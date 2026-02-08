@@ -140,13 +140,12 @@ HTTP, how to structure the scoring pipeline, what data format for the topic
 fingerprint, etc.), log each decision with Deciduous including what was chosen,
 what alternatives existed, and why this choice was made.
 
-**Platform.** Development happens on Fly.io sprites running Claude Code. The
+**Platform.** Development happens on Fly.io sprite running Claude Code. The
 finished tool should be runnable on a standard Linux box or Mac with minimal
 setup (cargo build + environment variables for API keys).
 
 **Bluesky API.** Use the AT Protocol / Bluesky API for fetching posts, follower
-lists, and detecting quote/repost events. My Bluesky handle is [FILL IN YOUR
-HANDLE]. For the MVP, polling on a reasonable interval is fine — I don't need
+lists, and detecting quote/repost events. My Bluesky handle is @chaosgreml.in. For the MVP, polling on a reasonable interval is fine — I don't need
 real-time WebSocket monitoring yet.
 
 **Toxicity scoring.** I'd prefer to use Google's Perspective API if the free
@@ -200,8 +199,7 @@ that describes the full Charcoal vision, including exposure graphs, shared
 intelligence, Cloudflare Workers architecture, and a Durable Object-based
 real-time monitoring system. That document describes where this project is
 headed eventually, but this MVP intentionally does not implement most of it.
-The architecture document can be found at [LINK TO charcoal-architecture-seed.md
-IF YOU WANT TO INCLUDE IT] and should be treated as context for future
+The architecture document can be found at docs/charcoal-architecture-seed.md and should be treated as context for future
 direction, not as requirements for this phase.
 
 For production deployment, investigate Osprey

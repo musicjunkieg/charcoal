@@ -1,2 +1,13 @@
 # Deciduous database (local)
 .deciduous/
+
+# Rust build artifacts
+/target/
+
+# Environment secrets (but NOT .env.example — that's the template)
+/.env
+
+# SQLite database files
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,121 @@
+// Database schema — table creation and migrations.
+//
+// We use a simple version-based migration approach: a `schema_version` table
+// tracks which migrations have run, and each migration is a function that
+// executes SQL statements.
+
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+
+/// Create all tables if they don't exist yet.
+///
+/// This is idempotent — safe to call on every startup.
+pub fn create_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        -- Tracks schema version for future migrations
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        -- The protected user's topic fingerprint
+        -- Stored as JSON so we can evolve the structure without migrations
+        CREATE TABLE IF NOT EXISTS topic_fingerprint (
+            id INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
+            fingerprint_json TEXT NOT NULL,
+            post_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        -- Cached toxicity scores for accounts we've already analyzed
+        CREATE TABLE IF NOT EXISTS account_scores (
+            did TEXT PRIMARY KEY,              -- Bluesky DID (decentralized identifier)
+            handle TEXT NOT NULL,
+            toxicity_score REAL,               -- 0.0 to 1.0
+            topic_overlap REAL,                -- 0.0 to 1.0
+            threat_score REAL,                 -- 0.0 to 100.0
+            threat_tier TEXT,                  -- Low / Watch / Elevated / High
+            posts_analyzed INTEGER NOT NULL DEFAULT 0,
+            top_toxic_posts TEXT,              -- JSON array of most toxic posts as evidence
+            scored_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        -- Amplification events (quotes and reposts of the protected user's posts)
+        CREATE TABLE IF NOT EXISTS amplification_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,          -- 'quote' or 'repost'
+            amplifier_did TEXT NOT NULL,       -- who quoted/reposted
+            amplifier_handle TEXT NOT NULL,
+            original_post_uri TEXT NOT NULL,   -- the protected user's post that was amplified
+            amplifier_post_uri TEXT,           -- the quote post URI (null for reposts)
+            amplifier_text TEXT,               -- the commentary added in a quote post
+            detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+            followers_fetched INTEGER NOT NULL DEFAULT 0,
+            followers_scored INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- Scan state — tracks pagination cursors and last-scan timestamps
+        CREATE TABLE IF NOT EXISTS scan_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        -- Index for looking up events by amplifier
+        CREATE INDEX IF NOT EXISTS idx_events_amplifier
+            ON amplification_events(amplifier_did);
+
+        -- Index for looking up scores by threat tier
+        CREATE INDEX IF NOT EXISTS idx_scores_tier
+            ON account_scores(threat_tier);
+
+        -- Index for finding stale scores that need refreshing
+        CREATE INDEX IF NOT EXISTS idx_scores_age
+            ON account_scores(scored_at);
+        ",
+    )
+    .context("Failed to create database tables")?;
+
+    // Record initial schema version if not already set
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_version (version) VALUES (?1)",
+        [1],
+    )?;
+
+    Ok(())
+}
+
+/// Count the number of tables in the database (useful for init confirmation).
+pub fn table_count(conn: &Connection) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_tables_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Running create_tables twice should not error
+        create_tables(&conn).unwrap();
+        create_tables(&conn).unwrap();
+    }
+
+    #[test]
+    fn test_table_count() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        let count = table_count(&conn).unwrap();
+        // schema_version, topic_fingerprint, account_scores,
+        // amplification_events, scan_state = 5 tables
+        assert_eq!(count, 5i64);
+    }
+}

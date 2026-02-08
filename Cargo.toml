@@ -1,0 +1,46 @@
+[package]
+name = "charcoal"
+version = "0.1.0"
+edition = "2021"
+description = "Predictive threat detection for Bluesky"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime (required by bsky-sdk)
+tokio = { version = "1", features = ["full"] }
+
+# Bluesky / AT Protocol
+bsky-sdk = "0.1.23"
+atrium-api = "0.25.7"
+
+# HTTP client (for Perspective API; already a transitive dep of bsky-sdk)
+reqwest = { version = "0.12", features = ["json"] }
+
+# Database
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+# Topic extraction
+keyword_extraction = "1.5"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Environment / config
+dotenvy = "0.15"
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Terminal output
+colored = "3"
+indicatif = "0.17"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }

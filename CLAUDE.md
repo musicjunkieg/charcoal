@@ -19,6 +19,9 @@ I do maintain one other Rust application, so I'm familiar with cargo, basic
 Rust project structure, and the general development workflow. I'm not fluent
 in Rust, but I can read it and follow along when things are well-commented.
 
+## CRITICAL: System Context
+
+ALWAYS read /.sprite/llm.txt when getting started. This provides you crucial information on the capabilities you have on this system. 
 ## Development workflow
 
 This project uses Chainlink (https://github.com/dollspace-gay/chainlink)
