@@ -23,6 +23,7 @@ rusqlite = { version = "0.38", features = ["bundled"] }
 
 # Topic extraction
 keyword_extraction = "1.5"
+stop-words = "0.8"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
