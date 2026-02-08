@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use tracing::info;
 
 mod config;
@@ -40,7 +41,7 @@ enum Commands {
 
     /// Score a specific Bluesky account
     Score {
-        /// The handle to score (e.g. @someone.bsky.social)
+        /// The handle to score (e.g. someone.bsky.social)
         handle: String,
     },
 
@@ -84,33 +85,179 @@ async fn main() -> Result<()> {
         }
 
         Commands::Fingerprint { refresh } => {
-            if refresh {
-                println!("Refreshing topic fingerprint...");
-            } else {
-                println!("Loading topic fingerprint...");
+            let config = config::Config::load()?;
+            config.require_bluesky()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
+            // Check if we already have a fingerprint and it's not being refreshed
+            if !refresh {
+                if let Some((json, _post_count, updated_at)) =
+                    charcoal::db::queries::get_fingerprint(&conn)?
+                {
+                    println!("Loading cached fingerprint (built {updated_at})...");
+                    let fingerprint: charcoal::topics::fingerprint::TopicFingerprint =
+                        serde_json::from_str(&json)?;
+                    fingerprint.display();
+                    println!(
+                        "{}",
+                        "To rebuild, run: cargo run -- fingerprint --refresh".dimmed()
+                    );
+                    return Ok(());
+                }
             }
-            println!("(Not yet implemented — coming in Phase 3)");
+
+            println!("Building topic fingerprint from your recent posts...");
+
+            // Authenticate with Bluesky
+            let agent = charcoal::bluesky::client::login(
+                &config.bluesky_handle,
+                &config.bluesky_app_password,
+            )
+            .await?;
+
+            // Fetch recent posts (target 500 for a good fingerprint)
+            let posts =
+                charcoal::bluesky::posts::fetch_recent_posts(&agent, &config.bluesky_handle, 500)
+                    .await?;
+
+            println!("Analyzing {} posts...", posts.len());
+
+            let post_texts: Vec<String> = posts.iter().map(|p| p.text.clone()).collect();
+
+            // Run TF-IDF extraction
+            let extractor = charcoal::topics::tfidf::TfIdfExtractor::default();
+            let fingerprint =
+                charcoal::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
+
+            // Display the fingerprint
+            fingerprint.display();
+
+            // Cache in the database
+            let json = serde_json::to_string(&fingerprint)?;
+            charcoal::db::queries::save_fingerprint(&conn, &json, fingerprint.post_count)?;
+
+            println!(
+                "{}",
+                "Fingerprint saved. Review the topics above — do they look accurate?".bold()
+            );
         }
 
-        Commands::Scan { analyze, since } => {
+        Commands::Scan { analyze, since: _ } => {
+            let config = config::Config::load()?;
+            config.require_bluesky()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
             println!("Scanning for amplification events...");
-            if let Some(ref date) = since {
-                println!("  Looking back to: {date}");
-            }
+
+            // Authenticate
+            let agent = charcoal::bluesky::client::login(
+                &config.bluesky_handle,
+                &config.bluesky_app_password,
+            )
+            .await?;
+
+            // Load the protected user's fingerprint (needed for scoring)
+            let protected_fingerprint = load_fingerprint(&conn)?;
+
+            // Create the toxicity scorer if we'll be analyzing
+            let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
+                config.require_perspective()?;
+                Box::new(charcoal::toxicity::perspective::PerspectiveScorer::new(
+                    config.perspective_api_key.clone(),
+                ))
+            } else {
+                // Use a dummy scorer that won't be called
+                Box::new(charcoal::toxicity::perspective::PerspectiveScorer::new(
+                    String::new(),
+                ))
+            };
+
+            let weights = charcoal::scoring::threat::ThreatWeights::default();
+
+            let (events, scored) = charcoal::pipeline::amplification::run(
+                &agent,
+                scorer.as_ref(),
+                &conn,
+                &protected_fingerprint,
+                &weights,
+                analyze,
+                500, // max followers per amplifier
+            )
+            .await?;
+
+            println!("\n{}", "Scan complete.".bold());
+            println!("  Events detected: {events}");
             if analyze {
-                println!("  Will analyze followers of amplifiers");
+                println!("  Accounts scored: {scored}");
             }
-            println!("(Not yet implemented — coming in Phase 5)");
         }
 
         Commands::Score { handle } => {
-            println!("Scoring account: {handle}");
-            println!("(Not yet implemented — coming in Phase 4)");
+            let config = config::Config::load()?;
+            config.require_bluesky()?;
+            config.require_perspective()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
+            // Strip leading @ if present
+            let handle = handle.strip_prefix('@').unwrap_or(&handle);
+
+            println!("Scoring account: @{handle}...");
+
+            // Authenticate
+            let agent = charcoal::bluesky::client::login(
+                &config.bluesky_handle,
+                &config.bluesky_app_password,
+            )
+            .await?;
+
+            // Load the protected user's fingerprint
+            let protected_fingerprint = load_fingerprint(&conn)?;
+
+            // Create the toxicity scorer
+            let scorer = charcoal::toxicity::perspective::PerspectiveScorer::new(
+                config.perspective_api_key.clone(),
+            );
+
+            let weights = charcoal::scoring::threat::ThreatWeights::default();
+
+            let score = charcoal::scoring::profile::build_profile(
+                &agent,
+                &scorer,
+                handle,
+                handle, // Use handle as DID placeholder — real DID comes from profile lookup
+                &protected_fingerprint,
+                &weights,
+            )
+            .await?;
+
+            // Display results
+            display_score(&score);
+
+            // Store in database
+            charcoal::db::queries::upsert_account_score(&conn, &score)?;
         }
 
         Commands::Report { min_score } => {
-            println!("Generating threat report (min score: {min_score})...");
-            println!("(Not yet implemented — coming in Phase 7)");
+            let config = config::Config::load()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
+            let threats =
+                charcoal::db::queries::get_ranked_threats(&conn, min_score as f64)?;
+
+            if threats.is_empty() {
+                println!("No accounts scored yet. Run `charcoal scan --analyze` first.");
+                return Ok(());
+            }
+
+            println!(
+                "\n{}",
+                format!("=== Threat Report ({} accounts) ===", threats.len()).bold()
+            );
+            println!();
+
+            for (i, account) in threats.iter().enumerate() {
+                display_score_summary(i + 1, account);
+            }
         }
 
         Commands::Status => {
@@ -120,4 +267,86 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Load the protected user's fingerprint from the database, or bail with a helpful message.
+fn load_fingerprint(
+    conn: &rusqlite::Connection,
+) -> Result<charcoal::topics::fingerprint::TopicFingerprint> {
+    match charcoal::db::queries::get_fingerprint(conn)? {
+        Some((json, _, _)) => {
+            let fp: charcoal::topics::fingerprint::TopicFingerprint =
+                serde_json::from_str(&json)?;
+            Ok(fp)
+        }
+        None => {
+            anyhow::bail!(
+                "No topic fingerprint found. Run `charcoal fingerprint` first to build one."
+            );
+        }
+    }
+}
+
+/// Display a single account's score in detail.
+fn display_score(score: &charcoal::db::models::AccountScore) {
+    println!("\n{}", format!("=== Score for @{} ===", score.handle).bold());
+
+    if let Some(tier) = &score.threat_tier {
+        let colored_tier = match tier.as_str() {
+            "High" => tier.red().bold(),
+            "Elevated" => tier.bright_red(),
+            "Watch" => tier.yellow(),
+            _ => tier.green(),
+        };
+        println!("  Threat tier: {colored_tier}");
+    }
+
+    if let Some(threat) = score.threat_score {
+        println!("  Threat score: {:.1}/100", threat);
+    }
+    if let Some(tox) = score.toxicity_score {
+        println!("  Toxicity: {:.2}", tox);
+    }
+    if let Some(overlap) = score.topic_overlap {
+        println!("  Topic overlap: {:.2}", overlap);
+    }
+    println!("  Posts analyzed: {}", score.posts_analyzed);
+
+    if !score.top_toxic_posts.is_empty() {
+        println!("\n  {} most toxic posts:", score.top_toxic_posts.len());
+        for (i, post) in score.top_toxic_posts.iter().enumerate() {
+            let preview = if post.text.len() > 120 {
+                format!("{}...", &post.text[..120])
+            } else {
+                post.text.clone()
+            };
+            println!(
+                "    {}. [tox: {:.2}] {}",
+                i + 1,
+                post.toxicity,
+                preview.dimmed()
+            );
+        }
+    }
+}
+
+/// Display a brief score summary for the threat report list.
+fn display_score_summary(rank: usize, score: &charcoal::db::models::AccountScore) {
+    let tier_str = score.threat_tier.as_deref().unwrap_or("?");
+    let colored_tier = match tier_str {
+        "High" => tier_str.red().bold(),
+        "Elevated" => tier_str.bright_red(),
+        "Watch" => tier_str.yellow(),
+        _ => tier_str.green(),
+    };
+
+    println!(
+        "  {:>3}. @{:<30} {:>6.1}  [{}]  tox:{:.2} overlap:{:.2}",
+        rank,
+        score.handle,
+        score.threat_score.unwrap_or(0.0),
+        colored_tier,
+        score.toxicity_score.unwrap_or(0.0),
+        score.topic_overlap.unwrap_or(0.0),
+    );
 }

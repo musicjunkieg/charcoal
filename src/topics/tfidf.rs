@@ -46,7 +46,7 @@ impl TopicExtractor for TfIdfExtractor {
 
         // Run TF-IDF with each post as a separate document.
         // The library handles tokenization, stop word removal, and scoring.
-        let params = TfIdfParams::UnprocessedDocuments(&posts, &stop_words, None);
+        let params = TfIdfParams::UnprocessedDocuments(posts, &stop_words, None);
         let tfidf = TfIdf::new(params);
 
         // Get the top keywords with their scores
