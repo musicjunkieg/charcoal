@@ -231,7 +231,7 @@ async fn main() -> Result<()> {
             .await?;
 
             // Display results
-            display_score(&score);
+            charcoal::output::terminal::display_account_detail(&score);
 
             // Store in database
             charcoal::db::queries::upsert_account_score(&conn, &score)?;
@@ -249,15 +249,23 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
+            // Display in terminal
+            charcoal::output::terminal::display_threat_list(&threats);
+
+            // Also generate a markdown report file
+            let fingerprint = charcoal::db::queries::get_fingerprint(&conn)?
+                .and_then(|(json, _, _)| serde_json::from_str(&json).ok());
+
+            let report_path = charcoal::output::markdown::generate_report(
+                &threats,
+                fingerprint.as_ref(),
+                "charcoal-report.md",
+            )?;
+
             println!(
                 "\n{}",
-                format!("=== Threat Report ({} accounts) ===", threats.len()).bold()
+                format!("Markdown report saved to: {report_path}").bold()
             );
-            println!();
-
-            for (i, account) in threats.iter().enumerate() {
-                display_score_summary(i + 1, account);
-            }
         }
 
         Commands::Status => {
@@ -287,66 +295,3 @@ fn load_fingerprint(
     }
 }
 
-/// Display a single account's score in detail.
-fn display_score(score: &charcoal::db::models::AccountScore) {
-    println!("\n{}", format!("=== Score for @{} ===", score.handle).bold());
-
-    if let Some(tier) = &score.threat_tier {
-        let colored_tier = match tier.as_str() {
-            "High" => tier.red().bold(),
-            "Elevated" => tier.bright_red(),
-            "Watch" => tier.yellow(),
-            _ => tier.green(),
-        };
-        println!("  Threat tier: {colored_tier}");
-    }
-
-    if let Some(threat) = score.threat_score {
-        println!("  Threat score: {:.1}/100", threat);
-    }
-    if let Some(tox) = score.toxicity_score {
-        println!("  Toxicity: {:.2}", tox);
-    }
-    if let Some(overlap) = score.topic_overlap {
-        println!("  Topic overlap: {:.2}", overlap);
-    }
-    println!("  Posts analyzed: {}", score.posts_analyzed);
-
-    if !score.top_toxic_posts.is_empty() {
-        println!("\n  {} most toxic posts:", score.top_toxic_posts.len());
-        for (i, post) in score.top_toxic_posts.iter().enumerate() {
-            let preview = if post.text.len() > 120 {
-                format!("{}...", &post.text[..120])
-            } else {
-                post.text.clone()
-            };
-            println!(
-                "    {}. [tox: {:.2}] {}",
-                i + 1,
-                post.toxicity,
-                preview.dimmed()
-            );
-        }
-    }
-}
-
-/// Display a brief score summary for the threat report list.
-fn display_score_summary(rank: usize, score: &charcoal::db::models::AccountScore) {
-    let tier_str = score.threat_tier.as_deref().unwrap_or("?");
-    let colored_tier = match tier_str {
-        "High" => tier_str.red().bold(),
-        "Elevated" => tier_str.bright_red(),
-        "Watch" => tier_str.yellow(),
-        _ => tier_str.green(),
-    };
-
-    println!(
-        "  {:>3}. @{:<30} {:>6.1}  [{}]  tox:{:.2} overlap:{:.2}",
-        rank,
-        score.handle,
-        score.threat_score.unwrap_or(0.0),
-        colored_tier,
-        score.toxicity_score.unwrap_or(0.0),
-        score.topic_overlap.unwrap_or(0.0),
-    );
-}
