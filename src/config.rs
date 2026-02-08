@@ -8,6 +8,9 @@ use std::env;
 pub struct Config {
     pub bluesky_handle: String,
     pub bluesky_app_password: String,
+    /// PDS endpoint URL (defaults to https://bsky.social).
+    /// Set BLUESKY_PDS_URL for non-default PDS like blackskyapp.com.
+    pub bluesky_pds_url: String,
     pub perspective_api_key: String,
     pub db_path: String,
 }
@@ -23,6 +26,8 @@ impl Config {
                 .unwrap_or_default(),
             bluesky_app_password: env::var("BLUESKY_APP_PASSWORD")
                 .unwrap_or_default(),
+            bluesky_pds_url: env::var("BLUESKY_PDS_URL")
+                .unwrap_or_else(|_| "https://bsky.social".to_string()),
             perspective_api_key: env::var("PERSPECTIVE_API_KEY")
                 .unwrap_or_default(),
             db_path: env::var("CHARCOAL_DB_PATH")

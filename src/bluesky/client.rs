@@ -10,10 +10,16 @@ use tracing::info;
 
 /// Create a new Bluesky agent and authenticate with the given credentials.
 ///
-/// The agent connects to bsky.social by default. After login, it manages
-/// session tokens automatically (including refreshing them when they expire).
-pub async fn login(handle: &str, app_password: &str) -> Result<BskyAgent> {
+/// The `pds_url` parameter sets the PDS endpoint (e.g. "https://bsky.social"
+/// or "https://blacksky.app" for non-default PDS instances).
+pub async fn login(handle: &str, app_password: &str, pds_url: &str) -> Result<BskyAgent> {
+    let config = bsky_sdk::agent::config::Config {
+        endpoint: pds_url.to_string(),
+        ..Default::default()
+    };
+
     let agent = BskyAgent::builder()
+        .config(config)
         .build()
         .await
         .context("Failed to initialize Bluesky agent")?;

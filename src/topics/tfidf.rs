@@ -41,16 +41,25 @@ impl TopicExtractor for TfIdfExtractor {
             anyhow::bail!("No posts to analyze — cannot build a topic fingerprint");
         }
 
-        // Get English stop words from the stop-words crate
-        let stop_words: Vec<String> = get(LANGUAGE::English);
+        // Pre-process posts: normalize unicode, strip URLs, expand contractions
+        let cleaned: Vec<String> = posts.iter().map(|p| clean_post(p)).collect();
+
+        // Build stop words list: English defaults + social media extras
+        let mut stop_words: Vec<String> = get(LANGUAGE::English);
+        stop_words.extend(extra_stop_words().into_iter().map(String::from));
 
         // Run TF-IDF with each post as a separate document.
-        // The library handles tokenization, stop word removal, and scoring.
-        let params = TfIdfParams::UnprocessedDocuments(posts, &stop_words, None);
+        // The library handles tokenization and scoring.
+        let params = TfIdfParams::UnprocessedDocuments(&cleaned, &stop_words, None);
         let tfidf = TfIdf::new(params);
 
-        // Get the top keywords with their scores
-        let ranked: Vec<(String, f32)> = tfidf.get_ranked_word_scores(self.top_n_keywords);
+        // Get the top keywords with their scores, filtering out junk
+        let ranked: Vec<(String, f32)> = tfidf
+            .get_ranked_word_scores(self.top_n_keywords * 2) // grab extra to filter from
+            .into_iter()
+            .filter(|(word, _)| is_meaningful_keyword(word))
+            .take(self.top_n_keywords)
+            .collect();
 
         if ranked.is_empty() {
             anyhow::bail!(
@@ -67,15 +76,153 @@ impl TopicExtractor for TfIdfExtractor {
         );
 
         // Cluster keywords into topic groups using simple co-occurrence.
-        // Two keywords belong to the same cluster if they frequently appear
-        // in the same posts.
-        let clusters = cluster_keywords(&ranked, posts, self.max_clusters);
+        let clusters = cluster_keywords(&ranked, &cleaned, self.max_clusters);
 
         Ok(TopicFingerprint {
             clusters,
             post_count: posts.len() as u32,
         })
     }
+}
+
+/// Clean a post for TF-IDF analysis.
+///
+/// Normalizes smart quotes, strips URLs/mentions/hashtags, lowercases,
+/// and removes non-alphabetic noise. This dramatically improves keyword
+/// quality on real social media text.
+fn clean_post(text: &str) -> String {
+    let mut cleaned = text.to_string();
+
+    // Normalize smart quotes and other unicode punctuation to ASCII
+    cleaned = cleaned
+        .replace(['\u{201C}', '\u{201D}'], "\"") // " "
+        .replace(['\u{2018}', '\u{2019}'], "'")  // ' '
+        .replace(['\u{2014}', '\u{2013}', '\u{2026}'], " "); // em/en dash, ellipsis
+
+    // Expand common contractions so the real words survive stop word filtering
+    let contractions = [
+        ("don't", "do not"), ("doesn't", "does not"), ("didn't", "did not"),
+        ("can't", "cannot"), ("won't", "will not"), ("wouldn't", "would not"),
+        ("couldn't", "could not"), ("shouldn't", "should not"),
+        ("isn't", "is not"), ("aren't", "are not"), ("wasn't", "was not"),
+        ("weren't", "were not"), ("hasn't", "has not"), ("haven't", "have not"),
+        ("hadn't", "had not"), ("i'm", "i am"), ("i've", "i have"),
+        ("i'll", "i will"), ("i'd", "i would"), ("it's", "it is"),
+        ("that's", "that is"), ("there's", "there is"), ("they're", "they are"),
+        ("they've", "they have"), ("they'll", "they will"),
+        ("we're", "we are"), ("we've", "we have"), ("we'll", "we will"),
+        ("you're", "you are"), ("you've", "you have"), ("you'll", "you will"),
+        ("who's", "who is"), ("what's", "what is"),
+    ];
+    let lower = cleaned.to_lowercase();
+    for (contraction, expansion) in &contractions {
+        if lower.contains(contraction) {
+            // Case-insensitive replace
+            cleaned = cleaned
+                .to_lowercase()
+                .replace(contraction, expansion);
+        }
+    }
+
+    // Strip URLs (http/https links)
+    let url_pattern = regex_lite::Regex::new(r"https?://\S+").unwrap();
+    cleaned = url_pattern.replace_all(&cleaned, " ").to_string();
+
+    // Strip @mentions
+    let mention_pattern = regex_lite::Regex::new(r"@[\w.]+").unwrap();
+    cleaned = mention_pattern.replace_all(&cleaned, " ").to_string();
+
+    // Remove non-letter characters (keep spaces and basic letters)
+    cleaned = cleaned
+        .chars()
+        .map(|c| if c.is_alphabetic() || c == ' ' { c } else { ' ' })
+        .collect();
+
+    // Collapse multiple spaces
+    let space_pattern = regex_lite::Regex::new(r"\s+").unwrap();
+    cleaned = space_pattern.replace_all(&cleaned, " ").trim().to_string();
+
+    cleaned
+}
+
+/// Additional stop words for social media text.
+///
+/// The standard English stop word list misses many common social media words
+/// and fragments that aren't meaningful for topic detection.
+fn extra_stop_words() -> Vec<&'static str> {
+    vec![
+        // Common social media / conversational words
+        "just", "like", "really", "actually", "literally", "basically",
+        "pretty", "also", "even", "still", "much", "way", "thing",
+        "things", "lot", "lot's", "gonna", "gotta", "wanna",
+        "yeah", "yes", "no", "oh", "ok", "okay", "lol", "lmao",
+        "hey", "hi", "hello", "thanks", "thank", "please",
+        // Pronouns / determiners the base list might miss
+        "something", "anything", "everything", "nothing",
+        "someone", "anyone", "everyone", "nobody",
+        "here", "there", "where", "when", "how", "why", "what",
+        "this", "that", "these", "those", "every", "each",
+        // Verbs too common to be meaningful
+        "get", "got", "getting", "make", "made", "making",
+        "go", "going", "went", "gone", "come", "coming", "came",
+        "know", "known", "knowing", "think", "thought", "thinking",
+        "see", "seen", "seeing", "look", "looking", "looked",
+        "want", "wanted", "wanting", "need", "needed", "needing",
+        "say", "said", "saying", "tell", "told", "telling",
+        "take", "took", "taking", "give", "gave", "giving",
+        "feel", "felt", "feeling", "keep", "kept", "keeping",
+        "let", "put", "try", "trying", "tried",
+        "use", "used", "using", "work", "working", "worked",
+        "call", "called", "find", "found",
+        // Time words
+        "now", "today", "time", "always", "never", "already",
+        "often", "sometimes", "usually", "ever",
+        // Quantity / degree
+        "many", "more", "most", "less", "few", "very",
+        "too", "enough", "really", "quite",
+        // Other noise
+        "new", "old", "good", "bad", "big", "great",
+        "first", "last", "next", "back", "right", "long",
+        "own", "same", "different", "able", "whole",
+        "well", "away", "sure", "kind", "sort",
+        // Bluesky-specific
+        "post", "thread", "quote", "repost", "reply",
+        "follow", "block", "mute", "feed",
+        // Generic social/conversational words that survive other filters
+        "people", "person", "folks", "guys", "everyone",
+        "understand", "believe", "agree", "disagree",
+        "love", "hate", "hope", "wish", "care",
+        "point", "part", "case", "fact", "idea",
+        "talk", "talking", "talked", "read", "reading",
+        "write", "writing", "wrote", "start", "stop",
+        "happen", "happened", "happening", "change", "changed",
+        "means", "mean", "meant", "true", "real",
+        "live", "life", "world", "place", "home",
+        "day", "week", "month", "year", "years",
+        "hard", "easy", "small", "high", "low",
+        "best", "worst", "better", "worse",
+        "stuff", "bit", "ones", "isn", "don",
+    ]
+}
+
+/// Check if a keyword is meaningful enough to include in the fingerprint.
+///
+/// Filters out single characters, pure numbers, and other junk that
+/// survives stop word filtering.
+fn is_meaningful_keyword(word: &str) -> bool {
+    // Must be at least 3 characters
+    if word.len() < 3 {
+        return false;
+    }
+    // Must contain at least one letter
+    if !word.chars().any(|c| c.is_alphabetic()) {
+        return false;
+    }
+    // Skip pure numbers
+    if word.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    true
 }
 
 /// Group keywords into topic clusters based on co-occurrence in posts.
@@ -88,19 +235,18 @@ fn cluster_keywords(
     posts: &[String],
     max_clusters: usize,
 ) -> Vec<TopicCluster> {
-    // Build a co-occurrence matrix: for each keyword pair, how many posts
-    // contain both keywords?
     let keywords: Vec<&str> = ranked.iter().map(|(w, _)| w.as_str()).collect();
 
-    // For each post, record which keywords appear in it
+    // For each post, record which keywords appear in it (word boundary aware)
     let post_keywords: Vec<Vec<usize>> = posts
         .iter()
         .map(|post| {
             let lower = post.to_lowercase();
+            let words: Vec<&str> = lower.split_whitespace().collect();
             keywords
                 .iter()
                 .enumerate()
-                .filter(|(_, kw)| lower.contains(*kw))
+                .filter(|(_, kw)| words.contains(kw))
                 .map(|(i, _)| i)
                 .collect()
         })
@@ -124,15 +270,16 @@ fn cluster_keywords(
     let mut assigned = vec![false; n];
     let mut clusters = Vec::new();
 
-    // Total score for normalization
     let total_score: f32 = ranked.iter().map(|(_, s)| s).sum();
 
     for seed_idx in 0..n {
-        if assigned[seed_idx] || clusters.len() >= max_clusters {
+        if clusters.len() >= max_clusters {
             break;
         }
+        if assigned[seed_idx] {
+            continue;
+        }
 
-        // Start a new cluster with this keyword as seed
         assigned[seed_idx] = true;
         let mut cluster_indices = vec![seed_idx];
         let mut cluster_score = ranked[seed_idx].1;
@@ -156,7 +303,6 @@ fn cluster_keywords(
             .map(|&i| ranked[i].0.clone())
             .collect();
 
-        // Generate a label from the top 2-3 keywords
         let label = generate_cluster_label(&cluster_keywords);
 
         let weight = if total_score > 0.0 {
@@ -180,16 +326,12 @@ fn cluster_keywords(
         }
     }
 
-    // Sort by weight descending
     clusters.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
 
     clusters
 }
 
 /// Generate a human-readable label from a cluster's top keywords.
-///
-/// Takes the first 2-3 keywords and joins them with " / ". In a more
-/// sophisticated version, this could use an LLM to generate better labels.
 fn generate_cluster_label(keywords: &[String]) -> String {
     let label_words: Vec<&str> = keywords.iter().take(3).map(|s| s.as_str()).collect();
     label_words.join(" / ")
@@ -235,5 +377,26 @@ mod tests {
         let extractor = TfIdfExtractor::default();
         let result = extractor.extract(&[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_clean_post() {
+        let raw = "Don\u{2019}t let them tell you \u{201C}fat is unhealthy\u{201D} https://example.com/link @someone.bsky.social #bodypositivity";
+        let cleaned = clean_post(raw);
+        assert!(!cleaned.contains("https"));
+        assert!(!cleaned.contains("@"));
+        assert!(!cleaned.contains('\u{201C}'));
+        assert!(!cleaned.contains('\u{2019}'));
+        // Contraction should be expanded
+        assert!(cleaned.contains("not"));
+    }
+
+    #[test]
+    fn test_is_meaningful_keyword() {
+        assert!(is_meaningful_keyword("fat"));
+        assert!(is_meaningful_keyword("liberation"));
+        assert!(!is_meaningful_keyword("a"));
+        assert!(!is_meaningful_keyword("42"));
+        assert!(!is_meaningful_keyword(""));
     }
 }

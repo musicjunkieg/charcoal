@@ -112,6 +112,7 @@ async fn main() -> Result<()> {
             let agent = charcoal::bluesky::client::login(
                 &config.bluesky_handle,
                 &config.bluesky_app_password,
+                &config.bluesky_pds_url,
             )
             .await?;
 
@@ -153,6 +154,7 @@ async fn main() -> Result<()> {
             let agent = charcoal::bluesky::client::login(
                 &config.bluesky_handle,
                 &config.bluesky_app_password,
+                &config.bluesky_pds_url,
             )
             .await?;
 
@@ -207,6 +209,7 @@ async fn main() -> Result<()> {
             let agent = charcoal::bluesky::client::login(
                 &config.bluesky_handle,
                 &config.bluesky_app_password,
+                &config.bluesky_pds_url,
             )
             .await?;
 
