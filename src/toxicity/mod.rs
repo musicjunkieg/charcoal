@@ -7,3 +7,5 @@
 pub mod traits;
 pub mod perspective;
 pub mod rate_limiter;
+pub mod onnx;
+pub mod download;

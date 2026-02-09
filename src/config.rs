@@ -1,5 +1,16 @@
-use anyhow::Result;
 use std::env;
+use std::path::PathBuf;
+
+use anyhow::Result;
+
+/// Which toxicity scoring backend to use.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScorerBackend {
+    /// Local ONNX model (default) — no API key needed, no rate limits
+    Onnx,
+    /// Google Perspective API — requires PERSPECTIVE_API_KEY, 1 QPS limit
+    Perspective,
+}
 
 /// Central configuration loaded from environment variables.
 ///
@@ -13,6 +24,10 @@ pub struct Config {
     pub bluesky_pds_url: String,
     pub perspective_api_key: String,
     pub db_path: String,
+    /// Which toxicity scorer to use (default: Onnx)
+    pub scorer_backend: ScorerBackend,
+    /// Directory containing the ONNX model files
+    pub model_dir: PathBuf,
 }
 
 impl Config {
@@ -21,6 +36,16 @@ impl Config {
     /// Only db_path has a default — the API credentials are required
     /// for anything beyond `init` and `status`.
     pub fn load() -> Result<Self> {
+        let scorer_backend = match env::var("CHARCOAL_SCORER").as_deref() {
+            Ok("perspective") => ScorerBackend::Perspective,
+            // "onnx" or unset both default to ONNX
+            _ => ScorerBackend::Onnx,
+        };
+
+        let model_dir = env::var("CHARCOAL_MODEL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
+
         Ok(Self {
             bluesky_handle: env::var("BLUESKY_HANDLE")
                 .unwrap_or_default(),
@@ -32,6 +57,8 @@ impl Config {
                 .unwrap_or_default(),
             db_path: env::var("CHARCOAL_DB_PATH")
                 .unwrap_or_else(|_| "./charcoal.db".to_string()),
+            scorer_backend,
+            model_dir,
         })
     }
 
@@ -54,7 +81,7 @@ impl Config {
     }
 
     /// Check that the Perspective API key is configured.
-    /// Call this before any operation that needs toxicity scoring.
+    /// Call this before any operation that needs toxicity scoring via Perspective.
     pub fn require_perspective(&self) -> Result<()> {
         if self.perspective_api_key.is_empty() {
             anyhow::bail!(
@@ -63,6 +90,26 @@ impl Config {
             );
         }
         Ok(())
+    }
+
+    /// Validate that the chosen scorer backend has what it needs.
+    /// For ONNX: model files must exist (or user should run download-model).
+    /// For Perspective: API key must be set.
+    pub fn require_scorer(&self) -> Result<()> {
+        match self.scorer_backend {
+            ScorerBackend::Onnx => {
+                if !charcoal::toxicity::download::model_files_present(&self.model_dir) {
+                    anyhow::bail!(
+                        "ONNX model files not found in {}\n\
+                         Run `charcoal download-model` to download them.\n\
+                         Or set CHARCOAL_SCORER=perspective to use the Perspective API instead.",
+                        self.model_dir.display()
+                    );
+                }
+                Ok(())
+            }
+            ScorerBackend::Perspective => self.require_perspective(),
+        }
     }
 }
 

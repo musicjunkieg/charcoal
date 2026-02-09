@@ -28,6 +28,9 @@ enum Commands {
         refresh: bool,
     },
 
+    /// Download the ONNX toxicity model (~126 MB)
+    DownloadModel,
+
     /// Scan for amplification events (quotes and reposts)
     Scan {
         /// Also analyze followers of amplifiers
@@ -147,6 +150,19 @@ async fn main() -> Result<()> {
             );
         }
 
+        Commands::DownloadModel => {
+            let config = config::Config::load()?;
+            let model_dir = &config.model_dir;
+
+            println!("Downloading ONNX toxicity model...");
+            println!("  Destination: {}", model_dir.display());
+
+            charcoal::toxicity::download::download_model(model_dir).await?;
+
+            println!("\n{}", "Model downloaded successfully.".bold());
+            println!("You can now run `charcoal scan --analyze` or `charcoal score @handle`.");
+        }
+
         Commands::Scan { analyze, max_followers, since: _ } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
@@ -167,12 +183,12 @@ async fn main() -> Result<()> {
 
             // Create the toxicity scorer if we'll be analyzing
             let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
-                config.require_perspective()?;
-                Box::new(charcoal::toxicity::perspective::PerspectiveScorer::new(
-                    config.perspective_api_key.clone(),
-                ))
+                config.require_scorer()?;
+                create_scorer(&config)?
             } else {
-                // Use a dummy scorer that won't be called
+                // Use a dummy scorer that won't be called — ONNX is cheap to load
+                // but we still need *something* for the type. Use Perspective with
+                // empty key as a no-op placeholder.
                 Box::new(charcoal::toxicity::perspective::PerspectiveScorer::new(
                     String::new(),
                 ))
@@ -201,7 +217,7 @@ async fn main() -> Result<()> {
         Commands::Score { handle } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
-            config.require_perspective()?;
+            config.require_scorer()?;
             let conn = charcoal::db::open(&config.db_path)?;
 
             // Strip leading @ if present
@@ -220,16 +236,14 @@ async fn main() -> Result<()> {
             // Load the protected user's fingerprint
             let protected_fingerprint = load_fingerprint(&conn)?;
 
-            // Create the toxicity scorer
-            let scorer = charcoal::toxicity::perspective::PerspectiveScorer::new(
-                config.perspective_api_key.clone(),
-            );
+            // Create the toxicity scorer based on configured backend
+            let scorer = create_scorer(&config)?;
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
 
             let score = charcoal::scoring::profile::build_profile(
                 &agent,
-                &scorer,
+                scorer.as_ref(),
                 handle,
                 handle, // Use handle as DID placeholder — real DID comes from profile lookup
                 &protected_fingerprint,
@@ -282,6 +296,26 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Create a toxicity scorer based on the configured backend.
+fn create_scorer(
+    config: &config::Config,
+) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
+    match config.scorer_backend {
+        config::ScorerBackend::Onnx => {
+            info!("Using local ONNX toxicity scorer");
+            let scorer = charcoal::toxicity::onnx::OnnxToxicityScorer::load(&config.model_dir)?;
+            Ok(Box::new(scorer))
+        }
+        config::ScorerBackend::Perspective => {
+            info!("Using Perspective API toxicity scorer");
+            let scorer = charcoal::toxicity::perspective::PerspectiveScorer::new(
+                config.perspective_api_key.clone(),
+            );
+            Ok(Box::new(scorer))
+        }
+    }
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.
