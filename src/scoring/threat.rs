@@ -65,7 +65,7 @@ mod tests {
         let (score, tier) = compute_threat_score(0.8, 0.25, &weights);
         // 0.8 * 70 + 0.25 * 30 = 56 + 7.5 = 63.5
         assert!((score - 63.5).abs() < 0.1, "Expected ~63.5, got {score}");
-        assert_eq!(tier, ThreatTier::Elevated);
+        assert_eq!(tier, ThreatTier::High);
     }
 
     #[test]
@@ -74,7 +74,7 @@ mod tests {
         let (score, tier) = compute_threat_score(0.9, 0.02, &weights);
         // Gated: 0.9 * 25 = 22.5, capped at 25
         assert!((score - 22.5).abs() < 0.1, "Expected ~22.5, got {score}");
-        assert_eq!(tier, ThreatTier::Low);
+        assert_eq!(tier, ThreatTier::Elevated);
     }
 
     #[test]
@@ -83,7 +83,7 @@ mod tests {
         let (score, tier) = compute_threat_score(0.4, 0.5, &weights);
         // 0.4 * 70 + 0.5 * 30 = 28 + 15 = 43
         assert!((score - 43.0).abs() < 0.1, "Expected ~43.0, got {score}");
-        assert_eq!(tier, ThreatTier::Watch);
+        assert_eq!(tier, ThreatTier::High);
     }
 
     #[test]
@@ -92,7 +92,7 @@ mod tests {
         let (score, tier) = compute_threat_score(0.1, 0.8, &weights);
         // 0.1 * 70 + 0.8 * 30 = 7 + 24 = 31
         assert!((score - 31.0).abs() < 0.1, "Expected ~31.0, got {score}");
-        assert_eq!(tier, ThreatTier::Watch);
+        assert_eq!(tier, ThreatTier::High);
     }
 
     #[test]
@@ -100,6 +100,26 @@ mod tests {
         let weights = ThreatWeights::default();
         let (score, tier) = compute_threat_score(0.0, 0.0, &weights);
         assert!((score - 0.0).abs() < 0.1);
+        assert_eq!(tier, ThreatTier::Low);
+    }
+
+    #[test]
+    fn test_realistic_watch_account() {
+        // Moderate toxicity with topic overlap — the kind of account
+        // Charcoal is designed to flag
+        let weights = ThreatWeights::default();
+        let (score, tier) = compute_threat_score(0.17, 0.06, &weights);
+        // 0.17 * 70 + 0.06 * 30 = 11.9 + 1.8 = 13.7
+        assert!((score - 13.7).abs() < 0.1, "Expected ~13.7, got {score}");
+        assert_eq!(tier, ThreatTier::Watch);
+    }
+
+    #[test]
+    fn test_low_toxicity_no_overlap() {
+        let weights = ThreatWeights::default();
+        let (score, tier) = compute_threat_score(0.08, 0.02, &weights);
+        // Gated: 0.08 * 25 = 2.0
+        assert!((score - 2.0).abs() < 0.1, "Expected ~2.0, got {score}");
         assert_eq!(tier, ThreatTier::Low);
     }
 }

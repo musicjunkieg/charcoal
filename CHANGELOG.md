@@ -7,8 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Tune threat tier thresholds for real-world score distribution (#8)
 
 ### Fixed
+- Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
 - Phase 7: Reports, markdown output, and polish (#6)

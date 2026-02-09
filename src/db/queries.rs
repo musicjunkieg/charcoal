@@ -6,7 +6,7 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-use super::models::{AccountScore, AmplificationEvent, ToxicPost};
+use super::models::{AccountScore, AmplificationEvent, ThreatTier, ToxicPost};
 
 // --- Scan state ---
 
@@ -102,13 +102,17 @@ pub fn get_ranked_threats(conn: &Connection, min_score: f64) -> Result<Vec<Accou
         let top_posts_json: String = row.get(7)?;
         let top_toxic_posts: Vec<ToxicPost> =
             serde_json::from_str(&top_posts_json).unwrap_or_default();
+        // Recalculate tier from stored score so threshold changes
+        // take effect without rescanning.
+        let threat_score: Option<f64> = row.get(4)?;
+        let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
         Ok(AccountScore {
             did: row.get(0)?,
             handle: row.get(1)?,
             toxicity_score: row.get(2)?,
             topic_overlap: row.get(3)?,
-            threat_score: row.get(4)?,
-            threat_tier: row.get(5)?,
+            threat_score,
+            threat_tier,
             posts_analyzed: row.get(6)?,
             top_toxic_posts,
             scored_at: row.get(8)?,

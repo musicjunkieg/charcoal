@@ -34,6 +34,10 @@ enum Commands {
         #[arg(long)]
         analyze: bool,
 
+        /// Max followers to analyze per amplifier (default: 50)
+        #[arg(long, default_value = "50")]
+        max_followers: u32,
+
         /// Only look at events since this date (YYYY-MM-DD)
         #[arg(long)]
         since: Option<String>,
@@ -143,7 +147,7 @@ async fn main() -> Result<()> {
             );
         }
 
-        Commands::Scan { analyze, since: _ } => {
+        Commands::Scan { analyze, max_followers, since: _ } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             let conn = charcoal::db::open(&config.db_path)?;
@@ -183,7 +187,7 @@ async fn main() -> Result<()> {
                 &protected_fingerprint,
                 &weights,
                 analyze,
-                500, // max followers per amplifier
+                max_followers as usize,
             )
             .await?;
 

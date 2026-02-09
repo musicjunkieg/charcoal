@@ -55,11 +55,16 @@ pub enum ThreatTier {
 
 impl ThreatTier {
     /// Determine the tier from a threat score (0-100).
+    ///
+    /// Thresholds are tuned for real-world Perspective API + Jaccard overlap
+    /// scores, where most accounts land in the 0-15 range. A score of 25+
+    /// requires both significant toxicity AND topic proximity — the core
+    /// threat signal Charcoal is designed to detect.
     pub fn from_score(score: f64) -> Self {
         match score {
-            s if s >= 76.0 => ThreatTier::High,
-            s if s >= 51.0 => ThreatTier::Elevated,
-            s if s >= 26.0 => ThreatTier::Watch,
+            s if s >= 25.0 => ThreatTier::High,
+            s if s >= 15.0 => ThreatTier::Elevated,
+            s if s >= 8.0 => ThreatTier::Watch,
             _ => ThreatTier::Low,
         }
     }
