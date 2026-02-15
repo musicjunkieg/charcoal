@@ -13,8 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Close rate limiter issue as moot — ONNX scorer has no API rate limits (#9)
 - Select and implement Perspective API replacement (#13)
-- Fix Perspective API rate limiting to stay under 60 req/min quota (#9)
 - Research alternative toxicity scoring APIs (Perspective sunsetting Dec 2026) (#11)
 - Phase 7: Reports, markdown output, and polish (#6)
 - Phase 5: Amplification detection pipeline (#5)
