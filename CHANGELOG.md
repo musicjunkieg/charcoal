@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Clean up CLAUDE.md and create README.md (#20)
+- Add progress bar to parallel scoring (#18)
+- Refactor scoring loop to use buffer_unordered (#17)
+- Add --concurrency CLI flag to scan command (#16)
+- Add futures dependency to Cargo.toml (#15)
+- Scale scan pipeline — reduce per-account latency and support larger networks (#10)
 - Close rate limiter issue as moot — ONNX scorer has no API rate limits (#9)
 - Select and implement Perspective API replacement (#13)
 - Research alternative toxicity scoring APIs (Perspective sunsetting Dec 2026) (#11)
