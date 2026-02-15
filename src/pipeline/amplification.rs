@@ -9,6 +9,8 @@
 // 5. Stores the results for the threat report
 
 use anyhow::Result;
+use futures::stream::{self, StreamExt};
+use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::Connection;
 use tracing::{info, warn};
 
@@ -27,6 +29,7 @@ use bsky_sdk::BskyAgent;
 /// Polls for new quote/repost events, fetches amplifier followers,
 /// and scores them. Returns the number of new events detected and
 /// accounts scored.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     agent: &BskyAgent,
     scorer: &dyn ToxicityScorer,
@@ -35,6 +38,7 @@ pub async fn run(
     weights: &ThreatWeights,
     analyze_followers: bool,
     max_followers_per_amplifier: usize,
+    concurrency: usize,
 ) -> Result<(usize, usize)> {
     // Get the stored cursor from the last scan
     let last_cursor = queries::get_scan_state(conn, "notifications_cursor")?;
@@ -103,40 +107,63 @@ pub async fn run(
             .await
             {
                 Ok(follower_list) => {
+                    // Phase 1: Filter — find followers with stale scores (DB reads on main task)
+                    let stale_followers: Vec<_> = follower_list
+                        .iter()
+                        .filter(|f| queries::is_score_stale(conn, &f.did, 7).unwrap_or(true))
+                        .collect();
+
                     println!(
-                        "  Found {} followers, scoring...",
-                        follower_list.len()
+                        "  Found {} followers, {} need scoring ({} concurrent)...",
+                        follower_list.len(),
+                        stale_followers.len(),
+                        concurrency,
                     );
 
-                    for follower in &follower_list {
-                        // Skip if we already have a fresh score
-                        if !queries::is_score_stale(conn, &follower.did, 7)? {
-                            continue;
-                        }
+                    if stale_followers.is_empty() {
+                        continue;
+                    }
 
-                        match profile::build_profile(
-                            agent,
-                            scorer,
-                            &follower.handle,
-                            &follower.did,
-                            protected_fingerprint,
-                            weights,
-                        )
-                        .await
-                        {
+                    let pb = ProgressBar::new(stale_followers.len() as u64);
+                    pb.set_style(
+                        ProgressStyle::default_bar()
+                            .template("  Scoring [{bar:30}] {pos}/{len} ({eta})")
+                            .unwrap(),
+                    );
+
+                    // Phase 2: Score in parallel — each future does network I/O + ONNX inference
+                    let results: Vec<Result<_>> = stream::iter(
+                        stale_followers.into_iter().map(|follower| async move {
+                            profile::build_profile(
+                                agent,
+                                scorer,
+                                &follower.handle,
+                                &follower.did,
+                                protected_fingerprint,
+                                weights,
+                            )
+                            .await
+                        }),
+                    )
+                    .buffer_unordered(concurrency)
+                    .collect()
+                    .await;
+
+                    // Phase 3: Write results to DB sequentially (Connection is not Send)
+                    for result in results {
+                        match result {
                             Ok(score) => {
                                 queries::upsert_account_score(conn, &score)?;
                                 accounts_scored += 1;
                             }
                             Err(e) => {
-                                warn!(
-                                    handle = follower.handle,
-                                    error = %e,
-                                    "Failed to score follower, skipping"
-                                );
+                                warn!(error = %e, "Failed to score follower, skipping");
                             }
                         }
+                        pb.inc(1);
                     }
+
+                    pb.finish_and_clear();
                 }
                 Err(e) => {
                     warn!(

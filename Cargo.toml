@@ -43,6 +43,9 @@ tokenizers = { version = "0.22", default-features = false, features = ["fancy-re
 # Platform-appropriate directories (for model storage path)
 dirs = "6"
 
+# Async stream combinators (transitive dep via bsky-sdk, pinned for buffer_unordered)
+futures = "0.3"
+
 # Error handling
 anyhow = "1"
 

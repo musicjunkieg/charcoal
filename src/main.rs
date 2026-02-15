@@ -41,6 +41,10 @@ enum Commands {
         #[arg(long, default_value = "50")]
         max_followers: u32,
 
+        /// Number of accounts to score in parallel (default: 8)
+        #[arg(long, default_value = "8")]
+        concurrency: u32,
+
         /// Only look at events since this date (YYYY-MM-DD)
         #[arg(long)]
         since: Option<String>,
@@ -163,7 +167,7 @@ async fn main() -> Result<()> {
             println!("You can now run `charcoal scan --analyze` or `charcoal score @handle`.");
         }
 
-        Commands::Scan { analyze, max_followers, since: _ } => {
+        Commands::Scan { analyze, max_followers, concurrency, since: _ } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             let conn = charcoal::db::open(&config.db_path)?;
@@ -204,6 +208,7 @@ async fn main() -> Result<()> {
                 &weights,
                 analyze,
                 max_followers as usize,
+                concurrency as usize,
             )
             .await?;
 
