@@ -45,9 +45,21 @@ enum Commands {
         #[arg(long, default_value = "8")]
         concurrency: u32,
 
-        /// Only look at events since this date (YYYY-MM-DD)
-        #[arg(long)]
-        since: Option<String>,
+    },
+
+    /// Sweep second-degree network (followers-of-followers) for threats
+    Sweep {
+        /// Max first-degree followers to scan (default: 200)
+        #[arg(long, default_value = "200")]
+        max_followers: u32,
+
+        /// Max second-degree followers per first-degree (default: 50)
+        #[arg(long, default_value = "50")]
+        depth: u32,
+
+        /// Number of accounts to score in parallel (default: 8)
+        #[arg(long, default_value = "8")]
+        concurrency: u32,
     },
 
     /// Score a specific Bluesky account
@@ -167,7 +179,7 @@ async fn main() -> Result<()> {
             println!("You can now run `charcoal scan --analyze` or `charcoal score @handle`.");
         }
 
-        Commands::Scan { analyze, max_followers, concurrency, since: _ } => {
+        Commands::Scan { analyze, max_followers, concurrency } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             let conn = charcoal::db::open(&config.db_path)?;
@@ -190,11 +202,7 @@ async fn main() -> Result<()> {
                 config.require_scorer()?;
                 create_scorer(&config)?
             } else {
-                // Scorer won't be called without --analyze, but we need a value
-                // for the type. Use a no-op Perspective placeholder.
-                Box::new(charcoal::toxicity::perspective::PerspectiveScorer::new(
-                    String::new(),
-                ))
+                Box::new(charcoal::toxicity::traits::NoopScorer)
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
@@ -205,6 +213,7 @@ async fn main() -> Result<()> {
                 &conn,
                 &protected_fingerprint,
                 &weights,
+                &config.bluesky_handle,
                 analyze,
                 max_followers as usize,
                 concurrency as usize,
@@ -216,6 +225,43 @@ async fn main() -> Result<()> {
             if analyze {
                 println!("  Accounts scored: {scored}");
             }
+        }
+
+        Commands::Sweep { max_followers, depth, concurrency } => {
+            let config = config::Config::load()?;
+            config.require_bluesky()?;
+            config.require_scorer()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
+            println!("Running second-degree network sweep...");
+
+            let agent = charcoal::bluesky::client::login(
+                &config.bluesky_handle,
+                &config.bluesky_app_password,
+                &config.bluesky_pds_url,
+            )
+            .await?;
+
+            let protected_fingerprint = load_fingerprint(&conn)?;
+            let scorer = create_scorer(&config)?;
+            let weights = charcoal::scoring::threat::ThreatWeights::default();
+
+            let (pool_size, scored) = charcoal::pipeline::sweep::run(
+                &agent,
+                scorer.as_ref(),
+                &conn,
+                &config.bluesky_handle,
+                &protected_fingerprint,
+                &weights,
+                max_followers as usize,
+                depth as usize,
+                concurrency as usize,
+            )
+            .await?;
+
+            println!("\n{}", "Sweep complete.".bold());
+            println!("  Second-degree pool: {pool_size}");
+            println!("  Accounts scored: {scored}");
         }
 
         Commands::Score { handle } => {
@@ -274,8 +320,12 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
+            // Fetch recent amplification events for context
+            let events = charcoal::db::queries::get_recent_events(&conn, 100)?;
+
             // Display in terminal
             charcoal::output::terminal::display_threat_list(&threats);
+            charcoal::output::terminal::display_amplification_events(&events);
 
             // Also generate a markdown report file
             let fingerprint = charcoal::db::queries::get_fingerprint(&conn)?
@@ -284,6 +334,7 @@ async fn main() -> Result<()> {
             let report_path = charcoal::output::markdown::generate_report(
                 &threats,
                 fingerprint.as_ref(),
+                &events,
                 "charcoal-report.md",
             )?;
 

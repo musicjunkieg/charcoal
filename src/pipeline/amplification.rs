@@ -37,6 +37,7 @@ pub async fn run(
     conn: &Connection,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
+    protected_handle: &str,
     analyze_followers: bool,
     max_followers_per_amplifier: usize,
     concurrency: usize,
@@ -145,8 +146,10 @@ pub async fn run(
             {
                 Ok(follower_list) => {
                     // Phase 1: Filter — find followers with stale scores (DB reads on main task)
+                    // Also exclude the protected user from their own threat report
                     let stale_followers: Vec<_> = follower_list
                         .iter()
+                        .filter(|f| f.handle != protected_handle)
                         .filter(|f| queries::is_score_stale(conn, &f.did, 7).unwrap_or(true))
                         .collect();
 

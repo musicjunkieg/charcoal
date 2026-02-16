@@ -8,7 +8,7 @@ use anyhow::Result;
 use chrono::Utc;
 use std::fmt::Write;
 
-use crate::db::models::AccountScore;
+use crate::db::models::{AccountScore, AmplificationEvent};
 use crate::topics::fingerprint::TopicFingerprint;
 
 /// Generate a markdown threat report and write it to a file.
@@ -17,6 +17,7 @@ use crate::topics::fingerprint::TopicFingerprint;
 pub fn generate_report(
     accounts: &[AccountScore],
     fingerprint: Option<&TopicFingerprint>,
+    events: &[AmplificationEvent],
     output_path: &str,
 ) -> Result<String> {
     let mut md = String::new();
@@ -105,6 +106,38 @@ pub fn generate_report(
         )?;
     }
     writeln!(md)?;
+
+    // Amplification events with quote text
+    let quotes: Vec<&AmplificationEvent> = events
+        .iter()
+        .filter(|e| e.event_type == "quote" && e.amplifier_text.is_some())
+        .collect();
+
+    if !quotes.is_empty() {
+        writeln!(md, "## Amplification Events")?;
+        writeln!(md)?;
+        writeln!(md, "Quote posts that triggered analysis:")?;
+        writeln!(md)?;
+        writeln!(md, "| Amplifier | Quote Text | Date |")?;
+        writeln!(md, "|-----------|-----------|------|")?;
+
+        for event in &quotes {
+            let text = event.amplifier_text.as_deref().unwrap_or("");
+            // Truncate and escape pipes for markdown table
+            let preview = if text.len() > 100 {
+                format!("{}...", &text[..100])
+            } else {
+                text.to_string()
+            };
+            let safe_text = preview.replace('|', "\\|").replace('\n', " ");
+            writeln!(
+                md,
+                "| @{} | {} | {} |",
+                event.amplifier_handle, safe_text, event.detected_at,
+            )?;
+        }
+        writeln!(md)?;
+    }
 
     // Detailed evidence for elevated+ accounts
     let high_priority: Vec<&AccountScore> = accounts
@@ -202,7 +235,7 @@ mod tests {
         ];
 
         let tmp_path = "/tmp/charcoal_test_report.md";
-        let result = generate_report(&accounts, None, tmp_path);
+        let result = generate_report(&accounts, None, &[], tmp_path);
         assert!(result.is_ok());
 
         let content = std::fs::read_to_string(tmp_path).unwrap();
