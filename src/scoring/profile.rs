@@ -12,6 +12,7 @@ use anyhow::Result;
 use tracing::info;
 
 use crate::bluesky::posts::{self, Post};
+use crate::bluesky::rate_limit::RateLimiter;
 use crate::db::models::{AccountScore, ToxicPost};
 use crate::scoring::threat::{self, ThreatWeights};
 use crate::topics::fingerprint::TopicFingerprint;
@@ -34,9 +35,10 @@ pub async fn build_profile(
     target_did: &str,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
+    rate_limiter: &RateLimiter,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
-    let target_posts = posts::fetch_recent_posts(agent, target_handle, 50).await?;
+    let target_posts = posts::fetch_recent_posts(agent, target_handle, 50, rate_limiter).await?;
 
     if target_posts.len() < 5 {
         info!(
@@ -75,10 +77,7 @@ pub async fn build_profile(
     let avg_toxicity: f64 = if toxicity_results.is_empty() {
         0.0
     } else {
-        let sum: f64 = toxicity_results
-            .iter()
-            .map(weighted_toxicity)
-            .sum();
+        let sum: f64 = toxicity_results.iter().map(weighted_toxicity).sum();
         sum / toxicity_results.len() as f64
     };
 

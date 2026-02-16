@@ -3,6 +3,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use tracing::info;
 
+use charcoal::bluesky::rate_limit::RateLimiter;
+
 mod config;
 
 /// Charcoal: Predictive threat detection for Bluesky.
@@ -44,7 +46,6 @@ enum Commands {
         /// Number of accounts to score in parallel (default: 8)
         #[arg(long, default_value = "8")]
         concurrency: u32,
-
     },
 
     /// Sweep second-degree network (followers-of-followers) for threats
@@ -139,10 +140,16 @@ async fn main() -> Result<()> {
             )
             .await?;
 
+            let rate_limiter = create_rate_limiter();
+
             // Fetch recent posts (target 500 for a good fingerprint)
-            let posts =
-                charcoal::bluesky::posts::fetch_recent_posts(&agent, &config.bluesky_handle, 500)
-                    .await?;
+            let posts = charcoal::bluesky::posts::fetch_recent_posts(
+                &agent,
+                &config.bluesky_handle,
+                500,
+                &rate_limiter,
+            )
+            .await?;
 
             println!("Analyzing {} posts...", posts.len());
 
@@ -179,7 +186,11 @@ async fn main() -> Result<()> {
             println!("You can now run `charcoal scan --analyze` or `charcoal score @handle`.");
         }
 
-        Commands::Scan { analyze, max_followers, concurrency } => {
+        Commands::Scan {
+            analyze,
+            max_followers,
+            concurrency,
+        } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             let conn = charcoal::db::open(&config.db_path)?;
@@ -206,6 +217,7 @@ async fn main() -> Result<()> {
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
+            let rate_limiter = create_rate_limiter();
 
             let (events, scored) = charcoal::pipeline::amplification::run(
                 &agent,
@@ -217,6 +229,7 @@ async fn main() -> Result<()> {
                 analyze,
                 max_followers as usize,
                 concurrency as usize,
+                &rate_limiter,
             )
             .await?;
 
@@ -227,7 +240,11 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Sweep { max_followers, depth, concurrency } => {
+        Commands::Sweep {
+            max_followers,
+            depth,
+            concurrency,
+        } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
@@ -246,6 +263,8 @@ async fn main() -> Result<()> {
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
 
+            let rate_limiter = create_rate_limiter();
+
             let (pool_size, scored) = charcoal::pipeline::sweep::run(
                 &agent,
                 scorer.as_ref(),
@@ -256,6 +275,7 @@ async fn main() -> Result<()> {
                 max_followers as usize,
                 depth as usize,
                 concurrency as usize,
+                &rate_limiter,
             )
             .await?;
 
@@ -291,6 +311,8 @@ async fn main() -> Result<()> {
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
 
+            let rate_limiter = create_rate_limiter();
+
             let score = charcoal::scoring::profile::build_profile(
                 &agent,
                 scorer.as_ref(),
@@ -298,6 +320,7 @@ async fn main() -> Result<()> {
                 handle, // Use handle as DID placeholder — real DID comes from profile lookup
                 &protected_fingerprint,
                 &weights,
+                &rate_limiter,
             )
             .await?;
 
@@ -312,8 +335,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let conn = charcoal::db::open(&config.db_path)?;
 
-            let threats =
-                charcoal::db::queries::get_ranked_threats(&conn, min_score as f64)?;
+            let threats = charcoal::db::queries::get_ranked_threats(&conn, min_score as f64)?;
 
             if threats.is_empty() {
                 println!("No accounts scored yet. Run `charcoal scan --analyze` first.");
@@ -373,14 +395,23 @@ fn create_scorer(
     }
 }
 
+/// Create a rate limiter with Bluesky-appropriate defaults.
+///
+/// Bluesky's rate limit is ~3000 requests per 5 minutes. We use conservative
+/// settings to stay well under the limit:
+/// - 2500 requests per 5-minute window (leaves headroom)
+/// - 100ms minimum delay between requests (prevents bursts)
+fn create_rate_limiter() -> RateLimiter {
+    RateLimiter::new(2500, 300, 100)
+}
+
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.
 fn load_fingerprint(
     conn: &rusqlite::Connection,
 ) -> Result<charcoal::topics::fingerprint::TopicFingerprint> {
     match charcoal::db::queries::get_fingerprint(conn)? {
         Some((json, _, _)) => {
-            let fp: charcoal::topics::fingerprint::TopicFingerprint =
-                serde_json::from_str(&json)?;
+            let fp: charcoal::topics::fingerprint::TopicFingerprint = serde_json::from_str(&json)?;
             Ok(fp)
         }
         None => {
@@ -390,4 +421,3 @@ fn load_fingerprint(
         }
     }
 }
-

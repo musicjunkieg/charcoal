@@ -19,6 +19,7 @@ use tracing::{info, warn};
 use crate::bluesky::followers;
 use crate::bluesky::notifications;
 use crate::bluesky::posts;
+use crate::bluesky::rate_limit::RateLimiter;
 use crate::db::queries;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
@@ -43,21 +44,17 @@ pub async fn run(
     analyze_followers: bool,
     max_followers_per_amplifier: usize,
     concurrency: usize,
+    rate_limiter: &RateLimiter,
 ) -> Result<(usize, usize)> {
     // Get the stored cursor from the last scan
     let last_cursor = queries::get_scan_state(conn, "notifications_cursor")?;
 
     // Fetch new amplification events
-    let (events, new_cursor) = notifications::fetch_amplification_events(
-        agent,
-        last_cursor.as_deref(),
-    )
-    .await?;
+    let (events, new_cursor) =
+        notifications::fetch_amplification_events(agent, last_cursor.as_deref(), rate_limiter)
+            .await?;
 
-    info!(
-        new_events = events.len(),
-        "Amplification scan complete"
-    );
+    info!(new_events = events.len(), "Amplification scan complete");
 
     // Store the new cursor for next time
     if let Some(ref cursor) = new_cursor {
@@ -78,7 +75,7 @@ pub async fn run(
 
         // For quote events, fetch the quote post text and score it
         if event.event_type == "quote" && analyze_followers {
-            match posts::fetch_post_text(agent, &event.amplifier_post_uri).await {
+            match posts::fetch_post_text(agent, &event.amplifier_post_uri, rate_limiter).await {
                 Ok(Some(text)) => {
                     // Score the quote text for toxicity
                     match scorer.score_text(&text).await {
@@ -111,12 +108,14 @@ pub async fn run(
         )?;
 
         // Display the event with quote context if available
-        let event_label = if event.event_type == "quote" { "Quote" } else { "Repost" };
+        let event_label = if event.event_type == "quote" {
+            "Quote"
+        } else {
+            "Repost"
+        };
         println!(
             "  {} by @{} ({})",
-            event_label,
-            event.amplifier_handle,
-            event.indexed_at,
+            event_label, event.amplifier_handle, event.indexed_at,
         );
         if let Some(ref text) = quote_text {
             let preview = crate::output::truncate_chars(text, 120);
@@ -138,8 +137,14 @@ pub async fn run(
         let repost_count = events.len() - quote_events.len();
 
         if repost_count > 0 {
-            info!(reposts_skipped = repost_count, "Skipping follower analysis for reposts");
-            println!("  Skipping {} reposts (follower analysis is quote-only)", repost_count);
+            info!(
+                reposts_skipped = repost_count,
+                "Skipping follower analysis for reposts"
+            );
+            println!(
+                "  Skipping {} reposts (follower analysis is quote-only)",
+                repost_count
+            );
         }
 
         if quote_events.is_empty() {
@@ -147,15 +152,13 @@ pub async fn run(
         }
 
         for event in &quote_events {
-            println!(
-                "\nFetching followers of @{}...",
-                event.amplifier_handle
-            );
+            println!("\nFetching followers of @{}...", event.amplifier_handle);
 
             match followers::fetch_followers(
                 agent,
                 &event.amplifier_handle,
                 max_followers_per_amplifier,
+                rate_limiter,
             )
             .await
             {
@@ -188,29 +191,25 @@ pub async fn run(
 
                     // Phase 2: Score in parallel — each future does network I/O + ONNX inference
                     // Results are written incrementally so a crash doesn't lose everything
-                    let mut stream = stream::iter(
-                        stale_followers.into_iter().map(|follower| {
-                            let handle_for_panic = follower.handle.clone();
-                            async move {
-                                AssertUnwindSafe(profile::build_profile(
-                                    agent,
-                                    scorer,
-                                    &follower.handle,
-                                    &follower.did,
-                                    protected_fingerprint,
-                                    weights,
-                                ))
-                                .catch_unwind()
-                                .await
-                                .unwrap_or_else(|_| {
-                                    Err(anyhow::anyhow!(
-                                        "Panic while scoring @{}",
-                                        handle_for_panic
-                                    ))
-                                })
-                            }
-                        }),
-                    )
+                    let mut stream = stream::iter(stale_followers.into_iter().map(|follower| {
+                        let handle_for_panic = follower.handle.clone();
+                        async move {
+                            AssertUnwindSafe(profile::build_profile(
+                                agent,
+                                scorer,
+                                &follower.handle,
+                                &follower.did,
+                                protected_fingerprint,
+                                weights,
+                                rate_limiter,
+                            ))
+                            .catch_unwind()
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
+                            })
+                        }
+                    }))
                     .buffer_unordered(concurrency);
 
                     // Phase 3: Write results to DB incrementally as they arrive

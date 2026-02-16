@@ -10,6 +10,8 @@ use atrium_api::types::TryFromUnknown;
 use bsky_sdk::BskyAgent;
 use tracing::{debug, info};
 
+use super::rate_limit::RateLimiter;
+
 /// A simplified post — just the fields Charcoal needs for analysis.
 #[derive(Debug, Clone)]
 pub struct Post {
@@ -30,6 +32,7 @@ pub async fn fetch_recent_posts(
     agent: &BskyAgent,
     handle: &str,
     max_posts: usize,
+    rate_limiter: &RateLimiter,
 ) -> Result<Vec<Post>> {
     let mut posts = Vec::new();
     let mut cursor: Option<String> = None;
@@ -56,6 +59,8 @@ pub async fn fetch_recent_posts(
                     .map_err(|e: String| anyhow::anyhow!("{}", e))?,
             ),
         };
+
+        rate_limiter.acquire().await;
 
         let output = agent
             .api
@@ -135,10 +140,16 @@ pub async fn fetch_recent_posts(
 ///
 /// Used to retrieve quote-post text for amplification events. The notification
 /// gives us the URI but not the post content — this fills that gap.
-pub async fn fetch_post_text(agent: &BskyAgent, uri: &str) -> Result<Option<String>> {
+pub async fn fetch_post_text(
+    agent: &BskyAgent,
+    uri: &str,
+    rate_limiter: &RateLimiter,
+) -> Result<Option<String>> {
     let params = get_posts::ParametersData {
         uris: vec![uri.to_string()],
     };
+
+    rate_limiter.acquire().await;
 
     let output = agent
         .api
@@ -149,16 +160,11 @@ pub async fn fetch_post_text(agent: &BskyAgent, uri: &str) -> Result<Option<Stri
         .await
         .context("Failed to fetch post by URI")?;
 
-    let text = output
-        .posts
-        .first()
-        .and_then(|post_view| {
-            atrium_api::app::bsky::feed::post::Record::try_from_unknown(
-                post_view.record.clone(),
-            )
+    let text = output.posts.first().and_then(|post_view| {
+        atrium_api::app::bsky::feed::post::Record::try_from_unknown(post_view.record.clone())
             .ok()
             .map(|record| record.data.text.clone())
-        });
+    });
 
     Ok(text)
 }
