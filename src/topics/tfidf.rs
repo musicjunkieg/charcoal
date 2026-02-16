@@ -108,31 +108,50 @@ fn clean_post(text: &str) -> String {
     // Normalize smart quotes and other unicode punctuation to ASCII
     cleaned = cleaned
         .replace(['\u{201C}', '\u{201D}'], "\"") // " "
-        .replace(['\u{2018}', '\u{2019}'], "'")  // ' '
+        .replace(['\u{2018}', '\u{2019}'], "'") // ' '
         .replace(['\u{2014}', '\u{2013}', '\u{2026}'], " "); // em/en dash, ellipsis
 
     // Expand common contractions so the real words survive stop word filtering
     let contractions = [
-        ("don't", "do not"), ("doesn't", "does not"), ("didn't", "did not"),
-        ("can't", "cannot"), ("won't", "will not"), ("wouldn't", "would not"),
-        ("couldn't", "could not"), ("shouldn't", "should not"),
-        ("isn't", "is not"), ("aren't", "are not"), ("wasn't", "was not"),
-        ("weren't", "were not"), ("hasn't", "has not"), ("haven't", "have not"),
-        ("hadn't", "had not"), ("i'm", "i am"), ("i've", "i have"),
-        ("i'll", "i will"), ("i'd", "i would"), ("it's", "it is"),
-        ("that's", "that is"), ("there's", "there is"), ("they're", "they are"),
-        ("they've", "they have"), ("they'll", "they will"),
-        ("we're", "we are"), ("we've", "we have"), ("we'll", "we will"),
-        ("you're", "you are"), ("you've", "you have"), ("you'll", "you will"),
-        ("who's", "who is"), ("what's", "what is"),
+        ("don't", "do not"),
+        ("doesn't", "does not"),
+        ("didn't", "did not"),
+        ("can't", "cannot"),
+        ("won't", "will not"),
+        ("wouldn't", "would not"),
+        ("couldn't", "could not"),
+        ("shouldn't", "should not"),
+        ("isn't", "is not"),
+        ("aren't", "are not"),
+        ("wasn't", "was not"),
+        ("weren't", "were not"),
+        ("hasn't", "has not"),
+        ("haven't", "have not"),
+        ("hadn't", "had not"),
+        ("i'm", "i am"),
+        ("i've", "i have"),
+        ("i'll", "i will"),
+        ("i'd", "i would"),
+        ("it's", "it is"),
+        ("that's", "that is"),
+        ("there's", "there is"),
+        ("they're", "they are"),
+        ("they've", "they have"),
+        ("they'll", "they will"),
+        ("we're", "we are"),
+        ("we've", "we have"),
+        ("we'll", "we will"),
+        ("you're", "you are"),
+        ("you've", "you have"),
+        ("you'll", "you will"),
+        ("who's", "who is"),
+        ("what's", "what is"),
     ];
     let lower = cleaned.to_lowercase();
     for (contraction, expansion) in &contractions {
         if lower.contains(contraction) {
             // Case-insensitive replace
-            cleaned = cleaned
-                .to_lowercase()
-                .replace(contraction, expansion);
+            cleaned = cleaned.to_lowercase().replace(contraction, expansion);
         }
     }
 
@@ -145,11 +164,20 @@ fn clean_post(text: &str) -> String {
     // Remove non-letter characters (keep spaces and basic letters)
     cleaned = cleaned
         .chars()
-        .map(|c| if c.is_alphabetic() || c == ' ' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphabetic() || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
 
     // Collapse multiple spaces
-    cleaned = WHITESPACE_PATTERN.replace_all(&cleaned, " ").trim().to_string();
+    cleaned = WHITESPACE_PATTERN
+        .replace_all(&cleaned, " ")
+        .trim()
+        .to_string();
 
     cleaned
 }
@@ -161,56 +189,245 @@ fn clean_post(text: &str) -> String {
 fn extra_stop_words() -> Vec<&'static str> {
     vec![
         // Common social media / conversational words
-        "just", "like", "really", "actually", "literally", "basically",
-        "pretty", "also", "even", "still", "much", "way", "thing",
-        "things", "lot", "lot's", "gonna", "gotta", "wanna",
-        "yeah", "yes", "no", "oh", "ok", "okay", "lol", "lmao",
-        "hey", "hi", "hello", "thanks", "thank", "please",
+        "just",
+        "like",
+        "really",
+        "actually",
+        "literally",
+        "basically",
+        "pretty",
+        "also",
+        "even",
+        "still",
+        "much",
+        "way",
+        "thing",
+        "things",
+        "lot",
+        "lot's",
+        "gonna",
+        "gotta",
+        "wanna",
+        "yeah",
+        "yes",
+        "no",
+        "oh",
+        "ok",
+        "okay",
+        "lol",
+        "lmao",
+        "hey",
+        "hi",
+        "hello",
+        "thanks",
+        "thank",
+        "please",
         // Pronouns / determiners the base list might miss
-        "something", "anything", "everything", "nothing",
-        "someone", "anyone", "everyone", "nobody",
-        "here", "there", "where", "when", "how", "why", "what",
-        "this", "that", "these", "those", "every", "each",
+        "something",
+        "anything",
+        "everything",
+        "nothing",
+        "someone",
+        "anyone",
+        "everyone",
+        "nobody",
+        "here",
+        "there",
+        "where",
+        "when",
+        "how",
+        "why",
+        "what",
+        "this",
+        "that",
+        "these",
+        "those",
+        "every",
+        "each",
         // Verbs too common to be meaningful
-        "get", "got", "getting", "make", "made", "making",
-        "go", "going", "went", "gone", "come", "coming", "came",
-        "know", "known", "knowing", "think", "thought", "thinking",
-        "see", "seen", "seeing", "look", "looking", "looked",
-        "want", "wanted", "wanting", "need", "needed", "needing",
-        "say", "said", "saying", "tell", "told", "telling",
-        "take", "took", "taking", "give", "gave", "giving",
-        "feel", "felt", "feeling", "keep", "kept", "keeping",
-        "let", "put", "try", "trying", "tried",
-        "use", "used", "using", "work", "working", "worked",
-        "call", "called", "find", "found",
+        "get",
+        "got",
+        "getting",
+        "make",
+        "made",
+        "making",
+        "go",
+        "going",
+        "went",
+        "gone",
+        "come",
+        "coming",
+        "came",
+        "know",
+        "known",
+        "knowing",
+        "think",
+        "thought",
+        "thinking",
+        "see",
+        "seen",
+        "seeing",
+        "look",
+        "looking",
+        "looked",
+        "want",
+        "wanted",
+        "wanting",
+        "need",
+        "needed",
+        "needing",
+        "say",
+        "said",
+        "saying",
+        "tell",
+        "told",
+        "telling",
+        "take",
+        "took",
+        "taking",
+        "give",
+        "gave",
+        "giving",
+        "feel",
+        "felt",
+        "feeling",
+        "keep",
+        "kept",
+        "keeping",
+        "let",
+        "put",
+        "try",
+        "trying",
+        "tried",
+        "use",
+        "used",
+        "using",
+        "work",
+        "working",
+        "worked",
+        "call",
+        "called",
+        "find",
+        "found",
         // Time words
-        "now", "today", "time", "always", "never", "already",
-        "often", "sometimes", "usually", "ever",
+        "now",
+        "today",
+        "time",
+        "always",
+        "never",
+        "already",
+        "often",
+        "sometimes",
+        "usually",
+        "ever",
         // Quantity / degree
-        "many", "more", "most", "less", "few", "very",
-        "too", "enough", "really", "quite",
+        "many",
+        "more",
+        "most",
+        "less",
+        "few",
+        "very",
+        "too",
+        "enough",
+        "really",
+        "quite",
         // Other noise
-        "new", "old", "good", "bad", "big", "great",
-        "first", "last", "next", "back", "right", "long",
-        "own", "same", "different", "able", "whole",
-        "well", "away", "sure", "kind", "sort",
+        "new",
+        "old",
+        "good",
+        "bad",
+        "big",
+        "great",
+        "first",
+        "last",
+        "next",
+        "back",
+        "right",
+        "long",
+        "own",
+        "same",
+        "different",
+        "able",
+        "whole",
+        "well",
+        "away",
+        "sure",
+        "kind",
+        "sort",
         // Bluesky-specific
-        "post", "thread", "quote", "repost", "reply",
-        "follow", "block", "mute", "feed",
+        "post",
+        "thread",
+        "quote",
+        "repost",
+        "reply",
+        "follow",
+        "block",
+        "mute",
+        "feed",
         // Generic social/conversational words that survive other filters
-        "people", "person", "folks", "guys", "everyone",
-        "understand", "believe", "agree", "disagree",
-        "love", "hate", "hope", "wish", "care",
-        "point", "part", "case", "fact", "idea",
-        "talk", "talking", "talked", "read", "reading",
-        "write", "writing", "wrote", "start", "stop",
-        "happen", "happened", "happening", "change", "changed",
-        "means", "mean", "meant", "true", "real",
-        "live", "life", "world", "place", "home",
-        "day", "week", "month", "year", "years",
-        "hard", "easy", "small", "high", "low",
-        "best", "worst", "better", "worse",
-        "stuff", "bit", "ones", "isn", "don",
+        "people",
+        "person",
+        "folks",
+        "guys",
+        "everyone",
+        "understand",
+        "believe",
+        "agree",
+        "disagree",
+        "love",
+        "hate",
+        "hope",
+        "wish",
+        "care",
+        "point",
+        "part",
+        "case",
+        "fact",
+        "idea",
+        "talk",
+        "talking",
+        "talked",
+        "read",
+        "reading",
+        "write",
+        "writing",
+        "wrote",
+        "start",
+        "stop",
+        "happen",
+        "happened",
+        "happening",
+        "change",
+        "changed",
+        "means",
+        "mean",
+        "meant",
+        "true",
+        "real",
+        "live",
+        "life",
+        "world",
+        "place",
+        "home",
+        "day",
+        "week",
+        "month",
+        "year",
+        "years",
+        "hard",
+        "easy",
+        "small",
+        "high",
+        "low",
+        "best",
+        "worst",
+        "better",
+        "worse",
+        "stuff",
+        "bit",
+        "ones",
+        "isn",
+        "don",
     ]
 }
 
@@ -335,7 +552,11 @@ fn cluster_keywords(
         }
     }
 
-    clusters.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+    clusters.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     clusters
 }
@@ -378,7 +599,10 @@ mod tests {
 
         // Weights should sum to approximately 1.0
         let weight_sum: f64 = fingerprint.clusters.iter().map(|c| c.weight).sum();
-        assert!((weight_sum - 1.0).abs() < 0.01, "Weights sum to {weight_sum}");
+        assert!(
+            (weight_sum - 1.0).abs() < 0.01,
+            "Weights sum to {weight_sum}"
+        );
     }
 
     #[test]

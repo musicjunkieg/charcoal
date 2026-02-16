@@ -121,7 +121,11 @@ impl ToxicityScorer for OnnxToxicityScorer {
                 .collect::<Result<Vec<_>>>()?;
 
             let batch_size = encodings.len();
-            let max_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
+            let max_len = encodings
+                .iter()
+                .map(|e| e.get_ids().len())
+                .max()
+                .unwrap_or(0);
 
             // Build flat input tensors with right-padding to max_len.
             // Shape: [batch_size, max_len]

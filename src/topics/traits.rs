@@ -4,8 +4,8 @@
 // approach without changing the rest of the pipeline. The default implementation
 // uses TF-IDF, but this could be replaced with embeddings-based clustering later.
 
-use anyhow::Result;
 use super::fingerprint::TopicFingerprint;
+use anyhow::Result;
 
 /// Trait for extracting a topic fingerprint from a collection of posts.
 pub trait TopicExtractor {

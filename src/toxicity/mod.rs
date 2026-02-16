@@ -4,8 +4,8 @@
 // default (local Detoxify model, no API key needed). PerspectiveScorer is
 // available as a fallback via CHARCOAL_SCORER=perspective.
 
-pub mod traits;
+pub mod download;
+pub mod onnx;
 pub mod perspective;
 pub mod rate_limiter;
-pub mod onnx;
-pub mod download;
+pub mod traits;

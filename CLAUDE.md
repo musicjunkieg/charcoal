@@ -18,7 +18,27 @@ The MVP is functional. All 7 implementation phases are complete:
 6. Profile scoring and threat tiers
 7. Reports, markdown output, and polish
 
-31 tests passing, clippy clean, all CLI commands wired and tested end-to-end.
+Post-MVP improvements applied:
+- Cosine similarity for topic overlap (replaced weighted Jaccard)
+- Weighted toxicity categories (identity_attack/insult/threat elevated)
+- Crash-resilient pipelines (incremental DB writes + panic catching)
+- Mode 2 background sweep for second-degree network
+- UTF-8 safe string truncation (prevents panics on emoji/CJK text)
+- LazyLock regex compilation (avoids redundant compilations in TF-IDF)
+- ONNX inference offloaded to `spawn_blocking` (keeps async runtime responsive)
+- Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
+
+109 tests passing (32 unit + 77 integration), clippy clean, all CLI commands
+wired and tested end-to-end.
+
+### External contributions
+
+PR #1 by Bobby Grayson ([@notactuallytreyanastasio](https://github.com/notactuallytreyanastasio)):
+- Correctness fixes: evidence threshold, weighted sorting, float comparison
+- Performance: LazyLock regex, spawn_blocking for ONNX inference
+- UTF-8 safety: `truncate_chars()` helper replacing byte-slice truncation
+- 77 integration tests covering pure functions and composition chains
+- Git hooks installer script (`scripts/install-hooks.sh`)
 
 ## Who am I?
 
@@ -59,6 +79,13 @@ The full workflow reference is at
 [docs/deciduous-workflow.md](docs/deciduous-workflow.md). If you find yourself
 batching deciduous updates at the end of a session, you are doing it wrong.
 
+Deciduous v0.12.0 is installed. Notable features beyond basic logging:
+- `deciduous writeup` — generate PR writeups from graph nodes
+- `deciduous audit --associate-commits` — auto-link nodes to commits
+- `deciduous diff export/apply` — multi-user sync via patch files
+- `deciduous roadmap` — sync ROADMAP.md with GitHub Issues
+- `deciduous integration` — show Claude Code integration status
+
 ### Coding standards
 
 This is a Rust project. Follow idiomatic Rust patterns:
@@ -70,6 +97,29 @@ This is a Rust project. Follow idiomatic Rust patterns:
 - Prefer well-established crates over hand-rolling functionality
 - Add comments that explain *why*, not just *what* — I'll be reading this
   code to learn from it
+
+### Testing
+
+The project has 109 tests across three categories:
+
+- **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
+  truncation, boundary conditions
+- **Topic tests** (`tests/unit_topics.rs`) — cosine similarity, keyword
+  weights, TF-IDF invariants, edge cases
+- **Composition tests** (`tests/composition.rs`) — end-to-end pipelines
+  (TF-IDF → fingerprint → overlap → score → tier), report generation,
+  ally/hostile/irrelevant account scenarios
+
+Run all tests with `cargo test --all-targets`. The default `cargo test` only
+runs library tests — integration tests live in the `tests/` directory and
+need `--all-targets` to be included.
+
+### Git hooks
+
+After cloning, run `./scripts/install-hooks.sh` to install quality gates:
+- **pre-commit**: blocks commits with formatting errors, clippy warnings,
+  or failing tests
+- **pre-push**: blocks pushes with failing tests or clippy warnings
 
 ### Keep it runnable
 

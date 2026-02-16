@@ -26,7 +26,10 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
     // Fingerprint status
     match db::queries::get_fingerprint(&conn)? {
         Some((_json, post_count, updated_at)) => {
-            println!("Fingerprint: built from {} posts (updated {})", post_count, updated_at);
+            println!(
+                "Fingerprint: built from {} posts (updated {})",
+                post_count, updated_at
+            );
         }
         None => {
             println!("Fingerprint: not yet built");
@@ -36,10 +39,15 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
 
     // Scored accounts (Elevated tier starts at 15.0)
     let all_scores = db::queries::get_ranked_threats(&conn, 0.0)?;
-    let elevated_count = all_scores.iter().filter(|s| {
-        s.threat_score.is_some_and(|t| t >= 15.0)
-    }).count();
-    println!("Scored accounts: {} total, {} elevated+", all_scores.len(), elevated_count);
+    let elevated_count = all_scores
+        .iter()
+        .filter(|s| s.threat_score.is_some_and(|t| t >= 15.0))
+        .count();
+    println!(
+        "Scored accounts: {} total, {} elevated+",
+        all_scores.len(),
+        elevated_count
+    );
 
     // Recent events
     let events = db::queries::get_recent_events(&conn, 5)?;

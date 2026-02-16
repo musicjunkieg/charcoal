@@ -75,10 +75,7 @@ pub async fn build_profile(
     let avg_toxicity: f64 = if toxicity_results.is_empty() {
         0.0
     } else {
-        let sum: f64 = toxicity_results
-            .iter()
-            .map(weighted_toxicity)
-            .sum();
+        let sum: f64 = toxicity_results.iter().map(weighted_toxicity).sum();
         sum / toxicity_results.len() as f64
     };
 

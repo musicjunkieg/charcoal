@@ -133,11 +133,7 @@ pub fn display_amplification_events(events: &[AmplificationEvent]) {
     for event in &quotes {
         let text = event.amplifier_text.as_deref().unwrap_or("");
         let preview = super::truncate_chars(text, 140);
-        println!(
-            "  @{:<30} \"{}\"",
-            event.amplifier_handle,
-            preview.dimmed(),
-        );
+        println!("  @{:<30} \"{}\"", event.amplifier_handle, preview.dimmed(),);
     }
     println!();
 }

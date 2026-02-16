@@ -85,11 +85,7 @@ async fn download_file(url: &str, dest: &Path, show_progress: bool) -> Result<()
         .with_context(|| format!("Failed to download {}", url))?;
 
     if !response.status().is_success() {
-        anyhow::bail!(
-            "Download failed with status {}: {}",
-            response.status(),
-            url
-        );
+        anyhow::bail!("Download failed with status {}: {}", response.status(), url);
     }
 
     let total_size = response.content_length();
@@ -120,14 +116,16 @@ async fn download_file(url: &str, dest: &Path, show_progress: bool) -> Result<()
     };
 
     // Stream the response body to disk
-    let bytes = response.bytes().await.context("Failed to read response body")?;
+    let bytes = response
+        .bytes()
+        .await
+        .context("Failed to read response body")?;
 
     if let Some(ref pb) = pb {
         pb.set_position(bytes.len() as u64);
     }
 
-    std::fs::write(dest, &bytes)
-        .with_context(|| format!("Failed to write {}", dest.display()))?;
+    std::fs::write(dest, &bytes).with_context(|| format!("Failed to write {}", dest.display()))?;
 
     if let Some(pb) = pb {
         pb.finish_and_clear();

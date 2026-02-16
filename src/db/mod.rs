@@ -4,9 +4,9 @@
 // dependency. The database file lives wherever CHARCOAL_DB_PATH points
 // (defaults to ./charcoal.db).
 
-pub mod schema;
 pub mod models;
 pub mod queries;
+pub mod schema;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;

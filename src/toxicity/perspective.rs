@@ -72,11 +72,7 @@ impl ToxicityScorer for PerspectiveScorer {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Perspective API returned {}: {}",
-                status,
-                body
-            );
+            anyhow::bail!("Perspective API returned {}: {}", status, body);
         }
 
         let result: PerspectiveResponse = response

@@ -1,7 +1,7 @@
 // Output formatting — terminal display and report generation.
 
-pub mod terminal;
 pub mod markdown;
+pub mod terminal;
 
 /// Truncate a string to at most `max_chars` characters, appending "..." if truncated.
 ///

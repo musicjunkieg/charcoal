@@ -45,7 +45,8 @@ pub async fn run(
 ) -> Result<(usize, usize)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
-    let first_degree = followers::fetch_followers(agent, protected_handle, max_first_degree).await?;
+    let first_degree =
+        followers::fetch_followers(agent, protected_handle, max_first_degree).await?;
     info!(count = first_degree.len(), "First-degree followers fetched");
 
     // Step 2: Fetch second-degree followers (followers of your followers)
@@ -135,9 +136,7 @@ pub async fn run(
             ))
             .catch_unwind()
             .await
-            .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
-            })
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic)))
         }
     }))
     .buffer_unordered(concurrency);

@@ -51,11 +51,7 @@ impl TopicFingerprint {
             // Build the bar: filled portion + empty portion
             let filled = (cluster.weight * bar_width as f64).round() as usize;
             let empty = bar_width.saturating_sub(filled);
-            let bar = format!(
-                "[{}{}]",
-                "=".repeat(filled),
-                " ".repeat(empty)
-            );
+            let bar = format!("[{}{}]", "=".repeat(filled), " ".repeat(empty));
 
             // Color the bar based on weight
             let colored_bar = if cluster.weight >= 0.25 {

@@ -140,6 +140,24 @@ auto_detect = true
 2. Does every **action** link to why you did it?
 3. Any **dangling outcomes** without parents?
 
+## Graph Quality
+
+Use `deciduous audit` to maintain graph quality:
+```bash
+deciduous audit                       # Check for orphan nodes, missing links
+deciduous audit --associate-commits   # Auto-link nodes to matching commits
+deciduous audit --dry-run             # Preview what would change
+```
+
+## PR Writeups
+
+Generate PR descriptions from the decision graph:
+```bash
+deciduous writeup -t "PR title" -n 70-75    # From specific node range
+deciduous writeup -r 55                      # From root node, traversing children
+deciduous writeup -o pr-body.md              # Save to file
+```
+
 ## Session Start Checklist
 
 ```bash

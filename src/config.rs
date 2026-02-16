@@ -47,16 +47,12 @@ impl Config {
             .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
 
         Ok(Self {
-            bluesky_handle: env::var("BLUESKY_HANDLE")
-                .unwrap_or_default(),
-            bluesky_app_password: env::var("BLUESKY_APP_PASSWORD")
-                .unwrap_or_default(),
+            bluesky_handle: env::var("BLUESKY_HANDLE").unwrap_or_default(),
+            bluesky_app_password: env::var("BLUESKY_APP_PASSWORD").unwrap_or_default(),
             bluesky_pds_url: env::var("BLUESKY_PDS_URL")
                 .unwrap_or_else(|_| "https://bsky.social".to_string()),
-            perspective_api_key: env::var("PERSPECTIVE_API_KEY")
-                .unwrap_or_default(),
-            db_path: env::var("CHARCOAL_DB_PATH")
-                .unwrap_or_else(|_| "./charcoal.db".to_string()),
+            perspective_api_key: env::var("PERSPECTIVE_API_KEY").unwrap_or_default(),
+            db_path: env::var("CHARCOAL_DB_PATH").unwrap_or_else(|_| "./charcoal.db".to_string()),
             scorer_backend,
             model_dir,
         })

@@ -96,7 +96,25 @@ Options:
 - `--max-followers N` — limit followers analyzed per amplifier (default: 50)
 - `--concurrency N` — parallel scoring workers (default: 8)
 
-### 7. View results
+### 7. Sweep second-degree network (optional)
+
+```bash
+cargo run -- sweep
+```
+
+Scans your followers-of-followers — the accounts one hop removed from your
+direct audience. These are people who haven't encountered your content yet
+but may if an amplification event occurs.
+
+Options:
+- `--max-followers N` — first-degree followers to scan (default: 200)
+- `--depth N` — second-degree followers per first-degree (default: 50)
+- `--concurrency N` — parallel scoring workers (default: 8)
+
+This is slower than `scan` (potentially thousands of API calls) and is
+designed for periodic use rather than continuous monitoring.
+
+### 8. View results
 
 **Score a single account:**
 ```bash
@@ -163,9 +181,12 @@ src/
 ## Development
 
 ```bash
-cargo test          # Run tests
-cargo clippy        # Lint
-cargo run -- status # Quick smoke test
+# First-time setup: install git hooks (enforces fmt + clippy + tests)
+./scripts/install-hooks.sh
+
+cargo test --all-targets  # Run all 109 tests (unit + integration)
+cargo clippy              # Lint
+cargo run -- status       # Quick smoke test
 ```
 
 ## License

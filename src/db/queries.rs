@@ -13,9 +13,7 @@ use super::models::{AccountScore, AmplificationEvent, ThreatTier, ToxicPost};
 /// Get a scan state value by key (e.g., "notifications_cursor").
 pub fn get_scan_state(conn: &Connection, key: &str) -> Result<Option<String>> {
     let mut stmt = conn.prepare("SELECT value FROM scan_state WHERE key = ?1")?;
-    let result = stmt
-        .query_row(params![key], |row| row.get(0))
-        .optional()?;
+    let result = stmt.query_row(params![key], |row| row.get(0)).optional()?;
     Ok(result)
 }
 
@@ -128,12 +126,8 @@ pub fn get_ranked_threats(conn: &Connection, min_score: f64) -> Result<Vec<Accou
 
 /// Check if an account's score is stale (older than the given number of days).
 pub fn is_score_stale(conn: &Connection, did: &str, max_age_days: i64) -> Result<bool> {
-    let mut stmt = conn.prepare(
-        "SELECT scored_at FROM account_scores WHERE did = ?1",
-    )?;
-    let result: Option<String> = stmt
-        .query_row(params![did], |row| row.get(0))
-        .optional()?;
+    let mut stmt = conn.prepare("SELECT scored_at FROM account_scores WHERE did = ?1")?;
+    let result: Option<String> = stmt.query_row(params![did], |row| row.get(0)).optional()?;
 
     match result {
         None => Ok(true), // No score exists — treat as stale

@@ -149,16 +149,11 @@ pub async fn fetch_post_text(agent: &BskyAgent, uri: &str) -> Result<Option<Stri
         .await
         .context("Failed to fetch post by URI")?;
 
-    let text = output
-        .posts
-        .first()
-        .and_then(|post_view| {
-            atrium_api::app::bsky::feed::post::Record::try_from_unknown(
-                post_view.record.clone(),
-            )
+    let text = output.posts.first().and_then(|post_view| {
+        atrium_api::app::bsky::feed::post::Record::try_from_unknown(post_view.record.clone())
             .ok()
             .map(|record| record.data.text.clone())
-        });
+    });
 
     Ok(text)
 }
