@@ -45,12 +45,19 @@ of each work session, run `chainlink session start` to load previous context.
 At the end, run `chainlink session end --notes "..."` to preserve state for
 next time. Break large tasks into Chainlink issues with subissues.
 
-Use Deciduous (https://crates.io/crates/deciduous) for decision documentation.
-When making meaningful technical choices (crate selection, architecture
-patterns, API design, scoring approaches), log the decision with Deciduous
-including the choice made, alternatives considered, and reasoning. See
-[docs/deciduous-workflow.md](docs/deciduous-workflow.md) for the full
-Deciduous workflow reference.
+**CRITICAL: Deciduous decision logging is mandatory — not aspirational.**
+Use Deciduous (https://crates.io/crates/deciduous) to log every meaningful
+action and decision in real-time. This is NOT something to "catch up on later."
+
+- **Before implementing**: `deciduous add action "..." --commit HEAD -f "files"`
+- **After completing**: `deciduous add outcome "..." --commit HEAD`
+- **Every action node MUST include `--commit`** to link it to the git history
+- **Link nodes immediately** with `deciduous link FROM TO -r "reason"`
+- Log decisions, alternatives considered, and reasoning
+
+The full workflow reference is at
+[docs/deciduous-workflow.md](docs/deciduous-workflow.md). If you find yourself
+batching deciduous updates at the end of a session, you are doing it wrong.
 
 ### Coding standards
 
