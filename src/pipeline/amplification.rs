@@ -119,7 +119,7 @@ pub async fn run(
             event.indexed_at,
         );
         if let Some(ref text) = quote_text {
-            let preview = if text.len() > 120 { &text[..120] } else { text };
+            let preview = crate::output::truncate_chars(text, 120);
             let tox_str = quote_toxicity
                 .map(|t| format!(" [tox: {:.2}]", t))
                 .unwrap_or_default();
