@@ -5,7 +5,7 @@
 
 use colored::Colorize;
 
-use crate::db::models::AccountScore;
+use crate::db::models::{AccountScore, AmplificationEvent};
 
 /// Display a ranked threat list in the terminal.
 pub fn display_threat_list(accounts: &[AccountScore]) {
@@ -115,6 +115,39 @@ pub fn display_account_detail(score: &AccountScore) {
             );
         }
     }
+}
+
+/// Display recent amplification events with quote text when available.
+pub fn display_amplification_events(events: &[AmplificationEvent]) {
+    let quotes: Vec<&AmplificationEvent> = events
+        .iter()
+        .filter(|e| e.event_type == "quote" && e.amplifier_text.is_some())
+        .collect();
+
+    if quotes.is_empty() {
+        return;
+    }
+
+    println!(
+        "\n{}",
+        format!("=== Quote Context ({} quotes with text) ===", quotes.len()).bold()
+    );
+    println!();
+
+    for event in &quotes {
+        let text = event.amplifier_text.as_deref().unwrap_or("");
+        let preview = if text.len() > 140 {
+            format!("{}...", &text[..140])
+        } else {
+            text.to_string()
+        };
+        println!(
+            "  @{:<30} \"{}\"",
+            event.amplifier_handle,
+            preview.dimmed(),
+        );
+    }
+    println!();
 }
 
 /// Colorize a threat tier string.
