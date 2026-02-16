@@ -16,6 +16,7 @@ use tracing::{info, warn};
 
 use crate::bluesky::followers;
 use crate::bluesky::notifications;
+use crate::bluesky::posts;
 use crate::db::queries;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
@@ -67,8 +68,35 @@ pub async fn run(
         &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     )?;
 
-    // Store each event in the database
+    // Store each event in the database, fetching quote text when available
     for event in &events {
+        let mut quote_text: Option<String> = None;
+        let mut quote_toxicity: Option<f64> = None;
+
+        // For quote events, fetch the quote post text and score it
+        if event.event_type == "quote" && analyze_followers {
+            match posts::fetch_post_text(agent, &event.amplifier_post_uri).await {
+                Ok(Some(text)) => {
+                    // Score the quote text for toxicity
+                    match scorer.score_text(&text).await {
+                        Ok(result) => {
+                            quote_toxicity = Some(result.toxicity);
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Failed to score quote text");
+                        }
+                    }
+                    quote_text = Some(text);
+                }
+                Ok(None) => {
+                    info!(uri = event.amplifier_post_uri, "Quote post text not found");
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to fetch quote post text");
+                }
+            }
+        }
+
         queries::insert_amplification_event(
             conn,
             &event.event_type,
@@ -76,15 +104,24 @@ pub async fn run(
             &event.amplifier_handle,
             event.original_post_uri.as_deref().unwrap_or("unknown"),
             Some(&event.amplifier_post_uri),
-            None, // We'd need a separate API call to get quote text
+            quote_text.as_deref(),
         )?;
 
+        // Display the event with quote context if available
+        let event_label = if event.event_type == "quote" { "Quote" } else { "Repost" };
         println!(
             "  {} by @{} ({})",
-            if event.event_type == "quote" { "Quote" } else { "Repost" },
+            event_label,
             event.amplifier_handle,
             event.indexed_at,
         );
+        if let Some(ref text) = quote_text {
+            let preview = if text.len() > 120 { &text[..120] } else { text };
+            let tox_str = quote_toxicity
+                .map(|t| format!(" [tox: {:.2}]", t))
+                .unwrap_or_default();
+            println!("    \"{}\"{}", preview, tox_str);
+        }
     }
 
     let mut accounts_scored = 0;

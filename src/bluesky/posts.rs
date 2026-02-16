@@ -5,7 +5,7 @@
 // accounts' posting history (toxicity scoring).
 
 use anyhow::{Context, Result};
-use atrium_api::app::bsky::feed::get_author_feed;
+use atrium_api::app::bsky::feed::{get_author_feed, get_posts};
 use atrium_api::types::TryFromUnknown;
 use bsky_sdk::BskyAgent;
 use tracing::{debug, info};
@@ -126,4 +126,36 @@ pub async fn fetch_recent_posts(
     );
 
     Ok(posts)
+}
+
+/// Fetch a single post's text by its AT URI.
+///
+/// Used to retrieve quote-post text for amplification events. The notification
+/// gives us the URI but not the post content — this fills that gap.
+pub async fn fetch_post_text(agent: &BskyAgent, uri: &str) -> Result<Option<String>> {
+    let params = get_posts::ParametersData {
+        uris: vec![uri.to_string()],
+    };
+
+    let output = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_posts(params.into())
+        .await
+        .context("Failed to fetch post by URI")?;
+
+    let text = output
+        .posts
+        .first()
+        .and_then(|post_view| {
+            atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+                post_view.record.clone(),
+            )
+            .ok()
+            .map(|record| record.data.text.clone())
+        });
+
+    Ok(text)
 }
