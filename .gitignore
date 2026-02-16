@@ -11,3 +11,7 @@
 *.db
 *.db-wal
 *.db-shm
+
+# Chainlink local state (rules are tracked, but DB and cache are not)
+.chainlink/issues.db
+.chainlink/.cache/
