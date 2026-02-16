@@ -18,7 +18,7 @@ use crate::topics::fingerprint::TopicFingerprint;
 use crate::topics::overlap;
 use crate::topics::tfidf::TfIdfExtractor;
 use crate::topics::traits::TopicExtractor;
-use crate::toxicity::traits::ToxicityScorer;
+use crate::toxicity::traits::{ToxicityResult, ToxicityScorer};
 
 use bsky_sdk::BskyAgent;
 
@@ -35,8 +35,8 @@ pub async fn build_profile(
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
 ) -> Result<AccountScore> {
-    // Step 1: Fetch the target's recent posts (50 from API, keep up to 20 after filtering)
-    let target_posts = posts::fetch_recent_posts(agent, target_handle, 20).await?;
+    // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
+    let target_posts = posts::fetch_recent_posts(agent, target_handle, 50).await?;
 
     if target_posts.len() < 5 {
         info!(
@@ -61,11 +61,25 @@ pub async fn build_profile(
     let post_texts: Vec<String> = target_posts.iter().map(|p| p.text.clone()).collect();
     let toxicity_results = scorer.score_batch(&post_texts).await?;
 
-    // Calculate average toxicity
+    // Calculate weighted toxicity that emphasizes hostile intent over profanity.
+    //
+    // The raw `toxicity` score treats all toxicity equally — but "fuck yeah,
+    // fat liberation!" (high obscene, low identity_attack) is very different
+    // from "fat people are disgusting" (high identity_attack, high insult).
+    // We weight the categories to surface genuine hostility:
+    //   identity_attack: 0.35 — directly targets people for who they are
+    //   insult:          0.25 — hostile personal attacks
+    //   threat:          0.25 — threatening language
+    //   severe_toxicity: 0.10 — extreme toxicity signal
+    //   profanity:       0.05 — swearing alone is not hostility
     let avg_toxicity: f64 = if toxicity_results.is_empty() {
         0.0
     } else {
-        toxicity_results.iter().map(|r| r.toxicity).sum::<f64>() / toxicity_results.len() as f64
+        let sum: f64 = toxicity_results
+            .iter()
+            .map(weighted_toxicity)
+            .sum();
+        sum / toxicity_results.len() as f64
     };
 
     // Collect the top 3 most toxic posts as evidence
@@ -87,13 +101,13 @@ pub async fn build_profile(
 
     // Step 3: Build the target's topic fingerprint
     let topic_extractor = TfIdfExtractor {
-        top_n_keywords: 30,
-        max_clusters: 5,
+        top_n_keywords: 40,
+        max_clusters: 7,
     };
     let target_fingerprint = topic_extractor.extract(&post_texts)?;
 
     // Step 4: Compute topic overlap with the protected user
-    let topic_overlap = overlap::weighted_jaccard(protected_fingerprint, &target_fingerprint);
+    let topic_overlap = overlap::cosine_similarity(protected_fingerprint, &target_fingerprint);
 
     // Step 5: Compute the combined threat score
     let (threat_score, tier) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
@@ -119,4 +133,31 @@ pub async fn build_profile(
         top_toxic_posts,
         scored_at: String::new(),
     })
+}
+
+/// Compute a weighted toxicity score from individual category scores.
+///
+/// The raw model `toxicity` score treats all categories equally, but for
+/// threat detection we care much more about identity attacks, insults, and
+/// threats than about profanity. An ally who says "fuck yeah, fat liberation!"
+/// scores high on obscene/profanity but low on identity_attack — they should
+/// NOT be flagged as toxic.
+///
+/// Falls back to the raw toxicity score if category attributes are missing
+/// (e.g. when using a scorer that doesn't provide breakdowns).
+fn weighted_toxicity(result: &ToxicityResult) -> f64 {
+    let attrs = &result.attributes;
+
+    // If we don't have category breakdowns, fall back to raw score
+    let identity_attack = match attrs.identity_attack {
+        Some(v) => v,
+        None => return result.toxicity,
+    };
+
+    let insult = attrs.insult.unwrap_or(0.0);
+    let threat = attrs.threat.unwrap_or(0.0);
+    let severe = attrs.severe_toxicity.unwrap_or(0.0);
+    let profanity = attrs.profanity.unwrap_or(0.0);
+
+    identity_attack * 0.35 + insult * 0.25 + threat * 0.25 + severe * 0.10 + profanity * 0.05
 }

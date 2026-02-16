@@ -1,57 +1,60 @@
-// Weighted Jaccard similarity for topic overlap scoring.
+// Cosine similarity for topic overlap scoring.
 //
-// Compares two topic fingerprints by looking at their keyword weight vectors.
-// For each keyword in either fingerprint, we take the minimum weight from both
-// sides and the maximum weight from both sides. The overlap score is:
+// Compares two topic fingerprints by treating their keyword weight maps as
+// sparse vectors and computing cosine similarity:
 //
-//   sum(min(weight_a, weight_b)) / sum(max(weight_a, weight_b))
+//   dot(A, B) / (||A|| * ||B||)
 //
-// This gives 0.0 for no overlap and 1.0 for identical profiles. Keywords that
-// are important to the protected user (high weight) matter more than minor ones.
+// Unlike weighted Jaccard, cosine similarity is insensitive to the magnitude
+// of the vectors — it measures the angle between them. This means a fingerprint
+// built from 500 posts and one built from 20 posts can still produce meaningful
+// overlap scores, as long as the keywords that DO overlap point in the same
+// direction.
+//
+// Returns 0.0 for no overlap and 1.0 for identical topic profiles.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::fingerprint::TopicFingerprint;
 
-/// Compute the weighted Jaccard similarity between two fingerprints.
+/// Compute the cosine similarity between two fingerprints.
 ///
 /// Returns a score from 0.0 (no overlap) to 1.0 (identical topic profiles).
-pub fn weighted_jaccard(fp_a: &TopicFingerprint, fp_b: &TopicFingerprint) -> f64 {
+pub fn cosine_similarity(fp_a: &TopicFingerprint, fp_b: &TopicFingerprint) -> f64 {
     let weights_a = fp_a.keyword_weights();
     let weights_b = fp_b.keyword_weights();
 
-    jaccard_from_weights(&weights_a, &weights_b)
+    cosine_from_weights(&weights_a, &weights_b)
 }
 
-/// Compute weighted Jaccard from raw keyword weight maps.
+/// Compute cosine similarity from raw keyword weight maps.
 ///
-/// Separated from `weighted_jaccard` so it can be used with ad-hoc weight maps
-/// (e.g., from a single account's posts without full clustering).
-pub fn jaccard_from_weights(
+/// Treats each map as a sparse vector over the union of all keywords.
+/// Separated from `cosine_similarity` so it can be used with ad-hoc weight
+/// maps (e.g., from a single account's posts without full clustering).
+pub fn cosine_from_weights(
     weights_a: &HashMap<String, f64>,
     weights_b: &HashMap<String, f64>,
 ) -> f64 {
-    // Union of all keywords from both sides
-    let all_keys: HashSet<&String> = weights_a.keys().chain(weights_b.keys()).collect();
-
-    if all_keys.is_empty() {
+    if weights_a.is_empty() || weights_b.is_empty() {
         return 0.0;
     }
 
-    let mut min_sum = 0.0;
-    let mut max_sum = 0.0;
+    // Dot product: only non-zero where both vectors have the same keyword
+    let dot: f64 = weights_a
+        .iter()
+        .filter_map(|(key, &a)| weights_b.get(key).map(|&b| a * b))
+        .sum();
 
-    for key in all_keys {
-        let a = weights_a.get(key).copied().unwrap_or(0.0);
-        let b = weights_b.get(key).copied().unwrap_or(0.0);
-        min_sum += a.min(b);
-        max_sum += a.max(b);
-    }
+    // Magnitudes
+    let mag_a: f64 = weights_a.values().map(|v| v * v).sum::<f64>().sqrt();
+    let mag_b: f64 = weights_b.values().map(|v| v * v).sum::<f64>().sqrt();
 
-    if max_sum == 0.0 {
+    let denominator = mag_a * mag_b;
+    if denominator == 0.0 {
         0.0
     } else {
-        min_sum / max_sum
+        (dot / denominator).clamp(0.0, 1.0)
     }
 }
 
@@ -78,7 +81,7 @@ mod tests {
     #[test]
     fn test_identical_fingerprints() {
         let fp = make_fp(&[("fat", 0.3), ("queer", 0.2), ("dei", 0.15)]);
-        let score = weighted_jaccard(&fp, &fp);
+        let score = cosine_similarity(&fp, &fp);
         assert!(
             (score - 1.0).abs() < 0.001,
             "Identical fingerprints should score ~1.0, got {score}"
@@ -89,7 +92,7 @@ mod tests {
     fn test_no_overlap() {
         let fp_a = make_fp(&[("fat", 0.3), ("queer", 0.2)]);
         let fp_b = make_fp(&[("sports", 0.4), ("gaming", 0.3)]);
-        let score = weighted_jaccard(&fp_a, &fp_b);
+        let score = cosine_similarity(&fp_a, &fp_b);
         assert!(
             score < 0.001,
             "Non-overlapping fingerprints should score ~0.0, got {score}"
@@ -100,19 +103,32 @@ mod tests {
     fn test_partial_overlap() {
         let fp_a = make_fp(&[("fat", 0.3), ("queer", 0.2), ("dei", 0.15)]);
         let fp_b = make_fp(&[("fat", 0.2), ("gaming", 0.3), ("dei", 0.1)]);
-        let score = weighted_jaccard(&fp_a, &fp_b);
-        // Should be moderate — some shared topics
-        assert!(score > 0.0, "Should have some overlap");
+        let score = cosine_similarity(&fp_a, &fp_b);
+        // Cosine similarity should be moderate — shared keywords point
+        // in similar directions even though magnitudes differ
+        assert!(score > 0.1, "Should have meaningful overlap, got {score}");
         assert!(score < 1.0, "Should not be identical");
     }
 
     #[test]
     fn test_empty_fingerprints() {
         let fp = make_fp(&[]);
-        let score = weighted_jaccard(&fp, &fp);
+        let score = cosine_similarity(&fp, &fp);
         assert!(
             score.abs() < 0.001,
             "Empty fingerprints should score 0.0, got {score}"
+        );
+    }
+
+    #[test]
+    fn test_cosine_insensitive_to_magnitude() {
+        // Same keywords, different magnitudes — cosine should still be ~1.0
+        let fp_a = make_fp(&[("fat", 0.5), ("queer", 0.3), ("dei", 0.2)]);
+        let fp_b = make_fp(&[("fat", 0.1), ("queer", 0.06), ("dei", 0.04)]);
+        let score = cosine_similarity(&fp_a, &fp_b);
+        assert!(
+            (score - 1.0).abs() < 0.001,
+            "Proportional weights should score ~1.0, got {score}"
         );
     }
 }

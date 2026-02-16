@@ -11,9 +11,11 @@
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
+use futures::FutureExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::Connection;
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use tracing::{info, warn};
 
 use crate::bluesky::followers;
@@ -120,24 +122,30 @@ pub async fn run(
             .unwrap(),
     );
 
-    let results: Vec<Result<_>> = stream::iter(stale.into_iter().map(|follower| async move {
-        profile::build_profile(
-            agent,
-            scorer,
-            &follower.handle,
-            &follower.did,
-            protected_fingerprint,
-            weights,
-        )
-        .await
+    let mut stream = stream::iter(stale.into_iter().map(|follower| {
+        let handle_for_panic = follower.handle.clone();
+        async move {
+            AssertUnwindSafe(profile::build_profile(
+                agent,
+                scorer,
+                &follower.handle,
+                &follower.did,
+                protected_fingerprint,
+                weights,
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
+            })
+        }
     }))
-    .buffer_unordered(concurrency)
-    .collect()
-    .await;
+    .buffer_unordered(concurrency);
 
-    // Step 5: Write results to DB sequentially
+    // Step 5: Write results to DB incrementally — each score is persisted
+    // as it arrives so a crash doesn't lose everything scored so far
     let mut accounts_scored = 0;
-    for result in results {
+    while let Some(result) = stream.next().await {
         match result {
             Ok(score) => {
                 queries::upsert_account_score(conn, &score)?;

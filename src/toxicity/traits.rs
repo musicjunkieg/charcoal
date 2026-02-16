@@ -27,6 +27,17 @@ pub struct ToxicityAttributes {
     pub threat: Option<f64>,
 }
 
+/// No-op scorer used when toxicity scoring isn't needed (e.g. scan without --analyze).
+/// Panics if actually called — ensures we don't silently produce fake scores.
+pub struct NoopScorer;
+
+#[async_trait]
+impl ToxicityScorer for NoopScorer {
+    async fn score_text(&self, _text: &str) -> Result<ToxicityResult> {
+        anyhow::bail!("NoopScorer should never be called — use --analyze to enable scoring")
+    }
+}
+
 /// Trait for scoring text toxicity. Implementations must be async because
 /// most providers require HTTP API calls.
 #[async_trait]

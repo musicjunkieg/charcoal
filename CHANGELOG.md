@@ -7,15 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Reweight toxicity categories to reduce ally false positives (#31)
+- Replace weighted Jaccard with cosine similarity for topic overlap (#30)
 - Mode 2: Background sweep of followers-of-followers (#25)
 - Surface quote text and toxicity in threat reports (#21)
 - Tune threat tier thresholds for real-world score distribution (#8)
 
 ### Fixed
+- Crash-resilient pipelines: incremental DB writes + panic catching (#33)
 - Exclude protected user from their own threat report (#22)
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Increase posts per account from 20 to 50 for more stable fingerprints (#32)
 - Skip follower analysis for repost events (#27)
 - Stop tracking chainlink issues.db and .cache in git (#26)
 - Replace dummy Perspective scorer with proper no-op (#24)

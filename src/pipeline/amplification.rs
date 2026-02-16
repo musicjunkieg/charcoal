@@ -10,8 +10,10 @@
 
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
+use futures::FutureExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::Connection;
+use std::panic::AssertUnwindSafe;
 use tracing::{info, warn};
 
 use crate::bluesky::followers;
@@ -185,25 +187,34 @@ pub async fn run(
                     );
 
                     // Phase 2: Score in parallel — each future does network I/O + ONNX inference
-                    let results: Vec<Result<_>> = stream::iter(
-                        stale_followers.into_iter().map(|follower| async move {
-                            profile::build_profile(
-                                agent,
-                                scorer,
-                                &follower.handle,
-                                &follower.did,
-                                protected_fingerprint,
-                                weights,
-                            )
-                            .await
+                    // Results are written incrementally so a crash doesn't lose everything
+                    let mut stream = stream::iter(
+                        stale_followers.into_iter().map(|follower| {
+                            let handle_for_panic = follower.handle.clone();
+                            async move {
+                                AssertUnwindSafe(profile::build_profile(
+                                    agent,
+                                    scorer,
+                                    &follower.handle,
+                                    &follower.did,
+                                    protected_fingerprint,
+                                    weights,
+                                ))
+                                .catch_unwind()
+                                .await
+                                .unwrap_or_else(|_| {
+                                    Err(anyhow::anyhow!(
+                                        "Panic while scoring @{}",
+                                        handle_for_panic
+                                    ))
+                                })
+                            }
                         }),
                     )
-                    .buffer_unordered(concurrency)
-                    .collect()
-                    .await;
+                    .buffer_unordered(concurrency);
 
-                    // Phase 3: Write results to DB sequentially (Connection is not Send)
-                    for result in results {
+                    // Phase 3: Write results to DB incrementally as they arrive
+                    while let Some(result) = stream.next().await {
                         match result {
                             Ok(score) => {
                                 queries::upsert_account_score(conn, &score)?;
