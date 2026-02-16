@@ -19,6 +19,7 @@ use std::panic::AssertUnwindSafe;
 use tracing::{info, warn};
 
 use crate::bluesky::followers;
+use crate::bluesky::rate_limit::RateLimiter;
 use crate::db::queries;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
@@ -42,10 +43,12 @@ pub async fn run(
     max_first_degree: usize,
     max_second_degree_per: usize,
     concurrency: usize,
+    rate_limiter: &RateLimiter,
 ) -> Result<(usize, usize)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
-    let first_degree = followers::fetch_followers(agent, protected_handle, max_first_degree).await?;
+    let first_degree =
+        followers::fetch_followers(agent, protected_handle, max_first_degree, rate_limiter).await?;
     info!(count = first_degree.len(), "First-degree followers fetched");
 
     // Step 2: Fetch second-degree followers (followers of your followers)
@@ -72,7 +75,14 @@ pub async fn run(
     );
 
     for follower in &first_degree {
-        match followers::fetch_followers(agent, &follower.handle, max_second_degree_per).await {
+        match followers::fetch_followers(
+            agent,
+            &follower.handle,
+            max_second_degree_per,
+            rate_limiter,
+        )
+        .await
+        {
             Ok(their_followers) => {
                 for f in their_followers {
                     if seen.insert(f.did.clone()) {
@@ -132,12 +142,11 @@ pub async fn run(
                 &follower.did,
                 protected_fingerprint,
                 weights,
+                rate_limiter,
             ))
             .catch_unwind()
             .await
-            .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
-            })
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic)))
         }
     }))
     .buffer_unordered(concurrency);

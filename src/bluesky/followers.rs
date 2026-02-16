@@ -9,6 +9,8 @@ use atrium_api::app::bsky::graph::get_followers;
 use bsky_sdk::BskyAgent;
 use tracing::{debug, info};
 
+use super::rate_limit::RateLimiter;
+
 /// A simplified follower profile — just the fields Charcoal needs.
 #[derive(Debug, Clone)]
 pub struct Follower {
@@ -26,6 +28,7 @@ pub async fn fetch_followers(
     agent: &BskyAgent,
     handle: &str,
     max_followers: usize,
+    rate_limiter: &RateLimiter,
 ) -> Result<Vec<Follower>> {
     let mut followers = Vec::new();
     let mut cursor: Option<String> = None;
@@ -43,6 +46,8 @@ pub async fn fetch_followers(
                     .map_err(|e: String| anyhow::anyhow!("{}", e))?,
             ),
         };
+
+        rate_limiter.acquire().await;
 
         let output = agent
             .api

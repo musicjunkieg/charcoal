@@ -9,6 +9,8 @@ use atrium_api::app::bsky::notification::list_notifications;
 use bsky_sdk::BskyAgent;
 use tracing::{debug, info};
 
+use super::rate_limit::RateLimiter;
+
 /// An amplification event detected from notifications.
 #[derive(Debug, Clone)]
 pub struct AmplificationNotification {
@@ -29,6 +31,7 @@ pub struct AmplificationNotification {
 pub async fn fetch_amplification_events(
     agent: &BskyAgent,
     since_cursor: Option<&str>,
+    rate_limiter: &RateLimiter,
 ) -> Result<(Vec<AmplificationNotification>, Option<String>)> {
     let mut events = Vec::new();
     let mut cursor: Option<String> = since_cursor.map(String::from);
@@ -47,6 +50,8 @@ pub async fn fetch_amplification_events(
             reasons: Some(vec!["quote".to_string(), "repost".to_string()]),
             seen_at: None,
         };
+
+        rate_limiter.acquire().await;
 
         let output = agent
             .api
