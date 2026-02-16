@@ -22,6 +22,7 @@ use crate::bluesky::followers;
 use crate::db::queries;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
+use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::traits::ToxicityScorer;
 
@@ -42,6 +43,8 @@ pub async fn run(
     max_first_degree: usize,
     max_second_degree_per: usize,
     concurrency: usize,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
 ) -> Result<(usize, usize)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
@@ -133,6 +136,8 @@ pub async fn run(
                 &follower.did,
                 protected_fingerprint,
                 weights,
+                embedder,
+                protected_embedding,
             ))
             .catch_unwind()
             .await

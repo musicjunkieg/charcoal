@@ -84,6 +84,38 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         [1],
     )?;
 
+    // Migration v2: add embedding_vector column to topic_fingerprint.
+    // Stores the mean sentence embedding (384-dim, JSON array) for the
+    // protected user's posts. Used for semantic topic overlap scoring.
+    run_migration(conn, 2, |c| {
+        c.execute_batch(
+            "ALTER TABLE topic_fingerprint ADD COLUMN embedding_vector TEXT;",
+        )
+    })?;
+
+    Ok(())
+}
+
+/// Run a migration if it hasn't been applied yet.
+/// The migration function receives the connection and should execute its SQL.
+fn run_migration<F>(conn: &Connection, version: i64, migrate: F) -> Result<()>
+where
+    F: FnOnce(&Connection) -> rusqlite::Result<()>,
+{
+    let already_applied: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM schema_version WHERE version = ?1",
+        [version],
+        |row| row.get(0),
+    )?;
+
+    if !already_applied {
+        migrate(conn).with_context(|| format!("Migration v{version} failed"))?;
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            [version],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -117,5 +149,47 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state = 5 tables
         assert_eq!(count, 5i64);
+    }
+
+    #[test]
+    fn test_migration_v2_adds_embedding_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+
+        // Verify the embedding_vector column exists by inserting a row with it
+        conn.execute(
+            "INSERT INTO topic_fingerprint (id, fingerprint_json, post_count, embedding_vector)
+             VALUES (1, '{}', 10, '[0.1, 0.2]')",
+            [],
+        )
+        .unwrap();
+
+        let result: String = conn
+            .query_row(
+                "SELECT embedding_vector FROM topic_fingerprint WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(result, "[0.1, 0.2]");
+    }
+
+    #[test]
+    fn test_migration_v2_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Run create_tables three times — migration should only run once
+        create_tables(&conn).unwrap();
+        create_tables(&conn).unwrap();
+        create_tables(&conn).unwrap();
+
+        // Verify schema_version has both v1 and v2
+        let versions: Vec<i64> = conn
+            .prepare("SELECT version FROM schema_version ORDER BY version")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(versions, vec![1, 2]);
     }
 }

@@ -22,6 +22,7 @@ use crate::bluesky::posts;
 use crate::db::queries;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
+use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::traits::ToxicityScorer;
 
@@ -43,6 +44,8 @@ pub async fn run(
     analyze_followers: bool,
     max_followers_per_amplifier: usize,
     concurrency: usize,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
 ) -> Result<(usize, usize)> {
     // Get the stored cursor from the last scan
     let last_cursor = queries::get_scan_state(conn, "notifications_cursor")?;
@@ -197,6 +200,8 @@ pub async fn run(
                                 &follower.did,
                                 protected_fingerprint,
                                 weights,
+                                embedder,
+                                protected_embedding,
                             ))
                             .catch_unwind()
                             .await

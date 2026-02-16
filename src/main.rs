@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use tracing::info;
+use tracing::{info, warn};
 
 mod config;
 
@@ -159,6 +159,29 @@ async fn main() -> Result<()> {
             let json = serde_json::to_string(&fingerprint)?;
             charcoal::db::queries::save_fingerprint(&conn, &json, fingerprint.post_count)?;
 
+            // Compute and store the mean sentence embedding for semantic overlap.
+            // This is optional — if the embedding model isn't downloaded yet, we
+            // skip it and fall back to TF-IDF keyword overlap during scoring.
+            let embed_dir = charcoal::toxicity::download::embedding_model_dir(&config.model_dir);
+            if charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
+                println!("\nComputing sentence embeddings...");
+                let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
+                let post_embeddings = embedder.embed_batch(&post_texts).await?;
+                let mean_emb = charcoal::topics::embeddings::mean_embedding(&post_embeddings);
+                let emb_json = serde_json::to_string(&mean_emb)?;
+                charcoal::db::queries::save_embedding(&conn, &emb_json)?;
+                println!(
+                    "  Embedding computed ({} posts → {}-dim vector)",
+                    post_texts.len(),
+                    charcoal::topics::embeddings::EMBEDDING_DIM,
+                );
+            } else {
+                println!(
+                    "\n{}",
+                    "Tip: Run `charcoal download-model` to enable semantic topic overlap.".dimmed()
+                );
+            }
+
             println!(
                 "{}",
                 "Fingerprint saved. Review the topics above — do they look accurate?".bold()
@@ -169,12 +192,12 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let model_dir = &config.model_dir;
 
-            println!("Downloading ONNX toxicity model...");
+            println!("Downloading ONNX models...");
             println!("  Destination: {}", model_dir.display());
 
             charcoal::toxicity::download::download_model(model_dir).await?;
 
-            println!("\n{}", "Model downloaded successfully.".bold());
+            println!("\n{}", "Models downloaded successfully.".bold());
             println!("You can now run `charcoal scan --analyze` or `charcoal score @handle`.");
         }
 
@@ -209,6 +232,7 @@ async fn main() -> Result<()> {
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
+            let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
             let (events, scored) = charcoal::pipeline::amplification::run(
                 &agent,
@@ -220,6 +244,8 @@ async fn main() -> Result<()> {
                 analyze,
                 max_followers as usize,
                 concurrency as usize,
+                embedder.as_ref(),
+                protected_embedding.as_deref(),
             )
             .await?;
 
@@ -252,6 +278,7 @@ async fn main() -> Result<()> {
             let protected_fingerprint = load_fingerprint(&conn)?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
+            let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
             let (pool_size, scored) = charcoal::pipeline::sweep::run(
                 &agent,
@@ -263,6 +290,8 @@ async fn main() -> Result<()> {
                 max_followers as usize,
                 depth as usize,
                 concurrency as usize,
+                embedder.as_ref(),
+                protected_embedding.as_deref(),
             )
             .await?;
 
@@ -297,6 +326,7 @@ async fn main() -> Result<()> {
             let scorer = create_scorer(&config)?;
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
+            let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
             let score = charcoal::scoring::profile::build_profile(
                 &agent,
@@ -305,6 +335,8 @@ async fn main() -> Result<()> {
                 handle, // Use handle as DID placeholder — real DID comes from profile lookup
                 &protected_fingerprint,
                 &weights,
+                embedder.as_ref(),
+                protected_embedding.as_deref(),
             )
             .await?;
 
@@ -394,4 +426,48 @@ fn load_fingerprint(
             );
         }
     }
+}
+
+/// Try to load the sentence embedder and the protected user's stored embedding.
+/// Returns (None, None) if the model isn't downloaded or no embedding is stored.
+/// This is optional — scoring falls back to TF-IDF keyword overlap without it.
+fn load_embedder(
+    config: &config::Config,
+    conn: &rusqlite::Connection,
+) -> (
+    Option<charcoal::topics::embeddings::SentenceEmbedder>,
+    Option<Vec<f64>>,
+) {
+    let embed_dir = charcoal::toxicity::download::embedding_model_dir(&config.model_dir);
+
+    let embedder = if charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
+        match charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir) {
+            Ok(e) => {
+                info!("Loaded sentence embedding model");
+                Some(e)
+            }
+            Err(e) => {
+                warn!("Failed to load embedding model, falling back to TF-IDF: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let embedding = match charcoal::db::queries::get_embedding(conn) {
+        Ok(Some(v)) => Some(v),
+        Ok(None) => {
+            if embedder.is_some() {
+                warn!("Embedding model loaded but no stored embedding. Run `charcoal fingerprint --refresh`.");
+            }
+            None
+        }
+        Err(e) => {
+            warn!("Failed to load stored embedding: {e}");
+            None
+        }
+    };
+
+    (embedder, embedding)
 }

@@ -14,6 +14,7 @@ use tracing::info;
 use crate::bluesky::posts::{self, Post};
 use crate::db::models::{AccountScore, ToxicPost};
 use crate::scoring::threat::{self, ThreatWeights};
+use crate::topics::embeddings::{self, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::topics::overlap;
 use crate::topics::tfidf::TfIdfExtractor;
@@ -27,6 +28,11 @@ use bsky_sdk::BskyAgent;
 /// This is the core scoring function. It fetches the target's posts,
 /// scores them for toxicity, extracts their topics, and computes the
 /// combined threat score against the protected user's fingerprint.
+///
+/// When `embedder` and `protected_embedding` are provided, topic overlap
+/// is computed using sentence embeddings (semantic similarity). Otherwise,
+/// falls back to TF-IDF keyword cosine similarity.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_profile(
     agent: &BskyAgent,
     scorer: &dyn ToxicityScorer,
@@ -34,6 +40,8 @@ pub async fn build_profile(
     target_did: &str,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(agent, target_handle, 50).await?;
@@ -99,15 +107,25 @@ pub async fn build_profile(
         })
         .collect();
 
-    // Step 3: Build the target's topic fingerprint
-    let topic_extractor = TfIdfExtractor {
-        top_n_keywords: 40,
-        max_clusters: 7,
+    // Step 3: Compute topic overlap with the protected user.
+    //
+    // Prefer sentence embeddings when available — they capture semantic
+    // similarity ("fatphobia" ≈ "obesity") that keyword matching misses.
+    // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
+    let topic_overlap = if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
+        // Embedding path: embed target's posts, average, compare
+        let target_embeddings = emb.embed_batch(&post_texts).await?;
+        let target_mean = embeddings::mean_embedding(&target_embeddings);
+        embeddings::cosine_similarity_embeddings(protected_emb, &target_mean)
+    } else {
+        // Fallback: TF-IDF keyword cosine similarity
+        let topic_extractor = TfIdfExtractor {
+            top_n_keywords: 40,
+            max_clusters: 7,
+        };
+        let target_fingerprint = topic_extractor.extract(&post_texts)?;
+        overlap::cosine_similarity(protected_fingerprint, &target_fingerprint)
     };
-    let target_fingerprint = topic_extractor.extract(&post_texts)?;
-
-    // Step 4: Compute topic overlap with the protected user
-    let topic_overlap = overlap::cosine_similarity(protected_fingerprint, &target_fingerprint);
 
     // Step 5: Compute the combined threat score
     let (threat_score, tier) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);

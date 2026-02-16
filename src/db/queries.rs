@@ -44,6 +44,16 @@ pub fn save_fingerprint(conn: &Connection, fingerprint_json: &str, post_count: u
     Ok(())
 }
 
+/// Store the protected user's mean embedding vector alongside the fingerprint.
+/// The vector is stored as a JSON array of floats.
+pub fn save_embedding(conn: &Connection, embedding_json: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE topic_fingerprint SET embedding_vector = ?1, updated_at = datetime('now') WHERE id = 1",
+        params![embedding_json],
+    )?;
+    Ok(())
+}
+
 /// Load the stored fingerprint JSON and metadata.
 pub fn get_fingerprint(conn: &Connection) -> Result<Option<(String, u32, String)>> {
     let mut stmt = conn.prepare(
@@ -53,6 +63,24 @@ pub fn get_fingerprint(conn: &Connection) -> Result<Option<(String, u32, String)
         .query_row([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .optional()?;
     Ok(result)
+}
+
+/// Load the stored embedding vector (if one exists).
+pub fn get_embedding(conn: &Connection) -> Result<Option<Vec<f64>>> {
+    let mut stmt = conn.prepare(
+        "SELECT embedding_vector FROM topic_fingerprint WHERE id = 1",
+    )?;
+    let result: Option<Option<String>> = stmt
+        .query_row([], |row| row.get(0))
+        .optional()?;
+
+    match result.flatten() {
+        Some(json) => {
+            let vec: Vec<f64> = serde_json::from_str(&json)?;
+            Ok(Some(vec))
+        }
+        None => Ok(None),
+    }
 }
 
 // --- Account scores ---
@@ -275,6 +303,56 @@ mod tests {
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].handle, "test.bsky.social");
         assert_eq!(ranked[0].threat_score, Some(65.0));
+    }
+
+    #[test]
+    fn test_embedding_roundtrip() {
+        let conn = test_db();
+
+        // No embedding initially
+        assert!(get_embedding(&conn).unwrap().is_none());
+
+        // Must have a fingerprint row first (embedding is a column on it)
+        save_fingerprint(&conn, r#"{"clusters":[]}"#, 50).unwrap();
+
+        // Still no embedding until explicitly saved
+        assert!(get_embedding(&conn).unwrap().is_none());
+
+        // Save an embedding vector
+        let embedding = vec![0.1, 0.2, 0.3, -0.5];
+        let emb_json = serde_json::to_string(&embedding).unwrap();
+        save_embedding(&conn, &emb_json).unwrap();
+
+        // Retrieve it
+        let loaded = get_embedding(&conn).unwrap().unwrap();
+        assert_eq!(loaded.len(), 4);
+        assert!((loaded[0] - 0.1).abs() < f64::EPSILON);
+        assert!((loaded[3] - -0.5).abs() < f64::EPSILON);
+
+        // Overwrite with a new embedding
+        let new_embedding = vec![1.0, 2.0];
+        let new_json = serde_json::to_string(&new_embedding).unwrap();
+        save_embedding(&conn, &new_json).unwrap();
+
+        let reloaded = get_embedding(&conn).unwrap().unwrap();
+        assert_eq!(reloaded.len(), 2);
+        assert!((reloaded[0] - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_embedding_survives_fingerprint_update() {
+        let conn = test_db();
+        save_fingerprint(&conn, r#"{"clusters":[]}"#, 50).unwrap();
+
+        let embedding = vec![0.1, 0.2, 0.3];
+        save_embedding(&conn, &serde_json::to_string(&embedding).unwrap()).unwrap();
+
+        // Update the fingerprint — embedding should survive (different column)
+        save_fingerprint(&conn, r#"{"clusters":["new"]}"#, 100).unwrap();
+
+        let loaded = get_embedding(&conn).unwrap().unwrap();
+        assert_eq!(loaded.len(), 3);
+        assert!((loaded[0] - 0.1).abs() < f64::EPSILON);
     }
 
     #[test]

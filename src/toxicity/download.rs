@@ -1,9 +1,11 @@
-// Model download helper for the ONNX toxicity scorer.
+// Model download helper for ONNX models.
 //
-// Downloads the Detoxify unbiased-toxic-roberta model files from HuggingFace.
-// The quantized ONNX model is ~126MB and the tokenizer is ~1MB. Files are
-// stored in a platform-appropriate directory (~/.local/share/charcoal/models/
-// on Linux) so they persist across runs.
+// Downloads two models from HuggingFace:
+// 1. Detoxify unbiased-toxic-roberta — toxicity scoring (~126MB)
+// 2. all-MiniLM-L6-v2 — sentence embeddings for topic overlap (~90MB)
+//
+// Files are stored in a platform-appropriate directory
+// (~/.local/share/charcoal/models/ on Linux) so they persist across runs.
 
 use std::path::{Path, PathBuf};
 
@@ -11,13 +13,21 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use tracing::info;
 
-/// HuggingFace repo for the pre-exported ONNX model.
-const HF_BASE_URL: &str =
+/// HuggingFace repo for the toxicity model.
+const TOXICITY_HF_URL: &str =
     "https://huggingface.co/protectai/unbiased-toxic-roberta-onnx/resolve/main";
 
-/// Files we need from the repo.
-const MODEL_FILE: &str = "model_quantized.onnx";
-const TOKENIZER_FILE: &str = "tokenizer.json";
+/// HuggingFace repo for the sentence embedding model.
+const EMBEDDING_HF_URL: &str =
+    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main";
+
+/// Files for the toxicity model.
+const TOXICITY_MODEL_FILE: &str = "model_quantized.onnx";
+const TOXICITY_TOKENIZER_FILE: &str = "tokenizer.json";
+
+/// Files for the sentence embedding model (stored in a subdirectory).
+const EMBEDDING_MODEL_FILE: &str = "onnx/model.onnx";
+const EMBEDDING_TOKENIZER_FILE: &str = "tokenizer.json";
 
 /// Returns the default directory for storing model files.
 /// Uses the platform data directory: ~/.local/share/charcoal/models/ on Linux.
@@ -28,44 +38,91 @@ pub fn default_model_dir() -> PathBuf {
         .join("models")
 }
 
-/// Check whether both required model files exist in the given directory.
-pub fn model_files_present(dir: &Path) -> bool {
-    dir.join(MODEL_FILE).exists() && dir.join(TOKENIZER_FILE).exists()
+/// Subdirectory within model_dir for the sentence embedding model.
+pub fn embedding_model_dir(base: &Path) -> PathBuf {
+    base.join("all-MiniLM-L6-v2")
 }
 
-/// Download the ONNX model and tokenizer files to the given directory.
+/// Check whether both required toxicity model files exist.
+pub fn model_files_present(dir: &Path) -> bool {
+    dir.join(TOXICITY_MODEL_FILE).exists() && dir.join(TOXICITY_TOKENIZER_FILE).exists()
+}
+
+/// Check whether both required embedding model files exist.
+pub fn embedding_files_present(dir: &Path) -> bool {
+    let embed_dir = embedding_model_dir(dir);
+    embed_dir.join("model.onnx").exists() && embed_dir.join("tokenizer.json").exists()
+}
+
+/// Download all ONNX models (toxicity + embedding).
 ///
-/// Shows a progress bar for the large model file. Skips files that already
-/// exist. Creates the directory if it doesn't exist.
+/// Shows progress bars for large files. Skips files that already exist.
+/// Creates directories as needed.
 pub async fn download_model(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)
         .with_context(|| format!("Failed to create model directory: {}", dir.display()))?;
 
-    // Download tokenizer first (small, fast)
-    let tokenizer_path = dir.join(TOKENIZER_FILE);
+    // --- Toxicity model (Detoxify unbiased-toxic-roberta) ---
+    println!("\nToxicity model (unbiased-toxic-roberta):");
+
+    let tokenizer_path = dir.join(TOXICITY_TOKENIZER_FILE);
     if tokenizer_path.exists() {
-        info!("Tokenizer already exists, skipping");
-        println!("  {} (already exists)", TOKENIZER_FILE);
+        info!("Toxicity tokenizer already exists, skipping");
+        println!("  {} (already exists)", TOXICITY_TOKENIZER_FILE);
     } else {
-        println!("  Downloading {}...", TOKENIZER_FILE);
+        println!("  Downloading {}...", TOXICITY_TOKENIZER_FILE);
         download_file(
-            &format!("{}/{}", HF_BASE_URL, TOKENIZER_FILE),
+            &format!("{}/{}", TOXICITY_HF_URL, TOXICITY_TOKENIZER_FILE),
             &tokenizer_path,
             false,
         )
         .await?;
     }
 
-    // Download quantized model (large, ~126MB — show progress bar)
-    let model_path = dir.join(MODEL_FILE);
+    let model_path = dir.join(TOXICITY_MODEL_FILE);
     if model_path.exists() {
-        info!("Model already exists, skipping");
-        println!("  {} (already exists)", MODEL_FILE);
+        info!("Toxicity model already exists, skipping");
+        println!("  {} (already exists)", TOXICITY_MODEL_FILE);
     } else {
-        println!("  Downloading {} (~126 MB)...", MODEL_FILE);
+        println!("  Downloading {} (~126 MB)...", TOXICITY_MODEL_FILE);
         download_file(
-            &format!("{}/{}", HF_BASE_URL, MODEL_FILE),
+            &format!("{}/{}", TOXICITY_HF_URL, TOXICITY_MODEL_FILE),
             &model_path,
+            true,
+        )
+        .await?;
+    }
+
+    // --- Sentence embedding model (all-MiniLM-L6-v2) ---
+    println!("\nSentence embedding model (all-MiniLM-L6-v2):");
+
+    let embed_dir = embedding_model_dir(dir);
+    std::fs::create_dir_all(&embed_dir)
+        .with_context(|| format!("Failed to create embedding model directory: {}", embed_dir.display()))?;
+
+    let embed_tokenizer_path = embed_dir.join("tokenizer.json");
+    if embed_tokenizer_path.exists() {
+        info!("Embedding tokenizer already exists, skipping");
+        println!("  tokenizer.json (already exists)");
+    } else {
+        println!("  Downloading tokenizer.json...");
+        download_file(
+            &format!("{}/{}", EMBEDDING_HF_URL, EMBEDDING_TOKENIZER_FILE),
+            &embed_tokenizer_path,
+            false,
+        )
+        .await?;
+    }
+
+    let embed_model_path = embed_dir.join("model.onnx");
+    if embed_model_path.exists() {
+        info!("Embedding model already exists, skipping");
+        println!("  model.onnx (already exists)");
+    } else {
+        println!("  Downloading model.onnx (~90 MB)...");
+        download_file(
+            &format!("{}/{}", EMBEDDING_HF_URL, EMBEDDING_MODEL_FILE),
+            &embed_model_path,
             true,
         )
         .await?;
@@ -133,4 +190,52 @@ async fn download_file(url: &str, dest: &Path, show_progress: bool) -> Result<()
 
     info!("Downloaded {} to {}", url, dest.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_model_dir_is_under_charcoal() {
+        let dir = default_model_dir();
+        let path_str = dir.to_string_lossy();
+        assert!(
+            path_str.contains("charcoal") && path_str.contains("models"),
+            "Expected path containing charcoal/models, got: {path_str}"
+        );
+    }
+
+    #[test]
+    fn test_embedding_model_dir_is_subdirectory() {
+        let base = PathBuf::from("/tmp/test-models");
+        let embed_dir = embedding_model_dir(&base);
+        assert_eq!(embed_dir, base.join("all-MiniLM-L6-v2"));
+    }
+
+    #[test]
+    fn test_model_files_present_false_when_empty() {
+        let dir = std::env::temp_dir().join("charcoal-test-nonexistent");
+        assert!(!model_files_present(&dir));
+    }
+
+    #[test]
+    fn test_embedding_files_present_false_when_empty() {
+        let dir = std::env::temp_dir().join("charcoal-test-nonexistent");
+        assert!(!embedding_files_present(&dir));
+    }
+
+    #[test]
+    fn test_embedding_files_present_true_when_files_exist() {
+        let dir = std::env::temp_dir().join("charcoal-embed-test");
+        let embed_dir = embedding_model_dir(&dir);
+        std::fs::create_dir_all(&embed_dir).unwrap();
+        std::fs::write(embed_dir.join("model.onnx"), b"fake").unwrap();
+        std::fs::write(embed_dir.join("tokenizer.json"), b"fake").unwrap();
+
+        assert!(embedding_files_present(&dir));
+
+        // Cleanup
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
