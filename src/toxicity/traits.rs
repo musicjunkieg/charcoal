@@ -1,9 +1,8 @@
 // Toxicity scorer trait — the swap-ready abstraction.
 //
 // This trait defines the interface for toxicity scoring. The default
-// implementation uses Google's Perspective API, but when it sunsets
-// (Dec 2026), we can swap in OpenAI's moderation endpoint, a HuggingFace
-// model, or a local rust-bert model — no other code changes needed.
+// implementation uses a local ONNX model (Detoxify unbiased-toxic-roberta).
+// Google's Perspective API is available as a fallback.
 
 use anyhow::Result;
 use async_trait::async_trait;

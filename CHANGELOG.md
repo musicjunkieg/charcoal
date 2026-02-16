@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Cosmetic cleanup — update comments referencing Perspective as primary scorer (#14)
 - Clean up CLAUDE.md and create README.md (#20)
 - Add progress bar to parallel scoring (#18)
 - Refactor scoring loop to use buffer_unordered (#17)

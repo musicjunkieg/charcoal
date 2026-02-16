@@ -190,9 +190,8 @@ async fn main() -> Result<()> {
                 config.require_scorer()?;
                 create_scorer(&config)?
             } else {
-                // Use a dummy scorer that won't be called — ONNX is cheap to load
-                // but we still need *something* for the type. Use Perspective with
-                // empty key as a no-op placeholder.
+                // Scorer won't be called without --analyze, but we need a value
+                // for the type. Use a no-op Perspective placeholder.
                 Box::new(charcoal::toxicity::perspective::PerspectiveScorer::new(
                     String::new(),
                 ))

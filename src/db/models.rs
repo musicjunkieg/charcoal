@@ -56,7 +56,7 @@ pub enum ThreatTier {
 impl ThreatTier {
     /// Determine the tier from a threat score (0-100).
     ///
-    /// Thresholds are tuned for real-world Perspective API + Jaccard overlap
+    /// Thresholds are tuned for real-world toxicity + Jaccard overlap
     /// scores, where most accounts land in the 0-15 range. A score of 25+
     /// requires both significant toxicity AND topic proximity — the core
     /// threat signal Charcoal is designed to detect.
