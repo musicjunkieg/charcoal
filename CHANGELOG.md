@@ -7,12 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Mode 2: Background sweep of followers-of-followers (#25)
+- Surface quote text and toxicity in threat reports (#21)
 - Tune threat tier thresholds for real-world score distribution (#8)
 
 ### Fixed
+- Exclude protected user from their own threat report (#22)
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Skip follower analysis for repost events (#27)
+- Stop tracking chainlink issues.db and .cache in git (#26)
+- Replace dummy Perspective scorer with proper no-op (#24)
+- Wire up --since flag or remove it (#23)
 - Design repost scoring strategy — score all vs sample vs limit (#12)
 - Cosmetic cleanup — update comments referencing Perspective as primary scorer (#14)
 - Clean up CLAUDE.md and create README.md (#20)

@@ -127,11 +127,24 @@ pub async fn run(
 
     let mut accounts_scored = 0;
 
-    // If --analyze flag is set, score the followers of each amplifier
+    // If --analyze flag is set, score the followers of each quote amplifier.
+    // Reposts are recorded as events but don't trigger follower analysis —
+    // quotes are the primary harassment vector (hostile commentary framing
+    // the original post), while reposts are usually supportive sharing.
     if analyze_followers && !events.is_empty() {
-        info!("Analyzing followers of amplifiers...");
+        let quote_events: Vec<_> = events.iter().filter(|e| e.event_type == "quote").collect();
+        let repost_count = events.len() - quote_events.len();
 
-        for event in &events {
+        if repost_count > 0 {
+            info!(reposts_skipped = repost_count, "Skipping follower analysis for reposts");
+            println!("  Skipping {} reposts (follower analysis is quote-only)", repost_count);
+        }
+
+        if quote_events.is_empty() {
+            info!("No quote events to analyze");
+        }
+
+        for event in &quote_events {
             println!(
                 "\nFetching followers of @{}...",
                 event.amplifier_handle
