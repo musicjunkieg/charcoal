@@ -7,10 +7,22 @@
 // appear in every post get downweighted, while words that are distinctive to
 // certain posts get boosted. This is exactly what we want for topic detection.
 
+use std::sync::LazyLock;
+
 use anyhow::Result;
 use keyword_extraction::tf_idf::{TfIdf, TfIdfParams};
 use stop_words::{get, LANGUAGE};
 use tracing::info;
+
+/// Pre-compiled regex patterns for post cleaning. Using LazyLock ensures each
+/// pattern is compiled exactly once (on first use) rather than on every call
+/// to clean_post(). With 500 posts this avoids ~1500 redundant compilations.
+static URL_PATTERN: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r"https?://\S+").unwrap());
+static MENTION_PATTERN: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r"@[\w.]+").unwrap());
+static WHITESPACE_PATTERN: LazyLock<regex_lite::Regex> =
+    LazyLock::new(|| regex_lite::Regex::new(r"\s+").unwrap());
 
 use super::fingerprint::{TopicCluster, TopicFingerprint};
 use super::traits::TopicExtractor;
@@ -125,12 +137,10 @@ fn clean_post(text: &str) -> String {
     }
 
     // Strip URLs (http/https links)
-    let url_pattern = regex_lite::Regex::new(r"https?://\S+").unwrap();
-    cleaned = url_pattern.replace_all(&cleaned, " ").to_string();
+    cleaned = URL_PATTERN.replace_all(&cleaned, " ").to_string();
 
     // Strip @mentions
-    let mention_pattern = regex_lite::Regex::new(r"@[\w.]+").unwrap();
-    cleaned = mention_pattern.replace_all(&cleaned, " ").to_string();
+    cleaned = MENTION_PATTERN.replace_all(&cleaned, " ").to_string();
 
     // Remove non-letter characters (keep spaces and basic letters)
     cleaned = cleaned
@@ -139,8 +149,7 @@ fn clean_post(text: &str) -> String {
         .collect();
 
     // Collapse multiple spaces
-    let space_pattern = regex_lite::Regex::new(r"\s+").unwrap();
-    cleaned = space_pattern.replace_all(&cleaned, " ").trim().to_string();
+    cleaned = WHITESPACE_PATTERN.replace_all(&cleaned, " ").trim().to_string();
 
     cleaned
 }
