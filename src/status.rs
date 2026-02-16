@@ -3,15 +3,7 @@
 use anyhow::Result;
 use std::path::Path;
 
-// Config is defined in main.rs as a private module, so we accept the
-// fields we need directly to keep the library crate independent.
 use crate::db;
-
-/// Configuration subset needed for status display.
-/// (Avoids coupling to the binary-only config module.)
-pub struct StatusConfig {
-    pub db_path: String,
-}
 
 /// Display system status to the terminal.
 pub fn show(config: &impl HasDbPath) -> Result<()> {
@@ -42,10 +34,10 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
         }
     }
 
-    // Scored accounts
+    // Scored accounts (Elevated tier starts at 15.0)
     let all_scores = db::queries::get_ranked_threats(&conn, 0.0)?;
     let elevated_count = all_scores.iter().filter(|s| {
-        s.threat_score.is_some_and(|t| t >= 51.0)
+        s.threat_score.is_some_and(|t| t >= 15.0)
     }).count();
     println!("Scored accounts: {} total, {} elevated+", all_scores.len(), elevated_count);
 

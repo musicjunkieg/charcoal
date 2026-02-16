@@ -124,11 +124,7 @@ pub fn generate_report(
         for event in &quotes {
             let text = event.amplifier_text.as_deref().unwrap_or("");
             // Truncate and escape pipes for markdown table
-            let preview = if text.len() > 100 {
-                format!("{}...", &text[..100])
-            } else {
-                text.to_string()
-            };
+            let preview = super::truncate_chars(text, 100);
             let safe_text = preview.replace('|', "\\|").replace('\n', " ");
             writeln!(
                 md,
@@ -139,11 +135,11 @@ pub fn generate_report(
         writeln!(md)?;
     }
 
-    // Detailed evidence for elevated+ accounts
+    // Detailed evidence for elevated+ accounts (Elevated tier starts at 15.0)
     let high_priority: Vec<&AccountScore> = accounts
         .iter()
         .filter(|a| {
-            a.threat_score.is_some_and(|s| s >= 51.0)
+            a.threat_score.is_some_and(|s| s >= 15.0)
         })
         .collect();
 
