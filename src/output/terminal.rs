@@ -102,11 +102,7 @@ pub fn display_account_detail(score: &AccountScore) {
             score.top_toxic_posts.len()
         );
         for (i, post) in score.top_toxic_posts.iter().enumerate() {
-            let preview = if post.text.len() > 120 {
-                format!("{}...", &post.text[..120])
-            } else {
-                post.text.clone()
-            };
+            let preview = super::truncate_chars(&post.text, 120);
             println!(
                 "    {}. [tox: {:.2}] {}",
                 i + 1,
@@ -136,11 +132,7 @@ pub fn display_amplification_events(events: &[AmplificationEvent]) {
 
     for event in &quotes {
         let text = event.amplifier_text.as_deref().unwrap_or("");
-        let preview = if text.len() > 140 {
-            format!("{}...", &text[..140])
-        } else {
-            text.to_string()
-        };
+        let preview = super::truncate_chars(text, 140);
         println!(
             "  @{:<30} \"{}\"",
             event.amplifier_handle,

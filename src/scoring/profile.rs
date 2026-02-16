@@ -82,10 +82,13 @@ pub async fn build_profile(
         sum / toxicity_results.len() as f64
     };
 
-    // Collect the top 3 most toxic posts as evidence
+    // Collect the top 3 most toxic posts as evidence.
+    // Sort by weighted_toxicity (which drives the threat score) so the evidence
+    // shown to the user matches what actually determined the tier — not the raw
+    // model toxicity score, which can be misleading for ally-style profanity.
     let mut scored_posts: Vec<(&Post, f64)> = target_posts
         .iter()
-        .zip(toxicity_results.iter().map(|r| r.toxicity))
+        .zip(toxicity_results.iter().map(weighted_toxicity))
         .collect();
     scored_posts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 

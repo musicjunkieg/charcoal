@@ -9,7 +9,7 @@
 // Output: 7 toxicity categories with continuous 0-1 scores via sigmoid.
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -33,13 +33,17 @@ const LABEL_ORDER: [&str; 7] = [
 ];
 
 /// Local ONNX-based toxicity scorer. Holds the model session and tokenizer
-/// behind a Mutex so inference can happen from async context via spawn_blocking.
+/// behind Arc<Mutex> so inference can be offloaded to spawn_blocking without
+/// blocking the async runtime.
 pub struct OnnxToxicityScorer {
-    // Mutex because ort::Session::run takes &mut self, and we need Send+Sync
-    // for the ToxicityScorer trait. Inference is CPU-bound and serialized
-    // through spawn_blocking anyway, so contention is minimal.
-    session: Mutex<Session>,
-    tokenizer: Tokenizer,
+    // Arc+Mutex because:
+    // 1. ort::Session::run takes &mut self, so we need interior mutability
+    // 2. spawn_blocking requires 'static, so we need Arc for shared ownership
+    // 3. We need Send+Sync for the ToxicityScorer trait
+    // Inference is CPU-bound and serialized through spawn_blocking, so
+    // contention is minimal.
+    session: Arc<Mutex<Session>>,
+    tokenizer: Arc<Tokenizer>,
 }
 
 impl OnnxToxicityScorer {
@@ -75,8 +79,8 @@ impl OnnxToxicityScorer {
         debug!("Loaded ONNX toxicity model from {}", model_dir.display());
 
         Ok(Self {
-            session: Mutex::new(session),
-            tokenizer,
+            session: Arc::new(Mutex::new(session)),
+            tokenizer: Arc::new(tokenizer),
         })
     }
 }
@@ -90,104 +94,113 @@ impl ToxicityScorer for OnnxToxicityScorer {
 
     /// True batch inference: tokenize all texts, run one forward pass, apply
     /// sigmoid to logits, and map outputs to ToxicityResult structs.
+    ///
+    /// The CPU-bound tokenization and inference are offloaded to spawn_blocking
+    /// so they don't block the tokio async runtime.
     async fn score_batch(&self, texts: &[String]) -> Result<Vec<ToxicityResult>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Tokenize all texts, finding the max sequence length for padding
-        let encodings: Vec<_> = texts
-            .iter()
-            .map(|t| {
-                self.tokenizer
-                    .encode(t.as_str(), true)
-                    .map_err(|e| anyhow::anyhow!("Tokenization failed: {}", e))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        // Clone Arc handles for the spawn_blocking closure ('static requirement)
+        let session = Arc::clone(&self.session);
+        let tokenizer = Arc::clone(&self.tokenizer);
+        let texts = texts.to_vec();
 
-        let batch_size = encodings.len();
-        let max_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
-
-        // Build flat input tensors with right-padding to max_len.
-        // Shape: [batch_size, max_len]
-        let mut input_ids_flat: Vec<i64> = Vec::with_capacity(batch_size * max_len);
-        let mut attention_mask_flat: Vec<i64> = Vec::with_capacity(batch_size * max_len);
-
-        for enc in &encodings {
-            let ids = enc.get_ids();
-            let mask = enc.get_attention_mask();
-            let seq_len = ids.len();
-
-            // Copy actual tokens
-            for &id in ids {
-                input_ids_flat.push(id as i64);
-            }
-            for &m in mask {
-                attention_mask_flat.push(m as i64);
-            }
-
-            // Pad to max_len (pad_id = 1 for RoBERTa)
-            for _ in seq_len..max_len {
-                input_ids_flat.push(1); // RoBERTa pad token id
-                attention_mask_flat.push(0);
-            }
-        }
-
-        let shape = [batch_size as i64, max_len as i64];
-
-        // Run inference synchronously behind the Mutex. RoBERTa inference for
-        // a small batch is fast (~100ms on CPU), so blocking the async task
-        // briefly is acceptable. If we need true non-blocking later, we can
-        // wrap Session in an Arc and use spawn_blocking.
-        let input_ids_tensor = Tensor::from_array((shape, input_ids_flat))
-            .context("Failed to create input_ids tensor")?;
-        let attention_mask_tensor = Tensor::from_array((shape, attention_mask_flat))
-            .context("Failed to create attention_mask tensor")?;
-
-        let logits_data = {
-            let mut session = self
-                .session
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
-
-            let outputs = session
-                .run(ort::inputs! {
-                    "input_ids" => input_ids_tensor,
-                    "attention_mask" => attention_mask_tensor
+        // Offload all CPU-bound work (tokenization + inference) to a blocking
+        // thread so the async runtime stays responsive for other tasks.
+        tokio::task::spawn_blocking(move || {
+            // Tokenize all texts, finding the max sequence length for padding
+            let encodings: Vec<_> = texts
+                .iter()
+                .map(|t| {
+                    tokenizer
+                        .encode(t.as_str(), true)
+                        .map_err(|e| anyhow::anyhow!("Tokenization failed: {}", e))
                 })
-                .context("ONNX inference failed")?;
+                .collect::<Result<Vec<_>>>()?;
 
-            // Output shape: [batch_size, 7] — raw logits (pre-sigmoid)
-            let (_out_shape, data) = outputs[0]
-                .try_extract_tensor::<f32>()
-                .context("Failed to extract output tensor")?;
+            let batch_size = encodings.len();
+            let max_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
 
-            data.to_vec()
-        };
+            // Build flat input tensors with right-padding to max_len.
+            // Shape: [batch_size, max_len]
+            let mut input_ids_flat: Vec<i64> = Vec::with_capacity(batch_size * max_len);
+            let mut attention_mask_flat: Vec<i64> = Vec::with_capacity(batch_size * max_len);
 
-        // Convert logits to results: apply sigmoid and map to our attribute struct
-        let mut results = Vec::with_capacity(batch_size);
-        for (i, text) in texts.iter().enumerate() {
-            let offset = i * LABEL_ORDER.len();
-            let row = &logits_data[offset..offset + LABEL_ORDER.len()];
+            for enc in &encodings {
+                let ids = enc.get_ids();
+                let mask = enc.get_attention_mask();
+                let seq_len = ids.len();
 
-            // Apply sigmoid to each logit to get 0-1 probability
-            let scores: Vec<f64> = row.iter().map(|&logit| sigmoid(logit as f64)).collect();
+                // Copy actual tokens
+                for &id in ids {
+                    input_ids_flat.push(id as i64);
+                }
+                for &m in mask {
+                    attention_mask_flat.push(m as i64);
+                }
 
-            let result = map_scores_to_result(&scores);
+                // Pad to max_len (pad_id = 1 for RoBERTa)
+                for _ in seq_len..max_len {
+                    input_ids_flat.push(1); // RoBERTa pad token id
+                    attention_mask_flat.push(0);
+                }
+            }
 
-            debug!(
-                toxicity = result.toxicity,
-                severe_toxicity = ?result.attributes.severe_toxicity,
-                identity_attack = ?result.attributes.identity_attack,
-                text_preview = &text[..text.len().min(50)],
-                "ONNX scored text"
-            );
+            let shape = [batch_size as i64, max_len as i64];
 
-            results.push(result);
-        }
+            let input_ids_tensor = Tensor::from_array((shape, input_ids_flat))
+                .context("Failed to create input_ids tensor")?;
+            let attention_mask_tensor = Tensor::from_array((shape, attention_mask_flat))
+                .context("Failed to create attention_mask tensor")?;
 
-        Ok(results)
+            let logits_data = {
+                let mut session = session
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("Session lock poisoned: {}", e))?;
+
+                let outputs = session
+                    .run(ort::inputs! {
+                        "input_ids" => input_ids_tensor,
+                        "attention_mask" => attention_mask_tensor
+                    })
+                    .context("ONNX inference failed")?;
+
+                // Output shape: [batch_size, 7] — raw logits (pre-sigmoid)
+                let (_out_shape, data) = outputs[0]
+                    .try_extract_tensor::<f32>()
+                    .context("Failed to extract output tensor")?;
+
+                data.to_vec()
+            };
+
+            // Convert logits to results: apply sigmoid and map to our attribute struct
+            let mut results = Vec::with_capacity(batch_size);
+            for (i, text) in texts.iter().enumerate() {
+                let offset = i * LABEL_ORDER.len();
+                let row = &logits_data[offset..offset + LABEL_ORDER.len()];
+
+                // Apply sigmoid to each logit to get 0-1 probability
+                let scores: Vec<f64> = row.iter().map(|&logit| sigmoid(logit as f64)).collect();
+
+                let result = map_scores_to_result(&scores);
+
+                debug!(
+                    toxicity = result.toxicity,
+                    severe_toxicity = ?result.attributes.severe_toxicity,
+                    identity_attack = ?result.attributes.identity_attack,
+                    text_preview = %crate::output::truncate_chars(text, 50),
+                    "ONNX scored text"
+                );
+
+                results.push(result);
+            }
+
+            Ok(results)
+        })
+        .await
+        .context("spawn_blocking panicked")?
     }
 }
 

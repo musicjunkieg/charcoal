@@ -51,7 +51,7 @@ pub fn cosine_from_weights(
     let mag_b: f64 = weights_b.values().map(|v| v * v).sum::<f64>().sqrt();
 
     let denominator = mag_a * mag_b;
-    if denominator == 0.0 {
+    if denominator < f64::EPSILON {
         0.0
     } else {
         (dot / denominator).clamp(0.0, 1.0)

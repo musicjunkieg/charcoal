@@ -34,8 +34,10 @@ pub async fn fetch_recent_posts(
     let mut posts = Vec::new();
     let mut cursor: Option<String> = None;
 
-    // How many to request per page (API max is 100)
-    let page_size: u8 = 100.min(max_posts as u8);
+    // How many to request per page (API max is 100).
+    // Clamp as usize first, then convert — avoids silent u8 truncation
+    // when max_posts > 255 (e.g. 256 as u8 wraps to 0).
+    let page_size: u8 = max_posts.min(100) as u8;
 
     loop {
         let params = get_author_feed::ParametersData {
@@ -82,8 +84,9 @@ pub async fn fetch_recent_posts(
             .map(|record| record.data.text.clone())
             .unwrap_or_default();
 
-            // Skip empty posts and very short posts (likely just links/images)
-            if text.len() < 15 {
+            // Skip empty posts and very short posts (likely just links/images).
+            // Use char count, not byte length — a 5-char emoji sequence can be 20 bytes.
+            if text.chars().count() < 15 {
                 continue;
             }
 
