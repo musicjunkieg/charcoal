@@ -59,3 +59,6 @@ indicatif = "0.17"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
