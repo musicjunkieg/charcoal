@@ -44,7 +44,6 @@ enum Commands {
         /// Number of accounts to score in parallel (default: 8)
         #[arg(long, default_value = "8")]
         concurrency: u32,
-
     },
 
     /// Sweep second-degree network (followers-of-followers) for threats
@@ -73,6 +72,13 @@ enum Commands {
         /// Only include accounts at or above this threat score
         #[arg(long, default_value = "0")]
         min_score: u32,
+    },
+
+    /// Export scored accounts and events to JSON for the web viewer
+    Export {
+        /// Output file path (default: charcoal-export.json)
+        #[arg(long, default_value = "charcoal-export.json")]
+        output: String,
     },
 
     /// Show system status (last scan, DB stats, fingerprint age)
@@ -179,7 +185,11 @@ async fn main() -> Result<()> {
             println!("You can now run `charcoal scan --analyze` or `charcoal score @handle`.");
         }
 
-        Commands::Scan { analyze, max_followers, concurrency } => {
+        Commands::Scan {
+            analyze,
+            max_followers,
+            concurrency,
+        } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             let conn = charcoal::db::open(&config.db_path)?;
@@ -227,7 +237,11 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Sweep { max_followers, depth, concurrency } => {
+        Commands::Sweep {
+            max_followers,
+            depth,
+            concurrency,
+        } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
@@ -312,8 +326,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let conn = charcoal::db::open(&config.db_path)?;
 
-            let threats =
-                charcoal::db::queries::get_ranked_threats(&conn, min_score as f64)?;
+            let threats = charcoal::db::queries::get_ranked_threats(&conn, min_score as f64)?;
 
             if threats.is_empty() {
                 println!("No accounts scored yet. Run `charcoal scan --analyze` first.");
@@ -341,6 +354,32 @@ async fn main() -> Result<()> {
             println!(
                 "\n{}",
                 format!("Markdown report saved to: {report_path}").bold()
+            );
+        }
+
+        Commands::Export { output } => {
+            let config = config::Config::load()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
+            let accounts = charcoal::db::queries::get_ranked_threats(&conn, 0.0)?;
+            let events = charcoal::db::queries::get_recent_events(&conn, 500)?;
+
+            let export = serde_json::json!({
+                "accounts": accounts,
+                "events": events,
+                "exported_at": chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                "total_accounts": accounts.len(),
+                "total_events": events.len(),
+            });
+
+            let json = serde_json::to_string_pretty(&export)?;
+            std::fs::write(&output, &json)?;
+
+            println!(
+                "Exported {} accounts and {} events to {}",
+                accounts.len(),
+                events.len(),
+                output
             );
         }
 
@@ -379,8 +418,7 @@ fn load_fingerprint(
 ) -> Result<charcoal::topics::fingerprint::TopicFingerprint> {
     match charcoal::db::queries::get_fingerprint(conn)? {
         Some((json, _, _)) => {
-            let fp: charcoal::topics::fingerprint::TopicFingerprint =
-                serde_json::from_str(&json)?;
+            let fp: charcoal::topics::fingerprint::TopicFingerprint = serde_json::from_str(&json)?;
             Ok(fp)
         }
         None => {
@@ -390,4 +428,3 @@ fn load_fingerprint(
         }
     }
 }
-

@@ -12,6 +12,13 @@
 *.db-wal
 *.db-shm
 
+# Charcoal export files
+charcoal-export.json
+
+# Web viewer
+web/node_modules/
+web/dist/
+
 # Chainlink local state (rules are tracked, but DB and cache are not)
 .chainlink/issues.db
 .chainlink/.cache/
