@@ -88,9 +88,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // Stores the mean sentence embedding (384-dim, JSON array) for the
     // protected user's posts. Used for semantic topic overlap scoring.
     run_migration(conn, 2, |c| {
-        c.execute_batch(
-            "ALTER TABLE topic_fingerprint ADD COLUMN embedding_vector TEXT;",
-        )
+        c.execute_batch("ALTER TABLE topic_fingerprint ADD COLUMN embedding_vector TEXT;")
     })?;
 
     Ok(())

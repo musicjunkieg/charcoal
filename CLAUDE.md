@@ -19,6 +19,7 @@ The MVP is functional. All 7 implementation phases are complete:
 7. Reports, markdown output, and polish
 
 Post-MVP improvements applied:
+- Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2, 384-dim)
 - Cosine similarity for topic overlap (replaced weighted Jaccard)
 - Weighted toxicity categories (identity_attack/insult/threat elevated)
 - Crash-resilient pipelines (incremental DB writes + panic catching)
@@ -28,8 +29,7 @@ Post-MVP improvements applied:
 - ONNX inference offloaded to `spawn_blocking` (keeps async runtime responsive)
 - Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
 
-109 tests passing (32 unit + 77 integration), clippy clean, all CLI commands
-wired and tested end-to-end.
+132 tests passing, clippy clean, all CLI commands wired and tested end-to-end.
 
 ### External contributions
 
@@ -174,12 +174,14 @@ paint us into a corner that makes the future version harder to build.
 - Authentication via app password (provided as env var)
 - Crates: `bsky-sdk` 0.1.23, `atrium-api` 0.25.7
 
-### ONNX toxicity model (default scorer)
-- Detoxify `unbiased-toxic-roberta` model, run locally via `ort` crate
-- No API key needed, no rate limits
-- Download with `charcoal download-model` (~126 MB, one-time)
-- Trained to reduce bias around identity mentions
-- See `docs/toxicity-alternatives-report.md` for the evaluation that led here
+### ONNX models (local, no API keys needed)
+- **Toxicity**: Detoxify `unbiased-toxic-roberta` (~126 MB) — 7 toxicity categories,
+  trained to reduce bias around identity mentions
+- **Embeddings**: `all-MiniLM-L6-v2` (~90 MB) — 384-dim sentence embeddings for
+  semantic topic overlap (captures "fatphobia" ≈ "obesity" without exact keywords)
+- Both run locally via `ort` crate, no rate limits
+- Download both with `charcoal download-model` (one-time, ~216 MB total)
+- See `docs/toxicity-alternatives-report.md` for the toxicity model evaluation
 
 ### Google Perspective API (fallback scorer)
 - Optional fallback, enabled with `CHARCOAL_SCORER=perspective`

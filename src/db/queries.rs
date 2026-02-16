@@ -67,12 +67,8 @@ pub fn get_fingerprint(conn: &Connection) -> Result<Option<(String, u32, String)
 
 /// Load the stored embedding vector (if one exists).
 pub fn get_embedding(conn: &Connection) -> Result<Option<Vec<f64>>> {
-    let mut stmt = conn.prepare(
-        "SELECT embedding_vector FROM topic_fingerprint WHERE id = 1",
-    )?;
-    let result: Option<Option<String>> = stmt
-        .query_row([], |row| row.get(0))
-        .optional()?;
+    let mut stmt = conn.prepare("SELECT embedding_vector FROM topic_fingerprint WHERE id = 1")?;
+    let result: Option<Option<String>> = stmt.query_row([], |row| row.get(0)).optional()?;
 
     match result.flatten() {
         Some(json) => {

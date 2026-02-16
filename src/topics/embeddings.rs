@@ -349,7 +349,10 @@ mod tests {
         let a = vec![1.0, 2.0];
         let b = vec![1.0, 2.0, 3.0];
         let sim = cosine_similarity_embeddings(&a, &b);
-        assert!(sim.abs() < f64::EPSILON, "Mismatched dims should return 0.0");
+        assert!(
+            sim.abs() < f64::EPSILON,
+            "Mismatched dims should return 0.0"
+        );
     }
 
     #[test]

@@ -97,8 +97,12 @@ pub async fn download_model(dir: &Path) -> Result<()> {
     println!("\nSentence embedding model (all-MiniLM-L6-v2):");
 
     let embed_dir = embedding_model_dir(dir);
-    std::fs::create_dir_all(&embed_dir)
-        .with_context(|| format!("Failed to create embedding model directory: {}", embed_dir.display()))?;
+    std::fs::create_dir_all(&embed_dir).with_context(|| {
+        format!(
+            "Failed to create embedding model directory: {}",
+            embed_dir.display()
+        )
+    })?;
 
     let embed_tokenizer_path = embed_dir.join("tokenizer.json");
     if embed_tokenizer_path.exists() {
