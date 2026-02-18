@@ -44,6 +44,10 @@ enum Commands {
         /// Number of accounts to score in parallel (default: 8)
         #[arg(long, default_value = "8")]
         concurrency: u32,
+
+        /// Also query Constellation backlink index for amplification events
+        #[arg(long)]
+        constellation: bool,
     },
 
     /// Sweep second-degree network (followers-of-followers) for threats
@@ -205,6 +209,7 @@ async fn main() -> Result<()> {
             analyze,
             max_followers,
             concurrency,
+            constellation,
         } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
@@ -234,6 +239,30 @@ async fn main() -> Result<()> {
             let weights = charcoal::scoring::threat::ThreatWeights::default();
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
+            // Query Constellation backlink index if requested
+            let supplementary_events = if constellation {
+                println!("Querying Constellation backlink index...");
+                match fetch_constellation_events(&agent, &config).await {
+                    Ok(events) => {
+                        println!(
+                            "  Constellation found {} supplementary events",
+                            events.len()
+                        );
+                        events
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Constellation query failed, continuing without");
+                        println!(
+                            "  {} Constellation unavailable, continuing with notifications only",
+                            "Warning:".yellow()
+                        );
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+
             let (events, scored) = charcoal::pipeline::amplification::run(
                 &agent,
                 scorer.as_ref(),
@@ -246,6 +275,7 @@ async fn main() -> Result<()> {
                 concurrency as usize,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                supplementary_events,
             )
             .await?;
 
@@ -470,4 +500,59 @@ fn load_embedder(
     };
 
     (embedder, embedding)
+}
+
+/// Query the Constellation backlink index for amplification events.
+///
+/// Fetches the protected user's recent post URIs, then queries Constellation
+/// for quotes and reposts of those posts. This catches events that notification
+/// polling misses (e.g. from blocked/muted accounts).
+async fn fetch_constellation_events(
+    agent: &bsky_sdk::BskyAgent,
+    config: &config::Config,
+) -> Result<Vec<charcoal::bluesky::notifications::AmplificationNotification>> {
+    let client =
+        charcoal::constellation::client::ConstellationClient::new(&config.constellation_url)?;
+
+    // Fetch the protected user's recent post URIs to query against
+    let posts =
+        charcoal::bluesky::posts::fetch_recent_posts(agent, &config.bluesky_handle, 50).await?;
+
+    let post_uris: Vec<String> = posts.iter().map(|p| p.uri.clone()).collect();
+    info!(
+        post_count = post_uris.len(),
+        "Querying Constellation for backlinks"
+    );
+
+    let mut events = client.find_amplification_events(&post_uris).await;
+
+    // Resolve DIDs to human-readable handles. Constellation only returns DIDs,
+    // but the scoring pipeline needs handles for follower lookups and display.
+    let dids: Vec<String> = events
+        .iter()
+        .filter(|e| e.amplifier_handle.starts_with("did:"))
+        .map(|e| e.amplifier_did.clone())
+        .collect();
+
+    if !dids.is_empty() {
+        match charcoal::bluesky::profiles::resolve_dids_to_handles(agent, &dids).await {
+            Ok(resolved) => {
+                for event in &mut events {
+                    if let Some(handle) = resolved.get(&event.amplifier_did) {
+                        event.amplifier_handle = handle.clone();
+                    }
+                }
+                info!(
+                    resolved = resolved.len(),
+                    total = dids.len(),
+                    "Resolved Constellation DIDs to handles"
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to resolve DIDs, using raw DIDs as handles");
+            }
+        }
+    }
+
+    Ok(events)
 }

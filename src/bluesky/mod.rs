@@ -7,3 +7,4 @@ pub mod client;
 pub mod followers;
 pub mod notifications;
 pub mod posts;
+pub mod profiles;

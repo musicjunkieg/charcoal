@@ -13,6 +13,7 @@ use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::Connection;
+use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
 use tracing::{info, warn};
 
@@ -46,15 +47,41 @@ pub async fn run(
     concurrency: usize,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    supplementary_events: Vec<notifications::AmplificationNotification>,
 ) -> Result<(usize, usize)> {
     // Get the stored cursor from the last scan
     let last_cursor = queries::get_scan_state(conn, "notifications_cursor")?;
 
-    // Fetch new amplification events
-    let (events, new_cursor) =
+    // Fetch new amplification events from notifications
+    let (mut events, new_cursor) =
         notifications::fetch_amplification_events(agent, last_cursor.as_deref()).await?;
 
-    info!(new_events = events.len(), "Amplification scan complete");
+    info!(
+        notification_events = events.len(),
+        "Notification scan complete"
+    );
+
+    // Merge supplementary events (e.g. from Constellation), deduplicating
+    // by amplifier_post_uri so the same event isn't processed twice
+    if !supplementary_events.is_empty() {
+        let existing_uris: HashSet<String> = events
+            .iter()
+            .map(|e| e.amplifier_post_uri.clone())
+            .collect();
+        let mut added = 0usize;
+        for event in supplementary_events {
+            if !existing_uris.contains(&event.amplifier_post_uri) {
+                events.push(event);
+                added += 1;
+            }
+        }
+        info!(
+            supplementary_added = added,
+            "Merged supplementary amplification events"
+        );
+    }
+
+    info!(total_events = events.len(), "Amplification scan complete");
 
     // Store the new cursor for next time
     if let Some(ref cursor) = new_cursor {

@@ -31,8 +31,11 @@ Post-MVP improvements applied:
 - LazyLock regex compilation (avoids redundant compilations in TF-IDF)
 - ONNX inference offloaded to `spawn_blocking` (keeps async runtime responsive)
 - Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
+- Constellation backlink index integration (`--constellation` flag on scan)
+  catches amplification events the notification API misses (~19% more events)
+- Batch DID→handle resolution via `app.bsky.actor.getProfiles`
 
-132 tests passing, clippy clean, all CLI commands wired and tested end-to-end.
+139 tests passing, clippy clean, all CLI commands wired and tested end-to-end.
 
 ### External contributions
 
@@ -112,6 +115,8 @@ The project has 132 tests across three categories:
 - **Composition tests** (`tests/composition.rs`) — end-to-end pipelines
   (TF-IDF → fingerprint → overlap → score → tier), report generation,
   ally/hostile/irrelevant account scenarios
+- **Constellation tests** (`tests/unit_constellation.rs`) — serde
+  deserialization, AT-URI construction, dedup logic
 
 Run all tests with `cargo test --all-targets`. The default `cargo test` only
 runs library tests — integration tests live in the `tests/` directory and
@@ -185,6 +190,16 @@ paint us into a corner that makes the future version harder to build.
 - Both run locally via `ort` crate, no rate limits
 - Download both with `charcoal download-model` (one-time, ~216 MB total)
 - See `docs/toxicity-alternatives-report.md` for the toxicity model evaluation
+
+### Constellation backlink index (supplementary amplification detection)
+- Catches quotes/reposts the notification API misses (blocked/muted accounts,
+  polling gaps) — found ~19% more events in testing
+- API: `GET /xrpc/blue.microcosm.links.getBacklinks` with `subject` (AT-URI)
+  and `source` (`collection:json_path`, e.g. `app.bsky.feed.post:embed.record.uri`)
+- Public instance at `https://constellation.microcosm.blue` (Raspberry Pi, ~6 days indexed)
+- No auth required, no published Rust client crate — hand-rolled reqwest client
+- Set `CONSTELLATION_URL` env var to override the default instance
+- Enabled via `charcoal scan --constellation`
 
 ### Google Perspective API (fallback scorer)
 - Optional fallback, enabled with `CHARCOAL_SCORER=perspective`

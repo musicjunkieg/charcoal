@@ -28,6 +28,8 @@ pub struct Config {
     pub scorer_backend: ScorerBackend,
     /// Directory containing the ONNX model files
     pub model_dir: PathBuf,
+    /// Constellation backlink index URL (supplementary amplification detection)
+    pub constellation_url: String,
 }
 
 impl Config {
@@ -55,6 +57,8 @@ impl Config {
             db_path: env::var("CHARCOAL_DB_PATH").unwrap_or_else(|_| "./charcoal.db".to_string()),
             scorer_backend,
             model_dir,
+            constellation_url: env::var("CONSTELLATION_URL")
+                .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
         })
     }
 

@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Constellation backlink index for supplementary amplification detection (#35, #53)
+- Batch DID→handle resolution via getProfiles for Constellation events (#58)
 - Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2) (#34)
 - Wire embedding-based overlap into profile scoring pipeline (#40)
 - Store embedding vectors in DB and update fingerprint command (#39)
@@ -25,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Write architectural recommendations for multi-user migration (#47)
 - Update docs and close session for sentence embeddings work (#42)
 - Add tests for embedding DB queries, migration, and download helpers (#41)
 - Update CLAUDE.md and docs to reflect contributor changes and new tests (#36)
