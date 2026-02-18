@@ -20,6 +20,9 @@ The MVP is functional. All 7 implementation phases are complete:
 
 Post-MVP improvements applied:
 - Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2, 384-dim)
+- Multiplicative threat scoring: `tox * 70 * (1 + overlap * 1.5)` — overlap
+  amplifies toxicity instead of contributing independently, so allies with high
+  overlap but low toxicity stay Low tier
 - Cosine similarity for topic overlap (replaced weighted Jaccard)
 - Weighted toxicity categories (identity_attack/insult/threat elevated)
 - Crash-resilient pipelines (incremental DB writes + panic catching)
@@ -100,7 +103,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 109 tests across three categories:
+The project has 132 tests across three categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
