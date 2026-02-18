@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-PreToolUse hook that nudges when no active working issue is set.
-Runs before Write|Edit|Bash to remind about issue tracking.
+PreToolUse hook that blocks Write|Edit|Bash unless a chainlink issue
+is being actively worked on. Forces issue creation before code changes.
 """
 
 import json
@@ -12,6 +12,59 @@ import io
 
 # Fix Windows encoding issues
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+# Defaults — overridden by .chainlink/hook-config.json if present
+DEFAULT_BLOCKED_GIT = [
+    "git push", "git commit", "git merge", "git rebase", "git cherry-pick",
+    "git reset", "git checkout .", "git restore .", "git clean",
+    "git stash", "git tag", "git am", "git apply",
+    "git branch -d", "git branch -D", "git branch -m",
+]
+
+DEFAULT_ALLOWED_BASH = [
+    "chainlink ",
+    "git status", "git diff", "git log", "git branch", "git show",
+    "cargo test", "cargo build", "cargo check", "cargo clippy", "cargo fmt",
+    "npm test", "npm run", "npx ",
+    "tsc", "node ", "python ",
+    "ls", "dir", "pwd", "echo",
+]
+
+
+def load_config(chainlink_dir):
+    """Load hook config from .chainlink/hook-config.json, falling back to defaults.
+
+    Returns (tracking_mode, blocked_git, allowed_bash).
+    tracking_mode is one of: "strict", "normal", "relaxed".
+      strict  — block Write/Edit/Bash without an active issue
+      normal  — remind (print warning) but don't block
+      relaxed — no issue-tracking enforcement, only git blocks
+    """
+    blocked = list(DEFAULT_BLOCKED_GIT)
+    allowed = list(DEFAULT_ALLOWED_BASH)
+    mode = "strict"
+
+    if not chainlink_dir:
+        return mode, blocked, allowed
+
+    config_path = os.path.join(chainlink_dir, "hook-config.json")
+    if not os.path.isfile(config_path):
+        return mode, blocked, allowed
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        if config.get("tracking_mode") in ("strict", "normal", "relaxed"):
+            mode = config["tracking_mode"]
+        if "blocked_git_commands" in config:
+            blocked = config["blocked_git_commands"]
+        if "allowed_bash_prefixes" in config:
+            allowed = config["allowed_bash_prefixes"]
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    return mode, blocked, allowed
 
 
 def find_chainlink_dir():
@@ -42,6 +95,43 @@ def run_chainlink(args):
         return None
 
 
+def is_blocked_git(input_data, blocked_list):
+    """Check if a Bash command is a blocked git mutation. Always denied."""
+    command = input_data.get("tool_input", {}).get("command", "").strip()
+    for blocked in blocked_list:
+        if command.startswith(blocked):
+            return True
+    # Also catch piped/chained git mutations: && git push, ; git commit, etc.
+    for blocked in blocked_list:
+        if f"&& {blocked}" in command or f"; {blocked}" in command or f"| {blocked}" in command:
+            return True
+    return False
+
+
+def is_allowed_bash(input_data, allowed_list):
+    """Check if a Bash command is on the allow list (read-only/infra)."""
+    command = input_data.get("tool_input", {}).get("command", "").strip()
+    for prefix in allowed_list:
+        if command.startswith(prefix):
+            return True
+    return False
+
+
+def is_claude_memory_path(input_data):
+    """Check if a Write/Edit targets Claude Code's own memory/config directory (~/.claude/)."""
+    file_path = input_data.get("tool_input", {}).get("file_path", "")
+    if not file_path:
+        return False
+    home = os.path.expanduser("~")
+    claude_dir = os.path.join(home, ".claude")
+    try:
+        return os.path.normcase(os.path.abspath(file_path)).startswith(
+            os.path.normcase(os.path.abspath(claude_dir))
+        )
+    except (ValueError, OSError):
+        return False
+
+
 def main():
     try:
         input_data = json.load(sys.stdin)
@@ -53,28 +143,63 @@ def main():
     if tool_name not in ('Write', 'Edit', 'Bash'):
         sys.exit(0)
 
+    # Allow Claude Code to manage its own memory/config in ~/.claude/
+    if tool_name in ('Write', 'Edit') and is_claude_memory_path(input_data):
+        sys.exit(0)
+
     chainlink_dir = find_chainlink_dir()
+    tracking_mode, blocked_git, allowed_bash = load_config(chainlink_dir)
+
+    # PERMANENT BLOCK: git mutation commands are never allowed (all modes)
+    if tool_name == 'Bash' and is_blocked_git(input_data, blocked_git):
+        command = input_data.get("tool_input", {}).get("command", "").strip()
+        print(
+            f"BLOCKED: `{command}` — git mutation commands are reserved for the human.\n\n"
+            "DO NOT retry this command or attempt workarounds. Instead:\n"
+            "1. Tell the user exactly what command to run\n"
+            "2. Stop and wait for the user to do it themselves\n\n"
+            "Allowed git commands: status, diff, log, show, branch (read-only only)."
+        )
+        sys.exit(2)
+
+    # Allow read-only / infrastructure Bash commands through
+    if tool_name == 'Bash' and is_allowed_bash(input_data, allowed_bash):
+        sys.exit(0)
+
+    # Relaxed mode: no issue-tracking enforcement
+    if tracking_mode == "relaxed":
+        sys.exit(0)
+
     if not chainlink_dir:
         sys.exit(0)
 
     # Check session status
     status = run_chainlink(["session", "status"])
     if not status:
+        # chainlink not available — don't block
         sys.exit(0)
 
-    # If already working on something, no nudge needed
+    # If already working on an issue, allow
     if "Working on: #" in status:
         sys.exit(0)
 
-    # Check if there are open issues to work on
-    open_issues = run_chainlink(["list", "-s", "open"])
-    if not open_issues or "No issues found" in open_issues:
-        # No open issues - might need to create one, but don't block
-        sys.exit(0)
+    # No active work item — behavior depends on mode
+    nudge_msg = (
+        "No active chainlink issue. "
+        "Create and work on an issue before making changes.\n\n"
+        "  chainlink quick \"<describe your task>\" -p <priority> -l <label>\n\n"
+        "Or pick an existing issue:\n"
+        "  chainlink list -s open\n"
+        "  chainlink session work <id>"
+    )
 
-    # Soft nudge: working on nothing but there are open issues
-    print("Reminder: No active working issue. Run `chainlink session work <id>` or `chainlink quick \"title\"` to track your work.")
-    sys.exit(0)
+    if tracking_mode == "strict":
+        print(f"BLOCKED: {nudge_msg}")
+        sys.exit(2)
+    else:
+        # normal mode: remind but allow
+        print(f"Reminder: {nudge_msg}")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
