@@ -56,13 +56,13 @@ pub enum ThreatTier {
 impl ThreatTier {
     /// Determine the tier from a threat score (0-100).
     ///
-    /// Thresholds are tuned for real-world toxicity + cosine similarity
-    /// overlap scores, where most accounts land in the 0-15 range. A score
-    /// of 25+ requires both significant toxicity AND topic proximity — the
-    /// core threat signal Charcoal is designed to detect.
+    /// Thresholds are tuned for the multiplicative scoring formula where
+    /// overlap amplifies toxicity. A score of 35+ requires meaningful
+    /// toxicity combined with topic proximity — the core threat signal.
+    /// Low-toxicity accounts stay low regardless of topic overlap.
     pub fn from_score(score: f64) -> Self {
         match score {
-            s if s >= 25.0 => ThreatTier::High,
+            s if s >= 35.0 => ThreatTier::High,
             s if s >= 15.0 => ThreatTier::Elevated,
             s if s >= 8.0 => ThreatTier::Watch,
             _ => ThreatTier::Low,

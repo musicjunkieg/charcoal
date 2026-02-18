@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2) (#34)
+- Wire embedding-based overlap into profile scoring pipeline (#40)
+- Store embedding vectors in DB and update fingerprint command (#39)
+- Create SentenceEmbedder with ONNX inference + mean pooling (#38)
+- Add sentence embedding model download (all-MiniLM-L6-v2) (#37)
 - Reweight toxicity categories to reduce ally false positives (#31)
 - Replace weighted Jaccard with cosine similarity for topic overlap (#30)
 - Mode 2: Background sweep of followers-of-followers (#25)
@@ -14,11 +19,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tune threat tier thresholds for real-world score distribution (#8)
 
 ### Fixed
+- Recalibrate threat scoring for sentence embedding overlap scale (#44)
 - Crash-resilient pipelines: incremental DB writes + panic catching (#33)
 - Exclude protected user from their own threat report (#22)
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Update docs and close session for sentence embeddings work (#42)
+- Add tests for embedding DB queries, migration, and download helpers (#41)
+- Update CLAUDE.md and docs to reflect contributor changes and new tests (#36)
 - Increase posts per account from 20 to 50 for more stable fingerprints (#32)
 - Skip follower analysis for repost events (#27)
 - Stop tracking chainlink issues.db and .cache in git (#26)

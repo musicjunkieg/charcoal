@@ -14,12 +14,12 @@ use charcoal::scoring::threat::{compute_threat_score, ThreatWeights};
 
 #[test]
 fn tier_exact_boundary_high() {
-    assert_eq!(ThreatTier::from_score(25.0), ThreatTier::High);
+    assert_eq!(ThreatTier::from_score(35.0), ThreatTier::High);
 }
 
 #[test]
 fn tier_just_below_high() {
-    assert_eq!(ThreatTier::from_score(24.999), ThreatTier::Elevated);
+    assert_eq!(ThreatTier::from_score(34.999), ThreatTier::Elevated);
 }
 
 #[test]
@@ -112,8 +112,8 @@ fn tier_round_trip_score_to_string() {
 #[test]
 fn gate_just_below_threshold() {
     let w = ThreatWeights::default();
-    let (score, _) = compute_threat_score(0.5, 0.049, &w);
-    // Gated: 0.5 * 25 = 12.5
+    let (score, _) = compute_threat_score(0.5, 0.149, &w);
+    // Gated (0.149 < 0.15): 0.5 * 25 = 12.5
     assert!(
         (score - 12.5).abs() < 0.1,
         "Below gate threshold should use gated formula, got {score}"
@@ -123,11 +123,11 @@ fn gate_just_below_threshold() {
 #[test]
 fn gate_exactly_at_threshold() {
     let w = ThreatWeights::default();
-    // overlap (0.05) is NOT < 0.05, so full formula applies
-    let (score, _) = compute_threat_score(0.5, 0.05, &w);
-    // Full: 0.5 * 70 + 0.05 * 30 = 35 + 1.5 = 36.5
+    // overlap (0.15) is NOT < 0.15, so full formula applies
+    let (score, _) = compute_threat_score(0.5, 0.15, &w);
+    // Full: 0.5 * 70 * (1 + 0.15 * 1.5) = 35 * 1.225 = 42.875
     assert!(
-        (score - 36.5).abs() < 0.1,
+        (score - 42.875).abs() < 0.1,
         "At threshold should use full formula, got {score}"
     );
 }
@@ -135,10 +135,10 @@ fn gate_exactly_at_threshold() {
 #[test]
 fn gate_just_above_threshold() {
     let w = ThreatWeights::default();
-    let (score, _) = compute_threat_score(0.5, 0.051, &w);
-    // Full: 0.5 * 70 + 0.051 * 30 = 35 + 1.53 = 36.53
+    let (score, _) = compute_threat_score(0.5, 0.151, &w);
+    // Full: 0.5 * 70 * (1 + 0.151 * 1.5) = 35 * 1.2265 = 42.9275
     assert!(
-        (score - 36.53).abs() < 0.1,
+        (score - 42.9275).abs() < 0.1,
         "Above threshold should use full formula, got {score}"
     );
 }
@@ -151,7 +151,7 @@ fn gate_just_above_threshold() {
 fn score_clamped_to_100() {
     let w = ThreatWeights::default();
     let (score, tier) = compute_threat_score(1.5, 1.5, &w);
-    // 1.5*70 + 1.5*30 = 150 -> clamped to 100
+    // 1.5 * 70 * (1 + 1.5 * 1.5) = 105 * 3.25 = 341.25 -> clamped to 100
     assert_eq!(score, 100.0);
     assert_eq!(tier, ThreatTier::High);
 }
@@ -159,8 +159,8 @@ fn score_clamped_to_100() {
 #[test]
 fn negative_inputs_clamped_to_zero() {
     let w = ThreatWeights::default();
-    let (score, tier) = compute_threat_score(-0.5, 0.1, &w);
-    // -0.5*70 + 0.1*30 = -35 + 3 = -32 -> clamped to 0
+    let (score, tier) = compute_threat_score(-0.5, 0.2, &w);
+    // -0.5 * 70 * (1 + 0.2 * 1.5) = -35 * 1.3 = -45.5 -> clamped to 0
     assert_eq!(score, 0.0);
     assert_eq!(tier, ThreatTier::Low);
 }
@@ -193,8 +193,8 @@ fn gated_above_one_still_caps() {
 fn custom_weights_zero_produces_zero() {
     let w = ThreatWeights {
         toxicity_weight: 0.0,
-        overlap_weight: 0.0,
-        overlap_gate_threshold: 0.05,
+        overlap_multiplier: 0.0,
+        overlap_gate_threshold: 0.15,
         gate_max_score: 25.0,
     };
     let (score, tier) = compute_threat_score(0.9, 0.9, &w);
@@ -203,24 +203,24 @@ fn custom_weights_zero_produces_zero() {
 }
 
 #[test]
-fn custom_weights_inverted() {
+fn custom_weights_high_multiplier() {
     let w = ThreatWeights {
-        toxicity_weight: 30.0,
-        overlap_weight: 70.0,
-        overlap_gate_threshold: 0.05,
+        toxicity_weight: 70.0,
+        overlap_multiplier: 3.0,
+        overlap_gate_threshold: 0.15,
         gate_max_score: 25.0,
     };
     let (score, _) = compute_threat_score(0.5, 0.5, &w);
-    // 0.5*30 + 0.5*70 = 15 + 35 = 50
-    assert!((score - 50.0).abs() < 0.1);
+    // 0.5 * 70 * (1 + 0.5 * 3.0) = 35 * 2.5 = 87.5
+    assert!((score - 87.5).abs() < 0.1);
 }
 
 #[test]
 fn custom_gate_max_score() {
     let w = ThreatWeights {
         toxicity_weight: 70.0,
-        overlap_weight: 30.0,
-        overlap_gate_threshold: 0.05,
+        overlap_multiplier: 1.5,
+        overlap_gate_threshold: 0.15,
         gate_max_score: 10.0, // lower gate cap
     };
     let (score, _) = compute_threat_score(0.9, 0.0, &w);
@@ -232,8 +232,8 @@ fn custom_gate_max_score() {
 fn default_weights_match_documented_values() {
     let w = ThreatWeights::default();
     assert_eq!(w.toxicity_weight, 70.0);
-    assert_eq!(w.overlap_weight, 30.0);
-    assert_eq!(w.overlap_gate_threshold, 0.05);
+    assert_eq!(w.overlap_multiplier, 1.5);
+    assert_eq!(w.overlap_gate_threshold, 0.15);
     assert_eq!(w.gate_max_score, 25.0);
 }
 

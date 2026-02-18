@@ -220,8 +220,8 @@ fn fingerprint_to_cosine_manual_pipeline() {
 fn high_overlap_high_toxicity_yields_high_tier() {
     let weights = ThreatWeights::default();
     let (score, tier) = compute_threat_score(0.75, 0.4, &weights);
-    // 0.75*70 + 0.4*30 = 52.5 + 12 = 64.5
-    assert!((score - 64.5).abs() < 0.1);
+    // 0.75 * 70 * (1 + 0.4 * 1.5) = 52.5 * 1.6 = 84.0
+    assert!((score - 84.0).abs() < 0.1);
     assert_eq!(tier, ThreatTier::High);
 }
 
@@ -229,11 +229,11 @@ fn high_overlap_high_toxicity_yields_high_tier() {
 fn low_overlap_gates_even_high_toxicity() {
     let weights = ThreatWeights::default();
     let (score, tier) = compute_threat_score(0.95, 0.01, &weights);
-    // Gated: 0.95 * 25 = 23.75
+    // Gated (0.01 < 0.15): 0.95 * 25 = 23.75
     assert!((score - 23.75).abs() < 0.1);
     assert_eq!(tier, ThreatTier::Elevated);
     // Key insight: 95% toxicity without topic overlap stays below High
-    assert!(score < 25.0);
+    assert!(score < 35.0);
 }
 
 #[test]
