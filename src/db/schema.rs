@@ -91,6 +91,13 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         c.execute_batch("ALTER TABLE topic_fingerprint ADD COLUMN embedding_vector TEXT;")
     })?;
 
+    // Migration v3: add behavioral_signals column to account_scores.
+    // Stores a JSON object with quote_ratio, reply_ratio, avg_engagement,
+    // pile_on, benign_gate, and behavioral_boost.
+    run_migration(conn, 3, |c| {
+        c.execute_batch("ALTER TABLE account_scores ADD COLUMN behavioral_signals TEXT;")
+    })?;
+
     Ok(())
 }
 
@@ -173,6 +180,34 @@ mod tests {
     }
 
     #[test]
+    fn test_migration_v3_adds_behavioral_signals_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO account_scores (did, handle, posts_analyzed)
+             VALUES ('did:plc:test', 'test.bsky.social', 10)",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "UPDATE account_scores SET behavioral_signals = ?1 WHERE did = 'did:plc:test'",
+            rusqlite::params![r#"{"quote_ratio":0.5}"#],
+        )
+        .unwrap();
+
+        let result: String = conn
+            .query_row(
+                "SELECT behavioral_signals FROM account_scores WHERE did = 'did:plc:test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(result, r#"{"quote_ratio":0.5}"#);
+    }
+
+    #[test]
     fn test_migration_v2_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
         // Run create_tables three times — migration should only run once
@@ -188,6 +223,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2]);
+        assert_eq!(versions, vec![1, 2, 3]);
     }
 }
