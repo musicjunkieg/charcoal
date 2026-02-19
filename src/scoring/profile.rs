@@ -9,7 +9,7 @@
 // 6. Returns a complete AccountScore ready for storage
 
 use anyhow::Result;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, Post};
@@ -134,9 +134,17 @@ pub async fn build_profile(
     let quote_count = target_posts.iter().filter(|p| p.is_quote).count();
     let quote_ratio = behavioral::compute_quote_ratio(quote_count, target_posts.len());
 
-    let (reply_count, reply_total) = posts::fetch_reply_ratio(client, target_handle)
-        .await
-        .unwrap_or((0, 0));
+    let (reply_count, reply_total) = match posts::fetch_reply_ratio(client, target_handle).await {
+        Ok(counts) => counts,
+        Err(e) => {
+            warn!(
+                handle = target_handle,
+                error = %e,
+                "Reply ratio fetch failed, defaulting to 0"
+            );
+            (0, 0)
+        }
+    };
     let reply_ratio = behavioral::compute_reply_ratio(reply_count, reply_total);
 
     let avg_engagement = behavioral::compute_avg_engagement(&target_posts);
