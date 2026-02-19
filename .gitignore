@@ -12,6 +12,15 @@
 *.db-wal
 *.db-shm
 
+# Generated reports
+/output/
+
+# Database and report backups
+/backups/
+
+# Research scratch files
+/docs/research/
+
 # Chainlink local state (rules are tracked, but DB and cache are not)
 .chainlink/issues.db
 .chainlink/.cache/

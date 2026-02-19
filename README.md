@@ -130,7 +130,7 @@ cargo run -- report
 ```
 
 Outputs a ranked threat list to the terminal and saves a markdown report to
-`charcoal-report.md`. Use `--min-score N` to filter by minimum threat score.
+`output/charcoal-report.md`. Use `--min-score N` to filter by minimum threat score.
 
 **Check system status:**
 ```bash

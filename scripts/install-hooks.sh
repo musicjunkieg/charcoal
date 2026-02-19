@@ -21,10 +21,19 @@ cat > "$HOOKS_DIR/pre-commit" << 'HOOK'
 #!/usr/bin/env bash
 # Charcoal pre-commit hook
 # Enforces: formatting, linting, and tests before every commit.
+# Skips Rust checks when only docs/markdown files are staged.
 #
 # Bypass (emergency only): git commit --no-verify
 
 set -e
+
+# Check if any staged files are Rust/TOML source files
+RUST_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(rs|toml)$' || true)
+
+if [ -z "$RUST_FILES" ]; then
+    echo "📝 Pre-commit: docs-only commit, skipping Rust checks."
+    exit 0
+fi
 
 echo "🔍 Pre-commit: checking formatting..."
 if ! cargo fmt --check 2>/dev/null; then
@@ -67,10 +76,27 @@ cat > "$HOOKS_DIR/pre-push" << 'HOOK'
 #!/usr/bin/env bash
 # Charcoal pre-push hook
 # Blocks pushes if tests fail or clippy has warnings.
+# Skips Rust checks when only docs/markdown files changed since remote.
 #
 # Bypass (emergency only): git push --no-verify
 
 set -e
+
+# Check if any commits being pushed contain Rust/TOML changes
+REMOTE="$1"
+REMOTE_REF=$(git rev-parse "$REMOTE/$(git branch --show-current)" 2>/dev/null || echo "")
+
+if [ -n "$REMOTE_REF" ]; then
+    RUST_FILES=$(git diff --name-only "$REMOTE_REF"..HEAD | grep -E '\.(rs|toml)$' || true)
+else
+    # New branch — check all files vs main
+    RUST_FILES=$(git diff --name-only main..HEAD 2>/dev/null | grep -E '\.(rs|toml)$' || true)
+fi
+
+if [ -z "$RUST_FILES" ]; then
+    echo "📝 Pre-push: docs-only push, skipping Rust checks."
+    exit 0
+fi
 
 echo "🔍 Pre-push: running tests..."
 if ! cargo test --quiet 2>&1; then

@@ -373,7 +373,7 @@ async fn main() -> Result<()> {
                 &threats,
                 fingerprint.as_ref(),
                 &events,
-                "charcoal-report.md",
+                "output/charcoal-report.md",
             )?;
 
             println!(

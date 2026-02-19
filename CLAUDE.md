@@ -39,7 +39,11 @@ Post-MVP improvements applied:
 - Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
 - Batch DID→handle resolution via `app.bsky.actor.getProfiles`
 
-139 tests passing, clippy clean, all CLI commands wired and tested end-to-end.
+- Validate command: scores blocked accounts via PDS repo access to verify
+  pipeline accuracy (resolves DIDs via plc.directory, discovers PDS endpoints)
+
+139 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
+`scan`, `sweep`, `score`, `report`, `status`, `validate`.
 
 ### External contributions
 
@@ -130,8 +134,9 @@ need `--all-targets` to be included.
 
 After cloning, run `./scripts/install-hooks.sh` to install quality gates:
 - **pre-commit**: blocks commits with formatting errors, clippy warnings,
-  or failing tests
+  or failing tests (skipped for docs-only commits — markdown/text files)
 - **pre-push**: blocks pushes with failing tests or clippy warnings
+  (skipped for docs-only pushes)
 
 ### Keep it runnable
 
