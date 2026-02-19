@@ -230,6 +230,16 @@ async fn main() -> Result<()> {
             let weights = charcoal::scoring::threat::ThreatWeights::default();
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
+            // Compute behavioral context for scoring
+            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
+            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
+                .iter()
+                .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
+                .collect();
+            let pile_on_dids =
+                charcoal::scoring::behavioral::detect_pile_on_participants(&pile_on_refs);
+
             // Query Constellation backlink index for amplification events
             println!("Querying Constellation backlink index...");
             let events = match fetch_constellation_events(&client, &config).await {
@@ -257,6 +267,8 @@ async fn main() -> Result<()> {
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
                 events,
+                median_engagement,
+                &pile_on_dids,
             )
             .await?;
 
@@ -286,6 +298,15 @@ async fn main() -> Result<()> {
             let weights = charcoal::scoring::threat::ThreatWeights::default();
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
+            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
+            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
+                .iter()
+                .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
+                .collect();
+            let pile_on_dids =
+                charcoal::scoring::behavioral::detect_pile_on_participants(&pile_on_refs);
+
             let (pool_size, scored) = charcoal::pipeline::sweep::run(
                 &client,
                 scorer.as_ref(),
@@ -298,6 +319,8 @@ async fn main() -> Result<()> {
                 concurrency as usize,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                median_engagement,
+                &pile_on_dids,
             )
             .await?;
 
@@ -328,6 +351,15 @@ async fn main() -> Result<()> {
             let weights = charcoal::scoring::threat::ThreatWeights::default();
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
+            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
+            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
+                .iter()
+                .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
+                .collect();
+            let pile_on_dids =
+                charcoal::scoring::behavioral::detect_pile_on_participants(&pile_on_refs);
+
             let score = charcoal::scoring::profile::build_profile(
                 &client,
                 scorer.as_ref(),
@@ -337,6 +369,8 @@ async fn main() -> Result<()> {
                 &weights,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                median_engagement,
+                &pile_on_dids,
             )
             .await?;
 
@@ -445,6 +479,15 @@ async fn main() -> Result<()> {
             let weights = charcoal::scoring::threat::ThreatWeights::default();
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
+            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
+            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
+                .iter()
+                .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
+                .collect();
+            let pile_on_dids =
+                charcoal::scoring::behavioral::detect_pile_on_participants(&pile_on_refs);
+
             println!(
                 "\n{}",
                 "=== Validation: Scoring Blocked Accounts ===".bold()
@@ -482,6 +525,8 @@ async fn main() -> Result<()> {
                     &weights,
                     embedder.as_ref(),
                     protected_embedding.as_deref(),
+                    median_engagement,
+                    &pile_on_dids,
                 )
                 .await
                 {

@@ -9,11 +9,12 @@
 // 6. Returns a complete AccountScore ready for storage
 
 use anyhow::Result;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, Post};
 use crate::db::models::{AccountScore, ToxicPost};
+use crate::scoring::behavioral;
 use crate::scoring::threat::{self, ThreatWeights};
 use crate::topics::embeddings::{self, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
@@ -41,6 +42,8 @@ pub async fn build_profile(
     weights: &ThreatWeights,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    median_engagement: f64,
+    pile_on_dids: &std::collections::HashSet<String>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
@@ -61,6 +64,7 @@ pub async fn build_profile(
             posts_analyzed: target_posts.len() as u32,
             top_toxic_posts: vec![],
             scored_at: String::new(),
+            behavioral_signals: None,
         });
     }
 
@@ -126,15 +130,62 @@ pub async fn build_profile(
         overlap::cosine_similarity(protected_fingerprint, &target_fingerprint)
     };
 
-    // Step 5: Compute the combined threat score
-    let (threat_score, tier) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
+    // Step 4b: Compute behavioral signals
+    let quote_count = target_posts.iter().filter(|p| p.is_quote).count();
+    let quote_ratio = behavioral::compute_quote_ratio(quote_count, target_posts.len());
+
+    let (reply_count, reply_total) = match posts::fetch_reply_ratio(client, target_handle).await {
+        Ok(counts) => counts,
+        Err(e) => {
+            warn!(
+                handle = target_handle,
+                error = %e,
+                "Reply ratio fetch failed, defaulting to 0"
+            );
+            (0, 0)
+        }
+    };
+    let reply_ratio = behavioral::compute_reply_ratio(reply_count, reply_total);
+
+    let avg_engagement = behavioral::compute_avg_engagement(&target_posts);
+    let pile_on = pile_on_dids.contains(target_did);
+
+    // Step 5: Compute the raw threat score, then apply behavioral modifier
+    let (raw_score, _) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
+
+    let (final_score, benign_gate) = behavioral::apply_behavioral_modifier(
+        raw_score,
+        quote_ratio,
+        reply_ratio,
+        pile_on,
+        avg_engagement,
+        median_engagement,
+    );
+
+    let tier = crate::db::models::ThreatTier::from_score(final_score);
+
+    let behavioral_boost = behavioral::compute_behavioral_boost(quote_ratio, reply_ratio, pile_on);
+    let signals = behavioral::BehavioralSignals {
+        quote_ratio,
+        reply_ratio,
+        avg_engagement,
+        pile_on,
+        benign_gate,
+        behavioral_boost,
+    };
+    let signals_json = serde_json::to_string(&signals)?;
 
     info!(
         handle = target_handle,
         toxicity = format!("{:.2}", avg_toxicity),
         overlap = format!("{:.2}", topic_overlap),
-        threat = format!("{:.1}", threat_score),
+        raw_score = format!("{:.1}", raw_score),
+        threat = format!("{:.1}", final_score),
         tier = tier.as_str(),
+        quote_ratio = format!("{:.2}", quote_ratio),
+        reply_ratio = format!("{:.2}", reply_ratio),
+        benign_gate = benign_gate,
+        behavioral_boost = format!("{:.2}", behavioral_boost),
         posts = target_posts.len(),
         "Scored account"
     );
@@ -144,11 +195,12 @@ pub async fn build_profile(
         handle: target_handle.to_string(),
         toxicity_score: Some(avg_toxicity),
         topic_overlap: Some(topic_overlap),
-        threat_score: Some(threat_score),
+        threat_score: Some(final_score),
         threat_tier: Some(tier.to_string()),
         posts_analyzed: target_posts.len() as u32,
         top_toxic_posts,
         scored_at: String::new(),
+        behavioral_signals: Some(signals_json),
     })
 }
 

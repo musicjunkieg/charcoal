@@ -20,6 +20,8 @@ pub struct Post {
     pub like_count: i64,
     pub repost_count: i64,
     pub quote_count: i64,
+    /// Whether this post is a quote-post (embeds another post).
+    pub is_quote: bool,
 }
 
 /// Fetch recent posts for a given account, handling pagination automatically.
@@ -77,6 +79,20 @@ pub async fn fetch_recent_posts(
                 continue;
             }
 
+            // Detect quote-posts by checking the embed type.
+            // Quote-posts embed another post via AppBskyEmbedRecordView or
+            // AppBskyEmbedRecordWithMediaView (quote + image/video).
+            let is_quote = post_view.embed.as_ref().is_some_and(|embed| {
+                use atrium_api::types::Union;
+                matches!(
+                    embed,
+                    Union::Refs(
+                        atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordView(_)
+                            | atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(_)
+                    )
+                )
+            });
+
             posts.push(Post {
                 uri: post_view.uri.clone(),
                 text,
@@ -84,6 +100,7 @@ pub async fn fetch_recent_posts(
                 like_count: post_view.like_count.unwrap_or(0),
                 repost_count: post_view.repost_count.unwrap_or(0),
                 quote_count: post_view.quote_count.unwrap_or(0),
+                is_quote,
             });
 
             if posts.len() >= max_posts {
@@ -135,4 +152,45 @@ pub async fn fetch_post_text(client: &PublicAtpClient, uri: &str) -> Result<Opti
     });
 
     Ok(text)
+}
+
+/// Fetch the reply ratio for an account by sampling one page of posts.
+///
+/// Makes a single API call with `posts_and_author_threads` filter (which
+/// includes replies), then counts how many have a `reply` field set.
+/// Returns (reply_count, total_count) so the caller can compute the ratio.
+pub async fn fetch_reply_ratio(client: &PublicAtpClient, handle: &str) -> Result<(usize, usize)> {
+    let params: Vec<(&str, &str)> = vec![
+        ("actor", handle),
+        ("filter", "posts_and_author_threads"),
+        ("limit", "50"),
+    ];
+
+    let output: get_author_feed::Output = client
+        .xrpc_get("app.bsky.feed.getAuthorFeed", &params)
+        .await
+        .with_context(|| format!("Failed to fetch reply ratio for @{}", handle))?;
+
+    let mut reply_count = 0;
+    let mut total = 0;
+
+    for feed_item in &output.feed {
+        // Skip reposts — they aren't posts authored by this account.
+        if feed_item.reason.is_some() {
+            continue;
+        }
+        total += 1;
+        if feed_item.reply.is_some() {
+            reply_count += 1;
+        }
+    }
+
+    debug!(
+        handle = handle,
+        replies = reply_count,
+        total = total,
+        "Reply ratio sample"
+    );
+
+    Ok((reply_count, total))
 }

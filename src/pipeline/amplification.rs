@@ -46,6 +46,8 @@ pub async fn run(
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
     events: Vec<AmplificationNotification>,
+    median_engagement: f64,
+    pile_on_dids: &std::collections::HashSet<String>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -193,6 +195,8 @@ pub async fn run(
                                 weights,
                                 embedder,
                                 protected_embedding,
+                                median_engagement,
+                                pile_on_dids,
                             ))
                             .catch_unwind()
                             .await

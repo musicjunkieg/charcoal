@@ -19,6 +19,8 @@ pub struct AccountScore {
     /// The most toxic posts as evidence (JSON-encoded in the DB)
     pub top_toxic_posts: Vec<ToxicPost>,
     pub scored_at: String,
+    /// Behavioral signals (JSON-serialized), present when behavioral analysis ran
+    pub behavioral_signals: Option<String>,
 }
 
 /// A single post with its toxicity score, kept as evidence.
