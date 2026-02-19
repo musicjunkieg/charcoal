@@ -7,10 +7,15 @@
 pub mod models;
 pub mod queries;
 pub mod schema;
+pub mod sqlite;
+pub mod traits;
+
+pub use traits::Database;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Open (or create) the database and run migrations.
 ///
@@ -58,4 +63,16 @@ pub fn open(db_path: &str) -> Result<Connection> {
     schema::create_tables(&conn)?;
 
     Ok(conn)
+}
+
+/// Open SQLite database and return it as a trait object.
+pub fn open_sqlite(db_path: &str) -> Result<Arc<dyn Database>> {
+    let conn = open(db_path)?;
+    Ok(Arc::new(sqlite::SqliteDatabase::new(conn)))
+}
+
+/// Initialize SQLite database and return it as a trait object.
+pub fn initialize_sqlite(db_path: &str) -> Result<Arc<dyn Database>> {
+    let conn = initialize(db_path)?;
+    Ok(Arc::new(sqlite::SqliteDatabase::new(conn)))
 }
