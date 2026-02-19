@@ -38,6 +38,9 @@ pub fn initialize(db_path: &str) -> Result<Connection> {
 }
 
 /// Open an existing database (fails if it doesn't exist yet).
+///
+/// Also runs any pending migrations so schema changes apply automatically
+/// without requiring `charcoal init` again.
 pub fn open(db_path: &str) -> Result<Connection> {
     if !Path::new(db_path).exists() {
         anyhow::bail!(
@@ -50,6 +53,9 @@ pub fn open(db_path: &str) -> Result<Connection> {
         .with_context(|| format!("Failed to open database at {}", db_path))?;
 
     conn.pragma_update(None, "journal_mode", "WAL")?;
+
+    // Run pending migrations (idempotent — skips already-applied ones)
+    schema::create_tables(&conn)?;
 
     Ok(conn)
 }
