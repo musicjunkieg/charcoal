@@ -85,8 +85,8 @@ pub fn get_embedding(conn: &Connection) -> Result<Option<Vec<f64>>> {
 pub fn upsert_account_score(conn: &Connection, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
+        "INSERT INTO account_scores (did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9)
          ON CONFLICT(did) DO UPDATE SET
             handle = ?2,
             toxicity_score = ?3,
@@ -95,7 +95,8 @@ pub fn upsert_account_score(conn: &Connection, score: &AccountScore) -> Result<(
             threat_tier = ?6,
             posts_analyzed = ?7,
             top_toxic_posts = ?8,
-            scored_at = datetime('now')",
+            scored_at = datetime('now'),
+            behavioral_signals = ?9",
         params![
             score.did,
             score.handle,
@@ -105,6 +106,7 @@ pub fn upsert_account_score(conn: &Connection, score: &AccountScore) -> Result<(
             score.threat_tier,
             score.posts_analyzed,
             top_posts_json,
+            score.behavioral_signals,
         ],
     )?;
     Ok(())
@@ -114,7 +116,7 @@ pub fn upsert_account_score(conn: &Connection, score: &AccountScore) -> Result<(
 pub fn get_ranked_threats(conn: &Connection, min_score: f64) -> Result<Vec<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
          FROM account_scores
          WHERE threat_score >= ?1
          ORDER BY threat_score DESC",
@@ -138,6 +140,7 @@ pub fn get_ranked_threats(conn: &Connection, min_score: f64) -> Result<Vec<Accou
             posts_analyzed: row.get(6)?,
             top_toxic_posts,
             scored_at: row.get(8)?,
+            behavioral_signals: row.get(9)?,
         })
     })?;
 
@@ -228,6 +231,55 @@ pub fn get_recent_events(conn: &Connection, limit: u32) -> Result<Vec<Amplificat
     Ok(events)
 }
 
+/// Get amplification events for pile-on detection.
+/// Returns (amplifier_did, original_post_uri, detected_at) tuples.
+pub fn get_events_for_pile_on(conn: &Connection) -> Result<Vec<(String, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT amplifier_did, original_post_uri, detected_at
+         FROM amplification_events
+         ORDER BY original_post_uri, detected_at",
+    )?;
+
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
+/// Get the median engagement across all scored accounts with behavioral data.
+pub fn get_median_engagement(conn: &Connection) -> Result<f64> {
+    let mut stmt = conn.prepare(
+        "SELECT behavioral_signals FROM account_scores WHERE behavioral_signals IS NOT NULL",
+    )?;
+    let mut engagements: Vec<f64> = stmt
+        .query_map([], |row| {
+            let json: String = row.get(0)?;
+            Ok(json)
+        })?
+        .filter_map(|r| r.ok())
+        .filter_map(|json| {
+            serde_json::from_str::<serde_json::Value>(&json)
+                .ok()
+                .and_then(|v| v.get("avg_engagement")?.as_f64())
+        })
+        .collect();
+
+    if engagements.is_empty() {
+        return Ok(0.0);
+    }
+
+    engagements.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = engagements.len() / 2;
+    if engagements.len().is_multiple_of(2) {
+        Ok((engagements[mid - 1] + engagements[mid]) / 2.0)
+    } else {
+        Ok(engagements[mid])
+    }
+}
+
 // rusqlite's optional() helper — converts "no rows" into None
 use rusqlite::OptionalExtension;
 
@@ -292,6 +344,7 @@ mod tests {
             posts_analyzed: 20,
             top_toxic_posts: vec![],
             scored_at: String::new(),
+            behavioral_signals: None,
         };
         upsert_account_score(&conn, &score).unwrap();
 
