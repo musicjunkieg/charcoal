@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use std::collections::HashSet;
 use tracing::{info, warn};
 
 mod config;
@@ -44,10 +45,6 @@ enum Commands {
         /// Number of accounts to score in parallel (default: 8)
         #[arg(long, default_value = "8")]
         concurrency: u32,
-
-        /// Also query Constellation backlink index for amplification events
-        #[arg(long)]
-        constellation: bool,
     },
 
     /// Sweep second-degree network (followers-of-followers) for threats
@@ -76,6 +73,13 @@ enum Commands {
         /// Only include accounts at or above this threat score
         #[arg(long, default_value = "0")]
         min_score: u32,
+    },
+
+    /// Validate scoring by analyzing your blocked accounts
+    Validate {
+        /// Number of recent blocks to analyze (default: 10)
+        #[arg(long, default_value = "10")]
+        count: u32,
     },
 
     /// Show system status (last scan, DB stats, fingerprint age)
@@ -134,17 +138,11 @@ async fn main() -> Result<()> {
 
             println!("Building topic fingerprint from your recent posts...");
 
-            // Authenticate with Bluesky
-            let agent = charcoal::bluesky::client::login(
-                &config.bluesky_handle,
-                &config.bluesky_app_password,
-                &config.bluesky_pds_url,
-            )
-            .await?;
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             // Fetch recent posts (target 500 for a good fingerprint)
             let posts =
-                charcoal::bluesky::posts::fetch_recent_posts(&agent, &config.bluesky_handle, 500)
+                charcoal::bluesky::posts::fetch_recent_posts(&client, &config.bluesky_handle, 500)
                     .await?;
 
             println!("Analyzing {} posts...", posts.len());
@@ -209,7 +207,6 @@ async fn main() -> Result<()> {
             analyze,
             max_followers,
             concurrency,
-            constellation,
         } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
@@ -217,13 +214,7 @@ async fn main() -> Result<()> {
 
             println!("Scanning for amplification events...");
 
-            // Authenticate
-            let agent = charcoal::bluesky::client::login(
-                &config.bluesky_handle,
-                &config.bluesky_app_password,
-                &config.bluesky_pds_url,
-            )
-            .await?;
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             // Load the protected user's fingerprint (needed for scoring)
             let protected_fingerprint = load_fingerprint(&conn)?;
@@ -239,32 +230,22 @@ async fn main() -> Result<()> {
             let weights = charcoal::scoring::threat::ThreatWeights::default();
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
-            // Query Constellation backlink index if requested
-            let supplementary_events = if constellation {
-                println!("Querying Constellation backlink index...");
-                match fetch_constellation_events(&agent, &config).await {
-                    Ok(events) => {
-                        println!(
-                            "  Constellation found {} supplementary events",
-                            events.len()
-                        );
-                        events
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Constellation query failed, continuing without");
-                        println!(
-                            "  {} Constellation unavailable, continuing with notifications only",
-                            "Warning:".yellow()
-                        );
-                        Vec::new()
-                    }
+            // Query Constellation backlink index for amplification events
+            println!("Querying Constellation backlink index...");
+            let events = match fetch_constellation_events(&client, &config).await {
+                Ok(events) => {
+                    println!("  Constellation found {} events", events.len());
+                    events
                 }
-            } else {
-                Vec::new()
+                Err(e) => {
+                    warn!(error = %e, "Constellation query failed");
+                    println!("  {} Constellation unavailable: {}", "Warning:".yellow(), e);
+                    Vec::new()
+                }
             };
 
-            let (events, scored) = charcoal::pipeline::amplification::run(
-                &agent,
+            let (event_count, scored) = charcoal::pipeline::amplification::run(
+                &client,
                 scorer.as_ref(),
                 &conn,
                 &protected_fingerprint,
@@ -275,12 +256,12 @@ async fn main() -> Result<()> {
                 concurrency as usize,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
-                supplementary_events,
+                events,
             )
             .await?;
 
             println!("\n{}", "Scan complete.".bold());
-            println!("  Events detected: {events}");
+            println!("  Events detected: {event_count}");
             if analyze {
                 println!("  Accounts scored: {scored}");
             }
@@ -298,12 +279,7 @@ async fn main() -> Result<()> {
 
             println!("Running second-degree network sweep...");
 
-            let agent = charcoal::bluesky::client::login(
-                &config.bluesky_handle,
-                &config.bluesky_app_password,
-                &config.bluesky_pds_url,
-            )
-            .await?;
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             let protected_fingerprint = load_fingerprint(&conn)?;
             let scorer = create_scorer(&config)?;
@@ -311,7 +287,7 @@ async fn main() -> Result<()> {
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
             let (pool_size, scored) = charcoal::pipeline::sweep::run(
-                &agent,
+                &client,
                 scorer.as_ref(),
                 &conn,
                 &config.bluesky_handle,
@@ -341,13 +317,7 @@ async fn main() -> Result<()> {
 
             println!("Scoring account: @{handle}...");
 
-            // Authenticate
-            let agent = charcoal::bluesky::client::login(
-                &config.bluesky_handle,
-                &config.bluesky_app_password,
-                &config.bluesky_pds_url,
-            )
-            .await?;
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             // Load the protected user's fingerprint
             let protected_fingerprint = load_fingerprint(&conn)?;
@@ -359,7 +329,7 @@ async fn main() -> Result<()> {
             let (embedder, protected_embedding) = load_embedder(&config, &conn);
 
             let score = charcoal::scoring::profile::build_profile(
-                &agent,
+                &client,
                 scorer.as_ref(),
                 handle,
                 handle, // Use handle as DID placeholder — real DID comes from profile lookup
@@ -410,6 +380,209 @@ async fn main() -> Result<()> {
                 "\n{}",
                 format!("Markdown report saved to: {report_path}").bold()
             );
+        }
+
+        Commands::Validate { count } => {
+            let config = config::Config::load()?;
+            config.require_bluesky()?;
+            config.require_scorer()?;
+            let conn = charcoal::db::open(&config.db_path)?;
+
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+
+            println!("Resolving your PDS endpoint...");
+
+            // Resolve handle → DID → PDS URL (block records live on your PDS)
+            let did = client.resolve_handle(&config.bluesky_handle).await?;
+            let pds_url = client.resolve_pds_url(&did).await?;
+            println!("  PDS: {pds_url}");
+
+            let pds_client = charcoal::bluesky::client::PublicAtpClient::new(&pds_url)?;
+
+            println!("Fetching your {} most recent blocks...", count);
+
+            // Fetch block records from the PDS (reverse=true for most recent first)
+            let limit_str = count.to_string();
+            let blocks: charcoal::bluesky::client::ListRecordsResponse = pds_client
+                .xrpc_get(
+                    "com.atproto.repo.listRecords",
+                    &[
+                        ("repo", &did),
+                        ("collection", "app.bsky.graph.block"),
+                        ("limit", &limit_str),
+                        ("reverse", "true"),
+                    ],
+                )
+                .await?;
+
+            if blocks.records.is_empty() {
+                println!("No block records found.");
+                return Ok(());
+            }
+
+            // Extract blocked DIDs and timestamps from the record values
+            let blocked_accounts: Vec<charcoal::bluesky::client::BlockRecordValue> = blocks
+                .records
+                .iter()
+                .filter_map(|r| {
+                    serde_json::from_value::<charcoal::bluesky::client::BlockRecordValue>(
+                        r.value.clone(),
+                    )
+                    .ok()
+                })
+                .collect();
+
+            println!("  Found {} block records", blocked_accounts.len());
+
+            // Resolve DIDs to handles
+            let dids: Vec<String> = blocked_accounts.iter().map(|b| b.subject.clone()).collect();
+            let resolved =
+                charcoal::bluesky::profiles::resolve_dids_to_handles(&client, &dids).await?;
+
+            // Set up scoring
+            let protected_fingerprint = load_fingerprint(&conn)?;
+            let scorer = create_scorer(&config)?;
+            let weights = charcoal::scoring::threat::ThreatWeights::default();
+            let (embedder, protected_embedding) = load_embedder(&config, &conn);
+
+            println!(
+                "\n{}",
+                "=== Validation: Scoring Blocked Accounts ===".bold()
+            );
+            println!(
+                "{}",
+                "These are accounts you manually blocked. The pipeline should flag them.\n"
+                    .dimmed()
+            );
+
+            // Header
+            println!(
+                "  {:<4} {:<36} {:>6} {:>8} {:>8}  Tier",
+                "#", "Handle", "Score", "Tox", "Overlap"
+            );
+            println!("  {}", "-".repeat(80));
+
+            let mut scored_count = 0;
+            let mut watch_plus = 0;
+
+            for (i, block) in blocked_accounts.iter().enumerate() {
+                let handle = resolved
+                    .get(&block.subject)
+                    .cloned()
+                    .unwrap_or_else(|| block.subject.clone());
+
+                let blocked_date = &block.created_at[..10]; // YYYY-MM-DD
+
+                match charcoal::scoring::profile::build_profile(
+                    &client,
+                    scorer.as_ref(),
+                    &handle,
+                    &block.subject,
+                    &protected_fingerprint,
+                    &weights,
+                    embedder.as_ref(),
+                    protected_embedding.as_deref(),
+                )
+                .await
+                {
+                    Ok(score) => {
+                        let tier_str = score.threat_tier.as_deref().unwrap_or("?");
+                        let threat = score.threat_score.unwrap_or(0.0);
+                        let tox = score.toxicity_score.unwrap_or(0.0);
+                        let overlap = score.topic_overlap.unwrap_or(0.0);
+
+                        // Color the tier
+                        let tier_colored = match tier_str {
+                            "High" => tier_str.red().bold().to_string(),
+                            "Elevated" => tier_str.yellow().bold().to_string(),
+                            "Watch" => tier_str.yellow().to_string(),
+                            _ => tier_str.dimmed().to_string(),
+                        };
+
+                        println!(
+                            "  {:<4} {:<36} {:>6.1} {:>8.3} {:>8.2}  {}  (blocked {})",
+                            format!("{}.", i + 1),
+                            format!("@{handle}"),
+                            threat,
+                            tox,
+                            overlap,
+                            tier_colored,
+                            blocked_date,
+                        );
+
+                        // Show top toxic post as evidence if score is notable
+                        if threat >= 8.0 {
+                            if let Some(top) = score.top_toxic_posts.first() {
+                                let preview = charcoal::output::truncate_chars(&top.text, 100);
+                                println!(
+                                    "        {} \"{}\"",
+                                    format!("[tox: {:.2}]", top.toxicity).dimmed(),
+                                    preview.dimmed(),
+                                );
+                            }
+                        }
+
+                        if tier_str == "Watch" || tier_str == "Elevated" || tier_str == "High" {
+                            watch_plus += 1;
+                        }
+
+                        // Store in DB too
+                        charcoal::db::queries::upsert_account_score(&conn, &score)?;
+                        scored_count += 1;
+                    }
+                    Err(e) => {
+                        println!(
+                            "  {:<4} {:<36} {}  (blocked {})",
+                            format!("{}.", i + 1),
+                            format!("@{handle}"),
+                            format!("Error: {e}").red(),
+                            blocked_date,
+                        );
+                    }
+                }
+            }
+
+            println!("\n{}", "=== Validation Summary ===".bold());
+            println!("  Blocked accounts scored: {scored_count}");
+            println!("  Watch or higher:         {watch_plus}");
+            let detection_rate = if scored_count > 0 {
+                (watch_plus as f64 / scored_count as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!("  Detection rate:          {detection_rate:.0}%");
+
+            if detection_rate >= 50.0 {
+                println!(
+                    "\n  {}",
+                    "Pipeline is catching a majority of manually-blocked accounts.".green()
+                );
+            } else if detection_rate > 0.0 {
+                println!(
+                    "\n  {}",
+                    "Pipeline is catching some blocked accounts. Review the Low-tier ones —"
+                        .yellow()
+                );
+                println!(
+                    "  {}",
+                    "they may be blocked for reasons outside Charcoal's model (e.g. spam, DMs)."
+                        .yellow()
+                );
+            } else {
+                println!(
+                    "\n  {}",
+                    "No blocked accounts scored Watch+. This could mean:".yellow()
+                );
+                println!(
+                    "  {}",
+                    "  - Blocked accounts are inactive or have few posts".yellow()
+                );
+                println!(
+                    "  {}",
+                    "  - Blocks were for reasons outside the toxicity model".yellow()
+                );
+                println!("  {}", "  - Scoring thresholds may need tuning".yellow());
+            }
         }
 
         Commands::Status => {
@@ -505,18 +678,18 @@ fn load_embedder(
 /// Query the Constellation backlink index for amplification events.
 ///
 /// Fetches the protected user's recent post URIs, then queries Constellation
-/// for quotes and reposts of those posts. This catches events that notification
-/// polling misses (e.g. from blocked/muted accounts).
+/// for quotes and reposts of those posts. Resolves DIDs to handles for display
+/// and scoring pipeline compatibility.
 async fn fetch_constellation_events(
-    agent: &bsky_sdk::BskyAgent,
+    client: &charcoal::bluesky::client::PublicAtpClient,
     config: &config::Config,
-) -> Result<Vec<charcoal::bluesky::notifications::AmplificationNotification>> {
-    let client =
+) -> Result<Vec<charcoal::bluesky::amplification::AmplificationNotification>> {
+    let constellation =
         charcoal::constellation::client::ConstellationClient::new(&config.constellation_url)?;
 
     // Fetch the protected user's recent post URIs to query against
     let posts =
-        charcoal::bluesky::posts::fetch_recent_posts(agent, &config.bluesky_handle, 50).await?;
+        charcoal::bluesky::posts::fetch_recent_posts(client, &config.bluesky_handle, 50).await?;
 
     let post_uris: Vec<String> = posts.iter().map(|p| p.uri.clone()).collect();
     info!(
@@ -524,7 +697,7 @@ async fn fetch_constellation_events(
         "Querying Constellation for backlinks"
     );
 
-    let mut events = client.find_amplification_events(&post_uris).await;
+    let mut events = constellation.find_amplification_events(&post_uris).await;
 
     // Resolve DIDs to human-readable handles. Constellation only returns DIDs,
     // but the scoring pipeline needs handles for follower lookups and display.
@@ -535,7 +708,7 @@ async fn fetch_constellation_events(
         .collect();
 
     if !dids.is_empty() {
-        match charcoal::bluesky::profiles::resolve_dids_to_handles(agent, &dids).await {
+        match charcoal::bluesky::profiles::resolve_dids_to_handles(client, &dids).await {
             Ok(resolved) => {
                 for event in &mut events {
                     if let Some(handle) = resolved.get(&event.amplifier_did) {
@@ -553,6 +726,10 @@ async fn fetch_constellation_events(
             }
         }
     }
+
+    // Deduplicate events by amplifier_post_uri
+    let mut seen = HashSet::new();
+    events.retain(|e| seen.insert(e.amplifier_post_uri.clone()));
 
     Ok(events)
 }

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use tracing::{debug, warn};
 
-use crate::bluesky::notifications::AmplificationNotification;
+use crate::bluesky::amplification::AmplificationNotification;
 
 /// A single backlink record from the Constellation API.
 #[derive(Debug, Clone, Deserialize)]

@@ -2,8 +2,8 @@
 //
 // This is the main threat detection workflow (Mode 1). When someone quotes
 // or reposts the protected user's content, this pipeline:
-// 1. Detects the event via notification polling
-// 2. Records it in the database
+// 1. Receives events from Constellation backlink queries
+// 2. Records them in the database
 // 3. Fetches the amplifier's follower list
 // 4. Scores each follower for toxicity and topic overlap
 // 5. Stores the results for the threat report
@@ -13,12 +13,12 @@ use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::Connection;
-use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
 use tracing::{info, warn};
 
+use crate::bluesky::amplification::AmplificationNotification;
+use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
-use crate::bluesky::notifications;
 use crate::bluesky::posts;
 use crate::db::queries;
 use crate::scoring::profile;
@@ -27,16 +27,14 @@ use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::traits::ToxicityScorer;
 
-use bsky_sdk::BskyAgent;
-
 /// Run the amplification detection pipeline.
 ///
-/// Polls for new quote/repost events, fetches amplifier followers,
-/// and scores them. Returns the number of new events detected and
-/// accounts scored.
+/// Processes pre-fetched amplification events (from Constellation backlinks),
+/// fetches amplifier followers, and scores them. Returns the number of events
+/// processed and accounts scored.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    agent: &BskyAgent,
+    client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
     conn: &Connection,
     protected_fingerprint: &TopicFingerprint,
@@ -47,46 +45,12 @@ pub async fn run(
     concurrency: usize,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
-    supplementary_events: Vec<notifications::AmplificationNotification>,
+    events: Vec<AmplificationNotification>,
 ) -> Result<(usize, usize)> {
-    // Get the stored cursor from the last scan
-    let last_cursor = queries::get_scan_state(conn, "notifications_cursor")?;
-
-    // Fetch new amplification events from notifications
-    let (mut events, new_cursor) =
-        notifications::fetch_amplification_events(agent, last_cursor.as_deref()).await?;
-
     info!(
-        notification_events = events.len(),
-        "Notification scan complete"
+        total_events = events.len(),
+        "Processing amplification events"
     );
-
-    // Merge supplementary events (e.g. from Constellation), deduplicating
-    // by amplifier_post_uri so the same event isn't processed twice
-    if !supplementary_events.is_empty() {
-        let existing_uris: HashSet<String> = events
-            .iter()
-            .map(|e| e.amplifier_post_uri.clone())
-            .collect();
-        let mut added = 0usize;
-        for event in supplementary_events {
-            if !existing_uris.contains(&event.amplifier_post_uri) {
-                events.push(event);
-                added += 1;
-            }
-        }
-        info!(
-            supplementary_added = added,
-            "Merged supplementary amplification events"
-        );
-    }
-
-    info!(total_events = events.len(), "Amplification scan complete");
-
-    // Store the new cursor for next time
-    if let Some(ref cursor) = new_cursor {
-        queries::set_scan_state(conn, "notifications_cursor", cursor)?;
-    }
 
     // Record the scan timestamp
     queries::set_scan_state(
@@ -102,7 +66,7 @@ pub async fn run(
 
         // For quote events, fetch the quote post text and score it
         if event.event_type == "quote" && analyze_followers {
-            match posts::fetch_post_text(agent, &event.amplifier_post_uri).await {
+            match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {
                     // Score the quote text for toxicity
                     match scorer.score_text(&text).await {
@@ -182,7 +146,7 @@ pub async fn run(
             println!("\nFetching followers of @{}...", event.amplifier_handle);
 
             match followers::fetch_followers(
-                agent,
+                client,
                 &event.amplifier_handle,
                 max_followers_per_amplifier,
             )
@@ -221,7 +185,7 @@ pub async fn run(
                         let handle_for_panic = follower.handle.clone();
                         async move {
                             AssertUnwindSafe(profile::build_profile(
-                                agent,
+                                client,
                                 scorer,
                                 &follower.handle,
                                 &follower.did,

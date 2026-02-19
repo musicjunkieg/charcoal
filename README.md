@@ -41,10 +41,13 @@ cp .env.example .env
 
 You need:
 - **BLUESKY_HANDLE** — your Bluesky handle (e.g. `yourname.bsky.social`)
-- **BLUESKY_APP_PASSWORD** — generate one at Settings > App Passwords on Bluesky
+
+No app password or authentication is needed — Charcoal uses the public AT
+Protocol API for all read operations.
 
 Optional settings (see `.env.example` for details):
-- `BLUESKY_PDS_URL` — custom PDS endpoint if not on bsky.social
+- `PUBLIC_API_URL` — custom public API endpoint (default: `https://public.api.bsky.app`)
+- `CONSTELLATION_URL` — Constellation backlink index URL
 - `CHARCOAL_SCORER` — toxicity backend: `onnx` (default) or `perspective`
 - `CHARCOAL_MODEL_DIR` — custom path for ONNX model files
 - `CHARCOAL_DB_PATH` — custom path for the SQLite database
@@ -86,7 +89,7 @@ cargo run -- scan --analyze
 ```
 
 This is the main pipeline:
-1. Polls for new quote/repost events on your posts
+1. Queries the Constellation backlink index for quote/repost events on your posts
 2. Fetches the follower list of each amplifier
 3. Scores each follower for toxicity and topic overlap
 4. Stores results in the database
@@ -169,7 +172,7 @@ src/
   config.rs         Environment-based configuration
   lib.rs            Library root
 
-  bluesky/          AT Protocol client, post fetching, notifications
+  bluesky/          Public AT Protocol client, post fetching, amplification types
   topics/           TF-IDF topic extraction and fingerprinting
   toxicity/         Scorer trait + ONNX and Perspective backends
   scoring/          Profile building and threat score computation
@@ -184,7 +187,7 @@ src/
 # First-time setup: install git hooks (enforces fmt + clippy + tests)
 ./scripts/install-hooks.sh
 
-cargo test --all-targets  # Run all 109 tests (unit + integration)
+cargo test --all-targets  # Run all 139 tests (unit + integration)
 cargo clippy              # Lint
 cargo run -- status       # Quick smoke test
 ```

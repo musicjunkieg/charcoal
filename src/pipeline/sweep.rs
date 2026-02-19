@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
 use tracing::{info, warn};
 
+use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
 use crate::db::queries;
 use crate::scoring::profile;
@@ -26,15 +27,13 @@ use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::traits::ToxicityScorer;
 
-use bsky_sdk::BskyAgent;
-
 /// Run the background sweep pipeline.
 ///
 /// Scans followers-of-followers of the protected user, filtered by topic
 /// overlap. Returns the number of second-degree accounts found and scored.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    agent: &BskyAgent,
+    client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
     conn: &Connection,
     protected_handle: &str,
@@ -49,7 +48,7 @@ pub async fn run(
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
     let first_degree =
-        followers::fetch_followers(agent, protected_handle, max_first_degree).await?;
+        followers::fetch_followers(client, protected_handle, max_first_degree).await?;
     info!(count = first_degree.len(), "First-degree followers fetched");
 
     // Step 2: Fetch second-degree followers (followers of your followers)
@@ -76,7 +75,7 @@ pub async fn run(
     );
 
     for follower in &first_degree {
-        match followers::fetch_followers(agent, &follower.handle, max_second_degree_per).await {
+        match followers::fetch_followers(client, &follower.handle, max_second_degree_per).await {
             Ok(their_followers) => {
                 for f in their_followers {
                     if seen.insert(f.did.clone()) {
@@ -130,7 +129,7 @@ pub async fn run(
         let handle_for_panic = follower.handle.clone();
         async move {
             AssertUnwindSafe(profile::build_profile(
-                agent,
+                client,
                 scorer,
                 &follower.handle,
                 &follower.did,

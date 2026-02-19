@@ -1,4 +1,4 @@
-// Follower list fetching with pagination.
+// Follower list fetching with pagination via public API.
 //
 // Used to get the follower list of accounts that amplify the protected user's
 // content. Those followers are the exposure surface — people who can now see
@@ -6,8 +6,9 @@
 
 use anyhow::{Context, Result};
 use atrium_api::app::bsky::graph::get_followers;
-use bsky_sdk::BskyAgent;
 use tracing::{debug, info};
+
+use super::client::PublicAtpClient;
 
 /// A simplified follower profile — just the fields Charcoal needs.
 #[derive(Debug, Clone)]
@@ -23,7 +24,7 @@ pub struct Follower {
 /// calls. The `max_followers` parameter caps how many we collect to stay within
 /// reasonable rate limits.
 pub async fn fetch_followers(
-    agent: &BskyAgent,
+    client: &PublicAtpClient,
     handle: &str,
     max_followers: usize,
 ) -> Result<Vec<Follower>> {
@@ -31,25 +32,13 @@ pub async fn fetch_followers(
     let mut cursor: Option<String> = None;
 
     loop {
-        let params = get_followers::ParametersData {
-            actor: handle
-                .parse()
-                .map_err(|e: &str| anyhow::anyhow!("{}", e))
-                .context("Invalid Bluesky handle")?,
-            cursor: cursor.clone(),
-            limit: Some(
-                100u8
-                    .try_into()
-                    .map_err(|e: String| anyhow::anyhow!("{}", e))?,
-            ),
-        };
+        let mut params: Vec<(&str, &str)> = vec![("actor", handle), ("limit", "100")];
+        if let Some(ref c) = cursor {
+            params.push(("cursor", c));
+        }
 
-        let output = agent
-            .api
-            .app
-            .bsky
-            .graph
-            .get_followers(params.into())
+        let output: get_followers::Output = client
+            .xrpc_get("app.bsky.graph.getFollowers", &params)
             .await
             .with_context(|| format!("Failed to fetch followers for @{}", handle))?;
 

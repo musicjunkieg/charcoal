@@ -1,11 +1,10 @@
-// Constellation — supplementary backlink index for AT Protocol.
+// Constellation — primary backlink index for AT Protocol amplification detection.
 //
 // Constellation (constellation.microcosm.blue) indexes all quote-posts and
-// reposts across the AT Protocol network. This catches amplification events
-// that notification polling misses — for example, engagement from blocked/muted
-// accounts, or events that fall between polling intervals.
+// reposts across the AT Protocol network. It catches amplification events
+// including those from blocked/muted accounts and has 1+ years of indexed data.
 //
-// Constellation is supplementary, not a replacement. It runs on a Raspberry Pi
-// with ~6 days of indexed data, so availability and coverage are limited.
+// Constellation is the primary amplification detection source — it replaced
+// notification polling (which required authentication).
 
 pub mod client;
