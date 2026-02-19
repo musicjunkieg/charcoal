@@ -25,6 +25,12 @@ Post-MVP improvements applied:
 - **Constellation-primary**: amplification detection now always uses the
   Constellation backlink index (1+ year of data). Notification polling removed.
   The `--constellation` flag is gone — it's always on.
+- **Behavioral signals** (PR #5): quote ratio, reply ratio, pile-on detection,
+  and engagement metrics feed a Gate + Multiplier Hybrid scoring modifier.
+  Benign gate caps allies at Watch tier (12.0); hostile multiplier boosts
+  threat scores by 1.0–1.5x. Pile-on detection uses 24-hour sliding window
+  with 5+ distinct amplifiers threshold. DB schema v3 stores behavioral
+  signals as JSON on `account_scores`.
 - Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2, 384-dim)
 - Multiplicative threat scoring: `tox * 70 * (1 + overlap * 1.5)` — overlap
   amplifies toxicity instead of contributing independently, so allies with high
@@ -38,11 +44,11 @@ Post-MVP improvements applied:
 - ONNX inference offloaded to `spawn_blocking` (keeps async runtime responsive)
 - Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
 - Batch DID→handle resolution via `app.bsky.actor.getProfiles`
-
 - Validate command: scores blocked accounts via PDS repo access to verify
   pipeline accuracy (resolves DIDs via plc.directory, discovers PDS endpoints)
+- DB migrations run automatically on `db::open()` (not just `charcoal init`)
 
-139 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
+178 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
 `scan`, `sweep`, `score`, `report`, `status`, `validate`.
 
 ### External contributions
@@ -114,12 +120,15 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 139 tests across four categories:
+The project has 178 tests across five categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
 - **Topic tests** (`tests/unit_topics.rs`) — cosine similarity, keyword
   weights, TF-IDF invariants, edge cases
+- **Behavioral tests** (`tests/unit_behavioral.rs`) — boost computation,
+  benign gate, quote/reply ratios, pile-on detection, real-world persona
+  scenarios (quote-dunker, supportive ally, pile-on participant, etc.)
 - **Composition tests** (`tests/composition.rs`) — end-to-end pipelines
   (TF-IDF → fingerprint → overlap → score → tier), report generation,
   ally/hostile/irrelevant account scenarios
