@@ -11,14 +11,20 @@ requirements and README.md for usage instructions.
 
 The MVP is functional. All 7 implementation phases are complete:
 1. Project skeleton, config, and database
-2. Bluesky auth + post fetching
+2. Public AT Protocol API client (unauthenticated, read-only)
 3. Topic fingerprint with TF-IDF
 4. Toxicity scoring (ONNX local model, Perspective API fallback)
-5. Amplification detection pipeline
+5. Amplification detection pipeline (Constellation-primary)
 6. Profile scoring and threat tiers
 7. Reports, markdown output, and polish
 
 Post-MVP improvements applied:
+- **Public API refactor**: removed `bsky-sdk` and authentication — all read
+  operations use the public AT Protocol API via `PublicAtpClient` (reqwest).
+  Only `BLUESKY_HANDLE` needed, no app password required.
+- **Constellation-primary**: amplification detection now always uses the
+  Constellation backlink index (1+ year of data). Notification polling removed.
+  The `--constellation` flag is gone — it's always on.
 - Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2, 384-dim)
 - Multiplicative threat scoring: `tox * 70 * (1 + overlap * 1.5)` — overlap
   amplifies toxicity instead of contributing independently, so allies with high
@@ -31,8 +37,6 @@ Post-MVP improvements applied:
 - LazyLock regex compilation (avoids redundant compilations in TF-IDF)
 - ONNX inference offloaded to `spawn_blocking` (keeps async runtime responsive)
 - Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
-- Constellation backlink index integration (`--constellation` flag on scan)
-  catches amplification events the notification API misses (~19% more events)
 - Batch DID→handle resolution via `app.bsky.actor.getProfiles`
 
 139 tests passing, clippy clean, all CLI commands wired and tested end-to-end.
@@ -106,7 +110,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 132 tests across three categories:
+The project has 139 tests across four categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
@@ -176,11 +180,12 @@ paint us into a corner that makes the future version harder to build.
 
 ## Key external services
 
-### Bluesky / AT Protocol API
-- Used for fetching posts, followers, and detecting amplification events
+### Bluesky / AT Protocol API (public, no auth)
+- Used for fetching posts, followers, and resolving DIDs to handles
+- All read endpoints are public — no authentication needed
 - Docs: https://docs.bsky.app/
-- Authentication via app password (provided as env var)
-- Crates: `bsky-sdk` 0.1.23, `atrium-api` 0.25.7
+- Public API endpoint: `https://public.api.bsky.app`
+- Crate: `atrium-api` 0.25.7 (response types only), `reqwest` (HTTP client)
 
 ### ONNX models (local, no API keys needed)
 - **Toxicity**: Detoxify `unbiased-toxic-roberta` (~126 MB) — 7 toxicity categories,
@@ -191,15 +196,16 @@ paint us into a corner that makes the future version harder to build.
 - Download both with `charcoal download-model` (one-time, ~216 MB total)
 - See `docs/toxicity-alternatives-report.md` for the toxicity model evaluation
 
-### Constellation backlink index (supplementary amplification detection)
-- Catches quotes/reposts the notification API misses (blocked/muted accounts,
-  polling gaps) — found ~19% more events in testing
+### Constellation backlink index (primary amplification detection)
+- Primary source for detecting quotes/reposts of the protected user's content
+- Indexes all AT Protocol amplification events — 1+ year of data
+- Catches engagement from blocked/muted accounts that other methods miss
 - API: `GET /xrpc/blue.microcosm.links.getBacklinks` with `subject` (AT-URI)
   and `source` (`collection:json_path`, e.g. `app.bsky.feed.post:embed.record.uri`)
-- Public instance at `https://constellation.microcosm.blue` (Raspberry Pi, ~6 days indexed)
+- Public instance at `https://constellation.microcosm.blue`
 - No auth required, no published Rust client crate — hand-rolled reqwest client
 - Set `CONSTELLATION_URL` env var to override the default instance
-- Enabled via `charcoal scan --constellation`
+- Always-on — no flag needed (replaced the old `--constellation` opt-in)
 
 ### Google Perspective API (fallback scorer)
 - Optional fallback, enabled with `CHARCOAL_SCORER=perspective`

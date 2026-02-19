@@ -75,7 +75,7 @@ fn at_uri_construction_repost() {
 
 #[test]
 fn dedup_by_amplifier_post_uri() {
-    use charcoal::bluesky::notifications::AmplificationNotification;
+    use charcoal::bluesky::amplification::AmplificationNotification;
     use std::collections::HashSet;
 
     let events_a = vec![

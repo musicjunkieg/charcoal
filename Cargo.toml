@@ -11,11 +11,10 @@ clap = { version = "4", features = ["derive"] }
 # Async runtime (required by bsky-sdk)
 tokio = { version = "1", features = ["full"] }
 
-# Bluesky / AT Protocol
-bsky-sdk = "0.1.23"
+# AT Protocol response types (for deserializing public API responses)
 atrium-api = "0.25.7"
 
-# HTTP client (for Perspective API; already a transitive dep of bsky-sdk)
+# HTTP client (for public AT Protocol API, Constellation, and Perspective API)
 reqwest = { version = "0.12", features = ["json"] }
 
 # Database

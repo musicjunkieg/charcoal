@@ -11,6 +11,7 @@
 use anyhow::Result;
 use tracing::info;
 
+use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, Post};
 use crate::db::models::{AccountScore, ToxicPost};
 use crate::scoring::threat::{self, ThreatWeights};
@@ -20,8 +21,6 @@ use crate::topics::overlap;
 use crate::topics::tfidf::TfIdfExtractor;
 use crate::topics::traits::TopicExtractor;
 use crate::toxicity::traits::{ToxicityResult, ToxicityScorer};
-
-use bsky_sdk::BskyAgent;
 
 /// Build a complete threat profile for a single account.
 ///
@@ -34,7 +33,7 @@ use bsky_sdk::BskyAgent;
 /// falls back to TF-IDF keyword cosine similarity.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_profile(
-    agent: &BskyAgent,
+    client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
     target_handle: &str,
     target_did: &str,
@@ -44,7 +43,7 @@ pub async fn build_profile(
     protected_embedding: Option<&[f64]>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
-    let target_posts = posts::fetch_recent_posts(agent, target_handle, 50).await?;
+    let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
 
     if target_posts.len() < 5 {
         info!(

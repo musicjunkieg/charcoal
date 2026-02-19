@@ -1,4 +1,4 @@
-// Post fetching — paginated author feed retrieval.
+// Post fetching — paginated author feed retrieval via public API.
 //
 // Fetches a user's recent posts from Bluesky. Used both for building the
 // protected user's topic fingerprint (Step 0) and for analyzing target
@@ -7,8 +7,9 @@
 use anyhow::{Context, Result};
 use atrium_api::app::bsky::feed::{get_author_feed, get_posts};
 use atrium_api::types::TryFromUnknown;
-use bsky_sdk::BskyAgent;
 use tracing::{debug, info};
+
+use super::client::PublicAtpClient;
 
 /// A simplified post — just the fields Charcoal needs for analysis.
 #[derive(Debug, Clone)]
@@ -27,7 +28,7 @@ pub struct Post {
 /// page). Posts are returned newest-first. Reposts by others that appear in the
 /// feed are filtered out — we only want original posts by the account.
 pub async fn fetch_recent_posts(
-    agent: &BskyAgent,
+    client: &PublicAtpClient,
     handle: &str,
     max_posts: usize,
 ) -> Result<Vec<Post>> {
@@ -35,34 +36,20 @@ pub async fn fetch_recent_posts(
     let mut cursor: Option<String> = None;
 
     // How many to request per page (API max is 100).
-    // Clamp as usize first, then convert — avoids silent u8 truncation
-    // when max_posts > 255 (e.g. 256 as u8 wraps to 0).
-    let page_size: u8 = max_posts.min(100) as u8;
+    let page_size = max_posts.min(100).to_string();
 
     loop {
-        let params = get_author_feed::ParametersData {
-            actor: handle
-                .parse()
-                .map_err(|e: &str| anyhow::anyhow!("{}", e))
-                .context("Invalid Bluesky handle")?,
-            cursor: cursor.clone(),
-            // "posts_no_replies" filters out reply posts — we want original posts
-            // and quote posts for topic/toxicity analysis
-            filter: Some("posts_no_replies".to_string()),
-            include_pins: None,
-            limit: Some(
-                page_size
-                    .try_into()
-                    .map_err(|e: String| anyhow::anyhow!("{}", e))?,
-            ),
-        };
+        let mut params: Vec<(&str, &str)> = vec![
+            ("actor", handle),
+            ("filter", "posts_no_replies"),
+            ("limit", &page_size),
+        ];
+        if let Some(ref c) = cursor {
+            params.push(("cursor", c));
+        }
 
-        let output = agent
-            .api
-            .app
-            .bsky
-            .feed
-            .get_author_feed(params.into())
+        let output: get_author_feed::Output = client
+            .xrpc_get("app.bsky.feed.getAuthorFeed", &params)
             .await
             .with_context(|| format!("Failed to fetch feed for @{}", handle))?;
 
@@ -133,19 +120,11 @@ pub async fn fetch_recent_posts(
 
 /// Fetch a single post's text by its AT URI.
 ///
-/// Used to retrieve quote-post text for amplification events. The notification
-/// gives us the URI but not the post content — this fills that gap.
-pub async fn fetch_post_text(agent: &BskyAgent, uri: &str) -> Result<Option<String>> {
-    let params = get_posts::ParametersData {
-        uris: vec![uri.to_string()],
-    };
-
-    let output = agent
-        .api
-        .app
-        .bsky
-        .feed
-        .get_posts(params.into())
+/// Used to retrieve quote-post text for amplification events. The Constellation
+/// backlink gives us the URI but not the post content — this fills that gap.
+pub async fn fetch_post_text(client: &PublicAtpClient, uri: &str) -> Result<Option<String>> {
+    let output: get_posts::Output = client
+        .xrpc_get("app.bsky.feed.getPosts", &[("uris", uri)])
         .await
         .context("Failed to fetch post by URI")?;
 
