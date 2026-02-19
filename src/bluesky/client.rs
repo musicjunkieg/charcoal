@@ -77,10 +77,7 @@ impl PublicAtpClient {
     /// Resolve a handle to its DID via the public API.
     pub async fn resolve_handle(&self, handle: &str) -> Result<String> {
         let resp: ResolveHandleResponse = self
-            .xrpc_get(
-                "com.atproto.identity.resolveHandle",
-                &[("handle", handle)],
-            )
+            .xrpc_get("com.atproto.identity.resolveHandle", &[("handle", handle)])
             .await
             .with_context(|| format!("Failed to resolve handle @{handle}"))?;
         Ok(resp.did)
