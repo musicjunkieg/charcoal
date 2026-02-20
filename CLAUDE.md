@@ -284,3 +284,14 @@ paint us into a corner that makes the future version harder to build.
 **ALWAYS stage files explicitly by name:**
 - `git add src/main.rs src/lib.rs`
 - `git add Cargo.toml Cargo.lock`
+
+**NEVER use heredoc syntax (`<<EOF` / `<<'EOF'`) in commit commands.**
+Heredocs break in zsh on this system. Use single-quoted multi-line strings
+instead:
+```
+git commit -m 'first line
+
+Body text here.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
+```
