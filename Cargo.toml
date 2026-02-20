@@ -66,12 +66,11 @@ postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:pgvector"]
 
 # PostgreSQL support — split crates avoid the sqlx umbrella's transitive
 # sqlx-sqlite dependency which conflicts with rusqlite's bundled SQLite.
-# pgvector pulls in the sqlx umbrella transitively (needed for runtime
-# features), but only when the postgres feature is active.
+# _rt-tokio activates the tokio runtime in sqlx-core (required for PgPool).
 [dependencies.sqlx-core]
 version = "0.8"
 default-features = false
-features = ["chrono", "json"]
+features = ["chrono", "json", "_rt-tokio"]
 optional = true
 
 [dependencies.sqlx-postgres]
