@@ -5,6 +5,8 @@
 // (defaults to ./charcoal.db).
 
 pub mod models;
+#[cfg(feature = "postgres")]
+pub mod postgres;
 pub mod queries;
 pub mod schema;
 pub mod sqlite;
@@ -75,4 +77,11 @@ pub fn open_sqlite(db_path: &str) -> Result<Arc<dyn Database>> {
 pub fn initialize_sqlite(db_path: &str) -> Result<Arc<dyn Database>> {
     let conn = initialize(db_path)?;
     Ok(Arc::new(sqlite::SqliteDatabase::new(conn)))
+}
+
+/// Connect to PostgreSQL and return it as a trait object.
+#[cfg(feature = "postgres")]
+pub async fn connect_postgres(database_url: &str) -> Result<Arc<dyn Database>> {
+    let db = postgres::PgDatabase::connect(database_url).await?;
+    Ok(Arc::new(db))
 }

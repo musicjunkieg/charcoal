@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
         Commands::Init => {
             info!("Initializing Charcoal database...");
             let config = config::Config::load()?;
-            let db = charcoal::db::initialize_sqlite(&config.db_path)?;
+            let db = init_database(&config).await?;
             let table_count = db.table_count().await?;
             println!("Database initialized at: {}", config.db_path);
             println!("Tables created: {table_count}");
@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
         Commands::Fingerprint { refresh } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
 
             // Check if we already have a fingerprint and it's not being refreshed
             if !refresh {
@@ -208,7 +208,7 @@ async fn main() -> Result<()> {
         } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
 
             println!("Scanning for amplification events...");
 
@@ -285,7 +285,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
 
             println!("Running second-degree network sweep...");
 
@@ -331,7 +331,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
 
             // Strip leading @ if present
             let handle = handle.strip_prefix('@').unwrap_or(&handle);
@@ -381,7 +381,7 @@ async fn main() -> Result<()> {
 
         Commands::Report { min_score } => {
             let config = config::Config::load()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
 
             let threats = db.get_ranked_threats(min_score as f64).await?;
 
@@ -420,7 +420,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
@@ -632,12 +632,53 @@ async fn main() -> Result<()> {
 
         Commands::Status => {
             let config = config::Config::load()?;
-            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            let db = open_database(&config).await?;
             charcoal::status::show(&db, &config.db_path).await?;
         }
     }
 
     Ok(())
+}
+
+/// Select the database backend based on configuration.
+///
+/// When DATABASE_URL is set and points to PostgreSQL, uses the Postgres backend
+/// (requires the `postgres` feature). Otherwise, falls back to SQLite.
+async fn open_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::Database>> {
+    if let Some(ref url) = config.database_url {
+        if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+            #[cfg(feature = "postgres")]
+            {
+                info!("Using PostgreSQL backend");
+                return charcoal::db::connect_postgres(url).await;
+            }
+            #[cfg(not(feature = "postgres"))]
+            anyhow::bail!(
+                "DATABASE_URL points to PostgreSQL but the 'postgres' feature is not compiled in.\n\
+                 Rebuild with: cargo build --features postgres"
+            );
+        }
+    }
+    charcoal::db::open_sqlite(&config.db_path)
+}
+
+/// Initialize the database (create if needed).
+async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::Database>> {
+    if let Some(ref url) = config.database_url {
+        if url.starts_with("postgres://") || url.starts_with("postgresql://") {
+            #[cfg(feature = "postgres")]
+            {
+                info!("Using PostgreSQL backend");
+                return charcoal::db::connect_postgres(url).await;
+            }
+            #[cfg(not(feature = "postgres"))]
+            anyhow::bail!(
+                "DATABASE_URL points to PostgreSQL but the 'postgres' feature is not compiled in.\n\
+                 Rebuild with: cargo build --features postgres"
+            );
+        }
+    }
+    charcoal::db::initialize_sqlite(&config.db_path)
 }
 
 /// Create a toxicity scorer based on the configured backend.

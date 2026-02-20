@@ -58,3 +58,29 @@ indicatif = "0.17"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["sqlite"]
+sqlite = []
+postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:pgvector"]
+
+# PostgreSQL support — split crates avoid the sqlx umbrella's transitive
+# sqlx-sqlite dependency which conflicts with rusqlite's bundled SQLite.
+# pgvector pulls in the sqlx umbrella transitively (needed for runtime
+# features), but only when the postgres feature is active.
+[dependencies.sqlx-core]
+version = "0.8"
+default-features = false
+features = ["chrono", "json"]
+optional = true
+
+[dependencies.sqlx-postgres]
+version = "0.8"
+default-features = false
+features = ["chrono", "json"]
+optional = true
+
+[dependencies.pgvector]
+version = "0.4"
+features = ["sqlx"]
+optional = true
