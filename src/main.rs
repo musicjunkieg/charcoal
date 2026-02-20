@@ -641,7 +641,21 @@ async fn main() -> Result<()> {
         Commands::Status => {
             let config = config::Config::load()?;
             let db = open_database(&config).await?;
-            charcoal::status::show(&db, &config.db_path).await?;
+            // Build a display-friendly identifier. For PostgreSQL, redact the
+            // password from the connection URL before printing it.
+            let db_display = match config.database_url.as_deref() {
+                Some(url) if url.starts_with("postgres://") || url.starts_with("postgresql://") => {
+                    match url.find('@') {
+                        Some(at) => {
+                            let scheme_end = url.find("://").map(|i| i + 3).unwrap_or(0);
+                            format!("{}****@{}", &url[..scheme_end], &url[at + 1..])
+                        }
+                        None => url.to_string(),
+                    }
+                }
+                _ => config.db_path.clone(),
+            };
+            charcoal::status::show(&db, &db_display).await?;
         }
 
         #[cfg(feature = "postgres")]
@@ -690,19 +704,13 @@ async fn main() -> Result<()> {
             }
             println!("  {} {} account scores migrated", "✓".green(), scores.len());
 
-            // 3. Migrate amplification events
-            let events = sqlite_db.get_recent_events(u32::MAX).await?;
+            // 3. Migrate amplification events — preserve original detected_at
+            // timestamps so pile-on detection works correctly after migration.
+            // Use i32::MAX as the limit rather than u32::MAX to avoid an
+            // overflow when the Postgres backend casts the value to i32.
+            let events = sqlite_db.get_recent_events(i32::MAX as u32).await?;
             for event in &events {
-                pg_db
-                    .insert_amplification_event(
-                        &event.event_type,
-                        &event.amplifier_did,
-                        &event.amplifier_handle,
-                        &event.original_post_uri,
-                        event.amplifier_post_uri.as_deref(),
-                        event.amplifier_text.as_deref(),
-                    )
-                    .await?;
+                pg_db.insert_amplification_event_raw(event).await?;
             }
             println!(
                 "  {} {} amplification events migrated",
@@ -710,14 +718,12 @@ async fn main() -> Result<()> {
                 events.len()
             );
 
-            // 4. Migrate scan state
-            let scan_keys = ["notifications_cursor", "last_scan_at"];
-            let mut scan_migrated = 0;
-            for key in scan_keys {
-                if let Some(val) = sqlite_db.get_scan_state(key).await? {
-                    pg_db.set_scan_state(key, &val).await?;
-                    scan_migrated += 1;
-                }
+            // 4. Migrate all scan state keys (not just a hardcoded subset) so
+            // cursors, timestamps, and any future keys transfer automatically.
+            let scan_entries = sqlite_db.get_all_scan_state().await?;
+            let scan_migrated = scan_entries.len();
+            for (key, val) in &scan_entries {
+                pg_db.set_scan_state(key, val).await?;
             }
             if scan_migrated > 0 {
                 println!(

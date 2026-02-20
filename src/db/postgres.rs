@@ -40,8 +40,13 @@ impl PgDatabase {
     }
 
     /// Run all pending migrations.
+    ///
+    /// Migration 1 contains `CREATE EXTENSION` which cannot run inside a
+    /// transaction. All of its DDL uses `IF NOT EXISTS` so it is safe to
+    /// retry if partially applied. Migrations 2+ are wrapped in a transaction
+    /// so the schema change and the schema_version insert are atomic.
     async fn run_migrations(&self) -> Result<()> {
-        // Ensure schema_version table exists
+        // Ensure schema_version table exists (idempotent DDL, no transaction needed)
         sqlx_core::query::query(
             "CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER PRIMARY KEY,
@@ -51,7 +56,6 @@ impl PgDatabase {
         .execute(&self.pool)
         .await?;
 
-        // Run each migration if not already applied
         let migrations = [
             (
                 1,
@@ -78,8 +82,18 @@ impl PgDatabase {
             .unwrap_or(false);
 
             if !applied {
-                // Execute the migration SQL (may contain multiple statements)
-                sqlx_core::raw_sql::raw_sql(sql).execute(&self.pool).await?;
+                if version == 1 {
+                    // Migration 1 contains CREATE EXTENSION which cannot run inside a
+                    // transaction. All statements use IF NOT EXISTS so they are safe
+                    // to retry if the process is interrupted partway through.
+                    sqlx_core::raw_sql::raw_sql(sql).execute(&self.pool).await?;
+                } else {
+                    // Migrations 2+ are wrapped in a transaction so the schema change
+                    // and schema_version insert are committed or rolled back together.
+                    let mut tx = self.pool.begin().await?;
+                    sqlx_core::raw_sql::raw_sql(sql).execute(&mut *tx).await?;
+                    tx.commit().await?;
+                }
             }
         }
 
@@ -263,12 +277,14 @@ impl Database for PgDatabase {
     }
 
     async fn is_score_stale(&self, did: &str, max_age_days: i64) -> Result<bool> {
+        // Use make_interval(days => $2) with a bound i32 instead of string
+        // concatenation — avoids SQL injection risk and type ambiguity.
         let row = sqlx_core::query::query(
-            "SELECT scored_at < NOW() - ($2 || ' days')::interval
+            "SELECT scored_at < NOW() - make_interval(days => $2)
              FROM account_scores WHERE did = $1",
         )
         .bind(did)
-        .bind(max_age_days.to_string())
+        .bind(max_age_days as i32)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -306,6 +322,9 @@ impl Database for PgDatabase {
     }
 
     async fn get_recent_events(&self, limit: u32) -> Result<Vec<AmplificationEvent>> {
+        // Cap at i32::MAX before casting to avoid overflow — PostgreSQL LIMIT
+        // accepts i64 but sqlx binds integers as i32 here. Values above i32::MAX
+        // are effectively unlimited for any realistic dataset.
         let rows = sqlx_core::query::query(
             "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
                     amplifier_post_uri, amplifier_text,
@@ -315,7 +334,7 @@ impl Database for PgDatabase {
              ORDER BY detected_at DESC
              LIMIT $1",
         )
-        .bind(limit as i32)
+        .bind(limit.min(i32::MAX as u32) as i32)
         .fetch_all(&self.pool)
         .await?;
 
@@ -375,5 +394,37 @@ impl Database for PgDatabase {
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<f64, _>(0))
+    }
+
+    async fn get_all_scan_state(&self) -> Result<Vec<(String, String)>> {
+        let rows = sqlx_core::query::query("SELECT key, value FROM scan_state")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)))
+            .collect())
+    }
+
+    async fn insert_amplification_event_raw(&self, event: &AmplificationEvent) -> Result<i64> {
+        // Insert with the original detected_at so migrated events keep their
+        // real timestamps. Pile-on detection depends on accurate timestamps.
+        let row = sqlx_core::query::query(
+            "INSERT INTO amplification_events
+                (event_type, amplifier_did, amplifier_handle, original_post_uri,
+                 amplifier_post_uri, amplifier_text, detected_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+             RETURNING id",
+        )
+        .bind(&event.event_type)
+        .bind(&event.amplifier_did)
+        .bind(&event.amplifier_handle)
+        .bind(&event.original_post_uri)
+        .bind(&event.amplifier_post_uri)
+        .bind(&event.amplifier_text)
+        .bind(&event.detected_at)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
     }
 }

@@ -1,24 +1,38 @@
 // System status display — shows DB stats, fingerprint age, last scan time.
 
 use anyhow::Result;
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::db::Database;
 
 /// Display system status to the terminal.
-pub async fn show(db: &Arc<dyn Database>, db_display_path: &str) -> Result<()> {
-    if !Path::new(db_display_path).exists() {
-        println!("Database: not initialized");
-        println!("\nRun `charcoal init` to set up the database.");
-        return Ok(());
+///
+/// `db_display` is the human-readable database identifier — either a file path
+/// (for SQLite) or a redacted connection URL (for PostgreSQL). The caller is
+/// responsible for redacting credentials before passing the URL.
+pub async fn show(db: &Arc<dyn Database>, db_display: &str) -> Result<()> {
+    // Probe the database to detect initialization state. A table_count of 0
+    // means the schema hasn't been applied yet. An error means the database
+    // can't be reached at all. Both are treated as "not initialized".
+    match db.table_count().await {
+        Ok(n) if n > 0 => {}
+        _ => {
+            println!("Database: not initialized");
+            println!("\nRun `charcoal init` to set up the database.");
+            return Ok(());
+        }
     }
 
-    // Database file size
-    let file_size = std::fs::metadata(db_display_path)
-        .map(|m| format_bytes(m.len()))
-        .unwrap_or_else(|_| "unknown".to_string());
-    println!("Database: {} ({})", db_display_path, file_size);
+    // For SQLite, show the file path and size. For PostgreSQL (URL), just show
+    // the connection target — there's no local file to stat.
+    if db_display.starts_with("postgres://") || db_display.starts_with("postgresql://") {
+        println!("Database: {db_display}");
+    } else {
+        let file_size = std::fs::metadata(db_display)
+            .map(|m| format_bytes(m.len()))
+            .unwrap_or_else(|_| "unknown".to_string());
+        println!("Database: {} ({})", db_display, file_size);
+    }
 
     // Fingerprint status
     match db.get_fingerprint().await? {

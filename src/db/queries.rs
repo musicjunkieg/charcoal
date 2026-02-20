@@ -17,6 +17,17 @@ pub fn get_scan_state(conn: &Connection, key: &str) -> Result<Option<String>> {
     Ok(result)
 }
 
+/// Get all scan state key-value pairs.
+pub fn get_all_scan_state(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT key, value FROM scan_state")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row?);
+    }
+    Ok(result)
+}
+
 /// Set a scan state value (upsert).
 pub fn set_scan_state(conn: &Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
@@ -171,6 +182,30 @@ pub fn is_score_stale(conn: &Connection, did: &str, max_age_days: i64) -> Result
 }
 
 // --- Amplification events ---
+
+/// Insert an amplification event with an explicit detected_at timestamp.
+/// Used by the migrate command to preserve original event timestamps.
+pub fn insert_amplification_event_with_detected_at(
+    conn: &Connection,
+    event: &super::models::AmplificationEvent,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO amplification_events
+            (event_type, amplifier_did, amplifier_handle, original_post_uri,
+             amplifier_post_uri, amplifier_text, detected_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            event.event_type,
+            event.amplifier_did,
+            event.amplifier_handle,
+            event.original_post_uri,
+            event.amplifier_post_uri,
+            event.amplifier_text,
+            event.detected_at,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
 
 /// Record a new amplification event.
 pub fn insert_amplification_event(

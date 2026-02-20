@@ -28,6 +28,10 @@ pub trait Database: Send + Sync {
     /// Set a scan state value (upsert).
     async fn set_scan_state(&self, key: &str, value: &str) -> Result<()>;
 
+    /// Get all scan state key-value pairs. Used by the migration command to
+    /// transfer all keys without a hardcoded list.
+    async fn get_all_scan_state(&self) -> Result<Vec<(String, String)>>;
+
     // --- Topic fingerprint ---
 
     /// Store the topic fingerprint (singleton row).
@@ -72,6 +76,11 @@ pub trait Database: Send + Sync {
     /// Get amplification events for pile-on detection.
     /// Returns (amplifier_did, original_post_uri, detected_at) tuples.
     async fn get_events_for_pile_on(&self) -> Result<Vec<(String, String, String)>>;
+
+    /// Insert an amplification event preserving its original detected_at timestamp.
+    /// Used only by the migrate command so historical events keep their real timestamps
+    /// instead of all being stamped with NOW().
+    async fn insert_amplification_event_raw(&self, event: &AmplificationEvent) -> Result<i64>;
 
     // --- Behavioral context ---
 

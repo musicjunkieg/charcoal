@@ -46,6 +46,11 @@ impl Database for SqliteDatabase {
         super::queries::set_scan_state(&conn, key, value)
     }
 
+    async fn get_all_scan_state(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_all_scan_state(&conn)
+    }
+
     async fn save_fingerprint(&self, fingerprint_json: &str, post_count: u32) -> Result<()> {
         let conn = self.conn.lock().await;
         super::queries::save_fingerprint(&conn, fingerprint_json, post_count)
@@ -116,6 +121,14 @@ impl Database for SqliteDatabase {
     async fn get_median_engagement(&self) -> Result<f64> {
         let conn = self.conn.lock().await;
         super::queries::get_median_engagement(&conn)
+    }
+
+    async fn insert_amplification_event_raw(
+        &self,
+        event: &super::models::AmplificationEvent,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::insert_amplification_event_with_detected_at(&conn, event)
     }
 }
 
