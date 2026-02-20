@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 mod config;
@@ -105,8 +106,8 @@ async fn main() -> Result<()> {
         Commands::Init => {
             info!("Initializing Charcoal database...");
             let config = config::Config::load()?;
-            let conn = charcoal::db::initialize(&config.db_path)?;
-            let table_count = charcoal::db::schema::table_count(&conn)?;
+            let db = charcoal::db::initialize_sqlite(&config.db_path)?;
+            let table_count = db.table_count().await?;
             println!("Database initialized at: {}", config.db_path);
             println!("Tables created: {table_count}");
             println!("\nCharcoal is ready. Next step: set up your .env file");
@@ -117,13 +118,11 @@ async fn main() -> Result<()> {
         Commands::Fingerprint { refresh } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
-            let conn = charcoal::db::open(&config.db_path)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
 
             // Check if we already have a fingerprint and it's not being refreshed
             if !refresh {
-                if let Some((json, _post_count, updated_at)) =
-                    charcoal::db::queries::get_fingerprint(&conn)?
-                {
+                if let Some((json, _post_count, updated_at)) = db.get_fingerprint().await? {
                     println!("Loading cached fingerprint (built {updated_at})...");
                     let fingerprint: charcoal::topics::fingerprint::TopicFingerprint =
                         serde_json::from_str(&json)?;
@@ -159,7 +158,7 @@ async fn main() -> Result<()> {
 
             // Cache in the database
             let json = serde_json::to_string(&fingerprint)?;
-            charcoal::db::queries::save_fingerprint(&conn, &json, fingerprint.post_count)?;
+            db.save_fingerprint(&json, fingerprint.post_count).await?;
 
             // Compute and store the mean sentence embedding for semantic overlap.
             // This is optional — if the embedding model isn't downloaded yet, we
@@ -170,8 +169,7 @@ async fn main() -> Result<()> {
                 let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
                 let post_embeddings = embedder.embed_batch(&post_texts).await?;
                 let mean_emb = charcoal::topics::embeddings::mean_embedding(&post_embeddings);
-                let emb_json = serde_json::to_string(&mean_emb)?;
-                charcoal::db::queries::save_embedding(&conn, &emb_json)?;
+                db.save_embedding(&mean_emb).await?;
                 println!(
                     "  Embedding computed ({} posts → {}-dim vector)",
                     post_texts.len(),
@@ -210,14 +208,14 @@ async fn main() -> Result<()> {
         } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
-            let conn = charcoal::db::open(&config.db_path)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
 
             println!("Scanning for amplification events...");
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             // Load the protected user's fingerprint (needed for scoring)
-            let protected_fingerprint = load_fingerprint(&conn)?;
+            let protected_fingerprint = load_fingerprint(&db).await?;
 
             // Create the toxicity scorer if we'll be analyzing
             let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
@@ -228,11 +226,11 @@ async fn main() -> Result<()> {
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &conn);
+            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
 
             // Compute behavioral context for scoring
-            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
-            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let median_engagement = db.get_median_engagement().await?;
+            let pile_on_events = db.get_events_for_pile_on().await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -257,7 +255,7 @@ async fn main() -> Result<()> {
             let (event_count, scored) = charcoal::pipeline::amplification::run(
                 &client,
                 scorer.as_ref(),
-                &conn,
+                &db,
                 &protected_fingerprint,
                 &weights,
                 &config.bluesky_handle,
@@ -287,19 +285,19 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
-            let conn = charcoal::db::open(&config.db_path)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
 
             println!("Running second-degree network sweep...");
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
-            let protected_fingerprint = load_fingerprint(&conn)?;
+            let protected_fingerprint = load_fingerprint(&db).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &conn);
+            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
 
-            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
-            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let median_engagement = db.get_median_engagement().await?;
+            let pile_on_events = db.get_events_for_pile_on().await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -310,7 +308,7 @@ async fn main() -> Result<()> {
             let (pool_size, scored) = charcoal::pipeline::sweep::run(
                 &client,
                 scorer.as_ref(),
-                &conn,
+                &db,
                 &config.bluesky_handle,
                 &protected_fingerprint,
                 &weights,
@@ -333,7 +331,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
-            let conn = charcoal::db::open(&config.db_path)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
 
             // Strip leading @ if present
             let handle = handle.strip_prefix('@').unwrap_or(&handle);
@@ -343,16 +341,16 @@ async fn main() -> Result<()> {
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             // Load the protected user's fingerprint
-            let protected_fingerprint = load_fingerprint(&conn)?;
+            let protected_fingerprint = load_fingerprint(&db).await?;
 
             // Create the toxicity scorer based on configured backend
             let scorer = create_scorer(&config)?;
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &conn);
+            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
 
-            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
-            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let median_engagement = db.get_median_engagement().await?;
+            let pile_on_events = db.get_events_for_pile_on().await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -378,14 +376,14 @@ async fn main() -> Result<()> {
             charcoal::output::terminal::display_account_detail(&score);
 
             // Store in database
-            charcoal::db::queries::upsert_account_score(&conn, &score)?;
+            db.upsert_account_score(&score).await?;
         }
 
         Commands::Report { min_score } => {
             let config = config::Config::load()?;
-            let conn = charcoal::db::open(&config.db_path)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
 
-            let threats = charcoal::db::queries::get_ranked_threats(&conn, min_score as f64)?;
+            let threats = db.get_ranked_threats(min_score as f64).await?;
 
             if threats.is_empty() {
                 println!("No accounts scored yet. Run `charcoal scan --analyze` first.");
@@ -393,14 +391,16 @@ async fn main() -> Result<()> {
             }
 
             // Fetch recent amplification events for context
-            let events = charcoal::db::queries::get_recent_events(&conn, 100)?;
+            let events = db.get_recent_events(100).await?;
 
             // Display in terminal
             charcoal::output::terminal::display_threat_list(&threats);
             charcoal::output::terminal::display_amplification_events(&events);
 
             // Also generate a markdown report file
-            let fingerprint = charcoal::db::queries::get_fingerprint(&conn)?
+            let fingerprint = db
+                .get_fingerprint()
+                .await?
                 .and_then(|(json, _, _)| serde_json::from_str(&json).ok());
 
             let report_path = charcoal::output::markdown::generate_report(
@@ -420,7 +420,7 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
-            let conn = charcoal::db::open(&config.db_path)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
@@ -474,13 +474,13 @@ async fn main() -> Result<()> {
                 charcoal::bluesky::profiles::resolve_dids_to_handles(&client, &dids).await?;
 
             // Set up scoring
-            let protected_fingerprint = load_fingerprint(&conn)?;
+            let protected_fingerprint = load_fingerprint(&db).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &conn);
+            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
 
-            let median_engagement = charcoal::db::queries::get_median_engagement(&conn)?;
-            let pile_on_events = charcoal::db::queries::get_events_for_pile_on(&conn)?;
+            let median_engagement = db.get_median_engagement().await?;
+            let pile_on_events = db.get_events_for_pile_on().await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -572,7 +572,7 @@ async fn main() -> Result<()> {
                         }
 
                         // Store in DB too
-                        charcoal::db::queries::upsert_account_score(&conn, &score)?;
+                        db.upsert_account_score(&score).await?;
                         scored_count += 1;
                     }
                     Err(e) => {
@@ -632,7 +632,8 @@ async fn main() -> Result<()> {
 
         Commands::Status => {
             let config = config::Config::load()?;
-            charcoal::status::show(&config)?;
+            let db = charcoal::db::open_sqlite(&config.db_path)?;
+            charcoal::status::show(&db, &config.db_path).await?;
         }
     }
 
@@ -660,10 +661,10 @@ fn create_scorer(
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.
-fn load_fingerprint(
-    conn: &rusqlite::Connection,
+async fn load_fingerprint(
+    db: &Arc<dyn charcoal::db::Database>,
 ) -> Result<charcoal::topics::fingerprint::TopicFingerprint> {
-    match charcoal::db::queries::get_fingerprint(conn)? {
+    match db.get_fingerprint().await? {
         Some((json, _, _)) => {
             let fp: charcoal::topics::fingerprint::TopicFingerprint = serde_json::from_str(&json)?;
             Ok(fp)
@@ -679,9 +680,9 @@ fn load_fingerprint(
 /// Try to load the sentence embedder and the protected user's stored embedding.
 /// Returns (None, None) if the model isn't downloaded or no embedding is stored.
 /// This is optional — scoring falls back to TF-IDF keyword overlap without it.
-fn load_embedder(
+async fn load_embedder(
     config: &config::Config,
-    conn: &rusqlite::Connection,
+    db: &Arc<dyn charcoal::db::Database>,
 ) -> (
     Option<charcoal::topics::embeddings::SentenceEmbedder>,
     Option<Vec<f64>>,
@@ -703,7 +704,7 @@ fn load_embedder(
         None
     };
 
-    let embedding = match charcoal::db::queries::get_embedding(conn) {
+    let embedding = match db.get_embedding().await {
         Ok(Some(v)) => Some(v),
         Ok(None) => {
             if embedder.is_some() {

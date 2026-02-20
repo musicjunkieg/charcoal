@@ -123,11 +123,3 @@ impl Config {
         }
     }
 }
-
-// Allow the status module (in the library crate) to read db_path
-// without depending on this binary-only config module.
-impl charcoal::status::HasDbPath for Config {
-    fn db_path(&self) -> &str {
-        &self.db_path
-    }
-}

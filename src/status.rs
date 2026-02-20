@@ -2,29 +2,26 @@
 
 use anyhow::Result;
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::db;
+use crate::db::Database;
 
 /// Display system status to the terminal.
-pub fn show(config: &impl HasDbPath) -> Result<()> {
-    let db_path = config.db_path();
-
-    if !Path::new(db_path).exists() {
+pub async fn show(db: &Arc<dyn Database>, db_display_path: &str) -> Result<()> {
+    if !Path::new(db_display_path).exists() {
         println!("Database: not initialized");
         println!("\nRun `charcoal init` to set up the database.");
         return Ok(());
     }
 
-    let conn = db::open(db_path)?;
-
     // Database file size
-    let file_size = std::fs::metadata(db_path)
+    let file_size = std::fs::metadata(db_display_path)
         .map(|m| format_bytes(m.len()))
         .unwrap_or_else(|_| "unknown".to_string());
-    println!("Database: {} ({})", db_path, file_size);
+    println!("Database: {} ({})", db_display_path, file_size);
 
     // Fingerprint status
-    match db::queries::get_fingerprint(&conn)? {
+    match db.get_fingerprint().await? {
         Some((_json, post_count, updated_at)) => {
             println!(
                 "Fingerprint: built from {} posts (updated {})",
@@ -38,7 +35,7 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
     }
 
     // Scored accounts (Elevated tier starts at 15.0)
-    let all_scores = db::queries::get_ranked_threats(&conn, 0.0)?;
+    let all_scores = db.get_ranked_threats(0.0).await?;
     let elevated_count = all_scores
         .iter()
         .filter(|s| s.threat_score.is_some_and(|t| t >= 15.0))
@@ -50,7 +47,7 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
     );
 
     // Recent events
-    let events = db::queries::get_recent_events(&conn, 5)?;
+    let events = db.get_recent_events(5).await?;
     if events.is_empty() {
         println!("Recent events: none detected yet");
         println!("  Run `charcoal scan` to check for quotes/reposts");
@@ -65,9 +62,9 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
     }
 
     // Last scan cursor
-    match db::queries::get_scan_state(&conn, "notifications_cursor")? {
+    match db.get_scan_state("notifications_cursor").await? {
         Some(_) => {
-            if let Some(last_scan) = db::queries::get_scan_state(&conn, "last_scan_at")? {
+            if let Some(last_scan) = db.get_scan_state("last_scan_at").await? {
                 println!("Last scan: {}", last_scan);
             }
         }
@@ -77,11 +74,6 @@ pub fn show(config: &impl HasDbPath) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Trait so both the binary's Config and tests can call show().
-pub trait HasDbPath {
-    fn db_path(&self) -> &str;
 }
 
 fn format_bytes(bytes: u64) -> String {

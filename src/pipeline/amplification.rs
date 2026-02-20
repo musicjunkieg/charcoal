@@ -12,15 +12,15 @@ use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use indicatif::{ProgressBar, ProgressStyle};
-use rusqlite::Connection;
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::bluesky::amplification::AmplificationNotification;
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
 use crate::bluesky::posts;
-use crate::db::queries;
+use crate::db::Database;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -36,7 +36,7 @@ use crate::toxicity::traits::ToxicityScorer;
 pub async fn run(
     client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
-    conn: &Connection,
+    db: &Arc<dyn Database>,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
     protected_handle: &str,
@@ -55,11 +55,11 @@ pub async fn run(
     );
 
     // Record the scan timestamp
-    queries::set_scan_state(
-        conn,
+    db.set_scan_state(
         "last_scan_at",
         &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-    )?;
+    )
+    .await?;
 
     // Store each event in the database, fetching quote text when available
     for event in &events {
@@ -90,15 +90,15 @@ pub async fn run(
             }
         }
 
-        queries::insert_amplification_event(
-            conn,
+        db.insert_amplification_event(
             &event.event_type,
             &event.amplifier_did,
             &event.amplifier_handle,
             event.original_post_uri.as_deref().unwrap_or("unknown"),
             Some(&event.amplifier_post_uri),
             quote_text.as_deref(),
-        )?;
+        )
+        .await?;
 
         // Display the event with quote context if available
         let event_label = if event.event_type == "quote" {
@@ -157,11 +157,15 @@ pub async fn run(
                 Ok(follower_list) => {
                     // Phase 1: Filter — find followers with stale scores (DB reads on main task)
                     // Also exclude the protected user from their own threat report
-                    let stale_followers: Vec<_> = follower_list
+                    let mut stale_followers = Vec::new();
+                    for f in follower_list
                         .iter()
                         .filter(|f| f.handle != protected_handle)
-                        .filter(|f| queries::is_score_stale(conn, &f.did, 7).unwrap_or(true))
-                        .collect();
+                    {
+                        if db.is_score_stale(&f.did, 7).await.unwrap_or(true) {
+                            stale_followers.push(f);
+                        }
+                    }
 
                     println!(
                         "  Found {} followers, {} need scoring ({} concurrent)...",
@@ -211,7 +215,7 @@ pub async fn run(
                     while let Some(result) = stream.next().await {
                         match result {
                             Ok(score) => {
-                                queries::upsert_account_score(conn, &score)?;
+                                db.upsert_account_score(&score).await?;
                                 accounts_scored += 1;
                             }
                             Err(e) => {
