@@ -216,6 +216,7 @@ mod tests {
                     uri: "at://did:plc:abc/post/123".to_string(),
                 }],
                 scored_at: "2026-02-08".to_string(),
+                behavioral_signals: None,
             },
             AccountScore {
                 did: "did:plc:def".to_string(),
@@ -227,6 +228,7 @@ mod tests {
                 posts_analyzed: 15,
                 top_toxic_posts: vec![],
                 scored_at: "2026-02-08".to_string(),
+                behavioral_signals: None,
             },
         ];
 
