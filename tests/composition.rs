@@ -403,6 +403,7 @@ fn make_account(handle: &str, score: f64, tier: &str, toxicity: f64, overlap: f6
             vec![]
         },
         scored_at: "2026-02-16".to_string(),
+        behavioral_signals: None,
     }
 }
 

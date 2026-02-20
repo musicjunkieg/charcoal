@@ -47,9 +47,15 @@ Post-MVP improvements applied:
 - Validate command: scores blocked accounts via PDS repo access to verify
   pipeline accuracy (resolves DIDs via plc.directory, discovers PDS endpoints)
 - DB migrations run automatically on `db::open()` (not just `charcoal init`)
+- **PostgreSQL backend**: trait-based dual-backend architecture (`Database` async
+  trait with `SqliteDatabase` and `PgDatabase` implementations). SQLite remains
+  the default; PostgreSQL is available via `--features postgres` and activated at
+  runtime when `DATABASE_URL` is set. Uses pgvector for embeddings, JSONB for
+  structured data. `charcoal migrate` command transfers all data from SQLite to
+  PostgreSQL.
 
-178 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
-`scan`, `sweep`, `score`, `report`, `status`, `validate`.
+186 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
+`scan`, `sweep`, `score`, `report`, `status`, `validate`, `migrate` (postgres feature).
 
 ### External contributions
 
@@ -120,7 +126,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 178 tests across five categories:
+The project has 186 tests across six categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
@@ -134,10 +140,19 @@ The project has 178 tests across five categories:
   ally/hostile/irrelevant account scenarios
 - **Constellation tests** (`tests/unit_constellation.rs`) — serde
   deserialization, AT-URI construction, dedup logic
+- **PostgreSQL tests** (`tests/db_postgres.rs`) — integration tests for the
+  Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var.
+  8 tests covering scan state, fingerprint, embedding, scores, events, etc.
 
 Run all tests with `cargo test --all-targets`. The default `cargo test` only
 runs library tests — integration tests live in the `tests/` directory and
 need `--all-targets` to be included.
+
+To run PostgreSQL integration tests against a live instance:
+```
+DATABASE_URL=postgres://charcoal:charcoal@localhost/charcoal_test \
+  cargo test --all-targets --features postgres
+```
 
 ### Git hooks
 
@@ -152,6 +167,31 @@ After cloning, run `./scripts/install-hooks.sh` to install quality gates:
 Every feature should be testable with a simple command. If I can't run
 `cargo run` and see meaningful output within a few minutes of pulling
 the code, something has gone wrong.
+
+### Database architecture
+
+The project uses a trait-based dual-backend database layer:
+
+- **`Database` trait** (`src/db/traits.rs`): async trait with 14 methods
+  covering all DB operations. All pipeline code operates on `Arc<dyn Database>`.
+- **`SqliteDatabase`** (`src/db/sqlite.rs`): wraps `rusqlite::Connection` in
+  `tokio::sync::Mutex`. Default backend, no external dependencies.
+- **`PgDatabase`** (`src/db/postgres.rs`): native async via sqlx. Uses pgvector
+  for 384-dim embeddings, JSONB for structured data. Gated on `postgres` feature.
+- **Feature flags** in `Cargo.toml`: `sqlite` (default), `postgres` (optional).
+  Uses `sqlx-core`/`sqlx-postgres` as split deps to avoid `libsqlite3-sys` link
+  conflict with rusqlite's bundled SQLite.
+- **Runtime selection**: when `DATABASE_URL` env var is set and starts with
+  `postgres://`, the app uses PostgreSQL. Otherwise, SQLite.
+- **Migrations**: SQLite uses `src/db/schema.rs`; Postgres uses numbered SQL
+  files in `migrations/postgres/` embedded via `include_str!`.
+- **`charcoal migrate`**: one-time data transfer from SQLite→PostgreSQL.
+  Only available with `--features postgres`.
+
+Building with PostgreSQL support:
+```
+cargo build --features postgres
+```
 
 ## Domain knowledge you should know
 
@@ -227,6 +267,15 @@ paint us into a corner that makes the future version harder to build.
 - Requires `PERSPECTIVE_API_KEY` env var
 - Sunsetting December 2026 — ONNX is the recommended path forward
 
+### PostgreSQL (optional server backend)
+- Optional alternative to SQLite for server deployments
+- Requires pgvector extension for 384-dim embedding storage
+- Crates: `sqlx-core` + `sqlx-postgres` (split to avoid libsqlite3-sys conflict
+  with rusqlite), `pgvector` 0.4
+- Activated by: `cargo build --features postgres` + `DATABASE_URL` env var
+- Migrations in `migrations/postgres/` (3 files, embedded via `include_str!`)
+- `charcoal migrate --database-url <url>` transfers SQLite data to Postgres
+
 ## Git Staging Rules - CRITICAL
 
 **NEVER use broad git add commands that stage everything:**
@@ -235,3 +284,14 @@ paint us into a corner that makes the future version harder to build.
 **ALWAYS stage files explicitly by name:**
 - `git add src/main.rs src/lib.rs`
 - `git add Cargo.toml Cargo.lock`
+
+**NEVER use heredoc syntax (`<<EOF` / `<<'EOF'`) in commit commands.**
+Heredocs break in zsh on this system. Use single-quoted multi-line strings
+instead:
+```
+git commit -m 'first line
+
+Body text here.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
+```

@@ -13,14 +13,14 @@ use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use futures::FutureExt;
 use indicatif::{ProgressBar, ProgressStyle};
-use rusqlite::Connection;
 use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
-use crate::db::queries;
+use crate::db::Database;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -35,7 +35,7 @@ use crate::toxicity::traits::ToxicityScorer;
 pub async fn run(
     client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
-    conn: &Connection,
+    db: &Arc<dyn Database>,
     protected_handle: &str,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
@@ -103,10 +103,12 @@ pub async fn run(
     );
 
     // Step 3: Filter to accounts with stale or missing scores
-    let stale: Vec<_> = second_degree_pool
-        .iter()
-        .filter(|f| queries::is_score_stale(conn, &f.did, 7).unwrap_or(true))
-        .collect();
+    let mut stale = Vec::new();
+    for f in &second_degree_pool {
+        if db.is_score_stale(&f.did, 7).await.unwrap_or(true) {
+            stale.push(f);
+        }
+    }
 
     if stale.is_empty() {
         println!("  All second-degree accounts have recent scores.");
@@ -155,7 +157,7 @@ pub async fn run(
     while let Some(result) = stream.next().await {
         match result {
             Ok(score) => {
-                queries::upsert_account_score(conn, &score)?;
+                db.upsert_account_score(&score).await?;
                 accounts_scored += 1;
             }
             Err(e) => {

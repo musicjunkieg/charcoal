@@ -27,6 +27,8 @@ pub struct Config {
     pub public_api_url: String,
     pub perspective_api_key: String,
     pub db_path: String,
+    /// PostgreSQL connection URL (when set and starts with postgres://, uses Postgres backend)
+    pub database_url: Option<String>,
     /// Which toxicity scorer to use (default: Onnx)
     pub scorer_backend: ScorerBackend,
     /// Directory containing the ONNX model files
@@ -58,6 +60,7 @@ impl Config {
                 .unwrap_or_else(|_| charcoal::bluesky::client::DEFAULT_PUBLIC_API_URL.to_string()),
             perspective_api_key: env::var("PERSPECTIVE_API_KEY").unwrap_or_default(),
             db_path: env::var("CHARCOAL_DB_PATH").unwrap_or_else(|_| "./charcoal.db".to_string()),
+            database_url: env::var("DATABASE_URL").ok(),
             scorer_backend,
             model_dir,
             constellation_url: env::var("CONSTELLATION_URL")
@@ -121,13 +124,5 @@ impl Config {
             }
             ScorerBackend::Perspective => self.require_perspective(),
         }
-    }
-}
-
-// Allow the status module (in the library crate) to read db_path
-// without depending on this binary-only config module.
-impl charcoal::status::HasDbPath for Config {
-    fn db_path(&self) -> &str {
-        &self.db_path
     }
 }
