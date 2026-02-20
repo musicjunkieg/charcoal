@@ -154,12 +154,17 @@ impl Database for PgDatabase {
         // Convert f64 to f32 for pgvector (which uses 32-bit floats)
         let floats: Vec<f32> = embedding.iter().map(|&v| v as f32).collect();
         let vector = pgvector::Vector::from(floats);
-        sqlx_core::query::query(
+        let result = sqlx_core::query::query(
             "UPDATE topic_fingerprint SET embedding_vector = $1, updated_at = NOW() WHERE id = 1",
         )
         .bind(vector)
         .execute(&self.pool)
         .await?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!(
+                "save_embedding: no fingerprint row found — run `charcoal fingerprint` first"
+            );
+        }
         Ok(())
     }
 

@@ -57,11 +57,20 @@ pub fn save_fingerprint(conn: &Connection, fingerprint_json: &str, post_count: u
 
 /// Store the protected user's mean embedding vector alongside the fingerprint.
 /// The vector is stored as a JSON array of floats.
+///
+/// Returns an error if no fingerprint row exists (i.e., `charcoal fingerprint` has
+/// not been run yet). An UPDATE that matches zero rows would silently succeed
+/// otherwise, losing the embedding.
 pub fn save_embedding(conn: &Connection, embedding_json: &str) -> Result<()> {
-    conn.execute(
+    let rows = conn.execute(
         "UPDATE topic_fingerprint SET embedding_vector = ?1, updated_at = datetime('now') WHERE id = 1",
         params![embedding_json],
     )?;
+    if rows == 0 {
+        anyhow::bail!(
+            "save_embedding: no fingerprint row found — run `charcoal fingerprint` first"
+        );
+    }
     Ok(())
 }
 
@@ -387,6 +396,19 @@ mod tests {
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].handle, "test.bsky.social");
         assert_eq!(ranked[0].threat_score, Some(65.0));
+    }
+
+    #[test]
+    fn test_save_embedding_fails_without_fingerprint_row() {
+        let conn = test_db();
+        // No fingerprint row — save_embedding must return an error, not silently succeed
+        let result = save_embedding(&conn, r#"[0.1, 0.2]"#);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("no fingerprint row"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]
