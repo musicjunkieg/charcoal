@@ -9,7 +9,6 @@
 #![cfg(feature = "postgres")]
 
 use charcoal::db::models::AccountScore;
-use charcoal::db::Database;
 
 /// Skip the test if DATABASE_URL is not set or doesn't point to Postgres.
 fn database_url() -> Option<String> {

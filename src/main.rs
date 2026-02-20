@@ -85,6 +85,14 @@ enum Commands {
 
     /// Show system status (last scan, DB stats, fingerprint age)
     Status,
+
+    /// Migrate data from SQLite to PostgreSQL
+    #[cfg(feature = "postgres")]
+    Migrate {
+        /// PostgreSQL connection URL (e.g. postgres://user:pass@localhost/charcoal)
+        #[arg(long)]
+        database_url: String,
+    },
 }
 
 #[tokio::main]
@@ -634,6 +642,95 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let db = open_database(&config).await?;
             charcoal::status::show(&db, &config.db_path).await?;
+        }
+
+        #[cfg(feature = "postgres")]
+        Commands::Migrate { database_url } => {
+            let config = config::Config::load()?;
+
+            println!("Migrating data from SQLite to PostgreSQL...");
+            println!("  Source: {}", config.db_path);
+            // Redact credentials in the connection URL for display
+            let redacted = match database_url.find('@') {
+                Some(at) => format!("{}@****", &database_url[..at]),
+                None => database_url.clone(),
+            };
+            println!("  Destination: {redacted}");
+            println!();
+
+            // Open source (SQLite) and destination (Postgres)
+            let sqlite_db = charcoal::db::open_sqlite(&config.db_path)?;
+            let pg_db = charcoal::db::connect_postgres(&database_url).await?;
+
+            // 1. Migrate fingerprint + embedding
+            if let Some((json, count, _)) = sqlite_db.get_fingerprint().await? {
+                pg_db.save_fingerprint(&json, count).await?;
+                println!(
+                    "  {} Topic fingerprint migrated ({count} posts)",
+                    "✓".green()
+                );
+
+                // Migrate embedding if present
+                if let Some(embedding) = sqlite_db.get_embedding().await? {
+                    pg_db.save_embedding(&embedding).await?;
+                    println!(
+                        "  {} Embedding migrated ({}-dim vector)",
+                        "✓".green(),
+                        embedding.len()
+                    );
+                }
+            } else {
+                println!("  {} No fingerprint to migrate", "-".dimmed());
+            }
+
+            // 2. Migrate account scores
+            let scores = sqlite_db.get_ranked_threats(0.0).await?;
+            for score in &scores {
+                pg_db.upsert_account_score(score).await?;
+            }
+            println!("  {} {} account scores migrated", "✓".green(), scores.len());
+
+            // 3. Migrate amplification events
+            let events = sqlite_db.get_recent_events(u32::MAX).await?;
+            for event in &events {
+                pg_db
+                    .insert_amplification_event(
+                        &event.event_type,
+                        &event.amplifier_did,
+                        &event.amplifier_handle,
+                        &event.original_post_uri,
+                        event.amplifier_post_uri.as_deref(),
+                        event.amplifier_text.as_deref(),
+                    )
+                    .await?;
+            }
+            println!(
+                "  {} {} amplification events migrated",
+                "✓".green(),
+                events.len()
+            );
+
+            // 4. Migrate scan state
+            let scan_keys = ["notifications_cursor", "last_scan_at"];
+            let mut scan_migrated = 0;
+            for key in scan_keys {
+                if let Some(val) = sqlite_db.get_scan_state(key).await? {
+                    pg_db.set_scan_state(key, &val).await?;
+                    scan_migrated += 1;
+                }
+            }
+            if scan_migrated > 0 {
+                println!(
+                    "  {} {scan_migrated} scan state entries migrated",
+                    "✓".green()
+                );
+            }
+
+            println!("\n{}", "Migration complete!".green().bold());
+            println!(
+                "Set {} in your .env to switch to PostgreSQL.",
+                "DATABASE_URL".bold()
+            );
         }
     }
 
