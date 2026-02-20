@@ -664,9 +664,18 @@ async fn main() -> Result<()> {
 
             println!("Migrating data from SQLite to PostgreSQL...");
             println!("  Source: {}", config.db_path);
-            // Redact credentials in the connection URL for display
+            // Redact credentials in the connection URL for display.
+            // Preserve the scheme and host; hide the user:password portion.
+            // e.g. "postgres://user:pass@host/db" → "postgres://****@host/db"
             let redacted = match database_url.find('@') {
-                Some(at) => format!("{}@****", &database_url[..at]),
+                Some(at) => {
+                    let scheme_end = database_url.find("://").map(|i| i + 3).unwrap_or(0);
+                    format!(
+                        "{}****@{}",
+                        &database_url[..scheme_end],
+                        &database_url[at + 1..]
+                    )
+                }
                 None => database_url.clone(),
             };
             println!("  Destination: {redacted}");
