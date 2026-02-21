@@ -6,6 +6,7 @@
 use colored::Colorize;
 
 use crate::db::models::{AccountScore, AmplificationEvent};
+use crate::scoring::behavioral::BehavioralSignals;
 
 /// Display a ranked threat list in the terminal.
 pub fn display_threat_list(accounts: &[AccountScore]) {
@@ -95,6 +96,30 @@ pub fn display_account_detail(score: &AccountScore) {
         println!("  Topic overlap: {:.2}", overlap);
     }
     println!("  Posts analyzed: {}", score.posts_analyzed);
+
+    if let Some(signals_json) = &score.behavioral_signals {
+        if let Ok(signals) = serde_json::from_str::<BehavioralSignals>(signals_json) {
+            println!("\n  Behavioral signals:");
+            println!(
+                "    Quote ratio: {:.2}  Reply ratio: {:.2}  Avg engagement: {:.1}",
+                signals.quote_ratio, signals.reply_ratio, signals.avg_engagement
+            );
+            let pile_on_str = if signals.pile_on {
+                "yes".red().to_string()
+            } else {
+                "no".green().to_string()
+            };
+            let gate_str = if signals.benign_gate {
+                "applied (capped)".green().to_string()
+            } else {
+                "not applied".normal().to_string()
+            };
+            println!(
+                "    Pile-on: {}  |  Benign gate: {}  |  Boost: {:.2}x",
+                pile_on_str, gate_str, signals.behavioral_boost
+            );
+        }
+    }
 
     if !score.top_toxic_posts.is_empty() {
         println!(

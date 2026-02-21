@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+- Fix inverted credential redaction in migrate command display (#78)
+
 ### Added
+- Display behavioral signals in threat reports (#67)
+- Behavioral signals: reply ratio, quote ratio, pile-on detection (#54)
+- Add validate command: score blocked accounts to verify pipeline accuracy (#63)
+- Refactor Bluesky client to use public AT Protocol API without authentication (#62)
 - Constellation backlink index for supplementary amplification detection (#35, #53)
 - Batch DID→handle resolution via getProfiles for Constellation events (#58)
 - Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2) (#34)
@@ -21,12 +28,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tune threat tier thresholds for real-world score distribution (#8)
 
 ### Fixed
+- post_count u32-to-i32 cast could overflow (#75)
+- save_embedding silently fails if no fingerprint row exists (#71)
+- Fix critical/high code review findings from PR #6 (#70)
 - Recalibrate threat scoring for sentence embedding overlap scale (#44)
 - Crash-resilient pipelines: incremental DB writes + panic catching (#33)
 - Exclude protected user from their own threat report (#22)
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- sqlite feature flag now correctly gates sqlite-related code (#76)
+- Postgres integration tests now clean up after themselves (#74)
+- Document pgvector CREATE EXTENSION superuser requirement (#73)
+- Add advisory lock for concurrent migration protection (#72)
+- Optimize pile-on detection from O(n^2) to O(n) sliding window (#68)
+- Test SQLite-to-PostgreSQL migration end-to-end (#69)
+- Database migration: SQLite to PostgreSQL (#48)
+- Adapt scoring formula for multi-component signals (#56)
+- Organize generated files into gitignored directories (#65)
+- Research AT Protocol public API authentication requirements (#61)
 - Write architectural recommendations for multi-user migration (#47)
 - Update docs and close session for sentence embeddings work (#42)
 - Add tests for embedding DB queries, migration, and download helpers (#41)

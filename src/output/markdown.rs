@@ -9,6 +9,7 @@ use chrono::Utc;
 use std::fmt::Write;
 
 use crate::db::models::{AccountScore, AmplificationEvent};
+use crate::scoring::behavioral::BehavioralSignals;
 use crate::topics::fingerprint::TopicFingerprint;
 
 /// Generate a markdown threat report and write it to a file.
@@ -160,6 +161,28 @@ pub fn generate_report(
                 "- **Topic overlap:** {:.2}",
                 account.topic_overlap.unwrap_or(0.0)
             )?;
+
+            if let Some(signals_json) = &account.behavioral_signals {
+                if let Ok(signals) = serde_json::from_str::<BehavioralSignals>(signals_json) {
+                    let pile_on = if signals.pile_on { "yes" } else { "no" };
+                    let gate = if signals.benign_gate {
+                        "applied (score capped)"
+                    } else {
+                        "not applied"
+                    };
+                    writeln!(md, "- **Behavioral signals:**")?;
+                    writeln!(
+                        md,
+                        "  - Quote ratio: {:.2} | Reply ratio: {:.2} | Avg engagement: {:.1}",
+                        signals.quote_ratio, signals.reply_ratio, signals.avg_engagement
+                    )?;
+                    writeln!(
+                        md,
+                        "  - Pile-on: {} | Benign gate: {} | Behavioral boost: {:.2}x",
+                        pile_on, gate, signals.behavioral_boost
+                    )?;
+                }
+            }
             writeln!(md)?;
 
             if !account.top_toxic_posts.is_empty() {

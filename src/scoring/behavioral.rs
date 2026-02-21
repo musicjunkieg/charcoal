@@ -156,9 +156,12 @@ const PILE_ON_WINDOW_SECS: i64 = 24 * 60 * 60;
 /// Detect pile-on participants from amplification events.
 ///
 /// Takes a slice of (amplifier_did, original_post_uri, detected_at_iso)
-/// tuples. Groups by post URI, then uses a sliding 24-hour window to find
-/// clusters of 5+ distinct amplifiers. Returns the set of DIDs that
-/// participated in any detected pile-on.
+/// tuples. Groups by post URI, then uses an O(n) two-pointer sliding window
+/// to find clusters of 5+ distinct amplifiers within any 24-hour span.
+/// Returns the set of DIDs that participated in any detected pile-on.
+///
+/// The two-pointer approach: `left` and `right` both advance monotonically,
+/// so each event enters and exits the window at most once — O(n) total.
 pub fn detect_pile_on_participants(events: &[(&str, &str, &str)]) -> HashSet<String> {
     let mut result = HashSet::new();
 
@@ -169,7 +172,7 @@ pub fn detect_pile_on_participants(events: &[(&str, &str, &str)]) -> HashSet<Str
     }
 
     for (_uri, mut post_events) in by_post {
-        // Sort by timestamp
+        // Sort by timestamp so the two-pointer window is well-defined
         post_events.sort_by_key(|&(_, ts)| ts.to_string());
 
         // Parse timestamps and collect (did, timestamp_secs) pairs
@@ -186,22 +189,37 @@ pub fn detect_pile_on_participants(events: &[(&str, &str, &str)]) -> HashSet<Str
             continue;
         }
 
-        // Sliding window: for each event, look forward 24h and count unique DIDs
-        for i in 0..parsed.len() {
-            let window_start = parsed[i].1;
-            let window_end = window_start + PILE_ON_WINDOW_SECS;
+        // Two-pointer sliding window over sorted events.
+        //
+        // `did_counts` maps each DID in the current window to how many times
+        // it appears (needed for correct eviction when left advances).
+        // `did_counts.len()` is the number of *unique* DIDs in the window.
+        let mut did_counts: HashMap<&str, usize> = HashMap::new();
+        let mut left = 0usize;
 
-            let mut unique_dids: HashSet<&str> = HashSet::new();
+        for right in 0..parsed.len() {
+            let (right_did, right_ts) = parsed[right];
 
-            for &(did, ts) in parsed.iter().skip(i) {
-                if ts > window_end {
-                    break;
+            // Add the right event to the window
+            *did_counts.entry(right_did).or_insert(0) += 1;
+
+            // Shrink from the left until the window fits within 24 hours
+            while right_ts - parsed[left].1 > PILE_ON_WINDOW_SECS {
+                let (left_did, _) = parsed[left];
+                let count = did_counts
+                    .get_mut(left_did)
+                    .expect("left DID must be in map");
+                if *count == 1 {
+                    did_counts.remove(left_did);
+                } else {
+                    *count -= 1;
                 }
-                unique_dids.insert(did);
+                left += 1;
             }
 
-            if unique_dids.len() >= PILE_ON_THRESHOLD {
-                for did in unique_dids {
+            // If 5+ unique DIDs are in the window, they all participated
+            if did_counts.len() >= PILE_ON_THRESHOLD {
+                for did in did_counts.keys() {
                     result.insert(did.to_string());
                 }
             }
