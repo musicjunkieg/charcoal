@@ -17,8 +17,8 @@ atrium-api = "0.25.7"
 # HTTP client (for public AT Protocol API, Constellation, and Perspective API)
 reqwest = { version = "0.12", features = ["json"] }
 
-# Database
-rusqlite = { version = "0.38", features = ["bundled"] }
+# Database (SQLite — optional, enabled by the `sqlite` default feature)
+rusqlite = { version = "0.38", features = ["bundled"], optional = true }
 
 # Topic extraction
 keyword_extraction = "1.5"
@@ -61,7 +61,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [features]
 default = ["sqlite"]
-sqlite = []
+sqlite = ["dep:rusqlite"]
 postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:pgvector"]
 
 # PostgreSQL support — split crates avoid the sqlx umbrella's transitive

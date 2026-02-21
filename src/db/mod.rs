@@ -1,28 +1,39 @@
-// Database layer — SQLite storage for cached scores, scan state, and fingerprints.
+// Database layer — pluggable backend for cached scores, scan state, and fingerprints.
 //
-// We use rusqlite with the "bundled" feature so there's no system SQLite
-// dependency. The database file lives wherever CHARCOAL_DB_PATH points
-// (defaults to ./charcoal.db).
+// SQLite is the default backend (enabled by the `sqlite` feature). PostgreSQL
+// is available via the `postgres` feature + DATABASE_URL env var.
+//
+// The database file lives wherever CHARCOAL_DB_PATH points (defaults to
+// ./charcoal.db) for SQLite. PostgreSQL uses DATABASE_URL.
 
 pub mod models;
 #[cfg(feature = "postgres")]
 pub mod postgres;
+#[cfg(feature = "sqlite")]
 pub mod queries;
+#[cfg(feature = "sqlite")]
 pub mod schema;
+#[cfg(feature = "sqlite")]
 pub mod sqlite;
 pub mod traits;
 
 pub use traits::Database;
 
-use anyhow::{Context, Result};
-use rusqlite::Connection;
-use std::path::Path;
+use anyhow::Result;
 use std::sync::Arc;
 
-/// Open (or create) the database and run migrations.
+#[cfg(feature = "sqlite")]
+use anyhow::Context;
+#[cfg(feature = "sqlite")]
+use rusqlite::Connection;
+#[cfg(feature = "sqlite")]
+use std::path::Path;
+
+/// Open (or create) the SQLite database and run migrations.
 ///
 /// This is the main entry point — called by `charcoal init` and by any
 /// command that needs database access.
+#[cfg(feature = "sqlite")]
 pub fn initialize(db_path: &str) -> Result<Connection> {
     // Create parent directories if needed
     if let Some(parent) = Path::new(db_path).parent() {
@@ -44,10 +55,11 @@ pub fn initialize(db_path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
-/// Open an existing database (fails if it doesn't exist yet).
+/// Open an existing SQLite database (fails if it doesn't exist yet).
 ///
 /// Also runs any pending migrations so schema changes apply automatically
 /// without requiring `charcoal init` again.
+#[cfg(feature = "sqlite")]
 pub fn open(db_path: &str) -> Result<Connection> {
     if !Path::new(db_path).exists() {
         anyhow::bail!(
@@ -68,12 +80,14 @@ pub fn open(db_path: &str) -> Result<Connection> {
 }
 
 /// Open SQLite database and return it as a trait object.
+#[cfg(feature = "sqlite")]
 pub fn open_sqlite(db_path: &str) -> Result<Arc<dyn Database>> {
     let conn = open(db_path)?;
     Ok(Arc::new(sqlite::SqliteDatabase::new(conn)))
 }
 
 /// Initialize SQLite database and return it as a trait object.
+#[cfg(feature = "sqlite")]
 pub fn initialize_sqlite(db_path: &str) -> Result<Arc<dyn Database>> {
     let conn = initialize(db_path)?;
     Ok(Arc::new(sqlite::SqliteDatabase::new(conn)))

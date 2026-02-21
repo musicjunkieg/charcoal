@@ -41,11 +41,28 @@ impl PgDatabase {
 
     /// Run all pending migrations.
     ///
+    /// Acquires a Postgres session-level advisory lock (key 0x_CHAR_COAL) so
+    /// that concurrent processes (e.g. two app instances starting together)
+    /// don't race to apply the same migration. The lock is released when the
+    /// connection returns to the pool.
+    ///
     /// Migration 1 contains `CREATE EXTENSION` which cannot run inside a
     /// transaction. All of its DDL uses `IF NOT EXISTS` so it is safe to
     /// retry if partially applied. Migrations 2+ are wrapped in a transaction
     /// so the schema change and the schema_version insert are atomic.
     async fn run_migrations(&self) -> Result<()> {
+        // 0x43484152434F414C = ASCII "CHARCOAL" as a big-endian i64.
+        // Used as the advisory lock key to namespace this lock to Charcoal.
+        const MIGRATION_LOCK_KEY: i64 = 0x43484152434F414C_u64 as i64;
+
+        // Acquire session-level advisory lock — blocks until the lock is free.
+        // Released automatically when the connection is returned to the pool.
+        sqlx_core::query::query("SELECT pg_advisory_lock($1)")
+            .bind(MIGRATION_LOCK_KEY)
+            .execute(&self.pool)
+            .await
+            .context("Failed to acquire migration advisory lock")?;
+
         // Ensure schema_version table exists (idempotent DDL, no transaction needed)
         sqlx_core::query::query(
             "CREATE TABLE IF NOT EXISTS schema_version (
@@ -97,6 +114,14 @@ impl PgDatabase {
             }
         }
 
+        // Release the advisory lock explicitly so other waiters aren't blocked
+        // for the lifetime of the pool connection.
+        sqlx_core::query::query("SELECT pg_advisory_unlock($1)")
+            .bind(MIGRATION_LOCK_KEY)
+            .execute(&self.pool)
+            .await
+            .context("Failed to release migration advisory lock")?;
+
         Ok(())
     }
 }
@@ -144,7 +169,7 @@ impl Database for PgDatabase {
                 updated_at = NOW()",
         )
         .bind(fingerprint_json)
-        .bind(post_count as i32)
+        .bind(i32::try_from(post_count).context("post_count exceeds i32 range")?)
         .execute(&self.pool)
         .await?;
         Ok(())

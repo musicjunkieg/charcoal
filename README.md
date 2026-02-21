@@ -164,6 +164,38 @@ Google's Perspective API is available as a fallback by setting
 `CHARCOAL_SCORER=perspective` in your `.env` file (requires a
 `PERSPECTIVE_API_KEY`). Note: Perspective API is sunsetting December 2026.
 
+## PostgreSQL backend (optional)
+
+Charcoal uses SQLite by default. For server deployments you can switch to
+PostgreSQL:
+
+```bash
+# Build with Postgres support
+cargo build --release --features postgres
+
+# Point at your database
+export DATABASE_URL=postgres://user:pass@host/dbname
+```
+
+**Prerequisite — pgvector extension:** Charcoal's first migration runs
+`CREATE EXTENSION IF NOT EXISTS vector`, which requires superuser privileges
+(or the extension to be pre-installed by your database provider). On managed
+Postgres (Railway, Fly.io, Supabase, etc.) the `vector` extension is usually
+available but you may need to enable it through their dashboard or with a
+superuser connection before running Charcoal for the first time. On
+self-hosted Postgres, run `CREATE EXTENSION vector` as a superuser once:
+
+```sql
+-- Connect as a superuser, then:
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+To transfer existing SQLite data to Postgres:
+
+```bash
+cargo run --features postgres -- migrate --database-url postgres://user:pass@host/dbname
+```
+
 ## Architecture
 
 ```
@@ -178,7 +210,7 @@ src/
   scoring/          Profile building and threat score computation
   pipeline/         Amplification detection pipeline
   output/           Terminal display and markdown report generation
-  db/               SQLite schema, queries, and data models
+  db/               SQLite/PostgreSQL backends, schema, queries, and data models
 ```
 
 ## Development
