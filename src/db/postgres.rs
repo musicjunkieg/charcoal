@@ -43,8 +43,15 @@ impl PgDatabase {
     ///
     /// Acquires a Postgres session-level advisory lock (key 0x_CHAR_COAL) so
     /// that concurrent processes (e.g. two app instances starting together)
-    /// don't race to apply the same migration. The lock is released when the
-    /// connection returns to the pool.
+    /// don't race to apply the same migration.
+    ///
+    /// Session-level advisory locks are bound to the backend session that
+    /// acquired them, so the lock and unlock MUST run on the same physical
+    /// connection. We acquire a dedicated connection (`lock_conn`) for this
+    /// purpose and keep it alive for the duration of the migration loop.
+    /// Migrations themselves can use the pool normally. The unlock always runs
+    /// even if a migration fails — we capture the migration result first, then
+    /// unlock, then surface any error.
     ///
     /// Migration 1 contains `CREATE EXTENSION` which cannot run inside a
     /// transaction. All of its DDL uses `IF NOT EXISTS` so it is safe to
@@ -55,72 +62,92 @@ impl PgDatabase {
         // Used as the advisory lock key to namespace this lock to Charcoal.
         const MIGRATION_LOCK_KEY: i64 = 0x43484152434F414C_u64 as i64;
 
-        // Acquire session-level advisory lock — blocks until the lock is free.
-        // Released automatically when the connection is returned to the pool.
+        // Acquire a dedicated connection to hold the advisory lock for the
+        // entire migration sequence. Dropping this connection returns it to
+        // the pool AND releases the session-level advisory lock automatically.
+        let mut lock_conn = self
+            .pool
+            .acquire()
+            .await
+            .context("Failed to acquire connection for migration advisory lock")?;
+
+        // Block until no other Charcoal process is running migrations.
         sqlx_core::query::query("SELECT pg_advisory_lock($1)")
             .bind(MIGRATION_LOCK_KEY)
-            .execute(&self.pool)
+            .execute(&mut *lock_conn)
             .await
             .context("Failed to acquire migration advisory lock")?;
 
-        // Ensure schema_version table exists (idempotent DDL, no transaction needed)
-        sqlx_core::query::query(
-            "CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        let migrations = [
-            (
-                1,
-                include_str!("../../migrations/postgres/0001_initial.sql"),
-            ),
-            (
-                2,
-                include_str!("../../migrations/postgres/0002_pgvector.sql"),
-            ),
-            (
-                3,
-                include_str!("../../migrations/postgres/0003_behavioral_signals.sql"),
-            ),
-        ];
-
-        for (version, sql) in migrations {
-            let applied: bool = sqlx_core::query::query(
-                "SELECT COUNT(*) > 0 FROM schema_version WHERE version = $1",
+        // Run all migrations using the shared pool. The advisory lock is held
+        // on lock_conn independently, so pool connections can be used freely.
+        let migration_result: Result<()> = async {
+            // Ensure schema_version table exists (idempotent DDL, no transaction needed)
+            sqlx_core::query::query(
+                "CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )",
             )
-            .bind(version)
-            .fetch_one(&self.pool)
-            .await
-            .map(|row| row.get::<bool, _>(0))
-            .unwrap_or(false);
+            .execute(&self.pool)
+            .await?;
 
-            if !applied {
-                if version == 1 {
-                    // Migration 1 contains CREATE EXTENSION which cannot run inside a
-                    // transaction. All statements use IF NOT EXISTS so they are safe
-                    // to retry if the process is interrupted partway through.
-                    sqlx_core::raw_sql::raw_sql(sql).execute(&self.pool).await?;
-                } else {
-                    // Migrations 2+ are wrapped in a transaction so the schema change
-                    // and schema_version insert are committed or rolled back together.
-                    let mut tx = self.pool.begin().await?;
-                    sqlx_core::raw_sql::raw_sql(sql).execute(&mut *tx).await?;
-                    tx.commit().await?;
+            let migrations = [
+                (
+                    1,
+                    include_str!("../../migrations/postgres/0001_initial.sql"),
+                ),
+                (
+                    2,
+                    include_str!("../../migrations/postgres/0002_pgvector.sql"),
+                ),
+                (
+                    3,
+                    include_str!("../../migrations/postgres/0003_behavioral_signals.sql"),
+                ),
+            ];
+
+            for (version, sql) in migrations {
+                let applied: bool = sqlx_core::query::query(
+                    "SELECT COUNT(*) > 0 FROM schema_version WHERE version = $1",
+                )
+                .bind(version)
+                .fetch_one(&self.pool)
+                .await
+                .map(|row| row.get::<bool, _>(0))
+                .unwrap_or(false);
+
+                if !applied {
+                    if version == 1 {
+                        // Migration 1 contains CREATE EXTENSION which cannot run inside a
+                        // transaction. All statements use IF NOT EXISTS so they are safe
+                        // to retry if the process is interrupted partway through.
+                        sqlx_core::raw_sql::raw_sql(sql).execute(&self.pool).await?;
+                    } else {
+                        // Migrations 2+ are wrapped in a transaction so the schema change
+                        // and schema_version insert are committed or rolled back together.
+                        let mut tx = self.pool.begin().await?;
+                        sqlx_core::raw_sql::raw_sql(sql).execute(&mut *tx).await?;
+                        tx.commit().await?;
+                    }
                 }
             }
-        }
 
-        // Release the advisory lock explicitly so other waiters aren't blocked
-        // for the lifetime of the pool connection.
-        sqlx_core::query::query("SELECT pg_advisory_unlock($1)")
+            Ok(())
+        }
+        .await;
+
+        // Release the advisory lock on the same connection that acquired it.
+        // This always runs even if migrations failed — we surface the migration
+        // error below, but we never skip the unlock.
+        let unlock_result = sqlx_core::query::query("SELECT pg_advisory_unlock($1)")
             .bind(MIGRATION_LOCK_KEY)
-            .execute(&self.pool)
+            .execute(&mut *lock_conn)
             .await
-            .context("Failed to release migration advisory lock")?;
+            .context("Failed to release migration advisory lock");
+
+        // Migration error takes priority over unlock error.
+        migration_result?;
+        unlock_result?;
 
         Ok(())
     }

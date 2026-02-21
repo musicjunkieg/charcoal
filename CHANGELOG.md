@@ -37,8 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
-- sqlite feature flag defined but never gates any code (#76)
-- Postgres integration tests dont clean up after themselves (#74)
+- sqlite feature flag now correctly gates sqlite-related code (#76)
+- Postgres integration tests now clean up after themselves (#74)
 - Document pgvector CREATE EXTENSION superuser requirement (#73)
 - Add advisory lock for concurrent migration protection (#72)
 - Optimize pile-on detection from O(n^2) to O(n) sliding window (#68)

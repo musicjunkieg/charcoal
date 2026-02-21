@@ -8,6 +8,7 @@
 
 #![cfg(feature = "postgres")]
 
+use anyhow::Result;
 use charcoal::db::models::AccountScore;
 
 /// Skip the test if DATABASE_URL is not set or doesn't point to Postgres.
@@ -21,23 +22,25 @@ fn database_url() -> Option<String> {
 ///
 /// Called at the START of each writing test so leftover state from a previous
 /// interrupted run doesn't cause spurious failures.
-async fn cleanup_test_data(url: &str) {
+async fn cleanup_test_data(url: &str) -> Result<()> {
     use sqlx_core::pool::Pool;
     use sqlx_postgres::Postgres;
 
-    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(url)
+        .await
+        .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
 
     // Delete test-specific scan_state keys
     sqlx_core::query::query("DELETE FROM scan_state WHERE key = 'test_cursor'")
         .execute(&pool)
         .await
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("cleanup: scan_state delete failed: {e}"))?;
 
     // Delete test-specific account scores
     sqlx_core::query::query("DELETE FROM account_scores WHERE did = 'did:plc:pgtest1'")
         .execute(&pool)
         .await
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("cleanup: account_scores delete failed: {e}"))?;
 
     // Delete test-specific amplification events
     sqlx_core::query::query(
@@ -45,14 +48,16 @@ async fn cleanup_test_data(url: &str) {
     )
     .execute(&pool)
     .await
-    .unwrap();
+    .map_err(|e| anyhow::anyhow!("cleanup: amplification_events delete failed: {e}"))?;
 
     // topic_fingerprint has only one row (id = 1); reset to a neutral state
     // so embedding and fingerprint tests don't interfere with each other.
     sqlx_core::query::query("DELETE FROM topic_fingerprint WHERE id = 1")
         .execute(&pool)
         .await
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("cleanup: topic_fingerprint delete failed: {e}"))?;
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -60,7 +65,7 @@ async fn test_pg_scan_state_roundtrip() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await;
+    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     db.set_scan_state("test_cursor", "abc123").await.unwrap();
@@ -81,7 +86,7 @@ async fn test_pg_fingerprint_roundtrip() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await;
+    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     db.save_fingerprint(r#"{"topics": ["test"]}"#, 42)
@@ -97,7 +102,7 @@ async fn test_pg_embedding_roundtrip() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await;
+    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     // Ensure fingerprint row exists
@@ -118,7 +123,7 @@ async fn test_pg_account_score_upsert_and_rank() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await;
+    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     let score = AccountScore {
@@ -144,7 +149,7 @@ async fn test_pg_amplification_event() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await;
+    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     let id = db
