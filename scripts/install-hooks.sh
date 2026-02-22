@@ -25,10 +25,21 @@ cat > "$HOOKS_DIR/pre-commit" << 'HOOK'
 #   1. Block commits directly to main (use a feature branch + PR)
 #   2. If Rust/TOML files staged: enforce cargo fmt (fast gate only)
 #   3. Always: export chainlink issues + sync deciduous graph into the commit
+#   4. Always: upload both .db files to Tigris for crash recovery (if configured)
 #
 # Bypass (emergency only): git commit --no-verify
 
 set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# Source .env if present (needed for Tigris credentials)
+if [ -f "$REPO_ROOT/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/.env"
+    set +a
+fi
 
 # ── 1. Block commits to main ─────────────────────────────────────────
 CURRENT_BRANCH=$(git branch --show-current)
@@ -71,6 +82,42 @@ if deciduous sync 2>/dev/null; then
     echo "✅ Decision graph synced"
 else
     echo "⚠️  Deciduous sync failed (non-blocking)"
+fi
+
+# ── 5. Upload DBs to Tigris blob storage ────────────────────────────
+if [ -n "$TIGRIS_BUCKET" ] && [ -n "$TIGRIS_ACCESS_KEY_ID" ] && [ -n "$TIGRIS_SECRET_ACCESS_KEY" ]; then
+    echo "☁️  Pre-commit: backing up databases to Tigris..."
+    ENDPOINT="--endpoint-url=${TIGRIS_ENDPOINT:-https://fly.storage.tigris.dev} --region=auto"
+
+    export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
+    export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
+    S3="s3://$TIGRIS_BUCKET"
+
+    BACKUP_OK=true
+
+    if [ -f "$REPO_ROOT/.chainlink/issues.db" ]; then
+        if aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1; then
+            echo "  ✅ issues.db → Tigris"
+        else
+            echo "  ⚠️  issues.db upload failed (non-blocking)"
+            BACKUP_OK=false
+        fi
+    fi
+
+    if [ -f "$REPO_ROOT/.deciduous/deciduous.db" ]; then
+        if aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1; then
+            echo "  ✅ deciduous.db → Tigris"
+        else
+            echo "  ⚠️  deciduous.db upload failed (non-blocking)"
+            BACKUP_OK=false
+        fi
+    fi
+
+    if [ "$BACKUP_OK" = true ]; then
+        echo "✅ Tigris backup complete"
+    fi
+else
+    echo "⏭️  Tigris not configured (set TIGRIS_BUCKET/TIGRIS_ACCESS_KEY_ID/TIGRIS_SECRET_ACCESS_KEY in .env)"
 fi
 
 echo "✅ Pre-commit: all checks passed."
