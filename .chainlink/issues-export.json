@@ -1,0 +1,1425 @@
+{
+  "version": 1,
+  "exported_at": "2026-02-22T21:52:06.318306080+00:00",
+  "issues": [
+    {
+      "id": 88,
+      "title": "Harden workflow: atomic commits, branch protections, issue and graph persistence",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "arch"
+      ],
+      "comments": [],
+      "created_at": "2026-02-22T21:47:33.232980469+00:00",
+      "updated_at": "2026-02-22T21:47:33.232980469+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 87,
+      "title": "Railway deployment with Railpack",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "devops"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:28.108143468+00:00",
+      "updated_at": "2026-02-21T01:52:28.108143468+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 86,
+      "title": "Account list + account detail pages",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:28.057067714+00:00",
+      "updated_at": "2026-02-21T01:52:28.057067714+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 85,
+      "title": "Login page adaptation + dashboard page",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:28.010377252+00:00",
+      "updated_at": "2026-02-21T01:52:28.010377252+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 84,
+      "title": "SvelteKit web project setup — move from landing-page to web/",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:27.966271054+00:00",
+      "updated_at": "2026-02-21T01:52:27.966271054+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 83,
+      "title": "JSON API endpoints — status, accounts, events, fingerprint, scan",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:27.905226785+00:00",
+      "updated_at": "2026-02-21T01:52:27.905226785+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 82,
+      "title": "Database trait — get_account_by_handle + get_account_by_did",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:27.858016322+00:00",
+      "updated_at": "2026-02-21T01:52:27.858016322+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 81,
+      "title": "Auth layer — POST /api/login, session cookie, middleware",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:27.814202601+00:00",
+      "updated_at": "2026-02-21T01:52:27.814202601+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 80,
+      "title": "charcoal serve command + Axum skeleton + web feature flag",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "arch"
+      ],
+      "comments": [],
+      "created_at": "2026-02-21T01:52:27.773643822+00:00",
+      "updated_at": "2026-02-21T01:52:27.773643822+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 79,
+      "title": "Clean up feat/sqlite-to-postgres branch after PR #6 merge",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-02-20T05:38:11.754490040+00:00",
+      "updated_at": "2026-02-20T05:39:05.671812032+00:00",
+      "closed_at": "2026-02-20T05:39:05.671812032+00:00"
+    },
+    {
+      "id": 78,
+      "title": "Fix inverted credential redaction in migrate command display",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "security"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T05:25:03.523355012+00:00",
+      "updated_at": "2026-02-20T05:25:48.774663780+00:00",
+      "closed_at": "2026-02-20T05:25:48.774663780+00:00"
+    },
+    {
+      "id": 77,
+      "title": "Fetch PR #6 comments",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-02-20T05:23:37.235798614+00:00",
+      "updated_at": "2026-02-20T05:25:48.804509955+00:00",
+      "closed_at": "2026-02-20T05:25:48.804509955+00:00"
+    },
+    {
+      "id": 76,
+      "title": "sqlite feature flag defined but never gates any code",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "cleanup"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T02:26:48.297716183+00:00",
+      "updated_at": "2026-02-21T00:21:21.656483844+00:00",
+      "closed_at": "2026-02-21T00:21:21.656483844+00:00"
+    },
+    {
+      "id": 75,
+      "title": "post_count u32-to-i32 cast could overflow",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T02:26:48.262001746+00:00",
+      "updated_at": "2026-02-21T00:21:21.628358091+00:00",
+      "closed_at": "2026-02-21T00:21:21.628358091+00:00"
+    },
+    {
+      "id": 74,
+      "title": "Postgres integration tests dont clean up after themselves",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "testing"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T02:26:48.225123999+00:00",
+      "updated_at": "2026-02-21T00:21:21.603577869+00:00",
+      "closed_at": "2026-02-21T00:21:21.603577869+00:00"
+    },
+    {
+      "id": 73,
+      "title": "Document pgvector CREATE EXTENSION superuser requirement",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T02:26:48.189589192+00:00",
+      "updated_at": "2026-02-21T00:21:21.571519964+00:00",
+      "closed_at": "2026-02-21T00:21:21.571519964+00:00"
+    },
+    {
+      "id": 72,
+      "title": "Add advisory lock for concurrent migration protection",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T02:26:48.153984155+00:00",
+      "updated_at": "2026-02-21T00:21:21.541575670+00:00",
+      "closed_at": "2026-02-21T00:21:21.541575670+00:00"
+    },
+    {
+      "id": 71,
+      "title": "save_embedding silently fails if no fingerprint row exists",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-02-20T02:26:48.122246520+00:00",
+      "updated_at": "2026-02-20T23:12:04.950604762+00:00",
+      "closed_at": "2026-02-20T23:12:04.950604762+00:00"
+    },
+    {
+      "id": 70,
+      "title": "Fix critical/high code review findings from PR #6",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Code review findings from PR #6 (SQLite-to-PostgreSQL). Fix before merge.\n\nCRITICAL:\n1. Migration race condition: run_migrations() has no transaction wrapping. Partial failure leaves DB corrupt. Wrap each migration in BEGIN/COMMIT. Note: CREATE EXTENSION cannot run in a transaction — handle migration 1 specially.\n2. Fragile interval in is_score_stale: uses string concat ($2 || ' days'). Replace with make_interval(days => $2) and bind i32 directly.\n\nHIGH:\n3. status::show breaks for Postgres: checks SQLite file existence, prints 'not initialized' when no .db file exists. Need backend-aware status display.\n4. u32::MAX to i32 overflow: migrate command calls get_recent_events(u32::MAX), cast to i32 wraps to -1. Cap at i32::MAX or add get_all_events method.\n5. Migration only copies 2 hardcoded scan_state keys: add get_all_scan_state() to trait or query SQLite directly.\n6. Migration loses event timestamps/IDs: insert_amplification_event sets detected_at=NOW(). All migrated events get same timestamp, breaking pile-on detection. Need raw INSERT preserving original timestamps.\n\nMEDIUM (fix later):\n7. save_embedding UPDATE silently does nothing if no fingerprint row exists\n8. No concurrent migration protection (advisory locks)\n9. CREATE EXTENSION vector needs superuser (document requirement)\n10. Postgres tests dont clean up (consider sqlx::test or transaction rollback)\n11. post_count as i32 could overflow\n12. sqlite feature flag defined but never gated",
+          "created_at": "2026-02-20T02:25:54.788065796+00:00"
+        }
+      ],
+      "created_at": "2026-02-20T02:25:42.867741830+00:00",
+      "updated_at": "2026-02-20T05:10:45.357774002+00:00",
+      "closed_at": "2026-02-20T05:10:45.357774002+00:00"
+    },
+    {
+      "id": 69,
+      "title": "Test SQLite-to-PostgreSQL migration end-to-end",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "testing"
+      ],
+      "comments": [
+        {
+          "content": "End-to-end migration tested successfully against PostgreSQL 17 + pgvector. Found and fixed runtime bug: _rt-tokio feature missing on sqlx-core (compilation succeeded but PgPool::connect panicked at runtime). PR #6 created.",
+          "created_at": "2026-02-20T02:15:59.218878954+00:00"
+        }
+      ],
+      "created_at": "2026-02-20T01:27:43.644009786+00:00",
+      "updated_at": "2026-02-20T02:15:59.383893873+00:00",
+      "closed_at": "2026-02-20T02:15:59.383893873+00:00"
+    },
+    {
+      "id": 68,
+      "title": "Optimize pile-on detection from O(n^2) to O(n) sliding window",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "performance"
+      ],
+      "comments": [],
+      "created_at": "2026-02-19T06:56:04.536312533+00:00",
+      "updated_at": "2026-02-21T00:21:21.432491328+00:00",
+      "closed_at": "2026-02-21T00:21:21.432491328+00:00"
+    },
+    {
+      "id": 67,
+      "title": "Display behavioral signals in threat reports",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-19T06:56:03.736350677+00:00",
+      "updated_at": "2026-02-20T23:12:04.817588219+00:00",
+      "closed_at": "2026-02-20T23:12:04.817588219+00:00"
+    },
+    {
+      "id": 66,
+      "title": "Add behavioral signals design document",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "[action] Completed Tasks 1-6: BehavioralSignals struct, boost/gate functions, quote/reply detection, pile-on detection. 33 behavioral tests + 139 existing all passing. Starting Tasks 7-9: DB migration + pipeline wiring.",
+          "created_at": "2026-02-19T06:06:15.540443110+00:00"
+        }
+      ],
+      "created_at": "2026-02-19T05:28:06.876681055+00:00",
+      "updated_at": "2026-02-19T05:28:42.638928817+00:00",
+      "closed_at": "2026-02-19T05:28:42.638928817+00:00"
+    },
+    {
+      "id": 65,
+      "title": "Organize generated files into gitignored directories",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "chore"
+      ],
+      "comments": [],
+      "created_at": "2026-02-19T04:37:38.553007349+00:00",
+      "updated_at": "2026-02-19T04:47:12.535230192+00:00",
+      "closed_at": "2026-02-19T04:47:12.535230192+00:00"
+    },
+    {
+      "id": 64,
+      "title": "Screenshot-based amplification detection (searchPosts + future OCR)",
+      "description": "Detect amplification attacks where users screenshot posts instead of quoting/reposting them. This bypasses Constellation and AT Protocol backlinks entirely.\n\n**Phase 1: Text-based search (searchPosts)**\nUse app.bsky.feed.searchPosts to find posts mentioning the protected user's handle as plain text (not @mentions). Attackers who screenshot posts almost always reference the handle in their commentary. Low-cost, catches the majority of cases. Known example: @aly.codes was screenshotting posts for toxic amplification.\n\n**Phase 2: Image OCR (production-informed)**\nFor high-signal situations learned from production usage, add OCR scanning of attached images to detect:\n- Protected user's handle visible in screenshots\n- Protected user's post text matched in screenshot content\nConsider local ONNX OCR model (tesseract or similar) to stay consistent with the local-first approach. Only activate for situations where Phase 1 misses attacks that are confirmed through other channels.\n\n**Notes:**\n- Phase 2 scope should be shaped by production data — what patterns do screenshot attackers actually follow?\n- OCR is expensive; may want to limit to posts from accounts already flagged or from known hostile amplification chains\n- Deciduous nodes: 100 (goal), 101 (decision)",
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-19T04:19:59.406913144+00:00",
+      "updated_at": "2026-02-19T04:20:12.900239273+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 63,
+      "title": "Add validate command: score blocked accounts to verify pipeline accuracy",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-19T02:38:05.692603068+00:00",
+      "updated_at": "2026-02-19T04:20:24.586018040+00:00",
+      "closed_at": "2026-02-19T04:20:24.586018040+00:00"
+    },
+    {
+      "id": 62,
+      "title": "Refactor Bluesky client to use public AT Protocol API without authentication",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Epic: Remove authentication from the intelligence pipeline. Constellation (1+ year of data) replaces notification polling for amplification detection. All AT Protocol read endpoints are public via https://public.api.bsky.app. Auth only needed for future blocking/muting features. Plan: create PublicAtpClient struct, migrate all functions from BskyAgent, make Constellation always-on, remove --constellation flag, remove bsky-sdk dependency. See plan file: .claude/plans/zippy-seeking-quill.md",
+          "created_at": "2026-02-19T02:04:53.338067242+00:00"
+        }
+      ],
+      "created_at": "2026-02-19T02:04:47.282093288+00:00",
+      "updated_at": "2026-02-19T04:20:24.560952098+00:00",
+      "closed_at": "2026-02-19T04:20:24.560952098+00:00"
+    },
+    {
+      "id": 61,
+      "title": "Research AT Protocol public API authentication requirements",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [],
+      "created_at": "2026-02-19T01:43:56.928119249+00:00",
+      "updated_at": "2026-02-19T01:45:26.198737322+00:00",
+      "closed_at": "2026-02-19T01:45:26.198737322+00:00"
+    },
+    {
+      "id": 60,
+      "title": "Merge feat/constellation-api branch to main",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T12:27:04.409894549+00:00",
+      "updated_at": "2026-02-19T01:32:57.843627580+00:00",
+      "closed_at": "2026-02-19T01:32:57.843627580+00:00"
+    },
+    {
+      "id": 59,
+      "title": "Research AT Protocol event stream tools for multi-user scaling",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T04:59:31.405561976+00:00",
+      "updated_at": "2026-02-18T04:59:31.405561976+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 58,
+      "title": "Resolve Constellation DIDs to handles via getProfiles",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T04:32:14.506005589+00:00",
+      "updated_at": "2026-02-18T04:48:54.923128308+00:00",
+      "closed_at": "2026-02-18T04:48:54.923128308+00:00"
+    },
+    {
+      "id": 57,
+      "title": "Web interface: profile data storage and example posts for threat display",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T04:32:09.530749364+00:00",
+      "updated_at": "2026-02-18T04:32:09.530749364+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 56,
+      "title": "Adapt scoring formula for multi-component signals",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:48.099059646+00:00",
+      "updated_at": "2026-02-19T19:55:57.383508512+00:00",
+      "closed_at": "2026-02-19T19:55:57.383508512+00:00"
+    },
+    {
+      "id": 55,
+      "title": "Shared intelligence across protected users",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:47.406793499+00:00",
+      "updated_at": "2026-02-18T03:14:47.406793499+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 54,
+      "title": "Behavioral signals: reply ratio, quote ratio, pile-on detection",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:46.611467472+00:00",
+      "updated_at": "2026-02-19T07:48:59.560247884+00:00",
+      "closed_at": "2026-02-19T07:48:59.560247884+00:00"
+    },
+    {
+      "id": 53,
+      "title": "Constellation API integration",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:42.727384617+00:00",
+      "updated_at": "2026-02-18T05:00:45.188490167+00:00",
+      "closed_at": "2026-02-18T05:00:45.188490167+00:00"
+    },
+    {
+      "id": 52,
+      "title": "ONNX model concurrency for multi-user inference",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:42.053989449+00:00",
+      "updated_at": "2026-02-18T03:14:42.053989449+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 51,
+      "title": "Axum web server skeleton (Railway deployment)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:40.987022505+00:00",
+      "updated_at": "2026-02-18T03:14:40.987022505+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 50,
+      "title": "AT Protocol OAuth integration for web UI",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:39.672531955+00:00",
+      "updated_at": "2026-02-18T03:14:39.672531955+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 49,
+      "title": "Multi-user schema redesign (per-user vs shared data)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:35.058233233+00:00",
+      "updated_at": "2026-02-18T03:14:35.058233233+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 48,
+      "title": "Database migration: SQLite to PostgreSQL",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "architecture"
+      ],
+      "comments": [
+        {
+          "content": "Implementation plan written to docs/plans/2026-02-19-sqlite-to-postgres.md. Architecture: Trait-based dual backend (Approach 1). Database async trait with 11 methods, SqliteDatabase wraps rusqlite in Mutex (delegates to existing queries.rs — zero SQL duplication), PgDatabase uses sqlx + pgvector. 16 tasks across 5 phases. Phase 1-2: trait foundation + wiring (no behavior change). Phase 3: Postgres backend. Phase 4: migrate command. Phase 5: docs.",
+          "created_at": "2026-02-19T23:12:42.735342793+00:00"
+        },
+        {
+          "content": "[action] Context about to auto-compact. Phase 1-4 (feature-dev discovery/exploration/questions/architecture) complete. Plan written to docs/plans/2026-02-19-sqlite-to-postgres.md. Approach 1 chosen: trait-based dual backend with Mutex wrapper for SQLite. About to dispatch implementer subagent for Phase 1 tasks (1-4: feature flags, Database trait, SqliteDatabase wrapper, trait tests). Base SHA: 98d91d8. Branch: feat/sqlite-to-postgres. TodoWrite tasks #8-#17 track all 16 implementation tasks. Task #8 (feature flags) is in_progress. No code written yet.",
+          "created_at": "2026-02-19T23:16:20.326343497+00:00"
+        },
+        {
+          "content": "All 16 plan tasks complete across 5 phases. 7 commits on feat/sqlite-to-postgres branch. 186 tests passing, clippy clean, both feature configurations compile. Implemented: Database async trait, SqliteDatabase wrapper, PgDatabase with pgvector/JSONB, pipeline wiring, runtime backend selection, migrate command, documentation. Branch ready for PR.",
+          "created_at": "2026-02-20T01:24:11.845379683+00:00"
+        }
+      ],
+      "created_at": "2026-02-18T03:14:33.629912017+00:00",
+      "updated_at": "2026-02-20T01:24:15.874358069+00:00",
+      "closed_at": "2026-02-20T01:24:15.874358069+00:00"
+    },
+    {
+      "id": 47,
+      "title": "Write architectural recommendations for multi-user migration",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T03:14:32.932354929+00:00",
+      "updated_at": "2026-02-18T03:17:22.748230575+00:00",
+      "closed_at": "2026-02-18T03:17:22.748230575+00:00"
+    },
+    {
+      "id": 46,
+      "title": "Update docs and memory for scoring recalibration",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T02:54:58.061636993+00:00",
+      "updated_at": "2026-02-18T02:55:50.610184375+00:00",
+      "closed_at": "2026-02-18T02:55:50.610184375+00:00"
+    },
+    {
+      "id": 45,
+      "title": "Merge feat/sentence-embeddings branch to main",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T02:52:52.396880109+00:00",
+      "updated_at": "2026-02-18T02:53:08.562422943+00:00",
+      "closed_at": "2026-02-18T02:53:08.562422943+00:00"
+    },
+    {
+      "id": 44,
+      "title": "Recalibrate threat scoring for sentence embedding overlap scale",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [
+        {
+          "content": "Problem: With sentence embeddings, topic overlap values are 0.45-0.85 for most accounts in the social neighborhood, vs 0.05-0.24 with TF-IDF. The current formula (toxicity*70 + overlap*30) gives scores of 15-25 from overlap alone, putting nearly everyone at Elevated or higher regardless of toxicity.\n\nReal data from fresh scan: 12 High, 160 Elevated, 32 Watch, 9 Low out of 213 accounts. Most 'High' accounts have toxicity <0.10 — they're allies.\n\nFix approach: \n1. Change formula so toxicity is the PRIMARY driver and overlap is a multiplier/modifier rather than additive\n2. New formula: score = toxicity_component * (1 + overlap_boost). High overlap with low toxicity = low score. High overlap WITH toxicity = amplified score.\n3. Raise tier thresholds to reflect real-world score distributions\n4. Keep the overlap gate (below threshold = capped) but adjust threshold for embedding scale\n5. Update all unit tests and composition tests to match new formula",
+          "created_at": "2026-02-18T02:31:39.307274406+00:00"
+        }
+      ],
+      "created_at": "2026-02-18T02:31:28.766946638+00:00",
+      "updated_at": "2026-02-18T02:48:49.187921763+00:00",
+      "closed_at": "2026-02-18T02:48:49.187921763+00:00"
+    },
+    {
+      "id": 43,
+      "title": "Run end-to-end integration test of sentence embeddings branch",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-18T02:02:39.323104124+00:00",
+      "updated_at": "2026-02-18T02:48:49.162717981+00:00",
+      "closed_at": "2026-02-18T02:48:49.162717981+00:00"
+    },
+    {
+      "id": 42,
+      "title": "Update docs and close session for sentence embeddings work",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T23:47:47.590091569+00:00",
+      "updated_at": "2026-02-16T23:48:56.317707729+00:00",
+      "closed_at": "2026-02-16T23:48:56.317707729+00:00"
+    },
+    {
+      "id": 41,
+      "title": "Add tests for embedding DB queries, migration, and download helpers",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "testing"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T23:15:57.743424944+00:00",
+      "updated_at": "2026-02-16T23:20:50.831325211+00:00",
+      "closed_at": "2026-02-16T23:20:50.831325211+00:00"
+    },
+    {
+      "id": 40,
+      "title": "Wire embedding-based overlap into profile scoring pipeline",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T22:54:46.973760238+00:00",
+      "updated_at": "2026-02-16T23:46:12.361565414+00:00",
+      "closed_at": "2026-02-16T23:46:12.361565414+00:00"
+    },
+    {
+      "id": 39,
+      "title": "Store embedding vectors in DB and update fingerprint command",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T22:54:46.925894845+00:00",
+      "updated_at": "2026-02-16T23:46:12.333174080+00:00",
+      "closed_at": "2026-02-16T23:46:12.333174080+00:00"
+    },
+    {
+      "id": 38,
+      "title": "Create SentenceEmbedder with ONNX inference + mean pooling",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T22:54:46.879171813+00:00",
+      "updated_at": "2026-02-16T23:46:12.308432578+00:00",
+      "closed_at": "2026-02-16T23:46:12.308432578+00:00"
+    },
+    {
+      "id": 37,
+      "title": "Add sentence embedding model download (all-MiniLM-L6-v2)",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T22:54:46.838442883+00:00",
+      "updated_at": "2026-02-16T23:46:12.181991823+00:00",
+      "closed_at": "2026-02-16T23:46:12.181991823+00:00"
+    },
+    {
+      "id": 36,
+      "title": "Update CLAUDE.md and docs to reflect contributor changes and new tests",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T22:32:11.235597523+00:00",
+      "updated_at": "2026-02-16T22:51:35.294136918+00:00",
+      "closed_at": "2026-02-16T22:51:35.294136918+00:00"
+    },
+    {
+      "id": 35,
+      "title": "Constellation API integration for multi-user scanning",
+      "description": "Replace notification-based amplification detection with Constellation's public graph API. This enables scanning any public user without their credentials.\n\nKey requirements:\n- Constellation API for detecting quote/repost events on any user's posts\n- protected_users table: list of users we actively monitor (manual add or signup)\n- Per-user topic fingerprints (each protected user has their own)\n- Shared toxicity scores across all protected users (scored once, reused)\n- Threat scores combine shared toxicity with per-user topic overlap\n- Users should not be added to protection until they sign up or are manually added\n\nScaling & accuracy:\n- Tiered scoring depth: broad shallow pass (20 posts), deepen Watch-tier to 100+\n- Background job for new user onboarding (build fingerprint, then sweep network async)\n- Higher concurrency for network-bound work (16-32 vs current 8)\n- Shared toxicity is the biggest scaling win — score once, compute overlap per-user cheaply\n\nFingerprint & score lifecycle:\n- Full fingerprints for protected users and targets, refreshed periodically with new posts only (incremental, not full rebuild)\n- Toxicity scores refresh the same way — add new post scores incrementally\n- CRITICAL: never overwrite scores that a user has already acted on (blocked, muted, reviewed). Historical basis for actions must be preserved. Score history or versioning needed.\n- Consider: action_log table linking user actions to the score snapshot that informed them\n\nSome of this may be v2 (score versioning, incremental refresh) vs v1 (Constellation + multi-user + protected_users table).\n\nSupersedes #19 (configurable protected user).\nSee docs/research-alternative-approaches.md for Constellation discussion.",
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T05:54:26.250178737+00:00",
+      "updated_at": "2026-02-18T05:00:45.216015570+00:00",
+      "closed_at": "2026-02-18T05:00:45.216015570+00:00"
+    },
+    {
+      "id": 34,
+      "title": "Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2)",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T05:54:25.079435117+00:00",
+      "updated_at": "2026-02-16T23:46:12.394528759+00:00",
+      "closed_at": "2026-02-16T23:46:12.394528759+00:00"
+    },
+    {
+      "id": 33,
+      "title": "Crash-resilient pipelines: incremental DB writes + panic catching",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T05:54:24.154966422+00:00",
+      "updated_at": "2026-02-16T05:54:30.592357497+00:00",
+      "closed_at": "2026-02-16T05:54:30.592357497+00:00"
+    },
+    {
+      "id": 32,
+      "title": "Increase posts-per-account from 20 to 50 for better topic fingerprints",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T02:58:35.687695527+00:00",
+      "updated_at": "2026-02-16T05:53:46.041218165+00:00",
+      "closed_at": "2026-02-16T05:53:46.041218165+00:00"
+    },
+    {
+      "id": 31,
+      "title": "Reweight toxicity categories to reduce ally false positives",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [
+        {
+          "content": "Per research in docs/research-vader.md: Instead of adding VADER, first reweight the existing Detoxify model categories. Weight identity_attack, insult, and threat higher than obscene/sexual_explicit. This fixes the false positive problem where allies who swear get flagged as toxic.",
+          "created_at": "2026-02-16T02:37:04.806047191+00:00"
+        }
+      ],
+      "created_at": "2026-02-16T02:37:04.680299481+00:00",
+      "updated_at": "2026-02-16T02:44:12.564452738+00:00",
+      "closed_at": "2026-02-16T02:44:12.564452738+00:00"
+    },
+    {
+      "id": 30,
+      "title": "Replace weighted Jaccard with cosine similarity for topic overlap",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [
+        {
+          "content": "Per research in docs/research-overlap-diagnosis.md and docs/research-alternative-approaches.md: Weighted Jaccard requires exact keyword matches and produces max 0.09 scores across 426 accounts. Replacing with cosine similarity on the same TF-IDF weight vectors is a 30-minute fix that should dramatically improve overlap scoring. Keep keyword_weights() method, just change the comparison math.",
+          "created_at": "2026-02-16T02:37:04.779518868+00:00"
+        }
+      ],
+      "created_at": "2026-02-16T02:36:54.025660368+00:00",
+      "updated_at": "2026-02-16T02:44:12.143307337+00:00",
+      "closed_at": "2026-02-16T02:44:12.143307337+00:00"
+    },
+    {
+      "id": 29,
+      "title": "Investigate improved topic overlap and sentiment scoring",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T01:40:01.205672423+00:00",
+      "updated_at": "2026-02-16T05:53:47.550067704+00:00",
+      "closed_at": "2026-02-16T05:53:47.550067704+00:00"
+    },
+    {
+      "id": 28,
+      "title": "Run live validation against real Bluesky account",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "validation"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T01:16:47.470865464+00:00",
+      "updated_at": "2026-02-16T05:53:48.504526897+00:00",
+      "closed_at": "2026-02-16T05:53:48.504526897+00:00"
+    },
+    {
+      "id": 27,
+      "title": "Skip follower analysis for repost events",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "performance"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:51:19.774510700+00:00",
+      "updated_at": "2026-02-16T00:51:48.973961907+00:00",
+      "closed_at": "2026-02-16T00:51:48.973961907+00:00"
+    },
+    {
+      "id": 26,
+      "title": "Stop tracking chainlink issues.db and .cache in git",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "cleanup"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:46:47.293644542+00:00",
+      "updated_at": "2026-02-16T00:47:04.252820925+00:00",
+      "closed_at": "2026-02-16T00:47:04.252820925+00:00"
+    },
+    {
+      "id": 25,
+      "title": "Mode 2: Background sweep of followers-of-followers",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:33:27.858877908+00:00",
+      "updated_at": "2026-02-16T00:39:34.072458314+00:00",
+      "closed_at": "2026-02-16T00:39:34.072458314+00:00"
+    },
+    {
+      "id": 24,
+      "title": "Replace dummy Perspective scorer with proper no-op",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "cleanup"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:33:27.813825136+00:00",
+      "updated_at": "2026-02-16T00:38:03.589892379+00:00",
+      "closed_at": "2026-02-16T00:38:03.589892379+00:00"
+    },
+    {
+      "id": 23,
+      "title": "Wire up --since flag or remove it",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "cleanup"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:33:27.772475616+00:00",
+      "updated_at": "2026-02-16T00:38:03.570104059+00:00",
+      "closed_at": "2026-02-16T00:38:03.570104059+00:00"
+    },
+    {
+      "id": 22,
+      "title": "Exclude protected user from their own threat report",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bugfix"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:33:27.729376886+00:00",
+      "updated_at": "2026-02-16T00:36:57.129523464+00:00",
+      "closed_at": "2026-02-16T00:36:57.129523464+00:00"
+    },
+    {
+      "id": 21,
+      "title": "Surface quote text and toxicity in threat reports",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-02-16T00:33:27.686014655+00:00",
+      "updated_at": "2026-02-16T00:35:38.590797119+00:00",
+      "closed_at": "2026-02-16T00:35:38.590797119+00:00"
+    },
+    {
+      "id": 20,
+      "title": "Clean up CLAUDE.md and create README.md",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-02-15T23:55:44.093414843+00:00",
+      "updated_at": "2026-02-15T23:58:18.835458489+00:00",
+      "closed_at": "2026-02-15T23:58:18.835458489+00:00"
+    },
+    {
+      "id": 19,
+      "title": "Support configurable protected user separate from auth account",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [
+        {
+          "content": "Currently the protected user must be the authenticated user (notifications are per-account). To protect a different user, either: (1) they provide an app password, or (2) switch to search API / Jetstream for amplification detection. Posts and fingerprinting work with any public account already.",
+          "created_at": "2026-02-15T23:47:13.123587459+00:00"
+        }
+      ],
+      "created_at": "2026-02-15T23:47:07.636214023+00:00",
+      "updated_at": "2026-02-16T05:55:41.553041542+00:00",
+      "closed_at": "2026-02-16T05:55:41.553041542+00:00"
+    },
+    {
+      "id": 18,
+      "title": "Add progress bar to parallel scoring",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "pipeline"
+      ],
+      "comments": [],
+      "created_at": "2026-02-15T22:38:13.549057697+00:00",
+      "updated_at": "2026-02-15T23:47:42.309883701+00:00",
+      "closed_at": "2026-02-15T23:47:42.309883701+00:00"
+    },
+    {
+      "id": 17,
+      "title": "Refactor scoring loop to use buffer_unordered",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "pipeline"
+      ],
+      "comments": [],
+      "created_at": "2026-02-15T22:38:12.861310739+00:00",
+      "updated_at": "2026-02-15T23:47:42.285038059+00:00",
+      "closed_at": "2026-02-15T23:47:42.285038059+00:00"
+    },
+    {
+      "id": 16,
+      "title": "Add --concurrency CLI flag to scan command",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "pipeline"
+      ],
+      "comments": [],
+      "created_at": "2026-02-15T22:38:11.946181653+00:00",
+      "updated_at": "2026-02-15T23:47:42.256573316+00:00",
+      "closed_at": "2026-02-15T23:47:42.256573316+00:00"
+    },
+    {
+      "id": 15,
+      "title": "Add futures dependency to Cargo.toml",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "pipeline"
+      ],
+      "comments": [],
+      "created_at": "2026-02-15T22:38:10.494809531+00:00",
+      "updated_at": "2026-02-15T23:47:42.232431034+00:00",
+      "closed_at": "2026-02-15T23:47:42.232431034+00:00"
+    },
+    {
+      "id": 14,
+      "title": "Cosmetic cleanup — update comments referencing Perspective as primary scorer",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "cosmetic"
+      ],
+      "comments": [
+        {
+          "content": "[action] Closing #9, creating #14, committing CHANGELOG and issue DB",
+          "created_at": "2026-02-15T22:20:30.412147968+00:00"
+        }
+      ],
+      "created_at": "2026-02-15T22:19:32.890145932+00:00",
+      "updated_at": "2026-02-16T00:01:11.974670252+00:00",
+      "closed_at": "2026-02-16T00:01:11.974670252+00:00"
+    },
+    {
+      "id": 13,
+      "title": "Select and implement Perspective API replacement",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "planning",
+        "toxicity"
+      ],
+      "comments": [
+        {
+          "content": "Research complete (issue #11). Full report at docs/toxicity-alternatives-report.md. Top recommendation: Detoxify unbiased-toxic-roberta via ONNX Runtime (ort crate). Backup: OpenAI Moderation API. Future complement: CoPE by Zentropi for policy-steerable edge cases. This issue blocks scaling the MVP since Perspective API has a 1 QPS rate limit and sunsets Dec 31, 2026.",
+          "created_at": "2026-02-09T02:53:30.470280446+00:00"
+        },
+        {
+          "content": "DECISION POINTS:\n\n1. Primary scorer: Detoxify unbiased-toxic-roberta via ONNX (recommended) vs alternatives\n   - Returns continuous 0-1 scores across 7 categories (matches existing ToxicityScorer trait)\n   - Identity-bias mitigation (critical for Bryan's topic areas: fat liberation, queer identity, DEI)\n   - Pre-exported ONNX at protectai/unbiased-toxic-roberta-onnx (~125 MB quantized)\n   - Runs on CPU, no API dependency, Apache 2.0\n   - Alternative: MiniLMv2-toxic-jigsaw-onnx (22M params, even smaller, ROC-AUC 0.98)\n\n2. Integration approach: ort crate (pure Rust ONNX Runtime bindings) recommended\n   - Production-proven (SurrealDB, Bloop, Google Magika)\n   - Pair with tokenizers crate for text tokenization\n   - Alternative: rust-bert (adds ~2GB libtorch dep), candle (pure Rust but more manual work)\n\n3. Fallback strategy: OpenAI Moderation API as cloud backup\n   - Free, 13 harm categories, 95% accuracy, easy reqwest integration\n   - Useful when local inference isn't available or for cross-validation\n\n4. Timeline: Replace now vs keep Perspective and swap later\n   - Perspective works until Dec 31, 2026, but has 1 QPS rate limit blocking pipeline scaling\n   - Local ONNX scorer eliminates rate limits entirely\n   - Replacing now unblocks issues #9 (rate limiting) and #10 (pipeline scaling)\n\nRELATED ISSUES:\n- #9 (rate limiting) becomes moot with local scorer\n- #10 (pipeline scaling) partially unblocked by removing API rate limits\n- #11 (research) completed, report at docs/toxicity-alternatives-report.md",
+          "created_at": "2026-02-09T02:54:43.353683818+00:00"
+        },
+        {
+          "content": "Implementation complete. Added OnnxToxicityScorer using Detoxify unbiased-toxic-roberta model via ort crate. New files: src/toxicity/onnx.rs (scorer), src/toxicity/download.rs (model download helper). Updated: config.rs (ScorerBackend enum, CHARCOAL_SCORER/CHARCOAL_MODEL_DIR env vars), main.rs (download-model command, create_scorer() helper replacing hardcoded Perspective). Cargo.toml adds ort 2.0.0-rc.11, tokenizers 0.22, dirs 6. Default backend is now ONNX (local, no API key needed). Perspective kept as fallback via CHARCOAL_SCORER=perspective. 31 tests pass, clippy clean. Checkpointed at v4.",
+          "created_at": "2026-02-09T05:44:46.131241974+00:00"
+        }
+      ],
+      "created_at": "2026-02-09T02:53:22.728999767+00:00",
+      "updated_at": "2026-02-09T05:44:49.615354933+00:00",
+      "closed_at": "2026-02-09T05:44:49.615354933+00:00"
+    },
+    {
+      "id": 12,
+      "title": "Design repost scoring strategy — score all vs sample vs limit",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "medium"
+      ],
+      "comments": [],
+      "created_at": "2026-02-09T02:24:19.074809790+00:00",
+      "updated_at": "2026-02-16T00:18:24.143030623+00:00",
+      "closed_at": "2026-02-16T00:18:24.143030623+00:00"
+    },
+    {
+      "id": 11,
+      "title": "Research alternative toxicity scoring APIs (Perspective sunsetting Dec 2026)",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "medium"
+      ],
+      "comments": [
+        {
+          "content": "Research complete. Report written to docs/toxicity-alternatives-report.md. Top recommendation: Detoxify unbiased-toxic-roberta via ONNX Runtime (ort crate) as primary Perspective API replacement.",
+          "created_at": "2026-02-09T02:50:37.127677104+00:00"
+        }
+      ],
+      "created_at": "2026-02-09T02:24:18.131949984+00:00",
+      "updated_at": "2026-02-09T02:50:37.106993004+00:00",
+      "closed_at": "2026-02-09T02:50:37.106993004+00:00"
+    },
+    {
+      "id": 10,
+      "title": "Scale scan pipeline — reduce per-account latency and support larger networks",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "high"
+      ],
+      "comments": [
+        {
+          "content": "Rate limit bottleneck resolved by issue #13 — local ONNX scorer has no API rate limits. Remaining pipeline scaling work (parallelism, batch sizes) can proceed independently.",
+          "created_at": "2026-02-09T05:44:56.655304187+00:00"
+        }
+      ],
+      "created_at": "2026-02-09T02:24:17.250000048+00:00",
+      "updated_at": "2026-02-15T23:47:42.210991594+00:00",
+      "closed_at": "2026-02-15T23:47:42.210991594+00:00"
+    },
+    {
+      "id": 9,
+      "title": "Fix Perspective API rate limiting to stay under 60 req/min quota",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "high"
+      ],
+      "comments": [
+        {
+          "content": "Closed as moot — local ONNX scorer has no rate limits, replacing the Perspective API 1 QPS bottleneck that motivated this issue.",
+          "created_at": "2026-02-15T22:19:32.168074577+00:00"
+        }
+      ],
+      "created_at": "2026-02-09T02:24:16.296955699+00:00",
+      "updated_at": "2026-02-15T22:19:25.789846379+00:00",
+      "closed_at": "2026-02-15T22:19:25.789846379+00:00"
+    },
+    {
+      "id": 8,
+      "title": "Tune threat tier thresholds for real-world score distribution",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-02-09T02:08:18.252381071+00:00",
+      "updated_at": "2026-02-09T02:23:30.702311272+00:00",
+      "closed_at": "2026-02-09T02:23:30.702311272+00:00"
+    },
+    {
+      "id": 7,
+      "title": "Support custom PDS endpoint for non-bsky.social accounts",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bluesky",
+        "bugfix"
+      ],
+      "comments": [
+        {
+          "content": "[auto] Session resumed after context compression.",
+          "created_at": "2026-02-09T02:00:24.595828779+00:00"
+        },
+        {
+          "content": "[auto] Session resumed after context compression.",
+          "created_at": "2026-02-09T02:00:42.080122506+00:00"
+        }
+      ],
+      "created_at": "2026-02-08T23:28:05.596179148+00:00",
+      "updated_at": "2026-02-09T02:23:26.743305122+00:00",
+      "closed_at": "2026-02-09T02:23:26.743305122+00:00"
+    },
+    {
+      "id": 6,
+      "title": "Phase 7: Reports, markdown output, and polish",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "output",
+        "phase7"
+      ],
+      "comments": [],
+      "created_at": "2026-02-08T21:58:02.539787104+00:00",
+      "updated_at": "2026-02-08T22:00:15.995886508+00:00",
+      "closed_at": "2026-02-08T22:00:15.995886508+00:00"
+    },
+    {
+      "id": 5,
+      "title": "Phase 5: Amplification detection pipeline",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "phase5",
+        "pipeline"
+      ],
+      "comments": [],
+      "created_at": "2026-02-08T21:54:32.910361935+00:00",
+      "updated_at": "2026-02-08T21:57:56.981009277+00:00",
+      "closed_at": "2026-02-08T21:57:56.981009277+00:00"
+    },
+    {
+      "id": 4,
+      "title": "Phase 4: Toxicity scoring with Perspective API",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "phase4",
+        "toxicity"
+      ],
+      "comments": [],
+      "created_at": "2026-02-08T21:53:04.147771406+00:00",
+      "updated_at": "2026-02-08T21:54:27.679788525+00:00",
+      "closed_at": "2026-02-08T21:54:27.679788525+00:00"
+    },
+    {
+      "id": 3,
+      "title": "Phase 3: Topic fingerprint with TF-IDF",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "phase3",
+        "topics"
+      ],
+      "comments": [],
+      "created_at": "2026-02-08T21:48:27.357056309+00:00",
+      "updated_at": "2026-02-08T21:52:58.851750337+00:00",
+      "closed_at": "2026-02-08T21:52:58.851750337+00:00"
+    },
+    {
+      "id": 2,
+      "title": "Phase 2: Bluesky auth + post fetching",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bluesky",
+        "phase2"
+      ],
+      "comments": [],
+      "created_at": "2026-02-08T21:40:49.676612892+00:00",
+      "updated_at": "2026-02-08T21:48:22.674203159+00:00",
+      "closed_at": "2026-02-08T21:48:22.674203159+00:00"
+    },
+    {
+      "id": 1,
+      "title": "Phase 1: Project skeleton + config + database",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "phase1",
+        "scaffold"
+      ],
+      "comments": [],
+      "created_at": "2026-02-08T21:32:07.083538465+00:00",
+      "updated_at": "2026-02-08T21:40:35.076324923+00:00",
+      "closed_at": "2026-02-08T21:40:35.076324923+00:00"
+    }
+  ]
+}

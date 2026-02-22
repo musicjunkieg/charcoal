@@ -1,0 +1,266 @@
+[
+  {
+    "hash": "d708dbba57eeb05c7961411da6ef79fe1b98c2a1",
+    "short_hash": "d708dbb",
+    "author": "musicjunkieg",
+    "date": "2026-02-21T00:52:27Z",
+    "message": "fix: address CodeRabbit review findings on PR #7\n\n  Advisory lock (major): acquire a dedicated pool connection for the\n  lock/unlock pair so both execute on the same backend session.\n  Previously the pool could hand out different connections for acquire\n  and release, making the unlock a no-op. Also wraps migrations in an\n  async block so the unlock always runs even if a migration fails.\n\n  cleanup_test_data: return Result<()> and propagate errors with\n  context instead of panicking via unwrap.\n\n  CHANGELOG: fix \"dont\" typo, rephrase entries to describe fixes\n  applied rather than the problems that existed.",
+    "files_changed": 3
+  },
+  {
+    "hash": "62843cdd15d07167fec2d9cdc898b09060d5d750",
+    "short_hash": "62843cd",
+    "author": "musicjunkieg",
+    "date": "2026-02-21T00:13:39Z",
+    "message": "feat: v0.2 backend polish — close #68, #72, #73, #74, #75, #76\n\n  #73 — Add PostgreSQL setup section to README documenting pgvector\n    CREATE EXTENSION superuser requirement and migration command.\n\n  #75 — Replace silent post_count as i32 cast with i32::try_from()\n    in PgDatabase::save_fingerprint, surfacing an error instead of\n    silently wrapping on overflow.\n\n  #76 — Gate sqlite feature: make rusqlite optional (dep:rusqlite),\n    add cfg(feature = \"sqlite\") to mod sqlite/schema/queries and\n    all sqlite-specific functions in db/mod.rs.\n\n  #74 — Add cleanup_test_data() helper to db_postgres.rs that deletes\n    test-specific rows before each writing test so runs are idempotent.\n\n  #72 — Acquire pg_advisory_lock(0x43484152434F414C) before running\n    migrations and release it after, preventing race conditions when\n    two processes start concurrently.\n\n  #68 — Rewrite detect_pile_on_participants() as O(n) two-pointer\n    sliding window. Previous implementation was O(n^2). New approach\n    uses a HashMap<DID, count> maintained as left/right pointers\n    advance monotonically, so each event enters and exits at most once.",
+    "files_changed": 6
+  },
+  {
+    "hash": "6d1451c96a371df545a0d6ccdb8656e3ba685ebc",
+    "short_hash": "6d1451c",
+    "author": "musicjunkieg",
+    "date": "2026-02-20T23:27:38Z",
+    "message": "fix #71 and feat #67: save_embedding error on missing row, behavioral\n  signals in reports\n\n  fix: save_embedding now returns an error (instead of silently doing nothing)\n  when no fingerprint row exists in topic_fingerprint. Fixed in both SQLite\n  (queries.rs) and Postgres (postgres.rs) backends. Added a unit test that\n  exercises the failure path.\n\n  feat: behavioral signals (quote ratio, reply ratio, avg engagement, pile-on,\n  benign gate, boost multiplier) are now rendered in terminal detail view\n  (display_account_detail) and in the markdown report evidence section for\n  Elevated+ accounts. Data was already stored as JSON in account_scores — this\n  just wires it up for display. No schema or model changes needed.",
+    "files_changed": 4
+  },
+  {
+    "hash": "0752aeb79b2a42ec06be48e0a4e888336ed326d0",
+    "short_hash": "0752aeb",
+    "author": "Bryan Guffey",
+    "date": "2026-02-20T01:22:53Z",
+    "message": "docs: add note to never use heredoc syntax in commit commands\n\n  Heredocs break in zsh on this system. Use single-quoted multi-line\n  strings for commit messages instead.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "40167dd15469e181995d855068ffec748d4868e2",
+    "short_hash": "40167dd",
+    "author": "Bryan Guffey",
+    "date": "2026-02-20T01:21:21Z",
+    "message": "feat: add migrate command and PostgreSQL documentation\n\n  Add `charcoal migrate --database-url <url>` command (gated on postgres\n  feature) that transfers all data from SQLite to PostgreSQL. Update\n  CLAUDE.md with database architecture docs and .env.example with\n  DATABASE_URL.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "97e59eb490f3a2bdf300ae5f9cc59cf470315b34",
+    "short_hash": "97e59eb",
+    "author": "Bryan Guffey",
+    "date": "2026-02-20T00:12:42Z",
+    "message": "refactor: wire all pipelines and CLI through\n  Database trait\n\n  Replaces direct rusqlite::Connection usage with Arc<dyn Database> in:\n  - pipeline/amplification.rs (scan + score followers)\n  - pipeline/sweep.rs (second-degree network sweep)\n  - status.rs (now async, HasDbPath trait removed)\n  - main.rs (all 9 command handlers)\n  - config.rs (HasDbPath impl removed)\n\n  No behavior change — still SQLite-only via SqliteDatabase wrapper.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "d07da653ca87dab9d440247154872c8427dbacc3",
+    "short_hash": "d07da65",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T23:51:02Z",
+    "message": "feat: add Database trait defining async interface for all DB operations\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "629b24a2b092c32e4c663ac2033d7dc684f7e62c",
+    "short_hash": "629b24a",
+    "author": "chaos gremlin",
+    "date": "2026-02-19T21:37:25-08:00",
+    "message": "Merge pull request #6 from musicjunkieg/feat/sqlite-to-postgres\n\nfeat: SQLite to PostgreSQL dual-backend migration",
+    "files_changed": 0
+  },
+  {
+    "hash": "98d91d8f01c21dcac4f8fd412d7aefb9cebdcb09",
+    "short_hash": "98d91d8",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T07:46:40Z",
+    "message": "docs: update CLAUDE.md with behavioral signals feature (PR #5)\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "dcbabe2f1ba70620887458ee1af8a5f076a741e4",
+    "short_hash": "dcbabe2",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T04:45:43Z",
+    "message": "chore: organize generated files into gitignored directories\n\n  Reports go to output/, backups to backups/, research scratch to docs/research/.\n  Git hooks skip Rust checks for docs-only commits/pushes. Report generation\n  creates output/ directory automatically if missing.",
+    "files_changed": 11
+  },
+  {
+    "hash": "3a3837d7f2efe535eebf19632661a9e28d189637",
+    "short_hash": "3a3837d",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T03:12:38Z",
+    "message": "style: apply cargo fmt to client.rs",
+    "files_changed": 1
+  },
+  {
+    "hash": "5536e2ab246e70819ff229696c157e6cb828743f",
+    "short_hash": "5536e2a",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T02:59:27Z",
+    "message": "feat: replace authenticated BskyAgent with public AT Protocol API\n\n  Remove bsky-sdk dependency and authentication requirement from the entire\n  intelligence pipeline. All read operations now use the unauthenticated\n  public API at public.api.bsky.app via a new PublicAtpClient (reqwest).\n\n  Only BLUESKY_HANDLE is needed — no app password required. Constellation\n  backlink index is now always-on for amplification detection (replaces\n  notification polling, which required auth). Added validate command that\n  scores blocked accounts via PDS repo access to verify pipeline accuracy.\n\n  Key changes:\n  - BskyAgent → PublicAtpClient with generic xrpc_get() helper\n  - Notification polling (listNotifications) → Constellation-primary\n  - --constellation flag removed (always-on)\n  - Added DID/PDS resolution for validate command\n  - 139 tests passing, clippy clean\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 20
+  },
+  {
+    "hash": "015ad898c4e910e0117571fa1072394fe4207bdf",
+    "short_hash": "015ad89",
+    "author": "chaos gremlin",
+    "date": "2026-02-18T19:08:23-08:00",
+    "message": "Merge pull request #4 from musicjunkieg/feat/public-api-refactor\n\nfeat: replace authenticated BskyAgent with public AT Protocol API",
+    "files_changed": 0
+  },
+  {
+    "hash": "ec6b09b635afdf089224a5c5d8844d4dac2379c6",
+    "short_hash": "ec6b09b",
+    "author": "Bryan Guffey",
+    "date": "2026-02-18T02:56:25Z",
+    "message": "docs: update CLAUDE.md for scoring recalibration and test count",
+    "files_changed": 1
+  },
+  {
+    "hash": "c2201ebb1b33b2ab21df3b64d4693d8fc281c4c1",
+    "short_hash": "c2201eb",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T23:50:02Z",
+    "message": "docs: update CLAUDE.md for sentence embeddings, apply cargo fmt\n\n  Update project status to reflect 132 tests, sentence embedding model\n  docs, and DB schema v2. Apply cargo fmt to new code.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "9ea738a4db46a036c0a902448936388bda11bc3d",
+    "short_hash": "9ea738a",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T22:48:16Z",
+    "message": "docs: update CLAUDE.md, README, and workflow docs for contributor PR #1\n\n  Reflect post-MVP improvements from PR #1 (Bobby Grayson): 109 tests,\n  UTF-8 safety, LazyLock regex, spawn_blocking ONNX, git hooks. Add\n  deciduous v0.12.0 features to workflow docs. Apply cargo fmt to source.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 26
+  },
+  {
+    "hash": "8b6c16a79cfef1ae2b0c96d7211b4e9864112c8c",
+    "short_hash": "8b6c16a",
+    "author": "Robert Grayson",
+    "date": "2026-02-16T03:21:32-05:00",
+    "message": "chore: add install-hooks.sh for portable pre-commit and pre-push hooks\n\nInstalls both git hooks from a single script so new clones get the\nsame quality gates: formatting, clippy, and tests on commit; tests\nand clippy on push. Run ./scripts/install-hooks.sh after cloning.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "b038d52ce001ae6c2183a92d933de4d86e75b968",
+    "short_hash": "b038d52",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:55:04Z",
+    "message": "docs: strengthen Deciduous logging requirements in CLAUDE.md\n\n  Make it explicit that deciduous nodes must be created in real-time with\n  --commit flags, not batched retroactively. Add concrete command examples\n  and call out the anti-pattern of catching up later.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "bdf137d1dc2bb168734145a3956ddcddbc7c2362",
+    "short_hash": "bdf137d",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:52:26Z",
+    "message": "perf: skip follower analysis for repost events (#27)\n\n  Only quote events trigger follower scoring. Reposts are still recorded\n  as amplification events but don't trigger the expensive follower fetch\n  and scoring pipeline. Quotes are the primary harassment vector (hostile\n  commentary), while reposts are usually supportive sharing.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "c4e6a69534ea3fe84abe2efc4fcf4b62537ebaab",
+    "short_hash": "c4e6a69",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:47:59Z",
+    "message": "chore: stop tracking chainlink issues.db and .cache (#26)\n\n  These are local runtime state — binary DB diffs are noise in git history,\n  and .cache/ is ephemeral. Rules files remain tracked as shared config.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "7af30383dadaad8652b8526cb916c3e72e332e15",
+    "short_hash": "7af3038",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:42:46Z",
+    "message": "feat: quote context in reports, self-exclusion, Mode 2 sweep, CLI cleanup (#21-25)\n\n  - Surface quote text and toxicity in markdown and terminal reports (#21)\n  - Exclude protected user from their own threat report (#22)\n  - Remove unused --since CLI flag (#23)\n  - Replace dummy Perspective scorer with NoopScorer (#24)\n  - Implement Mode 2 background sweep of followers-of-followers (#25)\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "26ad26ae2ff9d17fdaaecb4fa12d2a896e200318",
+    "short_hash": "26ad26a",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:27:22Z",
+    "message": "feat: fetch and score quote text for amplification events (#12)\n\n  When a quote event is detected, fetch the quote post text via\n  app.bsky.feed.getPosts and score it for toxicity. Store the quote text\n  in the amplifier_text DB column and display it with a toxicity score\n  in scan output.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "b971e2f590734fb6ced73921535ac431821a0fef",
+    "short_hash": "b971e2f",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:03:55Z",
+    "message": "chore: update comments to reflect ONNX as default scorer (#14)\n\n  Replace references to Perspective API as the primary toxicity scorer\n  in module-level comments and doc comments. Perspective is now documented\n  as a fallback option.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "9573deab7655855cb91516ecc6743a64584589d7",
+    "short_hash": "9573dea",
+    "author": "Bryan Guffey",
+    "date": "2026-02-15T23:59:20Z",
+    "message": "docs: add README and clean up CLAUDE.md (#20)\n\n  Add comprehensive README with quick start guide, CLI reference, threat\n  tiers, and architecture overview. Update CLAUDE.md to reflect current\n  project state (ONNX scorer, all phases complete). Move Deciduous workflow\n  reference to docs/deciduous-workflow.md.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "646efd899071dd672f3af298525b8dbaf5441700",
+    "short_hash": "646efd8",
+    "author": "Bryan Guffey",
+    "date": "2026-02-15T23:50:57Z",
+    "message": "feat: parallelize scan pipeline with buffer_unordered (#10)\n\n  Restructure follower scoring into filter/score/write phases using\n  futures::stream::buffer_unordered for concurrent network I/O. Adds\n  --concurrency flag (default 8) to control parallelism. Includes\n  progress bar during scoring via indicatif.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "7ebfc4685ba33698f191082be64dcb827d2ab84f",
+    "short_hash": "7ebfc46",
+    "author": "Bryan Guffey",
+    "date": "2026-02-09T05:45:50Z",
+    "message": "feat: replace Perspective API with local ONNX toxicity scorer\n\nAdd OnnxToxicityScorer using Detoxify's unbiased-toxic-roberta model\nvia ort crate for local CPU inference — no API keys, no rate limits,\nand reduced bias around identity mentions. Perspective API kept as\nfallback via CHARCOAL_SCORER=perspective env var.\n\nNew: download-model CLI command, ScorerBackend config enum, model\ndownload helper with progress bar. Default backend is now ONNX.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "db8ad317216b37048ffb35473fa2125119b03914",
+    "short_hash": "db8ad31",
+    "author": "Bryan Guffey",
+    "date": "2026-02-09T02:40:55Z",
+    "message": "fix: improve fingerprint quality and add custom PDS support\n\nTune threat tier thresholds for real-world score distribution where most\naccounts land in 0-15 range. Add --max-followers CLI flag to control\nper-amplifier analysis depth. Recalculate tier from stored score so\nthreshold changes take effect without rescanning. Support custom PDS\nendpoints for non-bsky.social accounts.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "1a6477174b29bc64f39ecf60eed95ff1d0346f64",
+    "short_hash": "1a64771",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T22:00:06Z",
+    "message": "feat: Phase 7 — markdown report generation and terminal output formatting\n\nComplete the output subsystem:\n- output/terminal.rs: Colored threat list display with tier summaries,\n  account detail view with evidence posts\n- output/markdown.rs: Full .md report with summary table, ranked accounts,\n  topic fingerprint, and evidence section for elevated+ threats\n- main.rs: Wire report command to generate both terminal and markdown output,\n  delegate score display to output::terminal module\n\n1 new test (markdown generation), 21 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "99d9f519b3ebd26f4577ad9e330b91f5ee78e027",
+    "short_hash": "99d9f51",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:57:47Z",
+    "message": "feat: Phases 5+6 — amplification pipeline, threat scoring, and full CLI wiring\n\nComplete the core threat detection pipeline:\n- pipeline/amplification.rs: Full scan workflow — poll notifications for\n  quote/repost events, store in DB, optionally fetch amplifier followers\n  and score each one\n- scoring/threat.rs: Combined threat score formula (70% toxicity + 30%\n  topic overlap) with gate that caps scores for irrelevant hostile accounts\n- scoring/profile.rs: Profile builder that orchestrates post fetching,\n  toxicity scoring, topic extraction, and threat computation for one account\n\nWire all CLI commands to real implementations:\n- `fingerprint`: Fetches posts, runs TF-IDF, displays bar chart, caches in DB\n- `scan [--analyze]`: Polls notifications, stores events, optionally scores\n- `score @handle`: Full single-account scoring with evidence display\n- `report [--min-score N]`: Ranked threat list from DB\n\n5 new tests (threat formula), 20 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6dcb11233f83f5c04e8029eb32684bd8065f2049",
+    "short_hash": "6dcb112",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:54:20Z",
+    "message": "feat: Phase 4 — toxicity scoring with Perspective API and rate limiter\n\nImplement the toxicity scoring subsystem:\n- traits.rs: ToxicityScorer async trait with ToxicityResult/ToxicityAttributes\n  types, designed for provider swappability (Perspective sunsets Dec 2026)\n- perspective.rs: Google Perspective API client requesting TOXICITY,\n  SEVERE_TOXICITY, IDENTITY_ATTACK, INSULT, PROFANITY, and THREAT scores\n- rate_limiter.rs: Token-bucket rate limiter enforcing 1 QPS for the\n  free tier, with async sleep to avoid busy-waiting\n\nAdded async-trait crate dependency.\n2 new tests (rate limiter), 15 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6470b006afe23db6853b83b21c01451abd25b073",
+    "short_hash": "6470b00",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:52:47Z",
+    "message": "feat: Phase 3 — TF-IDF topic fingerprint with clustering and overlap scoring\n\nImplement the complete topic analysis subsystem:\n- traits.rs: TopicExtractor trait for swappable implementations\n- tfidf.rs: TF-IDF keyword extraction using keyword_extraction crate,\n  with co-occurrence based clustering into labeled topic groups\n- fingerprint.rs: TopicFingerprint/TopicCluster structs with colored\n  terminal bar chart display and keyword weight extraction\n- overlap.rs: Weighted Jaccard similarity for comparing two fingerprints\n\nAdded stop-words crate for English stop word filtering.\n7 new tests, 13 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
+    "short_hash": "272ff53",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:48:07Z",
+    "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",
+    "short_hash": "b5e1599",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:40:21Z",
+    "message": "feat: Phase 1 — project skeleton, CLI, config, and database\n\nSet up the complete Charcoal project structure with all module directories,\nCargo.toml with dependencies (bsky-sdk, rusqlite, keyword_extraction, clap,\ntokio, etc.), clap-based CLI with all planned subcommands, environment\nconfig loading via dotenvy, and SQLite database with schema for topic\nfingerprints, account scores, amplification events, and scan state.\n\nAll 6 database tests pass. `cargo run -- init` creates the DB,\n`cargo run -- status` shows system state, `cargo run -- --help` works.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 39
+  }
+]
