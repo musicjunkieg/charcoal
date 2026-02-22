@@ -1,4 +1,4 @@
-# Deciduous database (local)
+# Deciduous — local binary DB only; JSON exports in docs/ are tracked
 .deciduous/
 
 # Rust build artifacts
@@ -21,6 +21,11 @@
 # Research scratch files
 /docs/research/
 
-# Chainlink local state (rules are tracked, but DB and cache are not)
+# Chainlink local state — DB and cache are local; export JSON is tracked
 .chainlink/issues.db
 .chainlink/.cache/
+# issues-export.json is explicitly tracked (see pre-commit hook)
+
+# Git worktrees (local ephemeral state)
+.worktrees/
+.claude/worktrees/
