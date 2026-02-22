@@ -95,6 +95,7 @@ chainlink subissue 1 "Add webhook delivery dashboard endpoint"
 ```
 
 ### When to Create Issues
+
 | Scenario | Action |
 |----------|--------|
 | User asks for a feature | Create epic + subissues if >2 components |

@@ -17,12 +17,14 @@ For each narrative, you'll create a subgraph.
 For each narrative, create a backdated goal:
 
 ```bash
+# -c sets confidence level (0-100): 90 = high confidence this is the right framing
 deciduous add goal "<Narrative title>" -c 90 --date "YYYY-MM-DD"
 ```
 
 ## Step 3: Build initial approaches
 
 ```bash
+# -c 85 = slightly less certain than the goal framing; adjust based on how clear the history is
 deciduous add decision "<First approach>" -c 85 --date "YYYY-MM-DD"
 deciduous link <goal> <decision> -r "Initial design"
 ```

@@ -15,13 +15,31 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Load .env safely — parse key=value without executing as bash
-if [ -f "$REPO_ROOT/.env" ]; then
+# Pre-flight: require aws CLI
+if ! command -v aws &>/dev/null; then
+    echo "❌ aws CLI not found. Install it: sudo apt install awscli"
+    exit 1
+fi
+
+# Load .env safely — handles quoted values, export prefixes, and special chars
+# Does NOT execute the file as bash; parses key=value line by line.
+_load_env() {
+    local line key value
     while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${line//[[:space:]]/}" ]] && continue
-        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] && export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
-    done < "$REPO_ROOT/.env"
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue        # skip comments
+        [[ -z "${line//[[:space:]]/}" ]] && continue        # skip blank lines
+        line="${line#export }"                               # strip leading 'export '
+        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        value="${value%\"}" ; value="${value#\"}"            # strip surrounding double quotes
+        value="${value%\'}" ; value="${value#\'}"            # strip surrounding single quotes
+        export "$key=$value"
+    done < "$1"
+}
+
+if [ -f "$REPO_ROOT/.env" ]; then
+    _load_env "$REPO_ROOT/.env"
 fi
 
 # Validate required vars
@@ -43,18 +61,18 @@ echo "🗄️  Restoring databases from Tigris ($TIGRIS_BUCKET)..."
 
 # ── chainlink issues ─────────────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.chainlink"
-if aws s3 cp "$S3/issues.db" "$REPO_ROOT/.chainlink/issues.db" $ENDPOINT --quiet 2>/dev/null; then
+if aws s3 cp "$S3/issues.db" "$REPO_ROOT/.chainlink/issues.db" $ENDPOINT --quiet; then
     echo "✅ .chainlink/issues.db restored"
 else
-    echo "⚠️  issues.db not found in bucket (first-time setup?)"
+    echo "❌ Failed to restore issues.db — check bucket name and credentials"
 fi
 
 # ── deciduous decision graph ─────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.deciduous"
-if aws s3 cp "$S3/deciduous.db" "$REPO_ROOT/.deciduous/deciduous.db" $ENDPOINT --quiet 2>/dev/null; then
+if aws s3 cp "$S3/deciduous.db" "$REPO_ROOT/.deciduous/deciduous.db" $ENDPOINT --quiet; then
     echo "✅ .deciduous/deciduous.db restored"
 else
-    echo "⚠️  deciduous.db not found in bucket (first-time setup?)"
+    echo "❌ Failed to restore deciduous.db — check bucket name and credentials"
 fi
 
 echo ""

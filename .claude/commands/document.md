@@ -77,7 +77,7 @@ For each file/component, document:
 ### 3.2 API Surface
 For every public function/method/class:
 
-```markdown
+````markdown
 ### `function_name(param1: Type, param2: Type) -> ReturnType`
 
 **Purpose:** What this does and why you'd call it.
@@ -98,7 +98,7 @@ assert_eq!(result, expected);
 ```
 
 **Related:** Links to related functions
-```
+````
 
 ### 3.3 Internal Architecture
 - How does it work internally?
@@ -130,7 +130,7 @@ For each relevant test:
 
 **Document structure:**
 
-```markdown
+````markdown
 # <Component Name>
 
 > One-sentence description
@@ -169,7 +169,7 @@ High-level explanation of what this does and why it exists.
 
 - Links to other relevant docs
 - Links to test files
-```
+````
 
 ---
 

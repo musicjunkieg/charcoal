@@ -33,14 +33,24 @@ set -e
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# Load .env safely — parse key=value without executing as bash
-# (handles special chars like parens, dollar signs in values)
-if [ -f "$REPO_ROOT/.env" ]; then
+# Load .env safely — handles quoted values, export prefixes, and special chars
+# Does NOT execute the file as bash; parses key=value line by line.
+_load_env() {
+    local line key value
     while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue   # skip comments
-        [[ -z "${line//[[:space:]]/}" ]] && continue   # skip blank lines
-        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] && export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
-    done < "$REPO_ROOT/.env"
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue        # skip comments
+        [[ -z "${line//[[:space:]]/}" ]] && continue        # skip blank lines
+        line="${line#export }"                               # strip leading 'export '
+        [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        value="${value%\"}" ; value="${value#\"}"            # strip surrounding double quotes
+        value="${value%\'}" ; value="${value#\'}"            # strip surrounding single quotes
+        export "$key=$value"
+    done < "$1"
+}
+if [ -f "$REPO_ROOT/.env" ]; then
+    _load_env "$REPO_ROOT/.env"
 fi
 
 # ── 1. Block commits to main ─────────────────────────────────────────
@@ -88,6 +98,9 @@ fi
 
 # ── 5. Upload DBs to Tigris blob storage ────────────────────────────
 if [ -n "$TIGRIS_BUCKET" ] && [ -n "$TIGRIS_ACCESS_KEY_ID" ] && [ -n "$TIGRIS_SECRET_ACCESS_KEY" ]; then
+    if ! command -v aws &>/dev/null; then
+        echo "⚠️  Tigris configured but aws CLI not found — skipping backup (run: sudo apt install awscli)"
+    else
     echo "☁️  Pre-commit: backing up databases to Tigris..."
     ENDPOINT="--endpoint-url=${TIGRIS_ENDPOINT:-https://fly.storage.tigris.dev} --region=auto"
 
@@ -118,6 +131,7 @@ if [ -n "$TIGRIS_BUCKET" ] && [ -n "$TIGRIS_ACCESS_KEY_ID" ] && [ -n "$TIGRIS_SE
     if [ "$BACKUP_OK" = true ]; then
         echo "✅ Tigris backup complete"
     fi
+    fi  # end aws CLI check
 else
     echo "⏭️  Tigris not configured (set TIGRIS_BUCKET/TIGRIS_ACCESS_KEY_ID/TIGRIS_SECRET_ACCESS_KEY in .env)"
 fi

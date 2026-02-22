@@ -203,6 +203,7 @@ The graph viewer shows a branch dropdown in the stats bar:
 **Every node MUST be logically connected.** Floating nodes break the graph's value.
 
 ### Connection Rules (goal -> options -> decision -> actions -> outcomes)
+
 | Node Type | MUST connect to | Example |
 |-----------|----------------|---------|
 | `goal` | Can be a root (no parent needed) | Root goals are valid orphans |

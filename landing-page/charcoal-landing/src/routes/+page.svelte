@@ -1364,7 +1364,8 @@
 			transition: none;
 		}
 	}
+	/* #voices hidden until real testimonials are collected */
 	#voices {
-	display: none;
-}
+		display: none;
+	}
 </style>

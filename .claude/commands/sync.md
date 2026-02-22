@@ -39,7 +39,7 @@ deciduous events rebuild
 
 ```bash
 # Stage sync files (events are auto-committed to your event file)
-git add .deciduous/sync/
+git add docs/graph-data.json docs/git-history.json
 
 # Commit and push
 git commit -m "sync: decision graph events"
@@ -55,7 +55,7 @@ To prevent repo bloat, periodically create a checkpoint:
 deciduous events checkpoint --clear-events
 
 # Commit the checkpoint
-git add .deciduous/sync/
+git add docs/graph-data.json docs/git-history.json
 git commit -m "checkpoint: compact decision graph events"
 git push
 ```
@@ -69,7 +69,7 @@ git push
 
 ### Events not syncing?
 
-1. Make sure `.deciduous/sync/` is tracked in git
+1. Make sure `docs/graph-data.json` and `docs/git-history.json` are tracked in git
 2. Check that `deciduous events init` was run
 3. Verify events are being emitted: `deciduous events status`
 

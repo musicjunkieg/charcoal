@@ -1,12 +1,25 @@
 {
   "version": 1,
-  "exported_at": "2026-02-22T22:39:13.868944830+00:00",
+  "exported_at": "2026-02-22T23:31:06.803662497+00:00",
   "issues": [
+    {
+      "id": 90,
+      "title": "Review PR #8 comments",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-02-22T23:25:09.470584498+00:00",
+      "updated_at": "2026-02-22T23:25:09.470584498+00:00",
+      "closed_at": null
+    },
     {
       "id": 89,
       "title": "Research and implement DB persistence: chainlink issues + deciduous graph backup strategy",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -14,8 +27,8 @@
       ],
       "comments": [],
       "created_at": "2026-02-22T21:59:58.363197333+00:00",
-      "updated_at": "2026-02-22T21:59:58.363197333+00:00",
-      "closed_at": null
+      "updated_at": "2026-02-22T22:39:25.429222839+00:00",
+      "closed_at": "2026-02-22T22:39:25.429222839+00:00"
     },
     {
       "id": 88,

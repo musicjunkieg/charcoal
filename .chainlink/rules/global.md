@@ -17,7 +17,7 @@ These rules ensure code works correctly. They yield only to security concerns.
 - **Read before write**: Always read a file before editing it. Never guess at contents.
 - **Complete features**: Implement the full feature as requested. Don't stop partway.
 - **Error handling**: Proper error handling everywhere. No panics or crashes on bad input.
-- **No dead code**: Intelligently deal with dead code. If its a hallucinated function remove it. If its an unfinished function complete it. 
+- **No dead code**: Intelligently deal with dead code. If it's a hallucinated function remove it. If it's an unfinished function complete it.
 - **Test after changes**: Run the project's test suite after making code changes.
 
 ### Pre-Coding Grounding
