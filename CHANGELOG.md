@@ -37,6 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Review PR #8 comments (#90)
+- Research and implement DB persistence: chainlink issues + deciduous graph backup strategy (#89)
 - Harden workflow: atomic commits, branch protections, issue and graph persistence (#88)
 - sqlite feature flag now correctly gates sqlite-related code (#76)
 - Postgres integration tests now clean up after themselves (#74)
