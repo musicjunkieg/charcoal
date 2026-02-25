@@ -35,6 +35,12 @@ pub struct Config {
     pub model_dir: PathBuf,
     /// Constellation backlink index URL (primary amplification detection)
     pub constellation_url: String,
+    /// Password for the single-user web dashboard (CHARCOAL_WEB_PASSWORD env var)
+    #[cfg(feature = "web")]
+    pub web_password: String,
+    /// Secret for HMAC session token signing (CHARCOAL_SESSION_SECRET env var)
+    #[cfg(feature = "web")]
+    pub session_secret: String,
 }
 
 impl Config {
@@ -51,13 +57,18 @@ impl Config {
 
         let model_dir = env::var("CHARCOAL_MODEL_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
+            .unwrap_or_else(|_| crate::toxicity::download::default_model_dir());
+
+        #[cfg(feature = "web")]
+        let web_password = env::var("CHARCOAL_WEB_PASSWORD").unwrap_or_default();
+        #[cfg(feature = "web")]
+        let session_secret = env::var("CHARCOAL_SESSION_SECRET").unwrap_or_default();
 
         Ok(Self {
             bluesky_handle: env::var("BLUESKY_HANDLE").unwrap_or_default(),
             bluesky_app_password: env::var("BLUESKY_APP_PASSWORD").unwrap_or_default(),
             public_api_url: env::var("PUBLIC_API_URL")
-                .unwrap_or_else(|_| charcoal::bluesky::client::DEFAULT_PUBLIC_API_URL.to_string()),
+                .unwrap_or_else(|_| crate::bluesky::client::DEFAULT_PUBLIC_API_URL.to_string()),
             perspective_api_key: env::var("PERSPECTIVE_API_KEY").unwrap_or_default(),
             db_path: env::var("CHARCOAL_DB_PATH").unwrap_or_else(|_| "./charcoal.db".to_string()),
             database_url: env::var("DATABASE_URL").ok(),
@@ -65,6 +76,10 @@ impl Config {
             model_dir,
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
+            #[cfg(feature = "web")]
+            web_password,
+            #[cfg(feature = "web")]
+            session_secret,
         })
     }
 
@@ -112,7 +127,7 @@ impl Config {
     pub fn require_scorer(&self) -> Result<()> {
         match self.scorer_backend {
             ScorerBackend::Onnx => {
-                if !charcoal::toxicity::download::model_files_present(&self.model_dir) {
+                if !crate::toxicity::download::model_files_present(&self.model_dir) {
                     anyhow::bail!(
                         "ONNX model files not found in {}\n\
                          Run `charcoal download-model` to download them.\n\
