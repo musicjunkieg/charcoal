@@ -1,19 +1,45 @@
 {
   "version": 1,
-  "exported_at": "2026-02-22T23:31:06.803662497+00:00",
+  "exported_at": "2026-02-25T02:05:20.266552189+00:00",
   "issues": [
+    {
+      "id": 92,
+      "title": "Post-merge cleanup for PR #8 workflow hardening branch",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-02-23T00:07:15.564397780+00:00",
+      "updated_at": "2026-02-23T00:09:22.124793494+00:00",
+      "closed_at": "2026-02-23T00:09:22.124793494+00:00"
+    },
+    {
+      "id": 91,
+      "title": "Review remaining PR #8 comments after fixes",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-02-22T23:55:21.936366860+00:00",
+      "updated_at": "2026-02-22T23:55:45.751583561+00:00",
+      "closed_at": "2026-02-22T23:55:45.751583561+00:00"
+    },
     {
       "id": 90,
       "title": "Review PR #8 comments",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [],
       "comments": [],
       "created_at": "2026-02-22T23:25:09.470584498+00:00",
-      "updated_at": "2026-02-22T23:25:09.470584498+00:00",
-      "closed_at": null
+      "updated_at": "2026-02-22T23:31:21.051632949+00:00",
+      "closed_at": "2026-02-22T23:31:21.051632949+00:00"
     },
     {
       "id": 89,

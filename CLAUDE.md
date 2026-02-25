@@ -291,10 +291,18 @@ instead:
 ```
 git commit -m 'first line
 
-Body text here.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>'
+Body text here.'
 ```
+
+**NEVER use `EnterWorktree` or git worktrees.**
+Worktrees crash this machine. Always use a plain branch:
+```
+git checkout -b feat/my-feature
+```
+
+**Atomic commits — push regularly.**
+Commit after each logical unit of work. Push the feature branch frequently
+so work is never sitting only locally.
 
 <!-- deciduous:start -->
 ## Decision Graph Workflow

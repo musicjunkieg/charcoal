@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bf3be11ff396fd5c0227eee7587fd099a2b6e0b7",
+    "short_hash": "bf3be11",
+    "author": "chaos gremlin",
+    "date": "2026-02-22T15:57:51-08:00",
+    "message": "Merge pull request #8 from musicjunkieg/chore/workflow-hardening\n\nchore: harden workflow — atomic commits, branch protection, persistence",
+    "files_changed": 0
+  },
+  {
     "hash": "d708dbba57eeb05c7961411da6ef79fe1b98c2a1",
     "short_hash": "d708dbb",
     "author": "musicjunkieg",

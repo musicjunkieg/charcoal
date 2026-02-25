@@ -1341,6 +1341,28 @@
       "created_at": "2026-02-21T01:06:06.614420525+00:00",
       "updated_at": "2026-02-21T01:06:06.614420525+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.2-backend-polish\",\"commit\":\"d708dbb\",\"confidence\":99}"
+    },
+    {
+      "id": 129,
+      "change_id": "48812150-7aef-423d-bbab-9777d13c6207",
+      "node_type": "goal",
+      "title": "Build v0.3 Web GUI — Axum API + SvelteKit dashboard for Charcoal",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-02-25T01:32:14.788536808+00:00",
+      "updated_at": "2026-02-25T01:32:14.788536808+00:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":90,\"prompt\":\"User asked: let's start v0.3 planning. Decided: single-user (Bryan only), SvelteKit SPA + Axum JSON API, Railway/Railpack deployment, password auth via HMAC session cookie, reuse existing landing page splash/login. Full plan at /home/sprite/.claude/plans/wondrous-jumping-falcon.md\"}"
+    },
+    {
+      "id": 130,
+      "change_id": "11e204b6-cc5c-457a-99f0-bd3a6abdf45d",
+      "node_type": "action",
+      "title": "Rescue v0.3 web GUI work from abandoned worktree into regular branch feat/v0.3-web-gui",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-02-25T01:50:38.638720821+00:00",
+      "updated_at": "2026-02-25T01:50:38.638720821+00:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"bf3be11\",\"confidence\":90,\"files\":[\"src/web/\",\"web/\",\"src/config.rs\",\"src/main.rs\",\"Cargo.toml\"]}"
     }
   ],
   "edges": [
@@ -2564,6 +2586,35 @@
       "weight": 1.0,
       "rationale": "PR merged to main",
       "created_at": "2026-02-21T01:06:06.759207235+00:00"
+    },
+    {
+      "id": 118,
+      "from_node_id": 129,
+      "to_node_id": 130,
+      "from_change_id": "48812150-7aef-423d-bbab-9777d13c6207",
+      "to_change_id": "11e204b6-cc5c-457a-99f0-bd3a6abdf45d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action implements the v0.3 goal by rescuing abandoned worktree work",
+      "created_at": "2026-02-25T01:50:42.006517364+00:00"
+    }
+  ],
+  "documents": [
+    {
+      "id": 1,
+      "change_id": "b2290168-af2c-4339-82b8-64c940ec87ab",
+      "node_id": 129,
+      "node_change_id": "48812150-7aef-423d-bbab-9777d13c6207",
+      "content_hash": "ce01f018f5c51f112085e70f3d97a863b4de1ef0c8556cf6e35fccdb0c07bc9c",
+      "original_filename": "wondrous-jumping-falcon.md",
+      "storage_filename": "wondrous-jumping-falcon.md.ce01f018",
+      "mime_type": "text/markdown",
+      "file_size": 27023,
+      "description": "v0.3 Web GUI implementation plan — Axum API + SvelteKit dashboard",
+      "description_source": "manual",
+      "attached_at": "2026-02-25T01:33:49.087540052+00:00",
+      "attached_by": null,
+      "detached_at": null
     }
   ]
 }
