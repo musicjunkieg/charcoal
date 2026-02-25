@@ -1,0 +1,8 @@
+[build]
+# npm build must run first so web/build/ exists for include_dir! at compile time
+buildCommand = "cd web && npm ci && npm run build && cd .. && cargo build --release --features web,postgres"
+
+[deploy]
+startCommand = "./target/release/charcoal serve --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 10
