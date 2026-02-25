@@ -130,6 +130,16 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::insert_amplification_event_with_detected_at(&conn, event)
     }
+
+    async fn get_account_by_handle(&self, handle: &str) -> Result<Option<AccountScore>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_account_by_handle(&conn, handle)
+    }
+
+    async fn get_account_by_did(&self, did: &str) -> Result<Option<AccountScore>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_account_by_did(&conn, did)
+    }
 }
 
 #[cfg(test)]
@@ -234,5 +244,60 @@ mod tests {
     async fn test_trait_is_score_stale_missing() {
         let db = test_db().await;
         assert!(db.is_score_stale("did:plc:missing", 7).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_trait_get_account_by_handle() {
+        let db = test_db().await;
+        // Insert a score
+        let score = AccountScore {
+            did: "did:plc:test123".to_string(),
+            handle: "test.bsky.social".to_string(),
+            toxicity_score: Some(0.5),
+            topic_overlap: Some(0.3),
+            threat_score: Some(20.0),
+            threat_tier: Some("Elevated".to_string()),
+            posts_analyzed: 10,
+            top_toxic_posts: vec![],
+            scored_at: "2024-01-01".to_string(),
+            behavioral_signals: None,
+        };
+        db.upsert_account_score(&score).await.unwrap();
+        // Exact match
+        let found = db.get_account_by_handle("test.bsky.social").await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().did, "did:plc:test123");
+        // Case insensitive
+        let found_upper = db.get_account_by_handle("TEST.BSKY.SOCIAL").await.unwrap();
+        assert!(found_upper.is_some());
+        // Not found
+        let missing = db
+            .get_account_by_handle("nobody.bsky.social")
+            .await
+            .unwrap();
+        assert!(missing.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_trait_get_account_by_did() {
+        let db = test_db().await;
+        let score = AccountScore {
+            did: "did:plc:findme".to_string(),
+            handle: "findme.bsky.social".to_string(),
+            toxicity_score: Some(0.1),
+            topic_overlap: Some(0.2),
+            threat_score: Some(5.0),
+            threat_tier: Some("Low".to_string()),
+            posts_analyzed: 5,
+            top_toxic_posts: vec![],
+            scored_at: "2024-01-01".to_string(),
+            behavioral_signals: None,
+        };
+        db.upsert_account_score(&score).await.unwrap();
+        let found = db.get_account_by_did("did:plc:findme").await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().handle, "findme.bsky.social");
+        let missing = db.get_account_by_did("did:plc:nobody").await.unwrap();
+        assert!(missing.is_none());
     }
 }

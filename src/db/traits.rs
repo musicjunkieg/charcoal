@@ -86,4 +86,12 @@ pub trait Database: Send + Sync {
 
     /// Get the median engagement across all scored accounts with behavioral data.
     async fn get_median_engagement(&self) -> Result<f64>;
+
+    // --- Single-account lookup ---
+
+    /// Get a single account score by exact handle match.
+    async fn get_account_by_handle(&self, handle: &str) -> Result<Option<AccountScore>>;
+
+    /// Get a single account score by DID.
+    async fn get_account_by_did(&self, did: &str) -> Result<Option<AccountScore>>;
 }
