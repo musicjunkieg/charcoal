@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-mod config;
+use charcoal::config;
 
 /// Charcoal: Predictive threat detection for Bluesky.
 ///
@@ -85,6 +85,17 @@ enum Commands {
 
     /// Show system status (last scan, DB stats, fingerprint age)
     Status,
+
+    /// Start the web dashboard server
+    #[cfg(feature = "web")]
+    Serve {
+        /// Port to listen on (default: 3000, or $PORT env var)
+        #[arg(long, default_value = "3000")]
+        port: u16,
+        /// Address to bind
+        #[arg(long, default_value = "0.0.0.0")]
+        bind: String,
+    },
 
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
@@ -656,6 +667,14 @@ async fn main() -> Result<()> {
                 _ => config.db_path.clone(),
             };
             charcoal::status::show(&db, &db_display).await?;
+        }
+
+        #[cfg(feature = "web")]
+        Commands::Serve { port, bind } => {
+            let config = config::Config::load()?;
+            let db = open_database(&config).await?;
+            info!(port, %bind, "Starting Charcoal web server");
+            charcoal::web::run_server(config, db, port, &bind).await?;
         }
 
         #[cfg(feature = "postgres")]
