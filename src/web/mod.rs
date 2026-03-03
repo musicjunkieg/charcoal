@@ -69,7 +69,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/status", get(handlers::status::get_status))
         .route("/api/accounts", get(handlers::accounts::list_accounts))
         .route(
-            "/api/accounts/:handle",
+            "/api/accounts/{handle}",
             get(handlers::accounts::get_account),
         )
         .route("/api/events", get(handlers::events::list_events))
