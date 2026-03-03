@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-02-25T02:07:21.601477349+00:00",
+  "exported_at": "2026-03-03T17:58:23.645143108+00:00",
   "issues": [
+    {
+      "id": 93,
+      "title": "Generate package-lock.json and fix npm ci for web build",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "web"
+      ],
+      "comments": [],
+      "created_at": "2026-03-03T17:39:51.365633243+00:00",
+      "updated_at": "2026-03-03T17:39:51.365633243+00:00",
+      "closed_at": null
+    },
     {
       "id": 92,
       "title": "Post-merge cleanup for PR #8 workflow hardening branch",

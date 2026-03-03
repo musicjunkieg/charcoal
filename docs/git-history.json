@@ -1,5 +1,13 @@
 [
   {
+    "hash": "133c254d21d3f68483806bd1b0a2267588ae58d5",
+    "short_hash": "133c254",
+    "author": "musicjunkieg",
+    "date": "2026-02-25T02:07:21Z",
+    "message": "feat: Railway deployment with Railpack closes #87\n\nrailway.toml: buildCommand runs npm ci + npm build first (so web/build/ exists\nfor include_dir! at compile time), then cargo build --release --features web,postgres.\nstartCommand: ./target/release/charcoal serve --port $PORT\nHealth check: /health endpoint, 10s timeout.\n\nscripts/build-web.sh: local dev helper that runs both steps in order.\n\nRequired Railway env vars: DATABASE_URL (auto-provided by Railway Postgres addon),\nBLUESKY_HANDLE, CHARCOAL_WEB_PASSWORD, CHARCOAL_SESSION_SECRET.",
+    "files_changed": 3
+  },
+  {
     "hash": "bf3be11ff396fd5c0227eee7587fd099a2b6e0b7",
     "short_hash": "bf3be11",
     "author": "chaos gremlin",
