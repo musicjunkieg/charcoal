@@ -54,8 +54,17 @@ Post-MVP improvements applied:
   structured data. `charcoal migrate` command transfers all data from SQLite to
   PostgreSQL.
 
-186 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
-`scan`, `sweep`, `score`, `report`, `status`, `validate`, `migrate` (postgres feature).
+- **v0.3 Web GUI** (PR #9): Axum-based API server + SvelteKit single-page dashboard,
+  gated behind `--features web`. Stateless HMAC-SHA256 session cookies. Endpoints:
+  login/logout, GET /api/status (tier counts + scan progress), GET /api/accounts
+  (paginated, sortable), GET /api/accounts/{handle}, GET /api/events, GET /api/fingerprint,
+  POST /api/scan (triggers background scan). Dashboard shows elapsed scan time and
+  disables the scan button while a scan is running. SvelteKit SPA embedded at compile
+  time via `include_dir!`. Railway deployment config included (`railway.toml`).
+
+189 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
+`scan`, `sweep`, `score`, `report`, `status`, `validate`, `migrate` (postgres feature),
+`serve` (web feature).
 
 ### External contributions
 
