@@ -63,6 +63,7 @@ chrono = { version = "0.4", features = ["serde"] }
 default = ["sqlite"]
 sqlite = ["dep:rusqlite"]
 postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:pgvector"]
+web = ["dep:axum", "dep:tower-http", "dep:include_dir", "dep:hmac", "dep:sha2", "dep:rand", "dep:hex"]
 
 # PostgreSQL support — split crates avoid the sqlx umbrella's transitive
 # sqlx-sqlite dependency which conflicts with rusqlite's bundled SQLite.
@@ -82,4 +83,33 @@ optional = true
 [dependencies.pgvector]
 version = "0.4"
 features = ["sqlx"]
+optional = true
+
+[dependencies.axum]
+version = "0.8"
+optional = true
+
+[dependencies.tower-http]
+version = "0.6"
+features = ["cors", "trace"]
+optional = true
+
+[dependencies.include_dir]
+version = "0.7"
+optional = true
+
+[dependencies.hmac]
+version = "0.12"
+optional = true
+
+[dependencies.sha2]
+version = "0.10"
+optional = true
+
+[dependencies.rand]
+version = "0.9"
+optional = true
+
+[dependencies.hex]
+version = "0.4"
 optional = true

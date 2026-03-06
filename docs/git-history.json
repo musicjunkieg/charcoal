@@ -1,5 +1,37 @@
 [
   {
+    "hash": "e057e88308ad3218ae22e605b4eef59bf2cebdc7",
+    "short_hash": "e057e88",
+    "author": "musicjunkieg",
+    "date": "2026-03-06T02:58:33Z",
+    "message": "fix: address CodeRabbit security and correctness findings\n\n- Fail startup if CHARCOAL_WEB_PASSWORD is empty or\n  CHARCOAL_SESSION_SECRET is under 32 chars (src/web/mod.rs)\n- Remove HMAC fallback to hardcoded \"fallback\" key; panic instead\n  since an empty key is a misconfiguration, not a recoverable error\n- Drop scan_status RwLock read guard before awaiting DB in get_status\n  to unblock scan job writers during slow queries; return 500 on DB error\n  instead of silently returning empty tier counts\n- Wrap OnnxToxicityScorer::load and SentenceEmbedder::load in\n  spawn_blocking — both are synchronous blocking I/O that should not\n  run on the async runtime\n- robots.txt: Disallow: / — private dashboard should not be indexed\n\nCloses #101",
+    "files_changed": 8
+  },
+  {
+    "hash": "74ea6753ea6523b2e90970827ab67ebef2aaad47",
+    "short_hash": "74ea675",
+    "author": "musicjunkieg",
+    "date": "2026-03-06T02:25:05Z",
+    "message": "feat: scan progress indicator and disable button while running\n\n- Show elapsed time (live 1-second ticker) and progress_message while\n  scan is in progress; subtitle switches to amber \"Scan in progress — Xs\"\n- Disable Trigger Scan button during async window between click and\n  status update; shows \"Starting...\" with not-allowed cursor\n- Both changes confined to dashboard/+page.svelte, no backend changes\n- Closes #97, closes #95",
+    "files_changed": 3
+  },
+  {
+    "hash": "133c254d21d3f68483806bd1b0a2267588ae58d5",
+    "short_hash": "133c254",
+    "author": "musicjunkieg",
+    "date": "2026-02-25T02:07:21Z",
+    "message": "feat: Railway deployment with Railpack closes #87\n\nrailway.toml: buildCommand runs npm ci + npm build first (so web/build/ exists\nfor include_dir! at compile time), then cargo build --release --features web,postgres.\nstartCommand: ./target/release/charcoal serve --port $PORT\nHealth check: /health endpoint, 10s timeout.\n\nscripts/build-web.sh: local dev helper that runs both steps in order.\n\nRequired Railway env vars: DATABASE_URL (auto-provided by Railway Postgres addon),\nBLUESKY_HANDLE, CHARCOAL_WEB_PASSWORD, CHARCOAL_SESSION_SECRET.",
+    "files_changed": 3
+  },
+  {
+    "hash": "bf3be11ff396fd5c0227eee7587fd099a2b6e0b7",
+    "short_hash": "bf3be11",
+    "author": "chaos gremlin",
+    "date": "2026-02-22T15:57:51-08:00",
+    "message": "Merge pull request #8 from musicjunkieg/chore/workflow-hardening\n\nchore: harden workflow — atomic commits, branch protection, persistence",
+    "files_changed": 0
+  },
+  {
     "hash": "d708dbba57eeb05c7961411da6ef79fe1b98c2a1",
     "short_hash": "d708dbb",
     "author": "musicjunkieg",

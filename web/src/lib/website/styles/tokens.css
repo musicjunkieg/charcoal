@@ -1,0 +1,36 @@
+/* Charcoal Design Tokens
+ * Shared CSS custom properties for the Charcoal website.
+ * Import this in any component that needs access to the design system.
+ */
+
+:root {
+	/* Warm charcoal palette */
+	--charcoal-950: #0c0a09;
+	--charcoal-900: #1c1917;
+	--charcoal-800: #292524;
+	--charcoal-700: #44403c;
+	--charcoal-600: #57534e;
+	--charcoal-500: #78716c;
+	--charcoal-400: #a8a29e;
+	--charcoal-300: #d6d3d1;
+
+	/* Warm cream tones */
+	--cream-50: #fffbeb;
+	--cream-100: #fef3c7;
+
+	/* Amber accent */
+	--amber-500: #f59e0b;
+	--amber-600: #d97706;
+
+	/* Copper accent */
+	--copper: #c9956c;
+	--copper-glow: rgba(201, 149, 108, 0.3);
+
+	/* Typography */
+	--font-display: 'Libre Baskerville', Georgia, serif;
+	--font-body: 'Outfit', system-ui, sans-serif;
+
+	/* Easing */
+	--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}

@@ -324,6 +324,72 @@ pub fn get_median_engagement(conn: &Connection) -> Result<f64> {
     }
 }
 
+/// Get a single account score by exact handle (case-insensitive).
+pub fn get_account_by_handle(conn: &Connection, handle: &str) -> Result<Option<AccountScore>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+         FROM account_scores
+         WHERE lower(handle) = lower(?1)
+         LIMIT 1",
+    )?;
+    let result = stmt
+        .query_row(params![handle], |row| {
+            let top_posts_json: String = row.get(7)?;
+            let top_toxic_posts: Vec<ToxicPost> =
+                serde_json::from_str(&top_posts_json).unwrap_or_default();
+            let threat_score: Option<f64> = row.get(4)?;
+            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            Ok(AccountScore {
+                did: row.get(0)?,
+                handle: row.get(1)?,
+                toxicity_score: row.get(2)?,
+                topic_overlap: row.get(3)?,
+                threat_score,
+                threat_tier,
+                posts_analyzed: row.get(6)?,
+                top_toxic_posts,
+                scored_at: row.get(8)?,
+                behavioral_signals: row.get(9)?,
+            })
+        })
+        .optional()?;
+    Ok(result)
+}
+
+/// Get a single account score by DID.
+pub fn get_account_by_did(conn: &Connection, did: &str) -> Result<Option<AccountScore>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+         FROM account_scores
+         WHERE did = ?1
+         LIMIT 1",
+    )?;
+    let result = stmt
+        .query_row(params![did], |row| {
+            let top_posts_json: String = row.get(7)?;
+            let top_toxic_posts: Vec<ToxicPost> =
+                serde_json::from_str(&top_posts_json).unwrap_or_default();
+            let threat_score: Option<f64> = row.get(4)?;
+            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            Ok(AccountScore {
+                did: row.get(0)?,
+                handle: row.get(1)?,
+                toxicity_score: row.get(2)?,
+                topic_overlap: row.get(3)?,
+                threat_score,
+                threat_tier,
+                posts_analyzed: row.get(6)?,
+                top_toxic_posts,
+                scored_at: row.get(8)?,
+                behavioral_signals: row.get(9)?,
+            })
+        })
+        .optional()?;
+    Ok(result)
+}
+
 // rusqlite's optional() helper — converts "no rows" into None
 use rusqlite::OptionalExtension;
 

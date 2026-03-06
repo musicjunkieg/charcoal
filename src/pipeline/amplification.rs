@@ -163,7 +163,10 @@ pub async fn run(
                         .filter(|f| f.handle != protected_handle)
                     {
                         if db.is_score_stale(&f.did, 7).await.unwrap_or(true) {
-                            stale_followers.push(f);
+                            // Clone to produce an owned Vec<Follower> — required for
+                            // the async move closure in the scoring stream to be
+                            // 'static-compatible when called from tokio::spawn.
+                            stale_followers.push(f.clone());
                         }
                     }
 
