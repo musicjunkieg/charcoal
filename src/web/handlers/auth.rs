@@ -29,13 +29,24 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
     let expected = &state.config.web_password;
     let provided = &body.password;
 
-    // Lengths differ — still do a trivial compare to avoid timing shortcircuit.
-    let passwords_match = expected.len() == provided.len()
-        && expected
-            .bytes()
-            .zip(provided.bytes())
-            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-            == 0;
+    // Constant-time comparison: always XOR all bytes regardless of length so
+    // the branch timing doesn't reveal whether the lengths matched.
+    // Strategy: XOR byte-by-byte over the longer length, substituting 0 for
+    // missing bytes in the shorter string, then OR in a length-mismatch flag.
+    let max_len = expected.len().max(provided.len());
+    let expected_bytes = expected.as_bytes();
+    let provided_bytes = provided.as_bytes();
+    let mut diff = if expected.len() == provided.len() {
+        0u8
+    } else {
+        1u8
+    };
+    for i in 0..max_len {
+        let a = expected_bytes.get(i).copied().unwrap_or(0);
+        let b = provided_bytes.get(i).copied().unwrap_or(0);
+        diff |= a ^ b;
+    }
+    let passwords_match = diff == 0;
 
     if !passwords_match || expected.is_empty() {
         return api_error(StatusCode::UNAUTHORIZED, "Invalid password");

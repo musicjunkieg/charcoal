@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-03-06T04:29:29.267723887+00:00",
+  "exported_at": "2026-03-06T04:41:43.755963256+00:00",
   "issues": [
+    {
+      "id": 102,
+      "title": "Fix pre-merge CodeRabbit findings: timing attack + fingerprint null coercion",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-06T04:40:59.096817127+00:00",
+      "updated_at": "2026-03-06T04:40:59.096817127+00:00",
+      "closed_at": null
+    },
     {
       "id": 101,
       "title": "Address CodeRabbit security and correctness findings on PR #9",

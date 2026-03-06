@@ -5,18 +5,26 @@
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 use crate::web::{api_error, AppState};
 
 /// GET /api/fingerprint — return the stored topic fingerprint.
-pub async fn get_fingerprint(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn get_fingerprint(State(state): State<AppState>) -> Response {
     match state.db.get_fingerprint().await {
         Ok(Some((json, post_count, updated_at))) => {
             // Parse the fingerprint JSON to return it as a structured object.
-            let fingerprint: serde_json::Value =
-                serde_json::from_str(&json).unwrap_or(serde_json::json!(null));
+            let fingerprint: serde_json::Value = match serde_json::from_str(&json) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(error = %e, "Corrupt fingerprint JSON in DB");
+                    return api_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Corrupt fingerprint data",
+                    );
+                }
+            };
             Json(serde_json::json!({
                 "fingerprint": fingerprint,
                 "post_count": post_count,
