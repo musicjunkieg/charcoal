@@ -79,7 +79,12 @@ pub fn verify_token(secret: &str, token: &str) -> bool {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    now.saturating_sub(timestamp) < SESSION_TTL_SECS
+    // Use checked_sub so future-dated tokens (clock skew / tampered timestamp)
+    // are rejected rather than treated as age 0.
+    match now.checked_sub(timestamp) {
+        Some(age) => age < SESSION_TTL_SECS,
+        None => false,
+    }
 }
 
 /// Axum middleware: reject requests without a valid session cookie with 401.

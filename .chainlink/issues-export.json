@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "exported_at": "2026-03-06T02:58:34.711203234+00:00",
+  "exported_at": "2026-03-06T03:28:05.960598374+00:00",
   "issues": [
     {
       "id": 101,
       "title": "Address CodeRabbit security and correctness findings on PR #9",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -19,8 +19,8 @@
         }
       ],
       "created_at": "2026-03-06T02:52:10.800407819+00:00",
-      "updated_at": "2026-03-06T02:52:10.800407819+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-06T02:59:31.149027498+00:00",
+      "closed_at": "2026-03-06T02:59:31.149027498+00:00"
     },
     {
       "id": 100,

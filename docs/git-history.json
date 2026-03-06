@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e057e88308ad3218ae22e605b4eef59bf2cebdc7",
+    "short_hash": "e057e88",
+    "author": "musicjunkieg",
+    "date": "2026-03-06T02:58:33Z",
+    "message": "fix: address CodeRabbit security and correctness findings\n\n- Fail startup if CHARCOAL_WEB_PASSWORD is empty or\n  CHARCOAL_SESSION_SECRET is under 32 chars (src/web/mod.rs)\n- Remove HMAC fallback to hardcoded \"fallback\" key; panic instead\n  since an empty key is a misconfiguration, not a recoverable error\n- Drop scan_status RwLock read guard before awaiting DB in get_status\n  to unblock scan job writers during slow queries; return 500 on DB error\n  instead of silently returning empty tier counts\n- Wrap OnnxToxicityScorer::load and SentenceEmbedder::load in\n  spawn_blocking — both are synchronous blocking I/O that should not\n  run on the async runtime\n- robots.txt: Disallow: / — private dashboard should not be indexed\n\nCloses #101",
+    "files_changed": 8
+  },
+  {
     "hash": "74ea6753ea6523b2e90970827ab67ebef2aaad47",
     "short_hash": "74ea675",
     "author": "musicjunkieg",

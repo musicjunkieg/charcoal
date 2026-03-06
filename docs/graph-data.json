@@ -1418,6 +1418,83 @@
       "created_at": "2026-03-06T02:26:06.812119959+00:00",
       "updated_at": "2026-03-06T02:26:06.812119959+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"74ea675\",\"confidence\":99}"
+    },
+    {
+      "id": 136,
+      "change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "node_type": "goal",
+      "title": "Address CodeRabbit security and correctness findings on PR #9",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T02:59:59.353356964+00:00",
+      "updated_at": "2026-03-06T02:59:59.353356964+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":95,\"prompt\":\"CodeRabbit flagged 5 issues on PR #9: empty password default, HMAC fallback key, lock held across DB await, blocking model loads on async runtime, robots.txt allowing crawlers\"}"
+    },
+    {
+      "id": 137,
+      "change_id": "4edc8647-fc3a-4fd8-ac12-478a4291813d",
+      "node_type": "action",
+      "title": "Hard startup error for missing/weak CHARCOAL_WEB_PASSWORD and CHARCOAL_SESSION_SECRET",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T03:00:06.271716668+00:00",
+      "updated_at": "2026-03-06T03:00:06.271716668+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99,\"files\":[\"src/web/mod.rs\"]}"
+    },
+    {
+      "id": 138,
+      "change_id": "aabf356c-c33c-4488-be49-e0e54d77c2d1",
+      "node_type": "action",
+      "title": "Remove HMAC fallback to hardcoded key; use expect() for misconfiguration",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T03:00:06.312361787+00:00",
+      "updated_at": "2026-03-06T03:00:06.312361787+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99,\"files\":[\"src/web/auth.rs\"]}"
+    },
+    {
+      "id": 139,
+      "change_id": "b3fa9753-a0f0-4f57-b1da-577d7dd643aa",
+      "node_type": "action",
+      "title": "Drop RwLock read guard before DB await in get_status; return 500 on DB error",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T03:00:06.361501744+00:00",
+      "updated_at": "2026-03-06T03:00:06.361501744+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99,\"files\":[\"src/web/handlers/status.rs\"]}"
+    },
+    {
+      "id": 140,
+      "change_id": "f0ca7b6d-6192-4c01-b154-aec856585e33",
+      "node_type": "action",
+      "title": "Wrap ONNX and embedder model loads in spawn_blocking",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T03:00:06.441846422+00:00",
+      "updated_at": "2026-03-06T03:00:06.441846422+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99,\"files\":[\"src/web/scan_job.rs\"]}"
+    },
+    {
+      "id": 141,
+      "change_id": "3b466767-20c6-4473-a78e-e3bc55db6681",
+      "node_type": "action",
+      "title": "Block all crawlers in robots.txt (Disallow: /)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T03:00:06.649005031+00:00",
+      "updated_at": "2026-03-06T03:00:06.649005031+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99,\"files\":[\"web/static/robots.txt\"]}"
+    },
+    {
+      "id": 142,
+      "change_id": "d5131eea-866c-4aaa-ac4f-f57526d0a1d7",
+      "node_type": "outcome",
+      "title": "All 5 CodeRabbit security/correctness findings addressed. 189 tests passing, clippy clean, web build green. PR #9 updated.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T03:00:10.572954810+00:00",
+      "updated_at": "2026-03-06T03:00:10.572954810+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99}"
     }
   ],
   "edges": [
@@ -2718,6 +2795,127 @@
       "weight": 1.0,
       "rationale": "Session continuation — prior v0.3 work led to this scan UX polish",
       "created_at": "2026-03-06T02:26:11.234092425+00:00"
+    },
+    {
+      "id": 125,
+      "from_node_id": 135,
+      "to_node_id": 136,
+      "from_change_id": "a585aba3-7c8b-46bd-aee8-ad87c4fef924",
+      "to_change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Prior scan UX work led to PR #9 review findings",
+      "created_at": "2026-03-06T03:00:16.171902466+00:00"
+    },
+    {
+      "id": 126,
+      "from_node_id": 136,
+      "to_node_id": 137,
+      "from_change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "to_change_id": "4edc8647-fc3a-4fd8-ac12-478a4291813d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Security fix: credential validation",
+      "created_at": "2026-03-06T03:00:16.995235302+00:00"
+    },
+    {
+      "id": 127,
+      "from_node_id": 136,
+      "to_node_id": 138,
+      "from_change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "to_change_id": "aabf356c-c33c-4488-be49-e0e54d77c2d1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Security fix: HMAC key hardening",
+      "created_at": "2026-03-06T03:00:17.019608774+00:00"
+    },
+    {
+      "id": 128,
+      "from_node_id": 136,
+      "to_node_id": 139,
+      "from_change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "to_change_id": "b3fa9753-a0f0-4f57-b1da-577d7dd643aa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Correctness fix: lock + error handling",
+      "created_at": "2026-03-06T03:00:17.047511607+00:00"
+    },
+    {
+      "id": 129,
+      "from_node_id": 136,
+      "to_node_id": 140,
+      "from_change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "to_change_id": "f0ca7b6d-6192-4c01-b154-aec856585e33",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Correctness fix: async runtime blocking",
+      "created_at": "2026-03-06T03:00:17.074457390+00:00"
+    },
+    {
+      "id": 130,
+      "from_node_id": 136,
+      "to_node_id": 141,
+      "from_change_id": "147242de-6cfe-41a7-8494-4a30f7a55a86",
+      "to_change_id": "3b466767-20c6-4473-a78e-e3bc55db6681",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Hardening: crawler access",
+      "created_at": "2026-03-06T03:00:17.105934495+00:00"
+    },
+    {
+      "id": 131,
+      "from_node_id": 137,
+      "to_node_id": 142,
+      "from_change_id": "4edc8647-fc3a-4fd8-ac12-478a4291813d",
+      "to_change_id": "d5131eea-866c-4aaa-ac4f-f57526d0a1d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Produced outcome",
+      "created_at": "2026-03-06T03:00:17.137444920+00:00"
+    },
+    {
+      "id": 132,
+      "from_node_id": 138,
+      "to_node_id": 142,
+      "from_change_id": "aabf356c-c33c-4488-be49-e0e54d77c2d1",
+      "to_change_id": "d5131eea-866c-4aaa-ac4f-f57526d0a1d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Produced outcome",
+      "created_at": "2026-03-06T03:00:17.171437116+00:00"
+    },
+    {
+      "id": 133,
+      "from_node_id": 139,
+      "to_node_id": 142,
+      "from_change_id": "b3fa9753-a0f0-4f57-b1da-577d7dd643aa",
+      "to_change_id": "d5131eea-866c-4aaa-ac4f-f57526d0a1d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Produced outcome",
+      "created_at": "2026-03-06T03:00:17.204696352+00:00"
+    },
+    {
+      "id": 134,
+      "from_node_id": 140,
+      "to_node_id": 142,
+      "from_change_id": "f0ca7b6d-6192-4c01-b154-aec856585e33",
+      "to_change_id": "d5131eea-866c-4aaa-ac4f-f57526d0a1d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Produced outcome",
+      "created_at": "2026-03-06T03:00:17.263815220+00:00"
+    },
+    {
+      "id": 135,
+      "from_node_id": 141,
+      "to_node_id": 142,
+      "from_change_id": "3b466767-20c6-4473-a78e-e3bc55db6681",
+      "to_change_id": "d5131eea-866c-4aaa-ac4f-f57526d0a1d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Produced outcome",
+      "created_at": "2026-03-06T03:00:17.526367378+00:00"
     }
   ],
   "documents": [
