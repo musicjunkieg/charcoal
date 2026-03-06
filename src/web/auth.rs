@@ -186,11 +186,16 @@ mod tests {
     fn test_tampered_token_rejected() {
         let secret = "my_secret";
         let token = create_token(secret);
-        let tampered = token.replace('a', "b");
-        // Only check if token actually changed (if no 'a', test is trivially true)
-        if tampered != token {
-            assert!(!verify_token(secret, &tampered));
-        }
+        // Flip the last byte deterministically — tokens are hex-encoded so always ASCII.
+        let mut tampered_bytes = token.clone().into_bytes();
+        let last = tampered_bytes.len() - 1;
+        tampered_bytes[last] = if tampered_bytes[last] == b'0' {
+            b'1'
+        } else {
+            b'0'
+        };
+        let tampered = String::from_utf8(tampered_bytes).expect("token is ASCII");
+        assert!(!verify_token(secret, &tampered));
     }
 
     #[test]
