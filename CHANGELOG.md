@@ -8,8 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 - Fix inverted credential redaction in migrate command display (#78)
+- Constant-time password comparison in login handler — prevents timing oracle on password length (#102)
+- Reject future-dated session tokens using checked_sub (#101)
+- Remove HMAC fallback to hardcoded key; panic on misconfiguration (#101)
 
 ### Added
+- v0.3 web GUI: Axum API server + SvelteKit dashboard (login, dashboard, accounts, events, fingerprint, scan trigger) (#80–#87, #95, #97)
+- Scan progress display with elapsed time counter (#95)
+- Scan button disabled while scan is running (#97)
+
+### Fixed
+- Return 500 on corrupt fingerprint JSON instead of silently coercing to null (#102)
+- Session cookies: startup fails with clear message if CHARCOAL_WEB_PASSWORD or CHARCOAL_SESSION_SECRET are missing or too short (#101)
+- Lock held across DB await in status handler — snapshot fields before releasing the read guard (#101)
+- ONNX and embedder model loads wrapped in spawn_blocking to avoid blocking async runtime (#101)
+
+
 - Display behavioral signals in threat reports (#67)
 - Behavioral signals: reply ratio, quote ratio, pile-on detection (#54)
 - Add validate command: score blocked accounts to verify pipeline accuracy (#63)
