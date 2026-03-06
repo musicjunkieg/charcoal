@@ -12,6 +12,9 @@
 	let searchQuery = $state('');
 
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let scanning = $state(false);
+	let now = $state(Date.now());
+	let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 	async function loadData() {
 		try {
@@ -36,10 +39,16 @@
 				} catch {}
 			}
 		}, 5000);
+
+		if (elapsedTimer) clearInterval(elapsedTimer);
+		elapsedTimer = setInterval(() => {
+			if (status?.scan_running) now = Date.now();
+		}, 1000);
 	}
 
 	async function handleScan() {
 		scanError = '';
+		scanning = true;
 		try {
 			await triggerScan();
 			status = await getStatus();
@@ -49,6 +58,8 @@
 				return;
 			}
 			scanError = err instanceof Error ? err.message : 'Scan failed to start';
+		} finally {
+			scanning = false;
 		}
 	}
 
@@ -84,6 +95,14 @@
 		}
 	}
 
+	function elapsedTime(iso: string): string {
+		const ms = now - new Date(iso).getTime();
+		const secs = Math.floor(ms / 1000);
+		if (secs < 60) return `${secs}s`;
+		const mins = Math.floor(secs / 60);
+		return `${mins}m ${secs % 60}s`;
+	}
+
 	onMount(() => {
 		loadData();
 		startPolling();
@@ -91,6 +110,7 @@
 
 	onDestroy(() => {
 		if (pollTimer) clearInterval(pollTimer);
+		if (elapsedTimer) clearInterval(elapsedTimer);
 	});
 </script>
 
@@ -102,7 +122,9 @@
 	<div class="page-header">
 		<div>
 			<h1 class="page-title">Threat Intelligence</h1>
-			{#if status?.started_at}
+			{#if status?.scan_running && status.started_at}
+				<p class="page-subtitle scan-in-progress">Scan in progress — {elapsedTime(status.started_at)}</p>
+			{:else if status?.started_at}
 				<p class="page-subtitle">Last scan: {timeAgo(status.started_at)}</p>
 			{/if}
 		</div>
@@ -111,10 +133,17 @@
 			{#if status?.scan_running}
 				<div class="scan-running">
 					<div class="spinner"></div>
-					<span>{status.progress_message || 'Scanning…'}</span>
+					<div class="scan-status-text">
+						<span>{status.progress_message || 'Scanning…'}</span>
+						{#if status.started_at}
+							<span class="scan-elapsed">{elapsedTime(status.started_at)}</span>
+						{/if}
+					</div>
 				</div>
 			{:else}
-				<button class="btn-scan" onclick={handleScan}>Trigger Scan</button>
+				<button class="btn-scan" onclick={handleScan} disabled={scanning}>
+					{scanning ? 'Starting…' : 'Trigger Scan'}
+				</button>
 			{/if}
 			{#if scanError}
 				<p class="scan-error">{scanError}</p>
@@ -169,7 +198,7 @@
 				</div>
 
 				<div class="events-list">
-					{#each events as event}
+					{#each events as event (event.amplifier_handle + event.detected_at)}
 						<div class="event-row">
 							<div class="event-info">
 								<a
@@ -470,6 +499,28 @@
 		text-align: center;
 		color: #57534e;
 		font-size: 0.9375rem;
+	}
+
+	.btn-scan:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+		transform: none;
+		box-shadow: none;
+	}
+
+	.scan-status-text {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+
+	.scan-elapsed {
+		font-size: 0.75rem;
+		color: #78716c;
+	}
+
+	.scan-in-progress {
+		color: #c9956c;
 	}
 
 	@media (max-width: 640px) {

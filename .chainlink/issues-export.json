@@ -1,7 +1,141 @@
 {
   "version": 1,
-  "exported_at": "2026-03-03T18:10:02.475321474+00:00",
+  "exported_at": "2026-03-06T02:25:05.130834551+00:00",
   "issues": [
+    {
+      "id": 100,
+      "title": "Document scan resilience and handle server restart mid-scan",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "The scan already survives browser tab close — tokio::spawn detaches it from the HTTP connection. However: if the server process is restarted mid-scan (Railway deploy, crash), scan_running will be stuck as 'true' in memory and no scan will be completable until server restart clears it. Two things to address: (1) add a startup check that resets any stale scan_running=true state, (2) consider persisting scan status to DB so a restart can show 'last scan was interrupted'. Low priority — document the current behavior clearly in code comments too.",
+          "created_at": "2026-03-06T02:09:34.005383704+00:00"
+        }
+      ],
+      "created_at": "2026-03-06T02:09:33.971315857+00:00",
+      "updated_at": "2026-03-06T02:09:33.971315857+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 99,
+      "title": "Separate unresolved DIDs from resolved handles in accounts list",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Some accounts in the DB may only have DIDs without resolved handles. These appear as 'did:plc:...' in the handle column. Options: (1) filter them into a separate section/tab in the accounts list, (2) add a badge/visual distinction, (3) attempt lazy resolution on load. User suggested a separate column. Could also be a separate tab 'Unresolved (N)' in the accounts table. Accounts with unresolved handles are lower quality signals since we can't verify identity — worth surfacing separately.",
+          "created_at": "2026-03-06T02:04:42.347606936+00:00"
+        },
+        {
+          "content": "Decision: implement as a separate tab in the accounts list, e.g. 'Unresolved (N)' alongside the main list. DIDs are those where handle still looks like did:plc:... or did:web:...",
+          "created_at": "2026-03-06T02:07:55.105168285+00:00"
+        }
+      ],
+      "created_at": "2026-03-06T02:04:42.313041790+00:00",
+      "updated_at": "2026-03-06T02:04:42.313041790+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 98,
+      "title": "False positive feedback system for toxic post labels",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "User sees a post marked as toxic in the account detail view and wants to flag it as incorrect. Need: (1) a UI affordance on each toxic post (thumbs down / 'not toxic' button), (2) a way to capture why (free text or category: 'sarcasm', 'context missing', 'quote of bad content', etc.), (3) storage in DB, (4) eventually feed back into scoring to adjust thresholds or exclude flagged posts. This is a multi-part feature — start with storage + UI, defer scoring integration.",
+          "created_at": "2026-03-06T02:04:36.467780025+00:00"
+        }
+      ],
+      "created_at": "2026-03-06T02:04:36.438741902+00:00",
+      "updated_at": "2026-03-06T02:04:36.438741902+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 97,
+      "title": "Disable trigger scan button while scan is running",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": 94,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "The /api/scan endpoint already returns 409 if a scan is running. The frontend should check scan_running from /api/status and disable/hide the trigger button accordingly. Optimistic UI: disable immediately on click, re-enable on error.",
+          "created_at": "2026-03-06T02:04:30.332790056+00:00"
+        }
+      ],
+      "created_at": "2026-03-06T02:04:23.852172684+00:00",
+      "updated_at": "2026-03-06T02:04:23.852172684+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 96,
+      "title": "Show scan history log in web UI",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 94,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-06T02:04:23.817541327+00:00",
+      "updated_at": "2026-03-06T02:04:23.817541327+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 95,
+      "title": "Show active scan progress and estimated completion time in UI",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": 94,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Scan status is already returned from /api/status (scan_running, started_at, progress_message). Need to surface this in the dashboard UI — show a banner/indicator when scan_running=true, calculate elapsed time from started_at, and if possible show estimated remaining time. The scan_job stores progress_message which can be used for status text.",
+          "created_at": "2026-03-06T02:04:30.308046525+00:00"
+        }
+      ],
+      "created_at": "2026-03-06T02:04:23.783160025+00:00",
+      "updated_at": "2026-03-06T02:04:23.783160025+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 94,
+      "title": "Improve scan status and history in web UI",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-06T02:04:20.374886219+00:00",
+      "updated_at": "2026-03-06T02:04:20.374886219+00:00",
+      "closed_at": null
+    },
     {
       "id": 93,
       "title": "Generate package-lock.json and fix npm ci for web build",
