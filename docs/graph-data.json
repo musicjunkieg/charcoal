@@ -1374,6 +1374,50 @@
       "created_at": "2026-02-25T02:07:39.407352932+00:00",
       "updated_at": "2026-02-25T02:07:39.407352932+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"133c254\",\"confidence\":95}"
+    },
+    {
+      "id": 132,
+      "change_id": "7827a9d2-c86b-4130-a7c2-36fb204e8e0e",
+      "node_type": "goal",
+      "title": "Add scan progress UI and prevent double-trigger",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T02:26:06.717701194+00:00",
+      "updated_at": "2026-03-06T02:26:06.717701194+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"74ea675\",\"confidence\":95,\"prompt\":\"User asked: implement #97 (disable scan button while running) and #95 (show scan progress and elapsed time) before creating the PR for feat/v0.3-web-gui\"}"
+    },
+    {
+      "id": 133,
+      "change_id": "1e7a292c-474d-438e-93ed-330144309917",
+      "node_type": "action",
+      "title": "Fix missing # on .env comment line blocking BLUESKY_HANDLE load",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T02:26:06.749826129+00:00",
+      "updated_at": "2026-03-06T02:26:06.749826129+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"74ea675\",\"confidence\":99,\"files\":[\".env\"]}"
+    },
+    {
+      "id": 134,
+      "change_id": "3d76740c-6fac-4e8f-a58f-3ad14f12cebd",
+      "node_type": "action",
+      "title": "Implement scan progress indicator and button disable in dashboard",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T02:26:06.779926924+00:00",
+      "updated_at": "2026-03-06T02:26:06.779926924+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"74ea675\",\"confidence\":95,\"files\":[\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
+    },
+    {
+      "id": 135,
+      "change_id": "a585aba3-7c8b-46bd-aee8-ad87c4fef924",
+      "node_type": "outcome",
+      "title": "Scan button disables on click (scanning flag + finally), elapsed time ticks live every second, subtitle shows amber 'Scan in progress'. #95 and #97 closed.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-06T02:26:06.812119959+00:00",
+      "updated_at": "2026-03-06T02:26:06.812119959+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"74ea675\",\"confidence\":99}"
     }
   ],
   "edges": [
@@ -2619,6 +2663,61 @@
       "weight": 1.0,
       "rationale": "Rescue action produced successful outcome",
       "created_at": "2026-02-25T02:07:43.002075432+00:00"
+    },
+    {
+      "id": 120,
+      "from_node_id": 132,
+      "to_node_id": 133,
+      "from_change_id": "7827a9d2-c86b-4130-a7c2-36fb204e8e0e",
+      "to_change_id": "1e7a292c-474d-438e-93ed-330144309917",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixed blocking .env issue before implementing features",
+      "created_at": "2026-03-06T02:26:11.139192579+00:00"
+    },
+    {
+      "id": 121,
+      "from_node_id": 132,
+      "to_node_id": 134,
+      "from_change_id": "7827a9d2-c86b-4130-a7c2-36fb204e8e0e",
+      "to_change_id": "3d76740c-6fac-4e8f-a58f-3ad14f12cebd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Main implementation work",
+      "created_at": "2026-03-06T02:26:11.161531780+00:00"
+    },
+    {
+      "id": 122,
+      "from_node_id": 133,
+      "to_node_id": 135,
+      "from_change_id": "1e7a292c-474d-438e-93ed-330144309917",
+      "to_change_id": "a585aba3-7c8b-46bd-aee8-ad87c4fef924",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Unblocked scan from running",
+      "created_at": "2026-03-06T02:26:11.185931812+00:00"
+    },
+    {
+      "id": 123,
+      "from_node_id": 134,
+      "to_node_id": 135,
+      "from_change_id": "3d76740c-6fac-4e8f-a58f-3ad14f12cebd",
+      "to_change_id": "a585aba3-7c8b-46bd-aee8-ad87c4fef924",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Produced the UX improvements",
+      "created_at": "2026-03-06T02:26:11.210557874+00:00"
+    },
+    {
+      "id": 124,
+      "from_node_id": 131,
+      "to_node_id": 132,
+      "from_change_id": "5a581fff-66ec-4d6f-a961-52b3e6d1ff3c",
+      "to_change_id": "7827a9d2-c86b-4130-a7c2-36fb204e8e0e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Session continuation — prior v0.3 work led to this scan UX polish",
+      "created_at": "2026-03-06T02:26:11.234092425+00:00"
     }
   ],
   "documents": [

@@ -67,12 +67,13 @@ async fn run_scan(
     }
 
     let scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
-        match OnnxToxicityScorer::load(&config.model_dir) {
-            Ok(s) => Box::new(s),
-            Err(e) => anyhow::bail!(
-                "Failed to load ONNX model: {e}. Run `charcoal download-model` first."
-            ),
-        }
+        let model_dir = config.model_dir.clone();
+        // OnnxToxicityScorer::load is synchronous blocking I/O — offload to avoid
+        // stalling the async runtime while the model is read from disk.
+        let loaded = tokio::task::spawn_blocking(move || OnnxToxicityScorer::load(&model_dir))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked loading ONNX model: {e}"))??;
+        Box::new(loaded)
     } else {
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
@@ -96,13 +97,23 @@ async fn run_scan(
 
     let embed_dir = embedding_model_dir(&config.model_dir);
     let embedder = if embedding_files_present(&config.model_dir) {
-        match crate::topics::embeddings::SentenceEmbedder::load(&embed_dir) {
-            Ok(e) => {
+        // SentenceEmbedder::load is synchronous blocking I/O — offload to avoid
+        // stalling the async runtime while the model is read from disk.
+        match tokio::task::spawn_blocking(move || {
+            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
+        })
+        .await
+        {
+            Ok(Ok(e)) => {
                 info!("Embedding model loaded");
                 Some(e)
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!(error = %e, "Embedding model failed to load, using TF-IDF fallback");
+                None
+            }
+            Err(e) => {
+                warn!(error = %e, "spawn_blocking panicked loading embedder, using TF-IDF fallback");
                 None
             }
         }

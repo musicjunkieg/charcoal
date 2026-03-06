@@ -5,16 +5,34 @@
 // without a separate round-trip.
 
 use axum::extract::State;
-use axum::response::IntoResponse;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use crate::web::AppState;
+use crate::web::{api_error, AppState};
 
-pub async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
-    let scan_status = state.scan_status.read().await;
+pub async fn get_status(State(state): State<AppState>) -> Response {
+    // Snapshot scan status fields and release the lock before awaiting the DB.
+    // Holding the read guard across an async DB call would block writers (e.g.
+    // the scan job updating progress) for the duration of the query.
+    let (scan_running, started_at, progress_message, last_error) = {
+        let s = state.scan_status.read().await;
+        (
+            s.running,
+            s.started_at.clone(),
+            s.progress_message.clone(),
+            s.last_error.clone(),
+        )
+    };
 
     // Compute tier counts from DB. threat_tier is stored as Option<String>.
-    let threats = state.db.get_ranked_threats(0.0).await.unwrap_or_default();
+    let threats = match state.db.get_ranked_threats(0.0).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error in get_status");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
     let mut high = 0u32;
     let mut elevated = 0u32;
     let mut watch = 0u32;
@@ -29,10 +47,10 @@ pub async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
     }
 
     Json(serde_json::json!({
-        "scan_running": scan_status.running,
-        "started_at": scan_status.started_at,
-        "progress_message": scan_status.progress_message,
-        "last_error": scan_status.last_error,
+        "scan_running": scan_running,
+        "started_at": started_at,
+        "progress_message": progress_message,
+        "last_error": last_error,
         "tier_counts": {
             "high": high,
             "elevated": elevated,
@@ -41,4 +59,5 @@ pub async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
             "total": threats.len(),
         }
     }))
+    .into_response()
 }

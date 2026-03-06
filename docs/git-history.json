@@ -1,5 +1,13 @@
 [
   {
+    "hash": "74ea6753ea6523b2e90970827ab67ebef2aaad47",
+    "short_hash": "74ea675",
+    "author": "musicjunkieg",
+    "date": "2026-03-06T02:25:05Z",
+    "message": "feat: scan progress indicator and disable button while running\n\n- Show elapsed time (live 1-second ticker) and progress_message while\n  scan is in progress; subtitle switches to amber \"Scan in progress — Xs\"\n- Disable Trigger Scan button during async window between click and\n  status update; shows \"Starting...\" with not-allowed cursor\n- Both changes confined to dashboard/+page.svelte, no backend changes\n- Closes #97, closes #95",
+    "files_changed": 3
+  },
+  {
     "hash": "133c254d21d3f68483806bd1b0a2267588ae58d5",
     "short_hash": "133c254",
     "author": "musicjunkieg",

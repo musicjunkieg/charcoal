@@ -47,6 +47,23 @@ pub async fn run_server(
     port: u16,
     bind: &str,
 ) -> Result<()> {
+    // Fail fast if required web credentials are missing or too short.
+    // Better to crash at startup with a clear message than to run with
+    // a blank password or a weak signing key.
+    if config.web_password.is_empty() {
+        anyhow::bail!(
+            "CHARCOAL_WEB_PASSWORD is not set. Add it to your .env file.\n\
+             Generate one with: openssl rand -base64 24"
+        );
+    }
+    if config.session_secret.len() < 32 {
+        anyhow::bail!(
+            "CHARCOAL_SESSION_SECRET must be at least 32 characters (currently {} chars).\n\
+             Generate one with: openssl rand -hex 32",
+            config.session_secret.len()
+        );
+    }
+
     let state = AppState {
         db,
         config: Arc::new(config),

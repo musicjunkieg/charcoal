@@ -119,8 +119,10 @@ pub fn clear_cookie_header() -> String {
 // --- Private helpers ---
 
 fn hmac_sign(secret: &str, payload: &str) -> String {
+    // new_from_slice only fails for zero-length keys; the session secret is
+    // validated to be non-empty at server startup, so this is always safe.
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .unwrap_or_else(|_| HmacSha256::new_from_slice(b"fallback").unwrap());
+        .expect("HMAC-SHA256 accepts any non-empty key");
     mac.update(payload.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }

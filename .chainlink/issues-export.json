@@ -1,7 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-03-06T02:25:05.130834551+00:00",
+  "exported_at": "2026-03-06T02:58:34.711203234+00:00",
   "issues": [
+    {
+      "id": 101,
+      "title": "Address CodeRabbit security and correctness findings on PR #9",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Five fixes:\n1. src/config.rs: hard startup error if CHARCOAL_WEB_PASSWORD or CHARCOAL_SESSION_SECRET is missing/empty (not unwrap_or_default)\n2. src/web/auth.rs: hmac_sign fallback to 'fallback' key — panic instead  \n3. src/web/handlers/status.rs: release RwLock read guard before awaiting DB; return 500 on DB error instead of empty 200\n4. src/web/scan_job.rs: wrap OnnxToxicityScorer::load and SentenceEmbedder::load in spawn_blocking\n5. web/static/robots.txt: Disallow: / to block crawlers on this private dashboard",
+          "created_at": "2026-03-06T02:52:15.889859366+00:00"
+        }
+      ],
+      "created_at": "2026-03-06T02:52:10.800407819+00:00",
+      "updated_at": "2026-03-06T02:52:10.800407819+00:00",
+      "closed_at": null
+    },
     {
       "id": 100,
       "title": "Document scan resilience and handle server restart mid-scan",
@@ -70,7 +90,7 @@
       "id": 97,
       "title": "Disable trigger scan button while scan is running",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": 94,
       "labels": [
@@ -83,8 +103,8 @@
         }
       ],
       "created_at": "2026-03-06T02:04:23.852172684+00:00",
-      "updated_at": "2026-03-06T02:04:23.852172684+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-06T02:25:32.328658009+00:00",
+      "closed_at": "2026-03-06T02:25:32.328658009+00:00"
     },
     {
       "id": 96,
@@ -105,7 +125,7 @@
       "id": 95,
       "title": "Show active scan progress and estimated completion time in UI",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": 94,
       "labels": [
@@ -118,8 +138,8 @@
         }
       ],
       "created_at": "2026-03-06T02:04:23.783160025+00:00",
-      "updated_at": "2026-03-06T02:04:23.783160025+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-06T02:25:32.349100249+00:00",
+      "closed_at": "2026-03-06T02:25:32.349100249+00:00"
     },
     {
       "id": 94,
