@@ -1495,6 +1495,17 @@
       "created_at": "2026-03-06T03:00:10.572954810+00:00",
       "updated_at": "2026-03-06T03:00:10.572954810+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.3-web-gui\",\"commit\":\"e057e88\",\"confidence\":99}"
+    },
+    {
+      "id": 143,
+      "change_id": "f15c0676-7dbe-41e2-8c5c-7f6cbd27a2da",
+      "node_type": "action",
+      "title": "Update CLAUDE.md test count and version CHANGELOG into 0.3.0 and 0.2.0 releases",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-07T22:57:25.361687379+00:00",
+      "updated_at": "2026-03-07T22:57:25.361687379+00:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"64e388d\",\"confidence\":90,\"files\":[\"CLAUDE.md\",\"CHANGELOG.md\"]}"
     }
   ],
   "edges": [

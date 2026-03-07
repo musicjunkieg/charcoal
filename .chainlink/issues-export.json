@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "exported_at": "2026-03-06T05:52:42.144081848+00:00",
+  "exported_at": "2026-03-07T23:02:25.845800496+00:00",
   "issues": [
     {
       "id": 94,
       "title": "Allow git stash in hook-config",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "low",
       "parent_id": null,
       "labels": [
@@ -14,8 +14,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-06T05:52:32.920163746+00:00",
-      "updated_at": "2026-03-06T05:52:32.920163746+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-06T05:52:56.772979249+00:00",
+      "closed_at": "2026-03-06T05:52:56.772979249+00:00"
     },
     {
       "id": 93,
@@ -105,7 +105,7 @@
       "id": 87,
       "title": "Railway deployment with Railpack",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -113,14 +113,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:28.108143468+00:00",
-      "updated_at": "2026-02-21T01:52:28.108143468+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.881134661+00:00",
+      "closed_at": "2026-03-07T22:56:14.881134661+00:00"
     },
     {
       "id": 86,
       "title": "Account list + account detail pages",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -128,14 +128,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:28.057067714+00:00",
-      "updated_at": "2026-02-21T01:52:28.057067714+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.856514559+00:00",
+      "closed_at": "2026-03-07T22:56:14.856514559+00:00"
     },
     {
       "id": 85,
       "title": "Login page adaptation + dashboard page",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -143,14 +143,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:28.010377252+00:00",
-      "updated_at": "2026-02-21T01:52:28.010377252+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.836703600+00:00",
+      "closed_at": "2026-03-07T22:56:14.836703600+00:00"
     },
     {
       "id": 84,
       "title": "SvelteKit web project setup — move from landing-page to web/",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -158,14 +158,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:27.966271054+00:00",
-      "updated_at": "2026-02-21T01:52:27.966271054+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.814350189+00:00",
+      "closed_at": "2026-03-07T22:56:14.814350189+00:00"
     },
     {
       "id": 83,
       "title": "JSON API endpoints — status, accounts, events, fingerprint, scan",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -173,14 +173,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:27.905226785+00:00",
-      "updated_at": "2026-02-21T01:52:27.905226785+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.788561187+00:00",
+      "closed_at": "2026-03-07T22:56:14.788561187+00:00"
     },
     {
       "id": 82,
       "title": "Database trait — get_account_by_handle + get_account_by_did",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -188,14 +188,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:27.858016322+00:00",
-      "updated_at": "2026-02-21T01:52:27.858016322+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.767414237+00:00",
+      "closed_at": "2026-03-07T22:56:14.767414237+00:00"
     },
     {
       "id": 81,
       "title": "Auth layer — POST /api/login, session cookie, middleware",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -203,14 +203,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:27.814202601+00:00",
-      "updated_at": "2026-02-21T01:52:27.814202601+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.742347135+00:00",
+      "closed_at": "2026-03-07T22:56:14.742347135+00:00"
     },
     {
       "id": 80,
       "title": "charcoal serve command + Axum skeleton + web feature flag",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -218,8 +218,8 @@
       ],
       "comments": [],
       "created_at": "2026-02-21T01:52:27.773643822+00:00",
-      "updated_at": "2026-02-21T01:52:27.773643822+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T22:56:14.710936410+00:00",
+      "closed_at": "2026-03-07T22:56:14.710936410+00:00"
     },
     {
       "id": 79,

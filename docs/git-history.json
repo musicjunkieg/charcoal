@@ -16,6 +16,14 @@
     "files_changed": 3
   },
   {
+    "hash": "64e388dcf95a2003e39dd6858ea3086a8e4b4768",
+    "short_hash": "64e388d",
+    "author": "chaos gremlin",
+    "date": "2026-03-05T21:52:48-08:00",
+    "message": "chore: allow git stash in hook-config (#11)\n\nRemoves git stash from the blocked commands list so it can be used\nto safely park uncommitted changes when switching branches, instead\nof having to discard or commit them first.",
+    "files_changed": 2
+  },
+  {
     "hash": "133c254d21d3f68483806bd1b0a2267588ae58d5",
     "short_hash": "133c254",
     "author": "musicjunkieg",
