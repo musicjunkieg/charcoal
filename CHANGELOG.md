@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Lock held across DB await in status handler — snapshot fields before releasing the read guard (#101)
 - ONNX and embedder model loads wrapped in spawn_blocking to avoid blocking async runtime (#101)
 
+### Changed
+- Update CLAUDE.md and CHANGELOG for v0.3 web GUI merge (#93)
+- Allow git stash in hook-config (#94)
+
 ## [0.2.0] - 2026-02-20
 
 ### Added
@@ -55,8 +59,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
-- Update CLAUDE.md and CHANGELOG for v0.3 web GUI merge (#93)
-- Allow git stash in hook-config (#94)
 - Harden workflow: atomic commits, branch protections, issue and graph persistence (#88)
 - sqlite feature flag now correctly gates sqlite-related code (#76)
 - Postgres integration tests now clean up after themselves (#74)
