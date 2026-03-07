@@ -96,7 +96,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Phase 7: Reports, markdown output, and polish (#6)
-- Phase 6: Profile scoring and threat tiers (#5)
+- Phase 6: Profile scoring and threat tiers
 - Phase 5: Amplification detection pipeline (#5)
 - Phase 4: Toxicity scoring with Perspective API (#4)
 - Phase 3: Topic fingerprint with TF-IDF (#3)
