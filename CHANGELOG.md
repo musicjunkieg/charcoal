@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-07
+
 ### Security
 - Fix inverted credential redaction in migrate command display (#78)
 - Constant-time password comparison in login handler — prevents timing oracle on password length (#102)
@@ -13,7 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove HMAC fallback to hardcoded key; panic on misconfiguration (#101)
 
 ### Added
-- v0.3 web GUI: Axum API server + SvelteKit dashboard (login, dashboard, accounts, events, fingerprint, scan trigger) (#80–#87, #95, #97)
+- v0.3 web GUI: Axum API server + SvelteKit dashboard (login, dashboard, accounts, events, fingerprint, scan trigger) (#80–#86, #95, #97)
+- Railway deployment configuration with Railpack (#87)
 - Scan progress display with elapsed time counter (#95)
 - Scan button disabled while scan is running (#97)
 
@@ -23,7 +26,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Lock held across DB await in status handler — snapshot fields before releasing the read guard (#101)
 - ONNX and embedder model loads wrapped in spawn_blocking to avoid blocking async runtime (#101)
 
+### Changed
+- Update CLAUDE.md and CHANGELOG for v0.3 web GUI merge (#93)
+- Allow git stash in hook-config (#94)
 
+## [0.2.0] - 2026-02-20
+
+### Added
 - Display behavioral signals in threat reports (#67)
 - Behavioral signals: reply ratio, quote ratio, pile-on detection (#54)
 - Add validate command: score blocked accounts to verify pipeline accuracy (#63)
@@ -82,7 +91,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Close rate limiter issue as moot — ONNX scorer has no API rate limits (#9)
 - Select and implement Perspective API replacement (#13)
 - Research alternative toxicity scoring APIs (Perspective sunsetting Dec 2026) (#11)
+
+## [0.1.0] - 2026-01-31
+
+### Added
 - Phase 7: Reports, markdown output, and polish (#6)
+- Phase 6: Profile scoring and threat tiers
 - Phase 5: Amplification detection pipeline (#5)
 - Phase 4: Toxicity scoring with Perspective API (#4)
 - Phase 3: Topic fingerprint with TF-IDF (#3)

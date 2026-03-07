@@ -135,7 +135,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 186 tests across six categories:
+The project has 189 tests across six categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions

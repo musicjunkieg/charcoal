@@ -1,5 +1,13 @@
 [
   {
+    "hash": "1e0758fc01b581021b19491055f36345bec7eab5",
+    "short_hash": "1e0758f",
+    "author": "musicjunkieg",
+    "date": "2026-03-07T23:02:25Z",
+    "message": "docs: version CHANGELOG into 0.3.0/0.2.0/0.1.0 releases, fix test count in CLAUDE.md\n\n- Promote [Unreleased] to [0.3.0] (2026-03-07): web GUI, scan progress, security fixes\n- Extract [0.2.0] (2026-02-20): behavioral signals, postgres backend, embeddings, validate\n- Extract [0.1.0] (2026-01-31): original 7 MVP phases\n- Fix CLAUDE.md test count: 186 -> 189 (matches current cargo test output)\n- Closes #93",
+    "files_changed": 5
+  },
+  {
     "hash": "e057e88308ad3218ae22e605b4eef59bf2cebdc7",
     "short_hash": "e057e88",
     "author": "musicjunkieg",
@@ -14,6 +22,14 @@
     "date": "2026-03-06T02:25:05Z",
     "message": "feat: scan progress indicator and disable button while running\n\n- Show elapsed time (live 1-second ticker) and progress_message while\n  scan is in progress; subtitle switches to amber \"Scan in progress — Xs\"\n- Disable Trigger Scan button during async window between click and\n  status update; shows \"Starting...\" with not-allowed cursor\n- Both changes confined to dashboard/+page.svelte, no backend changes\n- Closes #97, closes #95",
     "files_changed": 3
+  },
+  {
+    "hash": "64e388dcf95a2003e39dd6858ea3086a8e4b4768",
+    "short_hash": "64e388d",
+    "author": "chaos gremlin",
+    "date": "2026-03-05T21:52:48-08:00",
+    "message": "chore: allow git stash in hook-config (#11)\n\nRemoves git stash from the blocked commands list so it can be used\nto safely park uncommitted changes when switching branches, instead\nof having to discard or commit them first.",
+    "files_changed": 2
   },
   {
     "hash": "133c254d21d3f68483806bd1b0a2267588ae58d5",
