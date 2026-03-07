@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Support custom PDS endpoint for non-bsky.social accounts (#7)
 
 ### Changed
+- Update CLAUDE.md and CHANGELOG for v0.3 web GUI merge (#93)
 - Allow git stash in hook-config (#94)
 - Harden workflow: atomic commits, branch protections, issue and graph persistence (#88)
 - sqlite feature flag now correctly gates sqlite-related code (#76)

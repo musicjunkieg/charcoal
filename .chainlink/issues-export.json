@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-07T23:02:25.845800496+00:00",
+  "exported_at": "2026-03-07T23:03:10.392966756+00:00",
   "issues": [
     {
       "id": 94,
@@ -21,7 +21,7 @@
       "id": 93,
       "title": "Update CLAUDE.md and CHANGELOG for v0.3 web GUI merge",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -29,8 +29,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-06T05:49:42.054996904+00:00",
-      "updated_at": "2026-03-06T05:49:42.054996904+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-07T23:03:02.174957855+00:00",
+      "closed_at": "2026-03-07T23:03:02.174957855+00:00"
     },
     {
       "id": 92,
