@@ -15,7 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove HMAC fallback to hardcoded key; panic on misconfiguration (#101)
 
 ### Added
-- v0.3 web GUI: Axum API server + SvelteKit dashboard (login, dashboard, accounts, events, fingerprint, scan trigger) (#80–#87, #95, #97)
+- v0.3 web GUI: Axum API server + SvelteKit dashboard (login, dashboard, accounts, events, fingerprint, scan trigger) (#80–#86, #95, #97)
+- Railway deployment configuration with Railpack (#87)
 - Scan progress display with elapsed time counter (#95)
 - Scan button disabled while scan is running (#97)
 
@@ -95,6 +96,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - Phase 7: Reports, markdown output, and polish (#6)
+- Phase 6: Profile scoring and threat tiers (#5)
 - Phase 5: Amplification detection pipeline (#5)
 - Phase 4: Toxicity scoring with Perspective API (#4)
 - Phase 3: Topic fingerprint with TF-IDF (#3)
