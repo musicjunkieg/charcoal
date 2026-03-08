@@ -1,17 +1,17 @@
 // Auth middleware — stateless HMAC-SHA256 session cookie validation.
 //
-// Session token format: {timestamp_secs}.{nonce_hex}.{hmac_hex}
+// Session token format: {timestamp_secs}.{did_b64}.{nonce_hex}.{hmac_hex}
 //
-// The HMAC covers "{timestamp_secs}.{nonce_hex}" signed with CHARCOAL_SESSION_SECRET.
-// Tokens are valid for SESSION_TTL_SECS (24 hours).
+// The HMAC covers "{timestamp_secs}.{did_b64}.{nonce_hex}" signed with CHARCOAL_SESSION_SECRET.
+// Tokens are valid for SESSION_TTL_SECS (24 hours). The DID identifies who authenticated.
 //
 // Login flow:
-//   POST /api/login { password } → check CHARCOAL_WEB_PASSWORD
-//     success: set charcoal_session cookie with new HMAC token
-//     failure: 401
+//   POST /api/auth/initiate → PAR request to PDS → redirect to Bluesky OAuth
+//   GET  /api/auth/callback → exchange code for tokens → set session cookie
 //
 // Auth check (this middleware):
-//   extract charcoal_session cookie → parse → verify HMAC → verify age → allow
+//   extract charcoal_session cookie → parse → verify HMAC → verify age
+//   → extract DID → check against CHARCOAL_ALLOWED_DID → allow/deny
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

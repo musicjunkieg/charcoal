@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Return 500 on corrupt fingerprint JSON instead of silently coercing to null (#102)
-- Session cookies: startup fails with clear message if CHARCOAL_WEB_PASSWORD or CHARCOAL_SESSION_SECRET are missing or too short (#101)
+- Session cookies: startup fails with clear message if CHARCOAL_ALLOWED_DID, CHARCOAL_OAUTH_CLIENT_ID, or CHARCOAL_SESSION_SECRET are missing or too short (#101)
 - Lock held across DB await in status handler — snapshot fields before releasing the read guard (#101)
 - ONNX and embedder model loads wrapped in spawn_blocking to avoid blocking async runtime (#101)
 

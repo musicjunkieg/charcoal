@@ -62,7 +62,14 @@ Post-MVP improvements applied:
   disables the scan button while a scan is running. SvelteKit SPA embedded at compile
   time via `include_dir!`. Railway deployment config included (`railway.toml`).
 
-189 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
+- **v0.4 AT Protocol OAuth**: Backend-driven OAuth via `atproto-oauth` crate (from
+  tangled.org/ngerakines.me/atproto-crates). Replaces password auth with Bluesky sign-in.
+  PAR + PKCE + DPoP + private_key_jwt. DID-embedded session cookies with CHARCOAL_ALLOWED_DID
+  gate (single-user). P-256 signing key generated at startup. AT Protocol tokens stored
+  in-memory for future XRPC calls (muting/blocking milestone). Env vars:
+  `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
+
+215 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
 `scan`, `sweep`, `score`, `report`, `status`, `validate`, `migrate` (postgres feature),
 `serve` (web feature).
 
