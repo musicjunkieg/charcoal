@@ -152,10 +152,9 @@ impl Config {
     }
 }
 
-#[cfg(test)]
 impl Config {
     /// Build a Config with safe test values. Used by integration test helpers.
-    /// Individual fields can be overridden after construction.
+    /// Contains only dummy/safe values — nothing sensitive.
     pub fn test_defaults() -> Self {
         Self {
             bluesky_handle: String::new(),

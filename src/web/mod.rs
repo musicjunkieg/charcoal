@@ -6,6 +6,7 @@
 //
 // Auth: stateless HMAC-SHA256 session cookies. No session table in the DB.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -26,11 +27,16 @@ use crate::db::Database;
 pub mod auth;
 pub mod handlers;
 pub mod scan_job;
+pub mod test_helpers;
 
 // Embed the SvelteKit build output at compile time.
 // web/build/ must exist before `cargo build --features web` runs.
 // Run `cd web && npm ci && npm run build` first.
 static ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/build");
+
+/// Placeholder for in-flight OAuth request data. Will be replaced with a
+/// proper struct in Task 7 when the full OAuth flow is implemented.
+pub type PendingOAuth = serde_json::Value;
 
 /// Shared application state threaded through all Axum handlers.
 #[derive(Clone)]
@@ -38,6 +44,12 @@ pub struct AppState {
     pub db: Arc<dyn Database>,
     pub config: Arc<Config>,
     pub scan_status: Arc<RwLock<scan_job::ScanStatus>>,
+    /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
+    /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
+    pub pending_oauth: Arc<RwLock<HashMap<String, PendingOAuth>>>,
+    /// AT Protocol tokens for the authenticated user.
+    /// Stored in-memory for this milestone (lost on restart — user re-authenticates).
+    pub oauth_tokens: Arc<RwLock<Option<serde_json::Value>>>,
 }
 
 /// Start the Axum web server and block until it exits.
@@ -74,6 +86,8 @@ pub async fn run_server(
         db,
         config: Arc::new(config),
         scan_status: Arc::new(RwLock::new(scan_job::ScanStatus::default())),
+        pending_oauth: Arc::new(RwLock::new(HashMap::new())),
+        oauth_tokens: Arc::new(RwLock::new(None)),
     };
 
     let app = build_router(state);
@@ -86,7 +100,7 @@ pub async fn run_server(
     Ok(())
 }
 
-fn build_router(state: AppState) -> Router {
+pub(crate) fn build_router(state: AppState) -> Router {
     // Authenticated API routes (require valid session cookie)
     let protected_api = Router::new()
         .route("/api/status", get(handlers::status::get_status))
@@ -108,7 +122,14 @@ fn build_router(state: AppState) -> Router {
         ));
 
     // Public routes (no auth)
-    let public_api = Router::new().route("/health", get(health));
+    let public_api = Router::new()
+        .route(
+            "/oauth-client-metadata.json",
+            get(handlers::oauth::client_metadata),
+        )
+        .route("/health", get(health))
+        .route("/api/auth/initiate", post(handlers::oauth::initiate))
+        .route("/api/auth/callback", get(handlers::oauth::callback));
 
     Router::new()
         .merge(protected_api)
