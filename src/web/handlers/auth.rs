@@ -52,7 +52,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
         return api_error(StatusCode::UNAUTHORIZED, "Invalid password");
     }
 
-    let token = create_token(&state.config.session_secret);
+    let token = create_token(&state.config.session_secret, "");
     // Use Secure flag only over HTTPS (not needed for local dev).
     // In production on Railway, Railway provides HTTPS termination.
     let secure = false; // stateless server can't detect TLS; rely on Railway's proxy

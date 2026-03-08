@@ -19,6 +19,7 @@ use axum::extract::{Request, State};
 use axum::http::header;
 use axum::middleware::Next;
 use axum::response::Response;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use sha2::Sha256;
@@ -33,79 +34,112 @@ pub const COOKIE_NAME: &str = "charcoal_session";
 /// Session lifetime: 24 hours.
 pub const SESSION_TTL_SECS: u64 = 86_400;
 
-/// Build a new session token signed with `secret`.
+/// Build a new session token with the authenticated DID embedded.
 ///
-/// Returns the raw cookie value (the token string, not the full Set-Cookie header).
-pub fn create_token(secret: &str) -> String {
+/// Token format: `{timestamp}.{did_b64}.{nonce_hex}.{hmac_hex}`
+/// The HMAC covers `"{timestamp}.{did_b64}.{nonce_hex}"`.
+/// `did_b64` is URL-safe base64 (no padding) of the DID UTF-8 bytes.
+pub fn create_token(secret: &str, did: &str) -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
+    let did_b64 = URL_SAFE_NO_PAD.encode(did.as_bytes());
+
     let mut nonce_bytes = [0u8; 16];
     rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = hex::encode(nonce_bytes);
 
-    let payload = format!("{timestamp}.{nonce}");
+    let payload = format!("{timestamp}.{did_b64}.{nonce}");
     let sig = hmac_sign(secret, &payload);
 
     format!("{payload}.{sig}")
 }
 
-/// Verify a session token. Returns `true` if the HMAC is valid and the token
-/// is not older than `SESSION_TTL_SECS`.
-pub fn verify_token(secret: &str, token: &str) -> bool {
-    // Format: {timestamp}.{nonce}.{hmac}
-    let parts: Vec<&str> = token.splitn(3, '.').collect();
-    if parts.len() != 3 {
-        return false;
+/// Verify a session token and extract the embedded DID.
+///
+/// Returns `Some(did)` if:
+/// - The token has exactly 4 `.`-separated segments
+/// - The HMAC is valid (constant-time check)
+/// - The token age is within SESSION_TTL_SECS (using checked_sub to reject future-dated tokens)
+/// - The did_b64 segment decodes to valid UTF-8
+///
+/// Returns `None` otherwise.
+pub fn verify_token_did(secret: &str, token: &str) -> Option<String> {
+    // Format: {timestamp}.{did_b64}.{nonce}.{hmac}
+    let parts: Vec<&str> = token.splitn(5, '.').collect();
+    if parts.len() != 4 {
+        return None;
     }
     let timestamp_str = parts[0];
-    let nonce = parts[1];
-    let provided_sig = parts[2];
+    let did_b64 = parts[1];
+    let nonce = parts[2];
+    let provided_sig = parts[3];
 
-    // Verify HMAC
-    let payload = format!("{timestamp_str}.{nonce}");
+    // Verify HMAC first (covers timestamp + did_b64 + nonce)
+    let payload = format!("{timestamp_str}.{did_b64}.{nonce}");
     let expected_sig = hmac_sign(secret, &payload);
     if !constant_time_eq(provided_sig, &expected_sig) {
-        return false;
+        return None;
     }
 
-    // Verify age
-    let Ok(timestamp) = timestamp_str.parse::<u64>() else {
-        return false;
-    };
+    // Verify age — checked_sub rejects future-dated tokens
+    let timestamp = timestamp_str.parse::<u64>().ok()?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Use checked_sub so future-dated tokens (clock skew / tampered timestamp)
-    // are rejected rather than treated as age 0.
-    match now.checked_sub(timestamp) {
-        Some(age) => age < SESSION_TTL_SECS,
-        None => false,
+    let age = now.checked_sub(timestamp)?;
+    if age >= SESSION_TTL_SECS {
+        return None;
     }
+
+    // Decode DID
+    let did_bytes = URL_SAFE_NO_PAD.decode(did_b64).ok()?;
+    String::from_utf8(did_bytes).ok()
 }
 
-/// Axum middleware: reject requests without a valid session cookie with 401.
+/// Verify a session token (ignores the embedded DID).
+/// Kept for backward compatibility with existing tests.
+/// New code should use verify_token_did.
+pub fn verify_token(secret: &str, token: &str) -> bool {
+    verify_token_did(secret, token).is_some()
+}
+
+/// Check whether a DID is allowed to authenticate.
+///
+/// Returns `false` if `allowed_did` is empty (CHARCOAL_ALLOWED_DID not configured).
+/// Uses constant-time comparison to avoid timing oracle on the DID.
+pub fn did_is_allowed(did: &str, allowed_did: &str) -> bool {
+    !allowed_did.is_empty() && constant_time_eq(did, allowed_did)
+}
+
+/// Axum middleware: reject requests without a valid session cookie.
+///
+/// Returns 401 if no valid session, 403 if the DID is not allowed.
+/// On success, inserts `AuthUser { did }` into request extensions.
 pub async fn require_auth(
     State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let secret = &state.config.web_password; // password doubles as signing context
     let session_secret = &state.config.session_secret;
+    let allowed_did = &state.config.allowed_did;
 
-    if !has_valid_session(&request, session_secret, secret) {
-        return super::api_error(
+    match extract_session_did(&request, session_secret) {
+        None => super::api_error(
             axum::http::StatusCode::UNAUTHORIZED,
             "Authentication required",
-        );
+        ),
+        Some(did) if !did_is_allowed(&did, allowed_did) => {
+            super::api_error(axum::http::StatusCode::FORBIDDEN, "Access denied")
+        }
+        Some(did) => {
+            request.extensions_mut().insert(AuthUser { did });
+            next.run(request).await
+        }
     }
-
-    // Insert AuthUser marker so handlers can extract it if needed
-    request.extensions_mut().insert(AuthUser);
-    next.run(request).await
 }
 
 /// Build the `Set-Cookie` header value for a new session.
@@ -143,49 +177,43 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
         == 0
 }
 
-/// Extract and validate the session cookie from the request.
-fn has_valid_session(request: &Request, session_secret: &str, _password: &str) -> bool {
-    let cookie_header = match request.headers().get(header::COOKIE) {
-        Some(v) => match v.to_str() {
-            Ok(s) => s,
-            Err(_) => return false,
-        },
-        None => return false,
-    };
-
-    // Parse individual cookie pairs
+/// Extract the authenticated DID from the session cookie, if valid.
+fn extract_session_did(request: &Request, session_secret: &str) -> Option<String> {
+    let cookie_header = request.headers().get(header::COOKIE)?.to_str().ok()?;
     for pair in cookie_header.split(';') {
         let pair = pair.trim();
         if let Some((name, value)) = pair.split_once('=') {
             if name.trim() == COOKIE_NAME {
-                return verify_token(session_secret, value.trim());
+                return verify_token_did(session_secret, value.trim());
             }
         }
     }
-    false
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const TEST_DID: &str = "did:plc:test000000000000000000";
+
     #[test]
     fn test_token_roundtrip() {
         let secret = "test_secret_32_bytes_long_enough!";
-        let token = create_token(secret);
+        let token = create_token(secret, TEST_DID);
         assert!(verify_token(secret, &token));
     }
 
     #[test]
     fn test_wrong_secret_rejected() {
-        let token = create_token("correct_secret");
+        let token = create_token("correct_secret", TEST_DID);
         assert!(!verify_token("wrong_secret", &token));
     }
 
     #[test]
     fn test_tampered_token_rejected() {
         let secret = "my_secret";
-        let token = create_token(secret);
+        let token = create_token(secret, TEST_DID);
         // Flip the last byte deterministically — tokens are hex-encoded so always ASCII.
         let mut tampered_bytes = token.clone().into_bytes();
         let last = tampered_bytes.len() - 1;

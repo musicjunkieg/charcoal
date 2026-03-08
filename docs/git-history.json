@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d79585668198f785b2d322f7fb9f3c561db9607a",
+    "short_hash": "d795856",
+    "author": "musicjunkieg",
+    "date": "2026-03-08T00:37:59Z",
+    "message": "chore: add atproto-oauth, atproto-oauth-axum, atproto-identity, base64 deps\n\nGated on the web feature. These power the AT Protocol OAuth flow\nthat replaces password auth in v0.4.",
+    "files_changed": 5
+  },
+  {
     "hash": "17b1ad638d16f206202ba66d2995c9f98a71dc19",
     "short_hash": "17b1ad6",
     "author": "musicjunkieg",

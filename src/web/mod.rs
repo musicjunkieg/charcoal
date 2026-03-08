@@ -190,5 +190,8 @@ pub fn api_error(status: StatusCode, message: &str) -> Response {
 
 /// Marker type indicating the request passed session authentication.
 /// Inserted into request extensions by `require_auth` middleware.
+/// Handlers can extract it to learn who is authenticated.
 #[derive(Clone)]
-pub struct AuthUser;
+pub struct AuthUser {
+    pub did: String,
+}

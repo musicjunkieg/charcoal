@@ -38,6 +38,9 @@ pub struct Config {
     /// Password for the single-user web dashboard (CHARCOAL_WEB_PASSWORD env var)
     #[cfg(feature = "web")]
     pub web_password: String,
+    /// DID that is allowed to authenticate (CHARCOAL_ALLOWED_DID env var)
+    #[cfg(feature = "web")]
+    pub allowed_did: String,
     /// Secret for HMAC session token signing (CHARCOAL_SESSION_SECRET env var)
     #[cfg(feature = "web")]
     pub session_secret: String,
@@ -62,6 +65,8 @@ impl Config {
         #[cfg(feature = "web")]
         let web_password = env::var("CHARCOAL_WEB_PASSWORD").unwrap_or_default();
         #[cfg(feature = "web")]
+        let allowed_did = env::var("CHARCOAL_ALLOWED_DID").unwrap_or_default();
+        #[cfg(feature = "web")]
         let session_secret = env::var("CHARCOAL_SESSION_SECRET").unwrap_or_default();
 
         Ok(Self {
@@ -78,6 +83,8 @@ impl Config {
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
             #[cfg(feature = "web")]
             web_password,
+            #[cfg(feature = "web")]
+            allowed_did,
             #[cfg(feature = "web")]
             session_secret,
         })

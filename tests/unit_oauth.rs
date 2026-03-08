@@ -17,7 +17,10 @@ mod token_tests {
     fn token_with_did_roundtrip() {
         let token = create_token(SECRET, TEST_DID);
         let result = verify_token_did(SECRET, &token);
-        assert!(result.is_some(), "verify_token_did should return Some(did) for a fresh token");
+        assert!(
+            result.is_some(),
+            "verify_token_did should return Some(did) for a fresh token"
+        );
         assert_eq!(result.unwrap(), TEST_DID);
     }
 
@@ -36,7 +39,10 @@ mod token_tests {
         let last = bytes.len() - 1;
         bytes[last] = if bytes[last] == b'0' { b'1' } else { b'0' };
         let tampered = String::from_utf8(bytes).unwrap();
-        assert!(verify_token_did(SECRET, &tampered).is_none(), "Tampered HMAC should be rejected");
+        assert!(
+            verify_token_did(SECRET, &tampered).is_none(),
+            "Tampered HMAC should be rejected"
+        );
     }
 
     #[test]
@@ -83,7 +89,10 @@ mod gate_tests {
 
     #[test]
     fn disallowed_did_rejected() {
-        assert!(!did_is_allowed("did:plc:attacker00000000000000000", ALLOWED));
+        assert!(!did_is_allowed(
+            "did:plc:attacker00000000000000000",
+            ALLOWED
+        ));
     }
 
     #[test]
