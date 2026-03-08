@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use atproto_identity::key::{generate_key, KeyType};
 use tokio::sync::RwLock;
 
 use crate::config::Config;
@@ -31,12 +32,16 @@ pub fn build_test_app() -> axum::Router {
     create_tables(&conn).expect("schema creation should succeed");
     let db = Arc::new(SqliteDatabase::new(conn)) as Arc<dyn crate::db::Database>;
 
+    let signing_key =
+        generate_key(KeyType::P256Private).expect("P-256 key generation should succeed");
+
     let state = AppState {
         db,
         config: Arc::new(config),
         scan_status: Arc::new(RwLock::new(ScanStatus::default())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
+        signing_key,
     };
 
     build_router(state)

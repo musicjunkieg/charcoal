@@ -34,10 +34,6 @@ pub mod test_helpers;
 // Run `cd web && npm ci && npm run build` first.
 static ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/build");
 
-/// Placeholder for in-flight OAuth request data. Will be replaced with a
-/// proper struct in Task 7 when the full OAuth flow is implemented.
-pub type PendingOAuth = serde_json::Value;
-
 /// Shared application state threaded through all Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -46,10 +42,12 @@ pub struct AppState {
     pub scan_status: Arc<RwLock<scan_job::ScanStatus>>,
     /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
     /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
-    pub pending_oauth: Arc<RwLock<HashMap<String, PendingOAuth>>>,
+    pub pending_oauth: Arc<RwLock<HashMap<String, handlers::oauth::PendingOAuth>>>,
     /// AT Protocol tokens for the authenticated user.
     /// Stored in-memory for this milestone (lost on restart — user re-authenticates).
     pub oauth_tokens: Arc<RwLock<Option<serde_json::Value>>>,
+    /// P-256 signing key for JWT client assertions. Generated at startup.
+    pub signing_key: atproto_identity::key::KeyData,
 }
 
 /// Start the Axum web server and block until it exits.
@@ -82,12 +80,21 @@ pub async fn run_server(
         );
     }
 
+    // Generate a P-256 signing key for JWT client assertions.
+    // This key lives only in memory — on restart, a new key is generated and
+    // the user re-authenticates. Future milestones may persist this key.
+    let signing_key =
+        atproto_identity::key::generate_key(atproto_identity::key::KeyType::P256Private)
+            .map_err(|e| anyhow::anyhow!("Failed to generate signing key: {e}"))?;
+    info!("Generated P-256 signing key for OAuth client assertions");
+
     let state = AppState {
         db,
         config: Arc::new(config),
         scan_status: Arc::new(RwLock::new(scan_job::ScanStatus::default())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
+        signing_key,
     };
 
     let app = build_router(state);

@@ -50,7 +50,7 @@ mod tests {
             "redirect_uris must be an array"
         );
         assert_eq!(json["scope"], "atproto");
-        assert_eq!(json["token_endpoint_auth_method"], "none");
+        assert_eq!(json["token_endpoint_auth_method"], "private_key_jwt");
         assert_eq!(json["application_type"], "web");
         assert_eq!(json["dpop_bound_access_tokens"], true);
         assert!(
