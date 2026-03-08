@@ -1517,6 +1517,17 @@
       "created_at": "2026-03-07T23:02:58.775680431+00:00",
       "updated_at": "2026-03-07T23:02:58.775680431+00:00",
       "metadata_json": "{\"branch\":\"docs/v0.3-changelog-and-claude-md\",\"commit\":\"1e0758f\",\"confidence\":95}"
+    },
+    {
+      "id": 145,
+      "change_id": "d762adea-0c03-449f-a665-3beb2156bf8c",
+      "node_type": "goal",
+      "title": "v0.4 AT Protocol OAuth — replace password auth with AT Protocol OAuth",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-08T00:36:19.898604538+00:00",
+      "updated_at": "2026-03-08T00:36:19.898604538+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.4-atproto-oauth\",\"commit\":\"17b1ad6\",\"confidence\":90,\"files\":[\"Cargo.toml\",\"src/web/auth.rs\",\"src/config.rs\",\"src/web/mod.rs\"]}"
     }
   ],
   "edges": [
