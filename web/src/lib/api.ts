@@ -35,19 +35,19 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 // ---- Auth ----
 
-export async function login(password: string): Promise<void> {
-	const res = await fetch('/api/login', {
+export async function initiateAuth(handle: string): Promise<string> {
+	const res = await fetch('/api/auth/initiate', {
 		method: 'POST',
 		credentials: 'include',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ password })
+		body: JSON.stringify({ handle })
 	});
-	if (res.status === 401) {
-		throw new Error('Invalid password');
-	}
 	if (!res.ok) {
-		throw new Error('Login failed');
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body.error ?? 'Sign-in failed — please try again');
 	}
+	const data = await res.json();
+	return data.redirect_url as string;
 }
 
 export async function logout(): Promise<void> {

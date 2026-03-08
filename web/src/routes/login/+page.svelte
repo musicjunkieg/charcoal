@@ -1,24 +1,23 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { login } from '$lib/api.js';
+	import { initiateAuth } from '$lib/api.js';
 
-	let password = $state('');
+	let handle = $state('');
 	let isSubmitting = $state(false);
 	let isFocused = $state(false);
 	let errorMessage = $state('');
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
-		if (!password.trim() || isSubmitting) return;
+		if (!handle.trim() || isSubmitting) return;
 
 		isSubmitting = true;
 		errorMessage = '';
 
 		try {
-			await login(password);
-			await goto('/dashboard');
+			const redirectUrl = await initiateAuth(handle.trim());
+			window.location.href = redirectUrl;
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Login failed';
+			errorMessage = err instanceof Error ? err.message : 'Sign-in failed';
 		} finally {
 			isSubmitting = false;
 		}
@@ -71,17 +70,17 @@
 
 					<form onsubmit={handleSubmit}>
 						<div class="field">
-							<label for="password" class="label">Password</label>
+							<label for="handle" class="label">Bluesky Handle</label>
 							<div class="input-container" class:focused={isFocused}>
 								<input
-									type="password"
-									id="password"
-									name="password"
-									bind:value={password}
+									type="text"
+									id="handle"
+									name="handle"
+									bind:value={handle}
 									onfocus={() => (isFocused = true)}
 									onblur={() => (isFocused = false)}
-									placeholder="Enter dashboard password"
-									autocomplete="current-password"
+									placeholder="yourhandle.bsky.social"
+									autocomplete="username"
 									required
 									disabled={isSubmitting}
 								/>
@@ -89,16 +88,16 @@
 							{#if errorMessage}
 								<p class="error">{errorMessage}</p>
 							{:else}
-								<p class="hint">Single-user personal dashboard</p>
+								<p class="hint">Sign in with your Bluesky account</p>
 							{/if}
 						</div>
 
-						<button type="submit" class="btn-continue" disabled={!password.trim() || isSubmitting}>
+						<button type="submit" class="btn-continue" disabled={!handle.trim() || isSubmitting}>
 							{#if isSubmitting}
 								<span class="loading-pulse"></span>
 								<span>Signing in...</span>
 							{:else}
-								<span>Continue</span>
+								<span>Sign in with Bluesky</span>
 								<svg class="arrow" viewBox="0 0 20 20" fill="none">
 									<path
 										d="M4 10h12m-4-4l4 4-4 4"
