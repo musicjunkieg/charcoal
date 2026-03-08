@@ -35,12 +35,15 @@ pub struct Config {
     pub model_dir: PathBuf,
     /// Constellation backlink index URL (primary amplification detection)
     pub constellation_url: String,
-    /// Password for the single-user web dashboard (CHARCOAL_WEB_PASSWORD env var)
-    #[cfg(feature = "web")]
-    pub web_password: String,
-    /// DID that is allowed to authenticate (CHARCOAL_ALLOWED_DID env var)
+    /// DID that is allowed to authenticate (CHARCOAL_ALLOWED_DID env var).
+    /// Find your DID at: bsky.app → Settings → Account
     #[cfg(feature = "web")]
     pub allowed_did: String,
+    /// Public URL of the OAuth client metadata document (CHARCOAL_OAUTH_CLIENT_ID env var).
+    /// Dev: register at cimd-service.fly.dev to get a URL like https://cimd-service.fly.dev/clients/xxx
+    /// Production: https://{RAILWAY_PUBLIC_DOMAIN}/oauth-client-metadata.json
+    #[cfg(feature = "web")]
+    pub oauth_client_id: String,
     /// Secret for HMAC session token signing (CHARCOAL_SESSION_SECRET env var)
     #[cfg(feature = "web")]
     pub session_secret: String,
@@ -63,9 +66,9 @@ impl Config {
             .unwrap_or_else(|_| crate::toxicity::download::default_model_dir());
 
         #[cfg(feature = "web")]
-        let web_password = env::var("CHARCOAL_WEB_PASSWORD").unwrap_or_default();
-        #[cfg(feature = "web")]
         let allowed_did = env::var("CHARCOAL_ALLOWED_DID").unwrap_or_default();
+        #[cfg(feature = "web")]
+        let oauth_client_id = env::var("CHARCOAL_OAUTH_CLIENT_ID").unwrap_or_default();
         #[cfg(feature = "web")]
         let session_secret = env::var("CHARCOAL_SESSION_SECRET").unwrap_or_default();
 
@@ -82,9 +85,9 @@ impl Config {
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
             #[cfg(feature = "web")]
-            web_password,
-            #[cfg(feature = "web")]
             allowed_did,
+            #[cfg(feature = "web")]
+            oauth_client_id,
             #[cfg(feature = "web")]
             session_secret,
         })
@@ -145,6 +148,31 @@ impl Config {
                 Ok(())
             }
             ScorerBackend::Perspective => self.require_perspective(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Config {
+    /// Build a Config with safe test values. Used by integration test helpers.
+    /// Individual fields can be overridden after construction.
+    pub fn test_defaults() -> Self {
+        Self {
+            bluesky_handle: String::new(),
+            bluesky_app_password: String::new(),
+            public_api_url: "https://public.api.bsky.app".to_string(),
+            perspective_api_key: String::new(),
+            db_path: ":memory:".to_string(),
+            database_url: None,
+            scorer_backend: ScorerBackend::Onnx,
+            model_dir: std::path::PathBuf::from("/tmp/test_models"),
+            constellation_url: "https://constellation.microcosm.blue".to_string(),
+            #[cfg(feature = "web")]
+            allowed_did: "did:plc:testalloweddid0000000000".to_string(),
+            #[cfg(feature = "web")]
+            oauth_client_id: "https://test.example.com/oauth-client-metadata.json".to_string(),
+            #[cfg(feature = "web")]
+            session_secret: "test_session_secret_at_least_32_chars!".to_string(),
         }
     }
 }

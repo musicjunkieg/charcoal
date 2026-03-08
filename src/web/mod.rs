@@ -47,13 +47,19 @@ pub async fn run_server(
     port: u16,
     bind: &str,
 ) -> Result<()> {
-    // Fail fast if required web credentials are missing or too short.
-    // Better to crash at startup with a clear message than to run with
-    // a blank password or a weak signing key.
-    if config.web_password.is_empty() {
+    // Fail fast if required OAuth config is missing.
+    if config.allowed_did.is_empty() {
         anyhow::bail!(
-            "CHARCOAL_WEB_PASSWORD is not set. Add it to your .env file.\n\
-             Generate one with: openssl rand -base64 24"
+            "CHARCOAL_ALLOWED_DID is not set. Add your Bluesky DID to your .env file.\n\
+             Find it at: https://bsky.app → Settings → Account\n\
+             It looks like: did:plc:xxxxxxxxxxxxxxxxxxxx"
+        );
+    }
+    if config.oauth_client_id.is_empty() {
+        anyhow::bail!(
+            "CHARCOAL_OAUTH_CLIENT_ID is not set.\n\
+             For dev: register your client metadata at your OAuth client ID service.\n\
+             For production: set to https://{{RAILWAY_PUBLIC_DOMAIN}}/oauth-client-metadata.json"
         );
     }
     if config.session_secret.len() < 32 {
@@ -102,9 +108,7 @@ fn build_router(state: AppState) -> Router {
         ));
 
     // Public routes (no auth)
-    let public_api = Router::new()
-        .route("/health", get(health))
-        .route("/api/login", post(handlers::auth::login));
+    let public_api = Router::new().route("/health", get(health));
 
     Router::new()
         .merge(protected_api)
