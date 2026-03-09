@@ -84,13 +84,18 @@ pub fn verify_token_did(secret: &str, token: &str) -> Option<String> {
         return None;
     }
 
-    // Verify age — checked_sub rejects future-dated tokens
+    // Verify age — allow up to 60s of clock skew for cloud deployments
+    // (NTP corrections, blue/green swaps, container migration)
     let timestamp = timestamp_str.parse::<u64>().ok()?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let age = now.checked_sub(timestamp)?;
+    let future_skew = timestamp.saturating_sub(now);
+    if future_skew > 60 {
+        return None;
+    }
+    let age = now.saturating_sub(timestamp);
     if age >= SESSION_TTL_SECS {
         return None;
     }
@@ -184,7 +189,9 @@ fn extract_session_did(request: &Request, session_secret: &str) -> Option<String
         let pair = pair.trim();
         if let Some((name, value)) = pair.split_once('=') {
             if name.trim() == COOKIE_NAME {
-                return verify_token_did(session_secret, value.trim());
+                if let Some(did) = verify_token_did(session_secret, value.trim()) {
+                    return Some(did);
+                }
             }
         }
     }

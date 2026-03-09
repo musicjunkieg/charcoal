@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- v0.4 AT Protocol OAuth: replace password auth with Bluesky sign-in (#50, #95)
+  - PAR + PKCE + DPoP + private_key_jwt via `atproto-oauth` crate
+  - DID-embedded session cookies with CHARCOAL_ALLOWED_DID gate
+  - Stable P-256 signing key derived from CHARCOAL_SESSION_SECRET
+  - AT Protocol tokens stored in-memory for future XRPC calls
+
+### Fixed
+- Session cookies: startup fails with clear message if CHARCOAL_ALLOWED_DID, CHARCOAL_OAUTH_CLIENT_ID, or CHARCOAL_SESSION_SECRET are missing or too short
+
 ## [0.3.0] - 2026-03-07
 
 ### Security
@@ -22,7 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - Return 500 on corrupt fingerprint JSON instead of silently coercing to null (#102)
-- Session cookies: startup fails with clear message if CHARCOAL_ALLOWED_DID, CHARCOAL_OAUTH_CLIENT_ID, or CHARCOAL_SESSION_SECRET are missing or too short (#101)
+- Session cookies: startup fails with clear message if CHARCOAL_WEB_PASSWORD or CHARCOAL_SESSION_SECRET are missing or too short (#101)
 - Lock held across DB await in status handler — snapshot fields before releasing the read guard (#101)
 - ONNX and embedder model loads wrapped in spawn_blocking to avoid blocking async runtime (#101)
 

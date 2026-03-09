@@ -15,6 +15,7 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
 use chrono::{Duration, Utc};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use rand::distr::{Alphanumeric, SampleString};
 use serde::Deserialize;
 
@@ -246,12 +247,12 @@ pub async fn initiate(
         },
     );
 
-    // Step 9: Build authorization URL and return
+    // Step 9: Build authorization URL and return (percent-encode query params)
     let auth_url = format!(
         "{}?client_id={}&request_uri={}",
         authorization_server.authorization_endpoint,
-        oauth_client.client_id,
-        par_response.request_uri,
+        utf8_percent_encode(&oauth_client.client_id, NON_ALPHANUMERIC),
+        utf8_percent_encode(&par_response.request_uri, NON_ALPHANUMERIC),
     );
 
     (

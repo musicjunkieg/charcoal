@@ -65,7 +65,8 @@ Post-MVP improvements applied:
 - **v0.4 AT Protocol OAuth**: Backend-driven OAuth via `atproto-oauth` crate (from
   tangled.org/ngerakines.me/atproto-crates). Replaces password auth with Bluesky sign-in.
   PAR + PKCE + DPoP + private_key_jwt. DID-embedded session cookies with CHARCOAL_ALLOWED_DID
-  gate (single-user). P-256 signing key generated at startup. AT Protocol tokens stored
+  gate (single-user). Stable P-256 signing key derived from CHARCOAL_SESSION_SECRET
+  (deterministic across restarts). AT Protocol tokens stored
   in-memory for future XRPC calls (muting/blocking milestone). Env vars:
   `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
 
@@ -142,7 +143,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 189 tests across six categories:
+The project has 215 tests across eight categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
@@ -156,6 +157,10 @@ The project has 189 tests across six categories:
   ally/hostile/irrelevant account scenarios
 - **Constellation tests** (`tests/unit_constellation.rs`) — serde
   deserialization, AT-URI construction, dedup logic
+- **OAuth unit tests** (`tests/unit_oauth.rs`) — DID-aware token roundtrip,
+  verification failures, DID gate checks
+- **OAuth integration tests** (`tests/web_oauth.rs`) — OAuth endpoints,
+  auth middleware, callback flow, protected route access control
 - **PostgreSQL tests** (`tests/db_postgres.rs`) — integration tests for the
   Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var.
   8 tests covering scan state, fingerprint, embedding, scores, events, etc.

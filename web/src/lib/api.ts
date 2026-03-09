@@ -46,8 +46,11 @@ export async function initiateAuth(handle: string): Promise<string> {
 		const body = await res.json().catch(() => ({}));
 		throw new Error(body.error ?? 'Sign-in failed — please try again');
 	}
-	const data = await res.json();
-	return data.redirect_url as string;
+	const data = (await res.json()) as { redirect_url?: unknown };
+	if (typeof data.redirect_url !== 'string' || data.redirect_url.length === 0) {
+		throw new Error('Sign-in failed — invalid OAuth redirect response');
+	}
+	return data.redirect_url;
 }
 
 export async function logout(): Promise<void> {

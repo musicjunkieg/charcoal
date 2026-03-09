@@ -1524,9 +1524,9 @@
       "node_type": "goal",
       "title": "v0.4 AT Protocol OAuth — replace password auth with AT Protocol OAuth",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-03-08T00:36:19.898604538+00:00",
-      "updated_at": "2026-03-08T00:36:19.898604538+00:00",
+      "updated_at": "2026-03-09T03:41:38.083961193+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.4-atproto-oauth\",\"commit\":\"17b1ad6\",\"confidence\":90,\"files\":[\"Cargo.toml\",\"src/web/auth.rs\",\"src/config.rs\",\"src/web/mod.rs\"]}"
     },
     {
@@ -1535,10 +1535,21 @@
       "node_type": "action",
       "title": "Task 1: Add atproto-oauth Cargo dependencies",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-03-08T00:38:08.945760194+00:00",
-      "updated_at": "2026-03-08T00:38:08.945760194+00:00",
+      "updated_at": "2026-03-09T03:41:38.107074284+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.4-atproto-oauth\",\"commit\":\"d795856\",\"confidence\":95,\"files\":[\"Cargo.toml\",\"Cargo.lock\"]}"
+    },
+    {
+      "id": 147,
+      "change_id": "bbdaca12-ab29-432f-95f2-280e8983f79b",
+      "node_type": "outcome",
+      "title": "AT Protocol OAuth fully implemented and smoke-tested",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-03-09T03:41:30.359763186+00:00",
+      "updated_at": "2026-03-09T03:41:38.130969325+00:00",
+      "metadata_json": "{\"branch\":\"feat/v0.4-atproto-oauth\",\"commit\":\"a4bd8c3\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -2982,6 +2993,28 @@
       "weight": 1.0,
       "rationale": "First task of OAuth goal",
       "created_at": "2026-03-08T00:38:08.994258817+00:00"
+    },
+    {
+      "id": 138,
+      "from_node_id": 145,
+      "to_node_id": 147,
+      "from_change_id": "d762adea-0c03-449f-a665-3beb2156bf8c",
+      "to_change_id": "bbdaca12-ab29-432f-95f2-280e8983f79b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "OAuth implementation complete — PR #13 open",
+      "created_at": "2026-03-09T03:41:35.305484920+00:00"
+    },
+    {
+      "id": 139,
+      "from_node_id": 146,
+      "to_node_id": 147,
+      "from_change_id": "3fbf9f6b-eee1-4202-abf6-8e7e3416eec3",
+      "to_change_id": "bbdaca12-ab29-432f-95f2-280e8983f79b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "All tasks completed",
+      "created_at": "2026-03-09T03:41:35.332299097+00:00"
     }
   ],
   "documents": [
