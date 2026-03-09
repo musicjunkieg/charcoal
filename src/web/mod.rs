@@ -80,13 +80,25 @@ pub async fn run_server(
         );
     }
 
-    // Generate a P-256 signing key for JWT client assertions.
-    // This key lives only in memory — on restart, a new key is generated and
-    // the user re-authenticates. Future milestones may persist this key.
-    let signing_key =
-        atproto_identity::key::generate_key(atproto_identity::key::KeyType::P256Private)
-            .map_err(|e| anyhow::anyhow!("Failed to generate signing key: {e}"))?;
-    info!("Generated P-256 signing key for OAuth client assertions");
+    // Derive a stable P-256 signing key from the session secret.
+    // Using HMAC-SHA256 ensures the same key is produced on every restart,
+    // which is critical because the PDS caches our client metadata (including
+    // the JWKS public key). A new key on restart would cause `invalid_client`
+    // errors until the PDS cache expires.
+    let signing_key = {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(config.session_secret.as_bytes())
+            .expect("HMAC accepts any key length");
+        mac.update(b"charcoal-oauth-signing-key-v1");
+        let derived = mac.finalize().into_bytes(); // 32 bytes — valid P-256 scalar
+        atproto_identity::key::KeyData::new(
+            atproto_identity::key::KeyType::P256Private,
+            derived.to_vec(),
+        )
+    };
+    info!("Derived stable P-256 signing key for OAuth client assertions");
 
     let state = AppState {
         db,

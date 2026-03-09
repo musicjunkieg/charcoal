@@ -198,7 +198,7 @@
 				</div>
 
 				<div class="events-list">
-					{#each events as event (event.amplifier_handle + event.detected_at)}
+					{#each events as event, i (event.id || i)}
 						<div class="event-row">
 							<div class="event-info">
 								<a

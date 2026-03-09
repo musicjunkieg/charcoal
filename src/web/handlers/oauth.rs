@@ -5,6 +5,7 @@
 
 use atproto_identity::key::{generate_key, to_public, KeyType};
 use atproto_identity::resolve::resolve_handle_http;
+use atproto_oauth::jwk::generate as generate_jwk;
 use atproto_oauth::resources::pds_resources;
 use atproto_oauth::workflow::{
     oauth_complete, oauth_init, OAuthClient, OAuthRequest, OAuthRequestState,
@@ -38,11 +39,22 @@ pub async fn client_metadata(State(state): State<AppState>) -> Response {
     let redirect_uri = derive_redirect_uri(client_id);
     let base_uri = derive_base_url(client_id);
 
-    // Derive public key from signing key for JWKS
+    // Derive public key from signing key and convert to proper JWK format
     let public_key = match to_public(&state.signing_key) {
         Ok(pk) => pk,
         Err(e) => {
             tracing::error!("Failed to derive public key: {e}");
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Server key configuration error",
+            );
+        }
+    };
+
+    let jwk = match generate_jwk(&public_key) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::error!("Failed to generate JWK from public key: {e}");
             return api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Server key configuration error",
@@ -63,14 +75,7 @@ pub async fn client_metadata(State(state): State<AppState>) -> Response {
         "application_type": "web",
         "dpop_bound_access_tokens": true,
         "jwks": {
-            "keys": [
-                {
-                    "kty": "EC",
-                    "crv": "P-256",
-                    "use": "sig",
-                    "kid": public_key.to_string(),
-                }
-            ]
+            "keys": [jwk]
         }
     });
 
@@ -120,16 +125,21 @@ pub async fn initiate(
 
     let http_client = reqwest::Client::new();
 
-    // Step 1: Resolve handle to DID via HTTP well-known
+    // Step 1: Resolve handle to DID
+    // Try HTTP well-known first, fall back to AppView resolveHandle API
+    // (some domains return Cloudflare errors on /.well-known/atproto-did)
     let did = match resolve_handle_http(&http_client, &handle).await {
         Ok(d) => d,
-        Err(e) => {
-            tracing::warn!("Handle resolution failed for '{handle}': {e}");
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                "Could not resolve Bluesky handle — check spelling",
-            );
-        }
+        Err(_) => match resolve_handle_appview(&http_client, &handle).await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("Handle resolution failed for '{handle}': {e}");
+                return api_error(
+                    StatusCode::BAD_REQUEST,
+                    "Could not resolve Bluesky handle — check spelling",
+                );
+            }
+        },
     };
 
     // Step 2: Resolve DID to document to get PDS endpoint
@@ -249,6 +259,31 @@ pub async fn initiate(
         Json(serde_json::json!({ "redirect_url": auth_url })),
     )
         .into_response()
+}
+
+/// Resolve a handle to a DID via the public AppView API.
+/// Fallback for when the HTTP well-known method fails (e.g. Cloudflare SSL issues).
+async fn resolve_handle_appview(
+    http_client: &reqwest::Client,
+    handle: &str,
+) -> Result<String, String> {
+    let url = format!(
+        "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle={}",
+        handle
+    );
+    let resp: serde_json::Value = http_client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("AppView resolveHandle failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid resolveHandle response: {e}"))?;
+
+    resp["did"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "resolveHandle response missing 'did' field".to_string())
 }
 
 /// Resolve a DID to its PDS endpoint URL.

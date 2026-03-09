@@ -146,13 +146,13 @@ pub async fn require_auth(
 pub fn set_cookie_header(token: &str, secure: bool) -> String {
     let secure_flag = if secure { "; Secure" } else { "" };
     format!(
-        "{COOKIE_NAME}={token}; HttpOnly{secure_flag}; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_SECS}"
+        "{COOKIE_NAME}={token}; HttpOnly{secure_flag}; SameSite=Lax; Path=/; Max-Age={SESSION_TTL_SECS}"
     )
 }
 
 /// Build the `Set-Cookie` header value that clears the session cookie.
 pub fn clear_cookie_header() -> String {
-    format!("{COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+    format!("{COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
 }
 
 // --- Private helpers ---

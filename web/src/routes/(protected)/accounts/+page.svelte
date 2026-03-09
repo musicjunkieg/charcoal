@@ -135,7 +135,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each accounts as account}
+					{#each accounts as account, i (account.did || i)}
 						<tr
 							class="account-row"
 							onclick={() => goto(`/accounts/${account.handle}`)}
