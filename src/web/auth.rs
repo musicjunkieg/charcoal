@@ -106,8 +106,8 @@ pub fn verify_token_did(secret: &str, token: &str) -> Option<String> {
 }
 
 /// Verify a session token (ignores the embedded DID).
-/// Kept for backward compatibility with existing tests.
-/// New code should use verify_token_did.
+/// Only compiled for tests — production code should use verify_token_did.
+#[cfg(test)]
 pub fn verify_token(secret: &str, token: &str) -> bool {
     verify_token_did(secret, token).is_some()
 }
@@ -172,14 +172,21 @@ fn hmac_sign(secret: &str, payload: &str) -> String {
 }
 
 /// Constant-time string comparison to prevent timing attacks.
+///
+/// Never short-circuits on length mismatch — iterates over the full max length
+/// and folds the length difference into the mismatch accumulator so that neither
+/// content nor length is leaked via timing.
 fn constant_time_eq(a: &str, b: &str) -> bool {
-    if a.len() != b.len() {
-        return false;
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let max_len = a.len().max(b.len());
+    let mut acc = (a.len() ^ b.len()) as u8;
+    for i in 0..max_len {
+        let x = if i < a.len() { a[i] } else { 0 };
+        let y = if i < b.len() { b[i] } else { 0 };
+        acc |= x ^ y;
     }
-    a.bytes()
-        .zip(b.bytes())
-        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-        == 0
+    acc == 0
 }
 
 /// Extract the authenticated DID from the session cookie, if valid.

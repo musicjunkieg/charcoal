@@ -165,9 +165,9 @@ The project has 215 tests across eight categories:
   Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var.
   8 tests covering scan state, fingerprint, embedding, scores, events, etc.
 
-Run all tests with `cargo test --all-targets`. The default `cargo test` only
-runs library tests — integration tests live in the `tests/` directory and
-need `--all-targets` to be included.
+Run tests with `cargo test` (includes unit tests, doc tests, and integration
+tests in `tests/`). Use `cargo test --all-targets` in CI to also compile
+benches and examples, ensuring they aren't broken.
 
 To run PostgreSQL integration tests against a live instance:
 ```

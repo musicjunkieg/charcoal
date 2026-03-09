@@ -148,7 +148,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 [[package]]
 name = "atproto-dasl"
 version = "0.14.0"
-source = "git+https://tangled.org/ngerakines.me/atproto-crates#d2457eecc6814e8351486df3a3608542bae848a7"
+source = "git+https://tangled.org/ngerakines.me/atproto-crates?rev=d2457eecc6814e8351486df3a3608542bae848a7#d2457eecc6814e8351486df3a3608542bae848a7"
 dependencies = [
  "blake3",
  "cid",
@@ -167,7 +167,7 @@ dependencies = [
 [[package]]
 name = "atproto-identity"
 version = "0.14.0"
-source = "git+https://tangled.org/ngerakines.me/atproto-crates#d2457eecc6814e8351486df3a3608542bae848a7"
+source = "git+https://tangled.org/ngerakines.me/atproto-crates?rev=d2457eecc6814e8351486df3a3608542bae848a7#d2457eecc6814e8351486df3a3608542bae848a7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -197,7 +197,7 @@ dependencies = [
 [[package]]
 name = "atproto-oauth"
 version = "0.14.0"
-source = "git+https://tangled.org/ngerakines.me/atproto-crates#d2457eecc6814e8351486df3a3608542bae848a7"
+source = "git+https://tangled.org/ngerakines.me/atproto-crates?rev=d2457eecc6814e8351486df3a3608542bae848a7#d2457eecc6814e8351486df3a3608542bae848a7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -227,7 +227,7 @@ dependencies = [
 [[package]]
 name = "atproto-oauth-axum"
 version = "0.14.0"
-source = "git+https://tangled.org/ngerakines.me/atproto-crates#d2457eecc6814e8351486df3a3608542bae848a7"
+source = "git+https://tangled.org/ngerakines.me/atproto-crates?rev=d2457eecc6814e8351486df3a3608542bae848a7#d2457eecc6814e8351486df3a3608542bae848a7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -253,7 +253,7 @@ dependencies = [
 [[package]]
 name = "atproto-record"
 version = "0.14.0"
-source = "git+https://tangled.org/ngerakines.me/atproto-crates#d2457eecc6814e8351486df3a3608542bae848a7"
+source = "git+https://tangled.org/ngerakines.me/atproto-crates?rev=d2457eecc6814e8351486df3a3608542bae848a7#d2457eecc6814e8351486df3a3608542bae848a7"
 dependencies = [
  "anyhow",
  "atproto-dasl",
