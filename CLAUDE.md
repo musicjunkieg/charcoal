@@ -70,9 +70,10 @@ Post-MVP improvements applied:
   in-memory for future XRPC calls (muting/blocking milestone). Env vars:
   `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
 
-215 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
-`scan`, `sweep`, `score`, `report`, `status`, `validate`, `migrate` (postgres feature),
-`serve` (web feature).
+215 tests passing (with `--features web`; 189 without), clippy clean. CLI
+commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`, `score`,
+`report`, `status`, `validate`, `migrate` (postgres feature), `serve` (web
+feature).
 
 ### External contributions
 
@@ -158,9 +159,10 @@ The project has 215 tests across eight categories:
 - **Constellation tests** (`tests/unit_constellation.rs`) — serde
   deserialization, AT-URI construction, dedup logic
 - **OAuth unit tests** (`tests/unit_oauth.rs`) — DID-aware token roundtrip,
-  verification failures, DID gate checks
+  verification failures, DID gate checks. Gated on `--features web`.
 - **OAuth integration tests** (`tests/web_oauth.rs`) — OAuth endpoints,
-  auth middleware, callback flow, protected route access control
+  auth middleware, callback flow, protected route access control. Gated on
+  `--features web`.
 - **PostgreSQL tests** (`tests/db_postgres.rs`) — integration tests for the
   Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var.
   8 tests covering scan state, fingerprint, embedding, scores, events, etc.
@@ -168,6 +170,11 @@ The project has 215 tests across eight categories:
 Run tests with `cargo test` (includes unit tests, doc tests, and integration
 tests in `tests/`). Use `cargo test --all-targets` in CI to also compile
 benches and examples, ensuring they aren't broken.
+
+To run OAuth tests (requires `--features web`):
+```
+cargo test --features web --test unit_oauth --test web_oauth
+```
 
 To run PostgreSQL integration tests against a live instance:
 ```
