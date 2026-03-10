@@ -62,9 +62,18 @@ Post-MVP improvements applied:
   disables the scan button while a scan is running. SvelteKit SPA embedded at compile
   time via `include_dir!`. Railway deployment config included (`railway.toml`).
 
-189 tests passing, clippy clean. CLI commands: `init`, `fingerprint`, `download-model`,
-`scan`, `sweep`, `score`, `report`, `status`, `validate`, `migrate` (postgres feature),
-`serve` (web feature).
+- **v0.4 AT Protocol OAuth**: Backend-driven OAuth via `atproto-oauth` crate (from
+  tangled.org/ngerakines.me/atproto-crates). Replaces password auth with Bluesky sign-in.
+  PAR + PKCE + DPoP + private_key_jwt. DID-embedded session cookies with CHARCOAL_ALLOWED_DID
+  gate (single-user). Stable P-256 signing key derived from CHARCOAL_SESSION_SECRET
+  (deterministic across restarts). AT Protocol tokens stored
+  in-memory for future XRPC calls (muting/blocking milestone). Env vars:
+  `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
+
+215 tests passing (with `--features web`; 189 without), clippy clean. CLI
+commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`, `score`,
+`report`, `status`, `validate`, `migrate` (postgres feature), `serve` (web
+feature).
 
 ### External contributions
 
@@ -135,7 +144,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 189 tests across six categories:
+The project has 215 tests across eight categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
@@ -149,13 +158,23 @@ The project has 189 tests across six categories:
   ally/hostile/irrelevant account scenarios
 - **Constellation tests** (`tests/unit_constellation.rs`) — serde
   deserialization, AT-URI construction, dedup logic
+- **OAuth unit tests** (`tests/unit_oauth.rs`) — DID-aware token roundtrip,
+  verification failures, DID gate checks. Gated on `--features web`.
+- **OAuth integration tests** (`tests/web_oauth.rs`) — OAuth endpoints,
+  auth middleware, callback flow, protected route access control. Gated on
+  `--features web`.
 - **PostgreSQL tests** (`tests/db_postgres.rs`) — integration tests for the
   Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var.
   8 tests covering scan state, fingerprint, embedding, scores, events, etc.
 
-Run all tests with `cargo test --all-targets`. The default `cargo test` only
-runs library tests — integration tests live in the `tests/` directory and
-need `--all-targets` to be included.
+Run tests with `cargo test` (includes unit tests, doc tests, and integration
+tests in `tests/`). Use `cargo test --all-targets` in CI to also compile
+benches and examples, ensuring they aren't broken.
+
+To run OAuth tests (requires `--features web`):
+```
+cargo test --features web --test unit_oauth --test web_oauth
+```
 
 To run PostgreSQL integration tests against a live instance:
 ```

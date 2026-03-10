@@ -6,6 +6,7 @@
 //
 // Auth: stateless HMAC-SHA256 session cookies. No session table in the DB.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -26,6 +27,7 @@ use crate::db::Database;
 pub mod auth;
 pub mod handlers;
 pub mod scan_job;
+pub mod test_helpers;
 
 // Embed the SvelteKit build output at compile time.
 // web/build/ must exist before `cargo build --features web` runs.
@@ -38,6 +40,14 @@ pub struct AppState {
     pub db: Arc<dyn Database>,
     pub config: Arc<Config>,
     pub scan_status: Arc<RwLock<scan_job::ScanStatus>>,
+    /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
+    /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
+    pub pending_oauth: Arc<RwLock<HashMap<String, handlers::oauth::PendingOAuth>>>,
+    /// AT Protocol tokens for the authenticated user.
+    /// Stored in-memory for this milestone (lost on restart — user re-authenticates).
+    pub oauth_tokens: Arc<RwLock<Option<serde_json::Value>>>,
+    /// P-256 signing key for JWT client assertions. Generated at startup.
+    pub signing_key: atproto_identity::key::KeyData,
 }
 
 /// Start the Axum web server and block until it exits.
@@ -47,13 +57,19 @@ pub async fn run_server(
     port: u16,
     bind: &str,
 ) -> Result<()> {
-    // Fail fast if required web credentials are missing or too short.
-    // Better to crash at startup with a clear message than to run with
-    // a blank password or a weak signing key.
-    if config.web_password.is_empty() {
+    // Fail fast if required OAuth config is missing.
+    if config.allowed_did.is_empty() {
         anyhow::bail!(
-            "CHARCOAL_WEB_PASSWORD is not set. Add it to your .env file.\n\
-             Generate one with: openssl rand -base64 24"
+            "CHARCOAL_ALLOWED_DID is not set. Add your Bluesky DID to your .env file.\n\
+             Find it at: https://bsky.app → Settings → Account\n\
+             It looks like: did:plc:xxxxxxxxxxxxxxxxxxxx"
+        );
+    }
+    if config.oauth_client_id.is_empty() {
+        anyhow::bail!(
+            "CHARCOAL_OAUTH_CLIENT_ID is not set.\n\
+             For dev: register your client metadata at your OAuth client ID service.\n\
+             For production: set to https://{{RAILWAY_PUBLIC_DOMAIN}}/oauth-client-metadata.json"
         );
     }
     if config.session_secret.len() < 32 {
@@ -64,10 +80,33 @@ pub async fn run_server(
         );
     }
 
+    // Derive a stable P-256 signing key from the session secret.
+    // Using HMAC-SHA256 ensures the same key is produced on every restart,
+    // which is critical because the PDS caches our client metadata (including
+    // the JWKS public key). A new key on restart would cause `invalid_client`
+    // errors until the PDS cache expires.
+    let signing_key = {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(config.session_secret.as_bytes())
+            .expect("HMAC accepts any key length");
+        mac.update(b"charcoal-oauth-signing-key-v1");
+        let derived = mac.finalize().into_bytes(); // 32 bytes — valid P-256 scalar
+        atproto_identity::key::KeyData::new(
+            atproto_identity::key::KeyType::P256Private,
+            derived.to_vec(),
+        )
+    };
+    info!("Derived stable P-256 signing key for OAuth client assertions");
+
     let state = AppState {
         db,
         config: Arc::new(config),
         scan_status: Arc::new(RwLock::new(scan_job::ScanStatus::default())),
+        pending_oauth: Arc::new(RwLock::new(HashMap::new())),
+        oauth_tokens: Arc::new(RwLock::new(None)),
+        signing_key,
     };
 
     let app = build_router(state);
@@ -80,7 +119,7 @@ pub async fn run_server(
     Ok(())
 }
 
-fn build_router(state: AppState) -> Router {
+pub(crate) fn build_router(state: AppState) -> Router {
     // Authenticated API routes (require valid session cookie)
     let protected_api = Router::new()
         .route("/api/status", get(handlers::status::get_status))
@@ -103,8 +142,13 @@ fn build_router(state: AppState) -> Router {
 
     // Public routes (no auth)
     let public_api = Router::new()
+        .route(
+            "/oauth-client-metadata.json",
+            get(handlers::oauth::client_metadata),
+        )
         .route("/health", get(health))
-        .route("/api/login", post(handlers::auth::login));
+        .route("/api/auth/initiate", post(handlers::oauth::initiate))
+        .route("/api/auth/callback", get(handlers::oauth::callback));
 
     Router::new()
         .merge(protected_api)
@@ -190,5 +234,8 @@ pub fn api_error(status: StatusCode, message: &str) -> Response {
 
 /// Marker type indicating the request passed session authentication.
 /// Inserted into request extensions by `require_auth` middleware.
+/// Handlers can extract it to learn who is authenticated.
 #[derive(Clone)]
-pub struct AuthUser;
+pub struct AuthUser {
+    pub did: String,
+}

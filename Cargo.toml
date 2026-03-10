@@ -63,7 +63,7 @@ chrono = { version = "0.4", features = ["serde"] }
 default = ["sqlite"]
 sqlite = ["dep:rusqlite"]
 postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:pgvector"]
-web = ["dep:axum", "dep:tower-http", "dep:include_dir", "dep:hmac", "dep:sha2", "dep:rand", "dep:hex"]
+web = ["dep:axum", "dep:tower-http", "dep:include_dir", "dep:hmac", "dep:sha2", "dep:rand", "dep:hex", "dep:atproto-oauth", "dep:atproto-oauth-axum", "dep:atproto-identity", "dep:base64", "dep:percent-encoding"]
 
 # PostgreSQL support — split crates avoid the sqlx umbrella's transitive
 # sqlx-sqlite dependency which conflicts with rusqlite's bundled SQLite.
@@ -113,3 +113,32 @@ optional = true
 [dependencies.hex]
 version = "0.4"
 optional = true
+
+# AT Protocol OAuth (required for the web feature — backend-driven OAuth flow)
+[dependencies.atproto-oauth]
+git = "https://tangled.org/ngerakines.me/atproto-crates"
+rev = "d2457eecc6814e8351486df3a3608542bae848a7"
+optional = true
+
+[dependencies.atproto-oauth-axum]
+git = "https://tangled.org/ngerakines.me/atproto-crates"
+rev = "d2457eecc6814e8351486df3a3608542bae848a7"
+optional = true
+
+[dependencies.atproto-identity]
+git = "https://tangled.org/ngerakines.me/atproto-crates"
+rev = "d2457eecc6814e8351486df3a3608542bae848a7"
+optional = true
+
+# base64 encoding for DID in session tokens
+[dependencies.base64]
+version = "0.22"
+optional = true
+
+# URL percent-encoding for OAuth redirect URLs
+[dependencies.percent-encoding]
+version = "2"
+optional = true
+
+[dev-dependencies]
+tower = "0.5"

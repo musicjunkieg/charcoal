@@ -7,10 +7,11 @@
 #   ./scripts/build-web.sh --postgres      # PostgreSQL backend (server/Railway)
 #
 # Required env vars for Railway / server deploys:
-#   DATABASE_URL          - Postgres connection string (auto-set by Railway addon)
-#   BLUESKY_HANDLE        - Bryan's Bluesky handle
-#   CHARCOAL_WEB_PASSWORD - Dashboard login password
-#   CHARCOAL_SESSION_SECRET - 32+ byte random hex string for HMAC signing
+#   DATABASE_URL            - Postgres connection string (auto-set by Railway addon)
+#   BLUESKY_HANDLE          - Bryan's Bluesky handle
+#   CHARCOAL_ALLOWED_DID    - Your Bluesky DID (only this account can sign in)
+#   CHARCOAL_OAUTH_CLIENT_ID - Public URL of your OAuth client metadata document
+#   CHARCOAL_SESSION_SECRET  - 32+ byte random hex string for HMAC signing
 
 set -euo pipefail
 

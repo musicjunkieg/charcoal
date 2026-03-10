@@ -1,5 +1,29 @@
 [
   {
+    "hash": "a4bd8c37262ff53f38f1a8e15e25822a801ac15c",
+    "short_hash": "a4bd8c3",
+    "author": "musicjunkieg",
+    "date": "2026-03-09T02:02:34Z",
+    "message": "chore: add service wrapper script for charcoal serve",
+    "files_changed": 2
+  },
+  {
+    "hash": "d79585668198f785b2d322f7fb9f3c561db9607a",
+    "short_hash": "d795856",
+    "author": "musicjunkieg",
+    "date": "2026-03-08T00:37:59Z",
+    "message": "chore: add atproto-oauth, atproto-oauth-axum, atproto-identity, base64 deps\n\nGated on the web feature. These power the AT Protocol OAuth flow\nthat replaces password auth in v0.4.",
+    "files_changed": 5
+  },
+  {
+    "hash": "17b1ad638d16f206202ba66d2995c9f98a71dc19",
+    "short_hash": "17b1ad6",
+    "author": "musicjunkieg",
+    "date": "2026-03-08T00:30:10Z",
+    "message": "docs: add AT Protocol OAuth implementation plan (v0.4, TDD)",
+    "files_changed": 2
+  },
+  {
     "hash": "1e0758fc01b581021b19491055f36345bec7eab5",
     "short_hash": "1e0758f",
     "author": "musicjunkieg",
