@@ -379,7 +379,7 @@ impl Database for PgDatabase {
         )
         .bind(user_did)
         .bind(did)
-        .bind(max_age_days as i32)
+        .bind(i32::try_from(max_age_days).context("max_age_days exceeds i32 range")?)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -538,14 +538,23 @@ impl Database for PgDatabase {
         .bind(&event.original_post_uri)
         .bind(&event.amplifier_post_uri)
         .bind(&event.amplifier_text)
-        .bind(
-            if event.detected_at.contains('+') || event.detected_at.ends_with('Z') {
+        .bind({
+            // Check if timestamp already has an explicit timezone offset (Z, +HH, or -HH
+            // after the time portion). The '-' check only looks after 'T' to avoid matching
+            // date separators like 2026-03-10.
+            let has_tz = event.detected_at.ends_with('Z')
+                || event.detected_at.contains('+')
+                || event
+                    .detected_at
+                    .find('T')
+                    .map_or(false, |t| event.detected_at[t..].contains('-'));
+            if has_tz {
                 event.detected_at.clone()
             } else {
                 // Append UTC offset so PostgreSQL doesn't interpret via session TimeZone
                 format!("{}+00", event.detected_at)
-            },
-        )
+            }
+        })
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))

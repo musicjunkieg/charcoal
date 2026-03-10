@@ -157,8 +157,31 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             DROP TABLE account_scores;
             ALTER TABLE account_scores_v4 RENAME TO account_scores;
 
-            -- Add user_did to amplification_events
-            ALTER TABLE amplification_events ADD COLUMN user_did TEXT NOT NULL DEFAULT '';
+            -- Rebuild amplification_events with user_did (no DEFAULT, so future
+            -- inserts without user_did fail hard)
+            CREATE TABLE amplification_events_v4 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_did TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                amplifier_did TEXT NOT NULL,
+                amplifier_handle TEXT NOT NULL,
+                original_post_uri TEXT NOT NULL,
+                amplifier_post_uri TEXT,
+                amplifier_text TEXT,
+                detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+                followers_fetched INTEGER NOT NULL DEFAULT 0,
+                followers_scored INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO amplification_events_v4
+                (id, user_did, event_type, amplifier_did, amplifier_handle,
+                 original_post_uri, amplifier_post_uri, amplifier_text,
+                 detected_at, followers_fetched, followers_scored)
+                SELECT id, '', event_type, amplifier_did, amplifier_handle,
+                 original_post_uri, amplifier_post_uri, amplifier_text,
+                 detected_at, followers_fetched, followers_scored
+                FROM amplification_events;
+            DROP TABLE amplification_events;
+            ALTER TABLE amplification_events_v4 RENAME TO amplification_events;
 
             -- Rebuild scan_state with composite key (user_did, key)
             CREATE TABLE scan_state_v4 (

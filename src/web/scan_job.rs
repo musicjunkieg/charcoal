@@ -179,11 +179,8 @@ async fn run_scan(
         s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
     }
 
-    let median_engagement = db.get_median_engagement(user_did).await.unwrap_or(0.0);
-    let pile_on_refs = db
-        .get_events_for_pile_on(user_did)
-        .await
-        .unwrap_or_default();
+    let median_engagement = db.get_median_engagement(user_did).await?;
+    let pile_on_refs = db.get_events_for_pile_on(user_did).await?;
     let pile_on_dids: HashSet<String> = detect_pile_on_participants(
         &pile_on_refs
             .iter()
