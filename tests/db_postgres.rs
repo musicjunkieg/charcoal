@@ -11,6 +11,8 @@
 use anyhow::Result;
 use charcoal::db::models::AccountScore;
 
+const TEST_USER: &str = "did:plc:pgtest_user000000000000";
+
 /// Skip the test if DATABASE_URL is not set or doesn't point to Postgres.
 fn database_url() -> Option<String> {
     std::env::var("DATABASE_URL")
@@ -30,17 +32,21 @@ async fn cleanup_test_data(url: &str) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
 
-    // Delete test-specific scan_state keys
-    sqlx_core::query::query("DELETE FROM scan_state WHERE key = 'test_cursor'")
-        .execute(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("cleanup: scan_state delete failed: {e}"))?;
+    // Delete test-specific scan_state keys (scoped by user_did)
+    sqlx_core::query::query(
+        "DELETE FROM scan_state WHERE user_did = 'did:plc:pgtest_user000000000000' AND key = 'test_cursor'",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("cleanup: scan_state delete failed: {e}"))?;
 
-    // Delete test-specific account scores
-    sqlx_core::query::query("DELETE FROM account_scores WHERE did = 'did:plc:pgtest1'")
-        .execute(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("cleanup: account_scores delete failed: {e}"))?;
+    // Delete test-specific account scores (scoped by user_did)
+    sqlx_core::query::query(
+        "DELETE FROM account_scores WHERE did = 'did:plc:pgtest1' AND user_did = 'did:plc:pgtest_user000000000000'",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("cleanup: account_scores delete failed: {e}"))?;
 
     // Delete test-specific amplification events
     sqlx_core::query::query(
@@ -50,12 +56,13 @@ async fn cleanup_test_data(url: &str) -> Result<()> {
     .await
     .map_err(|e| anyhow::anyhow!("cleanup: amplification_events delete failed: {e}"))?;
 
-    // topic_fingerprint has only one row (id = 1); reset to a neutral state
-    // so embedding and fingerprint tests don't interfere with each other.
-    sqlx_core::query::query("DELETE FROM topic_fingerprint WHERE id = 1")
-        .execute(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("cleanup: topic_fingerprint delete failed: {e}"))?;
+    // Delete test-specific topic fingerprint (scoped by user_did)
+    sqlx_core::query::query(
+        "DELETE FROM topic_fingerprint WHERE user_did = 'did:plc:pgtest_user000000000000'",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("cleanup: topic_fingerprint delete failed: {e}"))?;
 
     Ok(())
 }
@@ -68,17 +75,23 @@ async fn test_pg_scan_state_roundtrip() {
     cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    db.set_scan_state("test_cursor", "abc123").await.unwrap();
-    let val = db.get_scan_state("test_cursor").await.unwrap();
+    db.set_scan_state(TEST_USER, "test_cursor", "abc123")
+        .await
+        .unwrap();
+    let val = db.get_scan_state(TEST_USER, "test_cursor").await.unwrap();
     assert_eq!(val, Some("abc123".to_string()));
 
     // Upsert overwrites
-    db.set_scan_state("test_cursor", "def456").await.unwrap();
-    let val = db.get_scan_state("test_cursor").await.unwrap();
+    db.set_scan_state(TEST_USER, "test_cursor", "def456")
+        .await
+        .unwrap();
+    let val = db.get_scan_state(TEST_USER, "test_cursor").await.unwrap();
     assert_eq!(val, Some("def456".to_string()));
 
     // Clean up
-    db.set_scan_state("test_cursor", "").await.unwrap();
+    db.set_scan_state(TEST_USER, "test_cursor", "")
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -89,10 +102,10 @@ async fn test_pg_fingerprint_roundtrip() {
     cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    db.save_fingerprint(r#"{"topics": ["test"]}"#, 42)
+    db.save_fingerprint(TEST_USER, r#"{"topics": ["test"]}"#, 42)
         .await
         .unwrap();
-    let (json, count, _) = db.get_fingerprint().await.unwrap().unwrap();
+    let (json, count, _) = db.get_fingerprint(TEST_USER).await.unwrap().unwrap();
     assert_eq!(json, r#"{"topics": ["test"]}"#);
     assert_eq!(count, 42);
 }
@@ -106,12 +119,14 @@ async fn test_pg_embedding_roundtrip() {
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     // Ensure fingerprint row exists
-    db.save_fingerprint(r#"{"clusters":[]}"#, 10).await.unwrap();
+    db.save_fingerprint(TEST_USER, r#"{"clusters":[]}"#, 10)
+        .await
+        .unwrap();
 
     let embedding: Vec<f64> = (0..384).map(|i| i as f64 / 384.0).collect();
-    db.save_embedding(&embedding).await.unwrap();
+    db.save_embedding(TEST_USER, &embedding).await.unwrap();
 
-    let loaded = db.get_embedding().await.unwrap().unwrap();
+    let loaded = db.get_embedding(TEST_USER).await.unwrap().unwrap();
     assert_eq!(loaded.len(), 384);
     // f64→f32→f64 round-trip loses some precision
     assert!((loaded[0] - 0.0).abs() < 0.001);
@@ -138,9 +153,9 @@ async fn test_pg_account_score_upsert_and_rank() {
         scored_at: String::new(),
         behavioral_signals: None,
     };
-    db.upsert_account_score(&score).await.unwrap();
+    db.upsert_account_score(TEST_USER, &score).await.unwrap();
 
-    let ranked = db.get_ranked_threats(50.0).await.unwrap();
+    let ranked = db.get_ranked_threats(TEST_USER, 50.0).await.unwrap();
     assert!(ranked.iter().any(|s| s.did == "did:plc:pgtest1"));
 }
 
@@ -154,6 +169,7 @@ async fn test_pg_amplification_event() {
 
     let id = db
         .insert_amplification_event(
+            TEST_USER,
             "quote",
             "did:plc:pgtest_amp",
             "pgtest_troll.bsky.social",
@@ -165,7 +181,7 @@ async fn test_pg_amplification_event() {
         .unwrap();
     assert!(id > 0);
 
-    let events = db.get_recent_events(10).await.unwrap();
+    let events = db.get_recent_events(TEST_USER, 10).await.unwrap();
     assert!(!events.is_empty());
 }
 
@@ -177,7 +193,7 @@ async fn test_pg_table_count() {
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     let count = db.table_count().await.unwrap();
-    assert!(count >= 5, "Expected at least 5 tables, got {count}");
+    assert!(count >= 6, "Expected at least 6 tables, got {count}");
 }
 
 #[tokio::test]
@@ -188,7 +204,7 @@ async fn test_pg_is_score_stale_missing() {
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     assert!(db
-        .is_score_stale("did:plc:nonexistent_pg", 7)
+        .is_score_stale(TEST_USER, "did:plc:nonexistent_pg", 7)
         .await
         .unwrap());
 }
@@ -201,6 +217,6 @@ async fn test_pg_median_engagement_empty() {
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     // Should return 0.0 when no behavioral data exists
-    let median = db.get_median_engagement().await.unwrap();
+    let median = db.get_median_engagement(TEST_USER).await.unwrap();
     assert!(median >= 0.0);
 }
