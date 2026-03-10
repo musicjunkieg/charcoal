@@ -2,25 +2,55 @@
 //
 // Every database interaction goes through this module. This keeps SQL
 // contained in one place and gives the rest of the app clean Rust interfaces.
+//
+// All query functions take a `user_did` parameter to scope data to a specific
+// protected user. This enables multi-user support where each user's threat
+// data is isolated.
 
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
 use super::models::{AccountScore, AmplificationEvent, ThreatTier, ToxicPost};
 
+// --- Users ---
+
+/// Create or update a user record.
+pub fn upsert_user(conn: &Connection, did: &str, handle: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO users (did, handle) VALUES (?1, ?2)
+         ON CONFLICT(did) DO UPDATE SET handle = ?2",
+        params![did, handle],
+    )?;
+    Ok(())
+}
+
+/// Look up a user's handle by DID. Returns None if the user is not registered.
+pub fn get_user_handle(conn: &Connection, did: &str) -> Result<Option<String>> {
+    let handle = conn
+        .query_row(
+            "SELECT handle FROM users WHERE did = ?1",
+            params![did],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(handle)
+}
+
 // --- Scan state ---
 
-/// Get a scan state value by key (e.g., "notifications_cursor").
-pub fn get_scan_state(conn: &Connection, key: &str) -> Result<Option<String>> {
-    let mut stmt = conn.prepare("SELECT value FROM scan_state WHERE key = ?1")?;
-    let result = stmt.query_row(params![key], |row| row.get(0)).optional()?;
+/// Get a scan state value by key (e.g., "notifications_cursor") for a specific user.
+pub fn get_scan_state(conn: &Connection, user_did: &str, key: &str) -> Result<Option<String>> {
+    let mut stmt = conn.prepare("SELECT value FROM scan_state WHERE user_did = ?1 AND key = ?2")?;
+    let result = stmt
+        .query_row(params![user_did, key], |row| row.get(0))
+        .optional()?;
     Ok(result)
 }
 
-/// Get all scan state key-value pairs.
-pub fn get_all_scan_state(conn: &Connection) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare("SELECT key, value FROM scan_state")?;
-    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+/// Get all scan state key-value pairs for a specific user.
+pub fn get_all_scan_state(conn: &Connection, user_did: &str) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare("SELECT key, value FROM scan_state WHERE user_did = ?1")?;
+    let rows = stmt.query_map(params![user_did], |row| Ok((row.get(0)?, row.get(1)?)))?;
     let mut result = Vec::new();
     for row in rows {
         result.push(row?);
@@ -28,29 +58,34 @@ pub fn get_all_scan_state(conn: &Connection) -> Result<Vec<(String, String)>> {
     Ok(result)
 }
 
-/// Set a scan state value (upsert).
-pub fn set_scan_state(conn: &Connection, key: &str, value: &str) -> Result<()> {
+/// Set a scan state value (upsert) for a specific user.
+pub fn set_scan_state(conn: &Connection, user_did: &str, key: &str, value: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO scan_state (key, value, updated_at)
-         VALUES (?1, ?2, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
-        params![key, value],
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES (?1, ?2, ?3, datetime('now'))
+         ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
+        params![user_did, key, value],
     )?;
     Ok(())
 }
 
 // --- Topic fingerprint ---
 
-/// Store the topic fingerprint (singleton — always id=1).
-pub fn save_fingerprint(conn: &Connection, fingerprint_json: &str, post_count: u32) -> Result<()> {
+/// Store the topic fingerprint for a specific user.
+pub fn save_fingerprint(
+    conn: &Connection,
+    user_did: &str,
+    fingerprint_json: &str,
+    post_count: u32,
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO topic_fingerprint (id, fingerprint_json, post_count, updated_at)
-         VALUES (1, ?1, ?2, datetime('now'))
-         ON CONFLICT(id) DO UPDATE SET
-            fingerprint_json = ?1,
-            post_count = ?2,
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, updated_at)
+         VALUES (?1, ?2, ?3, datetime('now'))
+         ON CONFLICT(user_did) DO UPDATE SET
+            fingerprint_json = ?2,
+            post_count = ?3,
             updated_at = datetime('now')",
-        params![fingerprint_json, post_count],
+        params![user_did, fingerprint_json, post_count],
     )?;
     Ok(())
 }
@@ -58,13 +93,13 @@ pub fn save_fingerprint(conn: &Connection, fingerprint_json: &str, post_count: u
 /// Store the protected user's mean embedding vector alongside the fingerprint.
 /// The vector is stored as a JSON array of floats.
 ///
-/// Returns an error if no fingerprint row exists (i.e., `charcoal fingerprint` has
-/// not been run yet). An UPDATE that matches zero rows would silently succeed
-/// otherwise, losing the embedding.
-pub fn save_embedding(conn: &Connection, embedding_json: &str) -> Result<()> {
+/// Returns an error if no fingerprint row exists for this user (i.e.,
+/// `charcoal fingerprint` has not been run yet). An UPDATE that matches zero
+/// rows would silently succeed otherwise, losing the embedding.
+pub fn save_embedding(conn: &Connection, user_did: &str, embedding_json: &str) -> Result<()> {
     let rows = conn.execute(
-        "UPDATE topic_fingerprint SET embedding_vector = ?1, updated_at = datetime('now') WHERE id = 1",
-        params![embedding_json],
+        "UPDATE topic_fingerprint SET embedding_vector = ?1, updated_at = datetime('now') WHERE user_did = ?2",
+        params![embedding_json, user_did],
     )?;
     if rows == 0 {
         anyhow::bail!(
@@ -74,21 +109,26 @@ pub fn save_embedding(conn: &Connection, embedding_json: &str) -> Result<()> {
     Ok(())
 }
 
-/// Load the stored fingerprint JSON and metadata.
-pub fn get_fingerprint(conn: &Connection) -> Result<Option<(String, u32, String)>> {
+/// Load the stored fingerprint JSON and metadata for a specific user.
+pub fn get_fingerprint(conn: &Connection, user_did: &str) -> Result<Option<(String, u32, String)>> {
     let mut stmt = conn.prepare(
-        "SELECT fingerprint_json, post_count, updated_at FROM topic_fingerprint WHERE id = 1",
+        "SELECT fingerprint_json, post_count, updated_at FROM topic_fingerprint WHERE user_did = ?1",
     )?;
     let result = stmt
-        .query_row([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .query_row(params![user_did], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
         .optional()?;
     Ok(result)
 }
 
-/// Load the stored embedding vector (if one exists).
-pub fn get_embedding(conn: &Connection) -> Result<Option<Vec<f64>>> {
-    let mut stmt = conn.prepare("SELECT embedding_vector FROM topic_fingerprint WHERE id = 1")?;
-    let result: Option<Option<String>> = stmt.query_row([], |row| row.get(0)).optional()?;
+/// Load the stored embedding vector for a specific user (if one exists).
+pub fn get_embedding(conn: &Connection, user_did: &str) -> Result<Option<Vec<f64>>> {
+    let mut stmt =
+        conn.prepare("SELECT embedding_vector FROM topic_fingerprint WHERE user_did = ?1")?;
+    let result: Option<Option<String>> = stmt
+        .query_row(params![user_did], |row| row.get(0))
+        .optional()?;
 
     match result.flatten() {
         Some(json) => {
@@ -101,23 +141,24 @@ pub fn get_embedding(conn: &Connection) -> Result<Option<Vec<f64>>> {
 
 // --- Account scores ---
 
-/// Save or update an account's scores.
-pub fn upsert_account_score(conn: &Connection, score: &AccountScore) -> Result<()> {
+/// Save or update an account's scores for a specific user.
+pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9)
-         ON CONFLICT(did) DO UPDATE SET
-            handle = ?2,
-            toxicity_score = ?3,
-            topic_overlap = ?4,
-            threat_score = ?5,
-            threat_tier = ?6,
-            posts_analyzed = ?7,
-            top_toxic_posts = ?8,
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10)
+         ON CONFLICT(user_did, did) DO UPDATE SET
+            handle = ?3,
+            toxicity_score = ?4,
+            topic_overlap = ?5,
+            threat_score = ?6,
+            threat_tier = ?7,
+            posts_analyzed = ?8,
+            top_toxic_posts = ?9,
             scored_at = datetime('now'),
-            behavioral_signals = ?9",
+            behavioral_signals = ?10",
         params![
+            user_did,
             score.did,
             score.handle,
             score.toxicity_score,
@@ -132,17 +173,21 @@ pub fn upsert_account_score(conn: &Connection, score: &AccountScore) -> Result<(
     Ok(())
 }
 
-/// Get all scored accounts, ranked by threat score descending.
-pub fn get_ranked_threats(conn: &Connection, min_score: f64) -> Result<Vec<AccountScore>> {
+/// Get all scored accounts for a specific user, ranked by threat score descending.
+pub fn get_ranked_threats(
+    conn: &Connection,
+    user_did: &str,
+    min_score: f64,
+) -> Result<Vec<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
          FROM account_scores
-         WHERE threat_score >= ?1
+         WHERE user_did = ?1 AND threat_score >= ?2
          ORDER BY threat_score DESC",
     )?;
 
-    let rows = stmt.query_map(params![min_score], |row| {
+    let rows = stmt.query_map(params![user_did, min_score], |row| {
         let top_posts_json: String = row.get(7)?;
         let top_toxic_posts: Vec<ToxicPost> =
             serde_json::from_str(&top_posts_json).unwrap_or_default();
@@ -171,10 +216,18 @@ pub fn get_ranked_threats(conn: &Connection, min_score: f64) -> Result<Vec<Accou
     Ok(accounts)
 }
 
-/// Check if an account's score is stale (older than the given number of days).
-pub fn is_score_stale(conn: &Connection, did: &str, max_age_days: i64) -> Result<bool> {
-    let mut stmt = conn.prepare("SELECT scored_at FROM account_scores WHERE did = ?1")?;
-    let result: Option<String> = stmt.query_row(params![did], |row| row.get(0)).optional()?;
+/// Check if an account's score is stale (older than the given number of days) for a specific user.
+pub fn is_score_stale(
+    conn: &Connection,
+    user_did: &str,
+    did: &str,
+    max_age_days: i64,
+) -> Result<bool> {
+    let mut stmt =
+        conn.prepare("SELECT scored_at FROM account_scores WHERE user_did = ?1 AND did = ?2")?;
+    let result: Option<String> = stmt
+        .query_row(params![user_did, did], |row| row.get(0))
+        .optional()?;
 
     match result {
         None => Ok(true), // No score exists — treat as stale
@@ -192,18 +245,20 @@ pub fn is_score_stale(conn: &Connection, did: &str, max_age_days: i64) -> Result
 
 // --- Amplification events ---
 
-/// Insert an amplification event with an explicit detected_at timestamp.
+/// Insert an amplification event with an explicit detected_at timestamp for a specific user.
 /// Used by the migrate command to preserve original event timestamps.
 pub fn insert_amplification_event_with_detected_at(
     conn: &Connection,
+    user_did: &str,
     event: &super::models::AmplificationEvent,
 ) -> Result<i64> {
     conn.execute(
         "INSERT INTO amplification_events
-            (event_type, amplifier_did, amplifier_handle, original_post_uri,
+            (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
              amplifier_post_uri, amplifier_text, detected_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
+            user_did,
             event.event_type,
             event.amplifier_did,
             event.amplifier_handle,
@@ -216,9 +271,10 @@ pub fn insert_amplification_event_with_detected_at(
     Ok(conn.last_insert_rowid())
 }
 
-/// Record a new amplification event.
+/// Record a new amplification event for a specific user.
 pub fn insert_amplification_event(
     conn: &Connection,
+    user_did: &str,
     event_type: &str,
     amplifier_did: &str,
     amplifier_handle: &str,
@@ -228,10 +284,11 @@ pub fn insert_amplification_event(
 ) -> Result<i64> {
     conn.execute(
         "INSERT INTO amplification_events
-            (event_type, amplifier_did, amplifier_handle, original_post_uri,
+            (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
              amplifier_post_uri, amplifier_text)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
+            user_did,
             event_type,
             amplifier_did,
             amplifier_handle,
@@ -243,17 +300,22 @@ pub fn insert_amplification_event(
     Ok(conn.last_insert_rowid())
 }
 
-/// Get recent amplification events.
-pub fn get_recent_events(conn: &Connection, limit: u32) -> Result<Vec<AmplificationEvent>> {
+/// Get recent amplification events for a specific user.
+pub fn get_recent_events(
+    conn: &Connection,
+    user_did: &str,
+    limit: u32,
+) -> Result<Vec<AmplificationEvent>> {
     let mut stmt = conn.prepare(
         "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
                 amplifier_post_uri, amplifier_text, detected_at, followers_fetched, followers_scored
          FROM amplification_events
+         WHERE user_did = ?1
          ORDER BY detected_at DESC
-         LIMIT ?1",
+         LIMIT ?2",
     )?;
 
-    let rows = stmt.query_map(params![limit], |row| {
+    let rows = stmt.query_map(params![user_did, limit], |row| {
         Ok(AmplificationEvent {
             id: row.get(0)?,
             event_type: row.get(1)?,
@@ -275,16 +337,22 @@ pub fn get_recent_events(conn: &Connection, limit: u32) -> Result<Vec<Amplificat
     Ok(events)
 }
 
-/// Get amplification events for pile-on detection.
+/// Get amplification events for pile-on detection for a specific user.
 /// Returns (amplifier_did, original_post_uri, detected_at) tuples.
-pub fn get_events_for_pile_on(conn: &Connection) -> Result<Vec<(String, String, String)>> {
+pub fn get_events_for_pile_on(
+    conn: &Connection,
+    user_did: &str,
+) -> Result<Vec<(String, String, String)>> {
     let mut stmt = conn.prepare(
         "SELECT amplifier_did, original_post_uri, detected_at
          FROM amplification_events
+         WHERE user_did = ?1
          ORDER BY original_post_uri, detected_at",
     )?;
 
-    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    let rows = stmt.query_map(params![user_did], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
 
     let mut events = Vec::new();
     for row in rows {
@@ -293,13 +361,13 @@ pub fn get_events_for_pile_on(conn: &Connection) -> Result<Vec<(String, String, 
     Ok(events)
 }
 
-/// Get the median engagement across all scored accounts with behavioral data.
-pub fn get_median_engagement(conn: &Connection) -> Result<f64> {
+/// Get the median engagement across all scored accounts with behavioral data for a specific user.
+pub fn get_median_engagement(conn: &Connection, user_did: &str) -> Result<f64> {
     let mut stmt = conn.prepare(
-        "SELECT behavioral_signals FROM account_scores WHERE behavioral_signals IS NOT NULL",
+        "SELECT behavioral_signals FROM account_scores WHERE user_did = ?1 AND behavioral_signals IS NOT NULL",
     )?;
     let mut engagements: Vec<f64> = stmt
-        .query_map([], |row| {
+        .query_map(params![user_did], |row| {
             let json: String = row.get(0)?;
             Ok(json)
         })?
@@ -324,17 +392,21 @@ pub fn get_median_engagement(conn: &Connection) -> Result<f64> {
     }
 }
 
-/// Get a single account score by exact handle (case-insensitive).
-pub fn get_account_by_handle(conn: &Connection, handle: &str) -> Result<Option<AccountScore>> {
+/// Get a single account score by exact handle (case-insensitive) for a specific user.
+pub fn get_account_by_handle(
+    conn: &Connection,
+    user_did: &str,
+    handle: &str,
+) -> Result<Option<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
          FROM account_scores
-         WHERE lower(handle) = lower(?1)
+         WHERE user_did = ?1 AND lower(handle) = lower(?2)
          LIMIT 1",
     )?;
     let result = stmt
-        .query_row(params![handle], |row| {
+        .query_row(params![user_did, handle], |row| {
             let top_posts_json: String = row.get(7)?;
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_str(&top_posts_json).unwrap_or_default();
@@ -357,17 +429,21 @@ pub fn get_account_by_handle(conn: &Connection, handle: &str) -> Result<Option<A
     Ok(result)
 }
 
-/// Get a single account score by DID.
-pub fn get_account_by_did(conn: &Connection, did: &str) -> Result<Option<AccountScore>> {
+/// Get a single account score by DID for a specific user.
+pub fn get_account_by_did(
+    conn: &Connection,
+    user_did: &str,
+    did: &str,
+) -> Result<Option<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
          FROM account_scores
-         WHERE did = ?1
+         WHERE user_did = ?1 AND did = ?2
          LIMIT 1",
     )?;
     let result = stmt
-        .query_row(params![did], |row| {
+        .query_row(params![user_did, did], |row| {
             let top_posts_json: String = row.get(7)?;
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_str(&top_posts_json).unwrap_or_default();
@@ -398,6 +474,8 @@ mod tests {
     use super::*;
     use crate::db::schema::create_tables;
 
+    const TEST_USER: &str = "did:plc:testuser000000000000";
+
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         create_tables(&conn).unwrap();
@@ -405,37 +483,86 @@ mod tests {
     }
 
     #[test]
+    fn test_upsert_user() {
+        let conn = test_db();
+        upsert_user(&conn, "did:plc:abc", "alice.bsky.social").unwrap();
+
+        let handle: String = conn
+            .query_row(
+                "SELECT handle FROM users WHERE did = 'did:plc:abc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(handle, "alice.bsky.social");
+
+        // Update handle
+        upsert_user(&conn, "did:plc:abc", "alice-new.bsky.social").unwrap();
+        let handle: String = conn
+            .query_row(
+                "SELECT handle FROM users WHERE did = 'did:plc:abc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(handle, "alice-new.bsky.social");
+    }
+
+    #[test]
     fn test_scan_state_roundtrip() {
         let conn = test_db();
-        assert_eq!(get_scan_state(&conn, "cursor").unwrap(), None);
+        assert_eq!(get_scan_state(&conn, TEST_USER, "cursor").unwrap(), None);
 
-        set_scan_state(&conn, "cursor", "abc123").unwrap();
+        set_scan_state(&conn, TEST_USER, "cursor", "abc123").unwrap();
         assert_eq!(
-            get_scan_state(&conn, "cursor").unwrap(),
+            get_scan_state(&conn, TEST_USER, "cursor").unwrap(),
             Some("abc123".to_string())
         );
 
         // Upsert overwrites
-        set_scan_state(&conn, "cursor", "def456").unwrap();
+        set_scan_state(&conn, TEST_USER, "cursor", "def456").unwrap();
         assert_eq!(
-            get_scan_state(&conn, "cursor").unwrap(),
+            get_scan_state(&conn, TEST_USER, "cursor").unwrap(),
             Some("def456".to_string())
         );
     }
 
     #[test]
+    fn test_scan_state_user_isolation() {
+        let conn = test_db();
+        let user_a = "did:plc:usera";
+        let user_b = "did:plc:userb";
+
+        set_scan_state(&conn, user_a, "cursor", "aaa").unwrap();
+        set_scan_state(&conn, user_b, "cursor", "bbb").unwrap();
+
+        assert_eq!(
+            get_scan_state(&conn, user_a, "cursor").unwrap(),
+            Some("aaa".to_string())
+        );
+        assert_eq!(
+            get_scan_state(&conn, user_b, "cursor").unwrap(),
+            Some("bbb".to_string())
+        );
+
+        let all_a = get_all_scan_state(&conn, user_a).unwrap();
+        assert_eq!(all_a.len(), 1);
+        assert_eq!(all_a[0], ("cursor".to_string(), "aaa".to_string()));
+    }
+
+    #[test]
     fn test_fingerprint_roundtrip() {
         let conn = test_db();
-        assert!(get_fingerprint(&conn).unwrap().is_none());
+        assert!(get_fingerprint(&conn, TEST_USER).unwrap().is_none());
 
-        save_fingerprint(&conn, r#"{"topics": []}"#, 100).unwrap();
-        let (json, count, _updated) = get_fingerprint(&conn).unwrap().unwrap();
+        save_fingerprint(&conn, TEST_USER, r#"{"topics": []}"#, 100).unwrap();
+        let (json, count, _updated) = get_fingerprint(&conn, TEST_USER).unwrap().unwrap();
         assert_eq!(json, r#"{"topics": []}"#);
         assert_eq!(count, 100);
 
         // Upsert replaces
-        save_fingerprint(&conn, r#"{"topics": ["a"]}"#, 200).unwrap();
-        let (json, count, _) = get_fingerprint(&conn).unwrap().unwrap();
+        save_fingerprint(&conn, TEST_USER, r#"{"topics": ["a"]}"#, 200).unwrap();
+        let (json, count, _) = get_fingerprint(&conn, TEST_USER).unwrap().unwrap();
         assert_eq!(json, r#"{"topics": ["a"]}"#);
         assert_eq!(count, 200);
     }
@@ -456,9 +583,9 @@ mod tests {
             scored_at: String::new(),
             behavioral_signals: None,
         };
-        upsert_account_score(&conn, &score).unwrap();
+        upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
-        let ranked = get_ranked_threats(&conn, 0.0).unwrap();
+        let ranked = get_ranked_threats(&conn, TEST_USER, 0.0).unwrap();
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].handle, "test.bsky.social");
         assert_eq!(ranked[0].threat_score, Some(65.0));
@@ -468,7 +595,7 @@ mod tests {
     fn test_save_embedding_fails_without_fingerprint_row() {
         let conn = test_db();
         // No fingerprint row — save_embedding must return an error, not silently succeed
-        let result = save_embedding(&conn, r#"[0.1, 0.2]"#);
+        let result = save_embedding(&conn, TEST_USER, r#"[0.1, 0.2]"#);
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(
@@ -482,21 +609,21 @@ mod tests {
         let conn = test_db();
 
         // No embedding initially
-        assert!(get_embedding(&conn).unwrap().is_none());
+        assert!(get_embedding(&conn, TEST_USER).unwrap().is_none());
 
         // Must have a fingerprint row first (embedding is a column on it)
-        save_fingerprint(&conn, r#"{"clusters":[]}"#, 50).unwrap();
+        save_fingerprint(&conn, TEST_USER, r#"{"clusters":[]}"#, 50).unwrap();
 
         // Still no embedding until explicitly saved
-        assert!(get_embedding(&conn).unwrap().is_none());
+        assert!(get_embedding(&conn, TEST_USER).unwrap().is_none());
 
         // Save an embedding vector
         let embedding = vec![0.1, 0.2, 0.3, -0.5];
         let emb_json = serde_json::to_string(&embedding).unwrap();
-        save_embedding(&conn, &emb_json).unwrap();
+        save_embedding(&conn, TEST_USER, &emb_json).unwrap();
 
         // Retrieve it
-        let loaded = get_embedding(&conn).unwrap().unwrap();
+        let loaded = get_embedding(&conn, TEST_USER).unwrap().unwrap();
         assert_eq!(loaded.len(), 4);
         assert!((loaded[0] - 0.1).abs() < f64::EPSILON);
         assert!((loaded[3] - -0.5).abs() < f64::EPSILON);
@@ -504,9 +631,9 @@ mod tests {
         // Overwrite with a new embedding
         let new_embedding = vec![1.0, 2.0];
         let new_json = serde_json::to_string(&new_embedding).unwrap();
-        save_embedding(&conn, &new_json).unwrap();
+        save_embedding(&conn, TEST_USER, &new_json).unwrap();
 
-        let reloaded = get_embedding(&conn).unwrap().unwrap();
+        let reloaded = get_embedding(&conn, TEST_USER).unwrap().unwrap();
         assert_eq!(reloaded.len(), 2);
         assert!((reloaded[0] - 1.0).abs() < f64::EPSILON);
     }
@@ -514,15 +641,20 @@ mod tests {
     #[test]
     fn test_embedding_survives_fingerprint_update() {
         let conn = test_db();
-        save_fingerprint(&conn, r#"{"clusters":[]}"#, 50).unwrap();
+        save_fingerprint(&conn, TEST_USER, r#"{"clusters":[]}"#, 50).unwrap();
 
         let embedding = vec![0.1, 0.2, 0.3];
-        save_embedding(&conn, &serde_json::to_string(&embedding).unwrap()).unwrap();
+        save_embedding(
+            &conn,
+            TEST_USER,
+            &serde_json::to_string(&embedding).unwrap(),
+        )
+        .unwrap();
 
         // Update the fingerprint — embedding should survive (different column)
-        save_fingerprint(&conn, r#"{"clusters":["new"]}"#, 100).unwrap();
+        save_fingerprint(&conn, TEST_USER, r#"{"clusters":["new"]}"#, 100).unwrap();
 
-        let loaded = get_embedding(&conn).unwrap().unwrap();
+        let loaded = get_embedding(&conn, TEST_USER).unwrap().unwrap();
         assert_eq!(loaded.len(), 3);
         assert!((loaded[0] - 0.1).abs() < f64::EPSILON);
     }
@@ -533,6 +665,7 @@ mod tests {
 
         let id = insert_amplification_event(
             &conn,
+            TEST_USER,
             "quote",
             "did:plc:xyz",
             "troll.bsky.social",
@@ -543,9 +676,150 @@ mod tests {
         .unwrap();
         assert!(id > 0);
 
-        let events = get_recent_events(&conn, 10).unwrap();
+        let events = get_recent_events(&conn, TEST_USER, 10).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "quote");
         assert_eq!(events[0].amplifier_handle, "troll.bsky.social");
+    }
+
+    #[test]
+    fn test_account_by_handle() {
+        let conn = test_db();
+
+        let score = AccountScore {
+            did: "did:plc:abc".to_string(),
+            handle: "Test.Bsky.Social".to_string(),
+            toxicity_score: Some(0.5),
+            topic_overlap: Some(0.2),
+            threat_score: Some(30.0),
+            threat_tier: Some("Watch".to_string()),
+            posts_analyzed: 10,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+        };
+        upsert_account_score(&conn, TEST_USER, &score).unwrap();
+
+        // Case-insensitive lookup
+        let found = get_account_by_handle(&conn, TEST_USER, "test.bsky.social")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.did, "did:plc:abc");
+
+        // Not found for different user
+        let not_found = get_account_by_handle(&conn, "did:plc:other", "test.bsky.social").unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_account_by_did() {
+        let conn = test_db();
+
+        let score = AccountScore {
+            did: "did:plc:abc".to_string(),
+            handle: "test.bsky.social".to_string(),
+            toxicity_score: Some(0.5),
+            topic_overlap: Some(0.2),
+            threat_score: Some(30.0),
+            threat_tier: Some("Watch".to_string()),
+            posts_analyzed: 10,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+        };
+        upsert_account_score(&conn, TEST_USER, &score).unwrap();
+
+        let found = get_account_by_did(&conn, TEST_USER, "did:plc:abc")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.handle, "test.bsky.social");
+
+        // Not found for different user
+        let not_found = get_account_by_did(&conn, "did:plc:other", "did:plc:abc").unwrap();
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_is_score_stale() {
+        let conn = test_db();
+
+        // No score — should be stale
+        assert!(is_score_stale(&conn, TEST_USER, "did:plc:abc", 7).unwrap());
+
+        let score = AccountScore {
+            did: "did:plc:abc".to_string(),
+            handle: "test.bsky.social".to_string(),
+            toxicity_score: Some(0.5),
+            topic_overlap: Some(0.2),
+            threat_score: Some(30.0),
+            threat_tier: Some("Watch".to_string()),
+            posts_analyzed: 10,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+        };
+        upsert_account_score(&conn, TEST_USER, &score).unwrap();
+
+        // Just scored — should not be stale
+        assert!(!is_score_stale(&conn, TEST_USER, "did:plc:abc", 7).unwrap());
+    }
+
+    #[test]
+    fn test_pile_on_events() {
+        let conn = test_db();
+
+        insert_amplification_event(
+            &conn,
+            TEST_USER,
+            "quote",
+            "did:plc:a",
+            "a.bsky.social",
+            "at://did:plc:me/app.bsky.feed.post/1",
+            None,
+            None,
+        )
+        .unwrap();
+        insert_amplification_event(
+            &conn,
+            TEST_USER,
+            "quote",
+            "did:plc:b",
+            "b.bsky.social",
+            "at://did:plc:me/app.bsky.feed.post/1",
+            None,
+            None,
+        )
+        .unwrap();
+
+        let events = get_events_for_pile_on(&conn, TEST_USER).unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn test_median_engagement() {
+        let conn = test_db();
+
+        // No data — returns 0.0
+        assert!((get_median_engagement(&conn, TEST_USER).unwrap() - 0.0).abs() < f64::EPSILON);
+
+        // Insert accounts with behavioral signals
+        for (i, eng) in [10.0, 20.0, 30.0].iter().enumerate() {
+            let score = AccountScore {
+                did: format!("did:plc:eng{i}"),
+                handle: format!("eng{i}.bsky.social"),
+                toxicity_score: Some(0.5),
+                topic_overlap: Some(0.2),
+                threat_score: Some(30.0),
+                threat_tier: Some("Watch".to_string()),
+                posts_analyzed: 10,
+                top_toxic_posts: vec![],
+                scored_at: String::new(),
+                behavioral_signals: Some(format!(r#"{{"avg_engagement":{eng}}}"#)),
+            };
+            upsert_account_score(&conn, TEST_USER, &score).unwrap();
+        }
+
+        let median = get_median_engagement(&conn, TEST_USER).unwrap();
+        assert!((median - 20.0).abs() < f64::EPSILON);
     }
 }

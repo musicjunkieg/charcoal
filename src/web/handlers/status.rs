@@ -7,11 +7,14 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 
-use crate::web::{api_error, AppState};
+use crate::web::{api_error, AppState, AuthUser};
 
-pub async fn get_status(State(state): State<AppState>) -> Response {
+pub async fn get_status(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Response {
     // Snapshot scan status fields and release the lock before awaiting the DB.
     // Holding the read guard across an async DB call would block writers (e.g.
     // the scan job updating progress) for the duration of the query.
@@ -26,7 +29,7 @@ pub async fn get_status(State(state): State<AppState>) -> Response {
     };
 
     // Compute tier counts from DB. threat_tier is stored as Option<String>.
-    let threats = match state.db.get_ranked_threats(0.0).await {
+    let threats = match state.db.get_ranked_threats(&auth.did, 0.0).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "DB error in get_status");

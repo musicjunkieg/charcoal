@@ -31,6 +31,11 @@ Post-MVP improvements applied:
   threat scores by 1.0–1.5x. Pile-on detection uses 24-hour sliding window
   with 5+ distinct amplifiers threshold. DB schema v3 stores behavioral
   signals as JSON on `account_scores`.
+- **Multi-user schema** (v0.5): `users` table and `user_did` column on all data
+  tables (`topic_fingerprint`, `account_scores`, `amplification_events`,
+  `scan_state`). Composite primary keys for per-user data isolation. CLI resolves
+  `BLUESKY_HANDLE` to a DID at startup; web handlers extract user DID from OAuth
+  session. DB schema v4 with automatic migration.
 - Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2, 384-dim)
 - Multiplicative threat scoring: `tox * 70 * (1 + overlap * 1.5)` — overlap
   amplifies toxicity instead of contributing independently, so allies with high
@@ -70,7 +75,7 @@ Post-MVP improvements applied:
   in-memory for future XRPC calls (muting/blocking milestone). Env vars:
   `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
 
-215 tests passing (with `--features web`; 189 without), clippy clean. CLI
+225 tests passing (with `--features web`), clippy clean. CLI
 commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`, `score`,
 `report`, `status`, `validate`, `migrate` (postgres feature), `serve` (web
 feature).
@@ -144,7 +149,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 215 tests across eight categories:
+The project has 225 tests across eight categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
@@ -200,8 +205,10 @@ the code, something has gone wrong.
 
 The project uses a trait-based dual-backend database layer:
 
-- **`Database` trait** (`src/db/traits.rs`): async trait with 14 methods
-  covering all DB operations. All pipeline code operates on `Arc<dyn Database>`.
+- **`Database` trait** (`src/db/traits.rs`): async trait with 18 user-scoped
+  methods plus `table_count()` and `upsert_user()`. All user-scoped methods
+  take `user_did: &str` as the first data parameter. All pipeline code operates
+  on `Arc<dyn Database>`.
 - **`SqliteDatabase`** (`src/db/sqlite.rs`): wraps `rusqlite::Connection` in
   `tokio::sync::Mutex`. Default backend, no external dependencies.
 - **`PgDatabase`** (`src/db/postgres.rs`): native async via sqlx. Uses pgvector
@@ -211,8 +218,10 @@ The project uses a trait-based dual-backend database layer:
   conflict with rusqlite's bundled SQLite.
 - **Runtime selection**: when `DATABASE_URL` env var is set and starts with
   `postgres://`, the app uses PostgreSQL. Otherwise, SQLite.
+- **Schema version**: v4 (v1: initial, v2: embedding_vector, v3: behavioral_signals,
+  v4: multi-user with `users` table and `user_did` columns).
 - **Migrations**: SQLite uses `src/db/schema.rs`; Postgres uses numbered SQL
-  files in `migrations/postgres/` embedded via `include_str!`.
+  files in `migrations/postgres/` (4 files) embedded via `include_str!`.
 - **`charcoal migrate`**: one-time data transfer from SQLite→PostgreSQL.
   Only available with `--features postgres`.
 

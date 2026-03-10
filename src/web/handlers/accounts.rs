@@ -12,11 +12,11 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use serde::Deserialize;
 
 use crate::db::models::AccountScore;
-use crate::web::{api_error, AppState};
+use crate::web::{api_error, AppState, AuthUser};
 
 #[derive(Deserialize, Default)]
 pub struct AccountsQuery {
@@ -33,9 +33,16 @@ pub struct AccountsQuery {
 /// GET /api/accounts — list accounts with optional tier filter and search.
 pub async fn list_accounts(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
     Query(params): Query<AccountsQuery>,
-) -> impl IntoResponse {
-    let mut accounts = state.db.get_ranked_threats(0.0).await.unwrap_or_default();
+) -> Response {
+    let mut accounts = match state.db.get_ranked_threats(&auth.did, 0.0).await {
+        Ok(accounts) => accounts,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error fetching accounts");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
 
     // Tier filter
     if let Some(ref tier) = params.tier {
@@ -78,11 +85,16 @@ pub async fn list_accounts(
         "page": page,
         "per_page": per_page,
     }))
+    .into_response()
 }
 
 /// GET /api/accounts/:handle — single account by handle.
-pub async fn get_account(State(state): State<AppState>, Path(handle): Path<String>) -> Response {
-    match state.db.get_account_by_handle(&handle).await {
+pub async fn get_account(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(handle): Path<String>,
+) -> Response {
+    match state.db.get_account_by_handle(&auth.did, &handle).await {
         Ok(Some(account)) => Json(account_to_json(account, 0)).into_response(),
         Ok(None) => api_error(StatusCode::NOT_FOUND, "Account not found"),
         Err(e) => {

@@ -7,6 +7,19 @@ use tracing::{info, warn};
 
 use charcoal::config;
 
+/// Resolve the configured handle to a DID for user-scoped DB operations.
+/// Also ensures the user row exists in the database.
+async fn resolve_and_register_user(
+    client: &charcoal::bluesky::client::PublicAtpClient,
+    config: &config::Config,
+    db: &dyn charcoal::db::Database,
+) -> anyhow::Result<String> {
+    config.require_bluesky()?;
+    let did = client.resolve_handle(&config.bluesky_handle).await?;
+    db.upsert_user(&did, &config.bluesky_handle).await?;
+    Ok(did)
+}
+
 /// Charcoal: Predictive threat detection for Bluesky.
 ///
 /// Identifies accounts likely to engage with your content in a toxic or
@@ -139,9 +152,12 @@ async fn main() -> Result<()> {
             config.require_bluesky()?;
             let db = open_database(&config).await?;
 
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
+
             // Check if we already have a fingerprint and it's not being refreshed
             if !refresh {
-                if let Some((json, _post_count, updated_at)) = db.get_fingerprint().await? {
+                if let Some((json, _post_count, updated_at)) = db.get_fingerprint(&did).await? {
                     println!("Loading cached fingerprint (built {updated_at})...");
                     let fingerprint: charcoal::topics::fingerprint::TopicFingerprint =
                         serde_json::from_str(&json)?;
@@ -155,8 +171,6 @@ async fn main() -> Result<()> {
             }
 
             println!("Building topic fingerprint from your recent posts...");
-
-            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
 
             // Fetch recent posts (target 500 for a good fingerprint)
             let posts =
@@ -177,7 +191,8 @@ async fn main() -> Result<()> {
 
             // Cache in the database
             let json = serde_json::to_string(&fingerprint)?;
-            db.save_fingerprint(&json, fingerprint.post_count).await?;
+            db.save_fingerprint(&did, &json, fingerprint.post_count)
+                .await?;
 
             // Compute and store the mean sentence embedding for semantic overlap.
             // This is optional — if the embedding model isn't downloaded yet, we
@@ -188,7 +203,7 @@ async fn main() -> Result<()> {
                 let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
                 let post_embeddings = embedder.embed_batch(&post_texts).await?;
                 let mean_emb = charcoal::topics::embeddings::mean_embedding(&post_embeddings);
-                db.save_embedding(&mean_emb).await?;
+                db.save_embedding(&did, &mean_emb).await?;
                 println!(
                     "  Embedding computed ({} posts → {}-dim vector)",
                     post_texts.len(),
@@ -232,9 +247,10 @@ async fn main() -> Result<()> {
             println!("Scanning for amplification events...");
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
 
             // Load the protected user's fingerprint (needed for scoring)
-            let protected_fingerprint = load_fingerprint(&db).await?;
+            let protected_fingerprint = load_fingerprint(&db, &did).await?;
 
             // Create the toxicity scorer if we'll be analyzing
             let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
@@ -245,11 +261,11 @@ async fn main() -> Result<()> {
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
+            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
 
             // Compute behavioral context for scoring
-            let median_engagement = db.get_median_engagement().await?;
-            let pile_on_events = db.get_events_for_pile_on().await?;
+            let median_engagement = db.get_median_engagement(&did).await?;
+            let pile_on_events = db.get_events_for_pile_on(&did).await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -275,6 +291,7 @@ async fn main() -> Result<()> {
                 &client,
                 scorer.as_ref(),
                 &db,
+                &did,
                 &protected_fingerprint,
                 &weights,
                 &config.bluesky_handle,
@@ -309,14 +326,15 @@ async fn main() -> Result<()> {
             println!("Running second-degree network sweep...");
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
 
-            let protected_fingerprint = load_fingerprint(&db).await?;
+            let protected_fingerprint = load_fingerprint(&db, &did).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
+            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
 
-            let median_engagement = db.get_median_engagement().await?;
-            let pile_on_events = db.get_events_for_pile_on().await?;
+            let median_engagement = db.get_median_engagement(&did).await?;
+            let pile_on_events = db.get_events_for_pile_on(&did).await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -328,6 +346,7 @@ async fn main() -> Result<()> {
                 &client,
                 scorer.as_ref(),
                 &db,
+                &did,
                 &config.bluesky_handle,
                 &protected_fingerprint,
                 &weights,
@@ -358,18 +377,19 @@ async fn main() -> Result<()> {
             println!("Scoring account: @{handle}...");
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
 
             // Load the protected user's fingerprint
-            let protected_fingerprint = load_fingerprint(&db).await?;
+            let protected_fingerprint = load_fingerprint(&db, &did).await?;
 
             // Create the toxicity scorer based on configured backend
             let scorer = create_scorer(&config)?;
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
+            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
 
-            let median_engagement = db.get_median_engagement().await?;
-            let pile_on_events = db.get_events_for_pile_on().await?;
+            let median_engagement = db.get_median_engagement(&did).await?;
+            let pile_on_events = db.get_events_for_pile_on(&did).await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -395,14 +415,18 @@ async fn main() -> Result<()> {
             charcoal::output::terminal::display_account_detail(&score);
 
             // Store in database
-            db.upsert_account_score(&score).await?;
+            db.upsert_account_score(&did, &score).await?;
         }
 
         Commands::Report { min_score } => {
             let config = config::Config::load()?;
+            config.require_bluesky()?;
             let db = open_database(&config).await?;
 
-            let threats = db.get_ranked_threats(min_score as f64).await?;
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
+
+            let threats = db.get_ranked_threats(&did, min_score as f64).await?;
 
             if threats.is_empty() {
                 println!("No accounts scored yet. Run `charcoal scan --analyze` first.");
@@ -410,7 +434,7 @@ async fn main() -> Result<()> {
             }
 
             // Fetch recent amplification events for context
-            let events = db.get_recent_events(100).await?;
+            let events = db.get_recent_events(&did, 100).await?;
 
             // Display in terminal
             charcoal::output::terminal::display_threat_list(&threats);
@@ -418,7 +442,7 @@ async fn main() -> Result<()> {
 
             // Also generate a markdown report file
             let fingerprint = db
-                .get_fingerprint()
+                .get_fingerprint(&did)
                 .await?
                 .and_then(|(json, _, _)| serde_json::from_str(&json).ok());
 
@@ -442,11 +466,11 @@ async fn main() -> Result<()> {
             let db = open_database(&config).await?;
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
 
             println!("Resolving your PDS endpoint...");
 
             // Resolve handle → DID → PDS URL (block records live on your PDS)
-            let did = client.resolve_handle(&config.bluesky_handle).await?;
             let pds_url = client.resolve_pds_url(&did).await?;
             println!("  PDS: {pds_url}");
 
@@ -493,13 +517,13 @@ async fn main() -> Result<()> {
                 charcoal::bluesky::profiles::resolve_dids_to_handles(&client, &dids).await?;
 
             // Set up scoring
-            let protected_fingerprint = load_fingerprint(&db).await?;
+            let protected_fingerprint = load_fingerprint(&db, &did).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db).await;
+            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
 
-            let median_engagement = db.get_median_engagement().await?;
-            let pile_on_events = db.get_events_for_pile_on().await?;
+            let median_engagement = db.get_median_engagement(&did).await?;
+            let pile_on_events = db.get_events_for_pile_on(&did).await?;
             let pile_on_refs: Vec<(&str, &str, &str)> = pile_on_events
                 .iter()
                 .map(|(d, u, t)| (d.as_str(), u.as_str(), t.as_str()))
@@ -591,7 +615,7 @@ async fn main() -> Result<()> {
                         }
 
                         // Store in DB too
-                        db.upsert_account_score(&score).await?;
+                        db.upsert_account_score(&did, &score).await?;
                         scored_count += 1;
                     }
                     Err(e) => {
@@ -666,7 +690,29 @@ async fn main() -> Result<()> {
                 }
                 _ => config.db_path.clone(),
             };
-            charcoal::status::show(&db, &db_display).await?;
+
+            // Resolve user DID if BLUESKY_HANDLE is configured. Status can
+            // work without it (basic DB info only), so use empty string as
+            // fallback for user-scoped queries.
+            let user_did = if !config.bluesky_handle.is_empty() {
+                let client =
+                    charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+                match resolve_and_register_user(&client, &config, db.as_ref()).await {
+                    Ok(did) => did,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            handle = %config.bluesky_handle,
+                            "Could not resolve user DID, showing limited status"
+                        );
+                        String::new()
+                    }
+                }
+            } else {
+                String::new()
+            };
+
+            charcoal::status::show(&db, &user_did, &db_display).await?;
         }
 
         #[cfg(feature = "web")]
@@ -680,6 +726,7 @@ async fn main() -> Result<()> {
         #[cfg(feature = "postgres")]
         Commands::Migrate { database_url } => {
             let config = config::Config::load()?;
+            config.require_bluesky()?;
 
             println!("Migrating data from SQLite to PostgreSQL...");
             println!("  Source: {}", config.db_path);
@@ -704,17 +751,23 @@ async fn main() -> Result<()> {
             let sqlite_db = charcoal::db::open_sqlite(&config.db_path)?;
             let pg_db = charcoal::db::connect_postgres(&database_url).await?;
 
+            // Resolve the user DID and register in both databases
+            let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
+            let did = client.resolve_handle(&config.bluesky_handle).await?;
+            sqlite_db.upsert_user(&did, &config.bluesky_handle).await?;
+            pg_db.upsert_user(&did, &config.bluesky_handle).await?;
+
             // 1. Migrate fingerprint + embedding
-            if let Some((json, count, _)) = sqlite_db.get_fingerprint().await? {
-                pg_db.save_fingerprint(&json, count).await?;
+            if let Some((json, count, _)) = sqlite_db.get_fingerprint(&did).await? {
+                pg_db.save_fingerprint(&did, &json, count).await?;
                 println!(
                     "  {} Topic fingerprint migrated ({count} posts)",
                     "✓".green()
                 );
 
                 // Migrate embedding if present
-                if let Some(embedding) = sqlite_db.get_embedding().await? {
-                    pg_db.save_embedding(&embedding).await?;
+                if let Some(embedding) = sqlite_db.get_embedding(&did).await? {
+                    pg_db.save_embedding(&did, &embedding).await?;
                     println!(
                         "  {} Embedding migrated ({}-dim vector)",
                         "✓".green(),
@@ -726,9 +779,9 @@ async fn main() -> Result<()> {
             }
 
             // 2. Migrate account scores
-            let scores = sqlite_db.get_ranked_threats(0.0).await?;
+            let scores = sqlite_db.get_ranked_threats(&did, 0.0).await?;
             for score in &scores {
-                pg_db.upsert_account_score(score).await?;
+                pg_db.upsert_account_score(&did, score).await?;
             }
             println!("  {} {} account scores migrated", "✓".green(), scores.len());
 
@@ -736,9 +789,9 @@ async fn main() -> Result<()> {
             // timestamps so pile-on detection works correctly after migration.
             // Use i32::MAX as the limit rather than u32::MAX to avoid an
             // overflow when the Postgres backend casts the value to i32.
-            let events = sqlite_db.get_recent_events(i32::MAX as u32).await?;
+            let events = sqlite_db.get_recent_events(&did, i32::MAX as u32).await?;
             for event in &events {
-                pg_db.insert_amplification_event_raw(event).await?;
+                pg_db.insert_amplification_event_raw(&did, event).await?;
             }
             println!(
                 "  {} {} amplification events migrated",
@@ -748,10 +801,10 @@ async fn main() -> Result<()> {
 
             // 4. Migrate all scan state keys (not just a hardcoded subset) so
             // cursors, timestamps, and any future keys transfer automatically.
-            let scan_entries = sqlite_db.get_all_scan_state().await?;
+            let scan_entries = sqlite_db.get_all_scan_state(&did).await?;
             let scan_migrated = scan_entries.len();
             for (key, val) in &scan_entries {
-                pg_db.set_scan_state(key, val).await?;
+                pg_db.set_scan_state(&did, key, val).await?;
             }
             if scan_migrated > 0 {
                 println!(
@@ -835,8 +888,9 @@ fn create_scorer(
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.
 async fn load_fingerprint(
     db: &Arc<dyn charcoal::db::Database>,
+    user_did: &str,
 ) -> Result<charcoal::topics::fingerprint::TopicFingerprint> {
-    match db.get_fingerprint().await? {
+    match db.get_fingerprint(user_did).await? {
         Some((json, _, _)) => {
             let fp: charcoal::topics::fingerprint::TopicFingerprint = serde_json::from_str(&json)?;
             Ok(fp)
@@ -855,6 +909,7 @@ async fn load_fingerprint(
 async fn load_embedder(
     config: &config::Config,
     db: &Arc<dyn charcoal::db::Database>,
+    user_did: &str,
 ) -> (
     Option<charcoal::topics::embeddings::SentenceEmbedder>,
     Option<Vec<f64>>,
@@ -876,7 +931,7 @@ async fn load_embedder(
         None
     };
 
-    let embedding = match db.get_embedding().await {
+    let embedding = match db.get_embedding(user_did).await {
         Ok(Some(v)) => Some(v),
         Ok(None) => {
             if embedder.is_some() {

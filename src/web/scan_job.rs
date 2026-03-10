@@ -6,8 +6,10 @@
 // Only one scan can run at a time; POST /api/scan returns 409 if one is already active.
 
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use tracing::{error, info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
@@ -43,9 +45,21 @@ pub fn launch_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
     scan_status: Arc<RwLock<ScanStatus>>,
+    user_did: String,
+    actor_handle: String,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run_scan(config, db, scan_status.clone()).await {
+        let result = AssertUnwindSafe(run_scan(
+            config,
+            db,
+            scan_status.clone(),
+            &user_did,
+            &actor_handle,
+        ))
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
+        if let Err(e) = result {
             error!(error = %e, "Background scan failed");
             let mut status = scan_status.write().await;
             status.running = false;
@@ -59,6 +73,8 @@ async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
     scan_status: Arc<RwLock<ScanStatus>>,
+    user_did: &str,
+    actor_handle: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: load toxicity scorer
     {
@@ -84,7 +100,7 @@ async fn run_scan(
         s.progress_message = "Loading topic fingerprint…".to_string();
     }
 
-    let fingerprint: TopicFingerprint = match db.get_fingerprint().await? {
+    let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
         Some((json, _, _)) => serde_json::from_str(&json)?,
         None => anyhow::bail!("No fingerprint found. Run `charcoal fingerprint` first."),
     };
@@ -121,10 +137,7 @@ async fn run_scan(
         None
     };
 
-    let protected_embedding = match db.get_embedding().await {
-        Ok(Some(v)) => Some(v),
-        _ => None,
-    };
+    let protected_embedding = db.get_embedding(user_did).await?;
 
     // Phase 4: fetch amplification events from Constellation
     {
@@ -136,8 +149,7 @@ async fn run_scan(
     let constellation =
         crate::constellation::client::ConstellationClient::new(&config.constellation_url)?;
 
-    let posts =
-        crate::bluesky::posts::fetch_recent_posts(&client, &config.bluesky_handle, 50).await?;
+    let posts = crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50).await?;
     let post_uris: Vec<String> = posts.iter().map(|p| p.uri.clone()).collect();
 
     let mut events = constellation.find_amplification_events(&post_uris).await;
@@ -171,8 +183,8 @@ async fn run_scan(
         s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
     }
 
-    let median_engagement = db.get_median_engagement().await.unwrap_or(0.0);
-    let pile_on_refs = db.get_events_for_pile_on().await.unwrap_or_default();
+    let median_engagement = db.get_median_engagement(user_did).await?;
+    let pile_on_refs = db.get_events_for_pile_on(user_did).await?;
     let pile_on_dids: HashSet<String> = detect_pile_on_participants(
         &pile_on_refs
             .iter()
@@ -186,9 +198,10 @@ async fn run_scan(
         &client,
         scorer.as_ref(),
         &db,
+        user_did,
         &fingerprint,
         &weights,
-        &config.bluesky_handle,
+        actor_handle,
         true, // analyze_followers
         50,   // max_followers_per_amplifier
         8,    // concurrency
