@@ -20,48 +20,60 @@ pub trait Database: Send + Sync {
     /// Count the number of user-created tables in the database.
     async fn table_count(&self) -> Result<i64>;
 
+    // --- User management ---
+
+    /// Create or update a user record (DID + handle).
+    async fn upsert_user(&self, did: &str, handle: &str) -> Result<()>;
+
     // --- Scan state ---
 
-    /// Get a scan state value by key (e.g., "notifications_cursor").
-    async fn get_scan_state(&self, key: &str) -> Result<Option<String>>;
+    /// Get a scan state value by key for a specific user (e.g., "notifications_cursor").
+    async fn get_scan_state(&self, user_did: &str, key: &str) -> Result<Option<String>>;
 
-    /// Set a scan state value (upsert).
-    async fn set_scan_state(&self, key: &str, value: &str) -> Result<()>;
+    /// Set a scan state value (upsert) for a specific user.
+    async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
 
-    /// Get all scan state key-value pairs. Used by the migration command to
-    /// transfer all keys without a hardcoded list.
-    async fn get_all_scan_state(&self) -> Result<Vec<(String, String)>>;
+    /// Get all scan state key-value pairs for a specific user. Used by the
+    /// migration command to transfer all keys without a hardcoded list.
+    async fn get_all_scan_state(&self, user_did: &str) -> Result<Vec<(String, String)>>;
 
     // --- Topic fingerprint ---
 
-    /// Store the topic fingerprint (singleton row).
-    async fn save_fingerprint(&self, fingerprint_json: &str, post_count: u32) -> Result<()>;
+    /// Store the topic fingerprint for a specific user.
+    async fn save_fingerprint(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+    ) -> Result<()>;
 
-    /// Store the protected user's mean embedding vector.
-    async fn save_embedding(&self, embedding: &[f64]) -> Result<()>;
+    /// Store a user's mean embedding vector.
+    async fn save_embedding(&self, user_did: &str, embedding: &[f64]) -> Result<()>;
 
-    /// Load the stored fingerprint JSON, post count, and updated_at timestamp.
-    async fn get_fingerprint(&self) -> Result<Option<(String, u32, String)>>;
+    /// Load the stored fingerprint JSON, post count, and updated_at timestamp for a user.
+    async fn get_fingerprint(&self, user_did: &str) -> Result<Option<(String, u32, String)>>;
 
-    /// Load the stored embedding vector (if one exists).
-    async fn get_embedding(&self) -> Result<Option<Vec<f64>>>;
+    /// Load the stored embedding vector for a user (if one exists).
+    async fn get_embedding(&self, user_did: &str) -> Result<Option<Vec<f64>>>;
 
     // --- Account scores ---
 
-    /// Save or update an account's scores.
-    async fn upsert_account_score(&self, score: &AccountScore) -> Result<()>;
+    /// Save or update an account's scores for a specific user.
+    async fn upsert_account_score(&self, user_did: &str, score: &AccountScore) -> Result<()>;
 
-    /// Get all scored accounts above a minimum score, ranked by threat score descending.
-    async fn get_ranked_threats(&self, min_score: f64) -> Result<Vec<AccountScore>>;
+    /// Get all scored accounts above a minimum score for a user, ranked by threat score descending.
+    async fn get_ranked_threats(&self, user_did: &str, min_score: f64)
+        -> Result<Vec<AccountScore>>;
 
-    /// Check if an account's score is stale (older than the given number of days).
-    async fn is_score_stale(&self, did: &str, max_age_days: i64) -> Result<bool>;
+    /// Check if an account's score is stale for a user (older than the given number of days).
+    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool>;
 
     // --- Amplification events ---
 
-    /// Record a new amplification event and return its ID.
+    /// Record a new amplification event for a user and return its ID.
     async fn insert_amplification_event(
         &self,
+        user_did: &str,
         event_type: &str,
         amplifier_did: &str,
         amplifier_handle: &str,
@@ -70,28 +82,41 @@ pub trait Database: Send + Sync {
         amplifier_text: Option<&str>,
     ) -> Result<i64>;
 
-    /// Get recent amplification events, ordered by detection time descending.
-    async fn get_recent_events(&self, limit: u32) -> Result<Vec<AmplificationEvent>>;
+    /// Get recent amplification events for a user, ordered by detection time descending.
+    async fn get_recent_events(
+        &self,
+        user_did: &str,
+        limit: u32,
+    ) -> Result<Vec<AmplificationEvent>>;
 
-    /// Get amplification events for pile-on detection.
+    /// Get amplification events for pile-on detection for a specific user.
     /// Returns (amplifier_did, original_post_uri, detected_at) tuples.
-    async fn get_events_for_pile_on(&self) -> Result<Vec<(String, String, String)>>;
+    async fn get_events_for_pile_on(&self, user_did: &str)
+        -> Result<Vec<(String, String, String)>>;
 
-    /// Insert an amplification event preserving its original detected_at timestamp.
+    /// Insert an amplification event for a user, preserving its original detected_at timestamp.
     /// Used only by the migrate command so historical events keep their real timestamps
     /// instead of all being stamped with NOW().
-    async fn insert_amplification_event_raw(&self, event: &AmplificationEvent) -> Result<i64>;
+    async fn insert_amplification_event_raw(
+        &self,
+        user_did: &str,
+        event: &AmplificationEvent,
+    ) -> Result<i64>;
 
     // --- Behavioral context ---
 
-    /// Get the median engagement across all scored accounts with behavioral data.
-    async fn get_median_engagement(&self) -> Result<f64>;
+    /// Get the median engagement across all scored accounts with behavioral data for a user.
+    async fn get_median_engagement(&self, user_did: &str) -> Result<f64>;
 
     // --- Single-account lookup ---
 
-    /// Get a single account score by exact handle match.
-    async fn get_account_by_handle(&self, handle: &str) -> Result<Option<AccountScore>>;
+    /// Get a single account score by exact handle match, scoped to a user.
+    async fn get_account_by_handle(
+        &self,
+        user_did: &str,
+        handle: &str,
+    ) -> Result<Option<AccountScore>>;
 
-    /// Get a single account score by DID.
-    async fn get_account_by_did(&self, did: &str) -> Result<Option<AccountScore>>;
+    /// Get a single account score by DID, scoped to a user.
+    async fn get_account_by_did(&self, user_did: &str, did: &str) -> Result<Option<AccountScore>>;
 }
