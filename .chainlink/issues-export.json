@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-10T03:22:19.478882470+00:00",
+  "exported_at": "2026-03-10T04:00:56.274850374+00:00",
   "issues": [
     {
       "id": 99,
@@ -727,7 +727,12 @@
       "labels": [
         "architecture"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Current Arc<Mutex<Session>> + spawn_blocking is correct for serialized inference. Per the architecture recommendations doc, a semaphore with N=2-4 concurrent sessions is the next step when contention is observed. Not needed until multi-user alpha has real concurrent users.",
+          "created_at": "2026-03-10T03:54:36.195531331+00:00"
+        }
+      ],
       "created_at": "2026-02-18T03:14:42.053989449+00:00",
       "updated_at": "2026-02-18T03:14:42.053989449+00:00",
       "closed_at": null
@@ -736,16 +741,21 @@
       "id": 51,
       "title": "Axum web server skeleton (Railway deployment)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
         "architecture"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Completed as part of v0.3 web GUI (PR #9). Axum server, Railway config, SvelteKit SPA, all API endpoints shipped.",
+          "created_at": "2026-03-10T03:54:26.737395942+00:00"
+        }
+      ],
       "created_at": "2026-02-18T03:14:40.987022505+00:00",
-      "updated_at": "2026-02-18T03:14:40.987022505+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-10T03:54:26.715258731+00:00",
+      "closed_at": "2026-03-10T03:54:26.715258731+00:00"
     },
     {
       "id": 50,
@@ -772,7 +782,12 @@
       "labels": [
         "architecture"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Milestone corrected: this is v1.0 multi-user work, not v0.3 single-user. Plan at docs/plans/2026-03-10-multi-user-schema.md. Note: plan uses simpler user_did column approach rather than the shared/per-user table split from the architecture recommendations doc. The shared profiles optimization can come later when user count warrants it.",
+          "created_at": "2026-03-10T03:54:31.408988619+00:00"
+        }
+      ],
       "created_at": "2026-02-18T03:14:35.058233233+00:00",
       "updated_at": "2026-02-18T03:14:35.058233233+00:00",
       "closed_at": null

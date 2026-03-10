@@ -98,6 +98,90 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         c.execute_batch("ALTER TABLE account_scores ADD COLUMN behavioral_signals TEXT;")
     })?;
 
+    // Migration v4: multi-user schema. Adds a `users` table, and adds
+    // `user_did` to topic_fingerprint, account_scores, amplification_events,
+    // and scan_state. Tables with single-column primary keys are rebuilt
+    // to use composite keys including user_did.
+    run_migration(conn, 4, |c| {
+        c.execute_batch(
+            "
+            -- New users table
+            CREATE TABLE IF NOT EXISTS users (
+                did TEXT PRIMARY KEY,
+                handle TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            -- Rebuild topic_fingerprint with user_did as primary key
+            CREATE TABLE topic_fingerprint_v4 (
+                user_did TEXT NOT NULL,
+                fingerprint_json TEXT NOT NULL,
+                post_count INTEGER NOT NULL,
+                embedding_vector TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (user_did)
+            );
+            INSERT OR IGNORE INTO topic_fingerprint_v4
+                (user_did, fingerprint_json, post_count, embedding_vector, created_at, updated_at)
+                SELECT '', fingerprint_json, post_count, embedding_vector, created_at, updated_at
+                FROM topic_fingerprint;
+            DROP TABLE topic_fingerprint;
+            ALTER TABLE topic_fingerprint_v4 RENAME TO topic_fingerprint;
+
+            -- Rebuild account_scores with composite key (user_did, did)
+            CREATE TABLE account_scores_v4 (
+                user_did TEXT NOT NULL,
+                did TEXT NOT NULL,
+                handle TEXT NOT NULL,
+                toxicity_score REAL,
+                topic_overlap REAL,
+                threat_score REAL,
+                threat_tier TEXT,
+                posts_analyzed INTEGER NOT NULL DEFAULT 0,
+                top_toxic_posts TEXT,
+                scored_at TEXT NOT NULL DEFAULT (datetime('now')),
+                behavioral_signals TEXT,
+                PRIMARY KEY (user_did, did)
+            );
+            INSERT OR IGNORE INTO account_scores_v4
+                (user_did, did, handle, toxicity_score, topic_overlap, threat_score,
+                 threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
+                SELECT '', did, handle, toxicity_score, topic_overlap, threat_score,
+                 threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                FROM account_scores;
+            DROP TABLE account_scores;
+            ALTER TABLE account_scores_v4 RENAME TO account_scores;
+
+            -- Add user_did to amplification_events
+            ALTER TABLE amplification_events ADD COLUMN user_did TEXT NOT NULL DEFAULT '';
+
+            -- Rebuild scan_state with composite key (user_did, key)
+            CREATE TABLE scan_state_v4 (
+                user_did TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (user_did, key)
+            );
+            INSERT OR IGNORE INTO scan_state_v4
+                (user_did, key, value, updated_at)
+                SELECT '', key, value, updated_at
+                FROM scan_state;
+            DROP TABLE scan_state;
+            ALTER TABLE scan_state_v4 RENAME TO scan_state;
+
+            -- Rebuild indices with user_did
+            DROP INDEX IF EXISTS idx_events_amplifier;
+            CREATE INDEX idx_events_amplifier ON amplification_events(user_did, amplifier_did);
+            DROP INDEX IF EXISTS idx_scores_tier;
+            CREATE INDEX idx_scores_tier ON account_scores(user_did, threat_tier);
+            DROP INDEX IF EXISTS idx_scores_age;
+            CREATE INDEX idx_scores_age ON account_scores(user_did, scored_at);
+            ",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -152,8 +236,8 @@ mod tests {
         create_tables(&conn).unwrap();
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
-        // amplification_events, scan_state = 5 tables
-        assert_eq!(count, 5i64);
+        // amplification_events, scan_state, users = 6 tables
+        assert_eq!(count, 6i64);
     }
 
     #[test]
@@ -162,16 +246,17 @@ mod tests {
         create_tables(&conn).unwrap();
 
         // Verify the embedding_vector column exists by inserting a row with it
+        // (After v4, topic_fingerprint uses user_did as primary key instead of id)
         conn.execute(
-            "INSERT INTO topic_fingerprint (id, fingerprint_json, post_count, embedding_vector)
-             VALUES (1, '{}', 10, '[0.1, 0.2]')",
+            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+             VALUES ('did:plc:test', '{}', 10, '[0.1, 0.2]')",
             [],
         )
         .unwrap();
 
         let result: String = conn
             .query_row(
-                "SELECT embedding_vector FROM topic_fingerprint WHERE id = 1",
+                "SELECT embedding_vector FROM topic_fingerprint WHERE user_did = 'did:plc:test'",
                 [],
                 |row| row.get(0),
             )
@@ -184,9 +269,10 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_tables(&conn).unwrap();
 
+        // After v4, account_scores has composite key (user_did, did)
         conn.execute(
-            "INSERT INTO account_scores (did, handle, posts_analyzed)
-             VALUES ('did:plc:test', 'test.bsky.social', 10)",
+            "INSERT INTO account_scores (user_did, did, handle, posts_analyzed)
+             VALUES ('', 'did:plc:test', 'test.bsky.social', 10)",
             [],
         )
         .unwrap();
@@ -223,6 +309,117 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3]);
+        assert_eq!(versions, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_migration_v4_adds_user_did_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+
+        // Verify users table exists and can accept rows
+        conn.execute(
+            "INSERT INTO users (did, handle) VALUES ('did:plc:abc123', 'alice.bsky.social')",
+            [],
+        )
+        .unwrap();
+
+        let handle: String = conn
+            .query_row(
+                "SELECT handle FROM users WHERE did = 'did:plc:abc123'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(handle, "alice.bsky.social");
+
+        // Verify topic_fingerprint now has user_did column (no singleton constraint)
+        conn.execute(
+            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count)
+             VALUES ('did:plc:abc123', '{\"test\":1}', 5)",
+            [],
+        )
+        .unwrap();
+
+        let fp_user: String = conn
+            .query_row(
+                "SELECT user_did FROM topic_fingerprint WHERE user_did = 'did:plc:abc123'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fp_user, "did:plc:abc123");
+
+        // Verify account_scores has composite key (user_did, did)
+        conn.execute(
+            "INSERT INTO account_scores (user_did, did, handle, posts_analyzed)
+             VALUES ('did:plc:abc123', 'did:plc:target1', 'target.bsky.social', 10)",
+            [],
+        )
+        .unwrap();
+
+        let score_user: String = conn
+            .query_row(
+                "SELECT user_did FROM account_scores WHERE did = 'did:plc:target1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(score_user, "did:plc:abc123");
+
+        // Verify amplification_events has user_did column
+        conn.execute(
+            "INSERT INTO amplification_events
+             (event_type, amplifier_did, amplifier_handle, original_post_uri, user_did)
+             VALUES ('quote', 'did:plc:amp1', 'amp.bsky.social', 'at://did:plc:abc123/app.bsky.feed.post/1', 'did:plc:abc123')",
+            [],
+        )
+        .unwrap();
+
+        let event_user: String = conn
+            .query_row(
+                "SELECT user_did FROM amplification_events WHERE amplifier_did = 'did:plc:amp1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_user, "did:plc:abc123");
+
+        // Verify scan_state has composite key (user_did, key)
+        conn.execute(
+            "INSERT INTO scan_state (user_did, key, value)
+             VALUES ('did:plc:abc123', 'last_scan', '2026-03-10')",
+            [],
+        )
+        .unwrap();
+
+        let scan_user: String = conn
+            .query_row(
+                "SELECT user_did FROM scan_state WHERE key = 'last_scan'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(scan_user, "did:plc:abc123");
+    }
+
+    #[test]
+    fn test_migration_v4_updates_table_count() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        let count = table_count(&conn).unwrap();
+        // schema_version, topic_fingerprint, account_scores,
+        // amplification_events, scan_state, users = 6 tables
+        assert_eq!(count, 6i64);
+
+        // Verify schema_version includes v4
+        let versions: Vec<i64> = conn
+            .prepare("SELECT version FROM schema_version ORDER BY version")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(versions, vec![1, 2, 3, 4]);
     }
 }
