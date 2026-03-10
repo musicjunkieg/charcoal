@@ -1,21 +1,30 @@
 {
   "version": 1,
-  "exported_at": "2026-03-10T13:31:40.758241018+00:00",
+  "exported_at": "2026-03-10T16:23:03.364882188+00:00",
   "issues": [
     {
       "id": 101,
       "title": "Fix second round of CodeRabbit findings on PR #14",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
         "fix"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "[auto] Session resumed after context compression.",
+          "created_at": "2026-03-10T16:02:32.456987812+00:00"
+        },
+        {
+          "content": "[auto] Session resumed after context compression.",
+          "created_at": "2026-03-10T16:03:32.297179503+00:00"
+        }
+      ],
       "created_at": "2026-03-10T13:24:44.136961484+00:00",
-      "updated_at": "2026-03-10T13:24:44.136961484+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-10T13:37:41.372426568+00:00",
+      "closed_at": "2026-03-10T13:37:41.372426568+00:00"
     },
     {
       "id": 100,

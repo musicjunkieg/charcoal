@@ -129,10 +129,7 @@ async fn run_scan(
         None
     };
 
-    let protected_embedding = match db.get_embedding(user_did).await {
-        Ok(Some(v)) => Some(v),
-        _ => None,
-    };
+    let protected_embedding = db.get_embedding(user_did).await?;
 
     // Phase 4: fetch amplification events from Constellation
     {
