@@ -103,8 +103,12 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // and scan_state. Tables with single-column primary keys are rebuilt
     // to use composite keys including user_did.
     run_migration(conn, 4, |c| {
+        // Wrap in explicit transaction — execute_batch does NOT auto-wrap,
+        // so a failure mid-batch would leave a half-migrated schema.
         c.execute_batch(
             "
+            BEGIN;
+
             -- New users table
             CREATE TABLE IF NOT EXISTS users (
                 did TEXT PRIMARY KEY,
@@ -178,6 +182,8 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             CREATE INDEX idx_scores_tier ON account_scores(user_did, threat_tier);
             DROP INDEX IF EXISTS idx_scores_age;
             CREATE INDEX idx_scores_age ON account_scores(user_did, scored_at);
+
+            COMMIT;
             ",
         )
     })?;

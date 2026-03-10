@@ -6,8 +6,10 @@
 // Only one scan can run at a time; POST /api/scan returns 409 if one is already active.
 
 use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use futures::FutureExt;
 use tracing::{error, info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
@@ -46,7 +48,11 @@ pub fn launch_scan(
     user_did: String,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run_scan(config, db, scan_status.clone(), &user_did).await {
+        let result = AssertUnwindSafe(run_scan(config, db, scan_status.clone(), &user_did))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
+        if let Err(e) = result {
             error!(error = %e, "Background scan failed");
             let mut status = scan_status.write().await;
             status.running = false;

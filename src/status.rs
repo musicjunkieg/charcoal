@@ -75,16 +75,12 @@ pub async fn show(db: &Arc<dyn Database>, user_did: &str, db_display: &str) -> R
         }
     }
 
-    // Last scan cursor
-    match db.get_scan_state(user_did, "notifications_cursor").await? {
-        Some(_) => {
-            if let Some(last_scan) = db.get_scan_state(user_did, "last_scan_at").await? {
-                println!("Last scan: {}", last_scan);
-            }
-        }
-        None => {
-            println!("Last scan: never");
-        }
+    // Last scan time — check directly rather than gating on notifications_cursor,
+    // because web/background scans set last_scan_at without a cursor.
+    if let Some(last_scan) = db.get_scan_state(user_did, "last_scan_at").await? {
+        println!("Last scan: {}", last_scan);
+    } else {
+        println!("Last scan: never");
     }
 
     Ok(())

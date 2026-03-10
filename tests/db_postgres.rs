@@ -50,7 +50,7 @@ async fn cleanup_test_data(url: &str) -> Result<()> {
 
     // Delete test-specific amplification events
     sqlx_core::query::query(
-        "DELETE FROM amplification_events WHERE amplifier_did = 'did:plc:pgtest_amp'",
+        "DELETE FROM amplification_events WHERE user_did = 'did:plc:pgtest_user000000000000' AND amplifier_did = 'did:plc:pgtest_amp'",
     )
     .execute(&pool)
     .await

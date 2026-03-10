@@ -1,7 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-03-10T04:40:37.109375743+00:00",
+  "exported_at": "2026-03-10T12:57:32.388140063+00:00",
   "issues": [
+    {
+      "id": 100,
+      "title": "Fix CodeRabbit review findings on PR #14 (multi-user schema)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [
+        {
+          "content": "CodeRabbit review on PR #14 found these valid issues to fix:\n\nCRITICAL:\n1. src/db/schema.rs: SQLite v4 migration not atomic — execute_batch has no transaction wrapper. If a later statement fails, early CREATE/INSERT persists. Wrap in BEGIN/COMMIT.\n\nMAJOR:\n2. migrations/postgres/0004_multiuser.sql: DEFAULT \"\" left on user_did columns after backfill — drop defaults so missing binds fail hard.\n3. src/web/handlers/events.rs: unwrap_or_default() on get_recent_events hides DB errors. Return 500.\n4. src/pipeline/sweep.rs: seen set seeded with protected_handle (a handle string) but dedupe keys are DIDs. Seed with user_did instead.\n5. src/db/postgres.rs insert_amplification_event_raw: detected_at bound without UTC offset — append +00 suffix.\n\nMINOR:\n6. src/status.rs: last_scan_at only shown when notifications_cursor exists. Show independently.\n7. src/web/handlers/accounts.rs: unwrap_or_default() on get_ranked_threats hides DB errors. Return 500.\n8. src/web/scan_job.rs: panic in run_scan leaves running=true forever. Add catch_unwind.\n9. src/main.rs: unwrap_or_default() on DID resolution hides errors. Log warning.\n10. tests/db_postgres.rs: amplification_events cleanup should also filter by user_did.\n\nSKIPPED:\n- docs/plans backfill description mismatch: plan doc is informational, code uses empty string consistently, no fix needed\n- scan_job.rs config.bluesky_handle coupling: nitpick about future architecture, not a bug in current code",
+          "created_at": "2026-03-10T12:45:01.045620770+00:00"
+        }
+      ],
+      "created_at": "2026-03-10T12:44:46.707780930+00:00",
+      "updated_at": "2026-03-10T12:44:46.707780930+00:00",
+      "closed_at": null
+    },
     {
       "id": 99,
       "title": "Create development environment migration guide for Docker sandbox",

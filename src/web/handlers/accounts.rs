@@ -35,12 +35,14 @@ pub async fn list_accounts(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Query(params): Query<AccountsQuery>,
-) -> impl IntoResponse {
-    let mut accounts = state
-        .db
-        .get_ranked_threats(&auth.did, 0.0)
-        .await
-        .unwrap_or_default();
+) -> Response {
+    let mut accounts = match state.db.get_ranked_threats(&auth.did, 0.0).await {
+        Ok(accounts) => accounts,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error fetching accounts");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
 
     // Tier filter
     if let Some(ref tier) = params.tier {
@@ -83,6 +85,7 @@ pub async fn list_accounts(
         "page": page,
         "per_page": per_page,
     }))
+    .into_response()
 }
 
 /// GET /api/accounts/:handle — single account by handle.

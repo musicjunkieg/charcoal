@@ -538,7 +538,14 @@ impl Database for PgDatabase {
         .bind(&event.original_post_uri)
         .bind(&event.amplifier_post_uri)
         .bind(&event.amplifier_text)
-        .bind(&event.detected_at)
+        .bind(
+            if event.detected_at.contains('+') || event.detected_at.ends_with('Z') {
+                event.detected_at.clone()
+            } else {
+                // Append UTC offset so PostgreSQL doesn't interpret via session TimeZone
+                format!("{}+00", event.detected_at)
+            },
+        )
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))

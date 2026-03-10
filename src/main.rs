@@ -697,9 +697,17 @@ async fn main() -> Result<()> {
             let user_did = if !config.bluesky_handle.is_empty() {
                 let client =
                     charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
-                resolve_and_register_user(&client, &config, db.as_ref())
-                    .await
-                    .unwrap_or_default()
+                match resolve_and_register_user(&client, &config, db.as_ref()).await {
+                    Ok(did) => did,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            handle = %config.bluesky_handle,
+                            "Could not resolve user DID, showing limited status"
+                        );
+                        String::new()
+                    }
+                }
             } else {
                 String::new()
             };

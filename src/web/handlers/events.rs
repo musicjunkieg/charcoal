@@ -4,11 +4,12 @@
 // AT-URIs in amplifier_post_uri are converted to bsky.app URLs.
 
 use axum::extract::{Query, State};
-use axum::response::IntoResponse;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Deserialize;
 
-use crate::web::{AppState, AuthUser};
+use crate::web::{api_error, AppState, AuthUser};
 
 #[derive(Deserialize, Default)]
 pub struct EventsQuery {
@@ -20,13 +21,15 @@ pub async fn list_events(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Query(params): Query<EventsQuery>,
-) -> impl IntoResponse {
+) -> Response {
     let limit = params.limit.unwrap_or(50).min(500);
-    let events = state
-        .db
-        .get_recent_events(&auth.did, limit as u32)
-        .await
-        .unwrap_or_default();
+    let events = match state.db.get_recent_events(&auth.did, limit as u32).await {
+        Ok(events) => events,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error listing events");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
 
     let events: Vec<serde_json::Value> = events
         .into_iter()
@@ -48,7 +51,7 @@ pub async fn list_events(
         })
         .collect();
 
-    Json(serde_json::json!({ "events": events }))
+    Json(serde_json::json!({ "events": events })).into_response()
 }
 
 /// Convert an AT-URI to a bsky.app web URL.

@@ -62,8 +62,8 @@ pub async fn run(
     );
 
     let mut seen: HashSet<String> = HashSet::new();
-    // Exclude the protected user and all first-degree followers
-    seen.insert(protected_handle.to_string());
+    // Exclude the protected user (by DID, since dedupe keys are DIDs) and all first-degree followers
+    seen.insert(user_did.to_string());
     for f in &first_degree {
         seen.insert(f.did.clone());
     }
