@@ -37,6 +37,7 @@ pub async fn run(
     client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
     db: &Arc<dyn Database>,
+    user_did: &str,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
     protected_handle: &str,
@@ -56,6 +57,7 @@ pub async fn run(
 
     // Record the scan timestamp
     db.set_scan_state(
+        user_did,
         "last_scan_at",
         &chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
     )
@@ -91,6 +93,7 @@ pub async fn run(
         }
 
         db.insert_amplification_event(
+            user_did,
             &event.event_type,
             &event.amplifier_did,
             &event.amplifier_handle,
@@ -162,7 +165,7 @@ pub async fn run(
                         .iter()
                         .filter(|f| f.handle != protected_handle)
                     {
-                        if db.is_score_stale(&f.did, 7).await.unwrap_or(true) {
+                        if db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
                             // Clone to produce an owned Vec<Follower> — required for
                             // the async move closure in the scoring stream to be
                             // 'static-compatible when called from tokio::spawn.
@@ -218,7 +221,7 @@ pub async fn run(
                     while let Some(result) = stream.next().await {
                         match result {
                             Ok(score) => {
-                                db.upsert_account_score(&score).await?;
+                                db.upsert_account_score(user_did, &score).await?;
                                 accounts_scored += 1;
                             }
                             Err(e) => {

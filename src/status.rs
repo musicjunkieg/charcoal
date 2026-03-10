@@ -10,7 +10,7 @@ use crate::db::Database;
 /// `db_display` is the human-readable database identifier — either a file path
 /// (for SQLite) or a redacted connection URL (for PostgreSQL). The caller is
 /// responsible for redacting credentials before passing the URL.
-pub async fn show(db: &Arc<dyn Database>, db_display: &str) -> Result<()> {
+pub async fn show(db: &Arc<dyn Database>, user_did: &str, db_display: &str) -> Result<()> {
     // Probe the database to detect initialization state. A table_count of 0
     // means the schema hasn't been applied yet. An error means the database
     // can't be reached at all. Both are treated as "not initialized".
@@ -35,7 +35,7 @@ pub async fn show(db: &Arc<dyn Database>, db_display: &str) -> Result<()> {
     }
 
     // Fingerprint status
-    match db.get_fingerprint().await? {
+    match db.get_fingerprint(user_did).await? {
         Some((_json, post_count, updated_at)) => {
             println!(
                 "Fingerprint: built from {} posts (updated {})",
@@ -49,7 +49,7 @@ pub async fn show(db: &Arc<dyn Database>, db_display: &str) -> Result<()> {
     }
 
     // Scored accounts (Elevated tier starts at 15.0)
-    let all_scores = db.get_ranked_threats(0.0).await?;
+    let all_scores = db.get_ranked_threats(user_did, 0.0).await?;
     let elevated_count = all_scores
         .iter()
         .filter(|s| s.threat_score.is_some_and(|t| t >= 15.0))
@@ -61,7 +61,7 @@ pub async fn show(db: &Arc<dyn Database>, db_display: &str) -> Result<()> {
     );
 
     // Recent events
-    let events = db.get_recent_events(5).await?;
+    let events = db.get_recent_events(user_did, 5).await?;
     if events.is_empty() {
         println!("Recent events: none detected yet");
         println!("  Run `charcoal scan` to check for quotes/reposts");
@@ -76,9 +76,9 @@ pub async fn show(db: &Arc<dyn Database>, db_display: &str) -> Result<()> {
     }
 
     // Last scan cursor
-    match db.get_scan_state("notifications_cursor").await? {
+    match db.get_scan_state(user_did, "notifications_cursor").await? {
         Some(_) => {
-            if let Some(last_scan) = db.get_scan_state("last_scan_at").await? {
+            if let Some(last_scan) = db.get_scan_state(user_did, "last_scan_at").await? {
                 println!("Last scan: {}", last_scan);
             }
         }
