@@ -104,6 +104,10 @@ impl PgDatabase {
                     3,
                     include_str!("../../migrations/postgres/0003_behavioral_signals.sql"),
                 ),
+                (
+                    4,
+                    include_str!("../../migrations/postgres/0004_multiuser.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
@@ -165,20 +169,36 @@ impl Database for PgDatabase {
         Ok(row.get::<i64, _>(0))
     }
 
-    async fn get_scan_state(&self, key: &str) -> Result<Option<String>> {
-        let row = sqlx_core::query::query("SELECT value FROM scan_state WHERE key = $1")
-            .bind(key)
-            .fetch_optional(&self.pool)
-            .await?;
+    async fn upsert_user(&self, did: &str, handle: &str) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO users (did, handle) VALUES ($1, $2)
+             ON CONFLICT(did) DO UPDATE SET handle = $2",
+        )
+        .bind(did)
+        .bind(handle)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_scan_state(&self, user_did: &str, key: &str) -> Result<Option<String>> {
+        let row = sqlx_core::query::query(
+            "SELECT value FROM scan_state WHERE user_did = $1 AND key = $2",
+        )
+        .bind(user_did)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(|r| r.get::<String, _>(0)))
     }
 
-    async fn set_scan_state(&self, key: &str, value: &str) -> Result<()> {
+    async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()> {
         sqlx_core::query::query(
-            "INSERT INTO scan_state (key, value, updated_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT(key) DO UPDATE SET value = $2, updated_at = NOW()",
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT(user_did, key) DO UPDATE SET value = $3, updated_at = NOW()",
         )
+        .bind(user_did)
         .bind(key)
         .bind(value)
         .execute(&self.pool)
@@ -186,15 +206,21 @@ impl Database for PgDatabase {
         Ok(())
     }
 
-    async fn save_fingerprint(&self, fingerprint_json: &str, post_count: u32) -> Result<()> {
+    async fn save_fingerprint(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+    ) -> Result<()> {
         sqlx_core::query::query(
-            "INSERT INTO topic_fingerprint (id, fingerprint_json, post_count, updated_at)
-             VALUES (1, $1, $2, NOW())
-             ON CONFLICT(id) DO UPDATE SET
-                fingerprint_json = $1,
-                post_count = $2,
+            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, updated_at)
+             VALUES ($1, $2, $3, NOW())
+             ON CONFLICT(user_did) DO UPDATE SET
+                fingerprint_json = $2,
+                post_count = $3,
                 updated_at = NOW()",
         )
+        .bind(user_did)
         .bind(fingerprint_json)
         .bind(i32::try_from(post_count).context("post_count exceeds i32 range")?)
         .execute(&self.pool)
@@ -202,14 +228,16 @@ impl Database for PgDatabase {
         Ok(())
     }
 
-    async fn save_embedding(&self, embedding: &[f64]) -> Result<()> {
+    async fn save_embedding(&self, user_did: &str, embedding: &[f64]) -> Result<()> {
         // Convert f64 to f32 for pgvector (which uses 32-bit floats)
         let floats: Vec<f32> = embedding.iter().map(|&v| v as f32).collect();
         let vector = pgvector::Vector::from(floats);
         let result = sqlx_core::query::query(
-            "UPDATE topic_fingerprint SET embedding_vector = $1, updated_at = NOW() WHERE id = 1",
+            "UPDATE topic_fingerprint SET embedding_vector = $1, updated_at = NOW()
+             WHERE user_did = $2",
         )
         .bind(vector)
+        .bind(user_did)
         .execute(&self.pool)
         .await?;
         if result.rows_affected() == 0 {
@@ -220,12 +248,13 @@ impl Database for PgDatabase {
         Ok(())
     }
 
-    async fn get_fingerprint(&self) -> Result<Option<(String, u32, String)>> {
+    async fn get_fingerprint(&self, user_did: &str) -> Result<Option<(String, u32, String)>> {
         let row = sqlx_core::query::query(
             "SELECT fingerprint_json, post_count,
                     to_char(updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
-             FROM topic_fingerprint WHERE id = 1",
+             FROM topic_fingerprint WHERE user_did = $1",
         )
+        .bind(user_did)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -238,11 +267,13 @@ impl Database for PgDatabase {
         }))
     }
 
-    async fn get_embedding(&self) -> Result<Option<Vec<f64>>> {
-        let row =
-            sqlx_core::query::query("SELECT embedding_vector FROM topic_fingerprint WHERE id = 1")
-                .fetch_optional(&self.pool)
-                .await?;
+    async fn get_embedding(&self, user_did: &str) -> Result<Option<Vec<f64>>> {
+        let row = sqlx_core::query::query(
+            "SELECT embedding_vector FROM topic_fingerprint WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_optional(&self.pool)
+        .await?;
 
         match row {
             Some(r) => {
@@ -253,7 +284,7 @@ impl Database for PgDatabase {
         }
     }
 
-    async fn upsert_account_score(&self, score: &AccountScore) -> Result<()> {
+    async fn upsert_account_score(&self, user_did: &str, score: &AccountScore) -> Result<()> {
         let top_posts_json = serde_json::to_value(&score.top_toxic_posts)?;
         let behavioral_json: Option<serde_json::Value> = score
             .behavioral_signals
@@ -262,20 +293,21 @@ impl Database for PgDatabase {
 
         sqlx_core::query::query(
             "INSERT INTO account_scores
-                (did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                  posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
-             ON CONFLICT(did) DO UPDATE SET
-                handle = $2,
-                toxicity_score = $3,
-                topic_overlap = $4,
-                threat_score = $5,
-                threat_tier = $6,
-                posts_analyzed = $7,
-                top_toxic_posts = $8,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
+             ON CONFLICT(user_did, did) DO UPDATE SET
+                handle = $3,
+                toxicity_score = $4,
+                topic_overlap = $5,
+                threat_score = $6,
+                threat_tier = $7,
+                posts_analyzed = $8,
+                top_toxic_posts = $9,
                 scored_at = NOW(),
-                behavioral_signals = $9",
+                behavioral_signals = $10",
         )
+        .bind(user_did)
         .bind(&score.did)
         .bind(&score.handle)
         .bind(score.toxicity_score)
@@ -290,16 +322,21 @@ impl Database for PgDatabase {
         Ok(())
     }
 
-    async fn get_ranked_threats(&self, min_score: f64) -> Result<Vec<AccountScore>> {
+    async fn get_ranked_threats(
+        &self,
+        user_did: &str,
+        min_score: f64,
+    ) -> Result<Vec<AccountScore>> {
         let rows = sqlx_core::query::query(
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals
              FROM account_scores
-             WHERE threat_score >= $1
+             WHERE user_did = $1 AND threat_score >= $2
              ORDER BY threat_score DESC",
         )
+        .bind(user_did)
         .bind(min_score)
         .fetch_all(&self.pool)
         .await?;
@@ -333,13 +370,14 @@ impl Database for PgDatabase {
         Ok(accounts)
     }
 
-    async fn is_score_stale(&self, did: &str, max_age_days: i64) -> Result<bool> {
-        // Use make_interval(days => $2) with a bound i32 instead of string
+    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool> {
+        // Use make_interval(days => $3) with a bound i32 instead of string
         // concatenation — avoids SQL injection risk and type ambiguity.
         let row = sqlx_core::query::query(
-            "SELECT scored_at < NOW() - make_interval(days => $2)
-             FROM account_scores WHERE did = $1",
+            "SELECT scored_at < NOW() - make_interval(days => $3)
+             FROM account_scores WHERE user_did = $1 AND did = $2",
         )
+        .bind(user_did)
         .bind(did)
         .bind(max_age_days as i32)
         .fetch_optional(&self.pool)
@@ -353,6 +391,7 @@ impl Database for PgDatabase {
 
     async fn insert_amplification_event(
         &self,
+        user_did: &str,
         event_type: &str,
         amplifier_did: &str,
         amplifier_handle: &str,
@@ -362,11 +401,12 @@ impl Database for PgDatabase {
     ) -> Result<i64> {
         let row = sqlx_core::query::query(
             "INSERT INTO amplification_events
-                (event_type, amplifier_did, amplifier_handle, original_post_uri,
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
                  amplifier_post_uri, amplifier_text)
-             VALUES ($1, $2, $3, $4, $5, $6)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING id",
         )
+        .bind(user_did)
         .bind(event_type)
         .bind(amplifier_did)
         .bind(amplifier_handle)
@@ -378,7 +418,11 @@ impl Database for PgDatabase {
         Ok(row.get::<i64, _>(0))
     }
 
-    async fn get_recent_events(&self, limit: u32) -> Result<Vec<AmplificationEvent>> {
+    async fn get_recent_events(
+        &self,
+        user_did: &str,
+        limit: u32,
+    ) -> Result<Vec<AmplificationEvent>> {
         // Cap at i32::MAX before casting to avoid overflow — PostgreSQL LIMIT
         // accepts i64 but sqlx binds integers as i32 here. Values above i32::MAX
         // are effectively unlimited for any realistic dataset.
@@ -388,9 +432,11 @@ impl Database for PgDatabase {
                     to_char(detected_at, 'YYYY-MM-DD HH24:MI:SS') as detected_at,
                     followers_fetched, followers_scored
              FROM amplification_events
+             WHERE user_did = $1
              ORDER BY detected_at DESC
-             LIMIT $1",
+             LIMIT $2",
         )
+        .bind(user_did)
         .bind(limit.min(i32::MAX as u32) as i32)
         .fetch_all(&self.pool)
         .await?;
@@ -413,13 +459,18 @@ impl Database for PgDatabase {
         Ok(events)
     }
 
-    async fn get_events_for_pile_on(&self) -> Result<Vec<(String, String, String)>> {
+    async fn get_events_for_pile_on(
+        &self,
+        user_did: &str,
+    ) -> Result<Vec<(String, String, String)>> {
         let rows = sqlx_core::query::query(
             "SELECT amplifier_did, original_post_uri,
                     to_char(detected_at, 'YYYY-MM-DD HH24:MI:SS') as detected_at
              FROM amplification_events
+             WHERE user_did = $1
              ORDER BY original_post_uri, detected_at",
         )
+        .bind(user_did)
         .fetch_all(&self.pool)
         .await?;
 
@@ -435,7 +486,7 @@ impl Database for PgDatabase {
             .collect())
     }
 
-    async fn get_median_engagement(&self) -> Result<f64> {
+    async fn get_median_engagement(&self, user_did: &str) -> Result<f64> {
         // Use percentile_cont for a true median calculation
         let row = sqlx_core::query::query(
             "SELECT COALESCE(
@@ -445,16 +496,19 @@ impl Database for PgDatabase {
                 0.0
              )
              FROM account_scores
-             WHERE behavioral_signals IS NOT NULL
+             WHERE user_did = $1
+               AND behavioral_signals IS NOT NULL
                AND behavioral_signals->>'avg_engagement' IS NOT NULL",
         )
+        .bind(user_did)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<f64, _>(0))
     }
 
-    async fn get_all_scan_state(&self) -> Result<Vec<(String, String)>> {
-        let rows = sqlx_core::query::query("SELECT key, value FROM scan_state")
+    async fn get_all_scan_state(&self, user_did: &str) -> Result<Vec<(String, String)>> {
+        let rows = sqlx_core::query::query("SELECT key, value FROM scan_state WHERE user_did = $1")
+            .bind(user_did)
             .fetch_all(&self.pool)
             .await?;
         Ok(rows
@@ -463,16 +517,21 @@ impl Database for PgDatabase {
             .collect())
     }
 
-    async fn insert_amplification_event_raw(&self, event: &AmplificationEvent) -> Result<i64> {
+    async fn insert_amplification_event_raw(
+        &self,
+        user_did: &str,
+        event: &AmplificationEvent,
+    ) -> Result<i64> {
         // Insert with the original detected_at so migrated events keep their
         // real timestamps. Pile-on detection depends on accurate timestamps.
         let row = sqlx_core::query::query(
             "INSERT INTO amplification_events
-                (event_type, amplifier_did, amplifier_handle, original_post_uri,
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
                  amplifier_post_uri, amplifier_text, detected_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
              RETURNING id",
         )
+        .bind(user_did)
         .bind(&event.event_type)
         .bind(&event.amplifier_did)
         .bind(&event.amplifier_handle)
@@ -485,16 +544,21 @@ impl Database for PgDatabase {
         Ok(row.get::<i64, _>(0))
     }
 
-    async fn get_account_by_handle(&self, handle: &str) -> Result<Option<AccountScore>> {
+    async fn get_account_by_handle(
+        &self,
+        user_did: &str,
+        handle: &str,
+    ) -> Result<Option<AccountScore>> {
         let row = sqlx_core::query::query(
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals
              FROM account_scores
-             WHERE lower(handle) = lower($1)
+             WHERE user_did = $1 AND lower(handle) = lower($2)
              LIMIT 1",
         )
+        .bind(user_did)
         .bind(handle)
         .fetch_optional(&self.pool)
         .await?;
@@ -521,16 +585,17 @@ impl Database for PgDatabase {
         }))
     }
 
-    async fn get_account_by_did(&self, did: &str) -> Result<Option<AccountScore>> {
+    async fn get_account_by_did(&self, user_did: &str, did: &str) -> Result<Option<AccountScore>> {
         let row = sqlx_core::query::query(
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals
              FROM account_scores
-             WHERE did = $1
+             WHERE user_did = $1 AND did = $2
              LIMIT 1",
         )
+        .bind(user_did)
         .bind(did)
         .fetch_optional(&self.pool)
         .await?;
