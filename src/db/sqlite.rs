@@ -41,6 +41,11 @@ impl Database for SqliteDatabase {
         super::queries::upsert_user(&conn, did, handle)
     }
 
+    async fn get_user_handle(&self, did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_user_handle(&conn, did)
+    }
+
     async fn get_scan_state(&self, user_did: &str, key: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().await;
         super::queries::get_scan_state(&conn, user_did, key)

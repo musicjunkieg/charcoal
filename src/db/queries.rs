@@ -24,6 +24,18 @@ pub fn upsert_user(conn: &Connection, did: &str, handle: &str) -> Result<()> {
     Ok(())
 }
 
+/// Look up a user's handle by DID. Returns None if the user is not registered.
+pub fn get_user_handle(conn: &Connection, did: &str) -> Result<Option<String>> {
+    let handle = conn
+        .query_row(
+            "SELECT handle FROM users WHERE did = ?1",
+            params![did],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(handle)
+}
+
 // --- Scan state ---
 
 /// Get a scan state value by key (e.g., "notifications_cursor") for a specific user.

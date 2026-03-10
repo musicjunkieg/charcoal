@@ -13,7 +13,7 @@ use axum::{Extension, Json};
 use chrono::Utc;
 
 use crate::web::scan_job::launch_scan;
-use crate::web::{AppState, AuthUser};
+use crate::web::{api_error, AppState, AuthUser};
 
 /// POST /api/scan — start a background threat scan.
 pub async fn trigger_scan(
@@ -30,6 +30,21 @@ pub async fn trigger_scan(
             .into_response();
     }
 
+    // Look up the authenticated user's handle for the scan pipeline.
+    let actor_handle = match state.db.get_user_handle(&auth.did).await {
+        Ok(Some(handle)) => handle,
+        Ok(None) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "User not found — re-authenticate",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "DB error looking up user handle");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+
     status.running = true;
     status.started_at = Some(Utc::now().to_rfc3339());
     status.progress_message = "Starting scan…".to_string();
@@ -41,6 +56,7 @@ pub async fn trigger_scan(
         state.db.clone(),
         state.scan_status.clone(),
         auth.did,
+        actor_handle,
     );
 
     (

@@ -25,6 +25,9 @@ pub trait Database: Send + Sync {
     /// Create or update a user record (DID + handle).
     async fn upsert_user(&self, did: &str, handle: &str) -> Result<()>;
 
+    /// Look up a user's handle by DID. Returns None if the user is not registered.
+    async fn get_user_handle(&self, did: &str) -> Result<Option<String>>;
+
     // --- Scan state ---
 
     /// Get a scan state value by key for a specific user (e.g., "notifications_cursor").

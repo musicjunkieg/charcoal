@@ -181,6 +181,14 @@ impl Database for PgDatabase {
         Ok(())
     }
 
+    async fn get_user_handle(&self, did: &str) -> Result<Option<String>> {
+        let row = sqlx_core::query::query("SELECT handle FROM users WHERE did = $1")
+            .bind(did)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get::<String, _>(0)))
+    }
+
     async fn get_scan_state(&self, user_did: &str, key: &str) -> Result<Option<String>> {
         let row = sqlx_core::query::query(
             "SELECT value FROM scan_state WHERE user_did = $1 AND key = $2",

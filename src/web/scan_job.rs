@@ -46,12 +46,19 @@ pub fn launch_scan(
     db: Arc<dyn Database>,
     scan_status: Arc<RwLock<ScanStatus>>,
     user_did: String,
+    actor_handle: String,
 ) {
     tokio::spawn(async move {
-        let result = AssertUnwindSafe(run_scan(config, db, scan_status.clone(), &user_did))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
+        let result = AssertUnwindSafe(run_scan(
+            config,
+            db,
+            scan_status.clone(),
+            &user_did,
+            &actor_handle,
+        ))
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
         if let Err(e) = result {
             error!(error = %e, "Background scan failed");
             let mut status = scan_status.write().await;
@@ -67,6 +74,7 @@ async fn run_scan(
     db: Arc<dyn Database>,
     scan_status: Arc<RwLock<ScanStatus>>,
     user_did: &str,
+    actor_handle: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: load toxicity scorer
     {
@@ -141,8 +149,7 @@ async fn run_scan(
     let constellation =
         crate::constellation::client::ConstellationClient::new(&config.constellation_url)?;
 
-    let posts =
-        crate::bluesky::posts::fetch_recent_posts(&client, &config.bluesky_handle, 50).await?;
+    let posts = crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50).await?;
     let post_uris: Vec<String> = posts.iter().map(|p| p.uri.clone()).collect();
 
     let mut events = constellation.find_amplification_events(&post_uris).await;
@@ -194,7 +201,7 @@ async fn run_scan(
         user_did,
         &fingerprint,
         &weights,
-        &config.bluesky_handle,
+        actor_handle,
         true, // analyze_followers
         50,   // max_followers_per_amplifier
         8,    // concurrency

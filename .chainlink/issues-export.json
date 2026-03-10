@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-03-10T16:23:03.364882188+00:00",
+  "exported_at": "2026-03-10T17:52:05.072761404+00:00",
   "issues": [
+    {
+      "id": 102,
+      "title": "Thread authenticated actor handle through web scan job",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-10T17:27:08.287655995+00:00",
+      "updated_at": "2026-03-10T17:27:08.287655995+00:00",
+      "closed_at": null
+    },
     {
       "id": 101,
       "title": "Fix second round of CodeRabbit findings on PR #14",
