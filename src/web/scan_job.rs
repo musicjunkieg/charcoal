@@ -43,9 +43,10 @@ pub fn launch_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
     scan_status: Arc<RwLock<ScanStatus>>,
+    user_did: String,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run_scan(config, db, scan_status.clone()).await {
+        if let Err(e) = run_scan(config, db, scan_status.clone(), &user_did).await {
             error!(error = %e, "Background scan failed");
             let mut status = scan_status.write().await;
             status.running = false;
@@ -59,6 +60,7 @@ async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
     scan_status: Arc<RwLock<ScanStatus>>,
+    user_did: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: load toxicity scorer
     {
@@ -84,7 +86,7 @@ async fn run_scan(
         s.progress_message = "Loading topic fingerprint…".to_string();
     }
 
-    let fingerprint: TopicFingerprint = match db.get_fingerprint().await? {
+    let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
         Some((json, _, _)) => serde_json::from_str(&json)?,
         None => anyhow::bail!("No fingerprint found. Run `charcoal fingerprint` first."),
     };
@@ -121,7 +123,7 @@ async fn run_scan(
         None
     };
 
-    let protected_embedding = match db.get_embedding().await {
+    let protected_embedding = match db.get_embedding(user_did).await {
         Ok(Some(v)) => Some(v),
         _ => None,
     };
@@ -171,8 +173,11 @@ async fn run_scan(
         s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
     }
 
-    let median_engagement = db.get_median_engagement().await.unwrap_or(0.0);
-    let pile_on_refs = db.get_events_for_pile_on().await.unwrap_or_default();
+    let median_engagement = db.get_median_engagement(user_did).await.unwrap_or(0.0);
+    let pile_on_refs = db
+        .get_events_for_pile_on(user_did)
+        .await
+        .unwrap_or_default();
     let pile_on_dids: HashSet<String> = detect_pile_on_participants(
         &pile_on_refs
             .iter()
@@ -186,6 +191,7 @@ async fn run_scan(
         &client,
         scorer.as_ref(),
         &db,
+        user_did,
         &fingerprint,
         &weights,
         &config.bluesky_handle,

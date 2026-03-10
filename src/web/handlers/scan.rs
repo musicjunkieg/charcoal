@@ -9,14 +9,17 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
+use axum::{Extension, Json};
 use chrono::Utc;
 
 use crate::web::scan_job::launch_scan;
-use crate::web::AppState;
+use crate::web::{AppState, AuthUser};
 
 /// POST /api/scan — start a background threat scan.
-pub async fn trigger_scan(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn trigger_scan(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> impl IntoResponse {
     let mut status = state.scan_status.write().await;
 
     if status.running {
@@ -37,6 +40,7 @@ pub async fn trigger_scan(State(state): State<AppState>) -> impl IntoResponse {
         state.config.clone(),
         state.db.clone(),
         state.scan_status.clone(),
+        auth.did,
     );
 
     (

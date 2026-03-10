@@ -5,10 +5,10 @@
 
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
-use axum::Json;
+use axum::{Extension, Json};
 use serde::Deserialize;
 
-use crate::web::AppState;
+use crate::web::{AppState, AuthUser};
 
 #[derive(Deserialize, Default)]
 pub struct EventsQuery {
@@ -18,12 +18,13 @@ pub struct EventsQuery {
 /// GET /api/events — recent amplification events, newest first.
 pub async fn list_events(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
     Query(params): Query<EventsQuery>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(50).min(500);
     let events = state
         .db
-        .get_recent_events(limit as u32)
+        .get_recent_events(&auth.did, limit as u32)
         .await
         .unwrap_or_default();
 
