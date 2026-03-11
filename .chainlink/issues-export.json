@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-03-11T03:11:19.068598236+00:00",
+  "exported_at": "2026-03-11T03:29:20.714642663+00:00",
   "issues": [
     {
-      "id": 105,
-      "title": "Move multi-user schema changelog entry from 0.3.0 to Unreleased",
+      "id": 106,
+      "title": "Remove duplicate Axum web server entry from 0.3.0 Changed section",
       "description": null,
       "status": "open",
       "priority": "low",
@@ -13,9 +13,24 @@
         "fix"
       ],
       "comments": [],
-      "created_at": "2026-03-11T03:11:01.543054219+00:00",
-      "updated_at": "2026-03-11T03:11:01.543054219+00:00",
+      "created_at": "2026-03-11T03:29:13.399154583+00:00",
+      "updated_at": "2026-03-11T03:29:13.399154583+00:00",
       "closed_at": null
+    },
+    {
+      "id": 105,
+      "title": "Move multi-user schema changelog entry from 0.3.0 to Unreleased",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-11T03:11:01.543054219+00:00",
+      "updated_at": "2026-03-11T03:11:28.534306810+00:00",
+      "closed_at": "2026-03-11T03:11:28.534306810+00:00"
     },
     {
       "id": 104,
