@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Stable P-256 signing key derived from CHARCOAL_SESSION_SECRET
   - AT Protocol tokens stored in-memory for future XRPC calls
 
+### Changed
+- Multi-user schema redesign (per-user vs shared data) (#49)
+
 ### Fixed
 - Fix ambiguous test count wording and decision graph status typo (#104)
 - Thread authenticated actor handle through web scan job (#102)
@@ -44,7 +47,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - ONNX and embedder model loads wrapped in spawn_blocking to avoid blocking async runtime (#101)
 
 ### Changed
-- Multi-user schema redesign (per-user vs shared data) (#49)
 - Axum web server skeleton (Railway deployment) (#51)
 - Update CLAUDE.md and CHANGELOG for v0.3 web GUI merge (#93)
 - Allow git stash in hook-config (#94)

@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-03-11T03:04:25.935539328+00:00",
+  "exported_at": "2026-03-11T03:11:19.068598236+00:00",
   "issues": [
+    {
+      "id": 105,
+      "title": "Move multi-user schema changelog entry from 0.3.0 to Unreleased",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-11T03:11:01.543054219+00:00",
+      "updated_at": "2026-03-11T03:11:01.543054219+00:00",
+      "closed_at": null
+    },
     {
       "id": 104,
       "title": "Fix ambiguous test count wording and decision graph status typo",
