@@ -1,12 +1,72 @@
 {
   "version": 1,
-  "exported_at": "2026-03-10T17:52:05.072761404+00:00",
+  "exported_at": "2026-03-11T03:29:20.714642663+00:00",
   "issues": [
+    {
+      "id": 106,
+      "title": "Remove duplicate Axum web server entry from 0.3.0 Changed section",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-11T03:29:13.399154583+00:00",
+      "updated_at": "2026-03-11T03:29:13.399154583+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 105,
+      "title": "Move multi-user schema changelog entry from 0.3.0 to Unreleased",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-11T03:11:01.543054219+00:00",
+      "updated_at": "2026-03-11T03:11:28.534306810+00:00",
+      "closed_at": "2026-03-11T03:11:28.534306810+00:00"
+    },
+    {
+      "id": 104,
+      "title": "Fix ambiguous test count wording and decision graph status typo",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-11T03:03:11.649200875+00:00",
+      "updated_at": "2026-03-11T03:03:52.353210896+00:00",
+      "closed_at": "2026-03-11T03:03:52.353210896+00:00"
+    },
+    {
+      "id": 103,
+      "title": "Update CLAUDE.md test count and schema version after multi-user merge",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-03-10T19:51:02.415966682+00:00",
+      "updated_at": "2026-03-10T19:53:33.263261050+00:00",
+      "closed_at": "2026-03-10T19:53:33.263261050+00:00"
+    },
     {
       "id": 102,
       "title": "Thread authenticated actor handle through web scan job",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -14,8 +74,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-10T17:27:08.287655995+00:00",
-      "updated_at": "2026-03-10T17:27:08.287655995+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-10T17:58:29.102106560+00:00",
+      "closed_at": "2026-03-10T17:58:29.102106560+00:00"
     },
     {
       "id": 101,
@@ -38,8 +98,8 @@
         }
       ],
       "created_at": "2026-03-10T13:24:44.136961484+00:00",
-      "updated_at": "2026-03-10T13:37:41.372426568+00:00",
-      "closed_at": "2026-03-10T13:37:41.372426568+00:00"
+      "updated_at": "2026-03-10T19:38:05.319305016+00:00",
+      "closed_at": "2026-03-10T19:38:05.319305016+00:00"
     },
     {
       "id": 100,
@@ -58,8 +118,8 @@
         }
       ],
       "created_at": "2026-03-10T12:44:46.707780930+00:00",
-      "updated_at": "2026-03-10T13:01:38.736316944+00:00",
-      "closed_at": "2026-03-10T13:01:38.736316944+00:00"
+      "updated_at": "2026-03-10T19:38:05.296121135+00:00",
+      "closed_at": "2026-03-10T19:38:05.296121135+00:00"
     },
     {
       "id": 99,
@@ -835,7 +895,7 @@
       "id": 49,
       "title": "Multi-user schema redesign (per-user vs shared data)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -848,8 +908,8 @@
         }
       ],
       "created_at": "2026-02-18T03:14:35.058233233+00:00",
-      "updated_at": "2026-02-18T03:14:35.058233233+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-10T19:38:05.268733612+00:00",
+      "closed_at": "2026-03-10T19:38:05.268733612+00:00"
     },
     {
       "id": 48,

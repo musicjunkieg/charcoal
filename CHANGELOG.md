@@ -13,7 +13,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Stable P-256 signing key derived from CHARCOAL_SESSION_SECRET
   - AT Protocol tokens stored in-memory for future XRPC calls
 
+### Changed
+- Multi-user schema redesign (per-user vs shared data) (#49)
+
 ### Fixed
+- Move multi-user schema changelog entry from 0.3.0 to Unreleased (#105)
+- Fix ambiguous test count wording and decision graph status typo (#104)
+- Thread authenticated actor handle through web scan job (#102)
+- Fix second round of CodeRabbit findings on PR #14 (#101)
+- Fix CodeRabbit review findings on PR #14 (multi-user schema) (#100)
+- Update CLAUDE.md test counts to note web feature gate (#98)
 - Fix PR #13 review round 2 findings (4 items) (#97)
 - Fix PR #13 review findings (7 items) (#96)
 - Session cookies: startup fails with clear message if CHARCOAL_ALLOWED_DID, CHARCOAL_OAUTH_CLIENT_ID, or CHARCOAL_SESSION_SECRET are missing or too short

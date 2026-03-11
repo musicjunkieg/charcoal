@@ -1550,6 +1550,17 @@
       "created_at": "2026-03-09T03:41:30.359763186+00:00",
       "updated_at": "2026-03-09T03:41:38.130969325+00:00",
       "metadata_json": "{\"branch\":\"feat/v0.4-atproto-oauth\",\"commit\":\"a4bd8c3\",\"confidence\":95}"
+    },
+    {
+      "id": 148,
+      "change_id": "c1248d5f-f00c-46fe-af92-8cd4c28c9504",
+      "node_type": "outcome",
+      "title": "Multi-user schema (v4) merged via PR #14",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-03-10T19:38:13.572010303+00:00",
+      "updated_at": "2026-03-11T03:03:31.138823892+00:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"14d1b8e\",\"confidence\":95,\"files\":[\"src/db/traits.rs\",\"src/db/schema.rs\",\"src/db/sqlite.rs\",\"src/db/postgres.rs\",\"src/db/queries.rs\",\"migrations/postgres/0004_multiuser.sql\"]}"
     }
   ],
   "edges": [
@@ -3015,6 +3026,17 @@
       "weight": 1.0,
       "rationale": "All tasks completed",
       "created_at": "2026-03-09T03:41:35.332299097+00:00"
+    },
+    {
+      "id": 140,
+      "from_node_id": 86,
+      "to_node_id": 148,
+      "from_change_id": "9467ebc1-405b-48b7-817b-8030100c48ee",
+      "to_change_id": "c1248d5f-f00c-46fe-af92-8cd4c28c9504",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Multi-user schema implements the chosen architecture",
+      "created_at": "2026-03-10T19:38:23.813885937+00:00"
     }
   ],
   "documents": [
