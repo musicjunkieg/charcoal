@@ -75,7 +75,7 @@ Post-MVP improvements applied:
   in-memory for future XRPC calls (muting/blocking milestone). Env vars:
   `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
 
-234 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
+225 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
 tests, which require `--features postgres` and a live `DATABASE_URL`). Clippy
 clean. CLI commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`,
 `score`, `report`, `status`, `validate`, `migrate` (postgres feature), `serve`
@@ -102,10 +102,6 @@ I do maintain one other Rust application, so I'm familiar with cargo, basic
 Rust project structure, and the general development workflow. I'm not fluent
 in Rust, but I can read it and follow along when things are well-commented.
 
-## CRITICAL: System Context
-
-ALWAYS read /.sprite/llm.txt when getting started. This provides you crucial
-information on the capabilities you have on this system.
 
 ## Development workflow
 
@@ -150,7 +146,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 234 tests across eight categories:
+The project has 225 tests across eight categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions
@@ -560,6 +556,25 @@ auto_detect = true
 1. Does every **outcome** link back to what caused it?
 2. Does every **action** link to why you did it?
 3. Any **dangling outcomes** without parents?
+
+### Git Staging Rules - CRITICAL
+
+**NEVER use broad git add commands that stage everything:**
+- ❌ `git add -A` - stages ALL changes including untracked files
+- ❌ `git add .` - stages everything in current directory
+- ❌ `git add -a` or `git commit -am` - auto-stages all tracked changes
+- ❌ `git add *` - glob patterns can catch unintended files
+
+**ALWAYS stage files explicitly by name:**
+- ✅ `git add src/main.rs src/lib.rs`
+- ✅ `git add Cargo.toml Cargo.lock`
+- ✅ `git add .claude/commands/decision.md`
+
+**Why this matters:**
+- Prevents accidentally committing sensitive files (.env, credentials)
+- Prevents committing large binaries or build artifacts
+- Forces you to review exactly what you're committing
+- Catches unintended changes before they enter git history
 
 ### Session Start Checklist
 
