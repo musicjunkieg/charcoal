@@ -36,6 +36,7 @@ pub async fn run(
     client: &PublicAtpClient,
     scorer: &dyn ToxicityScorer,
     db: &Arc<dyn Database>,
+    user_did: &str,
     protected_handle: &str,
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
@@ -61,8 +62,8 @@ pub async fn run(
     );
 
     let mut seen: HashSet<String> = HashSet::new();
-    // Exclude the protected user and all first-degree followers
-    seen.insert(protected_handle.to_string());
+    // Exclude the protected user (by DID, since dedupe keys are DIDs) and all first-degree followers
+    seen.insert(user_did.to_string());
     for f in &first_degree {
         seen.insert(f.did.clone());
     }
@@ -105,7 +106,7 @@ pub async fn run(
     // Step 3: Filter to accounts with stale or missing scores
     let mut stale = Vec::new();
     for f in &second_degree_pool {
-        if db.is_score_stale(&f.did, 7).await.unwrap_or(true) {
+        if db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
             stale.push(f);
         }
     }
@@ -157,7 +158,7 @@ pub async fn run(
     while let Some(result) = stream.next().await {
         match result {
             Ok(score) => {
-                db.upsert_account_score(&score).await?;
+                db.upsert_account_score(user_did, &score).await?;
                 accounts_scored += 1;
             }
             Err(e) => {

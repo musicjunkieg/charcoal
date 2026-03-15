@@ -6,13 +6,16 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 
-use crate::web::{api_error, AppState};
+use crate::web::{api_error, AppState, AuthUser};
 
 /// GET /api/fingerprint — return the stored topic fingerprint.
-pub async fn get_fingerprint(State(state): State<AppState>) -> Response {
-    match state.db.get_fingerprint().await {
+pub async fn get_fingerprint(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Response {
+    match state.db.get_fingerprint(&auth.did).await {
         Ok(Some((json, post_count, updated_at))) => {
             // Parse the fingerprint JSON to return it as a structured object.
             let fingerprint: serde_json::Value = match serde_json::from_str(&json) {
