@@ -1,12 +1,276 @@
 {
   "version": 1,
-  "exported_at": "2026-03-11T03:29:20.714642663+00:00",
+  "exported_at": "2026-03-16T00:46:58.820616+00:00",
   "issues": [
+    {
+      "id": 120,
+      "title": "Add GitHub Actions CI and branch protection for main",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-03-15T23:58:56.845492+00:00",
+      "updated_at": "2026-03-15T23:58:56.845492+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 119,
+      "title": "Update README documentation for new M4 Pro Mac Mini setup",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-03-15T23:52:20.122423+00:00",
+      "updated_at": "2026-03-15T23:52:20.122423+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 118,
+      "title": "Sync databases to Tigris",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-11T04:13:52.724505391+00:00",
+      "updated_at": "2026-03-11T04:14:27.240437374+00:00",
+      "closed_at": "2026-03-11T04:14:27.240437374+00:00"
+    },
+    {
+      "id": 117,
+      "title": "Stop charcoal server",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-11T04:13:17.243641042+00:00",
+      "updated_at": "2026-03-11T04:13:24.331886160+00:00",
+      "closed_at": "2026-03-11T04:13:24.331886160+00:00"
+    },
+    {
+      "id": 116,
+      "title": "Add user feedback on toxicity scores — flag and comment on misscored posts",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Users are already seeing toxicity scores that don't match their intuition about what's actually toxic. The ONNX model (unbiased-toxic-roberta) has known blind spots — it may flag assertive language as toxic or miss subtle hostility like sealioning. Users need a way to: (1) Flag a post as incorrectly scored (too high or too low), (2) Add a comment explaining why ('this is sarcasm, not a threat' or 'this is concern trolling, should be higher'), (3) These flags should be stored per-user in the DB and surfaced in the UI. Future use: flagged posts become training signal for model fine-tuning or rule-based score adjustments. This is critical for trust — users won't rely on a tool that flags their allies as threats with no recourse. Needs: new DB table (user_post_flags: user_did, post_uri, flag_type, comment, created_at), API endpoints (POST /api/flag, GET /api/flags), UI buttons on post cards in the account detail view.",
+          "created_at": "2026-03-11T04:12:20.843933395+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:12:04.324001551+00:00",
+      "updated_at": "2026-03-11T04:12:04.324001551+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 115,
+      "title": "Define Railway deploy strategy with clear scaling path",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Need a documented deploy strategy for Railway that doesn't require rearchitecting to scale. Key questions: (1) Single Railway service with Postgres addon, or separate web + worker services? (2) How do ONNX models get loaded — persistent volume, download on boot, or baked into Docker image? (3) Scaling path: can we horizontally scale web servers while keeping a single scan worker queue? (4) Background scan jobs — currently in-process via tokio::spawn. For scaling, may need a job queue (Redis/Postgres-based) so multiple instances don't double-scan. (5) Railway-specific: Nixpacks vs Dockerfile, health checks, deploy hooks, env var management. The goal is: deploy works on day one with a single instance, and when load increases we can add instances without code changes — just config.",
+          "created_at": "2026-03-11T04:12:12.947893968+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:12:03.562065672+00:00",
+      "updated_at": "2026-03-11T04:12:03.562065672+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 114,
+      "title": "Add manual handle scoring — let users score individual accounts on demand",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Users should be able to enter a Bluesky handle and score that specific account on demand, without running a full scan. Use case: 'this person just showed up in my mentions, are they a threat?' Flow: (1) UI input field on the dashboard or a dedicated page, (2) Backend resolves handle to DID, fetches their posts, runs toxicity + topic overlap + behavioral analysis against the logged-in user's fingerprint, (3) Returns the score and tier immediately. This is a single-account version of the scan pipeline. Needs: new API endpoint (POST /api/score-handle), frontend input component, and the pipeline logic refactored to work on a single account (currently it's batch-oriented from amplification events).",
+          "created_at": "2026-03-11T04:07:57.501259966+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:07:49.407318044+00:00",
+      "updated_at": "2026-03-11T04:07:49.407318044+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 113,
+      "title": "Add onboarding tutorial for new users",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "First-time user tutorial flow. Should cover: (1) What Charcoal does — predictive threat detection for your Bluesky account. (2) How to sign in via Bluesky OAuth. (3) What happens when you trigger a scan — it analyzes your recent posts, finds who's amplifying them, scores for toxicity and topic overlap. (4) How to read the dashboard — tier levels (High/Elevated/Watch/Low), what they mean. (5) How to use the account detail page — behavioral signals, toxic posts, evidence. Could be: an in-app walkthrough (tooltip/modal sequence), a static help page, or a brief markdown doc linked from the dashboard. In-app walkthrough would be the best UX.",
+          "created_at": "2026-03-11T04:05:05.913136507+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:04:45.773539380+00:00",
+      "updated_at": "2026-03-11T04:04:45.773539380+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 112,
+      "title": "Add ONNX model download strategy for Railway deployment",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "The two ONNX models (toxicity ~126MB, embeddings ~90MB) need to be available on Railway. Options: (1) Download on first boot via charcoal download-model — adds cold start latency but no storage config needed. (2) Railway persistent volume mounted at the model directory. (3) Bundle in Docker image — increases image size by ~216MB but zero cold start. Recommend option 1 with a health check that waits for models, or option 2 with Railway volume. The model paths are configured via dirs crate (data_dir), need to verify Railway's filesystem behavior.",
+          "created_at": "2026-03-11T04:05:00.815474769+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:04:45.484870190+00:00",
+      "updated_at": "2026-03-11T04:04:45.484870190+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 111,
+      "title": "Convert CHARCOAL_ALLOWED_DID single-user gate to multi-user allowlist",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Currently CHARCOAL_ALLOWED_DID accepts a single DID string and rejects all other logins. For multi-user alpha, convert this to an allowlist: comma-separated DIDs in the env var, or a database table of approved users. Consider: (1) env var approach is simpler but requires redeploy to add users, (2) DB table approach allows adding users at runtime via an admin endpoint. Either way, the OAuth callback handler in src/web/handlers/oauth.rs needs to check against the list instead of a single string equality.",
+          "created_at": "2026-03-11T04:04:55.394117596+00:00"
+        },
+        {
+          "content": "UPDATE: Alpha will be open to the public — no allowlist needed. Instead, remove the CHARCOAL_ALLOWED_DID gate entirely so any Bluesky user can sign in via OAuth. The multi-user schema already isolates data per-user via user_did. May want rate limiting or abuse prevention instead of an allowlist.",
+          "created_at": "2026-03-11T04:07:48.215095197+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:04:44.611784296+00:00",
+      "updated_at": "2026-03-11T04:04:44.611784296+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 110,
+      "title": "Add per-tier action config for mute/block/ignore thresholds",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "User-configurable action policy per threat tier. Each tier (Watch, Elevated, High) maps to an action: ignore, mute, or block. Example config:\n\n  High -> block\n  Elevated -> mute\n  Watch -> ignore (or mute)\n  Low -> ignore (always)\n\nThis should be stored per-user in the database (not env vars) so different protected users can have different policies. The web UI needs a settings page to configure this. The config feeds into #109 (block/mute XRPC actions) — when a scan completes and scores are assigned, the system checks each account's tier against the user's policy and queues the appropriate action.\n\nDepends on #109 (block/mute XRPC implementation) for the actual action execution.",
+          "created_at": "2026-03-11T04:01:57.195612162+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T04:01:49.334030054+00:00",
+      "updated_at": "2026-03-11T04:01:49.334030054+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 109,
+      "title": "Add block and mute actions via AT Protocol XRPC",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Future milestone: use the AT Protocol OAuth tokens stored in-memory (from v0.4 OAuth) to make authenticated XRPC calls for blocking and muting accounts. Relevant endpoints: app.bsky.graph.muteActor, com.atproto.repo.createRecord (app.bsky.graph.block). Requires: (1) token refresh flow (access tokens expire), (2) DPoP-bound requests, (3) UI buttons on account detail page and possibly bulk actions on the accounts list. The atproto-oauth crate already stores tokens — they just need to be wired into action endpoints.",
+          "created_at": "2026-03-11T03:59:10.567940640+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T03:58:55.484576632+00:00",
+      "updated_at": "2026-03-11T03:58:55.484576632+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 108,
+      "title": "Add auto-refresh and new account indicators to dashboard after scan",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Current behavior: after a scan completes, the user must manually refresh the page to see updated tier counts and new accounts. Expected: (1) Dashboard should auto-refresh tier counts and account list when scan_running transitions from true to false. (2) Show 'X new' badges on each tier level indicating how many accounts were newly scored or changed tier since the last view. This requires tracking the previous tier counts (or a 'last seen' timestamp) client-side and comparing after refresh.",
+          "created_at": "2026-03-11T03:59:06.119534728+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T03:58:54.856475390+00:00",
+      "updated_at": "2026-03-11T03:58:54.856475390+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 107,
+      "title": "Add separate dashboard tab for accounts with unresolvable DIDs",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Accounts whose DIDs can't be resolved to handles (deleted accounts, deactivated, PDS offline, etc.) currently get mixed in with scored accounts or silently dropped. They should be separated into their own tab/section on the web dashboard so users can see them without polluting the main threat list. This also avoids confusion when an account shows a raw DID instead of a handle.",
+          "created_at": "2026-03-11T03:44:14.853103153+00:00"
+        },
+        {
+          "content": "Additional context: unresolvable DIDs aren't always deleted/deactivated. They could also be accounts that have blocked the protected user (or that the protected user has blocked). Resolution should attempt to distinguish the reason: (1) DID doesn't resolve at plc.directory = truly gone, (2) DID resolves but PDS returns auth-required or blocked = likely a block relationship, (3) DID resolves but handle is invalid/empty = deactivated. For blocked accounts, try to determine direction — they blocked us vs we blocked them (the latter is less likely to be a threat but still worth surfacing).",
+          "created_at": "2026-03-11T03:45:25.914182734+00:00"
+        }
+      ],
+      "created_at": "2026-03-11T03:44:10.003278176+00:00",
+      "updated_at": "2026-03-11T03:44:10.003278176+00:00",
+      "closed_at": null
+    },
     {
       "id": 106,
       "title": "Remove duplicate Axum web server entry from 0.3.0 Changed section",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "low",
       "parent_id": null,
       "labels": [
@@ -14,8 +278,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-11T03:29:13.399154583+00:00",
-      "updated_at": "2026-03-11T03:29:13.399154583+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-11T03:29:31.313665635+00:00",
+      "closed_at": "2026-03-11T03:29:31.313665635+00:00"
     },
     {
       "id": 105,
@@ -850,6 +1114,10 @@
         {
           "content": "Current Arc<Mutex<Session>> + spawn_blocking is correct for serialized inference. Per the architecture recommendations doc, a semaphore with N=2-4 concurrent sessions is the next step when contention is observed. Not needed until multi-user alpha has real concurrent users.",
           "created_at": "2026-03-10T03:54:36.195531331+00:00"
+        },
+        {
+          "content": "UPDATE: Priority increased — open public alpha means multiple users scanning concurrently. The single Mutex on ONNX models will be a real bottleneck, not a theoretical one.",
+          "created_at": "2026-03-11T04:08:03.853761015+00:00"
         }
       ],
       "created_at": "2026-02-18T03:14:42.053989449+00:00",

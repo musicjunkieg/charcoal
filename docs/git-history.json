@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e7df2409d50dfcaa5fc168a7abfedf950e42c13c",
+    "short_hash": "e7df240",
+    "author": "chaos gremlin",
+    "date": "2026-03-10T20:37:15-07:00",
+    "message": "docs: update test count to 234 after multi-user schema merge (#15)\n\n* docs: update test count to 234 after multi-user schema merge\n\n* fix: clarify test count wording and fix decision graph status typo\n\n- CLAUDE.md: specify exact test command (cargo test --features web) and note\n  PostgreSQL tests are counted separately\n- graph-data.json: fix node 148 status \"complete\" -> \"completed\" for consistency\n\n* fix: move multi-user schema entry from 0.3.0 to Unreleased\n\nMulti-user schema (PR #14) merged 2026-03-10, after the 0.3.0 release\ndate of 2026-03-07. Moves the entry to the correct changelog section.\n\n* fix: remove duplicate Axum entry from 0.3.0 Changed section\n\nAlready covered under Added as \"v0.3 web GUI: Axum API server + SvelteKit\ndashboard\". Removes the redundant #51 entry from Changed.",
+    "files_changed": 5
+  },
+  {
     "hash": "14d1b8ee7cdbbacc2f133dd87dffaf4083b5b081",
     "short_hash": "14d1b8e",
     "author": "chaos gremlin",
@@ -8,68 +16,12 @@
     "files_changed": 20
   },
   {
-    "hash": "a4bd8c37262ff53f38f1a8e15e25822a801ac15c",
-    "short_hash": "a4bd8c3",
-    "author": "musicjunkieg",
-    "date": "2026-03-09T02:02:34Z",
-    "message": "chore: add service wrapper script for charcoal serve",
-    "files_changed": 2
-  },
-  {
-    "hash": "d79585668198f785b2d322f7fb9f3c561db9607a",
-    "short_hash": "d795856",
-    "author": "musicjunkieg",
-    "date": "2026-03-08T00:37:59Z",
-    "message": "chore: add atproto-oauth, atproto-oauth-axum, atproto-identity, base64 deps\n\nGated on the web feature. These power the AT Protocol OAuth flow\nthat replaces password auth in v0.4.",
-    "files_changed": 5
-  },
-  {
-    "hash": "17b1ad638d16f206202ba66d2995c9f98a71dc19",
-    "short_hash": "17b1ad6",
-    "author": "musicjunkieg",
-    "date": "2026-03-08T00:30:10Z",
-    "message": "docs: add AT Protocol OAuth implementation plan (v0.4, TDD)",
-    "files_changed": 2
-  },
-  {
-    "hash": "1e0758fc01b581021b19491055f36345bec7eab5",
-    "short_hash": "1e0758f",
-    "author": "musicjunkieg",
-    "date": "2026-03-07T23:02:25Z",
-    "message": "docs: version CHANGELOG into 0.3.0/0.2.0/0.1.0 releases, fix test count in CLAUDE.md\n\n- Promote [Unreleased] to [0.3.0] (2026-03-07): web GUI, scan progress, security fixes\n- Extract [0.2.0] (2026-02-20): behavioral signals, postgres backend, embeddings, validate\n- Extract [0.1.0] (2026-01-31): original 7 MVP phases\n- Fix CLAUDE.md test count: 186 -> 189 (matches current cargo test output)\n- Closes #93",
-    "files_changed": 5
-  },
-  {
-    "hash": "e057e88308ad3218ae22e605b4eef59bf2cebdc7",
-    "short_hash": "e057e88",
-    "author": "musicjunkieg",
-    "date": "2026-03-06T02:58:33Z",
-    "message": "fix: address CodeRabbit security and correctness findings\n\n- Fail startup if CHARCOAL_WEB_PASSWORD is empty or\n  CHARCOAL_SESSION_SECRET is under 32 chars (src/web/mod.rs)\n- Remove HMAC fallback to hardcoded \"fallback\" key; panic instead\n  since an empty key is a misconfiguration, not a recoverable error\n- Drop scan_status RwLock read guard before awaiting DB in get_status\n  to unblock scan job writers during slow queries; return 500 on DB error\n  instead of silently returning empty tier counts\n- Wrap OnnxToxicityScorer::load and SentenceEmbedder::load in\n  spawn_blocking — both are synchronous blocking I/O that should not\n  run on the async runtime\n- robots.txt: Disallow: / — private dashboard should not be indexed\n\nCloses #101",
-    "files_changed": 8
-  },
-  {
-    "hash": "74ea6753ea6523b2e90970827ab67ebef2aaad47",
-    "short_hash": "74ea675",
-    "author": "musicjunkieg",
-    "date": "2026-03-06T02:25:05Z",
-    "message": "feat: scan progress indicator and disable button while running\n\n- Show elapsed time (live 1-second ticker) and progress_message while\n  scan is in progress; subtitle switches to amber \"Scan in progress — Xs\"\n- Disable Trigger Scan button during async window between click and\n  status update; shows \"Starting...\" with not-allowed cursor\n- Both changes confined to dashboard/+page.svelte, no backend changes\n- Closes #97, closes #95",
-    "files_changed": 3
-  },
-  {
     "hash": "64e388dcf95a2003e39dd6858ea3086a8e4b4768",
     "short_hash": "64e388d",
     "author": "chaos gremlin",
     "date": "2026-03-05T21:52:48-08:00",
     "message": "chore: allow git stash in hook-config (#11)\n\nRemoves git stash from the blocked commands list so it can be used\nto safely park uncommitted changes when switching branches, instead\nof having to discard or commit them first.",
     "files_changed": 2
-  },
-  {
-    "hash": "133c254d21d3f68483806bd1b0a2267588ae58d5",
-    "short_hash": "133c254",
-    "author": "musicjunkieg",
-    "date": "2026-02-25T02:07:21Z",
-    "message": "feat: Railway deployment with Railpack closes #87\n\nrailway.toml: buildCommand runs npm ci + npm build first (so web/build/ exists\nfor include_dir! at compile time), then cargo build --release --features web,postgres.\nstartCommand: ./target/release/charcoal serve --port $PORT\nHealth check: /health endpoint, 10s timeout.\n\nscripts/build-web.sh: local dev helper that runs both steps in order.\n\nRequired Railway env vars: DATABASE_URL (auto-provided by Railway Postgres addon),\nBLUESKY_HANDLE, CHARCOAL_WEB_PASSWORD, CHARCOAL_SESSION_SECRET.",
-    "files_changed": 3
   },
   {
     "hash": "bf3be11ff396fd5c0227eee7587fd099a2b6e0b7",

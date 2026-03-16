@@ -1561,6 +1561,28 @@
       "created_at": "2026-03-10T19:38:13.572010303+00:00",
       "updated_at": "2026-03-11T03:03:31.138823892+00:00",
       "metadata_json": "{\"branch\":\"main\",\"commit\":\"14d1b8e\",\"confidence\":95,\"files\":[\"src/db/traits.rs\",\"src/db/schema.rs\",\"src/db/sqlite.rs\",\"src/db/postgres.rs\",\"src/db/queries.rs\",\"migrations/postgres/0004_multiuser.sql\"]}"
+    },
+    {
+      "id": 149,
+      "change_id": "677f8c3a-2206-4da9-944f-8d56a40a2b2c",
+      "node_type": "action",
+      "title": "Fix docs: CLAUDE.md test count wording, CHANGELOG entry placement, duplicate removal, graph node 148 status",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-11T03:39:05.841033597+00:00",
+      "updated_at": "2026-03-11T03:39:05.841033597+00:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"e7df240\",\"confidence\":95}"
+    },
+    {
+      "id": 150,
+      "change_id": "50985143-275c-4abe-9091-cf7b613a35cf",
+      "node_type": "outcome",
+      "title": "All 3 doc fixes merged to main via PR #15. CLAUDE.md test count clarified, multi-user entry moved to Unreleased, duplicate Axum entry removed, node 148 status corrected.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-11T03:39:10.032992809+00:00",
+      "updated_at": "2026-03-11T03:39:10.032992809+00:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"e7df240\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -3037,6 +3059,28 @@
       "weight": 1.0,
       "rationale": "Multi-user schema implements the chosen architecture",
       "created_at": "2026-03-10T19:38:23.813885937+00:00"
+    },
+    {
+      "id": 141,
+      "from_node_id": 148,
+      "to_node_id": 149,
+      "from_change_id": "c1248d5f-f00c-46fe-af92-8cd4c28c9504",
+      "to_change_id": "677f8c3a-2206-4da9-944f-8d56a40a2b2c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Doc fixes triggered by review of node 148 and surrounding docs",
+      "created_at": "2026-03-11T03:39:14.191660510+00:00"
+    },
+    {
+      "id": 142,
+      "from_node_id": 149,
+      "to_node_id": 150,
+      "from_change_id": "677f8c3a-2206-4da9-944f-8d56a40a2b2c",
+      "to_change_id": "50985143-275c-4abe-9091-cf7b613a35cf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action produced outcome",
+      "created_at": "2026-03-11T03:39:14.219931324+00:00"
     }
   ],
   "documents": [
