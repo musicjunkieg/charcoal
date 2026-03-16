@@ -272,6 +272,7 @@ pub fn insert_amplification_event_with_detected_at(
 }
 
 /// Record a new amplification event for a specific user.
+#[allow(clippy::too_many_arguments)]
 pub fn insert_amplification_event(
     conn: &Connection,
     user_did: &str,

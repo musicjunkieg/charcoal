@@ -61,15 +61,19 @@ cargo run -- init
 
 Creates the SQLite database and tables.
 
-### 4. Download the toxicity model
+### 4. Download ONNX models
 
 ```bash
 cargo run -- download-model
 ```
 
-Downloads the ONNX toxicity model (~126 MB) to your local machine. This is a
-one-time step. The model runs entirely locally — no API key needed, no rate
-limits.
+Downloads two ONNX models (~216 MB total) to your local machine:
+- **Toxicity model** — Detoxify unbiased-toxic-roberta (~126 MB) for toxicity scoring
+- **Embedding model** — all-MiniLM-L6-v2 (~90 MB) for semantic topic overlap
+
+This is a one-time step. Both models run entirely locally — no API key needed,
+no rate limits. Files are stored in `~/.local/share/charcoal/models/` (macOS:
+`~/Library/Application Support/charcoal/models/`).
 
 ### 5. Build your topic fingerprint
 
@@ -213,15 +217,72 @@ src/
   db/               SQLite/PostgreSQL backends, schema, queries, and data models
 ```
 
+## Web dashboard (optional)
+
+Charcoal includes a web-based dashboard for browsing scored accounts and
+triggering scans from a browser. It uses AT Protocol OAuth for authentication.
+
+### Build with web support
+
+```bash
+cd web && npm ci && npm run build && cd ..
+cargo build --release --features web
+```
+
+### Configure OAuth
+
+You need three additional environment variables (see `.env.example`):
+
+- `CHARCOAL_ALLOWED_DID` — your Bluesky DID (only this account can sign in)
+- `CHARCOAL_OAUTH_CLIENT_ID` — URL of your OAuth client metadata document
+- `CHARCOAL_SESSION_SECRET` — HMAC signing key for session cookies (generate
+  with `openssl rand -hex 32`)
+
+For local development, use Tailscale Funnel to get a public HTTPS URL:
+
+```bash
+tailscale funnel 3000
+```
+
+Then register that URL as your OAuth client ID.
+
+### Run the dashboard
+
+```bash
+cargo run --features web -- serve
+```
+
+The dashboard is available at `http://localhost:3000` (or your Tailscale Funnel URL).
+
 ## Development
 
 ```bash
 # First-time setup: install git hooks (enforces fmt + clippy + tests)
 ./scripts/install-hooks.sh
 
-cargo test --all-targets  # Run all 139 tests (unit + integration)
-cargo clippy              # Lint
-cargo run -- status       # Quick smoke test
+cargo test --features web   # Run all 225 tests (unit + integration + OAuth)
+cargo clippy                # Lint
+cargo run -- status         # Quick smoke test
+```
+
+### macOS Tahoe / Xcode Beta workaround
+
+On macOS Tahoe with Xcode Beta installed, the linker may fail to find
+`clang_rt.osx`. Fix by setting the library path before build/test commands:
+
+```bash
+export LIBRARY_PATH="/Library/Developer/CommandLineTools/usr/lib/clang/17/lib/darwin:$LIBRARY_PATH"
+```
+
+Add this to your shell profile (`~/.zshrc`) to make it permanent.
+
+### PostgreSQL tests
+
+PostgreSQL integration tests require a live database:
+
+```bash
+DATABASE_URL=postgres://charcoal:charcoal@localhost/charcoal_test \
+  cargo test --all-targets --features postgres
 ```
 
 ## License

@@ -296,7 +296,7 @@ async fn resolve_did_to_pds(http_client: &reqwest::Client, did: &str) -> Result<
             .map_err(|e| format!("Could not resolve DID '{did}': {e}"))?
     } else if did.starts_with("did:web:") {
         // did:web resolution via HTTP
-        let domain = &did["did:web:".len()..];
+        let domain = did.strip_prefix("did:web:").unwrap_or(did);
         let url = format!("https://{}/.well-known/did.json", domain);
         http_client
             .get(&url)
