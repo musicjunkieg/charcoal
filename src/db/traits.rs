@@ -74,6 +74,7 @@ pub trait Database: Send + Sync {
     // --- Amplification events ---
 
     /// Record a new amplification event for a user and return its ID.
+    #[allow(clippy::too_many_arguments)]
     async fn insert_amplification_event(
         &self,
         user_did: &str,
