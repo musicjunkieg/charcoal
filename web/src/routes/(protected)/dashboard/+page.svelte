@@ -156,79 +156,101 @@
 			<div class="spinner large"></div>
 		</div>
 	{:else if status}
-		<!-- Tier Summary Cards -->
-		<div class="tier-grid">
-			<a href="/accounts?tier=High" class="tier-card tier-high">
-				<span class="tier-count">{status.tier_counts.high}</span>
-				<span class="tier-label">High</span>
-			</a>
-			<a href="/accounts?tier=Elevated" class="tier-card tier-elevated">
-				<span class="tier-count">{status.tier_counts.elevated}</span>
-				<span class="tier-label">Elevated</span>
-			</a>
-			<a href="/accounts?tier=Watch" class="tier-card tier-watch">
-				<span class="tier-count">{status.tier_counts.watch}</span>
-				<span class="tier-label">Watch</span>
-			</a>
-			<a href="/accounts?tier=Low" class="tier-card tier-low">
-				<span class="tier-count">{status.tier_counts.low}</span>
-				<span class="tier-label">Low</span>
-			</a>
-		</div>
-
-		<!-- Handle Search -->
-		<div class="search-box">
-			<span class="search-at">@</span>
-			<input
-				type="text"
-				class="search-input"
-				placeholder="Search handle..."
-				bind:value={searchQuery}
-				onkeydown={handleSearch}
-			/>
-			<button class="search-btn" onclick={handleSearch}>Search</button>
-		</div>
-
-		<!-- Recent Events -->
-		{#if events.length > 0}
-			<section class="events-section">
-				<div class="section-header">
-					<h2 class="section-title">Recent Amplification Events</h2>
-					<a href="/accounts" class="section-link">View all accounts →</a>
-				</div>
-
-				<div class="events-list">
-					{#each events as event, i (event.id || i)}
-						<div class="event-row">
-							<div class="event-info">
-								<a
-									href="/accounts/{event.amplifier_handle}"
-									class="event-handle"
-								>@{event.amplifier_handle}</a>
-								<span class="event-type">{event.event_type.replace('_', ' ')}</span>
-								{#if event.amplifier_text}
-									<p class="event-text">"{event.amplifier_text}"</p>
-								{/if}
-							</div>
-							<div class="event-meta">
-								<span class="event-time">{timeAgo(event.detected_at)}</span>
-								{#if event.amplifier_post_uri}
-									<a
-										href={event.amplifier_post_uri}
-										target="_blank"
-										rel="noopener noreferrer"
-										class="event-link"
-									>View post ↗</a>
-								{/if}
-							</div>
-						</div>
-					{/each}
-				</div>
-			</section>
-		{:else}
-			<div class="empty-state">
-				<p>No amplification events yet. Run a scan to detect quotes and reposts.</p>
+		{#if status.tier_counts.total === 0 && !status.scan_running}
+			<!-- First-run welcome screen -->
+			<div class="welcome">
+				<h2 class="welcome-title">Welcome to Charcoal</h2>
+				<p class="welcome-text">
+					Charcoal scans your Bluesky posting history to identify accounts
+					that may engage with your content in hostile ways — before it happens.
+				</p>
+				<p class="welcome-text">
+					Your first scan will analyze your recent posts, find who's amplifying
+					them, and score each account for toxicity and topic overlap. This
+					usually takes a few minutes.
+				</p>
+				<button class="btn-scan btn-scan-welcome" onclick={handleScan} disabled={scanning}>
+					{scanning ? 'Starting…' : 'Start your first scan'}
+				</button>
+				{#if scanError}
+					<p class="scan-error">{scanError}</p>
+				{/if}
 			</div>
+		{:else}
+			<!-- Tier Summary Cards -->
+			<div class="tier-grid">
+				<a href="/accounts?tier=High" class="tier-card tier-high">
+					<span class="tier-count">{status.tier_counts.high}</span>
+					<span class="tier-label">High</span>
+				</a>
+				<a href="/accounts?tier=Elevated" class="tier-card tier-elevated">
+					<span class="tier-count">{status.tier_counts.elevated}</span>
+					<span class="tier-label">Elevated</span>
+				</a>
+				<a href="/accounts?tier=Watch" class="tier-card tier-watch">
+					<span class="tier-count">{status.tier_counts.watch}</span>
+					<span class="tier-label">Watch</span>
+				</a>
+				<a href="/accounts?tier=Low" class="tier-card tier-low">
+					<span class="tier-count">{status.tier_counts.low}</span>
+					<span class="tier-label">Low</span>
+				</a>
+			</div>
+
+			<!-- Handle Search -->
+			<div class="search-box">
+				<span class="search-at">@</span>
+				<input
+					type="text"
+					class="search-input"
+					placeholder="Search handle..."
+					bind:value={searchQuery}
+					onkeydown={handleSearch}
+				/>
+				<button class="search-btn" onclick={handleSearch}>Search</button>
+			</div>
+
+			<!-- Recent Events -->
+			{#if events.length > 0}
+				<section class="events-section">
+					<div class="section-header">
+						<h2 class="section-title">Recent Amplification Events</h2>
+						<a href="/accounts" class="section-link">View all accounts →</a>
+					</div>
+
+					<div class="events-list">
+						{#each events as event, i (event.id || i)}
+							<div class="event-row">
+								<div class="event-info">
+									<a
+										href="/accounts/{event.amplifier_handle}"
+										class="event-handle"
+									>@{event.amplifier_handle}</a>
+									<span class="event-type">{event.event_type.replace('_', ' ')}</span>
+									{#if event.amplifier_text}
+										<p class="event-text">"{event.amplifier_text}"</p>
+									{/if}
+								</div>
+								<div class="event-meta">
+									<span class="event-time">{timeAgo(event.detected_at)}</span>
+									{#if event.amplifier_post_uri}
+										<a
+											href={event.amplifier_post_uri}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="event-link"
+										>View post ↗</a>
+									{/if}
+								</div>
+							</div>
+						{/each}
+					</div>
+				</section>
+			{:else}
+				<div class="empty-state">
+					<p>No amplification events yet. Run a scan to detect quotes and reposts.</p>
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>
@@ -521,6 +543,38 @@
 
 	.scan-in-progress {
 		color: #c9956c;
+	}
+
+	/* Welcome screen */
+	.welcome {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		padding: 4rem 2rem;
+		max-width: 520px;
+		margin: 0 auto;
+	}
+
+	.welcome-title {
+		font-family: 'Libre Baskerville', Georgia, serif;
+		font-size: 1.5rem;
+		font-weight: 400;
+		color: #fffbeb;
+		margin-bottom: 1.25rem;
+	}
+
+	.welcome-text {
+		font-size: 0.9375rem;
+		color: #a8a29e;
+		line-height: 1.6;
+		margin-bottom: 1rem;
+	}
+
+	.btn-scan-welcome {
+		margin-top: 1rem;
+		padding: 0.75rem 2rem;
+		font-size: 1rem;
 	}
 
 	@media (max-width: 640px) {

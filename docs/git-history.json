@@ -1,5 +1,13 @@
 [
   {
+    "hash": "630b17a291c9f01c1829082c90866b7a3ee31d6b",
+    "short_hash": "630b17a",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:26:37-07:00",
+    "message": "fix: register user in DB during OAuth callback\n\nThe OAuth callback authenticated users and set session cookies but\nnever called upsert_user(), so the users table had no row for them.\nThis caused POST /api/scan to fail with \"User not found\".\n\nThread the handle through PendingOAuth and call upsert_user after\nthe DID gate passes. Closes #121.",
+    "files_changed": 3
+  },
+  {
     "hash": "e7df2409d50dfcaa5fc168a7abfedf950e42c13c",
     "short_hash": "e7df240",
     "author": "chaos gremlin",

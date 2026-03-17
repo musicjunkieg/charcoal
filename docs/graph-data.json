@@ -1616,6 +1616,28 @@
       "created_at": "2026-03-17T13:25:46.481044-07:00",
       "updated_at": "2026-03-17T13:25:46.481044-07:00",
       "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/handlers/oauth.rs\"]}"
+    },
+    {
+      "id": 154,
+      "change_id": "91d5169d-0965-4efe-9ba3-98887a9c056b",
+      "node_type": "outcome",
+      "title": "OAuth fix committed: handle threaded through PendingOAuth, upsert_user called in callback. 227 tests pass.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:26:45.368487-07:00",
+      "updated_at": "2026-03-17T13:26:45.368487-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"commit\":\"630b17a\",\"confidence\":95}"
+    },
+    {
+      "id": 155,
+      "change_id": "f7daebf8-aadc-4f01-9b35-22023a762c22",
+      "node_type": "action",
+      "title": "Add first-run welcome screen to dashboard Svelte component",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:27:07.738457-07:00",
+      "updated_at": "2026-03-17T13:27:07.738457-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":85,\"files\":[\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
     }
   ],
   "edges": [
@@ -3136,6 +3158,28 @@
       "weight": 1.0,
       "rationale": "Second action: implement the fix after tests",
       "created_at": "2026-03-17T13:25:51.126518-07:00"
+    },
+    {
+      "id": 145,
+      "from_node_id": 153,
+      "to_node_id": 154,
+      "from_change_id": "bbd9d1e2-e51e-4c0d-8378-6890484869e7",
+      "to_change_id": "91d5169d-0965-4efe-9ba3-98887a9c056b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix implemented and tested",
+      "created_at": "2026-03-17T13:26:49.455373-07:00"
+    },
+    {
+      "id": 146,
+      "from_node_id": 151,
+      "to_node_id": 155,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "f7daebf8-aadc-4f01-9b35-22023a762c22",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Third action: welcome screen UI",
+      "created_at": "2026-03-17T13:27:11.756685-07:00"
     }
   ],
   "documents": [
