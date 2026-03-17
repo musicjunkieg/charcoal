@@ -1605,6 +1605,17 @@
       "created_at": "2026-03-17T13:24:34.923043-07:00",
       "updated_at": "2026-03-17T13:24:34.923043-07:00",
       "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":85,\"files\":[\"src/web/test_helpers.rs\",\"tests/web_oauth.rs\"]}"
+    },
+    {
+      "id": 153,
+      "change_id": "bbd9d1e2-e51e-4c0d-8378-6890484869e7",
+      "node_type": "action",
+      "title": "Implement OAuth callback fix: thread handle through PendingOAuth, call upsert_user",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:25:46.481044-07:00",
+      "updated_at": "2026-03-17T13:25:46.481044-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/handlers/oauth.rs\"]}"
     }
   ],
   "edges": [
@@ -3114,6 +3125,17 @@
       "weight": 1.0,
       "rationale": "First action: write tests before fix",
       "created_at": "2026-03-17T13:24:39.708214-07:00"
+    },
+    {
+      "id": 144,
+      "from_node_id": 151,
+      "to_node_id": 153,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "bbd9d1e2-e51e-4c0d-8378-6890484869e7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second action: implement the fix after tests",
+      "created_at": "2026-03-17T13:25:51.126518-07:00"
     }
   ],
   "documents": [
