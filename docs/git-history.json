@@ -1,5 +1,13 @@
 [
   {
+    "hash": "1b74c64d3b6ddf3e15c765b71166f4271ad99a3f",
+    "short_hash": "1b74c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:35:37-07:00",
+    "message": "feat: add first-run welcome screen for new users\n\nWhen the dashboard loads with zero scored accounts and no scan\nrunning, show a centered welcome message explaining what Charcoal\ndoes and a \"Start your first scan\" button. After the scan starts,\nthe view flips to the normal dashboard with progress indicator.\n\nCloses #113.",
+    "files_changed": 4
+  },
+  {
     "hash": "630b17a291c9f01c1829082c90866b7a3ee31d6b",
     "short_hash": "630b17a",
     "author": "Bryan Guffey",

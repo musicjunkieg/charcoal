@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-17T20:35:37.949685+00:00",
+  "exported_at": "2026-03-17T20:36:31.000473+00:00",
   "issues": [
     {
       "id": 121,
@@ -159,7 +159,7 @@
       "id": 113,
       "title": "Add onboarding tutorial for new users",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -176,8 +176,8 @@
         }
       ],
       "created_at": "2026-03-11T04:04:45.773539380+00:00",
-      "updated_at": "2026-03-11T04:04:45.773539380+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-17T20:35:54.087286+00:00",
+      "closed_at": "2026-03-17T20:35:54.087286+00:00"
     },
     {
       "id": 112,
