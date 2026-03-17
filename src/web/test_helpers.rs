@@ -46,3 +46,32 @@ pub fn build_test_app() -> axum::Router {
 
     build_router(state)
 }
+
+/// Like `build_test_app`, but also returns the DB handle for state inspection.
+pub fn build_test_app_with_db() -> (axum::Router, Arc<dyn crate::db::Database>) {
+    let config = Config {
+        allowed_did: TEST_DID.to_string(),
+        oauth_client_id: TEST_CLIENT_ID.to_string(),
+        session_secret: TEST_SECRET.to_string(),
+        ..Config::test_defaults()
+    };
+
+    let conn =
+        rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
+    create_tables(&conn).expect("schema creation should succeed");
+    let db = Arc::new(SqliteDatabase::new(conn)) as Arc<dyn crate::db::Database>;
+
+    let signing_key =
+        generate_key(KeyType::P256Private).expect("P-256 key generation should succeed");
+
+    let state = AppState {
+        db: db.clone(),
+        config: Arc::new(config),
+        scan_status: Arc::new(RwLock::new(ScanStatus::default())),
+        pending_oauth: Arc::new(RwLock::new(HashMap::new())),
+        oauth_tokens: Arc::new(RwLock::new(None)),
+        signing_key,
+    };
+
+    (build_router(state), db)
+}

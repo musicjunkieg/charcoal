@@ -1,12 +1,32 @@
 {
   "version": 1,
-  "exported_at": "2026-03-16T01:14:02.676127+00:00",
+  "exported_at": "2026-03-17T20:25:33.939833+00:00",
   "issues": [
+    {
+      "id": 121,
+      "title": "Fix OAuth callback to register user in database",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "OAuth callback in src/web/handlers/oauth.rs never calls db.upsert_user() after successful authentication. The handle is resolved during initiate but not stored in PendingOAuth struct, so it's lost by the time callback runs. Fix: (1) Add handle field to PendingOAuth, (2) Store handle in initiate handler, (3) Call state.db.upsert_user(&authenticated_did, &pending.handle) in callback after DID gate passes. Without this fix, any scan triggered via the web UI fails with 'User not found — re-authenticate' because get_user_handle returns None.",
+          "created_at": "2026-03-17T17:33:43.690778+00:00"
+        }
+      ],
+      "created_at": "2026-03-17T17:33:35.937695+00:00",
+      "updated_at": "2026-03-17T17:33:35.937695+00:00",
+      "closed_at": null
+    },
     {
       "id": 120,
       "title": "Add GitHub Actions CI and branch protection for main",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -31,14 +51,14 @@
         }
       ],
       "created_at": "2026-03-15T23:58:56.845492+00:00",
-      "updated_at": "2026-03-15T23:58:56.845492+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-16T01:18:25.587559+00:00",
+      "closed_at": "2026-03-16T01:18:25.587559+00:00"
     },
     {
       "id": 119,
       "title": "Update README documentation for new M4 Pro Mac Mini setup",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -46,8 +66,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-15T23:52:20.122423+00:00",
-      "updated_at": "2026-03-15T23:52:20.122423+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-16T01:18:25.582700+00:00",
+      "closed_at": "2026-03-16T01:18:25.582700+00:00"
     },
     {
       "id": 118,
@@ -149,6 +169,10 @@
         {
           "content": "First-time user tutorial flow. Should cover: (1) What Charcoal does — predictive threat detection for your Bluesky account. (2) How to sign in via Bluesky OAuth. (3) What happens when you trigger a scan — it analyzes your recent posts, finds who's amplifying them, scores for toxicity and topic overlap. (4) How to read the dashboard — tier levels (High/Elevated/Watch/Low), what they mean. (5) How to use the account detail page — behavioral signals, toxic posts, evidence. Could be: an in-app walkthrough (tooltip/modal sequence), a static help page, or a brief markdown doc linked from the dashboard. In-app walkthrough would be the best UX.",
           "created_at": "2026-03-11T04:05:05.913136507+00:00"
+        },
+        {
+          "content": "Design finalized (2026-03-17 brainstorm session): Lightweight first-run flow, not a full wizard. Detection: client-side check — if GET /api/status returns zero accounts AND no scan running, show welcome screen. UI: conditional block in dashboard/+page.svelte (not a separate route). Welcome text: 'Charcoal scans your Bluesky posting history to identify accounts that may engage with your content in hostile ways — before it happens.' + 'Start your first scan' button. On scan start: flip to normal dashboard with progress indicator. Blocked by #121 (OAuth callback must register user in DB first).",
+          "created_at": "2026-03-17T17:33:51.865037+00:00"
         }
       ],
       "created_at": "2026-03-11T04:04:45.773539380+00:00",
