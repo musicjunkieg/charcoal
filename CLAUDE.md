@@ -75,7 +75,7 @@ Post-MVP improvements applied:
   in-memory for future XRPC calls (muting/blocking milestone). Env vars:
   `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
 
-225 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
+227 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
 tests, which require `--features postgres` and a live `DATABASE_URL`). Clippy
 clean. CLI commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`,
 `score`, `report`, `status`, `validate`, `migrate` (postgres feature), `serve`
@@ -146,7 +146,7 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 225 tests across eight categories:
+The project has 227 tests across eight categories:
 
 - **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
   truncation, boundary conditions

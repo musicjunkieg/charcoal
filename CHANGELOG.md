@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Add onboarding tutorial for new users (#113)
+- Add GitHub Actions CI and branch protection for main (#120)
+- Update README documentation for new M4 Pro Mac Mini setup (#119)
 - v0.4 AT Protocol OAuth: replace password auth with Bluesky sign-in (#50, #95)
   - PAR + PKCE + DPoP + private_key_jwt via `atproto-oauth` crate
   - DID-embedded session cookies with CHARCOAL_ALLOWED_DID gate
@@ -17,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Multi-user schema redesign (per-user vs shared data) (#49)
 
 ### Fixed
+- Fix OAuth callback to register user in database (#121)
 - Move multi-user schema changelog entry from 0.3.0 to Unreleased (#105)
 - Fix ambiguous test count wording and decision graph status typo (#104)
 - Thread authenticated actor handle through web scan job (#102)
