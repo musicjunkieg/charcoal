@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-03-18T03:47:21.902932+00:00",
+  "exported_at": "2026-03-18T04:07:33.594775+00:00",
   "issues": [
+    {
+      "id": 148,
+      "title": "Mirror atproto-crates to GitHub for reliable CI builds",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-18T04:07:11.008727+00:00",
+      "updated_at": "2026-03-18T04:07:11.008727+00:00",
+      "closed_at": null
+    },
     {
       "id": 147,
       "title": "Fix Railway Railpack Node.js detection",
