@@ -11,7 +11,7 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build dependencies
+# Install build dependencies + Node 22 via nodesource
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
@@ -19,8 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     ca-certificates \
     git \
-    nodejs \
-    npm \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust
