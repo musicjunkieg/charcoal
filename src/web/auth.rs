@@ -114,10 +114,16 @@ pub fn verify_token(secret: &str, token: &str) -> bool {
 
 /// Check whether a DID is allowed to authenticate.
 ///
-/// Returns `false` if `allowed_did` is empty (CHARCOAL_ALLOWED_DID not configured).
+/// Returns `true` if `allowed_did` is empty (open access — no gate configured).
+/// When `allowed_did` is set, supports comma-separated DIDs for allowlist.
 /// Uses constant-time comparison to avoid timing oracle on the DID.
 pub fn did_is_allowed(did: &str, allowed_did: &str) -> bool {
-    !allowed_did.is_empty() && constant_time_eq(did, allowed_did)
+    if allowed_did.is_empty() {
+        return true;
+    }
+    allowed_did
+        .split(',')
+        .any(|entry| constant_time_eq(did, entry.trim()))
 }
 
 /// Axum middleware: reject requests without a valid session cookie.
