@@ -116,17 +116,17 @@ optional = true
 
 # AT Protocol OAuth (required for the web feature — backend-driven OAuth flow)
 [dependencies.atproto-oauth]
-git = "https://tangled.org/ngerakines.me/atproto-crates"
+git = "https://github.com/musicjunkieg/atproto-crates"
 rev = "d2457eecc6814e8351486df3a3608542bae848a7"
 optional = true
 
 [dependencies.atproto-oauth-axum]
-git = "https://tangled.org/ngerakines.me/atproto-crates"
+git = "https://github.com/musicjunkieg/atproto-crates"
 rev = "d2457eecc6814e8351486df3a3608542bae848a7"
 optional = true
 
 [dependencies.atproto-identity]
-git = "https://tangled.org/ngerakines.me/atproto-crates"
+git = "https://github.com/musicjunkieg/atproto-crates"
 rev = "d2457eecc6814e8351486df3a3608542bae848a7"
 optional = true
 
