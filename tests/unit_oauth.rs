@@ -96,9 +96,15 @@ mod gate_tests {
     }
 
     #[test]
-    fn empty_allowed_did_rejects_everything() {
-        // If CHARCOAL_ALLOWED_DID is not set, no DID should pass.
-        assert!(!did_is_allowed(ALLOWED, ""));
+    fn empty_allowed_did_allows_everyone() {
+        // If CHARCOAL_ALLOWED_DID is not set, all DIDs pass (open access).
+        assert!(did_is_allowed(ALLOWED, ""));
+    }
+
+    #[test]
+    fn whitespace_only_allowed_did_allows_everyone() {
+        // Whitespace-only CHARCOAL_ALLOWED_DID is treated as unset.
+        assert!(did_is_allowed(ALLOWED, "   "));
     }
 
     #[test]
@@ -106,5 +112,29 @@ mod gate_tests {
         // No prefix matching or substring matching.
         let prefix = &ALLOWED[..ALLOWED.len() - 1];
         assert!(!did_is_allowed(prefix, ALLOWED));
+    }
+
+    #[test]
+    fn comma_separated_allowlist_first_entry() {
+        let allowlist = "did:plc:h3wpawnrlptr4534chevddo6,did:plc:other000000000000000";
+        assert!(did_is_allowed(ALLOWED, allowlist));
+    }
+
+    #[test]
+    fn comma_separated_allowlist_second_entry() {
+        let allowlist = "did:plc:other000000000000000,did:plc:h3wpawnrlptr4534chevddo6";
+        assert!(did_is_allowed(ALLOWED, allowlist));
+    }
+
+    #[test]
+    fn comma_separated_allowlist_rejects_unlisted() {
+        let allowlist = "did:plc:other000000000000000,did:plc:another0000000000000";
+        assert!(!did_is_allowed(ALLOWED, allowlist));
+    }
+
+    #[test]
+    fn comma_separated_allowlist_trims_whitespace() {
+        let allowlist = "did:plc:other000000000000000 , did:plc:h3wpawnrlptr4534chevddo6 ";
+        assert!(did_is_allowed(ALLOWED, allowlist));
     }
 }

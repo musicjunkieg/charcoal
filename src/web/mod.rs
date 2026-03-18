@@ -58,13 +58,8 @@ pub async fn run_server(
     bind: &str,
 ) -> Result<()> {
     // Fail fast if required OAuth config is missing.
-    if config.allowed_did.is_empty() {
-        anyhow::bail!(
-            "CHARCOAL_ALLOWED_DID is not set. Add your Bluesky DID to your .env file.\n\
-             Find it at: https://bsky.app → Settings → Account\n\
-             It looks like: did:plc:xxxxxxxxxxxxxxxxxxxx"
-        );
-    }
+    // Note: CHARCOAL_ALLOWED_DID is intentionally optional — when empty,
+    // all Bluesky users can sign in (open access for multi-user deploys).
     if config.oauth_client_id.is_empty() {
         anyhow::bail!(
             "CHARCOAL_OAUTH_CLIENT_ID is not set.\n\

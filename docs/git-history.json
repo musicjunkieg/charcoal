@@ -1,5 +1,13 @@
 [
   {
+    "hash": "cfabfc25aabd26b61b2a7416df38c7f2dbf1ed91",
+    "short_hash": "cfabfc2",
+    "author": "chaos gremlin",
+    "date": "2026-03-17T18:57:10-07:00",
+    "message": "Merge pull request #21 from musicjunkieg/feat/onboarding-flow\n\nfeat: onboarding flow — OAuth fix, welcome screen, auto-fingerprint",
+    "files_changed": 0
+  },
+  {
     "hash": "638e535927e6277f60b56c4432d7b00500e32f04",
     "short_hash": "638e535",
     "author": "Bryan Guffey",

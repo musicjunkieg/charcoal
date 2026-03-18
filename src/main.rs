@@ -719,6 +719,17 @@ async fn main() -> Result<()> {
         Commands::Serve { port, bind } => {
             let config = config::Config::load()?;
             let db = open_database(&config).await?;
+
+            // Auto-download ONNX models if not present (required for scans).
+            // On Railway with a persistent volume, this only happens on first deploy.
+            if !charcoal::toxicity::download::model_files_present(&config.model_dir)
+                || !charcoal::toxicity::download::embedding_files_present(&config.model_dir)
+            {
+                info!("Checking ONNX models — some files missing, downloading...");
+                charcoal::toxicity::download::download_model(&config.model_dir).await?;
+                info!("ONNX models ready");
+            }
+
             info!(port, %bind, "Starting Charcoal web server");
             charcoal::web::run_server(config, db, port, &bind).await?;
         }

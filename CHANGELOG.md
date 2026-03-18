@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Auto-fingerprint user on first scan via web UI (#122)
 - Add onboarding tutorial for new users (#113)
 - Add GitHub Actions CI and branch protection for main (#120)
 - Update README documentation for new M4 Pro Mac Mini setup (#119)
@@ -20,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Multi-user schema redesign (per-user vs shared data) (#49)
 
 ### Fixed
+- Fix duplicate SentenceEmbedder::load in scan job (#140)
+- Address CodeRabbit review findings on PR #21 (#138)
 - Fix OAuth callback to register user in database (#121)
 - Move multi-user schema changelog entry from 0.3.0 to Unreleased (#105)
 - Fix ambiguous test count wording and decision graph status typo (#104)
