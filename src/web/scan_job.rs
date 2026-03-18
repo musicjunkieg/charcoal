@@ -94,7 +94,42 @@ async fn run_scan(
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
 
-    // Phase 2: load or build topic fingerprint
+    // Phase 2: load embedding model (optional — falls back to TF-IDF)
+    //
+    // Loaded early so it can be reused for both auto-fingerprint embedding
+    // (if needed) and amplifier scoring in the pipeline.
+    {
+        let mut s = scan_status.write().await;
+        s.progress_message = "Loading embedding model…".to_string();
+    }
+
+    let embed_dir = embedding_model_dir(&config.model_dir);
+    let embedder = if embedding_files_present(&config.model_dir) {
+        // SentenceEmbedder::load is synchronous blocking I/O — offload to avoid
+        // stalling the async runtime while the model is read from disk.
+        match tokio::task::spawn_blocking(move || {
+            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
+        })
+        .await
+        {
+            Ok(Ok(e)) => {
+                info!("Embedding model loaded");
+                Some(e)
+            }
+            Ok(Err(e)) => {
+                warn!(error = %e, "Embedding model failed to load, using TF-IDF fallback");
+                None
+            }
+            Err(e) => {
+                warn!(error = %e, "spawn_blocking panicked loading embedder, using TF-IDF fallback");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Phase 3: load or build topic fingerprint
     //
     // For web users there is no CLI step — if no fingerprint exists yet,
     // we build one automatically from the user's recent posts.
@@ -136,75 +171,29 @@ async fn run_scan(
                 "Topic fingerprint built and saved"
             );
 
-            // Compute sentence embedding if model is available
-            let embed_dir_fp = embedding_model_dir(&config.model_dir);
-            if embedding_files_present(&config.model_dir) {
+            // Compute and save sentence embedding using the already-loaded embedder
+            if let Some(ref embedder) = embedder {
                 {
                     let mut s = scan_status.write().await;
                     s.progress_message = "Computing sentence embeddings…".to_string();
                 }
-                match tokio::task::spawn_blocking(move || {
-                    crate::topics::embeddings::SentenceEmbedder::load(&embed_dir_fp)
-                })
-                .await
-                {
-                    Ok(Ok(embedder)) => match embedder.embed_batch(&post_texts).await {
-                        Ok(post_embeddings) => {
-                            let mean_emb =
-                                crate::topics::embeddings::mean_embedding(&post_embeddings);
-                            if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
-                                warn!(error = %e, "Failed to save embedding during auto-fingerprint");
-                            } else {
-                                info!("Sentence embedding computed and saved");
-                            }
+                match embedder.embed_batch(&post_texts).await {
+                    Ok(post_embeddings) => {
+                        let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
+                        if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
+                            warn!(error = %e, "Failed to save embedding during auto-fingerprint");
+                        } else {
+                            info!("Sentence embedding computed and saved");
                         }
-                        Err(e) => {
-                            warn!(error = %e, "embed_batch failed during auto-fingerprint, using TF-IDF fallback");
-                        }
-                    },
-                    Ok(Err(e)) => {
-                        warn!(error = %e, "Embedding model failed to load during auto-fingerprint");
                     }
                     Err(e) => {
-                        warn!(error = %e, "spawn_blocking panicked loading embedder during auto-fingerprint");
+                        warn!(error = %e, "embed_batch failed during auto-fingerprint, using TF-IDF fallback");
                     }
                 }
             }
 
             fp
         }
-    };
-
-    // Phase 3: load embedding model (optional — falls back to TF-IDF)
-    {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading embedding model…".to_string();
-    }
-
-    let embed_dir = embedding_model_dir(&config.model_dir);
-    let embedder = if embedding_files_present(&config.model_dir) {
-        // SentenceEmbedder::load is synchronous blocking I/O — offload to avoid
-        // stalling the async runtime while the model is read from disk.
-        match tokio::task::spawn_blocking(move || {
-            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
-        })
-        .await
-        {
-            Ok(Ok(e)) => {
-                info!("Embedding model loaded");
-                Some(e)
-            }
-            Ok(Err(e)) => {
-                warn!(error = %e, "Embedding model failed to load, using TF-IDF fallback");
-                None
-            }
-            Err(e) => {
-                warn!(error = %e, "spawn_blocking panicked loading embedder, using TF-IDF fallback");
-                None
-            }
-        }
-    } else {
-        None
     };
 
     let protected_embedding = db.get_embedding(user_did).await?;
