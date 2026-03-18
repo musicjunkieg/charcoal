@@ -64,18 +64,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root runtime user
-RUN groupadd --system charcoal && useradd --system --gid charcoal charcoal
-
 WORKDIR /app
 
 # Copy the built binary
 COPY --from=builder /app/target/release/charcoal /app/charcoal
 
-# Ensure the runtime user owns the app directory
-RUN chown -R charcoal:charcoal /app
-
-USER charcoal
+# Create the model directory (Railway volume mounts here at runtime)
+RUN mkdir -p /data/models
 
 # Railway sets PORT at runtime
 ENV RUST_LOG=charcoal=info
