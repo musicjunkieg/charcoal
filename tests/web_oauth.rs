@@ -15,7 +15,9 @@ mod tests {
     use tower::ServiceExt; // for .oneshot()
 
     use charcoal::web::auth::{create_token, COOKIE_NAME};
-    use charcoal::web::test_helpers::{build_test_app, TEST_DID, TEST_SECRET};
+    use charcoal::web::test_helpers::{
+        build_test_app, build_test_app_with_db, TEST_DID, TEST_SECRET,
+    };
 
     fn session_cookie(did: &str) -> String {
         format!("{}={}", COOKIE_NAME, create_token(TEST_SECRET, did))
@@ -301,6 +303,71 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    // ---- Scan endpoint requires registered user ----
+
+    #[tokio::test]
+    async fn scan_fails_when_user_not_registered() {
+        // This test documents the bug: without a user row in the DB,
+        // POST /api/scan returns 500 "User not found".
+        let app = build_test_app();
+        let cookie = session_cookie(TEST_DID);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/scan")
+                    .method("POST")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            json["error"].as_str().unwrap_or("").contains("not found"),
+            "Error should mention user not found"
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_succeeds_when_user_registered_in_db() {
+        // This test proves the fix: if the user IS in the DB (as the
+        // fixed OAuth callback will do), POST /api/scan should not
+        // return "User not found". It will return 202 Accepted.
+        let (app, db) = build_test_app_with_db();
+
+        // Simulate what the fixed OAuth callback should do
+        db.upsert_user(TEST_DID, "test.bsky.social")
+            .await
+            .expect("upsert_user should succeed");
+
+        let cookie = session_cookie(TEST_DID);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/scan")
+                    .method("POST")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // 202 Accepted — scan started successfully
+        assert_eq!(
+            res.status(),
+            StatusCode::ACCEPTED,
+            "Scan should return 202 Accepted for registered users"
+        );
     }
 
     // ---- Logout ----

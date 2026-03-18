@@ -27,6 +27,9 @@ pub struct PendingOAuth {
     pub oauth_request: OAuthRequest,
     /// The authorization server metadata (needed by oauth_complete).
     pub authorization_server: atproto_oauth::resources::AuthorizationServer,
+    /// The user-input handle from the initiate request.
+    /// Stored here so the callback can register the user in the DB.
+    pub handle: String,
 }
 
 // ---- Client metadata ----
@@ -244,6 +247,7 @@ pub async fn initiate(
         PendingOAuth {
             oauth_request,
             authorization_server: authorization_server.clone(),
+            handle: handle.clone(),
         },
     );
 
@@ -438,6 +442,18 @@ pub async fn callback(
             StatusCode::FORBIDDEN,
             "This Bluesky account is not authorized to access this dashboard",
         );
+    }
+
+    // Register the authenticated user in the database.
+    // Uses the handle from the initiate step. If the user logs in again
+    // with a different handle, upsert_user's ON CONFLICT updates it.
+    if let Err(e) = state
+        .db
+        .upsert_user(&authenticated_did, &pending.handle)
+        .await
+    {
+        tracing::error!("Failed to register user: {e}");
+        return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Could not register user");
     }
 
     // Store tokens in-memory for future XRPC calls (muting/blocking milestone).

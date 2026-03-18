@@ -1583,6 +1583,105 @@
       "created_at": "2026-03-11T03:39:10.032992809+00:00",
       "updated_at": "2026-03-11T03:39:10.032992809+00:00",
       "metadata_json": "{\"branch\":\"main\",\"commit\":\"e7df240\",\"confidence\":95}"
+    },
+    {
+      "id": 151,
+      "change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "node_type": "goal",
+      "title": "Onboarding flow: fix OAuth user registration + first-run welcome screen",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:01:12.336379-07:00",
+      "updated_at": "2026-03-17T13:01:12.336379-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"prompt\":\"User wants to implement the spec at docs/superpowers/specs/2026-03-17-onboarding-flow-design.md. Two issues: #121 (OAuth callback doesn't register user in DB, causing scans to fail) and #113 (first-time welcome screen with scan trigger). Bug fix first, then onboarding UI.\"}"
+    },
+    {
+      "id": 152,
+      "change_id": "9d9df9e4-dc8e-47bc-a45d-ad705ad93208",
+      "node_type": "action",
+      "title": "Add build_test_app_with_db helper and TDD tests for user registration bug",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:24:34.923043-07:00",
+      "updated_at": "2026-03-17T13:24:34.923043-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":85,\"files\":[\"src/web/test_helpers.rs\",\"tests/web_oauth.rs\"]}"
+    },
+    {
+      "id": 153,
+      "change_id": "bbd9d1e2-e51e-4c0d-8378-6890484869e7",
+      "node_type": "action",
+      "title": "Implement OAuth callback fix: thread handle through PendingOAuth, call upsert_user",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:25:46.481044-07:00",
+      "updated_at": "2026-03-17T13:25:46.481044-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/handlers/oauth.rs\"]}"
+    },
+    {
+      "id": 154,
+      "change_id": "91d5169d-0965-4efe-9ba3-98887a9c056b",
+      "node_type": "outcome",
+      "title": "OAuth fix committed: handle threaded through PendingOAuth, upsert_user called in callback. 227 tests pass.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:26:45.368487-07:00",
+      "updated_at": "2026-03-17T13:26:45.368487-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"commit\":\"630b17a\",\"confidence\":95}"
+    },
+    {
+      "id": 155,
+      "change_id": "f7daebf8-aadc-4f01-9b35-22023a762c22",
+      "node_type": "action",
+      "title": "Add first-run welcome screen to dashboard Svelte component",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:27:07.738457-07:00",
+      "updated_at": "2026-03-17T13:27:07.738457-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":85,\"files\":[\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
+    },
+    {
+      "id": 156,
+      "change_id": "20e3d114-0cd1-443b-9f8e-65b147468046",
+      "node_type": "outcome",
+      "title": "Welcome screen committed. Conditional {#if} in dashboard shows welcome when tier_counts.total===0 && !scan_running.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T13:35:46.170991-07:00",
+      "updated_at": "2026-03-17T13:35:46.170991-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"commit\":\"1b74c64\",\"confidence\":95}"
+    },
+    {
+      "id": 157,
+      "change_id": "16b3a763-7eae-44e2-9bcb-576b9234baad",
+      "node_type": "action",
+      "title": "Auto-fingerprint in scan job: replace bail with inline fingerprint pipeline",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T17:25:49.450697-07:00",
+      "updated_at": "2026-03-17T17:25:49.450697-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/scan_job.rs\"]}"
+    },
+    {
+      "id": 158,
+      "change_id": "a2070b7a-cffb-4418-a1ad-4415cad54fd6",
+      "node_type": "outcome",
+      "title": "Full onboarding flow verified: login → welcome → auto-fingerprint → scan → dashboard. All working.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T17:32:44.768345-07:00",
+      "updated_at": "2026-03-17T17:32:44.768345-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"commit\":\"638e535\",\"confidence\":98}"
+    },
+    {
+      "id": 159,
+      "change_id": "3a909226-a0c8-4f68-8bda-faadb9d8b33e",
+      "node_type": "action",
+      "title": "Fix CodeRabbit findings on PR #21",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T17:52:41.490275-07:00",
+      "updated_at": "2026-03-17T17:52:41.490275-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/scan_job.rs\",\"tests/web_oauth.rs\",\"src/web/test_helpers.rs\",\"CLAUDE.md\",\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
     }
   ],
   "edges": [
@@ -3081,6 +3180,94 @@
       "weight": 1.0,
       "rationale": "Action produced outcome",
       "created_at": "2026-03-11T03:39:14.219931324+00:00"
+    },
+    {
+      "id": 143,
+      "from_node_id": 151,
+      "to_node_id": 152,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "9d9df9e4-dc8e-47bc-a45d-ad705ad93208",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "First action: write tests before fix",
+      "created_at": "2026-03-17T13:24:39.708214-07:00"
+    },
+    {
+      "id": 144,
+      "from_node_id": 151,
+      "to_node_id": 153,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "bbd9d1e2-e51e-4c0d-8378-6890484869e7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second action: implement the fix after tests",
+      "created_at": "2026-03-17T13:25:51.126518-07:00"
+    },
+    {
+      "id": 145,
+      "from_node_id": 153,
+      "to_node_id": 154,
+      "from_change_id": "bbd9d1e2-e51e-4c0d-8378-6890484869e7",
+      "to_change_id": "91d5169d-0965-4efe-9ba3-98887a9c056b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix implemented and tested",
+      "created_at": "2026-03-17T13:26:49.455373-07:00"
+    },
+    {
+      "id": 146,
+      "from_node_id": 151,
+      "to_node_id": 155,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "f7daebf8-aadc-4f01-9b35-22023a762c22",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Third action: welcome screen UI",
+      "created_at": "2026-03-17T13:27:11.756685-07:00"
+    },
+    {
+      "id": 147,
+      "from_node_id": 155,
+      "to_node_id": 156,
+      "from_change_id": "f7daebf8-aadc-4f01-9b35-22023a762c22",
+      "to_change_id": "20e3d114-0cd1-443b-9f8e-65b147468046",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Welcome screen implemented and committed",
+      "created_at": "2026-03-17T13:35:54.081983-07:00"
+    },
+    {
+      "id": 148,
+      "from_node_id": 151,
+      "to_node_id": 157,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "16b3a763-7eae-44e2-9bcb-576b9234baad",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Follow-up fix: scan must auto-fingerprint for web users",
+      "created_at": "2026-03-17T17:25:54.045673-07:00"
+    },
+    {
+      "id": 149,
+      "from_node_id": 157,
+      "to_node_id": 158,
+      "from_change_id": "16b3a763-7eae-44e2-9bcb-576b9234baad",
+      "to_change_id": "a2070b7a-cffb-4418-a1ad-4415cad54fd6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Auto-fingerprint verified working in production",
+      "created_at": "2026-03-17T17:32:48.952040-07:00"
+    },
+    {
+      "id": 150,
+      "from_node_id": 151,
+      "to_node_id": 159,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "3a909226-a0c8-4f68-8bda-faadb9d8b33e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Address PR review findings",
+      "created_at": "2026-03-17T17:52:45.937602-07:00"
     }
   ],
   "documents": [
