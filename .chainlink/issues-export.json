@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "exported_at": "2026-03-18T00:27:50.075774+00:00",
+  "exported_at": "2026-03-18T00:27:57.937077+00:00",
   "issues": [
     {
       "id": 122,
       "title": "Auto-fingerprint user on first scan via web UI",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -19,8 +19,8 @@
         }
       ],
       "created_at": "2026-03-18T00:25:37.846984+00:00",
-      "updated_at": "2026-03-18T00:25:37.846984+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-18T00:27:57.902920+00:00",
+      "closed_at": "2026-03-18T00:27:57.902920+00:00"
     },
     {
       "id": 121,
