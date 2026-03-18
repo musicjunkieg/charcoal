@@ -118,10 +118,11 @@ pub fn verify_token(secret: &str, token: &str) -> bool {
 /// When `allowed_did` is set, supports comma-separated DIDs for allowlist.
 /// Uses constant-time comparison to avoid timing oracle on the DID.
 pub fn did_is_allowed(did: &str, allowed_did: &str) -> bool {
-    if allowed_did.is_empty() {
+    let trimmed = allowed_did.trim();
+    if trimmed.is_empty() {
         return true;
     }
-    allowed_did
+    trimmed
         .split(',')
         .any(|entry| constant_time_eq(did, entry.trim()))
 }

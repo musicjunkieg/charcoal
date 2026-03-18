@@ -102,6 +102,12 @@ mod gate_tests {
     }
 
     #[test]
+    fn whitespace_only_allowed_did_allows_everyone() {
+        // Whitespace-only CHARCOAL_ALLOWED_DID is treated as unset.
+        assert!(did_is_allowed(ALLOWED, "   "));
+    }
+
+    #[test]
     fn did_comparison_is_exact() {
         // No prefix matching or substring matching.
         let prefix = &ALLOWED[..ALLOWED.len() - 1];

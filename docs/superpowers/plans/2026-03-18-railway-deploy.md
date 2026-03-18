@@ -292,10 +292,10 @@ Add `charcoal.watch`. Railway will show the CNAME target.
 - [ ] **Step 2: Configure DNS in Porkbun**
 
 In Porkbun dashboard for `charcoal.watch`:
-- If Railway provides a CNAME target: add CNAME record for `@` pointing to it
-  (Porkbun supports ALIAS/ANAME for apex domains)
-- If CNAME on apex doesn't work: use `www.charcoal.watch` as CNAME and set up
-  a redirect from the apex
+- If Railway provides a CNAME target: add an ALIAS record for `@` pointing to
+  it (Porkbun supports ALIAS for apex domains — do NOT use CNAME on apex)
+- If ALIAS is not available: add a CNAME for `www` pointing to Railway's target,
+  then set up a redirect from the apex to `www.charcoal.watch`
 
 - [ ] **Step 3: Wait for SSL provisioning**
 
