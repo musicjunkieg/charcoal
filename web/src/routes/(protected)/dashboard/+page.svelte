@@ -165,15 +165,18 @@
 					that may engage with your content in hostile ways — before it happens.
 				</p>
 				<p class="welcome-text">
-					Your first scan will analyze your recent posts, find who's amplifying
-					them, and score each account for toxicity and topic overlap. This
-					usually takes a few minutes.
+					Your first scan will build a topic fingerprint from your recent posts,
+					then find who's amplifying them and score each account for toxicity
+					and topic overlap. This usually takes a few minutes.
 				</p>
 				<button class="btn-scan btn-scan-welcome" onclick={handleScan} disabled={scanning}>
 					{scanning ? 'Starting…' : 'Start your first scan'}
 				</button>
 				{#if scanError}
 					<p class="scan-error">{scanError}</p>
+				{/if}
+				{#if status.last_error}
+					<p class="scan-error">{status.last_error}</p>
 				{/if}
 			</div>
 		{:else}

@@ -94,15 +94,77 @@ async fn run_scan(
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
 
-    // Phase 2: load topic fingerprint
+    // Phase 2: load or build topic fingerprint
+    //
+    // For web users there is no CLI step — if no fingerprint exists yet,
+    // we build one automatically from the user's recent posts.
     {
         let mut s = scan_status.write().await;
         s.progress_message = "Loading topic fingerprint…".to_string();
     }
 
+    let client = PublicAtpClient::new(&config.public_api_url)?;
+
     let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
         Some((json, _, _)) => serde_json::from_str(&json)?,
-        None => anyhow::bail!("No fingerprint found. Run `charcoal fingerprint` first."),
+        None => {
+            // Auto-fingerprint: fetch posts, run TF-IDF, save to DB
+            {
+                let mut s = scan_status.write().await;
+                s.progress_message =
+                    "Building your topic fingerprint from recent posts…".to_string();
+            }
+            info!("No fingerprint found for {user_did}, building automatically");
+
+            let fp_posts =
+                crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 500).await?;
+            if fp_posts.is_empty() {
+                anyhow::bail!(
+                    "No posts found — Charcoal needs posting history to build a topic fingerprint."
+                );
+            }
+
+            let post_texts: Vec<String> = fp_posts.iter().map(|p| p.text.clone()).collect();
+            let extractor = crate::topics::tfidf::TfIdfExtractor::default();
+            let fp = crate::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
+
+            let json = serde_json::to_string(&fp)?;
+            db.save_fingerprint(user_did, &json, fp.post_count).await?;
+            info!(
+                post_count = fp.post_count,
+                clusters = fp.clusters.len(),
+                "Topic fingerprint built and saved"
+            );
+
+            // Compute sentence embedding if model is available
+            let embed_dir_fp = embedding_model_dir(&config.model_dir);
+            if embedding_files_present(&config.model_dir) {
+                {
+                    let mut s = scan_status.write().await;
+                    s.progress_message = "Computing sentence embeddings…".to_string();
+                }
+                match tokio::task::spawn_blocking(move || {
+                    crate::topics::embeddings::SentenceEmbedder::load(&embed_dir_fp)
+                })
+                .await
+                {
+                    Ok(Ok(embedder)) => {
+                        let post_embeddings = embedder.embed_batch(&post_texts).await?;
+                        let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
+                        db.save_embedding(user_did, &mean_emb).await?;
+                        info!("Sentence embedding computed and saved");
+                    }
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "Embedding model failed to load during auto-fingerprint");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "spawn_blocking panicked loading embedder during auto-fingerprint");
+                    }
+                }
+            }
+
+            fp
+        }
     };
 
     // Phase 3: load embedding model (optional — falls back to TF-IDF)
@@ -145,7 +207,6 @@ async fn run_scan(
         s.progress_message = "Fetching amplification events…".to_string();
     }
 
-    let client = PublicAtpClient::new(&config.public_api_url)?;
     let constellation =
         crate::constellation::client::ConstellationClient::new(&config.constellation_url)?;
 

@@ -1,7 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-03-17T20:37:42.194869+00:00",
+  "exported_at": "2026-03-18T00:27:50.075774+00:00",
   "issues": [
+    {
+      "id": 122,
+      "title": "Auto-fingerprint user on first scan via web UI",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "The scan job in src/web/scan_job.rs bails with 'No fingerprint found' if the user hasn't run 'charcoal fingerprint' CLI. For a multi-user web app, this must happen automatically. When get_fingerprint returns None, the scan job should: (1) fetch 500 recent posts, (2) run TF-IDF extraction, (3) save fingerprint to DB, (4) compute sentence embeddings if model present, (5) then continue with the normal scan. Also update the welcome screen text to mention fingerprinting.",
+          "created_at": "2026-03-18T00:25:44.838842+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:25:37.846984+00:00",
+      "updated_at": "2026-03-18T00:25:37.846984+00:00",
+      "closed_at": null
+    },
     {
       "id": 121,
       "title": "Fix OAuth callback to register user in database",
