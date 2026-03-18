@@ -1,7 +1,300 @@
 {
   "version": 1,
-  "exported_at": "2026-03-18T00:27:57.937077+00:00",
+  "exported_at": "2026-03-18T00:54:10.997749+00:00",
   "issues": [
+    {
+      "id": 138,
+      "title": "Address CodeRabbit review findings on PR #21",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-18T00:52:09.389893+00:00",
+      "updated_at": "2026-03-18T00:52:09.389893+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 137,
+      "title": "Update SvelteKit dependencies to resolve devalue and cookie vulnerabilities",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "security"
+      ],
+      "comments": [
+        {
+          "content": "Dismissed Dependabot alerts with fix_started — this issue tracks the actual fix. Run npm update in web/ to bump: devalue (prototype pollution, #4 medium + #5 low), cookie (out-of-bounds chars, #2 low), lru (stacked borrows, #1 low). Bundle into next frontend PR or do standalone. Low urgency — all are transitive deps and we use adapter-static (no SSR).",
+          "created_at": "2026-03-18T00:46:12.005425+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:45:56.526263+00:00",
+      "updated_at": "2026-03-18T00:45:56.526263+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 136,
+      "title": "Dismiss remaining Dependabot alerts",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-18T00:45:10.002289+00:00",
+      "updated_at": "2026-03-18T00:45:31.664609+00:00",
+      "closed_at": "2026-03-18T00:45:31.664609+00:00"
+    },
+    {
+      "id": 135,
+      "title": "Investigate Dependabot alert #3",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "quinn-proto alert dismissed — not in compiled dependency tree (cargo tree confirms). devalue (#4/#5) and cookie (#2) are low-priority SvelteKit transitive deps. lru (#1) is low severity. Will address devalue when updating SvelteKit deps.",
+          "created_at": "2026-03-18T00:44:19.396425+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:42:06.121765+00:00",
+      "updated_at": "2026-03-18T00:44:19.401392+00:00",
+      "closed_at": "2026-03-18T00:44:19.401392+00:00"
+    },
+    {
+      "id": 134,
+      "title": "Add user feedback on topic fingerprint accuracy",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 131,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Let users flag topics as wrong ('I don't post about this') or suggest missing topics. Similar UX pattern to #116 (toxicity score feedback). Store feedback in a new table. Blocked by #132. Design needed — could be thumbs up/down per cluster, or free-text.",
+          "created_at": "2026-03-18T00:39:18.799779+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:18.795598+00:00",
+      "updated_at": "2026-03-18T00:39:18.795598+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 133,
+      "title": "Add fingerprint regeneration via web UI",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 131,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Add 'Regenerate' button on the fingerprint page. New POST /api/fingerprint/refresh endpoint that reuses the auto-fingerprint logic from scan_job.rs (extract into shared function). Should show progress and disable button while running. Blocked by #132.",
+          "created_at": "2026-03-18T00:39:18.791329+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:18.787205+00:00",
+      "updated_at": "2026-03-18T00:39:18.787205+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 132,
+      "title": "Add fingerprint viewer page to dashboard",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 131,
+      "labels": [],
+      "comments": [
+        {
+          "content": "New /fingerprint route in the SvelteKit SPA. Display topic clusters with keywords and weights in a readable format — e.g., cards per cluster showing top keywords and cluster weight. Uses existing GET /api/fingerprint endpoint. Link from dashboard nav.",
+          "created_at": "2026-03-18T00:39:18.782567+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:18.778240+00:00",
+      "updated_at": "2026-03-18T00:39:18.778240+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 131,
+      "title": "User-facing fingerprint viewer and management",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Users need to see, regenerate, and give feedback on their topic fingerprint. This builds trust and improves accuracy. Three subissues, implemented in order. GET /api/fingerprint endpoint already exists — just needs a proper UI.",
+          "created_at": "2026-03-18T00:39:18.773917+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:07.341968+00:00",
+      "updated_at": "2026-03-18T00:39:07.341968+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 130,
+      "title": "Build admin dashboard SvelteKit page",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "SvelteKit page at /admin showing current config values in editable form fields. Save button calls PUT endpoint. Show last-updated timestamp per field.",
+          "created_at": "2026-03-18T00:39:03.136433+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:03.132607+00:00",
+      "updated_at": "2026-03-18T00:39:03.132607+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 129,
+      "title": "Add admin API endpoints for config CRUD",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "GET /api/admin/config — list all config keys/values. PUT /api/admin/config/:key — update a value. Validate value ranges server-side (e.g., fingerprint_posts 50-2000, concurrency 1-32).",
+          "created_at": "2026-03-18T00:39:03.128651+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:03.124556+00:00",
+      "updated_at": "2026-03-18T00:39:03.124556+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 128,
+      "title": "Add admin auth gate and /admin route",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Admin middleware that checks if authenticated DID is in admin list. Could reuse CHARCOAL_ALLOWED_DID initially (single admin), or add admin_role column to users table. /admin serves a separate SvelteKit layout.",
+          "created_at": "2026-03-18T00:39:03.120572+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:03.116715+00:00",
+      "updated_at": "2026-03-18T00:39:03.116715+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 127,
+      "title": "Add config table and runtime parameter loading",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "New 'config' table in SQLite/Postgres with key TEXT PRIMARY KEY, value TEXT, updated_at TEXT. Load at scan start instead of hardcoded constants. Migrate existing constants as default values. DB trait methods: get_config/set_config.",
+          "created_at": "2026-03-18T00:39:03.112836+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:03.108388+00:00",
+      "updated_at": "2026-03-18T00:39:03.108388+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 126,
+      "title": "Design admin dashboard scope and UI",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Brainstorm session needed. Key questions: (1) Which parameters to expose? (2) Admin auth model — DID allowlist or role in users table? (3) Should non-admin users see any config? (4) Where to store config — new DB table with key/value pairs?",
+          "created_at": "2026-03-18T00:39:03.104250+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:39:03.099431+00:00",
+      "updated_at": "2026-03-18T00:39:03.099431+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 125,
+      "title": "Admin dashboard with runtime-configurable scan parameters",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Separate /admin route gated to admin DID(s). Allows runtime tuning of scan parameters that are currently hardcoded: posts for fingerprint (500), posts per scan (50), max followers per amplifier (50), concurrency (8). Config stored in DB table so changes persist without redeploy. Critical for scaling — must be in place before opening to more users. Design brainstorm needed before implementation.",
+          "created_at": "2026-03-18T00:39:03.094837+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:38:46.650427+00:00",
+      "updated_at": "2026-03-18T00:38:46.650427+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 124,
+      "title": "Plan roadmap phases and create milestone issues",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Creating milestone issues for 4 phases: Deploy (P1), Admin Dashboard (P1.5), Core UX (P2), Actions (P3)",
+          "created_at": "2026-03-18T00:38:46.645138+00:00"
+        },
+        {
+          "content": "Phase order:\nPhase 1 — Deploy to Railway: #112 (ONNX model strategy), #115 (deploy strategy), #111 (remove single-user gate)\nPhase 1.5 — Admin Dashboard: #125 (epic) with subissues #126-#130. Design brainstorm first (#126).\nPhase 2 — Core UX: #131 (fingerprint viewer/regen/feedback), #108 (auto-refresh), #114 (manual handle scoring), #107 (unresolvable DIDs tab), #57 (profile data display)\nPhase 3 — Actions: #109 (block/mute via XRPC), #110 (per-tier action config), #116 (toxicity score feedback)\nPhase 4 — Scaling: #52 (ONNX concurrency), #55 (shared intelligence), #59 (event streams)",
+          "created_at": "2026-03-18T00:39:29.389073+00:00"
+        }
+      ],
+      "created_at": "2026-03-18T00:38:39.034287+00:00",
+      "updated_at": "2026-03-18T00:39:34.332620+00:00",
+      "closed_at": "2026-03-18T00:39:34.332620+00:00"
+    },
+    {
+      "id": 123,
+      "title": "Create PR for onboarding flow branch",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-18T00:33:28.526659+00:00",
+      "updated_at": "2026-03-18T00:33:53.584862+00:00",
+      "closed_at": "2026-03-18T00:33:53.584862+00:00"
+    },
     {
       "id": 122,
       "title": "Auto-fingerprint user on first scan via web UI",

@@ -167,7 +167,7 @@ The project has 227 tests across eight categories:
   `--features web`.
 - **PostgreSQL tests** (`tests/db_postgres.rs`) — integration tests for the
   Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var
-  (counted separately from the 234 above).
+  (counted separately from the 227 above).
   8 tests covering scan state, fingerprint, embedding, scores, events, etc.
 
 Run tests with `cargo test` (includes unit tests, doc tests, and integration

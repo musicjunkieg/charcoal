@@ -156,7 +156,7 @@
 			<div class="spinner large"></div>
 		</div>
 	{:else if status}
-		{#if status.tier_counts.total === 0 && !status.scan_running}
+		{#if !status.started_at && status.tier_counts.total === 0 && !status.scan_running}
 			<!-- First-run welcome screen -->
 			<div class="welcome">
 				<h2 class="welcome-title">Welcome to Charcoal</h2>

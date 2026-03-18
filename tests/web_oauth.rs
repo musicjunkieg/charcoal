@@ -362,11 +362,11 @@ mod tests {
             .await
             .unwrap();
 
-        // 202 Accepted (scan started) — NOT 500 with "User not found"
-        assert_ne!(
+        // 202 Accepted — scan started successfully
+        assert_eq!(
             res.status(),
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Scan should not fail with 'User not found' when user is registered"
+            StatusCode::ACCEPTED,
+            "Scan should return 202 Accepted for registered users"
         );
     }
 

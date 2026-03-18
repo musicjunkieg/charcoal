@@ -148,12 +148,20 @@ async fn run_scan(
                 })
                 .await
                 {
-                    Ok(Ok(embedder)) => {
-                        let post_embeddings = embedder.embed_batch(&post_texts).await?;
-                        let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
-                        db.save_embedding(user_did, &mean_emb).await?;
-                        info!("Sentence embedding computed and saved");
-                    }
+                    Ok(Ok(embedder)) => match embedder.embed_batch(&post_texts).await {
+                        Ok(post_embeddings) => {
+                            let mean_emb =
+                                crate::topics::embeddings::mean_embedding(&post_embeddings);
+                            if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
+                                warn!(error = %e, "Failed to save embedding during auto-fingerprint");
+                            } else {
+                                info!("Sentence embedding computed and saved");
+                            }
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "embed_batch failed during auto-fingerprint, using TF-IDF fallback");
+                        }
+                    },
                     Ok(Err(e)) => {
                         warn!(error = %e, "Embedding model failed to load during auto-fingerprint");
                     }

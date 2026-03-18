@@ -17,37 +17,8 @@ pub const TEST_SECRET: &str = "test_session_secret_at_least_32_chars!";
 pub const TEST_DID: &str = "did:plc:testalloweddid0000000000";
 pub const TEST_CLIENT_ID: &str = "https://test.example.com/oauth-client-metadata.json";
 
-/// Build an in-memory Axum router suitable for integration tests.
+/// Build an in-memory Axum router and DB suitable for integration tests.
 /// Uses Config::test_defaults() — override fields as needed for specific tests.
-pub fn build_test_app() -> axum::Router {
-    let config = Config {
-        allowed_did: TEST_DID.to_string(),
-        oauth_client_id: TEST_CLIENT_ID.to_string(),
-        session_secret: TEST_SECRET.to_string(),
-        ..Config::test_defaults()
-    };
-
-    let conn =
-        rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
-    create_tables(&conn).expect("schema creation should succeed");
-    let db = Arc::new(SqliteDatabase::new(conn)) as Arc<dyn crate::db::Database>;
-
-    let signing_key =
-        generate_key(KeyType::P256Private).expect("P-256 key generation should succeed");
-
-    let state = AppState {
-        db,
-        config: Arc::new(config),
-        scan_status: Arc::new(RwLock::new(ScanStatus::default())),
-        pending_oauth: Arc::new(RwLock::new(HashMap::new())),
-        oauth_tokens: Arc::new(RwLock::new(None)),
-        signing_key,
-    };
-
-    build_router(state)
-}
-
-/// Like `build_test_app`, but also returns the DB handle for state inspection.
 pub fn build_test_app_with_db() -> (axum::Router, Arc<dyn crate::db::Database>) {
     let config = Config {
         allowed_did: TEST_DID.to_string(),
@@ -74,4 +45,10 @@ pub fn build_test_app_with_db() -> (axum::Router, Arc<dyn crate::db::Database>) 
     };
 
     (build_router(state), db)
+}
+
+/// Build an in-memory Axum router for tests that don't need DB access.
+pub fn build_test_app() -> axum::Router {
+    let (router, _db) = build_test_app_with_db();
+    router
 }

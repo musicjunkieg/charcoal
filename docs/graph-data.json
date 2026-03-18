@@ -1660,6 +1660,28 @@
       "created_at": "2026-03-17T17:25:49.450697-07:00",
       "updated_at": "2026-03-17T17:25:49.450697-07:00",
       "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/scan_job.rs\"]}"
+    },
+    {
+      "id": 158,
+      "change_id": "a2070b7a-cffb-4418-a1ad-4415cad54fd6",
+      "node_type": "outcome",
+      "title": "Full onboarding flow verified: login → welcome → auto-fingerprint → scan → dashboard. All working.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T17:32:44.768345-07:00",
+      "updated_at": "2026-03-17T17:32:44.768345-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"commit\":\"638e535\",\"confidence\":98}"
+    },
+    {
+      "id": 159,
+      "change_id": "3a909226-a0c8-4f68-8bda-faadb9d8b33e",
+      "node_type": "action",
+      "title": "Fix CodeRabbit findings on PR #21",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-17T17:52:41.490275-07:00",
+      "updated_at": "2026-03-17T17:52:41.490275-07:00",
+      "metadata_json": "{\"branch\":\"feat/onboarding-flow\",\"confidence\":90,\"files\":[\"src/web/scan_job.rs\",\"tests/web_oauth.rs\",\"src/web/test_helpers.rs\",\"CLAUDE.md\",\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
     }
   ],
   "edges": [
@@ -3224,6 +3246,28 @@
       "weight": 1.0,
       "rationale": "Follow-up fix: scan must auto-fingerprint for web users",
       "created_at": "2026-03-17T17:25:54.045673-07:00"
+    },
+    {
+      "id": 149,
+      "from_node_id": 157,
+      "to_node_id": 158,
+      "from_change_id": "16b3a763-7eae-44e2-9bcb-576b9234baad",
+      "to_change_id": "a2070b7a-cffb-4418-a1ad-4415cad54fd6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Auto-fingerprint verified working in production",
+      "created_at": "2026-03-17T17:32:48.952040-07:00"
+    },
+    {
+      "id": 150,
+      "from_node_id": 151,
+      "to_node_id": 159,
+      "from_change_id": "3d68d76f-5d01-4611-a5c5-45a038ae86ef",
+      "to_change_id": "3a909226-a0c8-4f68-8bda-faadb9d8b33e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Address PR review findings",
+      "created_at": "2026-03-17T17:52:45.937602-07:00"
     }
   ],
   "documents": [
