@@ -1858,6 +1858,17 @@
       "created_at": "2026-03-19T15:24:07.287613-07:00",
       "updated_at": "2026-03-19T15:24:07.287613-07:00",
       "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"a0bc878\",\"files\":[\"src/db/schema.rs\"]}"
+    },
+    {
+      "id": 176,
+      "change_id": "d915256e-1374-491a-aa5d-d0356a18f636",
+      "node_type": "outcome",
+      "title": "Chunk 1 complete: data models, schema v5 migration, and all DB trait methods implemented — 255 tests passing, merged to staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T15:43:24.652760-07:00",
+      "updated_at": "2026-03-19T15:43:24.652760-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"c39180e\"}"
     }
   ],
   "edges": [
@@ -3620,6 +3631,28 @@
       "weight": 1.0,
       "rationale": "Schema migration creates storage for new data",
       "created_at": "2026-03-19T15:24:13.181079-07:00"
+    },
+    {
+      "id": 167,
+      "from_node_id": 174,
+      "to_node_id": 176,
+      "from_change_id": "c6d6cfc2-de5c-412f-a2bd-6cfa9aa2c113",
+      "to_change_id": "d915256e-1374-491a-aa5d-d0356a18f636",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Data models led to trait implementation",
+      "created_at": "2026-03-19T15:43:24.658517-07:00"
+    },
+    {
+      "id": 168,
+      "from_node_id": 175,
+      "to_node_id": 176,
+      "from_change_id": "b0c62306-d337-46f3-91c8-845838724973",
+      "to_change_id": "d915256e-1374-491a-aa5d-d0356a18f636",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Schema migration led to trait implementation",
+      "created_at": "2026-03-19T15:43:24.663909-07:00"
     }
   ],
   "documents": [

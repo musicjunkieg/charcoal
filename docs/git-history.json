@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c39180e568a63f8dc0df66faacf85d4d02f53fe2",
+    "short_hash": "c39180e",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:35:45-07:00",
+    "message": "feat: add Database trait methods for labels, inferred pairs, and events\n\n  7 new trait methods: upsert/get user labels, get unlabeled accounts,\n  accuracy metrics, insert/get/delete inferred pairs. Updated\n  insert_amplification_event with original_post_text and context_score.\n  Both SQLite and PostgreSQL backends implemented. 255 tests passing.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
     "hash": "a0bc878cfcd289c699d5d3f65671be30961374fe",
     "short_hash": "a0bc878",
     "author": "Bryan Guffey",

@@ -724,6 +724,7 @@ async fn main() -> Result<()> {
             // On Railway with a persistent volume, this only happens on first deploy.
             if !charcoal::toxicity::download::model_files_present(&config.model_dir)
                 || !charcoal::toxicity::download::embedding_files_present(&config.model_dir)
+                || !charcoal::toxicity::download::nli_files_present(&config.model_dir)
             {
                 info!("Checking ONNX models — some files missing, downloading...");
                 charcoal::toxicity::download::download_model(&config.model_dir).await?;
