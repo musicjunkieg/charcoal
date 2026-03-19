@@ -14,6 +14,140 @@
 
 ---
 
+## CRITICAL: Corrections From Plan Review
+
+**Read these before implementing any task. They override the code examples below.**
+
+### 1. AccountScore and AmplificationEvent field types
+
+The test code throughout this plan uses `Option` wrappers on fields that are
+NOT optional in the actual structs. The real types from `src/db/models.rs`:
+
+```rust
+// AccountScore — these fields are NOT Option:
+pub posts_analyzed: u32,     // Plan incorrectly uses Some(10)
+pub scored_at: String,       // Plan incorrectly uses Some("...")
+
+// AmplificationEvent — these fields are NOT Option:
+pub id: i64,                 // Plan incorrectly uses Some(1)
+pub detected_at: String,     // Plan incorrectly uses Some("...")
+pub followers_fetched: bool, // Plan incorrectly uses Some(false)
+pub followers_scored: bool,  // Plan incorrectly uses Some(false)
+```
+
+**Fix:** In ALL test code that constructs these structs, use the actual types:
+- `posts_analyzed: 10` (not `Some(10)`)
+- `scored_at: "2026-03-19T12:00:00Z".to_string()` (not `Some(...)`)
+- `id: 1` (not `Some(1)`)
+- `detected_at: "2026-03-19T12:00:00Z".to_string()` (not `Some(...)`)
+- `followers_fetched: false` (not `Some(false)`)
+- `followers_scored: false` (not `Some(false)`)
+
+### 2. NLI score_pair input architecture is WRONG
+
+The plan's `score_pair` method concatenates texts with `[SEP]`:
+```rust
+let premise = format!("{} [SEP] {}", original_text, response_text);
+```
+This is INCORRECT. NLI cross-encoders take two separate text segments — the
+tokenizer handles `[SEP]` automatically via `encode((text_a, text_b), true)`.
+
+**Fix:** `score_pair` should call `score_hypothesis` with the original text as
+one segment. Restructure so that:
+- Premise = `"{original_text} ||| {response_text}"` (concatenated as a single
+  premise describing the interaction)
+- Hypothesis = each of the 5 hostility templates
+
+OR better: use the NLI model's native pair encoding:
+- text_a = the combined context (original + response)
+- text_b = the hypothesis template
+
+The tokenizer call `encode((text_a, text_b), true)` produces
+`[CLS] text_a [SEP] text_b [SEP]` which is the correct NLI input.
+
+### 3. Missing call sites for insert_amplification_event
+
+When the trait signature changes (Task 3), these additional callers need
+`None, None` appended:
+- `src/main.rs` (if it calls insert_amplification_event directly)
+- `tests/db_postgres.rs`
+- `src/db/sqlite.rs` — the `insert_amplification_event_raw` method also needs
+  updating to persist the new fields
+
+### 4. Missing files from breakage list (Task 1, Step 4)
+
+These files also construct AccountScore and need `context_score: None` added:
+- `src/output/markdown.rs`
+- `tests/db_postgres.rs`
+
+### 5. fetch_post_text already exists
+
+`src/bluesky/posts.rs` has `pub async fn fetch_post_text(client, uri) -> Result<Option<String>>`.
+Task 9 can use this directly — no new function needed. Verify the exact
+import path before using.
+
+### 6. getLikes fallback must be implemented
+
+Task 7 must include a fallback path for when Constellation does not index
+likes. Create `src/bluesky/likes.rs` with:
+
+```rust
+pub async fn fetch_likers_via_api(
+    client: &PublicAtpClient, post_uri: &str, limit: usize,
+) -> Result<Vec<String>> {
+    // GET app.bsky.feed.getLikes?uri={uri}&limit={limit}
+    // Parse response, return Vec of liker DIDs
+}
+```
+
+The scan pipeline should try Constellation first, fall back to this if
+Constellation returns an error or empty results for likes.
+
+### 7. Task 10 web API tests must be real tests
+
+The `todo!()` stubs in Task 10 are NOT acceptable. The implementer MUST:
+1. Read `tests/web_oauth.rs` for the test app setup pattern
+2. Write complete, runnable test bodies BEFORE implementing the handlers
+3. Each test must assert specific HTTP status codes and response body shapes
+
+### 8. NLI tensor construction guidance
+
+`score_hypothesis` needs the actual ort inference code. DeBERTa-v3-xsmall:
+- **Inputs:** `input_ids` (i64), `attention_mask` (i64), `token_type_ids` (i64)
+  — all shape `[1, seq_len]`
+- **Output:** logits shape `[1, 3]` → `[contradiction, neutral, entailment]`
+- **Post-processing:** softmax the logits, return `entailment` probability
+
+Follow the pattern from `src/toxicity/onnx.rs` but note:
+- RoBERTa (Detoxify) does NOT use `token_type_ids` — DeBERTa DOES
+- RoBERTa output is multi-label sigmoid — DeBERTa NLI output is 3-class softmax
+- Use `ndarray` for tensor construction, same as existing code
+
+### 9. Inferred pairs require per-post embeddings
+
+`find_most_similar_posts` needs per-post embeddings for both the target and
+the protected user. Currently `build_profile` computes a mean embedding.
+
+**Fix:** When fetching target posts, also embed each post individually using
+`SentenceEmbedder::embed()`. Store the post text + embedding pairs in memory
+(not DB) for the duration of the scoring pass. For the protected user's posts,
+embed their recent posts once at scan start and cache.
+
+### 10. Follows set threading
+
+`fetch_follows_set` should be called ONCE at the start of a scan and passed
+as a parameter to the reply detection pipeline. Do NOT re-fetch per post.
+Store in memory only (no database table needed). The spec's mention of a
+`user_follows` table is optional — in-memory `HashSet<String>` is sufficient.
+
+### 11. PublicAtpClient field access
+
+`PublicAtpClient` wraps a `reqwest::Client`. Check the actual field name in
+`src/bluesky/client.rs` before using `client.client` — it may be a different
+name or may need a getter method. Read the file first.
+
+---
+
 ## File Structure
 
 ### New Files
@@ -48,6 +182,10 @@
 | `src/scoring/profile.rs` | Integrate context scoring into `build_profile()` |
 | `src/pipeline/amplification.rs` | Store `original_post_text`, score likes and replies, pass context scorer |
 | `src/constellation/client.rs` | Add `get_likes()` query method |
+| `src/bluesky/likes.rs` | Create: `getLikes` fallback when Constellation doesn't index likes |
+| `src/output/markdown.rs` | Add `context_score: None` to AccountScore construction |
+| `src/main.rs` | Update `insert_amplification_event` call sites with new params |
+| `tests/db_postgres.rs` | Add `context_score` to AccountScore + update event call sites |
 | `src/toxicity/download.rs` | Add NLI model download |
 | `src/web/handlers/mod.rs` | Register label and review routes |
 | `src/web/handlers/accounts.rs` | Add label data to account detail response |
