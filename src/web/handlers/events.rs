@@ -40,10 +40,10 @@ pub async fn list_events(
             // the "View post" link shows the reposted content.
             let view_uri = if e.event_type == "repost" {
                 Some(at_uri_to_bsky_url(&e.original_post_uri))
-            } else if let Some(ref uri) = e.amplifier_post_uri {
-                Some(at_uri_to_bsky_url(uri))
             } else {
-                None
+                e.amplifier_post_uri
+                    .as_ref()
+                    .map(|uri| at_uri_to_bsky_url(uri))
             };
             e.amplifier_post_uri = view_uri;
             serde_json::json!({
