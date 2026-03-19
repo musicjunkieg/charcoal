@@ -109,7 +109,10 @@
 		</div>
 
 		<p class="meta">
-			{account.posts_analyzed} posts analyzed &nbsp;·&nbsp; Scored {account.scored_at.slice(0, 10)}
+			{account.posts_analyzed} posts analyzed
+			{#if account.scored_at}
+				&nbsp;·&nbsp; Scored {account.scored_at.slice(0, 10)}
+			{/if}
 		</p>
 
 		<!-- Behavioral Signals -->
@@ -159,7 +162,7 @@
 		</section>
 
 		<!-- Evidence: Top Toxic Posts -->
-		{#if account.top_toxic_posts.length > 0}
+		{#if account.top_toxic_posts && account.top_toxic_posts.length > 0}
 			<section class="section">
 				<h2 class="section-title">Evidence — Top Toxic Posts</h2>
 				<div class="posts-list">

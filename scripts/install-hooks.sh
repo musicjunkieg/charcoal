@@ -186,7 +186,7 @@ if [ -z "$RUST_FILES" ]; then
 fi
 
 echo "🔍 Pre-push: running clippy..."
-if ! cargo clippy --all-targets --quiet 2>&1; then
+if ! cargo clippy --all-targets --features web --quiet 2>&1; then
     echo ""
     echo "❌ Clippy warnings found. Fix them before pushing."
     echo ""
@@ -194,7 +194,7 @@ if ! cargo clippy --all-targets --quiet 2>&1; then
 fi
 
 echo "🔍 Pre-push: running tests..."
-if ! cargo test --all-targets --quiet 2>&1; then
+if ! cargo test --features web --quiet 2>&1; then
     echo ""
     echo "❌ Tests failed. Fix them before pushing."
     echo ""
