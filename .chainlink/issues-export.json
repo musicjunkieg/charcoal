@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-03-19T23:27:16.007658+00:00",
+  "exported_at": "2026-03-19T23:33:55.120165+00:00",
   "issues": [
     {
-      "id": 111,
-      "title": "Add NLI model download support for DeBERTa-v3-xsmall",
+      "id": 112,
+      "title": "Add NLI inference module for contextual hostility scoring",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -13,9 +13,24 @@
         "feature"
       ],
       "comments": [],
-      "created_at": "2026-03-19T22:53:50.302155+00:00",
-      "updated_at": "2026-03-19T22:53:50.302155+00:00",
+      "created_at": "2026-03-19T23:27:36.982353+00:00",
+      "updated_at": "2026-03-19T23:27:36.982353+00:00",
       "closed_at": null
+    },
+    {
+      "id": 111,
+      "title": "Add NLI model download support for DeBERTa-v3-xsmall",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-19T22:53:50.302155+00:00",
+      "updated_at": "2026-03-19T23:27:36.977237+00:00",
+      "closed_at": "2026-03-19T23:27:36.977237+00:00"
     },
     {
       "id": 110,
