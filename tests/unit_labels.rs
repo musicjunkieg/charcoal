@@ -293,3 +293,373 @@ fn schema_v5_inferred_pairs_dedup_index() {
         "Duplicate inferred pair should be rejected by unique index"
     );
 }
+
+// --- Trait-level tests using SqliteDatabase ---
+
+use charcoal::db::sqlite::SqliteDatabase;
+use charcoal::db::Database;
+use rusqlite::Connection;
+
+async fn test_db() -> SqliteDatabase {
+    let conn = Connection::open_in_memory().unwrap();
+    charcoal::db::schema::create_tables(&conn).unwrap();
+    SqliteDatabase::new(conn)
+}
+
+const TEST_USER: &str = "did:plc:testuser000000000000";
+
+fn make_score(did: &str, handle: &str, threat_score: f64, tier: &str) -> AccountScore {
+    AccountScore {
+        did: did.to_string(),
+        handle: handle.to_string(),
+        toxicity_score: Some(0.5),
+        topic_overlap: Some(0.3),
+        threat_score: Some(threat_score),
+        threat_tier: Some(tier.to_string()),
+        posts_analyzed: 10,
+        top_toxic_posts: vec![],
+        scored_at: String::new(),
+        behavioral_signals: None,
+        context_score: None,
+    }
+}
+
+#[tokio::test]
+async fn trait_upsert_and_get_user_label() {
+    let db = test_db().await;
+
+    // No label initially
+    let label = db
+        .get_user_label(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    assert!(label.is_none());
+
+    // Insert label
+    db.upsert_user_label(TEST_USER, "did:plc:target1", "high", Some("known troll"))
+        .await
+        .unwrap();
+
+    let label = db
+        .get_user_label(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(label.label, "high");
+    assert_eq!(label.notes, Some("known troll".to_string()));
+    assert_eq!(label.user_did, TEST_USER);
+    assert_eq!(label.target_did, "did:plc:target1");
+
+    // Upsert overwrites
+    db.upsert_user_label(TEST_USER, "did:plc:target1", "safe", None)
+        .await
+        .unwrap();
+
+    let label = db
+        .get_user_label(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(label.label, "safe");
+    assert!(label.notes.is_none());
+}
+
+#[tokio::test]
+async fn trait_user_label_isolation() {
+    let db = test_db().await;
+
+    db.upsert_user_label("did:plc:user_a", "did:plc:target1", "high", None)
+        .await
+        .unwrap();
+    db.upsert_user_label("did:plc:user_b", "did:plc:target1", "safe", None)
+        .await
+        .unwrap();
+
+    let label_a = db
+        .get_user_label("did:plc:user_a", "did:plc:target1")
+        .await
+        .unwrap()
+        .unwrap();
+    let label_b = db
+        .get_user_label("did:plc:user_b", "did:plc:target1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(label_a.label, "high");
+    assert_eq!(label_b.label, "safe");
+}
+
+#[tokio::test]
+async fn trait_get_unlabeled_accounts() {
+    let db = test_db().await;
+
+    // Insert 3 scored accounts
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:a", "a.bsky.social", 40.0, "High"),
+    )
+    .await
+    .unwrap();
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:b", "b.bsky.social", 20.0, "Elevated"),
+    )
+    .await
+    .unwrap();
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:c", "c.bsky.social", 5.0, "Low"),
+    )
+    .await
+    .unwrap();
+
+    // All 3 should be unlabeled
+    let unlabeled = db.get_unlabeled_accounts(TEST_USER, 10).await.unwrap();
+    assert_eq!(unlabeled.len(), 3);
+    // Should be sorted by threat_score DESC
+    assert_eq!(unlabeled[0].did, "did:plc:a");
+    assert_eq!(unlabeled[1].did, "did:plc:b");
+    assert_eq!(unlabeled[2].did, "did:plc:c");
+
+    // Label one account
+    db.upsert_user_label(TEST_USER, "did:plc:a", "high", None)
+        .await
+        .unwrap();
+
+    let unlabeled = db.get_unlabeled_accounts(TEST_USER, 10).await.unwrap();
+    assert_eq!(unlabeled.len(), 2);
+    assert_eq!(unlabeled[0].did, "did:plc:b");
+
+    // Limit works
+    let unlabeled = db.get_unlabeled_accounts(TEST_USER, 1).await.unwrap();
+    assert_eq!(unlabeled.len(), 1);
+}
+
+#[tokio::test]
+async fn trait_get_accuracy_metrics_empty() {
+    let db = test_db().await;
+
+    let metrics = db.get_accuracy_metrics(TEST_USER).await.unwrap();
+    assert_eq!(metrics.total_labeled, 0);
+    assert_eq!(metrics.exact_matches, 0);
+    assert!((metrics.accuracy - 0.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn trait_get_accuracy_metrics_mixed() {
+    let db = test_db().await;
+
+    // Insert scored accounts with various tiers
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:a", "a.bsky.social", 40.0, "High"),
+    )
+    .await
+    .unwrap();
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:b", "b.bsky.social", 20.0, "Elevated"),
+    )
+    .await
+    .unwrap();
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:c", "c.bsky.social", 5.0, "Low"),
+    )
+    .await
+    .unwrap();
+    db.upsert_account_score(
+        TEST_USER,
+        &make_score("did:plc:d", "d.bsky.social", 10.0, "Watch"),
+    )
+    .await
+    .unwrap();
+
+    // Label them: a=high (exact), b=safe (overscored), c=elevated (underscored), d=watch (exact)
+    db.upsert_user_label(TEST_USER, "did:plc:a", "high", None)
+        .await
+        .unwrap();
+    db.upsert_user_label(TEST_USER, "did:plc:b", "safe", None)
+        .await
+        .unwrap();
+    db.upsert_user_label(TEST_USER, "did:plc:c", "elevated", None)
+        .await
+        .unwrap();
+    db.upsert_user_label(TEST_USER, "did:plc:d", "watch", None)
+        .await
+        .unwrap();
+
+    let metrics = db.get_accuracy_metrics(TEST_USER).await.unwrap();
+    assert_eq!(metrics.total_labeled, 4);
+    assert_eq!(metrics.exact_matches, 2); // a=high, d=watch
+    assert_eq!(metrics.overscored, 1); // b: predicted Elevated, labeled safe
+    assert_eq!(metrics.underscored, 1); // c: predicted Low, labeled elevated
+    assert!((metrics.accuracy - 0.5).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn trait_inferred_pairs_crud() {
+    let db = test_db().await;
+
+    // No pairs initially
+    let pairs = db
+        .get_inferred_pairs(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    assert!(pairs.is_empty());
+
+    // Insert a pair
+    let id = db
+        .insert_inferred_pair(
+            TEST_USER,
+            "did:plc:target1",
+            "fatphobia is overblown",
+            "at://did:plc:target1/app.bsky.feed.post/abc",
+            "fatphobia in healthcare is real",
+            "at://did:plc:user/app.bsky.feed.post/xyz",
+            0.82,
+            Some(0.71),
+        )
+        .await
+        .unwrap();
+    assert!(id > 0);
+
+    // Retrieve it
+    let pairs = db
+        .get_inferred_pairs(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].target_post_text, "fatphobia is overblown");
+    assert_eq!(pairs[0].user_post_text, "fatphobia in healthcare is real");
+    assert!((pairs[0].similarity - 0.82).abs() < f64::EPSILON);
+    assert_eq!(pairs[0].context_score, Some(0.71));
+
+    // Insert a second pair
+    db.insert_inferred_pair(
+        TEST_USER,
+        "did:plc:target1",
+        "another post",
+        "at://did:plc:target1/app.bsky.feed.post/def",
+        "my other post",
+        "at://did:plc:user/app.bsky.feed.post/ghi",
+        0.65,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let pairs = db
+        .get_inferred_pairs(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    assert_eq!(pairs.len(), 2);
+    // Sorted by similarity DESC
+    assert!((pairs[0].similarity - 0.82).abs() < f64::EPSILON);
+    assert!((pairs[1].similarity - 0.65).abs() < f64::EPSILON);
+
+    // Delete all pairs for this target
+    db.delete_inferred_pairs(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    let pairs = db
+        .get_inferred_pairs(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    assert!(pairs.is_empty());
+}
+
+#[tokio::test]
+async fn trait_inferred_pairs_dedup_upsert() {
+    let db = test_db().await;
+
+    // Insert a pair
+    db.insert_inferred_pair(
+        TEST_USER,
+        "did:plc:target1",
+        "post text",
+        "at://did:plc:target1/app.bsky.feed.post/abc",
+        "user post text",
+        "at://did:plc:user/app.bsky.feed.post/xyz",
+        0.80,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // Insert same URIs — should upsert, not duplicate
+    db.insert_inferred_pair(
+        TEST_USER,
+        "did:plc:target1",
+        "post text",
+        "at://did:plc:target1/app.bsky.feed.post/abc",
+        "user post text",
+        "at://did:plc:user/app.bsky.feed.post/xyz",
+        0.90,
+        Some(0.55),
+    )
+    .await
+    .unwrap();
+
+    let pairs = db
+        .get_inferred_pairs(TEST_USER, "did:plc:target1")
+        .await
+        .unwrap();
+    assert_eq!(pairs.len(), 1);
+    // Should have the updated values
+    assert!((pairs[0].similarity - 0.90).abs() < f64::EPSILON);
+    assert_eq!(pairs[0].context_score, Some(0.55));
+}
+
+#[tokio::test]
+async fn trait_insert_amplification_event_with_new_fields() {
+    let db = test_db().await;
+
+    let id = db
+        .insert_amplification_event(
+            TEST_USER,
+            "quote",
+            "did:plc:amp",
+            "amp.bsky.social",
+            "at://did:plc:me/app.bsky.feed.post/abc",
+            Some("at://did:plc:amp/app.bsky.feed.post/def"),
+            Some("look at this"),
+            Some("my original post"),
+            Some(0.85),
+        )
+        .await
+        .unwrap();
+    assert!(id > 0);
+
+    let events = db.get_recent_events(TEST_USER, 10).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].original_post_text,
+        Some("my original post".to_string())
+    );
+    assert_eq!(events[0].context_score, Some(0.85));
+}
+
+#[tokio::test]
+async fn trait_insert_amplification_event_new_fields_none() {
+    let db = test_db().await;
+
+    db.insert_amplification_event(
+        TEST_USER,
+        "repost",
+        "did:plc:amp",
+        "amp.bsky.social",
+        "at://did:plc:me/app.bsky.feed.post/abc",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let events = db.get_recent_events(TEST_USER, 10).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(events[0].original_post_text.is_none());
+    assert!(events[0].context_score.is_none());
+}

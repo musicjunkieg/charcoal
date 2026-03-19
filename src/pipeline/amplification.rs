@@ -100,6 +100,8 @@ pub async fn run(
             event.original_post_uri.as_deref().unwrap_or("unknown"),
             Some(&event.amplifier_post_uri),
             quote_text.as_deref(),
+            None,
+            None,
         )
         .await?;
 

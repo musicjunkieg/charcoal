@@ -1,5 +1,29 @@
 [
   {
+    "hash": "a0bc878cfcd289c699d5d3f65671be30961374fe",
+    "short_hash": "a0bc878",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:22:24-07:00",
+    "message": "feat: add schema migration v5 for contextual scoring\n\n  New tables: user_labels (with upsert support), inferred_pairs\n  (with dedup unique index). New columns: amplification_events\n  gets original_post_text and context_score, account_scores gets\n  context_score. Updated table count tests (6 -> 8 tables).\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b0a00b64fbb89d707ed49e3ae2ec4367f3e26bf5",
+    "short_hash": "b0a00b6",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:15:07-07:00",
+    "message": "feat: add contextual scoring data models\n\n  Add UserLabel, InferredPair, AccuracyMetrics structs.\n  Add context_score to AccountScore.\n  Add original_post_text and context_score to AmplificationEvent.\n  All 240 tests pass (8 new + 232 existing).\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "15911a2a59b876efeb7ec35a4638c98d1c654450",
+    "short_hash": "15911a2",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T14:26:51-07:00",
+    "message": "docs: update staging strategy — long-lived staging branch with promotion flow\n\nstaging branch persists permanently. Feature branches merge into\nstaging for validation, staging merges into main for production.\nSeparate persistent volume for ONNX models on staging.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "f44530363a0214b839830c162119d608fef9e3df",
     "short_hash": "f445303",
     "author": "chaos gremlin",

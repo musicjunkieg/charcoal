@@ -17,7 +17,10 @@ use sqlx_core::pool::Pool;
 use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
-use super::models::{AccountScore, AmplificationEvent, ThreatTier, ToxicPost};
+use super::models::{
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
+    UserLabel,
+};
 use super::traits::Database;
 
 /// Type alias for the PostgreSQL connection pool.
@@ -407,12 +410,14 @@ impl Database for PgDatabase {
         original_post_uri: &str,
         amplifier_post_uri: Option<&str>,
         amplifier_text: Option<&str>,
+        original_post_text: Option<&str>,
+        context_score: Option<f64>,
     ) -> Result<i64> {
         let row = sqlx_core::query::query(
             "INSERT INTO amplification_events
                 (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
-                 amplifier_post_uri, amplifier_text)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 amplifier_post_uri, amplifier_text, original_post_text, context_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              RETURNING id",
         )
         .bind(user_did)
@@ -422,6 +427,8 @@ impl Database for PgDatabase {
         .bind(original_post_uri)
         .bind(amplifier_post_uri)
         .bind(amplifier_text)
+        .bind(original_post_text)
+        .bind(context_score)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))
@@ -439,7 +446,8 @@ impl Database for PgDatabase {
             "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
                     amplifier_post_uri, amplifier_text,
                     to_char(detected_at, 'YYYY-MM-DD HH24:MI:SS') as detected_at,
-                    followers_fetched, followers_scored
+                    followers_fetched, followers_scored,
+                    original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1
              ORDER BY detected_at DESC
@@ -463,8 +471,8 @@ impl Database for PgDatabase {
                 detected_at: row.get(7),
                 followers_fetched: row.get(8),
                 followers_scored: row.get(9),
-                original_post_text: None,
-                context_score: None,
+                original_post_text: row.get(10),
+                context_score: row.get(11),
             });
         }
         Ok(events)
@@ -538,8 +546,8 @@ impl Database for PgDatabase {
         let row = sqlx_core::query::query(
             "INSERT INTO amplification_events
                 (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
-                 amplifier_post_uri, amplifier_text, detected_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+                 amplifier_post_uri, amplifier_text, detected_at, original_post_text, context_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10)
              RETURNING id",
         )
         .bind(user_did)
@@ -566,6 +574,8 @@ impl Database for PgDatabase {
                 format!("{}+00", event.detected_at)
             }
         })
+        .bind(&event.original_post_text)
+        .bind(event.context_score)
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))
@@ -649,5 +659,231 @@ impl Database for PgDatabase {
                 context_score: None,
             }
         }))
+    }
+
+    async fn upsert_user_label(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        label: &str,
+        notes: Option<&str>,
+    ) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO user_labels (user_did, target_did, label, labeled_at, notes)
+             VALUES ($1, $2, $3, NOW(), $4)
+             ON CONFLICT(user_did, target_did) DO UPDATE SET
+                label = $3, labeled_at = NOW(), notes = $4",
+        )
+        .bind(user_did)
+        .bind(target_did)
+        .bind(label)
+        .bind(notes)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_user_label(&self, user_did: &str, target_did: &str) -> Result<Option<UserLabel>> {
+        let row = sqlx_core::query::query(
+            "SELECT user_did, target_did, label,
+                    to_char(labeled_at, 'YYYY-MM-DD HH24:MI:SS') as labeled_at, notes
+             FROM user_labels
+             WHERE user_did = $1 AND target_did = $2",
+        )
+        .bind(user_did)
+        .bind(target_did)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| UserLabel {
+            user_did: r.get(0),
+            target_did: r.get(1),
+            label: r.get(2),
+            labeled_at: r.get(3),
+            notes: r.get(4),
+        }))
+    }
+
+    async fn get_unlabeled_accounts(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<AccountScore>> {
+        let rows = sqlx_core::query::query(
+            "SELECT a.did, a.handle, a.toxicity_score, a.topic_overlap, a.threat_score, a.threat_tier,
+                    a.posts_analyzed, a.top_toxic_posts,
+                    to_char(a.scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
+                    a.behavioral_signals, a.context_score
+             FROM account_scores a
+             LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
+             WHERE a.user_did = $1 AND ul.target_did IS NULL
+             ORDER BY a.threat_score DESC
+             LIMIT $2",
+        )
+        .bind(user_did)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut accounts = Vec::new();
+        for row in rows {
+            let top_posts_json: serde_json::Value = row.get(7);
+            let top_toxic_posts: Vec<ToxicPost> =
+                serde_json::from_value(top_posts_json).unwrap_or_default();
+            let threat_score: Option<f64> = row.get(4);
+            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            let behavioral_signals: Option<serde_json::Value> = row.get(9);
+
+            accounts.push(AccountScore {
+                did: row.get(0),
+                handle: row.get(1),
+                toxicity_score: row.get(2),
+                topic_overlap: row.get(3),
+                threat_score,
+                threat_tier,
+                posts_analyzed: row.get::<i32, _>(6) as u32,
+                top_toxic_posts,
+                scored_at: row.get(8),
+                behavioral_signals: behavioral_signals.map(|v| v.to_string()),
+                context_score: row.get(10),
+            });
+        }
+        Ok(accounts)
+    }
+
+    async fn get_accuracy_metrics(&self, user_did: &str) -> Result<AccuracyMetrics> {
+        // Compute tier rank in SQL using CASE expressions, then compare
+        let rows = sqlx_core::query::query(
+            "SELECT
+                CASE lower(a.threat_tier)
+                    WHEN 'high' THEN 3
+                    WHEN 'elevated' THEN 2
+                    WHEN 'watch' THEN 1
+                    ELSE 0
+                END as predicted,
+                CASE lower(ul.label)
+                    WHEN 'high' THEN 3
+                    WHEN 'elevated' THEN 2
+                    WHEN 'watch' THEN 1
+                    ELSE 0
+                END as actual
+             FROM user_labels ul
+             INNER JOIN account_scores a ON a.user_did = ul.user_did AND a.did = ul.target_did
+             WHERE ul.user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let total_labeled = rows.len() as i64;
+        let mut exact_matches: i64 = 0;
+        let mut overscored: i64 = 0;
+        let mut underscored: i64 = 0;
+
+        for row in &rows {
+            let predicted: i32 = row.get(0);
+            let actual: i32 = row.get(1);
+            if predicted == actual {
+                exact_matches += 1;
+            } else if predicted > actual {
+                overscored += 1;
+            } else {
+                underscored += 1;
+            }
+        }
+
+        let accuracy = if total_labeled > 0 {
+            exact_matches as f64 / total_labeled as f64
+        } else {
+            0.0
+        };
+
+        Ok(AccuracyMetrics {
+            total_labeled,
+            exact_matches,
+            overscored,
+            underscored,
+            accuracy,
+        })
+    }
+
+    async fn delete_inferred_pairs(&self, user_did: &str, target_did: &str) -> Result<()> {
+        sqlx_core::query::query(
+            "DELETE FROM inferred_pairs WHERE user_did = $1 AND target_did = $2",
+        )
+        .bind(user_did)
+        .bind(target_did)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_inferred_pair(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        target_post_text: &str,
+        target_post_uri: &str,
+        user_post_text: &str,
+        user_post_uri: &str,
+        similarity: f64,
+        context_score: Option<f64>,
+    ) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "INSERT INTO inferred_pairs
+                (user_did, target_did, target_post_text, target_post_uri,
+                 user_post_text, user_post_uri, similarity, context_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT(user_did, target_did, target_post_uri, user_post_uri)
+             DO UPDATE SET similarity = $7, context_score = $8
+             RETURNING id",
+        )
+        .bind(user_did)
+        .bind(target_did)
+        .bind(target_post_text)
+        .bind(target_post_uri)
+        .bind(user_post_text)
+        .bind(user_post_uri)
+        .bind(similarity)
+        .bind(context_score)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn get_inferred_pairs(
+        &self,
+        user_did: &str,
+        target_did: &str,
+    ) -> Result<Vec<InferredPair>> {
+        let rows = sqlx_core::query::query(
+            "SELECT id, user_did, target_did, target_post_text, target_post_uri,
+                    user_post_text, user_post_uri, similarity, context_score,
+                    to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at
+             FROM inferred_pairs
+             WHERE user_did = $1 AND target_did = $2
+             ORDER BY similarity DESC",
+        )
+        .bind(user_did)
+        .bind(target_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut pairs = Vec::new();
+        for row in rows {
+            pairs.push(InferredPair {
+                id: row.get(0),
+                user_did: row.get(1),
+                target_did: row.get(2),
+                target_post_text: row.get(3),
+                target_post_uri: row.get(4),
+                user_post_text: row.get(5),
+                user_post_uri: row.get(6),
+                similarity: row.get(7),
+                context_score: row.get(8),
+                created_at: row.get(9),
+            });
+        }
+        Ok(pairs)
     }
 }

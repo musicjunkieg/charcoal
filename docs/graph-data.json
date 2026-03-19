@@ -1803,6 +1803,61 @@
       "created_at": "2026-03-19T09:45:18.303862-07:00",
       "updated_at": "2026-03-19T09:45:18.303862-07:00",
       "metadata_json": "{\"branch\":\"main\"}"
+    },
+    {
+      "id": 171,
+      "change_id": "2abb7a10-0ce4-434d-8757-c0ca782dc5c0",
+      "node_type": "goal",
+      "title": "Phase 1.75: Contextual scoring — implement data foundation",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T15:23:51.811898-07:00",
+      "updated_at": "2026-03-19T15:23:51.811898-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"a0bc878\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-03-19-contextual-scoring-design.md\",\"docs/superpowers/plans/2026-03-19-contextual-scoring-impl.md\"]}"
+    },
+    {
+      "id": 172,
+      "change_id": "7f1cc1e9-1b0b-48e7-bc23-c6f7306c71bb",
+      "node_type": "action",
+      "title": "Set up Railway staging environment — staging branch, own Postgres, own volume, Dockerfile builder",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T15:23:58.664838-07:00",
+      "updated_at": "2026-03-19T15:23:58.664838-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"15911a2\"}"
+    },
+    {
+      "id": 173,
+      "change_id": "5f17aba4-67c2-4399-922f-13bfd3e83d75",
+      "node_type": "outcome",
+      "title": "Staging live at charcoal-web-staging.up.railway.app — models downloaded, healthcheck passed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T15:23:58.674076-07:00",
+      "updated_at": "2026-03-19T15:23:58.674076-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"15911a2\"}"
+    },
+    {
+      "id": 174,
+      "change_id": "c6d6cfc2-de5c-412f-a2bd-6cfa9aa2c113",
+      "node_type": "action",
+      "title": "Add contextual scoring data models — UserLabel, InferredPair, AccuracyMetrics, context_score fields",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T15:24:07.278804-07:00",
+      "updated_at": "2026-03-19T15:24:07.278804-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"b0a00b6\",\"files\":[\"src/db/models.rs\",\"tests/unit_labels.rs\"]}"
+    },
+    {
+      "id": 175,
+      "change_id": "b0c62306-d337-46f3-91c8-845838724973",
+      "node_type": "action",
+      "title": "Schema migration v5 — user_labels, inferred_pairs tables, new columns on account_scores and amplification_events",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T15:24:07.287613-07:00",
+      "updated_at": "2026-03-19T15:24:07.287613-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"a0bc878\",\"files\":[\"src/db/schema.rs\"]}"
     }
   ],
   "edges": [
@@ -3521,9 +3576,85 @@
       "weight": 1.0,
       "rationale": "Post-deploy housekeeping",
       "created_at": "2026-03-19T09:45:21.314551-07:00"
+    },
+    {
+      "id": 163,
+      "from_node_id": 171,
+      "to_node_id": 172,
+      "from_change_id": "2abb7a10-0ce4-434d-8757-c0ca782dc5c0",
+      "to_change_id": "7f1cc1e9-1b0b-48e7-bc23-c6f7306c71bb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Staging environment is first step of implementation",
+      "created_at": "2026-03-19T15:24:13.164082-07:00"
+    },
+    {
+      "id": 164,
+      "from_node_id": 172,
+      "to_node_id": 173,
+      "from_change_id": "7f1cc1e9-1b0b-48e7-bc23-c6f7306c71bb",
+      "to_change_id": "5f17aba4-67c2-4399-922f-13bfd3e83d75",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Staging setup produced working environment",
+      "created_at": "2026-03-19T15:24:13.169735-07:00"
+    },
+    {
+      "id": 165,
+      "from_node_id": 171,
+      "to_node_id": 174,
+      "from_change_id": "2abb7a10-0ce4-434d-8757-c0ca782dc5c0",
+      "to_change_id": "c6d6cfc2-de5c-412f-a2bd-6cfa9aa2c113",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Data models are foundation for contextual scoring",
+      "created_at": "2026-03-19T15:24:13.175961-07:00"
+    },
+    {
+      "id": 166,
+      "from_node_id": 171,
+      "to_node_id": 175,
+      "from_change_id": "2abb7a10-0ce4-434d-8757-c0ca782dc5c0",
+      "to_change_id": "b0c62306-d337-46f3-91c8-845838724973",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Schema migration creates storage for new data",
+      "created_at": "2026-03-19T15:24:13.181079-07:00"
     }
   ],
   "documents": [
+    {
+      "id": 5,
+      "change_id": "517aa834-de70-42b0-9732-c0ada3d4c787",
+      "node_id": 171,
+      "node_change_id": "2abb7a10-0ce4-434d-8757-c0ca782dc5c0",
+      "content_hash": "85da1c653fa02d79b762b0dbd22d952ebf6a041fe6a18fbae41c6e22d69f7557",
+      "original_filename": "2026-03-19-contextual-scoring-impl.md",
+      "storage_filename": "2026-03-19-contextual-scoring-impl.md.85da1c65",
+      "mime_type": "text/markdown",
+      "file_size": 91226,
+      "description": "Phase 1.75 implementation plan (17 tasks)",
+      "description_source": "manual",
+      "attached_at": "2026-03-19T15:24:19.857818-07:00",
+      "attached_by": null,
+      "detached_at": null
+    },
+    {
+      "id": 4,
+      "change_id": "13089f76-b850-4746-837a-e9d79652cb50",
+      "node_id": 171,
+      "node_change_id": "2abb7a10-0ce4-434d-8757-c0ca782dc5c0",
+      "content_hash": "424350d7aa16c1b51313dd7ef6b7a98b01f96f801bd491c6b2ec1216ca003b46",
+      "original_filename": "2026-03-19-contextual-scoring-design.md",
+      "storage_filename": "2026-03-19-contextual-scoring-design.md.424350d7",
+      "mime_type": "text/markdown",
+      "file_size": 21984,
+      "description": "Phase 1.75 contextual scoring design spec",
+      "description_source": "manual",
+      "attached_at": "2026-03-19T15:24:19.851169-07:00",
+      "attached_by": null,
+      "detached_at": null
+    },
     {
       "id": 3,
       "change_id": "273f0d03-26a5-4e34-99e1-132af6157580",

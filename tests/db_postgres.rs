@@ -177,6 +177,8 @@ async fn test_pg_amplification_event() {
             "at://did:plc:me/app.bsky.feed.post/pgtest1",
             Some("at://did:plc:pgtest_amp/app.bsky.feed.post/q1"),
             Some("test quote text"),
+            None,
+            None,
         )
         .await
         .unwrap();

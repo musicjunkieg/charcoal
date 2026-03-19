@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
-use super::models::{AccountScore, AmplificationEvent};
+use super::models::{AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel};
 use super::traits::Database;
 
 pub struct SqliteDatabase {
@@ -115,6 +115,8 @@ impl Database for SqliteDatabase {
         original_post_uri: &str,
         amplifier_post_uri: Option<&str>,
         amplifier_text: Option<&str>,
+        original_post_text: Option<&str>,
+        context_score: Option<f64>,
     ) -> Result<i64> {
         let conn = self.conn.lock().await;
         super::queries::insert_amplification_event(
@@ -126,6 +128,8 @@ impl Database for SqliteDatabase {
             original_post_uri,
             amplifier_post_uri,
             amplifier_text,
+            original_post_text,
+            context_score,
         )
     }
 
@@ -172,6 +176,75 @@ impl Database for SqliteDatabase {
     async fn get_account_by_did(&self, user_did: &str, did: &str) -> Result<Option<AccountScore>> {
         let conn = self.conn.lock().await;
         super::queries::get_account_by_did(&conn, user_did, did)
+    }
+
+    async fn upsert_user_label(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        label: &str,
+        notes: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_user_label(&conn, user_did, target_did, label, notes)
+    }
+
+    async fn get_user_label(&self, user_did: &str, target_did: &str) -> Result<Option<UserLabel>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_user_label(&conn, user_did, target_did)
+    }
+
+    async fn get_unlabeled_accounts(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<AccountScore>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_unlabeled_accounts(&conn, user_did, limit)
+    }
+
+    async fn get_accuracy_metrics(&self, user_did: &str) -> Result<AccuracyMetrics> {
+        let conn = self.conn.lock().await;
+        super::queries::get_accuracy_metrics(&conn, user_did)
+    }
+
+    async fn delete_inferred_pairs(&self, user_did: &str, target_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_inferred_pairs(&conn, user_did, target_did)
+    }
+
+    async fn insert_inferred_pair(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        target_post_text: &str,
+        target_post_uri: &str,
+        user_post_text: &str,
+        user_post_uri: &str,
+        similarity: f64,
+        context_score: Option<f64>,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::insert_inferred_pair(
+            &conn,
+            user_did,
+            target_did,
+            target_post_text,
+            target_post_uri,
+            user_post_text,
+            user_post_uri,
+            similarity,
+            context_score,
+        )
+    }
+
+    async fn get_inferred_pairs(
+        &self,
+        user_did: &str,
+        target_did: &str,
+    ) -> Result<Vec<InferredPair>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_inferred_pairs(&conn, user_did, target_did)
     }
 }
 
@@ -262,6 +335,8 @@ mod tests {
                 "at://did:plc:me/app.bsky.feed.post/abc",
                 Some("at://did:plc:xyz/app.bsky.feed.post/def"),
                 Some("lol look at this"),
+                None,
+                None,
             )
             .await
             .unwrap();

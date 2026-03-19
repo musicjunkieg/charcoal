@@ -11,7 +11,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::models::{AccountScore, AmplificationEvent};
+use super::models::{AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel};
 
 #[async_trait]
 pub trait Database: Send + Sync {
@@ -84,6 +84,8 @@ pub trait Database: Send + Sync {
         original_post_uri: &str,
         amplifier_post_uri: Option<&str>,
         amplifier_text: Option<&str>,
+        original_post_text: Option<&str>,
+        context_score: Option<f64>,
     ) -> Result<i64>;
 
     /// Get recent amplification events for a user, ordered by detection time descending.
@@ -123,4 +125,51 @@ pub trait Database: Send + Sync {
 
     /// Get a single account score by DID, scoped to a user.
     async fn get_account_by_did(&self, user_did: &str, did: &str) -> Result<Option<AccountScore>>;
+
+    // --- User labels (ground truth for accuracy measurement) ---
+
+    /// Create or update a user-provided label for a target account.
+    async fn upsert_user_label(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        label: &str,
+        notes: Option<&str>,
+    ) -> Result<()>;
+
+    /// Get the user-provided label for a target account, if one exists.
+    async fn get_user_label(&self, user_did: &str, target_did: &str) -> Result<Option<UserLabel>>;
+
+    /// Get scored accounts that have no user label, sorted by threat_score DESC.
+    async fn get_unlabeled_accounts(&self, user_did: &str, limit: i64)
+        -> Result<Vec<AccountScore>>;
+
+    /// Compute accuracy metrics comparing predicted tiers to user labels.
+    async fn get_accuracy_metrics(&self, user_did: &str) -> Result<AccuracyMetrics>;
+
+    // --- Inferred pairs (topic-matched post pairs for NLI scoring) ---
+
+    /// Delete all inferred pairs for a target account (before re-inferring).
+    async fn delete_inferred_pairs(&self, user_did: &str, target_did: &str) -> Result<()>;
+
+    /// Insert a topic-matched post pair for NLI scoring.
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_inferred_pair(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        target_post_text: &str,
+        target_post_uri: &str,
+        user_post_text: &str,
+        user_post_uri: &str,
+        similarity: f64,
+        context_score: Option<f64>,
+    ) -> Result<i64>;
+
+    /// Get all inferred pairs for a target account.
+    async fn get_inferred_pairs(
+        &self,
+        user_did: &str,
+        target_did: &str,
+    ) -> Result<Vec<InferredPair>>;
 }
