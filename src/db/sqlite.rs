@@ -275,7 +275,7 @@ mod tests {
     async fn test_trait_table_count() {
         let db = test_db().await;
         let count = db.table_count().await.unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 8);
     }
 
     #[tokio::test]
