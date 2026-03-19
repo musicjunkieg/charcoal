@@ -235,7 +235,14 @@ CREATE TABLE inferred_pairs (
 
 CREATE INDEX idx_inferred_pairs_target
     ON inferred_pairs(user_did, target_did);
+CREATE UNIQUE INDEX idx_inferred_pairs_dedup
+    ON inferred_pairs(user_did, target_did, target_post_uri, user_post_uri);
 ```
+
+On rescan, delete existing inferred pairs for the target before inserting new
+ones: `DELETE FROM inferred_pairs WHERE user_did = ? AND target_did = ?`. The
+UNIQUE constraint is a safety net against duplicate inserts within a single
+scan run.
 
 ### New `user_labels` table
 
@@ -273,6 +280,9 @@ async fn get_accuracy_metrics(
 ) -> Result<AccuracyMetrics>;
 
 // Inferred pairs
+async fn delete_inferred_pairs(
+    &self, user_did: &str, target_did: &str
+) -> Result<()>;
 async fn insert_inferred_pair(
     &self, user_did: &str, target_did: &str,
     target_post_text: &str, target_post_uri: &str,
@@ -283,6 +293,9 @@ async fn get_inferred_pairs(
     &self, user_did: &str, target_did: &str
 ) -> Result<Vec<InferredPair>>;
 ```
+
+The `get_unlabeled_accounts` method returns accounts ordered by `threat_score
+DESC` (highest predicted threats first — most valuable to label).
 
 ### Modify `account_scores`
 
