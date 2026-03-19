@@ -392,11 +392,20 @@ Displayed on the main dashboard once 20+ labels exist.
 This is a large change (new model, schema migration, expanded pipeline, new
 UI). All work deploys to a staging environment first.
 
+**Branch strategy:** `staging` is a long-lived branch that persists permanently.
+Railway deploys each branch to its own environment:
+- `main` -> production (charcoal.watch)
+- `staging` -> staging environment (own domain)
+- Feature branches merge into `staging` for validation, then `staging`
+  merges into `main` for production promotion.
+
 **Setup:**
 - Create `staging` environment on the existing Railway charcoal project
-- Own Postgres instance, own persistent volume, own domain
-  (`staging.charcoal.watch` or Railway-generated)
-- Deploys from `feat/contextual-scoring` branch
+- Own Postgres instance
+- Own persistent volume at `/data/models` for ONNX models (not shared
+  with production)
+- Own domain (`staging.charcoal.watch` or Railway-generated)
+- Deploys from `staging` branch
 - Same Dockerfile, different env vars
 - Fresh database (no data migration from production)
 
@@ -410,9 +419,9 @@ UI). All work deploys to a staging environment first.
 - Bryan and testers can log in and start labeling accounts
 
 **Production cutover:**
-- Merge `feat/contextual-scoring` -> `main`
+- Merge `staging` -> `main`
 - Production auto-deploys, runs schema migration v5 on startup
-- Delete or retain staging environment
+- Staging environment persists for future features
 
 ### Post-Deploy Infrastructure Evaluation
 

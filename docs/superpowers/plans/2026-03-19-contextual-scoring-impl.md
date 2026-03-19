@@ -201,40 +201,76 @@ name or may need a getter method. Read the file first.
 
 ### Task 1: Create Railway Staging Environment
 
-**Files:** None (infrastructure setup via Railway CLI/MCP)
+**Files:** None (infrastructure setup via Railway CLI/MCP + git)
 
 This MUST be done before any code changes per the spec. Staging validates
-each chunk as it lands on the branch, rather than building everything
-locally and deploying all at once.
+each chunk as it lands, rather than building everything locally and
+deploying all at once.
 
-- [ ] **Step 1: Create staging environment on Railway**
+#### Branch Strategy
+
+`staging` is a **long-lived branch** that persists permanently alongside
+`main`. Railway deploys each branch to its own environment:
+
+- `main` → production (charcoal.watch)
+- `staging` → staging environment (staging domain TBD)
+- Feature branches (`feat/*`) → merge into `staging` for validation
+
+**Promotion flow:**
+```
+feat/contextual-scoring → staging → main
+```
+
+Feature branches are merged into `staging` for deployment and testing.
+When validated, `staging` is merged into `main` for production promotion.
+This pattern applies to all future features, not just Phase 1.75.
+
+#### Steps
+
+- [ ] **Step 1: Create the staging branch**
+
+```bash
+git checkout main
+git checkout -b staging
+git push -u origin staging
+```
+
+Then merge the current feature work into it:
+```bash
+git merge feat/contextual-scoring
+git push
+```
+
+- [ ] **Step 2: Create staging environment on Railway**
 
 Use Railway MCP tools to:
 1. Create a new `staging` environment on the charcoal project
    (Railway project ID: `84bbd271-c3f5-42a3-8e68-05a8e063824f`)
 2. Provision a new Postgres addon for staging
-3. Configure the staging environment to deploy from `feat/contextual-scoring` branch
-4. Set up environment variables (copy from production, adjust as needed):
+3. Create a new persistent volume at `/data/models` for ONNX models
+   (separate from production volume)
+4. Configure the staging environment to deploy from `staging` branch
+5. Set up environment variables (copy from production, adjust as needed):
    - `CHARCOAL_SESSION_SECRET` (generate new one for staging)
    - `CHARCOAL_OAUTH_CLIENT_ID` (may need staging-specific)
    - `CHARCOAL_ALLOWED_DID` (empty for open access, or Bryan + testers)
    - `DATABASE_URL` (auto-set by Postgres addon)
    - `BLUESKY_HANDLE` (Bryan's handle)
 
-- [ ] **Step 2: Generate domain for staging**
+- [ ] **Step 3: Generate domain for staging**
 
-Use Railway MCP `generate-domain` or set up `staging.charcoal.watch` subdomain.
+Use Railway MCP `generate-domain` or set up `staging.charcoal.watch`
+subdomain.
 
-- [ ] **Step 3: Verify staging deploys current codebase**
+- [ ] **Step 4: Verify staging deploys current codebase**
 
-The `feat/contextual-scoring` branch already has the spec and plan commits.
 Verify:
 1. Build succeeds on Railway
-2. Models auto-download
-3. OAuth login works (may need redirect URI update)
-4. Basic scan works
+2. Models auto-download to the staging volume
+3. OAuth login works (may need redirect URI update for staging domain)
+4. Basic scan works against fresh Postgres
 
-- [ ] **Step 4: Verify Constellation likes support**
+- [ ] **Step 5: Verify Constellation likes support**
 
 Test whether Constellation indexes likes by querying:
 `GET /xrpc/blue.microcosm.links.getBacklinks?subject={post_uri}&source=app.bsky.feed.like:subject.uri`
@@ -244,10 +280,21 @@ If it errors or returns empty: we need the `getLikes` API fallback in Task 8.
 
 Document the result as a chainlink comment for the implementer.
 
-- [ ] **Step 5: Document staging URL and share with testers**
+- [ ] **Step 6: Document staging URL and share with testers**
 
 Add staging URL to the spec document. Share access with any testers Bryan
 wants to invite.
+
+#### Ongoing Workflow (for all subsequent tasks)
+
+After completing each task on `feat/contextual-scoring`:
+1. Merge into `staging`: `git checkout staging && git merge feat/contextual-scoring && git push`
+2. Verify staging deployment succeeds
+3. Continue work on `feat/contextual-scoring`
+
+When Phase 1.75 is fully validated on staging:
+1. `git checkout main && git merge staging && git push`
+2. Production auto-deploys with all changes
 
 ---
 

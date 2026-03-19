@@ -1,12 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-03-19T21:18:25.628878+00:00",
+  "exported_at": "2026-03-19T21:26:51.193372+00:00",
   "issues": [
+    {
+      "id": 107,
+      "title": "Update plan and set up long-lived staging branch and Railway environment",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-19T21:25:50.525367+00:00",
+      "updated_at": "2026-03-19T21:25:50.525367+00:00",
+      "closed_at": null
+    },
     {
       "id": 106,
       "title": "Fix implementation plan: move Railway staging setup to Task 1",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -14,8 +29,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-19T21:15:45.859751+00:00",
-      "updated_at": "2026-03-19T21:15:45.859751+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T21:18:36.504517+00:00",
+      "closed_at": "2026-03-19T21:18:36.504517+00:00"
     },
     {
       "id": 105,
