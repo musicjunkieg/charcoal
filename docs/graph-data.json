@@ -1704,6 +1704,105 @@
       "created_at": "2026-03-17T20:07:24.220461-07:00",
       "updated_at": "2026-03-17T20:07:24.220461-07:00",
       "metadata_json": "{\"branch\":\"feat/railway-deploy\",\"confidence\":90,\"prompt\":\"User wants to deploy to Railway. Three issues: #112 (ONNX model strategy), #115 (deploy strategy), #111 (DID gate). Spec at docs/superpowers/specs/2026-03-18-railway-deploy-design.md.\"}"
+    },
+    {
+      "id": 162,
+      "change_id": "0aec6f77-3f62-4e1a-b008-addcff0e8e87",
+      "node_type": "action",
+      "title": "Bump Rust to 1.94, create Dockerfile with Ubuntu 24.04 for ort-sys glibc",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:44:30.970206-07:00",
+      "updated_at": "2026-03-19T09:44:30.970206-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"ac304fc\"}"
+    },
+    {
+      "id": 163,
+      "change_id": "d410160d-e6c7-4bf7-bf7a-5d1312ebe541",
+      "node_type": "action",
+      "title": "Fix Dockerfile: Node 22 via nodesource, non-root user, shell-form CMD, model dir",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:44:36.050025-07:00",
+      "updated_at": "2026-03-19T09:44:36.050025-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"683c5bf\"}"
+    },
+    {
+      "id": 164,
+      "change_id": "13fab25a-f8b2-4e37-9c35-e438efe657a0",
+      "node_type": "outcome",
+      "title": "Railway deploy live at charcoal.watch — Postgres addon, persistent volume, custom domain working",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:44:39.327336-07:00",
+      "updated_at": "2026-03-19T09:44:39.327336-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"683c5bf\"}"
+    },
+    {
+      "id": 165,
+      "change_id": "7473e9bc-a578-4911-8a8c-290c3482e2ed",
+      "node_type": "goal",
+      "title": "Fix post-deploy bugs: repost links, unscored accounts, pre-push hook",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:44:51.736724-07:00",
+      "updated_at": "2026-03-19T09:44:51.736724-07:00",
+      "metadata_json": "{\"branch\":\"main\"}"
+    },
+    {
+      "id": 166,
+      "change_id": "5a643cd5-3a82-468e-8f33-4f700679b8fd",
+      "node_type": "action",
+      "title": "Fix repost links to point to original post, add null safety for unscored accounts",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:44:55.237938-07:00",
+      "updated_at": "2026-03-19T09:44:55.237938-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"f6b68ed\"}"
+    },
+    {
+      "id": 167,
+      "change_id": "3ae54300-2b7c-483f-b8bc-11a27766dff2",
+      "node_type": "action",
+      "title": "Run clippy and tests with --features web in pre-push hook",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:44:57.858996-07:00",
+      "updated_at": "2026-03-19T09:44:57.858996-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"3b3f201\"}"
+    },
+    {
+      "id": 168,
+      "change_id": "bc3f7b33-85b8-4427-b92b-0f8bc1fd716a",
+      "node_type": "outcome",
+      "title": "All post-deploy bugs fixed — PRs #31 and #32 merged, pre-push hook catches web feature warnings",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:45:01.050668-07:00",
+      "updated_at": "2026-03-19T09:45:01.050668-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"f445303\"}"
+    },
+    {
+      "id": 169,
+      "change_id": "01d7c871-0671-42aa-bb13-b7c36cd2e93a",
+      "node_type": "observation",
+      "title": "Scoring assessment: 138 accounts, 0 High/Elevated, only 4 quotes, no ground truth — need labeled data before tuning",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:45:13.585425-07:00",
+      "updated_at": "2026-03-19T09:45:13.585425-07:00",
+      "metadata_json": "{\"branch\":\"main\"}"
+    },
+    {
+      "id": 170,
+      "change_id": "1528d063-9082-4fb8-8122-3278db2b4955",
+      "node_type": "observation",
+      "title": "Cleaned up 17 stale branches from completed work",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T09:45:18.303862-07:00",
+      "updated_at": "2026-03-19T09:45:18.303862-07:00",
+      "metadata_json": "{\"branch\":\"main\"}"
     }
   ],
   "edges": [
@@ -3301,6 +3400,127 @@
       "weight": 1.0,
       "rationale": "Goal complete — PR merged",
       "created_at": "2026-03-17T18:58:55.022523-07:00"
+    },
+    {
+      "id": 152,
+      "from_node_id": 161,
+      "to_node_id": 162,
+      "from_change_id": "b1b9325e-abb0-460a-bbf5-8e49ce261fd5",
+      "to_change_id": "0aec6f77-3f62-4e1a-b008-addcff0e8e87",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "First deploy attempt — Rust version and base image",
+      "created_at": "2026-03-19T09:44:43.272356-07:00"
+    },
+    {
+      "id": 153,
+      "from_node_id": 161,
+      "to_node_id": 163,
+      "from_change_id": "b1b9325e-abb0-460a-bbf5-8e49ce261fd5",
+      "to_change_id": "d410160d-e6c7-4bf7-bf7a-5d1312ebe541",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Iterative Dockerfile fixes for Railway environment",
+      "created_at": "2026-03-19T09:44:45.508145-07:00"
+    },
+    {
+      "id": 154,
+      "from_node_id": 162,
+      "to_node_id": 164,
+      "from_change_id": "0aec6f77-3f62-4e1a-b008-addcff0e8e87",
+      "to_change_id": "13fab25a-f8b2-4e37-9c35-e438efe657a0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Deploy actions produced working deployment",
+      "created_at": "2026-03-19T09:44:48.222317-07:00"
+    },
+    {
+      "id": 155,
+      "from_node_id": 163,
+      "to_node_id": 164,
+      "from_change_id": "d410160d-e6c7-4bf7-bf7a-5d1312ebe541",
+      "to_change_id": "13fab25a-f8b2-4e37-9c35-e438efe657a0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Deploy actions produced working deployment",
+      "created_at": "2026-03-19T09:44:48.229154-07:00"
+    },
+    {
+      "id": 156,
+      "from_node_id": 165,
+      "to_node_id": 166,
+      "from_change_id": "7473e9bc-a578-4911-8a8c-290c3482e2ed",
+      "to_change_id": "5a643cd5-3a82-468e-8f33-4f700679b8fd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix repost links and null safety",
+      "created_at": "2026-03-19T09:45:03.981109-07:00"
+    },
+    {
+      "id": 157,
+      "from_node_id": 165,
+      "to_node_id": 167,
+      "from_change_id": "7473e9bc-a578-4911-8a8c-290c3482e2ed",
+      "to_change_id": "3ae54300-2b7c-483f-b8bc-11a27766dff2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix pre-push hook coverage",
+      "created_at": "2026-03-19T09:45:03.987643-07:00"
+    },
+    {
+      "id": 158,
+      "from_node_id": 166,
+      "to_node_id": 168,
+      "from_change_id": "5a643cd5-3a82-468e-8f33-4f700679b8fd",
+      "to_change_id": "bc3f7b33-85b8-4427-b92b-0f8bc1fd716a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bug fixes merged",
+      "created_at": "2026-03-19T09:45:06.839576-07:00"
+    },
+    {
+      "id": 159,
+      "from_node_id": 167,
+      "to_node_id": 168,
+      "from_change_id": "3ae54300-2b7c-483f-b8bc-11a27766dff2",
+      "to_change_id": "bc3f7b33-85b8-4427-b92b-0f8bc1fd716a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Hook fix committed",
+      "created_at": "2026-03-19T09:45:06.845847-07:00"
+    },
+    {
+      "id": 160,
+      "from_node_id": 164,
+      "to_node_id": 165,
+      "from_change_id": "13fab25a-f8b2-4e37-9c35-e438efe657a0",
+      "to_change_id": "7473e9bc-a578-4911-8a8c-290c3482e2ed",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Deploy revealed bugs that needed fixing",
+      "created_at": "2026-03-19T09:45:09.475397-07:00"
+    },
+    {
+      "id": 161,
+      "from_node_id": 168,
+      "to_node_id": 169,
+      "from_change_id": "bc3f7b33-85b8-4427-b92b-0f8bc1fd716a",
+      "to_change_id": "01d7c871-0671-42aa-bb13-b7c36cd2e93a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Post-deploy analysis revealed scoring data gaps",
+      "created_at": "2026-03-19T09:45:15.689884-07:00"
+    },
+    {
+      "id": 162,
+      "from_node_id": 168,
+      "to_node_id": 170,
+      "from_change_id": "bc3f7b33-85b8-4427-b92b-0f8bc1fd716a",
+      "to_change_id": "1528d063-9082-4fb8-8122-3278db2b4955",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Post-deploy housekeeping",
+      "created_at": "2026-03-19T09:45:21.314551-07:00"
     }
   ],
   "documents": [

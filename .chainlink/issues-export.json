@@ -1,12 +1,113 @@
 {
   "version": 1,
-  "exported_at": "2026-03-19T05:02:38.274367+00:00",
+  "exported_at": "2026-03-19T17:52:33.574622+00:00",
   "issues": [
+    {
+      "id": 105,
+      "title": "Write Phase 1.75 contextual scoring design spec",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-19T17:51:35.593281+00:00",
+      "updated_at": "2026-03-19T17:51:35.593281+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 104,
+      "title": "Store interaction pairs (amplifier post + original post) for contextual scoring",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 101,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Current schema stores amplifier_post_uri and original_post_uri but not the TEXT of both posts together. For contextual toxicity scoring, we need to analyze the pair.\n\nSchema change: add amplifier_text and original_text columns to amplification_events (or a new interaction_pairs table). Populate during the Constellation event processing phase — we already fetch the amplifier's posts for toxicity scoring, just need to also store the original post text alongside.\n\nThis enables approach A from the parent issue (interaction-level scoring): feed both texts to a model and ask 'is this response hostile toward the original?'\n\nNote: amplifier_text already exists on amplification_events but original_text does not. The original post text is available during the scan (we fetch it in fetch_recent_posts) but it's not carried through to the event storage.",
+          "created_at": "2026-03-19T05:33:29.849811+00:00"
+        }
+      ],
+      "created_at": "2026-03-19T05:33:29.843446+00:00",
+      "updated_at": "2026-03-19T05:33:29.843446+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 103,
+      "title": "Build user feedback mechanism for labeling accounts as threat/safe/ally",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 101,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Add a way for users to label accounts from the dashboard: thumbs up (ally/safe), thumbs down (threat), or flag (needs review). Store in a new feedback table: user_did, target_did, target_handle, label (threat/safe/ally/unknown), created_at.\n\nThis serves two purposes:\n1. Immediate: Bryan can label his known threats and allies to create ground truth for scoring validation\n2. Long-term: All users can provide feedback, building a shared labeled dataset over time\n\nThe feedback data becomes the gold standard for measuring scoring accuracy: precision (of accounts we flag, how many are actually threats?) and recall (of actual threats, how many do we catch?).\n\nTies into #116 (user feedback on toxicity scores) but focused specifically on per-account labels rather than per-post feedback. Should be simple: a button on the account detail page, stores to DB, queryable for scoring evaluation.\n\nBlocked by: nothing (can implement independently of scoring changes)\nEnables: scoring validation, model tuning, contextual scoring evaluation",
+          "created_at": "2026-03-19T05:33:02.551987+00:00"
+        }
+      ],
+      "created_at": "2026-03-19T05:33:02.547734+00:00",
+      "updated_at": "2026-03-19T05:33:02.547734+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 102,
+      "title": "Research existing labeled datasets for social media harassment and hostile engagement",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 101,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Look for existing public datasets that could help train/validate contextual toxicity scoring. Potential sources:\n\n1. LABELED HARASSMENT DATASETS\n- Hatebase.org — multilingual hate speech lexicon\n- Davidson et al. (2017) hate speech dataset — 25k tweets labeled hate/offensive/neither\n- Waseem & Hovy (2016) — 16k tweets labeled racist/sexist/neither\n- Jigsaw/Google Toxic Comments — 150k+ Wikipedia comments with multi-label toxicity\n- HateXplain — hate speech with target group annotations and rationale spans\n- Implicit Hate Speech dataset (ElSherief et al.) — distinguishes explicit from implicit hate\n\n2. CONTEXT-AWARE / INTERACTION-LEVEL DATASETS\n- Reddit ChangeMyView — argument pairs with context\n- CONAN (COunter NArrative) — hate speech paired with counter-speech\n- Multi-Target CONAN — hate speech with target identity labels\n- Gab Hate Corpus — posts with fine-grained hate labels including target\n\n3. BLUESKY-SPECIFIC\n- Check if any researchers have published labeled Bluesky moderation datasets\n- AT Protocol Consortium research publications\n- Bluesky Trust & Safety team public data (if any)\n\n4. TOPIC-DIRECTED HOSTILITY\n- Specifically need datasets where toxicity is labeled relative to a TOPIC (fat liberation, queer identity, DEI) not just in isolation\n- Perspective API training data categories might be relevant (identity_attack specifically)\n- Check for intersectional bias datasets that distinguish hostility-about-identity vs general rudeness\n\nKey question: do any of these include INTERACTION PAIRS (original post + hostile response) rather than just individual posts scored in isolation? That's the specific gap in our current approach.",
+          "created_at": "2026-03-19T05:32:50.170052+00:00"
+        }
+      ],
+      "created_at": "2026-03-19T05:32:50.165709+00:00",
+      "updated_at": "2026-03-19T05:32:50.165709+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 101,
+      "title": "Improve scoring to detect contextual toxicity, not just isolated toxic words",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Current scoring is too blunt: ONNX toxicity model scores individual posts in isolation, flagging people who use words that map to toxic categories even when the context is benign. Example: someone quoting a friend's post and saying something sarcastic or blunt gets scored as toxic when there's no actual hostility.\n\nWhat we actually need to understand about each amplifier:\n\n1. CONTEXTUAL TOXICITY — Is this person toxic *toward* the people they're engaging with? A post that says 'this is garbage' about a political position is different from 'this is garbage' directed at a person. We need to score toxicity relative to the interaction pattern (quote/reply), not just the text in isolation.\n\n2. TOPIC-DIRECTED HOSTILITY — Do they overlap with our subject's topics (fat liberation, queer identity, DEI, etc.), and are they toxic specifically *about those topics*? Someone who's generally salty but supportive of our subject's topics is an ally, not a threat. The threat signal is hostility directed at the overlapping topics.\n\n3. ENGAGEMENT PATTERN — How often is this person toxic in their interactions? A single snarky quote-post from someone with 1000 supportive interactions is noise. Someone who exclusively engages via hostile quote-dunking is a real threat.\n\nThe current multiplicative scoring formula (tox * 70 * (1 + overlap * 1.5)) treats topic overlap as an amplifier of toxicity, which is the right direction. But the underlying toxicity score itself is too noisy because it doesn't understand context.\n\nThis is a fundamental scoring quality issue that affects trust in the tool. Should be prioritized before scaling to more users.",
+          "created_at": "2026-03-19T05:29:06.511551+00:00"
+        },
+        {
+          "content": "Possible approaches to explore:\n\nA) INTERACTION-LEVEL SCORING — Instead of scoring a post in isolation, score the (amplifier_post, original_post) pair. Feed both texts to the model and ask 'is this response hostile toward the original?' This requires a different model or prompt structure.\n\nB) TOPIC-FILTERED TOXICITY — After computing topic overlap, only count toxicity scores from posts that are *about* overlapping topics. Filter out toxicity from unrelated topics before computing the threat score.\n\nC) ENGAGEMENT RATIO — Weight toxicity by the ratio of hostile-to-total interactions. Someone with 2 toxic posts out of 500 is different from 2 toxic out of 3. The behavioral signals (quote_ratio, reply_ratio) partially capture this but don't distinguish hostile from non-hostile engagement.\n\nD) SENTIMENT TOWARD SUBJECT — Specifically analyze whether the amplifier's posts about overlapping topics express hostility toward the protected user's position (fat liberation, queer identity, etc.) vs. support.\n\nThese are not mutually exclusive. A+B together would be the most impactful.",
+          "created_at": "2026-03-19T05:29:19.626135+00:00"
+        },
+        {
+          "content": "PRIORITY: Promoted to Phase 1.75 — between Admin Dashboard (1.5) and Core UX (2). Scoring quality is the most critical trust factor for new users on charcoal.watch. False positives kill trust before any UX improvements matter.",
+          "created_at": "2026-03-19T05:30:17.650839+00:00"
+        },
+        {
+          "content": "DATA ASSESSMENT: Current data is insufficient for tuning. 138 scored accounts, 0 High/Elevated, only 4 quote-posts. No labeled ground truth (threat vs safe). No interaction pairs stored (amplifier post + original post together). Need: (1) labeled examples from Bryan (50-100 handles marked threat/safe), (2) more scan volume over time, (3) schema change to store interaction pairs for contextual scoring.",
+          "created_at": "2026-03-19T05:31:53.894186+00:00"
+        }
+      ],
+      "created_at": "2026-03-19T05:28:50.700283+00:00",
+      "updated_at": "2026-03-19T05:28:50.700283+00:00",
+      "closed_at": null
+    },
     {
       "id": 100,
       "title": "Fix pre-push hook to run clippy with --features web",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -14,14 +115,14 @@
       ],
       "comments": [],
       "created_at": "2026-03-19T04:22:09.119264+00:00",
-      "updated_at": "2026-03-19T04:22:09.119264+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T05:36:10.263784+00:00",
+      "closed_at": "2026-03-19T05:36:10.263784+00:00"
     },
     {
       "id": 99,
       "title": "Fix account detail pages not loading from dashboard",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -34,8 +135,8 @@
         }
       ],
       "created_at": "2026-03-19T00:23:35.066963+00:00",
-      "updated_at": "2026-03-19T00:23:35.066963+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T05:36:10.258601+00:00",
+      "closed_at": "2026-03-19T05:36:10.258601+00:00"
     },
     {
       "id": 98,
@@ -91,7 +192,7 @@
       "id": 95,
       "title": "v0.4 AT Protocol OAuth — Task 1: Add Cargo dependencies",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -99,8 +200,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-08T00:36:09.469616873+00:00",
-      "updated_at": "2026-03-08T00:36:09.469616873+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T16:44:11.193771+00:00",
+      "closed_at": "2026-03-19T16:44:11.193771+00:00"
     },
     {
       "id": 94,
@@ -761,7 +862,7 @@
       "id": 51,
       "title": "Axum web server skeleton (Railway deployment)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -769,14 +870,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:40.987022505+00:00",
-      "updated_at": "2026-02-18T03:14:40.987022505+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T16:44:10.902+00:00",
+      "closed_at": "2026-03-19T16:44:10.902+00:00"
     },
     {
       "id": 50,
       "title": "AT Protocol OAuth integration for web UI",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -784,14 +885,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:39.672531955+00:00",
-      "updated_at": "2026-02-18T03:14:39.672531955+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T16:44:10.723407+00:00",
+      "closed_at": "2026-03-19T16:44:10.723407+00:00"
     },
     {
       "id": 49,
       "title": "Multi-user schema redesign (per-user vs shared data)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -799,8 +900,8 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:35.058233233+00:00",
-      "updated_at": "2026-02-18T03:14:35.058233233+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T16:44:10.302491+00:00",
+      "closed_at": "2026-03-19T16:44:10.302491+00:00"
     },
     {
       "id": 48,

@@ -1,5 +1,45 @@
 [
   {
+    "hash": "f44530363a0214b839830c162119d608fef9e3df",
+    "short_hash": "f445303",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T22:16:02-07:00",
+    "message": "Merge pull request #32 from musicjunkieg/fix/repost-links-and-account-fallback\n\nfix: null safety for unscored accounts + pre-push hook features",
+    "files_changed": 0
+  },
+  {
+    "hash": "3b3f20156b04ca0ffbc22b792db68bf8a6237e90",
+    "short_hash": "3b3f201",
+    "author": "Bryan Guffey",
+    "date": "2026-03-18T21:22:43-07:00",
+    "message": "fix: run clippy and tests with --features web in pre-push hook\n\nLocal pre-push hook was running clippy without --features web, so\nweb module code was not checked. This let a clippy::manual_map\nwarning through to CI. Both the installed hook and the install\nscript now include --features web.\n\nCloses #100.",
+    "files_changed": 2
+  },
+  {
+    "hash": "f6b68ed93ec824184c91d660179d45219a3f3810",
+    "short_hash": "f6b68ed",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T21:21:38-07:00",
+    "message": "Merge pull request #31 from musicjunkieg/fix/repost-links-and-account-fallback\n\nfix: fix repost links and add unscored account fallback",
+    "files_changed": 0
+  },
+  {
+    "hash": "683c5bfd388cc26bfdc555ca76eb00e74ab73705",
+    "short_hash": "683c5bf",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T09:18:13-07:00",
+    "message": "Merge pull request #30 from musicjunkieg/fix/railway-dockerfile-builder\n\nfix: fix Dockerfile for Railway deployment and also update to root user to access volume",
+    "files_changed": 0
+  },
+  {
+    "hash": "ac304fcbc0bee095b99f41efa0db886bd9eec73f",
+    "short_hash": "ac304fc",
+    "author": "chaos gremlin",
+    "date": "2026-03-17T21:39:20-07:00",
+    "message": "Merge pull request #27 from musicjunkieg/fix/rust-1.94\n\nfix: bump Rust to 1.94.0 to match local toolchain",
+    "files_changed": 0
+  },
+  {
     "hash": "cfabfc25aabd26b61b2a7416df38c7f2dbf1ed91",
     "short_hash": "cfabfc2",
     "author": "chaos gremlin",
