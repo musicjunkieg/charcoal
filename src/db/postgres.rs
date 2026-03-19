@@ -373,6 +373,7 @@ impl Database for PgDatabase {
                 top_toxic_posts,
                 scored_at: row.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
+                context_score: None,
             });
         }
         Ok(accounts)
@@ -462,6 +463,8 @@ impl Database for PgDatabase {
                 detected_at: row.get(7),
                 followers_fetched: row.get(8),
                 followers_scored: row.get(9),
+                original_post_text: None,
+                context_score: None,
             });
         }
         Ok(events)
@@ -605,6 +608,7 @@ impl Database for PgDatabase {
                 top_toxic_posts,
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
+                context_score: None,
             }
         }))
     }
@@ -642,6 +646,7 @@ impl Database for PgDatabase {
                 top_toxic_posts,
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
+                context_score: None,
             }
         }))
     }

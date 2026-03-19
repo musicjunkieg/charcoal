@@ -206,6 +206,7 @@ pub fn get_ranked_threats(
             top_toxic_posts,
             scored_at: row.get(8)?,
             behavioral_signals: row.get(9)?,
+            context_score: None,
         })
     })?;
 
@@ -328,6 +329,8 @@ pub fn get_recent_events(
             detected_at: row.get(7)?,
             followers_fetched: row.get::<_, i32>(8)? != 0,
             followers_scored: row.get::<_, i32>(9)? != 0,
+            original_post_text: None,
+            context_score: None,
         })
     })?;
 
@@ -424,6 +427,7 @@ pub fn get_account_by_handle(
                 top_toxic_posts,
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
+                context_score: None,
             })
         })
         .optional()?;
@@ -461,6 +465,7 @@ pub fn get_account_by_did(
                 top_toxic_posts,
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
+                context_score: None,
             })
         })
         .optional()?;
@@ -583,6 +588,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -698,6 +704,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -727,6 +734,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -758,6 +766,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -816,6 +825,7 @@ mod tests {
                 top_toxic_posts: vec![],
                 scored_at: String::new(),
                 behavioral_signals: Some(format!(r#"{{"avg_engagement":{eng}}}"#)),
+                context_score: None,
             };
             upsert_account_score(&conn, TEST_USER, &score).unwrap();
         }

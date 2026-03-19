@@ -404,6 +404,7 @@ fn make_account(handle: &str, score: f64, tier: &str, toxicity: f64, overlap: f6
         },
         scored_at: "2026-02-16".to_string(),
         behavioral_signals: None,
+        context_score: None,
     }
 }
 
@@ -489,6 +490,8 @@ fn report_quotes_but_not_reposts() {
             detected_at: "2026-02-15".to_string(),
             followers_fetched: false,
             followers_scored: false,
+            original_post_text: None,
+            context_score: None,
         },
         // Repost — no quote text, should NOT appear in quotes table
         AmplificationEvent {
@@ -502,6 +505,8 @@ fn report_quotes_but_not_reposts() {
             detected_at: "2026-02-15".to_string(),
             followers_fetched: false,
             followers_scored: false,
+            original_post_text: None,
+            context_score: None,
         },
     ];
 
@@ -532,6 +537,8 @@ fn report_escapes_pipe_in_quote_text() {
         detected_at: "2026-02-15".to_string(),
         followers_fetched: false,
         followers_scored: false,
+        original_post_text: None,
+        context_score: None,
     }];
 
     let tmp_path = "/tmp/charcoal_test_pipe_escape.md";

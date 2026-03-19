@@ -21,6 +21,8 @@ pub struct AccountScore {
     pub scored_at: String,
     /// Behavioral signals (JSON-serialized), present when behavioral analysis ran
     pub behavioral_signals: Option<String>,
+    /// NLI-derived contextual hostility score (max across all interaction pairs)
+    pub context_score: Option<f64>,
 }
 
 /// A single post with its toxicity score, kept as evidence.
@@ -44,6 +46,46 @@ pub struct AmplificationEvent {
     pub detected_at: String,
     pub followers_fetched: bool,
     pub followers_scored: bool,
+    /// The protected user's original post text (for pair display and NLI scoring)
+    pub original_post_text: Option<String>,
+    /// NLI contextual hostility score for this interaction pair
+    pub context_score: Option<f64>,
+}
+
+/// A user-provided label for an account (ground truth for scoring accuracy).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserLabel {
+    pub user_did: String,
+    pub target_did: String,
+    /// One of: "high", "elevated", "watch", "safe"
+    pub label: String,
+    pub labeled_at: String,
+    pub notes: Option<String>,
+}
+
+/// A topic-matched post pair for NLI scoring (second-degree accounts).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferredPair {
+    pub id: i64,
+    pub user_did: String,
+    pub target_did: String,
+    pub target_post_text: String,
+    pub target_post_uri: String,
+    pub user_post_text: String,
+    pub user_post_uri: String,
+    pub similarity: f64,
+    pub context_score: Option<f64>,
+    pub created_at: String,
+}
+
+/// Accuracy metrics comparing predicted tiers to user labels.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccuracyMetrics {
+    pub total_labeled: i64,
+    pub exact_matches: i64,
+    pub overscored: i64,
+    pub underscored: i64,
+    pub accuracy: f64,
 }
 
 /// Threat tier thresholds — these are configurable constants.

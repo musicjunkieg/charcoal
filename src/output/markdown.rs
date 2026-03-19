@@ -240,6 +240,7 @@ mod tests {
                 }],
                 scored_at: "2026-02-08".to_string(),
                 behavioral_signals: None,
+                context_score: None,
             },
             AccountScore {
                 did: "did:plc:def".to_string(),
@@ -252,6 +253,7 @@ mod tests {
                 top_toxic_posts: vec![],
                 scored_at: "2026-02-08".to_string(),
                 behavioral_signals: None,
+                context_score: None,
             },
         ];
 

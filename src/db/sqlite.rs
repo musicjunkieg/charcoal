@@ -242,6 +242,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let ranked = db.get_ranked_threats(TEST_USER, 0.0).await.unwrap();
@@ -307,6 +308,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: "2024-01-01".to_string(),
             behavioral_signals: None,
+            context_score: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         // Exact match
@@ -344,6 +346,7 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: "2024-01-01".to_string(),
             behavioral_signals: None,
+            context_score: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let found = db

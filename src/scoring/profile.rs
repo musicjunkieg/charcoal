@@ -65,6 +65,7 @@ pub async fn build_profile(
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
         });
     }
 
@@ -201,6 +202,7 @@ pub async fn build_profile(
         top_toxic_posts,
         scored_at: String::new(),
         behavioral_signals: Some(signals_json),
+        context_score: None,
     })
 }
 

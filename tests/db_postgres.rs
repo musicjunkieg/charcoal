@@ -152,6 +152,7 @@ async fn test_pg_account_score_upsert_and_rank() {
         top_toxic_posts: vec![],
         scored_at: String::new(),
         behavioral_signals: None,
+        context_score: None,
     };
     db.upsert_account_score(TEST_USER, &score).await.unwrap();
 
