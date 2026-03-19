@@ -6,7 +6,9 @@
 
 use charcoal::db::models::ThreatTier;
 use charcoal::output::truncate_chars;
-use charcoal::scoring::threat::{compute_threat_score, ThreatWeights};
+use charcoal::scoring::threat::{
+    compute_threat_score, compute_threat_score_contextual, ThreatWeights,
+};
 
 // ============================================================
 // ThreatTier::from_score — boundary conditions
@@ -311,4 +313,53 @@ fn truncate_long_string() {
     let result = truncate_chars(&text, 100);
     assert_eq!(result.chars().count(), 103); // 100 + "..."
     assert!(result.ends_with("..."));
+}
+
+// --- Blended contextual scoring tests ---
+
+#[test]
+fn blended_score_uses_context_when_available() {
+    let weights = ThreatWeights::default();
+    // toxicity=0.3, context_score=0.8, overlap=0.5
+    // blended = 0.3 * 0.6 + 0.8 * 0.4 = 0.18 + 0.32 = 0.50
+    // threat = 0.50 * 70 * (1 + 0.5 * 1.5) = 35.0 * 1.75 = 61.25
+    let (score, tier) = compute_threat_score_contextual(0.3, 0.5, Some(0.8), &weights);
+    assert!(
+        score > 50.0,
+        "Blended score should be high when context hostile, got {}",
+        score
+    );
+    assert_eq!(tier.as_str(), "High");
+}
+
+#[test]
+fn blended_score_falls_back_without_context() {
+    let weights = ThreatWeights::default();
+    let (score_ctx, _tier_ctx) = compute_threat_score_contextual(0.5, 0.3, None, &weights);
+    let (score_orig, _tier_orig) = compute_threat_score(0.5, 0.3, &weights);
+    assert!((score_ctx - score_orig).abs() < f64::EPSILON);
+}
+
+#[test]
+fn supportive_context_lowers_threat() {
+    let weights = ThreatWeights::default();
+    // context_score=0.05 (supportive) should lower the blended toxicity
+    let (with_ctx, _) = compute_threat_score_contextual(0.5, 0.5, Some(0.05), &weights);
+    let (without_ctx, _) = compute_threat_score(0.5, 0.5, &weights);
+    assert!(
+        with_ctx < without_ctx,
+        "Supportive context should lower score: {} vs {}",
+        with_ctx,
+        without_ctx
+    );
+}
+
+#[test]
+fn context_score_at_boundary() {
+    let weights = ThreatWeights::default();
+    // context_score exactly equals toxicity — should produce same result as no context
+    // blended = 0.5 * 0.6 + 0.5 * 0.4 = 0.30 + 0.20 = 0.50 (same as tox=0.5)
+    let (with_ctx, _) = compute_threat_score_contextual(0.5, 0.3, Some(0.5), &weights);
+    let (without_ctx, _) = compute_threat_score(0.5, 0.3, &weights);
+    assert!((with_ctx - without_ctx).abs() < f64::EPSILON);
 }

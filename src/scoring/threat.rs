@@ -66,6 +66,27 @@ pub fn compute_threat_score(
     (score, tier)
 }
 
+/// Compute the combined threat score with optional contextual blending.
+///
+/// When a context_score is provided (from NLI pair scoring), it is blended
+/// with the isolated toxicity score: 60% toxicity + 40% context.
+/// When no context_score is available, falls back to the standard formula.
+pub fn compute_threat_score_contextual(
+    toxicity: f64,
+    topic_overlap: f64,
+    context_score: Option<f64>,
+    weights: &ThreatWeights,
+) -> (f64, ThreatTier) {
+    let effective_toxicity = match context_score {
+        Some(ctx) => {
+            let pair_weight = 0.4;
+            toxicity * (1.0 - pair_weight) + ctx * pair_weight
+        }
+        None => toxicity,
+    };
+    compute_threat_score(effective_toxicity, topic_overlap, weights)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

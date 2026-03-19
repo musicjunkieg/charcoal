@@ -146,6 +146,38 @@ pub fn apply_behavioral_modifier(
     }
 }
 
+/// Apply the behavioral modifier with optional contextual override.
+///
+/// When context_score >= 0.5, the benign gate is bypassed — an account that
+/// looks benign in isolation but is hostile in direct interactions with the
+/// protected user's content is exactly the concern troll this system detects.
+pub fn apply_behavioral_modifier_contextual(
+    raw_score: f64,
+    quote_ratio: f64,
+    reply_ratio: f64,
+    pile_on: bool,
+    avg_engagement: f64,
+    median_engagement: f64,
+    context_score: Option<f64>,
+) -> (f64, bool) {
+    let context_overrides_gate = context_score.map(|cs| cs >= 0.5).unwrap_or(false);
+
+    if context_overrides_gate {
+        // Skip benign gate check, but still apply hostile multiplier
+        let boost = compute_behavioral_boost(quote_ratio, reply_ratio, pile_on);
+        ((raw_score * boost).clamp(0.0, 100.0), false)
+    } else {
+        apply_behavioral_modifier(
+            raw_score,
+            quote_ratio,
+            reply_ratio,
+            pile_on,
+            avg_engagement,
+            median_engagement,
+        )
+    }
+}
+
 /// Minimum number of distinct amplifiers in a 24-hour window to trigger
 /// pile-on detection. Below this threshold, it's normal engagement.
 const PILE_ON_THRESHOLD: usize = 5;

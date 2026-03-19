@@ -1,7 +1,8 @@
 use charcoal::db::models::ThreatTier;
 use charcoal::scoring::behavioral::{
-    apply_behavioral_modifier, compute_behavioral_boost, compute_quote_ratio, compute_reply_ratio,
-    detect_pile_on_participants, is_behaviorally_benign, BehavioralSignals,
+    apply_behavioral_modifier, apply_behavioral_modifier_contextual, compute_behavioral_boost,
+    compute_quote_ratio, compute_reply_ratio, detect_pile_on_participants, is_behaviorally_benign,
+    BehavioralSignals,
 };
 use charcoal::scoring::threat::{compute_threat_score, ThreatWeights};
 
@@ -377,4 +378,88 @@ fn persona_high_tox_benign_behavior() {
     assert!((final_score - 12.0).abs() < f64::EPSILON);
     let tier = ThreatTier::from_score(final_score);
     assert_eq!(tier, ThreatTier::Watch, "Benign gate prevents High tier");
+}
+
+// --- Contextual benign gate bypass tests ---
+
+#[test]
+fn benign_gate_bypassed_when_context_score_high() {
+    // Account looks benign in isolation but context_score is 0.7 (hostile in direct interactions)
+    let (score, benign_gate) = apply_behavioral_modifier_contextual(
+        30.0,      // raw_score (Elevated)
+        0.05,      // quote_ratio (low — benign)
+        0.10,      // reply_ratio (low — benign)
+        false,     // pile_on (no)
+        5.0,       // avg_engagement (above median)
+        3.0,       // median_engagement
+        Some(0.7), // context_score — HIGH, should bypass gate
+    );
+    // Without context, benign gate would cap at 12.0
+    // With high context_score, gate should be bypassed
+    assert!(
+        score > 12.0,
+        "Benign gate should be bypassed with high context_score, got {}",
+        score
+    );
+    assert!(
+        !benign_gate,
+        "benign_gate should be false when context bypasses it"
+    );
+}
+
+#[test]
+fn benign_gate_still_applies_when_context_score_low() {
+    let (score, benign_gate) = apply_behavioral_modifier_contextual(
+        30.0,
+        0.05,
+        0.10,
+        false,
+        5.0,
+        3.0,
+        Some(0.3), // context_score below 0.5 threshold
+    );
+    assert_eq!(
+        score, 12.0,
+        "Benign gate should apply when context_score < 0.5"
+    );
+    assert!(benign_gate);
+}
+
+#[test]
+fn benign_gate_applies_when_no_context_score() {
+    let (score, benign_gate) =
+        apply_behavioral_modifier_contextual(30.0, 0.05, 0.10, false, 5.0, 3.0, None);
+    assert_eq!(score, 12.0);
+    assert!(benign_gate);
+}
+
+#[test]
+fn contextual_modifier_matches_original_when_no_context() {
+    // Without context score, contextual version should produce same result
+    let (score_orig, gate_orig) = apply_behavioral_modifier(30.0, 0.05, 0.10, false, 5.0, 3.0);
+    let (score_ctx, gate_ctx) =
+        apply_behavioral_modifier_contextual(30.0, 0.05, 0.10, false, 5.0, 3.0, None);
+    assert!((score_orig - score_ctx).abs() < f64::EPSILON);
+    assert_eq!(gate_orig, gate_ctx);
+}
+
+#[test]
+fn contextual_modifier_hostile_account_still_boosted() {
+    // Non-benign account with high context score — should still get boost
+    let (score, benign_gate) = apply_behavioral_modifier_contextual(
+        30.0,      // raw_score
+        0.25,      // quote_ratio (high — not benign)
+        0.35,      // reply_ratio (high — not benign)
+        false,     // pile_on
+        2.0,       // avg_engagement (below median)
+        5.0,       // median_engagement
+        Some(0.8), // context_score — high
+    );
+    assert!(!benign_gate);
+    // Score should be boosted (not capped), same as original behavior for non-benign
+    assert!(
+        score > 30.0,
+        "Hostile account should still get boost, got {}",
+        score
+    );
 }
