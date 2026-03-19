@@ -34,10 +34,18 @@ pub async fn list_events(
     let events: Vec<serde_json::Value> = events
         .into_iter()
         .map(|mut e| {
-            // Convert AT-URI amplifier_post_uri to bsky.app URL.
-            if let Some(ref uri) = e.amplifier_post_uri {
-                e.amplifier_post_uri = Some(at_uri_to_bsky_url(uri));
-            }
+            // Convert AT-URIs to bsky.app URLs.
+            // For reposts, amplifier_post_uri is an app.bsky.feed.repost record which
+            // has no viewable page on bsky.app. Use the original_post_uri instead so
+            // the "View post" link shows the reposted content.
+            let view_uri = if e.event_type == "repost" {
+                Some(at_uri_to_bsky_url(&e.original_post_uri))
+            } else {
+                e.amplifier_post_uri
+                    .as_ref()
+                    .map(|uri| at_uri_to_bsky_url(uri))
+            };
+            e.amplifier_post_uri = view_uri;
             serde_json::json!({
                 "id": e.id,
                 "event_type": e.event_type,
@@ -55,6 +63,9 @@ pub async fn list_events(
 }
 
 /// Convert an AT-URI to a bsky.app web URL.
+///
+/// Only converts `app.bsky.feed.post` URIs — other collections (like
+/// `app.bsky.feed.repost`) don't have viewable pages on bsky.app.
 fn at_uri_to_bsky_url(uri: &str) -> String {
     if uri.starts_with("https://") {
         return uri.to_string();
@@ -68,6 +79,12 @@ fn at_uri_to_bsky_url(uri: &str) -> String {
         return uri.to_string();
     }
     let did = parts[0];
+    let collection = parts[1];
     let rkey = parts[2];
-    format!("https://bsky.app/profile/{did}/post/{rkey}")
+    // Only app.bsky.feed.post records have viewable pages on bsky.app
+    if collection == "app.bsky.feed.post" {
+        format!("https://bsky.app/profile/{did}/post/{rkey}")
+    } else {
+        uri.to_string()
+    }
 }
