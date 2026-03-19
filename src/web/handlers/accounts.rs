@@ -89,6 +89,10 @@ pub async fn list_accounts(
 }
 
 /// GET /api/accounts/:handle — single account by handle.
+///
+/// If the account has been scored, returns full score data.
+/// If the account appears in amplification events but hasn't been scored yet,
+/// returns a stub with handle and "not yet scored" status so the page renders.
 pub async fn get_account(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -96,7 +100,24 @@ pub async fn get_account(
 ) -> Response {
     match state.db.get_account_by_handle(&auth.did, &handle).await {
         Ok(Some(account)) => Json(account_to_json(account, 0)).into_response(),
-        Ok(None) => api_error(StatusCode::NOT_FOUND, "Account not found"),
+        Ok(None) => {
+            // No score yet — return a stub so the detail page can still render.
+            // The frontend should show "not yet scored" instead of a 404.
+            Json(serde_json::json!({
+                "rank": 0,
+                "did": null,
+                "handle": handle,
+                "toxicity_score": null,
+                "topic_overlap": null,
+                "threat_score": null,
+                "threat_tier": null,
+                "posts_analyzed": 0,
+                "top_toxic_posts": [],
+                "scored_at": null,
+                "behavioral_signals": null,
+            }))
+            .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, handle = %handle, "DB error fetching account");
             api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
@@ -136,27 +157,26 @@ fn account_to_json(mut account: AccountScore, rank: usize) -> serde_json::Value 
 
 /// Convert an AT-URI to a bsky.app web URL.
 ///
-/// AT-URI format: `at://did:plc:xxxx/app.bsky.feed.post/rkey`
-/// Web URL format: `https://bsky.app/profile/did:plc:xxxx/post/rkey`
+/// Only converts `app.bsky.feed.post` URIs — other collections (like
+/// `app.bsky.feed.repost`) don't have viewable pages on bsky.app.
 fn at_uri_to_bsky_url(uri: &str) -> String {
-    // If it's already a web URL, return as-is.
     if uri.starts_with("https://") {
         return uri.to_string();
     }
-
-    // Strip the "at://" prefix.
     let rest = match uri.strip_prefix("at://") {
         Some(r) => r,
         None => return uri.to_string(),
     };
-
-    // Split into parts: did / collection / rkey
     let parts: Vec<&str> = rest.splitn(3, '/').collect();
     if parts.len() != 3 {
         return uri.to_string();
     }
     let did = parts[0];
+    let collection = parts[1];
     let rkey = parts[2];
-
-    format!("https://bsky.app/profile/{did}/post/{rkey}")
+    if collection == "app.bsky.feed.post" {
+        format!("https://bsky.app/profile/{did}/post/{rkey}")
+    } else {
+        uri.to_string()
+    }
 }

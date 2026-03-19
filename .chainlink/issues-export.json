@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-03-18T16:11:47.657711+00:00",
+  "exported_at": "2026-03-19T00:50:35.319840+00:00",
   "issues": [
     {
-      "id": 96,
-      "title": "Fix Dockerfile to use Node 22 via nodesource for SvelteKit build",
+      "id": 99,
+      "title": "Fix account detail pages not loading from dashboard",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -12,10 +12,65 @@
       "labels": [
         "bug"
       ],
+      "comments": [
+        {
+          "content": "Two issues: (1) Account detail pages 404 for unscored amplifiers — need fallback to show event data. (2) All 'View post' links lead to deleted posts, even for friendly reposts. Need to investigate how amplifier_post_uri is constructed.",
+          "created_at": "2026-03-19T00:27:08.656144+00:00"
+        }
+      ],
+      "created_at": "2026-03-19T00:23:35.066963+00:00",
+      "updated_at": "2026-03-19T00:23:35.066963+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 98,
+      "title": "Investigate amplification events accuracy on charcoal.watch",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Deleted posts in amplification events are expected: Constellation retains backlink records even after the amplifier deletes their post. This can be a useful signal (hit-and-run engagement). Need to verify whether these accounts still get scored properly.",
+          "created_at": "2026-03-19T00:20:53.617759+00:00"
+        }
+      ],
+      "created_at": "2026-03-19T00:15:49.974561+00:00",
+      "updated_at": "2026-03-19T00:21:14.107952+00:00",
+      "closed_at": "2026-03-19T00:21:14.107952+00:00"
+    },
+    {
+      "id": 97,
+      "title": "Verify charcoal.watch DNS and Railway domain",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-18T23:39:21.317223+00:00",
+      "updated_at": "2026-03-18T23:40:05.309641+00:00",
+      "closed_at": "2026-03-18T23:40:05.309641+00:00"
+    },
+    {
+      "id": 96,
+      "title": "Fix Dockerfile to use Node 22 via nodesource for SvelteKit build",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
       "comments": [],
       "created_at": "2026-03-18T04:59:41.029035+00:00",
-      "updated_at": "2026-03-18T04:59:41.029035+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-18T23:40:05.314030+00:00",
+      "closed_at": "2026-03-18T23:40:05.314030+00:00"
     },
     {
       "id": 95,

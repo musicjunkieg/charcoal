@@ -63,10 +63,16 @@
 			<p>@{$page.params.handle} hasn't been scored yet.</p>
 		</div>
 	{:else if account}
+		{#if account.scored_at === null}
+			<div class="not-scored-banner">
+				This account was detected as an amplifier but hasn't been fully scored yet.
+				Scores will appear after the next scan.
+			</div>
+		{/if}
 		<div class="account-header">
 			<div>
 				<h1 class="handle">@{account.handle}</h1>
-				<p class="did">{account.did}</p>
+				<p class="did">{account.did ?? 'DID not yet resolved'}</p>
 			</div>
 			<a
 				href="https://bsky.app/profile/{account.handle}"
@@ -212,6 +218,17 @@
 	}
 
 	.not-found h2 { font-size: 1.25rem; color: #d6d3d1; margin-bottom: 0.5rem; }
+
+	.not-scored-banner {
+		padding: 1rem 1.25rem;
+		margin-bottom: 1.5rem;
+		background: rgba(245, 158, 11, 0.08);
+		border: 1px solid rgba(245, 158, 11, 0.2);
+		border-radius: 10px;
+		color: #fcd34d;
+		font-size: 0.875rem;
+		line-height: 1.5;
+	}
 
 	.account-header {
 		display: flex;
