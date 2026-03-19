@@ -197,9 +197,63 @@ name or may need a getter method. Read the file first.
 
 ---
 
-## Chunk 1: Schema & Data Models (Tasks 1-3)
+## Chunk 0: Railway Staging Environment (Task 1)
 
-### Task 1: Data Model Structs
+### Task 1: Create Railway Staging Environment
+
+**Files:** None (infrastructure setup via Railway CLI/MCP)
+
+This MUST be done before any code changes per the spec. Staging validates
+each chunk as it lands on the branch, rather than building everything
+locally and deploying all at once.
+
+- [ ] **Step 1: Create staging environment on Railway**
+
+Use Railway MCP tools to:
+1. Create a new `staging` environment on the charcoal project
+   (Railway project ID: `84bbd271-c3f5-42a3-8e68-05a8e063824f`)
+2. Provision a new Postgres addon for staging
+3. Configure the staging environment to deploy from `feat/contextual-scoring` branch
+4. Set up environment variables (copy from production, adjust as needed):
+   - `CHARCOAL_SESSION_SECRET` (generate new one for staging)
+   - `CHARCOAL_OAUTH_CLIENT_ID` (may need staging-specific)
+   - `CHARCOAL_ALLOWED_DID` (empty for open access, or Bryan + testers)
+   - `DATABASE_URL` (auto-set by Postgres addon)
+   - `BLUESKY_HANDLE` (Bryan's handle)
+
+- [ ] **Step 2: Generate domain for staging**
+
+Use Railway MCP `generate-domain` or set up `staging.charcoal.watch` subdomain.
+
+- [ ] **Step 3: Verify staging deploys current codebase**
+
+The `feat/contextual-scoring` branch already has the spec and plan commits.
+Verify:
+1. Build succeeds on Railway
+2. Models auto-download
+3. OAuth login works (may need redirect URI update)
+4. Basic scan works
+
+- [ ] **Step 4: Verify Constellation likes support**
+
+Test whether Constellation indexes likes by querying:
+`GET /xrpc/blue.microcosm.links.getBacklinks?subject={post_uri}&source=app.bsky.feed.like:subject.uri`
+
+If it returns results: Constellation path works.
+If it errors or returns empty: we need the `getLikes` API fallback in Task 8.
+
+Document the result as a chainlink comment for the implementer.
+
+- [ ] **Step 5: Document staging URL and share with testers**
+
+Add staging URL to the spec document. Share access with any testers Bryan
+wants to invite.
+
+---
+
+## Chunk 1: Schema & Data Models (Tasks 2-4)
+
+### Task 2: Data Model Structs
 
 **Files:**
 - Modify: `src/db/models.rs`
@@ -402,7 +456,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 2: Schema Migration v5 (SQLite)
+### Task 3: Schema Migration v5 (SQLite)
 
 **Files:**
 - Modify: `src/db/schema.rs`
@@ -594,7 +648,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 3: Database Trait & SQLite Implementation
+### Task 4: Database Trait & SQLite Implementation
 
 **Files:**
 - Modify: `src/db/traits.rs`
@@ -928,9 +982,9 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-## Chunk 2: NLI Model & Contextual Scoring (Tasks 4-6)
+## Chunk 2: NLI Model & Contextual Scoring (Tasks 5-7)
 
-### Task 4: NLI Model Download
+### Task 5: NLI Model Download
 
 **Files:**
 - Modify: `src/toxicity/download.rs`
@@ -1030,7 +1084,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 5: NLI Inference Module
+### Task 6: NLI Inference Module
 
 **Files:**
 - Create: `src/scoring/nli.rs`
@@ -1342,7 +1396,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 6: Blended Scoring Formula & Benign Gate Bypass
+### Task 7: Blended Scoring Formula & Benign Gate Bypass
 
 **Files:**
 - Modify: `src/scoring/threat.rs`
@@ -1528,9 +1582,9 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-## Chunk 3: Engagement Detection Expansion (Tasks 7-9)
+## Chunk 3: Engagement Detection Expansion (Tasks 8-10)
 
-### Task 7: Like Detection via Constellation
+### Task 8: Like Detection via Constellation
 
 **Files:**
 - Create: `src/bluesky/likes.rs`
@@ -1625,7 +1679,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 8: Drive-By Reply Detection
+### Task 9: Drive-By Reply Detection
 
 **Files:**
 - Create: `src/bluesky/replies.rs`
@@ -1828,7 +1882,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 9: Expand Amplification Pipeline
+### Task 10: Expand Amplification Pipeline
 
 **Files:**
 - Modify: `src/pipeline/amplification.rs`
@@ -1926,9 +1980,9 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-## Chunk 4: Web API & Frontend (Tasks 10-13)
+## Chunk 4: Web API & Frontend (Tasks 11-14)
 
-### Task 10: Label API Endpoints
+### Task 11: Label API Endpoints
 
 **Files:**
 - Create: `src/web/handlers/labels.rs`
@@ -2069,7 +2123,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 11: Label Buttons Svelte Component
+### Task 12: Label Buttons Svelte Component
 
 **Files:**
 - Create: `web/src/lib/components/LabelButtons.svelte`
@@ -2165,7 +2219,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 12: Inline Labels on Account Detail + Review Queue Page
+### Task 13: Inline Labels on Account Detail + Review Queue Page
 
 **Files:**
 - Modify: `web/src/routes/(protected)/accounts/[handle]/+page.svelte`
@@ -2210,7 +2264,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 13: Accuracy Dashboard Panel
+### Task 14: Accuracy Dashboard Panel
 
 **Files:**
 - Modify: `web/src/routes/(protected)/dashboard/+page.svelte`
@@ -2245,9 +2299,9 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-## Chunk 5: Postgres Migration & Staging Deploy (Tasks 14-16)
+## Chunk 5: Postgres Migration & Pipeline Wiring (Tasks 15-17)
 
-### Task 14: Postgres Migration
+### Task 15: Postgres Migration
 
 **Files:**
 - Create: `migrations/postgres/0005_contextual_scoring.sql`
@@ -2317,49 +2371,30 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
 
 ---
 
-### Task 15: Railway Staging Environment
+### Task 16: Staging Validation (after all code changes)
 
-**Files:** None (infrastructure setup via Railway CLI/MCP)
+After all code tasks are complete and pushed to `feat/contextual-scoring`:
 
-- [ ] **Step 1: Create staging environment on Railway**
+- [ ] **Step 1: Verify staging auto-deploys with new code**
 
-Use Railway MCP tools to:
-1. Create a new `staging` environment on the charcoal project
-2. Provision a new Postgres addon for staging
-3. Configure the staging environment to deploy from `feat/contextual-scoring` branch
-4. Set up environment variables (copy from production, adjust as needed):
-   - `CHARCOAL_SESSION_SECRET` (generate new one for staging)
-   - `CHARCOAL_OAUTH_CLIENT_ID` (may need staging-specific)
-   - `CHARCOAL_ALLOWED_DID` (empty for open access, or Bryan + testers)
-   - `DATABASE_URL` (auto-set by Postgres addon)
-   - `BLUESKY_HANDLE` (Bryan's handle)
+Check Railway logs for successful build with schema v5 migration.
 
-- [ ] **Step 2: Generate domain for staging**
+- [ ] **Step 2: Verify 3 ONNX models download and load**
 
-Use Railway MCP `generate-domain` or set up `staging.charcoal.watch` subdomain.
+Check logs for Detoxify (~126MB) + embeddings (~90MB) + NLI (~87MB).
 
-- [ ] **Step 3: Push branch and trigger deploy**
+- [ ] **Step 3: End-to-end validation**
 
-```bash
-git push -u origin feat/contextual-scoring
-```
-
-- [ ] **Step 4: Verify staging deployment**
-
-1. Check Railway logs for successful build
-2. Verify model auto-download (all 3 models)
-3. Verify schema migration v5 runs
-4. Test OAuth login flow
-5. Run a scan and verify new engagement types appear
-6. Test label UI
-
-- [ ] **Step 5: Document staging URL**
-
-Add staging URL to the spec document and share with testers.
+1. OAuth login works
+2. Run a scan — verify likes and replies detected
+3. NLI scores appear on accounts with interaction pairs
+4. Label an account via inline buttons
+5. Use the review queue to label 5+ accounts
+6. Verify accuracy metrics appear after labeling
 
 ---
 
-### Task 16: Integration Testing & Context Scoring Pipeline Wiring
+### Task 17: Integration Testing & Context Scoring Pipeline Wiring
 
 **Files:**
 - Modify: `src/scoring/profile.rs`
