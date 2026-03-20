@@ -1,10 +1,64 @@
 {
   "version": 1,
-  "exported_at": "2026-03-19T23:44:40.196792+00:00",
+  "exported_at": "2026-03-20T02:42:59.267038+00:00",
   "issues": [
     {
-      "id": 113,
-      "title": "Add blended scoring formula and benign gate bypass for contextual scoring",
+      "id": 118,
+      "title": "Wire likes and replies into amplification scan pipeline",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 1,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Task 10: Modify src/pipeline/amplification.rs to process likes and replies alongside quotes/reposts. Modify src/web/scan_job.rs to call find_likers() and fetch_replies_to_post() during scan. Store original_post_text via fetch_post_text(). No new pure-function tests needed — integration validated in staging.",
+          "created_at": "2026-03-20T02:31:27.979177+00:00"
+        }
+      ],
+      "created_at": "2026-03-20T02:31:15.277309+00:00",
+      "updated_at": "2026-03-20T02:31:15.277309+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 117,
+      "title": "Add drive-by reply detection via getPostThread",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 1,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Task 9: Create src/bluesky/replies.rs with filter_drive_by_replies(), filter_drive_by_replies_excluding_self(), fetch_follows_set(), fetch_replies_to_post(). TDD: write tests first in tests/unit_replies.rs.",
+          "created_at": "2026-03-20T02:31:27.975186+00:00"
+        }
+      ],
+      "created_at": "2026-03-20T02:31:15.272888+00:00",
+      "updated_at": "2026-03-20T02:31:15.272888+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 116,
+      "title": "Add like detection via Constellation backlinks",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": 1,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Task 8: Add LIKES_SOURCE constant to constellation/client.rs, implement find_likers() method using existing get_backlinks() with 'app.bsky.feed.like:subject.uri' source. Also create src/bluesky/likes.rs with getLikes API fallback. TDD: write tests first in tests/unit_likes.rs.",
+          "created_at": "2026-03-20T02:31:27.971262+00:00"
+        }
+      ],
+      "created_at": "2026-03-20T02:31:15.267944+00:00",
+      "updated_at": "2026-03-20T02:34:16.179323+00:00",
+      "closed_at": "2026-03-20T02:34:16.179323+00:00"
+    },
+    {
+      "id": 115,
+      "title": "Expand engagement detection: likes, drive-by replies, pipeline wiring",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -12,10 +66,45 @@
       "labels": [
         "feature"
       ],
+      "comments": [
+        {
+          "content": "Phase 1.75 Chunk 3 (Tasks 8-10) from docs/superpowers/plans/2026-03-19-contextual-scoring-impl.md. Task 8: Constellation likes query with app.bsky.feed.like:subject.uri source path + getLikes API fallback. Task 9: getPostThread depth=1 reply fetching, follows set filtering, drive-by detection. Task 10: Wire both into amplification.rs pipeline and scan_job.rs orchestration, store original_post_text on events.",
+          "created_at": "2026-03-20T02:31:27.966675+00:00"
+        }
+      ],
+      "created_at": "2026-03-20T02:31:15.262929+00:00",
+      "updated_at": "2026-03-20T02:31:15.262929+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 114,
+      "title": "Update CLAUDE.md and memory for Phase 1.75 progress",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-19T23:59:50.075659+00:00",
+      "updated_at": "2026-03-20T00:01:17.835744+00:00",
+      "closed_at": "2026-03-20T00:01:17.835744+00:00"
+    },
+    {
+      "id": 113,
+      "title": "Add blended scoring formula and benign gate bypass for contextual scoring",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
       "comments": [],
       "created_at": "2026-03-19T23:34:20.976083+00:00",
-      "updated_at": "2026-03-19T23:34:20.976083+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-19T23:56:55.413061+00:00",
+      "closed_at": "2026-03-19T23:56:55.413061+00:00"
     },
     {
       "id": 112,

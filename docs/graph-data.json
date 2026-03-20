@@ -1869,6 +1869,28 @@
       "created_at": "2026-03-19T15:43:24.652760-07:00",
       "updated_at": "2026-03-19T15:43:24.652760-07:00",
       "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"c39180e\"}"
+    },
+    {
+      "id": 177,
+      "change_id": "34c583ad-faa6-4173-8419-790be45c532b",
+      "node_type": "action",
+      "title": "Implement NLI inference module and blended scoring formula with benign gate bypass",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T16:57:03.312953-07:00",
+      "updated_at": "2026-03-19T16:57:03.312953-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"7ca8e3f\",\"files\":[\"src/scoring/nli.rs\",\"src/scoring/threat.rs\",\"src/scoring/behavioral.rs\",\"src/toxicity/download.rs\"]}"
+    },
+    {
+      "id": 178,
+      "change_id": "13f456c3-c84b-4345-a7bd-bf4687d8f3a4",
+      "node_type": "outcome",
+      "title": "Chunk 2 complete: NLI model download, hostility scoring, blended formula, benign gate bypass — 277 tests passing, merged to staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-19T16:57:03.321945-07:00",
+      "updated_at": "2026-03-19T16:57:03.321945-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"7ca8e3f\"}"
     }
   ],
   "edges": [
@@ -3653,6 +3675,28 @@
       "weight": 1.0,
       "rationale": "Schema migration led to trait implementation",
       "created_at": "2026-03-19T15:43:24.663909-07:00"
+    },
+    {
+      "id": 169,
+      "from_node_id": 176,
+      "to_node_id": 177,
+      "from_change_id": "d915256e-1374-491a-aa5d-d0356a18f636",
+      "to_change_id": "34c583ad-faa6-4173-8419-790be45c532b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 1 completion led to Chunk 2 implementation",
+      "created_at": "2026-03-19T16:57:09.549339-07:00"
+    },
+    {
+      "id": 170,
+      "from_node_id": 177,
+      "to_node_id": 178,
+      "from_change_id": "34c583ad-faa6-4173-8419-790be45c532b",
+      "to_change_id": "13f456c3-c84b-4345-a7bd-bf4687d8f3a4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "NLI implementation produced Chunk 2 outcome",
+      "created_at": "2026-03-19T16:57:09.555243-07:00"
     }
   ],
   "documents": [
