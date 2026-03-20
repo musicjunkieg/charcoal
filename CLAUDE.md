@@ -75,11 +75,26 @@ Post-MVP improvements applied:
   in-memory for future XRPC calls (muting/blocking milestone). Env vars:
   `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
 
-231 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
+277 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
 tests, which require `--features postgres` and a live `DATABASE_URL`). Clippy
 clean. CLI commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`,
 `score`, `report`, `status`, `validate`, `migrate` (postgres feature), `serve`
 (web feature).
+
+**Phase 1.75 — Contextual Scoring** (in progress on `feat/contextual-scoring`):
+- Schema v5: `user_labels` table, `inferred_pairs` table, `context_score` on
+  `account_scores` and `amplification_events`, `original_post_text` on events
+- NLI cross-encoder model: `nli-deberta-v3-xsmall` (quantized ONNX, ~87MB)
+  for scoring text pairs against hostility hypotheses
+- Blended scoring formula: 60% toxicity + 40% NLI context score when pair
+  data available; falls back to original formula when no pairs exist
+- Benign gate bypass: accounts with `context_score >= 0.5` skip the benign
+  gate (catches concern trolls who look benign in isolation)
+- Database trait: 7 new methods for labels, inferred pairs, accuracy metrics
+- Staging environment: `staging` branch deploys to Railway staging
+  (`charcoal-web-staging.up.railway.app`), separate Postgres + volume
+- Design spec: `docs/superpowers/specs/2026-03-19-contextual-scoring-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-03-19-contextual-scoring-impl.md`
 
 ### External contributions
 
