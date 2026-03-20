@@ -19,7 +19,7 @@ use crate::scoring::behavioral::detect_pile_on_participants;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::download::{
-    embedding_files_present, embedding_model_dir, model_files_present,
+    embedding_files_present, embedding_model_dir, model_files_present, nli_files_present,
 };
 use crate::toxicity::onnx::OnnxToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
@@ -126,6 +126,35 @@ async fn run_scan(
             }
         }
     } else {
+        None
+    };
+
+    // Phase 2b: load NLI model (optional — falls back gracefully if unavailable)
+    {
+        let mut s = scan_status.write().await;
+        s.progress_message = "Loading NLI model…".to_string();
+    }
+
+    let nli_scorer = if nli_files_present(&config.model_dir) {
+        let model_dir = config.model_dir.clone();
+        match tokio::task::spawn_blocking(move || crate::scoring::nli::NliScorer::load(&model_dir))
+            .await
+        {
+            Ok(Ok(scorer)) => {
+                info!("NLI cross-encoder model loaded");
+                Some(scorer)
+            }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NLI model failed to load, context scoring disabled");
+                None
+            }
+            Err(e) => {
+                warn!(error = %e, "spawn_blocking panicked loading NLI model");
+                None
+            }
+        }
+    } else {
+        info!("NLI model not found, context scoring disabled");
         None
     };
 
@@ -333,6 +362,7 @@ async fn run_scan(
         median_engagement,
         &pile_on_dids,
         &original_text_cache,
+        nli_scorer.as_ref(),
     )
     .await;
 

@@ -46,6 +46,7 @@ pub async fn build_profile(
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
     nli_scorer: Option<&NliScorer>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
@@ -154,40 +155,75 @@ pub async fn build_profile(
     let pile_on = pile_on_dids.contains(target_did);
 
     // Step 5: Compute context score via NLI if scorer and embeddings available
-    let context_score = if let (Some(nli), Some(emb), Some(protected_emb)) =
-        (nli_scorer, embedder, protected_embedding)
+    //
+    // For each of the target's top 3 most similar posts (by embedding), find
+    // the closest matching protected user post and score the pair via NLI.
+    // The max hostility score across all pairs becomes the context_score.
+    let context_score = if let (Some(nli), Some(emb), Some(user_posts)) =
+        (nli_scorer, embedder, protected_posts_with_embeddings)
     {
-        // Embed each target post individually for pair matching
-        match emb.embed_batch(&post_texts).await {
-            Ok(target_embeddings) => {
-                let target_with_emb: Vec<(String, Vec<f64>)> = post_texts
-                    .iter()
-                    .zip(target_embeddings.into_iter())
-                    .map(|(text, emb)| (text.clone(), emb))
-                    .collect();
+        if user_posts.is_empty() {
+            None
+        } else {
+            // Embed each target post individually for pair matching
+            match emb.embed_batch(&post_texts).await {
+                Ok(target_embeddings) => {
+                    let target_with_emb: Vec<(String, Vec<f64>)> = post_texts
+                        .iter()
+                        .zip(target_embeddings.into_iter())
+                        .map(|(text, emb)| (text.clone(), emb))
+                        .collect();
 
-                // Find the 3 most similar posts to the protected user's profile
-                let pairs = crate::scoring::context::find_most_similar_posts(
-                    protected_emb,
-                    &target_with_emb,
-                    3,
-                );
+                    // Find the 3 most similar target posts to the user's mean embedding
+                    let user_mean: Vec<f64> = {
+                        let dim = user_posts[0].1.len();
+                        let mut mean = vec![0.0; dim];
+                        for (_, emb) in user_posts {
+                            for (i, v) in emb.iter().enumerate() {
+                                mean[i] += v;
+                            }
+                        }
+                        let n = user_posts.len() as f64;
+                        mean.iter_mut().for_each(|v| *v /= n);
+                        mean
+                    };
+                    let top_target_posts = crate::scoring::context::find_most_similar_posts(
+                        &user_mean,
+                        &target_with_emb,
+                        3,
+                    );
 
-                // Score each pair via NLI and take the max
-                let mut pair_scores = Vec::new();
-                for (target_text, _similarity) in &pairs {
-                    match nli.score_pair("protected user's post", target_text).await {
-                        Ok(score) => pair_scores.push(score),
-                        Err(e) => {
-                            warn!(error = %e, "NLI scoring failed for pair");
+                    // Score each pair via NLI: target post vs closest matching user post
+                    let mut pair_scores = Vec::new();
+                    for (target_text, _similarity) in &top_target_posts {
+                        // Find the target post's embedding to match against user posts
+                        let target_emb = target_with_emb
+                            .iter()
+                            .find(|(t, _)| t == target_text)
+                            .map(|(_, e)| e.as_slice());
+
+                        let user_text = target_emb.and_then(|emb| {
+                            crate::scoring::context::find_best_matching_user_post(emb, user_posts)
+                        });
+
+                        let original = user_text.as_deref().unwrap_or("");
+                        if original.is_empty() {
+                            continue;
+                        }
+
+                        match nli.score_pair(original, target_text).await {
+                            Ok(score) => pair_scores.push(score),
+                            Err(e) => {
+                                warn!(error = %e, "NLI scoring failed for pair");
+                            }
                         }
                     }
+                    crate::scoring::nli::max_context_score_opt(&pair_scores)
                 }
-                crate::scoring::nli::max_context_score_opt(&pair_scores)
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to embed target posts for NLI");
-                None
+                Err(e) => {
+                    warn!(error = %e, "Failed to embed target posts for NLI");
+                    None
+                }
             }
         }
     } else {

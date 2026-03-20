@@ -1,5 +1,13 @@
 [
   {
+    "hash": "5284b6fc5649e7302137756184f6ca5f01269ae2",
+    "short_hash": "5284b6f",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T20:30:44-07:00",
+    "message": "feat: wire NLI contextual scoring into profile building pipeline\n\nfind_most_similar_posts matches target posts to user fingerprint\nvia embedding cosine similarity. build_profile now accepts optional\nNliScorer, computes context_score from inferred pairs, and uses\nblended formula + benign gate bypass. 4 new context tests.\n322 total tests passing.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 8
+  },
+  {
     "hash": "7ca8e3facf7a5f0b6eff3df6c8207f73ca4f4d46",
     "short_hash": "7ca8e3f",
     "author": "Bryan Guffey",

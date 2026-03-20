@@ -145,6 +145,7 @@ pub async fn run(
                 median_engagement,
                 pile_on_dids,
                 None, // NLI scorer not used for sweep scoring
+                None, // No protected post embeddings for sweep
             ))
             .catch_unwind()
             .await

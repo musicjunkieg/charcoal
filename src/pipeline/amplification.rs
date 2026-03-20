@@ -21,6 +21,7 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
 use crate::bluesky::posts;
 use crate::db::Database;
+use crate::scoring::nli::NliScorer;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -50,6 +51,7 @@ pub async fn run(
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
     original_text_cache: &std::collections::HashMap<String, String>,
+    nli_scorer: Option<&NliScorer>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -103,6 +105,27 @@ pub async fn run(
             .and_then(|uri| original_text_cache.get(uri))
             .map(|s| s.as_str());
 
+        // Score the interaction pair via NLI when both texts are available
+        let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {
+            (Some(nli), Some(amp_text), Some(orig_text)) => {
+                match nli.score_pair(orig_text, amp_text).await {
+                    Ok(score) => {
+                        info!(
+                            handle = event.amplifier_handle,
+                            context_score = format!("{:.3}", score),
+                            "NLI scored event pair"
+                        );
+                        Some(score)
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "NLI scoring failed for event pair");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
         db.insert_amplification_event(
             user_did,
             &event.event_type,
@@ -112,7 +135,7 @@ pub async fn run(
             Some(&event.amplifier_post_uri),
             amplifier_text.as_deref(),
             original_post_text,
-            None, // context_score filled later by NLI pipeline
+            context_score,
         )
         .await?;
 
@@ -226,6 +249,7 @@ pub async fn run(
                                 median_engagement,
                                 pile_on_dids,
                                 None, // NLI scorer not used for follower scoring
+                                None, // No protected post embeddings for followers
                             ))
                             .catch_unwind()
                             .await

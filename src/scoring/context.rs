@@ -23,3 +23,23 @@ pub fn find_most_similar_posts(
     scored.truncate(top_n);
     scored
 }
+
+/// Given a target post's embedding and the protected user's posts (text + embedding),
+/// return the user post text that is most similar to the target post.
+/// Used to form real text pairs for NLI scoring instead of placeholders.
+pub fn find_best_matching_user_post(
+    target_embedding: &[f64],
+    user_posts: &[(String, Vec<f64>)],
+) -> Option<String> {
+    if user_posts.is_empty() {
+        return None;
+    }
+    user_posts
+        .iter()
+        .map(|(text, emb)| {
+            let sim = cosine_similarity_embeddings(target_embedding, emb);
+            (text.clone(), sim)
+        })
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(text, _)| text)
+}

@@ -48,3 +48,33 @@ fn find_most_similar_posts_returns_all_when_fewer_than_limit() {
     let top = find_most_similar_posts(&user_embedding, &target_posts, 5);
     assert_eq!(top.len(), 1);
 }
+
+#[test]
+fn find_best_matching_user_post_returns_closest() {
+    use charcoal::scoring::context::find_best_matching_user_post;
+
+    // Protected user's posts with embeddings
+    let user_posts = vec![
+        ("I love fat liberation".to_string(), vec![0.9, 0.1, 0.0]),
+        (
+            "Great a cappella rehearsal today".to_string(),
+            vec![0.0, 0.9, 0.1],
+        ),
+        ("DEI work matters".to_string(), vec![0.1, 0.0, 0.9]),
+    ];
+
+    // Target post embedding is closest to the fat liberation post
+    let target_embedding = vec![0.85, 0.15, 0.0];
+    let result = find_best_matching_user_post(&target_embedding, &user_posts);
+    assert!(result.is_some());
+    assert_eq!(result.unwrap(), "I love fat liberation");
+}
+
+#[test]
+fn find_best_matching_user_post_returns_none_for_empty() {
+    use charcoal::scoring::context::find_best_matching_user_post;
+
+    let user_posts: Vec<(String, Vec<f64>)> = vec![];
+    let target_embedding = vec![1.0, 0.0, 0.0];
+    assert!(find_best_matching_user_post(&target_embedding, &user_posts).is_none());
+}

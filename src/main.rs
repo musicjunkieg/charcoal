@@ -316,6 +316,7 @@ async fn main() -> Result<()> {
                 median_engagement,
                 &pile_on_dids,
                 &original_text_cache,
+                None, // NLI scorer not loaded in CLI mode (yet)
             )
             .await?;
 
@@ -422,6 +423,7 @@ async fn main() -> Result<()> {
                 median_engagement,
                 &pile_on_dids,
                 None, // NLI scorer — not yet wired into CLI
+                None, // No protected post embeddings in CLI
             )
             .await?;
 
@@ -585,6 +587,7 @@ async fn main() -> Result<()> {
                     median_engagement,
                     &pile_on_dids,
                     None, // NLI scorer — not yet wired into CLI
+                    None, // No protected post embeddings in CLI
                 )
                 .await
                 {

@@ -1891,6 +1891,50 @@
       "created_at": "2026-03-19T16:57:03.321945-07:00",
       "updated_at": "2026-03-19T16:57:03.321945-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"7ca8e3f\"}"
+    },
+    {
+      "id": 179,
+      "change_id": "a24f2bca-9fdf-4758-a4af-7708857727f5",
+      "node_type": "goal",
+      "title": "Wire NLI context scoring into scan pipeline (Task 17)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-20T09:45:17.964801-07:00",
+      "updated_at": "2026-03-20T09:45:17.964801-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"5284b6f\",\"confidence\":85,\"prompt\":\"The NLI infrastructure (model, inference, DB methods, UI) is all built but never connected to the scan pipeline. Need to: (1) load NLI model in scan_job.rs, (2) pass through amplification pipeline, (3) fix profile.rs to use real post text instead of placeholder.\"}"
+    },
+    {
+      "id": 180,
+      "change_id": "4749b515-08fd-45ba-807b-c717c1d34682",
+      "node_type": "option",
+      "title": "Thread NLI scorer + protected post texts through pipeline params",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-20T09:45:23.500380-07:00",
+      "updated_at": "2026-03-20T09:45:23.500380-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"confidence\":90}"
+    },
+    {
+      "id": 181,
+      "change_id": "ff7249a7-321a-4b5c-8339-6551ee0aacb3",
+      "node_type": "decision",
+      "title": "Pass NLI scorer through pipeline; pass protected post texts for real NLI scoring",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-20T09:45:32.491586-07:00",
+      "updated_at": "2026-03-20T09:45:32.491586-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"confidence\":90}"
+    },
+    {
+      "id": 182,
+      "change_id": "568442e1-6459-4ad9-89f5-ec1255a3cc42",
+      "node_type": "action",
+      "title": "Wire NLI scorer loading into scan_job.rs and thread through amplification pipeline",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-20T09:46:23.658684-07:00",
+      "updated_at": "2026-03-20T09:46:23.658684-07:00",
+      "metadata_json": "{\"branch\":\"feat/contextual-scoring\",\"commit\":\"5284b6f\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -3697,6 +3741,39 @@
       "weight": 1.0,
       "rationale": "NLI implementation produced Chunk 2 outcome",
       "created_at": "2026-03-19T16:57:09.555243-07:00"
+    },
+    {
+      "id": 171,
+      "from_node_id": 179,
+      "to_node_id": 180,
+      "from_change_id": "a24f2bca-9fdf-4758-a4af-7708857727f5",
+      "to_change_id": "4749b515-08fd-45ba-807b-c717c1d34682",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approach for wiring",
+      "created_at": "2026-03-20T09:45:27.016618-07:00"
+    },
+    {
+      "id": 172,
+      "from_node_id": 180,
+      "to_node_id": 181,
+      "from_change_id": "4749b515-08fd-45ba-807b-c717c1d34682",
+      "to_change_id": "ff7249a7-321a-4b5c-8339-6551ee0aacb3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen approach",
+      "created_at": "2026-03-20T09:45:32.497499-07:00"
+    },
+    {
+      "id": 173,
+      "from_node_id": 181,
+      "to_node_id": 182,
+      "from_change_id": "ff7249a7-321a-4b5c-8339-6551ee0aacb3",
+      "to_change_id": "568442e1-6459-4ad9-89f5-ec1255a3cc42",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementing the wiring",
+      "created_at": "2026-03-20T09:46:23.664424-07:00"
     }
   ],
   "documents": [
