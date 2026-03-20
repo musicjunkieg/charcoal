@@ -111,6 +111,10 @@ impl PgDatabase {
                     4,
                     include_str!("../../migrations/postgres/0004_multiuser.sql"),
                 ),
+                (
+                    5,
+                    include_str!("../../migrations/postgres/0005_contextual_scoring.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
@@ -305,8 +309,8 @@ impl Database for PgDatabase {
         sqlx_core::query::query(
             "INSERT INTO account_scores
                 (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
+                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11)
              ON CONFLICT(user_did, did) DO UPDATE SET
                 handle = $3,
                 toxicity_score = $4,
@@ -316,7 +320,8 @@ impl Database for PgDatabase {
                 posts_analyzed = $8,
                 top_toxic_posts = $9,
                 scored_at = NOW(),
-                behavioral_signals = $10",
+                behavioral_signals = $10,
+                context_score = $11",
         )
         .bind(user_did)
         .bind(&score.did)
@@ -328,6 +333,7 @@ impl Database for PgDatabase {
         .bind(score.posts_analyzed as i32)
         .bind(&top_posts_json)
         .bind(&behavioral_json)
+        .bind(score.context_score)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -342,7 +348,7 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals
+                    behavioral_signals, context_score
              FROM account_scores
              WHERE user_did = $1 AND threat_score >= $2
              ORDER BY threat_score DESC",
@@ -376,7 +382,7 @@ impl Database for PgDatabase {
                 top_toxic_posts,
                 scored_at: row.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
-                context_score: None,
+                context_score: row.get(10),
             });
         }
         Ok(accounts)
@@ -566,7 +572,7 @@ impl Database for PgDatabase {
                 || event
                     .detected_at
                     .find('T')
-                    .map_or(false, |t| event.detected_at[t..].contains('-'));
+                    .is_some_and(|t| event.detected_at[t..].contains('-'));
             if has_tz {
                 event.detected_at.clone()
             } else {
@@ -590,7 +596,7 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals
+                    behavioral_signals, context_score
              FROM account_scores
              WHERE user_did = $1 AND lower(handle) = lower($2)
              LIMIT 1",
@@ -618,7 +624,7 @@ impl Database for PgDatabase {
                 top_toxic_posts,
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
-                context_score: None,
+                context_score: r.get(10),
             }
         }))
     }
@@ -628,7 +634,7 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals
+                    behavioral_signals, context_score
              FROM account_scores
              WHERE user_did = $1 AND did = $2
              LIMIT 1",
@@ -656,7 +662,7 @@ impl Database for PgDatabase {
                 top_toxic_posts,
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
-                context_score: None,
+                context_score: r.get(10),
             }
         }))
     }
