@@ -1,416 +1,12 @@
 {
   "version": 1,
-  "exported_at": "2026-03-20T02:42:59.267038+00:00",
+  "exported_at": "2026-03-20T02:44:10.810864+00:00",
   "issues": [
-    {
-      "id": 118,
-      "title": "Wire likes and replies into amplification scan pipeline",
-      "description": null,
-      "status": "open",
-      "priority": "medium",
-      "parent_id": 1,
-      "labels": [],
-      "comments": [
-        {
-          "content": "Task 10: Modify src/pipeline/amplification.rs to process likes and replies alongside quotes/reposts. Modify src/web/scan_job.rs to call find_likers() and fetch_replies_to_post() during scan. Store original_post_text via fetch_post_text(). No new pure-function tests needed — integration validated in staging.",
-          "created_at": "2026-03-20T02:31:27.979177+00:00"
-        }
-      ],
-      "created_at": "2026-03-20T02:31:15.277309+00:00",
-      "updated_at": "2026-03-20T02:31:15.277309+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 117,
-      "title": "Add drive-by reply detection via getPostThread",
-      "description": null,
-      "status": "open",
-      "priority": "medium",
-      "parent_id": 1,
-      "labels": [],
-      "comments": [
-        {
-          "content": "Task 9: Create src/bluesky/replies.rs with filter_drive_by_replies(), filter_drive_by_replies_excluding_self(), fetch_follows_set(), fetch_replies_to_post(). TDD: write tests first in tests/unit_replies.rs.",
-          "created_at": "2026-03-20T02:31:27.975186+00:00"
-        }
-      ],
-      "created_at": "2026-03-20T02:31:15.272888+00:00",
-      "updated_at": "2026-03-20T02:31:15.272888+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 116,
-      "title": "Add like detection via Constellation backlinks",
-      "description": null,
-      "status": "closed",
-      "priority": "medium",
-      "parent_id": 1,
-      "labels": [],
-      "comments": [
-        {
-          "content": "Task 8: Add LIKES_SOURCE constant to constellation/client.rs, implement find_likers() method using existing get_backlinks() with 'app.bsky.feed.like:subject.uri' source. Also create src/bluesky/likes.rs with getLikes API fallback. TDD: write tests first in tests/unit_likes.rs.",
-          "created_at": "2026-03-20T02:31:27.971262+00:00"
-        }
-      ],
-      "created_at": "2026-03-20T02:31:15.267944+00:00",
-      "updated_at": "2026-03-20T02:34:16.179323+00:00",
-      "closed_at": "2026-03-20T02:34:16.179323+00:00"
-    },
-    {
-      "id": 115,
-      "title": "Expand engagement detection: likes, drive-by replies, pipeline wiring",
-      "description": null,
-      "status": "open",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [
-        {
-          "content": "Phase 1.75 Chunk 3 (Tasks 8-10) from docs/superpowers/plans/2026-03-19-contextual-scoring-impl.md. Task 8: Constellation likes query with app.bsky.feed.like:subject.uri source path + getLikes API fallback. Task 9: getPostThread depth=1 reply fetching, follows set filtering, drive-by detection. Task 10: Wire both into amplification.rs pipeline and scan_job.rs orchestration, store original_post_text on events.",
-          "created_at": "2026-03-20T02:31:27.966675+00:00"
-        }
-      ],
-      "created_at": "2026-03-20T02:31:15.262929+00:00",
-      "updated_at": "2026-03-20T02:31:15.262929+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 114,
-      "title": "Update CLAUDE.md and memory for Phase 1.75 progress",
-      "description": null,
-      "status": "closed",
-      "priority": "low",
-      "parent_id": null,
-      "labels": [
-        "fix"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T23:59:50.075659+00:00",
-      "updated_at": "2026-03-20T00:01:17.835744+00:00",
-      "closed_at": "2026-03-20T00:01:17.835744+00:00"
-    },
-    {
-      "id": 113,
-      "title": "Add blended scoring formula and benign gate bypass for contextual scoring",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T23:34:20.976083+00:00",
-      "updated_at": "2026-03-19T23:56:55.413061+00:00",
-      "closed_at": "2026-03-19T23:56:55.413061+00:00"
-    },
-    {
-      "id": 112,
-      "title": "Add NLI inference module for contextual hostility scoring",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T23:27:36.982353+00:00",
-      "updated_at": "2026-03-19T23:34:20.970570+00:00",
-      "closed_at": "2026-03-19T23:34:20.970570+00:00"
-    },
-    {
-      "id": 111,
-      "title": "Add NLI model download support for DeBERTa-v3-xsmall",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T22:53:50.302155+00:00",
-      "updated_at": "2026-03-19T23:27:36.977237+00:00",
-      "closed_at": "2026-03-19T23:27:36.977237+00:00"
-    },
-    {
-      "id": 110,
-      "title": "Add Database trait methods for labels, inferred pairs, and updated amplification events",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T22:24:26.661896+00:00",
-      "updated_at": "2026-03-19T22:43:16.110454+00:00",
-      "closed_at": "2026-03-19T22:43:16.110454+00:00"
-    },
-    {
-      "id": 109,
-      "title": "Add schema migration v5 for contextual scoring tables and columns",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T22:15:25.755489+00:00",
-      "updated_at": "2026-03-19T22:23:43.440658+00:00",
-      "closed_at": "2026-03-19T22:23:43.440658+00:00"
-    },
-    {
-      "id": 108,
-      "title": "Add contextual scoring data models (UserLabel, InferredPair, AccuracyMetrics, new fields)",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T21:43:07.953403+00:00",
-      "updated_at": "2026-03-19T22:15:25.750350+00:00",
-      "closed_at": "2026-03-19T22:15:25.750350+00:00"
-    },
-    {
-      "id": 107,
-      "title": "Update plan and set up long-lived staging branch and Railway environment",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [
-        {
-          "content": "[action] Creating staging branch and Railway environment",
-          "created_at": "2026-03-19T21:27:19.940082+00:00"
-        },
-        {
-          "content": "Staging environment live at https://charcoal-web-staging.up.railway.app. Railway environment: staging, deploys from staging branch, Dockerfile builder, own Postgres + own volume at /data/models. OAuth client ID updated to staging domain. Session secret is unique to staging. CHARCOAL_ALLOWED_DID is empty (open access).",
-          "created_at": "2026-03-19T21:38:09.054025+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T21:25:50.525367+00:00",
-      "updated_at": "2026-03-19T21:38:12.770111+00:00",
-      "closed_at": "2026-03-19T21:38:12.770111+00:00"
-    },
-    {
-      "id": 106,
-      "title": "Fix implementation plan: move Railway staging setup to Task 1",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "fix"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T21:15:45.859751+00:00",
-      "updated_at": "2026-03-19T21:18:36.504517+00:00",
-      "closed_at": "2026-03-19T21:18:36.504517+00:00"
-    },
-    {
-      "id": 105,
-      "title": "Write Phase 1.75 contextual scoring design spec",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T17:51:35.593281+00:00",
-      "updated_at": "2026-03-19T20:51:01.139766+00:00",
-      "closed_at": "2026-03-19T20:51:01.139766+00:00"
-    },
-    {
-      "id": 104,
-      "title": "Store interaction pairs (amplifier post + original post) for contextual scoring",
-      "description": null,
-      "status": "open",
-      "priority": "medium",
-      "parent_id": 101,
-      "labels": [],
-      "comments": [
-        {
-          "content": "Current schema stores amplifier_post_uri and original_post_uri but not the TEXT of both posts together. For contextual toxicity scoring, we need to analyze the pair.\n\nSchema change: add amplifier_text and original_text columns to amplification_events (or a new interaction_pairs table). Populate during the Constellation event processing phase — we already fetch the amplifier's posts for toxicity scoring, just need to also store the original post text alongside.\n\nThis enables approach A from the parent issue (interaction-level scoring): feed both texts to a model and ask 'is this response hostile toward the original?'\n\nNote: amplifier_text already exists on amplification_events but original_text does not. The original post text is available during the scan (we fetch it in fetch_recent_posts) but it's not carried through to the event storage.",
-          "created_at": "2026-03-19T05:33:29.849811+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T05:33:29.843446+00:00",
-      "updated_at": "2026-03-19T05:33:29.843446+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 103,
-      "title": "Build user feedback mechanism for labeling accounts as threat/safe/ally",
-      "description": null,
-      "status": "open",
-      "priority": "medium",
-      "parent_id": 101,
-      "labels": [],
-      "comments": [
-        {
-          "content": "Add a way for users to label accounts from the dashboard: thumbs up (ally/safe), thumbs down (threat), or flag (needs review). Store in a new feedback table: user_did, target_did, target_handle, label (threat/safe/ally/unknown), created_at.\n\nThis serves two purposes:\n1. Immediate: Bryan can label his known threats and allies to create ground truth for scoring validation\n2. Long-term: All users can provide feedback, building a shared labeled dataset over time\n\nThe feedback data becomes the gold standard for measuring scoring accuracy: precision (of accounts we flag, how many are actually threats?) and recall (of actual threats, how many do we catch?).\n\nTies into #116 (user feedback on toxicity scores) but focused specifically on per-account labels rather than per-post feedback. Should be simple: a button on the account detail page, stores to DB, queryable for scoring evaluation.\n\nBlocked by: nothing (can implement independently of scoring changes)\nEnables: scoring validation, model tuning, contextual scoring evaluation",
-          "created_at": "2026-03-19T05:33:02.551987+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T05:33:02.547734+00:00",
-      "updated_at": "2026-03-19T05:33:02.547734+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 102,
-      "title": "Research existing labeled datasets for social media harassment and hostile engagement",
-      "description": null,
-      "status": "open",
-      "priority": "medium",
-      "parent_id": 101,
-      "labels": [],
-      "comments": [
-        {
-          "content": "Look for existing public datasets that could help train/validate contextual toxicity scoring. Potential sources:\n\n1. LABELED HARASSMENT DATASETS\n- Hatebase.org — multilingual hate speech lexicon\n- Davidson et al. (2017) hate speech dataset — 25k tweets labeled hate/offensive/neither\n- Waseem & Hovy (2016) — 16k tweets labeled racist/sexist/neither\n- Jigsaw/Google Toxic Comments — 150k+ Wikipedia comments with multi-label toxicity\n- HateXplain — hate speech with target group annotations and rationale spans\n- Implicit Hate Speech dataset (ElSherief et al.) — distinguishes explicit from implicit hate\n\n2. CONTEXT-AWARE / INTERACTION-LEVEL DATASETS\n- Reddit ChangeMyView — argument pairs with context\n- CONAN (COunter NArrative) — hate speech paired with counter-speech\n- Multi-Target CONAN — hate speech with target identity labels\n- Gab Hate Corpus — posts with fine-grained hate labels including target\n\n3. BLUESKY-SPECIFIC\n- Check if any researchers have published labeled Bluesky moderation datasets\n- AT Protocol Consortium research publications\n- Bluesky Trust & Safety team public data (if any)\n\n4. TOPIC-DIRECTED HOSTILITY\n- Specifically need datasets where toxicity is labeled relative to a TOPIC (fat liberation, queer identity, DEI) not just in isolation\n- Perspective API training data categories might be relevant (identity_attack specifically)\n- Check for intersectional bias datasets that distinguish hostility-about-identity vs general rudeness\n\nKey question: do any of these include INTERACTION PAIRS (original post + hostile response) rather than just individual posts scored in isolation? That's the specific gap in our current approach.",
-          "created_at": "2026-03-19T05:32:50.170052+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T05:32:50.165709+00:00",
-      "updated_at": "2026-03-19T05:32:50.165709+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 101,
-      "title": "Improve scoring to detect contextual toxicity, not just isolated toxic words",
-      "description": null,
-      "status": "open",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [
-        {
-          "content": "Current scoring is too blunt: ONNX toxicity model scores individual posts in isolation, flagging people who use words that map to toxic categories even when the context is benign. Example: someone quoting a friend's post and saying something sarcastic or blunt gets scored as toxic when there's no actual hostility.\n\nWhat we actually need to understand about each amplifier:\n\n1. CONTEXTUAL TOXICITY — Is this person toxic *toward* the people they're engaging with? A post that says 'this is garbage' about a political position is different from 'this is garbage' directed at a person. We need to score toxicity relative to the interaction pattern (quote/reply), not just the text in isolation.\n\n2. TOPIC-DIRECTED HOSTILITY — Do they overlap with our subject's topics (fat liberation, queer identity, DEI, etc.), and are they toxic specifically *about those topics*? Someone who's generally salty but supportive of our subject's topics is an ally, not a threat. The threat signal is hostility directed at the overlapping topics.\n\n3. ENGAGEMENT PATTERN — How often is this person toxic in their interactions? A single snarky quote-post from someone with 1000 supportive interactions is noise. Someone who exclusively engages via hostile quote-dunking is a real threat.\n\nThe current multiplicative scoring formula (tox * 70 * (1 + overlap * 1.5)) treats topic overlap as an amplifier of toxicity, which is the right direction. But the underlying toxicity score itself is too noisy because it doesn't understand context.\n\nThis is a fundamental scoring quality issue that affects trust in the tool. Should be prioritized before scaling to more users.",
-          "created_at": "2026-03-19T05:29:06.511551+00:00"
-        },
-        {
-          "content": "Possible approaches to explore:\n\nA) INTERACTION-LEVEL SCORING — Instead of scoring a post in isolation, score the (amplifier_post, original_post) pair. Feed both texts to the model and ask 'is this response hostile toward the original?' This requires a different model or prompt structure.\n\nB) TOPIC-FILTERED TOXICITY — After computing topic overlap, only count toxicity scores from posts that are *about* overlapping topics. Filter out toxicity from unrelated topics before computing the threat score.\n\nC) ENGAGEMENT RATIO — Weight toxicity by the ratio of hostile-to-total interactions. Someone with 2 toxic posts out of 500 is different from 2 toxic out of 3. The behavioral signals (quote_ratio, reply_ratio) partially capture this but don't distinguish hostile from non-hostile engagement.\n\nD) SENTIMENT TOWARD SUBJECT — Specifically analyze whether the amplifier's posts about overlapping topics express hostility toward the protected user's position (fat liberation, queer identity, etc.) vs. support.\n\nThese are not mutually exclusive. A+B together would be the most impactful.",
-          "created_at": "2026-03-19T05:29:19.626135+00:00"
-        },
-        {
-          "content": "PRIORITY: Promoted to Phase 1.75 — between Admin Dashboard (1.5) and Core UX (2). Scoring quality is the most critical trust factor for new users on charcoal.watch. False positives kill trust before any UX improvements matter.",
-          "created_at": "2026-03-19T05:30:17.650839+00:00"
-        },
-        {
-          "content": "DATA ASSESSMENT: Current data is insufficient for tuning. 138 scored accounts, 0 High/Elevated, only 4 quote-posts. No labeled ground truth (threat vs safe). No interaction pairs stored (amplifier post + original post together). Need: (1) labeled examples from Bryan (50-100 handles marked threat/safe), (2) more scan volume over time, (3) schema change to store interaction pairs for contextual scoring.",
-          "created_at": "2026-03-19T05:31:53.894186+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T05:28:50.700283+00:00",
-      "updated_at": "2026-03-19T05:28:50.700283+00:00",
-      "closed_at": null
-    },
-    {
-      "id": 100,
-      "title": "Fix pre-push hook to run clippy with --features web",
-      "description": null,
-      "status": "closed",
-      "priority": "medium",
-      "parent_id": null,
-      "labels": [
-        "bug"
-      ],
-      "comments": [],
-      "created_at": "2026-03-19T04:22:09.119264+00:00",
-      "updated_at": "2026-03-19T05:36:10.263784+00:00",
-      "closed_at": "2026-03-19T05:36:10.263784+00:00"
-    },
-    {
-      "id": 99,
-      "title": "Fix account detail pages not loading from dashboard",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "bug"
-      ],
-      "comments": [
-        {
-          "content": "Two issues: (1) Account detail pages 404 for unscored amplifiers — need fallback to show event data. (2) All 'View post' links lead to deleted posts, even for friendly reposts. Need to investigate how amplifier_post_uri is constructed.",
-          "created_at": "2026-03-19T00:27:08.656144+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T00:23:35.066963+00:00",
-      "updated_at": "2026-03-19T05:36:10.258601+00:00",
-      "closed_at": "2026-03-19T05:36:10.258601+00:00"
-    },
-    {
-      "id": 98,
-      "title": "Investigate amplification events accuracy on charcoal.watch",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "bug"
-      ],
-      "comments": [
-        {
-          "content": "Deleted posts in amplification events are expected: Constellation retains backlink records even after the amplifier deletes their post. This can be a useful signal (hit-and-run engagement). Need to verify whether these accounts still get scored properly.",
-          "created_at": "2026-03-19T00:20:53.617759+00:00"
-        }
-      ],
-      "created_at": "2026-03-19T00:15:49.974561+00:00",
-      "updated_at": "2026-03-19T00:21:14.107952+00:00",
-      "closed_at": "2026-03-19T00:21:14.107952+00:00"
-    },
-    {
-      "id": 97,
-      "title": "Verify charcoal.watch DNS and Railway domain",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "feature"
-      ],
-      "comments": [],
-      "created_at": "2026-03-18T23:39:21.317223+00:00",
-      "updated_at": "2026-03-18T23:40:05.309641+00:00",
-      "closed_at": "2026-03-18T23:40:05.309641+00:00"
-    },
-    {
-      "id": 96,
-      "title": "Fix Dockerfile to use Node 22 via nodesource for SvelteKit build",
-      "description": null,
-      "status": "closed",
-      "priority": "high",
-      "parent_id": null,
-      "labels": [
-        "bug"
-      ],
-      "comments": [],
-      "created_at": "2026-03-18T04:59:41.029035+00:00",
-      "updated_at": "2026-03-18T23:40:05.314030+00:00",
-      "closed_at": "2026-03-18T23:40:05.314030+00:00"
-    },
     {
       "id": 95,
       "title": "v0.4 AT Protocol OAuth — Task 1: Add Cargo dependencies",
       "description": null,
-      "status": "closed",
+      "status": "open",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -418,8 +14,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-08T00:36:09.469616873+00:00",
-      "updated_at": "2026-03-19T16:44:11.193771+00:00",
-      "closed_at": "2026-03-19T16:44:11.193771+00:00"
+      "updated_at": "2026-03-08T00:36:09.469616873+00:00",
+      "closed_at": null
     },
     {
       "id": 94,
@@ -1080,7 +676,7 @@
       "id": 51,
       "title": "Axum web server skeleton (Railway deployment)",
       "description": null,
-      "status": "closed",
+      "status": "open",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -1088,14 +684,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:40.987022505+00:00",
-      "updated_at": "2026-03-19T16:44:10.902+00:00",
-      "closed_at": "2026-03-19T16:44:10.902+00:00"
+      "updated_at": "2026-02-18T03:14:40.987022505+00:00",
+      "closed_at": null
     },
     {
       "id": 50,
       "title": "AT Protocol OAuth integration for web UI",
       "description": null,
-      "status": "closed",
+      "status": "open",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -1103,14 +699,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:39.672531955+00:00",
-      "updated_at": "2026-03-19T16:44:10.723407+00:00",
-      "closed_at": "2026-03-19T16:44:10.723407+00:00"
+      "updated_at": "2026-02-18T03:14:39.672531955+00:00",
+      "closed_at": null
     },
     {
       "id": 49,
       "title": "Multi-user schema redesign (per-user vs shared data)",
       "description": null,
-      "status": "closed",
+      "status": "open",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -1118,8 +714,8 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:35.058233233+00:00",
-      "updated_at": "2026-03-19T16:44:10.302491+00:00",
-      "closed_at": "2026-03-19T16:44:10.302491+00:00"
+      "updated_at": "2026-02-18T03:14:35.058233233+00:00",
+      "closed_at": null
     },
     {
       "id": 48,
