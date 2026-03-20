@@ -1,3 +1,0 @@
-# single-user private dashboard — disallow all crawlers
-User-agent: *
-Disallow: /
