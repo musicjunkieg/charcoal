@@ -15,6 +15,7 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, Post};
 use crate::db::models::{AccountScore, ToxicPost};
 use crate::scoring::behavioral;
+use crate::scoring::nli::NliScorer;
 use crate::scoring::threat::{self, ThreatWeights};
 use crate::topics::embeddings::{self, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
@@ -44,6 +45,7 @@ pub async fn build_profile(
     protected_embedding: Option<&[f64]>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
+    nli_scorer: Option<&NliScorer>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
@@ -151,16 +153,63 @@ pub async fn build_profile(
     let avg_engagement = behavioral::compute_avg_engagement(&target_posts);
     let pile_on = pile_on_dids.contains(target_did);
 
-    // Step 5: Compute the raw threat score, then apply behavioral modifier
-    let (raw_score, _) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
+    // Step 5: Compute context score via NLI if scorer and embeddings available
+    let context_score = if let (Some(nli), Some(emb), Some(protected_emb)) =
+        (nli_scorer, embedder, protected_embedding)
+    {
+        // Embed each target post individually for pair matching
+        match emb.embed_batch(&post_texts).await {
+            Ok(target_embeddings) => {
+                let target_with_emb: Vec<(String, Vec<f64>)> = post_texts
+                    .iter()
+                    .zip(target_embeddings.into_iter())
+                    .map(|(text, emb)| (text.clone(), emb))
+                    .collect();
 
-    let (final_score, benign_gate) = behavioral::apply_behavioral_modifier(
+                // Find the 3 most similar posts to the protected user's profile
+                let pairs = crate::scoring::context::find_most_similar_posts(
+                    protected_emb,
+                    &target_with_emb,
+                    3,
+                );
+
+                // Score each pair via NLI and take the max
+                let mut pair_scores = Vec::new();
+                for (target_text, _similarity) in &pairs {
+                    match nli.score_pair("protected user's post", target_text).await {
+                        Ok(score) => pair_scores.push(score),
+                        Err(e) => {
+                            warn!(error = %e, "NLI scoring failed for pair");
+                        }
+                    }
+                }
+                crate::scoring::nli::max_context_score_opt(&pair_scores)
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to embed target posts for NLI");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Step 6: Compute the raw threat score with contextual blending, then apply behavioral modifier
+    let (raw_score, _) = threat::compute_threat_score_contextual(
+        avg_toxicity,
+        topic_overlap,
+        context_score,
+        weights,
+    );
+
+    let (final_score, benign_gate) = behavioral::apply_behavioral_modifier_contextual(
         raw_score,
         quote_ratio,
         reply_ratio,
         pile_on,
         avg_engagement,
         median_engagement,
+        context_score,
     );
 
     let tier = crate::db::models::ThreatTier::from_score(final_score);
@@ -180,6 +229,7 @@ pub async fn build_profile(
         handle = target_handle,
         toxicity = format!("{:.2}", avg_toxicity),
         overlap = format!("{:.2}", topic_overlap),
+        context = format!("{:?}", context_score),
         raw_score = format!("{:.1}", raw_score),
         threat = format!("{:.1}", final_score),
         tier = tier.as_str(),
@@ -202,7 +252,7 @@ pub async fn build_profile(
         top_toxic_posts,
         scored_at: String::new(),
         behavioral_signals: Some(signals_json),
-        context_score: None,
+        context_score,
     })
 }
 

@@ -421,6 +421,7 @@ async fn main() -> Result<()> {
                 protected_embedding.as_deref(),
                 median_engagement,
                 &pile_on_dids,
+                None, // NLI scorer — not yet wired into CLI
             )
             .await?;
 
@@ -583,6 +584,7 @@ async fn main() -> Result<()> {
                     protected_embedding.as_deref(),
                     median_engagement,
                     &pile_on_dids,
+                    None, // NLI scorer — not yet wired into CLI
                 )
                 .await
                 {

@@ -225,6 +225,7 @@ pub async fn run(
                                 protected_embedding,
                                 median_engagement,
                                 pile_on_dids,
+                                None, // NLI scorer not used for follower scoring
                             ))
                             .catch_unwind()
                             .await
