@@ -158,12 +158,10 @@ impl NliScorer {
 
             let ids = encoding.get_ids();
             let mask = encoding.get_attention_mask();
-            let type_ids = encoding.get_type_ids();
             let seq_len = ids.len();
 
             let input_ids: Vec<i64> = ids.iter().map(|&id| id as i64).collect();
             let attention_mask: Vec<i64> = mask.iter().map(|&m| m as i64).collect();
-            let token_type_ids: Vec<i64> = type_ids.iter().map(|&t| t as i64).collect();
 
             let shape = [1i64, seq_len as i64];
 
@@ -171,38 +169,22 @@ impl NliScorer {
                 Tensor::from_array((shape, input_ids)).context("Failed to create input_ids")?;
             let attention_mask_tensor = Tensor::from_array((shape, attention_mask))
                 .context("Failed to create attention_mask")?;
-            let token_type_ids_tensor = Tensor::from_array((shape, token_type_ids))
-                .context("Failed to create token_type_ids")?;
 
             let logits_data = {
                 let mut session = session
                     .lock()
                     .map_err(|e| anyhow::anyhow!("NLI session lock poisoned: {}", e))?;
 
-                // Many ONNX exports of DeBERTa (including Xenova's) omit
-                // token_type_ids. Try without it first; if that fails, retry
-                // with all three inputs.
-                let first_err_msg = match session.run(ort::inputs! {
-                    "input_ids" => input_ids_tensor.clone(),
-                    "attention_mask" => attention_mask_tensor.clone()
-                }) {
-                    Ok(out) => {
-                        let (_shape, data) = out[0]
-                            .try_extract_tensor::<f32>()
-                            .context("Failed to extract NLI output tensor")?;
-                        return Ok(softmax_entailment(data));
-                    }
-                    Err(e) => e.to_string(), // Convert to String to release session borrow
-                };
-
-                debug!(error = first_err_msg, "NLI inference without token_type_ids failed, retrying with");
+                // Xenova's nli-deberta-v3-xsmall ONNX export only accepts
+                // input_ids and attention_mask (no token_type_ids). Passing
+                // an unexpected input causes ort to segfault rather than
+                // return an error, so we only send the two known inputs.
                 let outputs = session
                     .run(ort::inputs! {
                         "input_ids" => input_ids_tensor,
-                        "attention_mask" => attention_mask_tensor,
-                        "token_type_ids" => token_type_ids_tensor
+                        "attention_mask" => attention_mask_tensor
                     })
-                    .with_context(|| format!("NLI ONNX inference failed both ways. First: {first_err_msg}"))?;
+                    .context("NLI ONNX inference failed")?;
 
                 // Output shape: [1, 3] — logits for [contradiction, neutral, entailment]
                 let (_shape, data) = outputs[0]
