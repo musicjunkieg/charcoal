@@ -722,7 +722,7 @@ impl Database for PgDatabase {
                     a.behavioral_signals, a.context_score
              FROM account_scores a
              LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
-             WHERE a.user_did = $1 AND ul.target_did IS NULL
+             WHERE a.user_did = $1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
              ORDER BY a.threat_score DESC
              LIMIT $2",
         )
