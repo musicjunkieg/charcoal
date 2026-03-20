@@ -58,6 +58,14 @@ pub fn max_context_score_opt(scores: &[f64]) -> Option<f64> {
     }
 }
 
+/// Apply softmax to 3-class NLI logits and return the entailment probability.
+fn softmax_entailment(logits: &[f32]) -> f64 {
+    let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let exp_sum: f32 = logits.iter().map(|&x| (x - max_logit).exp()).sum();
+    let entailment_prob = (logits[2] - max_logit).exp() / exp_sum;
+    entailment_prob as f64
+}
+
 /// The 5 hypothesis templates used for NLI inference.
 /// Each is (field_name, hypothesis_text).
 const HYPOTHESES: [(&str, &str); 5] = [
@@ -171,13 +179,30 @@ impl NliScorer {
                     .lock()
                     .map_err(|e| anyhow::anyhow!("NLI session lock poisoned: {}", e))?;
 
+                // Many ONNX exports of DeBERTa (including Xenova's) omit
+                // token_type_ids. Try without it first; if that fails, retry
+                // with all three inputs.
+                let first_err_msg = match session.run(ort::inputs! {
+                    "input_ids" => input_ids_tensor.clone(),
+                    "attention_mask" => attention_mask_tensor.clone()
+                }) {
+                    Ok(out) => {
+                        let (_shape, data) = out[0]
+                            .try_extract_tensor::<f32>()
+                            .context("Failed to extract NLI output tensor")?;
+                        return Ok(softmax_entailment(data));
+                    }
+                    Err(e) => e.to_string(), // Convert to String to release session borrow
+                };
+
+                debug!(error = first_err_msg, "NLI inference without token_type_ids failed, retrying with");
                 let outputs = session
                     .run(ort::inputs! {
                         "input_ids" => input_ids_tensor,
                         "attention_mask" => attention_mask_tensor,
                         "token_type_ids" => token_type_ids_tensor
                     })
-                    .context("NLI ONNX inference failed")?;
+                    .with_context(|| format!("NLI ONNX inference failed both ways. First: {first_err_msg}"))?;
 
                 // Output shape: [1, 3] — logits for [contradiction, neutral, entailment]
                 let (_shape, data) = outputs[0]
@@ -187,15 +212,7 @@ impl NliScorer {
                 data.to_vec()
             };
 
-            // Apply softmax to get probabilities
-            let max_logit = logits_data
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
-            let exp_sum: f32 = logits_data.iter().map(|&x| (x - max_logit).exp()).sum();
-            let entailment_prob = (logits_data[2] - max_logit).exp() / exp_sum;
-
-            Ok(entailment_prob as f64)
+            Ok(softmax_entailment(&logits_data))
         })
         .await
         .context("NLI spawn_blocking panicked")?
