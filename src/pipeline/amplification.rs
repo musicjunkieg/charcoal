@@ -49,6 +49,7 @@ pub async fn run(
     events: Vec<AmplificationNotification>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
+    original_text_cache: &std::collections::HashMap<String, String>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -63,34 +64,44 @@ pub async fn run(
     )
     .await?;
 
-    // Store each event in the database, fetching quote text when available
+    // Store each event in the database, fetching quote text when available.
+    // Look up original post text from the cache for all event types.
     for event in &events {
-        let mut quote_text: Option<String> = None;
+        let mut amplifier_text: Option<String> = None;
         let mut quote_toxicity: Option<f64> = None;
 
-        // For quote events, fetch the quote post text and score it
-        if event.event_type == "quote" && analyze_followers {
+        // For quote and reply events, fetch the amplifier's text and score it
+        if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
             match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {
-                    // Score the quote text for toxicity
                     match scorer.score_text(&text).await {
                         Ok(result) => {
                             quote_toxicity = Some(result.toxicity);
                         }
                         Err(e) => {
-                            warn!(error = %e, "Failed to score quote text");
+                            warn!(error = %e, "Failed to score amplifier text");
                         }
                     }
-                    quote_text = Some(text);
+                    amplifier_text = Some(text);
                 }
                 Ok(None) => {
-                    info!(uri = event.amplifier_post_uri, "Quote post text not found");
+                    info!(
+                        uri = event.amplifier_post_uri,
+                        "Amplifier post text not found"
+                    );
                 }
                 Err(e) => {
-                    warn!(error = %e, "Failed to fetch quote post text");
+                    warn!(error = %e, "Failed to fetch amplifier post text");
                 }
             }
         }
+
+        // Look up the original (protected user's) post text from the cache
+        let original_post_text = event
+            .original_post_uri
+            .as_deref()
+            .and_then(|uri| original_text_cache.get(uri))
+            .map(|s| s.as_str());
 
         db.insert_amplification_event(
             user_did,
@@ -99,23 +110,24 @@ pub async fn run(
             &event.amplifier_handle,
             event.original_post_uri.as_deref().unwrap_or("unknown"),
             Some(&event.amplifier_post_uri),
-            quote_text.as_deref(),
-            None,
-            None,
+            amplifier_text.as_deref(),
+            original_post_text,
+            None, // context_score filled later by NLI pipeline
         )
         .await?;
 
-        // Display the event with quote context if available
-        let event_label = if event.event_type == "quote" {
-            "Quote"
-        } else {
-            "Repost"
+        let event_label = match event.event_type.as_str() {
+            "quote" => "Quote",
+            "repost" => "Repost",
+            "like" => "Like",
+            "reply" => "Reply",
+            other => other,
         };
         println!(
             "  {} by @{} ({})",
             event_label, event.amplifier_handle, event.indexed_at,
         );
-        if let Some(ref text) = quote_text {
+        if let Some(ref text) = amplifier_text {
             let preview = crate::output::truncate_chars(text, 120);
             let tox_str = quote_toxicity
                 .map(|t| format!(" [tox: {:.2}]", t))
@@ -126,30 +138,34 @@ pub async fn run(
 
     let mut accounts_scored = 0;
 
-    // If --analyze flag is set, score the followers of each quote amplifier.
-    // Reposts are recorded as events but don't trigger follower analysis —
-    // quotes are the primary harassment vector (hostile commentary framing
-    // the original post), while reposts are usually supportive sharing.
+    // If --analyze flag is set, score the followers of each quote/reply amplifier.
+    // Quotes and replies are direct hostile engagement vectors that warrant
+    // follower analysis. Reposts and likes are recorded but don't trigger
+    // follower analysis — reposts are usually supportive sharing, and likes
+    // are low-signal engagement.
     if analyze_followers && !events.is_empty() {
-        let quote_events: Vec<_> = events.iter().filter(|e| e.event_type == "quote").collect();
-        let repost_count = events.len() - quote_events.len();
+        let scorable_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "quote" || e.event_type == "reply")
+            .collect();
+        let skipped_count = events.len() - scorable_events.len();
 
-        if repost_count > 0 {
+        if skipped_count > 0 {
             info!(
-                reposts_skipped = repost_count,
-                "Skipping follower analysis for reposts"
+                skipped = skipped_count,
+                "Skipping follower analysis for reposts/likes"
             );
             println!(
-                "  Skipping {} reposts (follower analysis is quote-only)",
-                repost_count
+                "  Skipping {} reposts/likes (follower analysis is quote/reply-only)",
+                skipped_count
             );
         }
 
-        if quote_events.is_empty() {
-            info!("No quote events to analyze");
+        if scorable_events.is_empty() {
+            info!("No quote/reply events to analyze");
         }
 
-        for event in &quote_events {
+        for event in &scorable_events {
             println!("\nFetching followers of @{}...", event.amplifier_handle);
 
             match followers::fetch_followers(

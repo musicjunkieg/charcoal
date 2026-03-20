@@ -287,6 +287,18 @@ async fn main() -> Result<()> {
                 }
             };
 
+            // Build original post text cache for the pipeline
+            let original_text_cache: std::collections::HashMap<String, String> = {
+                let posts = charcoal::bluesky::posts::fetch_recent_posts(
+                    &client,
+                    &config.bluesky_handle,
+                    50,
+                )
+                .await
+                .unwrap_or_default();
+                posts.into_iter().map(|p| (p.uri, p.text)).collect()
+            };
+
             let (event_count, scored) = charcoal::pipeline::amplification::run(
                 &client,
                 scorer.as_ref(),
@@ -303,6 +315,7 @@ async fn main() -> Result<()> {
                 events,
                 median_engagement,
                 &pile_on_dids,
+                &original_text_cache,
             )
             .await?;
 

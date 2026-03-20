@@ -210,9 +210,66 @@ async fn run_scan(
     let posts = crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50).await?;
     let post_uris: Vec<String> = posts.iter().map(|p| p.uri.clone()).collect();
 
+    // Build a cache of original post text keyed by URI — avoids redundant fetches
+    // when multiple events reference the same protected post.
+    let original_text_cache: std::collections::HashMap<String, String> = posts
+        .iter()
+        .map(|p| (p.uri.clone(), p.text.clone()))
+        .collect();
+
     let mut events = constellation.find_amplification_events(&post_uris).await;
 
-    // Resolve DIDs to handles
+    // Also fetch likes via Constellation backlinks
+    {
+        let mut s = scan_status.write().await;
+        s.progress_message = "Detecting likes via Constellation…".to_string();
+    }
+    let like_events = constellation.find_likers(&post_uris).await;
+    info!(
+        like_count = like_events.len(),
+        "Constellation likes detected"
+    );
+    events.extend(like_events);
+
+    // Fetch reply threads and detect drive-by replies
+    {
+        let mut s = scan_status.write().await;
+        s.progress_message = "Detecting drive-by replies…".to_string();
+    }
+    let follows_set = crate::bluesky::replies::fetch_follows_set(&client, user_did)
+        .await
+        .unwrap_or_default();
+    for post in &posts {
+        match crate::bluesky::replies::fetch_replies_to_post(&client, &post.uri).await {
+            Ok(replies) => {
+                let reply_dids: Vec<String> =
+                    replies.iter().map(|(did, _, _)| did.clone()).collect();
+                let drive_by_dids = crate::bluesky::replies::filter_drive_by_replies_excluding_self(
+                    &reply_dids,
+                    &follows_set,
+                    user_did,
+                );
+                // Create events for drive-by replies
+                for (did, _text, uri) in &replies {
+                    if drive_by_dids.contains(did) {
+                        events.push(crate::bluesky::amplification::AmplificationNotification {
+                            event_type: "reply".to_string(),
+                            amplifier_did: did.clone(),
+                            amplifier_handle: did.clone(), // resolved below
+                            original_post_uri: Some(post.uri.clone()),
+                            amplifier_post_uri: uri.clone(),
+                            indexed_at: String::new(),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(uri = post.uri, error = %e, "Failed to fetch replies");
+            }
+        }
+    }
+
+    // Resolve DIDs to handles for all event types
     let unresolved_dids: Vec<String> = events
         .iter()
         .filter(|e| e.amplifier_handle.starts_with("did:"))
@@ -230,9 +287,16 @@ async fn run_scan(
         }
     }
 
-    // Deduplicate by amplifier_post_uri
-    let mut seen = HashSet::new();
-    events.retain(|e| seen.insert(e.amplifier_post_uri.clone()));
+    // Deduplicate: by amplifier_post_uri for quotes/replies, by (did, post_uri) for likes
+    let mut seen_uris = HashSet::new();
+    let mut seen_likes = HashSet::new();
+    events.retain(|e| {
+        if e.event_type == "like" {
+            seen_likes.insert((e.amplifier_did.clone(), e.original_post_uri.clone()))
+        } else {
+            seen_uris.insert(e.amplifier_post_uri.clone())
+        }
+    });
     let event_count = events.len();
 
     // Phase 5: behavioral context
@@ -268,6 +332,7 @@ async fn run_scan(
         events,
         median_engagement,
         &pile_on_dids,
+        &original_text_cache,
     )
     .await;
 

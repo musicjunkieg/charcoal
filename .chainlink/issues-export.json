@@ -1,7 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-03-20T02:44:10.810864+00:00",
+  "exported_at": "2026-03-20T02:51:03.140774+00:00",
   "issues": [
+    {
+      "id": 96,
+      "title": "Wire likes and replies into amplification scan pipeline",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Phase 1.75 Chunk 3 Task 10: Integrate likes + replies into src/pipeline/amplification.rs and src/web/scan_job.rs. Call find_likers() and fetch_replies_to_post() during scan. Store original_post_text via fetch_post_text(). Process all event types (quotes, reposts, likes, replies) through the scoring pipeline.",
+          "created_at": "2026-03-20T02:46:20.045154+00:00"
+        }
+      ],
+      "created_at": "2026-03-20T02:46:03.032271+00:00",
+      "updated_at": "2026-03-20T02:46:03.032271+00:00",
+      "closed_at": null
+    },
     {
       "id": 95,
       "title": "v0.4 AT Protocol OAuth — Task 1: Add Cargo dependencies",
