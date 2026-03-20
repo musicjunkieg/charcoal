@@ -129,6 +129,12 @@ pub(crate) fn build_router(state: AppState) -> Router {
             get(handlers::fingerprint::get_fingerprint),
         )
         .route("/api/scan", post(handlers::scan::trigger_scan))
+        .route(
+            "/api/accounts/{did}/label",
+            post(handlers::labels::upsert_label),
+        )
+        .route("/api/review", get(handlers::labels::get_review_queue))
+        .route("/api/accuracy", get(handlers::labels::get_accuracy))
         .route("/api/logout", post(handlers::auth::logout))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

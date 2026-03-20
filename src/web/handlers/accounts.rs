@@ -99,7 +99,22 @@ pub async fn get_account(
     Path(handle): Path<String>,
 ) -> Response {
     match state.db.get_account_by_handle(&auth.did, &handle).await {
-        Ok(Some(account)) => Json(account_to_json(account, 0)).into_response(),
+        Ok(Some(account)) => {
+            let mut json = account_to_json(account.clone(), 0);
+            // Include user label if one exists for this account
+            let label_json = match state.db.get_user_label(&auth.did, &account.did).await {
+                Ok(Some(label)) => serde_json::json!({
+                    "label": label.label,
+                    "labeled_at": label.labeled_at,
+                    "notes": label.notes,
+                }),
+                _ => serde_json::Value::Null,
+            };
+            json.as_object_mut()
+                .unwrap()
+                .insert("user_label".to_string(), label_json);
+            Json(json).into_response()
+        }
         Ok(None) => {
             // No score yet — return a stub so the detail page can still render.
             // The frontend should show "not yet scored" instead of a 404.
