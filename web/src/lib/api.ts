@@ -8,7 +8,10 @@ import type {
 	AccountsResponse,
 	Account,
 	EventsResponse,
-	FingerprintResponse
+	FingerprintResponse,
+	UserLabel,
+	AccuracyMetrics,
+	ReviewResponse
 } from './types.js';
 
 export class AuthError extends Error {
@@ -100,4 +103,30 @@ export async function getEvents(limit = 20): Promise<EventsResponse> {
 
 export async function getFingerprint(): Promise<FingerprintResponse> {
 	return apiFetch<FingerprintResponse>('/api/fingerprint');
+}
+
+// ---- Labels ----
+
+export async function labelAccount(
+	did: string,
+	label: string,
+	notes?: string
+): Promise<UserLabel> {
+	return apiFetch<UserLabel>(`/api/accounts/${encodeURIComponent(did)}/label`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ label, notes: notes ?? null })
+	});
+}
+
+// ---- Review Queue ----
+
+export async function getReviewQueue(limit = 20): Promise<ReviewResponse> {
+	return apiFetch<ReviewResponse>(`/api/review?limit=${limit}`);
+}
+
+// ---- Accuracy ----
+
+export async function getAccuracy(): Promise<AccuracyMetrics> {
+	return apiFetch<AccuracyMetrics>('/api/accuracy');
 }

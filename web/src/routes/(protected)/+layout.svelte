@@ -61,6 +61,11 @@
 					class="nav-link"
 					class:active={$page.url.pathname.startsWith('/accounts')}
 				>Accounts</a>
+				<a
+					href="/review"
+					class="nav-link"
+					class:active={$page.url.pathname === '/review'}
+				>Review</a>
 				<button
 					class="nav-logout"
 					onclick={async () => { await logout(); await goto('/login'); }}

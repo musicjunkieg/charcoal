@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getStatus, getEvents, triggerScan } from '$lib/api.js';
+	import { getStatus, getEvents, triggerScan, getAccuracy } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
-	import type { ScanStatus, AmplificationEvent } from '$lib/types.js';
+	import type { ScanStatus, AmplificationEvent, AccuracyMetrics } from '$lib/types.js';
 
 	let status = $state<ScanStatus | null>(null);
 	let events = $state<AmplificationEvent[]>([]);
+	let accuracy = $state<AccuracyMetrics | null>(null);
 	let loading = $state(true);
 	let scanError = $state('');
 	let searchQuery = $state('');
@@ -21,6 +22,8 @@
 			const [s, e] = await Promise.all([getStatus(), getEvents(10)]);
 			status = s;
 			events = e.events;
+			// Load accuracy metrics in background (non-blocking)
+			getAccuracy().then((m) => { accuracy = m; }).catch(() => {});
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
@@ -212,6 +215,39 @@
 				/>
 				<button class="search-btn" onclick={handleSearch}>Search</button>
 			</div>
+
+			<!-- Accuracy Metrics -->
+			{#if accuracy && accuracy.total_labeled >= 5}
+				<section class="accuracy-panel">
+					<div class="accuracy-header">
+						<h2 class="section-title">Scoring Accuracy</h2>
+						<a href="/review" class="section-link">Review more →</a>
+					</div>
+					<div class="accuracy-grid">
+						<div class="accuracy-stat">
+							<span class="accuracy-num" style="color: #86efac">{(accuracy.accuracy * 100).toFixed(0)}%</span>
+							<span class="accuracy-label">Accuracy</span>
+						</div>
+						<div class="accuracy-stat">
+							<span class="accuracy-num">{accuracy.total_labeled}</span>
+							<span class="accuracy-label">Labeled</span>
+						</div>
+						<div class="accuracy-stat">
+							<span class="accuracy-num" style="color: #fdba74">{accuracy.overscored}</span>
+							<span class="accuracy-label">Overscored</span>
+						</div>
+						<div class="accuracy-stat">
+							<span class="accuracy-num" style="color: #fcd34d">{accuracy.underscored}</span>
+							<span class="accuracy-label">Underscored</span>
+						</div>
+					</div>
+					{#if accuracy.overscored > accuracy.underscored}
+						<p class="accuracy-hint">Charcoal is flagging more accounts than warranted. Your labels help calibrate.</p>
+					{:else if accuracy.underscored > accuracy.overscored}
+						<p class="accuracy-hint">Charcoal is missing some threats. Your labels help it learn.</p>
+					{/if}
+				</section>
+			{/if}
 
 			<!-- Recent Events -->
 			{#if events.length > 0}
@@ -580,8 +616,61 @@
 		font-size: 1rem;
 	}
 
+	/* Accuracy Panel */
+	.accuracy-panel {
+		margin-bottom: 2.5rem;
+		padding: 1.25rem;
+		background: rgba(28, 25, 23, 0.5);
+		border: 1px solid rgba(168, 162, 158, 0.1);
+		border-radius: 14px;
+	}
+
+	.accuracy-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 1rem;
+	}
+
+	.accuracy-grid {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 1rem;
+	}
+
+	.accuracy-stat {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.accuracy-num {
+		font-family: 'Libre Baskerville', Georgia, serif;
+		font-size: 1.5rem;
+		font-weight: 400;
+		color: #d6d3d1;
+		line-height: 1;
+	}
+
+	.accuracy-label {
+		font-size: 0.6875rem;
+		font-weight: 500;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: #57534e;
+	}
+
+	.accuracy-hint {
+		font-size: 0.8125rem;
+		color: #78716c;
+		margin-top: 0.875rem;
+		text-align: center;
+	}
+
 	@media (max-width: 640px) {
 		.tier-grid { grid-template-columns: repeat(2, 1fr); }
+		.accuracy-grid { grid-template-columns: repeat(2, 1fr); }
 		.page-header { flex-direction: column; }
 		.scan-area { align-items: flex-start; }
 	}

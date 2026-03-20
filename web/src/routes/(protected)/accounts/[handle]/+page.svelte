@@ -5,6 +5,7 @@
 	import { getAccount } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
+	import LabelButtons from '$lib/components/LabelButtons.svelte';
 
 	const TIER_COLORS: Record<string, string> = {
 		High: '#fca5a5',
@@ -81,6 +82,17 @@
 				class="bsky-link"
 			>View on Bluesky ↗</a>
 		</div>
+
+		<!-- Label -->
+		{#if account.did}
+			<div class="label-section">
+				<LabelButtons
+					targetDid={account.did}
+					currentLabel={(account as any).user_label?.label ?? null}
+					predictedTier={account.threat_tier}
+				/>
+			</div>
+		{/if}
 
 		<!-- Score Overview -->
 		<div class="score-grid">
@@ -268,6 +280,14 @@
 	}
 
 	.bsky-link:hover { background: rgba(201, 149, 108, 0.18); }
+
+	.label-section {
+		margin-bottom: 1.5rem;
+		padding: 1rem 1.25rem;
+		background: rgba(28, 25, 23, 0.4);
+		border: 1px solid rgba(168, 162, 158, 0.08);
+		border-radius: 12px;
+	}
 
 	.score-grid {
 		display: grid;

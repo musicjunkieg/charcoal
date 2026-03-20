@@ -75,3 +75,37 @@ export interface FingerprintResponse {
 	post_count: number;
 	updated_at: string;
 }
+
+export interface UserLabel {
+	user_did: string;
+	target_did: string;
+	label: 'high' | 'elevated' | 'watch' | 'safe';
+	labeled_at: string;
+	notes: string | null;
+	predicted_tier: string | null;
+}
+
+export interface AccuracyMetrics {
+	total_labeled: number;
+	exact_matches: number;
+	overscored: number;
+	underscored: number;
+	accuracy: number;
+}
+
+export interface ReviewAccount {
+	did: string;
+	handle: string;
+	toxicity_score: number | null;
+	topic_overlap: number | null;
+	threat_score: number | null;
+	threat_tier: string | null;
+	posts_analyzed: number;
+	scored_at: string | null;
+	context_score: number | null;
+}
+
+export interface ReviewResponse {
+	accounts: ReviewAccount[];
+	total: number;
+}
