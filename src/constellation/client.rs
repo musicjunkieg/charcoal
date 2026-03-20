@@ -10,6 +10,9 @@ use tracing::{debug, warn};
 
 use crate::bluesky::amplification::AmplificationNotification;
 
+/// Constellation source path for like backlinks.
+pub const LIKES_SOURCE: &str = "app.bsky.feed.like:subject.uri";
+
 /// A single backlink record from the Constellation API.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BacklinkRecord {
@@ -157,5 +160,46 @@ impl ConstellationClient {
         );
 
         events
+    }
+
+    /// Find accounts that liked the given post URIs via Constellation backlinks.
+    ///
+    /// Queries `app.bsky.feed.like:subject.uri` for each URI. Likes don't create
+    /// a new post, so `amplifier_post_uri` is empty. Deduplicates by
+    /// (amplifier_did, original_post_uri).
+    pub async fn find_likers(&self, post_uris: &[String]) -> Vec<AmplificationNotification> {
+        let mut results = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for uri in post_uris {
+            match self.get_backlinks(uri, LIKES_SOURCE, 100).await {
+                Ok(resp) => {
+                    for record in &resp.records {
+                        let key = (record.did.clone(), uri.clone());
+                        if seen.insert(key) {
+                            results.push(AmplificationNotification {
+                                event_type: "like".to_string(),
+                                amplifier_did: record.did.clone(),
+                                amplifier_handle: record.did.clone(),
+                                original_post_uri: Some(uri.clone()),
+                                amplifier_post_uri: String::new(),
+                                indexed_at: String::new(),
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(uri = uri, error = %e, "Failed to query Constellation for likes");
+                }
+            }
+        }
+
+        debug!(
+            like_count = results.len(),
+            post_count = post_uris.len(),
+            "Constellation likes query complete"
+        );
+
+        results
     }
 }

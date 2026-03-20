@@ -6,5 +6,6 @@
 pub mod amplification;
 pub mod client;
 pub mod followers;
+pub mod likes;
 pub mod posts;
 pub mod profiles;
