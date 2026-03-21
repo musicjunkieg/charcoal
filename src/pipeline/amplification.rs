@@ -52,7 +52,7 @@ pub async fn run(
     pile_on_dids: &std::collections::HashSet<String>,
     original_text_cache: &std::collections::HashMap<String, String>,
     nli_scorer: Option<&NliScorer>,
-    _protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -310,12 +310,17 @@ pub async fn run(
                             .unwrap(),
                     );
 
-                    // Phase 2: Score in parallel — each future does network I/O + ONNX inference
-                    // Results are written incrementally so a crash doesn't lose everything
+                    // Phase 2: Two-pass scoring in parallel
+                    // Pass 1: score without NLI (fast). If raw_score >= 8.0 (Watch threshold),
+                    // pass 2 re-scores with NLI inferred pairs. Falls back to pass 1 on panic.
+                    let nli_ref = nli_scorer;
+                    let ppwe_ref = protected_posts_with_embeddings;
+
                     let mut stream = stream::iter(stale_followers.into_iter().map(|follower| {
                         let handle_for_panic = follower.handle.clone();
                         async move {
-                            AssertUnwindSafe(profile::build_profile(
+                            // Pass 1: score without NLI (fast)
+                            let result = AssertUnwindSafe(profile::build_profile(
                                 client,
                                 scorer,
                                 &follower.handle,
@@ -326,15 +331,50 @@ pub async fn run(
                                 protected_embedding,
                                 median_engagement,
                                 pile_on_dids,
-                                None, // NLI scorer not used for follower scoring
-                                None, // No protected post embeddings for followers
-                                None, // No direct pairs for followers
+                                None, // No NLI in pass 1
+                                None, // No protected post embeddings
+                                None, // No direct pairs
                             ))
                             .catch_unwind()
                             .await
                             .unwrap_or_else(|_| {
                                 Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
-                            })
+                            });
+
+                            match result {
+                                Ok(ref score)
+                                    if score.threat_score.unwrap_or(0.0) >= 8.0
+                                        && nli_ref.is_some()
+                                        && ppwe_ref.is_some() =>
+                                {
+                                    // Pass 2: above Watch threshold — re-score with NLI
+                                    info!(
+                                        handle = follower.handle.as_str(),
+                                        raw_score =
+                                            format!("{:.1}", score.threat_score.unwrap_or(0.0)),
+                                        "Follower above Watch threshold, running NLI"
+                                    );
+                                    AssertUnwindSafe(profile::build_profile(
+                                        client,
+                                        scorer,
+                                        &follower.handle,
+                                        &follower.did,
+                                        protected_fingerprint,
+                                        weights,
+                                        embedder,
+                                        protected_embedding,
+                                        median_engagement,
+                                        pile_on_dids,
+                                        nli_ref,  // NLI enabled
+                                        ppwe_ref, // Inferred pairs
+                                        None,     // No direct pairs
+                                    ))
+                                    .catch_unwind()
+                                    .await
+                                    .unwrap_or(result) // Fall back to pass 1 on panic
+                                }
+                                other => other,
+                            }
                         }
                     }))
                     .buffer_unordered(concurrency);

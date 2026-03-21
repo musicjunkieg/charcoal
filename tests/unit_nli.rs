@@ -1,8 +1,17 @@
 //! Unit tests for NLI model integration and hostility scoring.
 
+use charcoal::db::models::ThreatTier;
 use charcoal::scoring::nli::{avg_context_score, compute_hostility_score, HypothesisScores};
 use charcoal::scoring::nli_audit::{should_rotate, NliAuditEntry};
 use std::path::PathBuf;
+
+// --- Tier boundary tests ---
+
+#[test]
+fn watch_threshold_is_8() {
+    assert_eq!(ThreatTier::from_score(8.0), ThreatTier::Watch);
+    assert_eq!(ThreatTier::from_score(7.9), ThreatTier::Low);
+}
 
 // --- NLI model file detection tests ---
 
