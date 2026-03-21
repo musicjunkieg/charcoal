@@ -118,6 +118,12 @@
 				<div class="score-value">{formatPct(account.topic_overlap)}</div>
 				<div class="score-label">Topic Overlap</div>
 			</div>
+			{#if account.context_score != null}
+				<div class="score-card">
+					<div class="score-value">{formatScore(account.context_score)}</div>
+					<div class="score-label">Context Score</div>
+				</div>
+			{/if}
 		</div>
 
 		<p class="meta">
@@ -291,7 +297,7 @@
 
 	.score-grid {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 		gap: 1rem;
 		margin-bottom: 1rem;
 	}

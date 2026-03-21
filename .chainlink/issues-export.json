@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-21T02:25:15.552474+00:00",
+  "exported_at": "2026-03-21T02:26:14.474173+00:00",
   "issues": [
     {
       "id": 111,
@@ -21,7 +21,7 @@
       "id": 110,
       "title": "Deduplicate event pairs before NLI scoring in amplifier loop",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -29,8 +29,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-21T02:24:13.957023+00:00",
-      "updated_at": "2026-03-21T02:24:13.957023+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-21T02:25:22.065603+00:00",
+      "closed_at": "2026-03-21T02:25:22.065603+00:00"
     },
     {
       "id": 109,
