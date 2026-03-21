@@ -1,5 +1,13 @@
 [
   {
+    "hash": "a85a52dd2abb46d94c88bffe62c592b13ba6e603",
+    "short_hash": "a85a52d",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T11:57:35-07:00",
+    "message": "fix: exclude unscored accounts from review queue\n\n  Accounts with NULL threat_score (insufficient posts) were showing\n  first in the triage queue with all dashes. Filter them out with\n  AND a.threat_score IS NOT NULL in both SQLite and Postgres queries.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "e4fafa5d1777cbddb8ac6931c3eb107d769a4235",
     "short_hash": "e4fafa5",
     "author": "Bryan Guffey",

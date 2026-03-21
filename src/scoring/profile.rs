@@ -218,7 +218,7 @@ pub async fn build_profile(
                             }
                         }
                     }
-                    crate::scoring::nli::max_context_score_opt(&pair_scores)
+                    crate::scoring::nli::avg_context_score(&pair_scores)
                 }
                 Err(e) => {
                     warn!(error = %e, "Failed to embed target posts for NLI");

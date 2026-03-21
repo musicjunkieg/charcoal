@@ -1,7 +1,112 @@
 {
   "version": 1,
-  "exported_at": "2026-03-20T18:57:35.290147+00:00",
+  "exported_at": "2026-03-21T00:37:04.961367+00:00",
   "issues": [
+    {
+      "id": 109,
+      "title": "Implement NLI scoring redesign",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-21T00:34:54.877398+00:00",
+      "updated_at": "2026-03-21T00:34:54.877398+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 108,
+      "title": "Write NLI scoring redesign implementation plan",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "planning"
+      ],
+      "comments": [],
+      "created_at": "2026-03-20T22:00:43.161151+00:00",
+      "updated_at": "2026-03-20T22:09:18.796913+00:00",
+      "closed_at": "2026-03-20T22:09:18.796913+00:00"
+    },
+    {
+      "id": 107,
+      "title": "Admin: match pre-seeded data to user on first OAuth login",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-20T19:34:42.208293+00:00",
+      "updated_at": "2026-03-20T19:34:42.208293+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 106,
+      "title": "Admin: impersonation view — see any protected user's scored accounts (read-only)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-20T19:34:42.203771+00:00",
+      "updated_at": "2026-03-20T19:34:42.203771+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 105,
+      "title": "Admin: trigger scan for any protected account",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-20T19:34:42.198547+00:00",
+      "updated_at": "2026-03-20T19:34:42.198547+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 104,
+      "title": "Admin: pre-seed protected account by handle (resolve DID, build fingerprint/embeddings)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-20T19:34:42.193214+00:00",
+      "updated_at": "2026-03-20T19:34:42.193214+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 103,
+      "title": "Phase 1.5: Admin dashboard — pre-seed protected accounts, trigger scans, impersonation view",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-20T19:34:35.707609+00:00",
+      "updated_at": "2026-03-20T19:34:35.707609+00:00",
+      "closed_at": null
+    },
     {
       "id": 102,
       "title": "Wire NLI context scoring into scan pipeline (Task 17)",
@@ -16,6 +121,14 @@
         {
           "content": "[action] Merging feat/contextual-scoring into staging for deploy",
           "created_at": "2026-03-20T17:19:19.574867+00:00"
+        },
+        {
+          "content": "Scope expanded: score amplifiers via build_profile() with direct pairs, NLI for high-signal followers (Watch+ threshold), average context_score across pairs, wire into threat formula. Original wiring (model loading, event-level NLI) is done.",
+          "created_at": "2026-03-20T19:34:30.851686+00:00"
+        },
+        {
+          "content": "Spec approved: docs/superpowers/specs/2026-03-20-nli-scoring-redesign.md. Covers: amplifier scoring with direct pairs, threshold-based follower NLI, avg context_score, context_multiplier formula, NLI audit logging with JSONL + Railway Buckets rotation.",
+          "created_at": "2026-03-20T21:27:38.708172+00:00"
         }
       ],
       "created_at": "2026-03-20T16:44:30.209770+00:00",
@@ -121,7 +234,7 @@
       "id": 95,
       "title": "v0.4 AT Protocol OAuth — Task 1: Add Cargo dependencies",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -129,8 +242,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-08T00:36:09.469616873+00:00",
-      "updated_at": "2026-03-08T00:36:09.469616873+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-20T19:34:23.319872+00:00",
+      "closed_at": "2026-03-20T19:34:23.319872+00:00"
     },
     {
       "id": 94,
@@ -791,7 +904,7 @@
       "id": 51,
       "title": "Axum web server skeleton (Railway deployment)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -799,14 +912,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:40.987022505+00:00",
-      "updated_at": "2026-02-18T03:14:40.987022505+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-20T19:34:23.315273+00:00",
+      "closed_at": "2026-03-20T19:34:23.315273+00:00"
     },
     {
       "id": 50,
       "title": "AT Protocol OAuth integration for web UI",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -814,14 +927,14 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:39.672531955+00:00",
-      "updated_at": "2026-02-18T03:14:39.672531955+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-20T19:34:23.309437+00:00",
+      "closed_at": "2026-03-20T19:34:23.309437+00:00"
     },
     {
       "id": 49,
       "title": "Multi-user schema redesign (per-user vs shared data)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -829,8 +942,8 @@
       ],
       "comments": [],
       "created_at": "2026-02-18T03:14:35.058233233+00:00",
-      "updated_at": "2026-02-18T03:14:35.058233233+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-20T19:34:23.303245+00:00",
+      "closed_at": "2026-03-20T19:34:23.303245+00:00"
     },
     {
       "id": 48,

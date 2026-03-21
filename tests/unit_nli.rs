@@ -1,6 +1,6 @@
 //! Unit tests for NLI model integration and hostility scoring.
 
-use charcoal::scoring::nli::{compute_hostility_score, max_context_score_opt, HypothesisScores};
+use charcoal::scoring::nli::{avg_context_score, compute_hostility_score, HypothesisScores};
 use std::path::PathBuf;
 
 // --- NLI model file detection tests ---
@@ -162,20 +162,21 @@ fn hostility_score_clamped_to_zero_one() {
 }
 
 #[test]
-fn max_context_score_from_multiple_pairs() {
+fn avg_context_score_from_multiple_pairs() {
     let scores = vec![0.3, 0.7, 0.5, 0.2];
-    let result = max_context_score_opt(&scores);
-    assert_eq!(result, Some(0.7));
+    let result = avg_context_score(&scores);
+    // (0.3 + 0.7 + 0.5 + 0.2) / 4 = 0.425
+    assert!((result.unwrap() - 0.425).abs() < 0.001);
 }
 
 #[test]
-fn max_context_score_empty_returns_none() {
+fn avg_context_score_empty_returns_none() {
     let scores: Vec<f64> = vec![];
-    assert!(max_context_score_opt(&scores).is_none());
+    assert!(avg_context_score(&scores).is_none());
 }
 
 #[test]
-fn max_context_score_single_value() {
+fn avg_context_score_single_value() {
     let scores = vec![0.42];
-    assert_eq!(max_context_score_opt(&scores), Some(0.42));
+    assert_eq!(avg_context_score(&scores), Some(0.42));
 }

@@ -47,14 +47,14 @@ pub fn compute_hostility_score(scores: &HypothesisScores) -> f64 {
     (hostile_signal - supportive_signal).clamp(0.0, 1.0)
 }
 
-/// Return the maximum context score, or None if no scores provided.
-/// Used when an account has multiple interactions — one hostile
-/// interaction is sufficient signal.
-pub fn max_context_score_opt(scores: &[f64]) -> Option<f64> {
+/// Return the average context score, or None if no scores provided.
+/// Uses the mean across all scored pairs to capture overall engagement
+/// patterns rather than worst-case moments.
+pub fn avg_context_score(scores: &[f64]) -> Option<f64> {
     if scores.is_empty() {
         None
     } else {
-        Some(scores.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+        Some(scores.iter().sum::<f64>() / scores.len() as f64)
     }
 }
 
