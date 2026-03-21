@@ -167,6 +167,7 @@ fn account_to_json(mut account: AccountScore, rank: usize) -> serde_json::Value 
         "top_toxic_posts": account.top_toxic_posts,
         "scored_at": account.scored_at,
         "behavioral_signals": behavioral,
+        "context_score": account.context_score,
     })
 }
 

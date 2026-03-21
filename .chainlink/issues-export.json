@@ -1,10 +1,302 @@
 {
   "version": 1,
-  "exported_at": "2026-03-21T02:26:14.474173+00:00",
+  "exported_at": "2026-03-21T03:43:53.437293+00:00",
   "issues": [
     {
-      "id": 111,
-      "title": "Show context_score on account detail page",
+      "id": 134,
+      "title": "Add manual fingerprint rebuild trigger from the UI",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 131,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Add a 'Rebuild fingerprint' button that re-fetches posts and regenerates the TF-IDF fingerprint + embeddings. The backend already supports this (auto-fingerprint on first scan). Wire it as a POST endpoint. Show progress and the before/after difference.",
+          "created_at": "2026-03-21T03:42:21.731953+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:42:09.852478+00:00",
+      "updated_at": "2026-03-21T03:42:09.852478+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 133,
+      "title": "Add ability for user to flag incorrect or missing topics",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 131,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Let users say 'this topic is wrong' or 'you're missing X'. Could be: toggle clusters on/off, add custom keywords, or free-text feedback. Start simple — a feedback form that stores responses in a new table. This feeds into future fingerprint improvements. Don't auto-apply yet, just collect.",
+          "created_at": "2026-03-21T03:42:21.727300+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:42:09.847506+00:00",
+      "updated_at": "2026-03-21T03:42:09.847506+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 132,
+      "title": "Add topic fingerprint viewer page showing keyword clusters and weights",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 131,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Display the TF-IDF keyword clusters from the stored fingerprint JSON. Show: cluster labels, top keywords with weights, post count used. The /api/fingerprint endpoint already exists and returns this data. Design as a dedicated page or section within a profile/settings area. Visualize clusters — word cloud, bar chart, or simple ranked list.",
+          "created_at": "2026-03-21T03:42:21.722492+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:42:09.842646+00:00",
+      "updated_at": "2026-03-21T03:42:09.842646+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 131,
+      "title": "Add topic fingerprint viewer with user feedback",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Phase 2 (Core UX). Users need to see what Charcoal thinks their topics are and correct it. The fingerprint drives overlap scoring — if it's wrong, the whole pipeline is miscalibrated. Currently the fingerprint is built automatically from recent posts but the user never sees it.",
+          "created_at": "2026-03-21T03:42:21.717776+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:42:05.452275+00:00",
+      "updated_at": "2026-03-21T03:42:05.452275+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 130,
+      "title": "Add help page: How to use labels and the review queue",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Explain: labels (High/Elevated/Watch/Safe) are YOUR judgment calls that help Charcoal learn. The review queue shows accounts the system is least confident about. Labeling helps us measure accuracy and will eventually tune the model. Show where to find labels, how to apply them, that they're private to you.",
+          "created_at": "2026-03-21T03:42:01.312101+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:41:42.476218+00:00",
+      "updated_at": "2026-03-21T03:41:42.476218+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 129,
+      "title": "Add help page: What is NLI contextual scoring",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Explain in simple terms: the NLI model reads what someone said AND what you said, then judges if their response was attacking, dismissive, misrepresenting, respectfully disagreeing, or supporting. This catches 'concern trolls' who sound polite in isolation but are hostile in context. Only runs on accounts that already show warning signs (Watch tier+).",
+          "created_at": "2026-03-21T03:42:01.307704+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:41:42.472053+00:00",
+      "updated_at": "2026-03-21T03:41:42.472053+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 128,
+      "title": "Add help page: How threat tiers work",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Explain the 4 tiers: High (score >= 35, likely hostile + active in your topics), Elevated (>= 15, concerning pattern), Watch (>= 8, worth monitoring), Low (< 8, probably fine). Explain benign gate (allies get capped even with high overlap). Emphasize: tiers are signals, not verdicts.",
+          "created_at": "2026-03-21T03:42:01.303393+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:41:42.467769+00:00",
+      "updated_at": "2026-03-21T03:41:42.467769+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 127,
+      "title": "Add help page: What happens when I hit Scan",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Explain the scan pipeline in user terms: finds who quoted/replied/reposted/liked your recent posts (via Constellation), scores those amplifiers for hostility, then checks their followers too. Mention: scan takes a few minutes, scores are cached for 7 days, you can re-scan anytime, data is incremental (doesn't lose previous results).",
+          "created_at": "2026-03-21T03:42:01.298651+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:41:42.462516+00:00",
+      "updated_at": "2026-03-21T03:41:42.462516+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 126,
+      "title": "Add help page: What do these numbers mean",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 125,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Explain: threat score (0-100 composite), toxicity (0-1 from ONNX model, weighted categories), topic overlap (how much their posts overlap with yours semantically), context score (NLI hostility when interacting with your content specifically), behavioral signals (quote ratio, reply ratio, pile-on). Use plain language — 'how hostile are they' not 'weighted toxicity formula'. Include what makes a score go up or down.",
+          "created_at": "2026-03-21T03:42:01.293777+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:41:42.457806+00:00",
+      "updated_at": "2026-03-21T03:41:42.457806+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 125,
+      "title": "Add in-app help section with user-facing explanations",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Phase 2 (Core UX). In-app help accessible from the nav. Plain language, not developer docs. Target audience: Bluesky users who want to understand what Charcoal is telling them. Could be a single /help page with sections or a sidebar/modal system. Keep it scannable — nobody reads walls of text.",
+          "created_at": "2026-03-21T03:42:01.288981+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:41:37.491496+00:00",
+      "updated_at": "2026-03-21T03:41:37.491496+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 124,
+      "title": "Update README.md to reflect current project state",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 118,
+      "labels": [],
+      "comments": [
+        {
+          "content": "README is stale — still describes MVP phases. Update to reflect: current feature set (NLI contextual scoring, OAuth, web dashboard, dual DB backend), quick start (clone, download-model, configure, serve), env var reference, test commands, link to docs/ for deeper dives. Keep it concise — architecture.md has the depth.",
+          "created_at": "2026-03-21T03:39:17.302466+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:38:50.426019+00:00",
+      "updated_at": "2026-03-21T03:38:50.426019+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 123,
+      "title": "Add rustdoc module-level comments to all public modules",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 118,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Add //! module-level doc comments to: src/scoring/{mod,profile,threat,nli,nli_audit,behavioral,context}.rs, src/pipeline/{amplification,sweep}.rs, src/bluesky/{client,posts,followers,amplification,profiles,replies}.rs, src/topics/{fingerprint,embeddings,overlap,tfidf}.rs, src/toxicity/{mod,onnx,download,traits}.rs, src/db/{mod,traits,sqlite,postgres,queries,schema,models}.rs, src/web/{mod,scan_job,handlers/*.rs}. Focus on what each module does and how it fits in the pipeline.",
+          "created_at": "2026-03-21T03:39:14.313258+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:38:49.913831+00:00",
+      "updated_at": "2026-03-21T03:38:49.913831+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 122,
+      "title": "Write API reference (docs/api.md)",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 118,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Document all API endpoints with request/response JSON shapes: GET /api/status, GET /api/accounts (pagination, sorting), GET /api/accounts/{handle}, GET /api/events, GET /api/fingerprint, POST /api/scan, POST /api/labels, GET /api/labels/review, GET /api/labels/accuracy, OAuth endpoints (login, callback, logout). Include auth requirements and error shapes.",
+          "created_at": "2026-03-21T03:39:09.925345+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:38:49.019575+00:00",
+      "updated_at": "2026-03-21T03:38:49.019575+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 121,
+      "title": "Write deployment guide (docs/deployment.md)",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 118,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Cover: Railway setup (Dockerfile, multi-stage build, Ubuntu 24.04 for glibc 2.39), env vars (all CHARCOAL_* vars, DATABASE_URL, CONSTELLATION_URL), persistent volume (/data for models + audit logs), staging vs production (branches, separate Postgres + volumes), custom domain (charcoal.watch via Porkbun ALIAS), model auto-download on startup, Tigris S3 backup.",
+          "created_at": "2026-03-21T03:39:07.206971+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:38:48.570795+00:00",
+      "updated_at": "2026-03-21T03:38:48.570795+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 120,
+      "title": "Write scoring formula doc with worked examples (docs/scoring-formula.md)",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 118,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Document the full scoring pipeline with math: weighted toxicity formula (identity_attack 0.35, insult 0.25, threat 0.25, severe 0.10, profanity 0.05), threat score (tox * 70 * (1 + overlap * 1.5)), overlap gate (< 0.15 caps at 25), behavioral boost (1.0-1.5x from quote/reply/pile-on), benign gate (cap at 12.0), context_multiplier (1.0 + ctx * 0.5), benign gate bypass (ctx >= 0.5). Include worked examples for: hostile amplifier, ally, concern troll, news commenter false positive.",
+          "created_at": "2026-03-21T03:39:03.925674+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:38:48.118804+00:00",
+      "updated_at": "2026-03-21T03:38:48.118804+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 119,
+      "title": "Write architecture overview doc (docs/architecture.md)",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 118,
+      "labels": [],
+      "comments": [
+        {
+          "content": "Top-to-bottom system overview. Cover: data flow (Constellation → events → amplifier scoring → follower scoring → tiers), database architecture (dual SQLite/Postgres backend, schema v5), NLI pipeline (model loading, hypothesis scoring, hostility formula, direct vs inferred pairs, two-pass follower scoring), web layer (Axum + SvelteKit SPA, OAuth, session cookies), and how CLI vs web modes differ. Use the /document skill to shake the tree first.",
+          "created_at": "2026-03-21T03:38:58.300291+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:38:47.635833+00:00",
+      "updated_at": "2026-03-21T03:38:47.635833+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 118,
+      "title": "Documentation milestone — comprehensive developer docs",
       "description": null,
       "status": "open",
       "priority": "medium",
@@ -13,9 +305,120 @@
         "feature"
       ],
       "comments": [],
-      "created_at": "2026-03-21T02:24:14.382635+00:00",
-      "updated_at": "2026-03-21T02:24:14.382635+00:00",
+      "created_at": "2026-03-21T03:38:43.689436+00:00",
+      "updated_at": "2026-03-21T03:38:43.689436+00:00",
       "closed_at": null
+    },
+    {
+      "id": 117,
+      "title": "Include context_score in account API response",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-21T03:32:51.648437+00:00",
+      "updated_at": "2026-03-21T03:32:51.648437+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 116,
+      "title": "114",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": 102,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-21T03:14:03.647815+00:00",
+      "updated_at": "2026-03-21T03:14:13.898140+00:00",
+      "closed_at": "2026-03-21T03:14:13.898140+00:00"
+    },
+    {
+      "id": 115,
+      "title": "113",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": 102,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-21T03:14:03.642219+00:00",
+      "updated_at": "2026-03-21T03:14:13.893389+00:00",
+      "closed_at": "2026-03-21T03:14:13.893389+00:00"
+    },
+    {
+      "id": 114,
+      "title": "Investigate toxicity false positives on news commentary with violent keywords",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Part of Phase 1.75 contextual scoring (#102). Discovered during staging validation: ashteranic's post about ICE shooting scored 67% toxicity due to keywords (kill, shot, abused) despite being political commentary, not hostility. The ONNX model (unbiased-toxic-roberta) scores words in isolation. Options: accept it (avg toxicity is only 0.07), add news-context detector, or evaluate alternative models.",
+          "created_at": "2026-03-21T03:14:28.375933+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:13:37.454265+00:00",
+      "updated_at": "2026-03-21T03:13:37.454265+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 113,
+      "title": "Investigate NLI hypothesis saturation — all 5 scores near 0.9",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Part of Phase 1.75 contextual scoring (#102). Discovered during staging validation: all 5 NLI hypotheses score 0.82-0.97 for ashteranic.mycronite.net, meaning the model says 'yes' to contradictory hypotheses (attack AND support). The hostility formula partially compensates but discriminative power is low. Investigate: premise format, model capacity, hypothesis wording.",
+          "created_at": "2026-03-21T03:14:21.111181+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T03:13:34.038205+00:00",
+      "updated_at": "2026-03-21T03:13:34.038205+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 112,
+      "title": "Merge NLI dedup and UI fixes to staging",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "fix"
+      ],
+      "comments": [],
+      "created_at": "2026-03-21T02:26:27.701267+00:00",
+      "updated_at": "2026-03-21T02:26:47.337360+00:00",
+      "closed_at": "2026-03-21T02:26:47.337360+00:00"
+    },
+    {
+      "id": 111,
+      "title": "Show context_score on account detail page",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-21T02:24:14.382635+00:00",
+      "updated_at": "2026-03-21T02:26:20.571335+00:00",
+      "closed_at": "2026-03-21T02:26:20.571335+00:00"
     },
     {
       "id": 110,
