@@ -341,14 +341,15 @@ fn blended_score_falls_back_without_context() {
 }
 
 #[test]
-fn supportive_context_lowers_threat() {
+fn low_context_score_does_not_lower_threat() {
     let weights = ThreatWeights::default();
-    // context_score=0.05 (supportive) should lower the blended toxicity
+    // Under the multiplicative formula, context_score=0.05 produces a 1.025x multiplier.
+    // Context can only amplify existing threat signals, never reduce them.
     let (with_ctx, _) = compute_threat_score_contextual(0.5, 0.5, Some(0.05), &weights);
     let (without_ctx, _) = compute_threat_score(0.5, 0.5, &weights);
     assert!(
-        with_ctx < without_ctx,
-        "Supportive context should lower score: {} vs {}",
+        with_ctx >= without_ctx,
+        "Context multiplier should never reduce score: {} vs {}",
         with_ctx,
         without_ctx
     );
@@ -357,9 +358,15 @@ fn supportive_context_lowers_threat() {
 #[test]
 fn context_score_at_boundary() {
     let weights = ThreatWeights::default();
-    // context_score exactly equals toxicity — should produce same result as no context
-    // blended = 0.5 * 0.6 + 0.5 * 0.4 = 0.30 + 0.20 = 0.50 (same as tox=0.5)
+    // context_score=0.5 produces a 1.25x multiplier over the base score.
+    // The result should be 25% higher than the base (no context) score.
     let (with_ctx, _) = compute_threat_score_contextual(0.5, 0.3, Some(0.5), &weights);
     let (without_ctx, _) = compute_threat_score(0.5, 0.3, &weights);
-    assert!((with_ctx - without_ctx).abs() < f64::EPSILON);
+    let expected = without_ctx * 1.25;
+    assert!(
+        (with_ctx - expected).abs() < 0.1,
+        "ctx=0.5 should give 1.25x base: got {} vs expected {}",
+        with_ctx,
+        expected
+    );
 }

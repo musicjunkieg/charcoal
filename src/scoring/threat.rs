@@ -66,25 +66,29 @@ pub fn compute_threat_score(
     (score, tier)
 }
 
-/// Compute the combined threat score with optional contextual blending.
+/// Compute the combined threat score with optional context multiplier.
 ///
-/// When a context_score is provided (from NLI pair scoring), it is blended
-/// with the isolated toxicity score: 60% toxicity + 40% context.
-/// When no context_score is available, falls back to the standard formula.
+/// When a context_score is provided (from NLI pair scoring), it amplifies
+/// the base threat score multiplicatively:
+///   context_multiplier = 1.0 + (context_score * 0.5)   // range: 1.0–1.5
+///   final = base_score * context_multiplier
+///
+/// This ensures context can only boost existing threat signals — an account
+/// with zero toxicity stays at zero regardless of context_score.
 pub fn compute_threat_score_contextual(
     toxicity: f64,
     topic_overlap: f64,
     context_score: Option<f64>,
     weights: &ThreatWeights,
 ) -> (f64, ThreatTier) {
-    let effective_toxicity = match context_score {
-        Some(ctx) => {
-            let pair_weight = 0.4;
-            toxicity * (1.0 - pair_weight) + ctx * pair_weight
-        }
-        None => toxicity,
+    let (base_score, _) = compute_threat_score(toxicity, topic_overlap, weights);
+    let context_multiplier = match context_score {
+        Some(ctx) => 1.0 + (ctx * 0.5),
+        None => 1.0,
     };
-    compute_threat_score(effective_toxicity, topic_overlap, weights)
+    let score = (base_score * context_multiplier).clamp(0.0, 100.0);
+    let tier = ThreatTier::from_score(score);
+    (score, tier)
 }
 
 #[cfg(test)]
@@ -157,5 +161,70 @@ mod tests {
         // Gated (0.02 < 0.15): 0.08 * 25 = 2.0
         assert!((score - 2.0).abs() < 0.1, "Expected ~2.0, got {score}");
         assert_eq!(tier, ThreatTier::Low);
+    }
+
+    #[test]
+    fn context_multiplier_none_no_change() {
+        let weights = ThreatWeights::default();
+        let (with_ctx, _) = compute_threat_score_contextual(0.3, 0.4, None, &weights);
+        let (without_ctx, _) = compute_threat_score(0.3, 0.4, &weights);
+        assert!((with_ctx - without_ctx).abs() < 0.001);
+    }
+
+    #[test]
+    fn context_multiplier_zero_no_change() {
+        let weights = ThreatWeights::default();
+        let (base, _) = compute_threat_score(0.3, 0.4, &weights);
+        let (ctx, _) = compute_threat_score_contextual(0.3, 0.4, Some(0.0), &weights);
+        assert!(
+            (ctx - base).abs() < 0.001,
+            "ctx=0.0 should multiply by 1.0x, got {ctx} vs {base}"
+        );
+    }
+
+    #[test]
+    fn context_multiplier_moderate_boosts_25pct() {
+        let weights = ThreatWeights::default();
+        let (base, _) = compute_threat_score(0.3, 0.4, &weights);
+        let (ctx, _) = compute_threat_score_contextual(0.3, 0.4, Some(0.5), &weights);
+        let expected = base * 1.25;
+        assert!(
+            (ctx - expected).abs() < 0.1,
+            "ctx=0.5 should be ~1.25x base, got {ctx} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn context_multiplier_extreme_boosts_50pct() {
+        let weights = ThreatWeights::default();
+        let (base, _) = compute_threat_score(0.3, 0.4, &weights);
+        let (ctx, _) = compute_threat_score_contextual(0.3, 0.4, Some(1.0), &weights);
+        let expected = base * 1.5;
+        assert!(
+            (ctx - expected).abs() < 0.1,
+            "ctx=1.0 should be ~1.5x base, got {ctx} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn context_multiplier_zero_toxicity_stays_zero() {
+        let weights = ThreatWeights::default();
+        let (score, tier) = compute_threat_score_contextual(0.0, 0.5, Some(1.0), &weights);
+        assert!(
+            (score - 0.0).abs() < 0.001,
+            "Zero tox + any context = 0, got {score}"
+        );
+        assert_eq!(tier, ThreatTier::Low);
+    }
+
+    #[test]
+    fn context_multiplier_watch_borderline_promoted() {
+        let weights = ThreatWeights::default();
+        let (score, tier) = compute_threat_score_contextual(0.12, 0.35, Some(1.0), &weights);
+        assert!(
+            score > 15.0,
+            "Borderline Watch + extreme context should promote to Elevated, got {score}"
+        );
+        assert_eq!(tier, ThreatTier::Elevated);
     }
 }
