@@ -227,6 +227,35 @@ async fn run_scan(
 
     let protected_embedding = db.get_embedding(user_did).await?;
 
+    // Build per-post embeddings for follower NLI inferred pair matching.
+    // Each protected post gets its own embedding so followers' posts can be
+    // matched to the closest protected post for NLI pair scoring.
+    let protected_posts_with_embeddings: Option<Vec<(String, Vec<f64>)>> = if embedder.is_some()
+        && nli_scorer.is_some()
+    {
+        let pp_texts: Vec<String> =
+            crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .map(|p| p.text.clone())
+                .collect();
+
+        if let Some(ref emb) = embedder {
+            match emb.embed_batch(&pp_texts).await {
+                Ok(embeddings) => Some(pp_texts.into_iter().zip(embeddings.into_iter()).collect()),
+                Err(e) => {
+                    warn!(error = %e, "Failed to embed protected posts for NLI pairs");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Phase 4: fetch amplification events from Constellation
     {
         let mut s = scan_status.write().await;
@@ -363,6 +392,7 @@ async fn run_scan(
         &pile_on_dids,
         &original_text_cache,
         nli_scorer.as_ref(),
+        protected_posts_with_embeddings.as_deref(),
     )
     .await;
 

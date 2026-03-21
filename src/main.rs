@@ -317,6 +317,7 @@ async fn main() -> Result<()> {
                 &pile_on_dids,
                 &original_text_cache,
                 None, // NLI scorer not loaded in CLI mode (yet)
+                None, // No protected post embeddings in CLI mode
             )
             .await?;
 

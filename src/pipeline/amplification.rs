@@ -52,6 +52,7 @@ pub async fn run(
     pile_on_dids: &std::collections::HashSet<String>,
     original_text_cache: &std::collections::HashMap<String, String>,
     nli_scorer: Option<&NliScorer>,
+    _protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
