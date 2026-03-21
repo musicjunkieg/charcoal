@@ -248,15 +248,14 @@ pub async fn build_profile(
         None
     };
 
-    // Step 6: Compute the raw threat score with contextual blending, then apply behavioral modifier
-    let (raw_score, _) = threat::compute_threat_score_contextual(
-        avg_toxicity,
-        topic_overlap,
-        context_score,
-        weights,
-    );
+    // Step 6: Apply scoring formula in spec order:
+    //   1. raw_score = tox * 70 * (1 + overlap * 1.5)
+    //   2. score_with_behavioral = raw_score * behavioral_boost (via gate)
+    //   3. context_multiplier = 1.0 + (context_score * 0.5)
+    //   4. final_score = score_with_behavioral * context_multiplier
+    let (raw_score, _) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
 
-    let (final_score, benign_gate) = behavioral::apply_behavioral_modifier_contextual(
+    let (score_with_behavioral, benign_gate) = behavioral::apply_behavioral_modifier_contextual(
         raw_score,
         quote_ratio,
         reply_ratio,
@@ -265,6 +264,12 @@ pub async fn build_profile(
         median_engagement,
         context_score,
     );
+
+    let context_multiplier = match context_score {
+        Some(ctx) => 1.0 + (ctx * 0.5),
+        None => 1.0,
+    };
+    let final_score = (score_with_behavioral * context_multiplier).clamp(0.0, 100.0);
 
     let tier = crate::db::models::ThreatTier::from_score(final_score);
 
