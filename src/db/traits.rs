@@ -100,6 +100,13 @@ pub trait Database: Send + Sync {
     async fn get_events_for_pile_on(&self, user_did: &str)
         -> Result<Vec<(String, String, String)>>;
 
+    /// Get all amplification events for a specific amplifier DID.
+    async fn get_events_by_amplifier(
+        &self,
+        user_did: &str,
+        amplifier_did: &str,
+    ) -> Result<Vec<AmplificationEvent>>;
+
     /// Insert an amplification event for a user, preserving its original detected_at timestamp.
     /// Used only by the migrate command so historical events keep their real timestamps
     /// instead of all being stamped with NOW().

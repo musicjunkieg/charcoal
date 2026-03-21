@@ -511,6 +511,44 @@ impl Database for PgDatabase {
             .collect())
     }
 
+    async fn get_events_by_amplifier(
+        &self,
+        user_did: &str,
+        amplifier_did: &str,
+    ) -> Result<Vec<AmplificationEvent>> {
+        let rows = sqlx_core::query::query(
+            "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                    amplifier_post_uri, amplifier_text,
+                    to_char(detected_at, 'YYYY-MM-DD HH24:MI:SS') as detected_at,
+                    followers_fetched, followers_scored, original_post_text, context_score
+             FROM amplification_events
+             WHERE user_did = $1 AND amplifier_did = $2
+             ORDER BY detected_at DESC",
+        )
+        .bind(user_did)
+        .bind(amplifier_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| AmplificationEvent {
+                id: r.get::<i64, _>(0),
+                event_type: r.get::<String, _>(1),
+                amplifier_did: r.get::<String, _>(2),
+                amplifier_handle: r.get::<String, _>(3),
+                original_post_uri: r.get::<String, _>(4),
+                amplifier_post_uri: r.get::<Option<String>, _>(5),
+                amplifier_text: r.get::<Option<String>, _>(6),
+                detected_at: r.get::<String, _>(7),
+                followers_fetched: r.get::<bool, _>(8),
+                followers_scored: r.get::<bool, _>(9),
+                original_post_text: r.get::<Option<String>, _>(10),
+                context_score: r.get::<Option<f64>, _>(11),
+            })
+            .collect())
+    }
+
     async fn get_median_engagement(&self, user_did: &str) -> Result<f64> {
         // Use percentile_cont for a true median calculation
         let row = sqlx_core::query::query(

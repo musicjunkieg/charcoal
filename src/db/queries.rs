@@ -375,6 +375,44 @@ pub fn get_events_for_pile_on(
     Ok(events)
 }
 
+/// Get all amplification events for a specific amplifier DID.
+pub fn get_events_by_amplifier(
+    conn: &Connection,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<Vec<AmplificationEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                amplifier_post_uri, amplifier_text, detected_at, followers_fetched,
+                followers_scored, original_post_text, context_score
+         FROM amplification_events
+         WHERE user_did = ?1 AND amplifier_did = ?2
+         ORDER BY detected_at DESC",
+    )?;
+    let rows = stmt.query_map(params![user_did, amplifier_did], |row| {
+        Ok(AmplificationEvent {
+            id: row.get(0)?,
+            event_type: row.get(1)?,
+            amplifier_did: row.get(2)?,
+            amplifier_handle: row.get(3)?,
+            original_post_uri: row.get(4)?,
+            amplifier_post_uri: row.get(5)?,
+            amplifier_text: row.get(6)?,
+            detected_at: row.get(7)?,
+            followers_fetched: row.get::<_, i32>(8)? != 0,
+            followers_scored: row.get::<_, i32>(9)? != 0,
+            original_post_text: row.get(10)?,
+            context_score: row.get(11)?,
+        })
+    })?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
 /// Get the median engagement across all scored accounts with behavioral data for a specific user.
 pub fn get_median_engagement(conn: &Connection, user_did: &str) -> Result<f64> {
     let mut stmt = conn.prepare(

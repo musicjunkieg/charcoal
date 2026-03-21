@@ -150,6 +150,15 @@ impl Database for SqliteDatabase {
         super::queries::get_events_for_pile_on(&conn, user_did)
     }
 
+    async fn get_events_by_amplifier(
+        &self,
+        user_did: &str,
+        amplifier_did: &str,
+    ) -> Result<Vec<AmplificationEvent>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_events_by_amplifier(&conn, user_did, amplifier_did)
+    }
+
     async fn get_median_engagement(&self, user_did: &str) -> Result<f64> {
         let conn = self.conn.lock().await;
         super::queries::get_median_engagement(&conn, user_did)
