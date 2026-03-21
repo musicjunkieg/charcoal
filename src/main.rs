@@ -424,6 +424,7 @@ async fn main() -> Result<()> {
                 &pile_on_dids,
                 None, // NLI scorer — not yet wired into CLI
                 None, // No protected post embeddings in CLI
+                None, // No direct pairs in CLI
             )
             .await?;
 
@@ -588,6 +589,7 @@ async fn main() -> Result<()> {
                     &pile_on_dids,
                     None, // NLI scorer — not yet wired into CLI
                     None, // No protected post embeddings in CLI
+                    None, // No direct pairs in CLI
                 )
                 .await
                 {

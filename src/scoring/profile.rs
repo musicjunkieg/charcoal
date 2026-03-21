@@ -47,6 +47,7 @@ pub async fn build_profile(
     pile_on_dids: &std::collections::HashSet<String>,
     nli_scorer: Option<&NliScorer>,
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    direct_pairs: Option<&[(String, String)]>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
@@ -154,77 +155,94 @@ pub async fn build_profile(
     let avg_engagement = behavioral::compute_avg_engagement(&target_posts);
     let pile_on = pile_on_dids.contains(target_did);
 
-    // Step 5: Compute context score via NLI if scorer and embeddings available
+    // Step 5: Compute context score via NLI
     //
-    // For each of the target's top 3 most similar posts (by embedding), find
-    // the closest matching protected user post and score the pair via NLI.
-    // The max hostility score across all pairs becomes the context_score.
-    let context_score = if let (Some(nli), Some(emb), Some(user_posts)) =
-        (nli_scorer, embedder, protected_posts_with_embeddings)
-    {
-        if user_posts.is_empty() {
-            None
-        } else {
-            // Embed each target post individually for pair matching
-            match emb.embed_batch(&post_texts).await {
-                Ok(target_embeddings) => {
-                    let target_with_emb: Vec<(String, Vec<f64>)> = post_texts
-                        .iter()
-                        .zip(target_embeddings.into_iter())
-                        .map(|(text, emb)| (text.clone(), emb))
-                        .collect();
-
-                    // Find the 3 most similar target posts to the user's mean embedding
-                    let user_mean: Vec<f64> = {
-                        let dim = user_posts[0].1.len();
-                        let mut mean = vec![0.0; dim];
-                        for (_, emb) in user_posts {
-                            for (i, v) in emb.iter().enumerate() {
-                                mean[i] += v;
-                            }
-                        }
-                        let n = user_posts.len() as f64;
-                        mean.iter_mut().for_each(|v| *v /= n);
-                        mean
-                    };
-                    let top_target_posts = crate::scoring::context::find_most_similar_posts(
-                        &user_mean,
-                        &target_with_emb,
-                        3,
-                    );
-
-                    // Score each pair via NLI: target post vs closest matching user post
-                    let mut pair_scores = Vec::new();
-                    for (target_text, _similarity) in &top_target_posts {
-                        // Find the target post's embedding to match against user posts
-                        let target_emb = target_with_emb
-                            .iter()
-                            .find(|(t, _)| t == target_text)
-                            .map(|(_, e)| e.as_slice());
-
-                        let user_text = target_emb.and_then(|emb| {
-                            crate::scoring::context::find_best_matching_user_post(emb, user_posts)
-                        });
-
-                        let original = user_text.as_deref().unwrap_or("");
-                        if original.is_empty() {
-                            continue;
-                        }
-
-                        match nli.score_pair(original, target_text).await {
-                            Ok((score, _hypothesis_scores)) => pair_scores.push(score),
-                            Err(e) => {
-                                warn!(error = %e, "NLI scoring failed for pair");
-                            }
+    // Two modes:
+    // - Direct pairs (amplifiers): NLI-score the actual event texts
+    // - Inferred pairs (followers): find top 3 most similar posts by embedding
+    let context_score = if let Some(nli) = nli_scorer {
+        if let Some(pairs) = direct_pairs {
+            // Mode A: Direct pairs — score each real interaction
+            if pairs.is_empty() {
+                None
+            } else {
+                let mut pair_scores = Vec::new();
+                for (original, response) in pairs {
+                    match nli.score_pair(original, response).await {
+                        Ok((score, _hypothesis_scores)) => pair_scores.push(score),
+                        Err(e) => {
+                            warn!(error = %e, "NLI scoring failed for direct pair");
                         }
                     }
-                    crate::scoring::nli::avg_context_score(&pair_scores)
                 }
-                Err(e) => {
-                    warn!(error = %e, "Failed to embed target posts for NLI");
-                    None
+                crate::scoring::nli::avg_context_score(&pair_scores)
+            }
+        } else if let (Some(emb), Some(user_posts)) = (embedder, protected_posts_with_embeddings) {
+            // Mode B: Inferred pairs — embedding-matched (existing logic)
+            if user_posts.is_empty() {
+                None
+            } else {
+                match emb.embed_batch(&post_texts).await {
+                    Ok(target_embeddings) => {
+                        let target_with_emb: Vec<(String, Vec<f64>)> = post_texts
+                            .iter()
+                            .zip(target_embeddings.into_iter())
+                            .map(|(text, emb)| (text.clone(), emb))
+                            .collect();
+
+                        let user_mean: Vec<f64> = {
+                            let dim = user_posts[0].1.len();
+                            let mut mean = vec![0.0; dim];
+                            for (_, emb) in user_posts {
+                                for (i, v) in emb.iter().enumerate() {
+                                    mean[i] += v;
+                                }
+                            }
+                            let n = user_posts.len() as f64;
+                            mean.iter_mut().for_each(|v| *v /= n);
+                            mean
+                        };
+                        let top_target_posts = crate::scoring::context::find_most_similar_posts(
+                            &user_mean,
+                            &target_with_emb,
+                            3,
+                        );
+
+                        let mut pair_scores = Vec::new();
+                        for (target_text, _similarity) in &top_target_posts {
+                            let target_emb = target_with_emb
+                                .iter()
+                                .find(|(t, _)| t == target_text)
+                                .map(|(_, e)| e.as_slice());
+
+                            let user_text = target_emb.and_then(|emb| {
+                                crate::scoring::context::find_best_matching_user_post(
+                                    emb, user_posts,
+                                )
+                            });
+
+                            let original = user_text.as_deref().unwrap_or("");
+                            if original.is_empty() {
+                                continue;
+                            }
+
+                            match nli.score_pair(original, target_text).await {
+                                Ok((score, _hypothesis_scores)) => pair_scores.push(score),
+                                Err(e) => {
+                                    warn!(error = %e, "NLI scoring failed for inferred pair");
+                                }
+                            }
+                        }
+                        crate::scoring::nli::avg_context_score(&pair_scores)
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to embed target posts for NLI");
+                        None
+                    }
                 }
             }
+        } else {
+            None
         }
     } else {
         None

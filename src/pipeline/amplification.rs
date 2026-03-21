@@ -250,6 +250,7 @@ pub async fn run(
                                 pile_on_dids,
                                 None, // NLI scorer not used for follower scoring
                                 None, // No protected post embeddings for followers
+                                None, // No direct pairs for followers
                             ))
                             .catch_unwind()
                             .await
