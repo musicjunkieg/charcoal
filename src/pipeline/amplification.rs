@@ -109,7 +109,7 @@ pub async fn run(
         let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {
             (Some(nli), Some(amp_text), Some(orig_text)) => {
                 match nli.score_pair(orig_text, amp_text).await {
-                    Ok(score) => {
+                    Ok((score, _hypothesis_scores)) => {
                         info!(
                             handle = event.amplifier_handle,
                             context_score = format!("{:.3}", score),

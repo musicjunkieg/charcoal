@@ -212,7 +212,7 @@ pub async fn build_profile(
                         }
 
                         match nli.score_pair(original, target_text).await {
-                            Ok(score) => pair_scores.push(score),
+                            Ok((score, _hypothesis_scores)) => pair_scores.push(score),
                             Err(e) => {
                                 warn!(error = %e, "NLI scoring failed for pair");
                             }

@@ -206,7 +206,11 @@ impl NliScorer {
     /// The premise combines both texts so the model sees the interaction:
     /// "Original: {original} Response: {response}"
     /// Each hypothesis template is tested against this premise.
-    pub async fn score_pair(&self, original_text: &str, response_text: &str) -> Result<f64> {
+    pub async fn score_pair(
+        &self,
+        original_text: &str,
+        response_text: &str,
+    ) -> Result<(f64, HypothesisScores)> {
         let premise = format!("Original: {} Response: {}", original_text, response_text);
 
         let mut hypothesis_scores = HypothesisScores {
@@ -241,6 +245,6 @@ impl NliScorer {
             "NLI scored pair"
         );
 
-        Ok(hostility)
+        Ok((hostility, hypothesis_scores))
     }
 }
