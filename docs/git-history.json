@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b7bb93b2bf1eb7d3e4f7c65766c4ca8351837cd5",
+    "short_hash": "b7bb93b",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T18:00:20-07:00",
+    "message": "feat: wire NLI audit logging into all scoring paths\n\nEvery NLI score_pair call now emits structured tracing + JSONL audit\nentry with full hypothesis breakdown, pair type, and similarity.\nConfig.data_dir() returns model_dir parent (/data on Railway).\n\nSpec: nli-scoring-redesign §NLI Audit Logging",
+    "files_changed": 7
+  },
+  {
     "hash": "a85a52dd2abb46d94c88bffe62c592b13ba6e603",
     "short_hash": "a85a52d",
     "author": "Bryan Guffey",

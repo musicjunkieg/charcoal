@@ -205,13 +205,19 @@ pub async fn run(
                     continue;
                 }
 
-                // Gather direct text pairs from stored events
+                // Gather direct text pairs from stored events, deduplicating
+                // across scans (the same event can be recorded multiple times)
+                let mut seen_pairs: std::collections::HashSet<(String, String)> =
+                    std::collections::HashSet::new();
                 let mut pairs: Vec<(String, String)> = Vec::new();
                 if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
                     for ev in db_events {
                         if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
                         {
-                            if !orig.is_empty() && !amp.is_empty() {
+                            if !orig.is_empty()
+                                && !amp.is_empty()
+                                && seen_pairs.insert((orig.clone(), amp.clone()))
+                            {
                                 pairs.push((orig, amp));
                             }
                         }
