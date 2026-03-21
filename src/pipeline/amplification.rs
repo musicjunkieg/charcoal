@@ -159,7 +159,84 @@ pub async fn run(
         }
     }
 
+    // Phase B: Score amplifiers via build_profile() with direct NLI pairs.
+    //
+    // Collect unique amplifier DIDs and their text pairs from stored events,
+    // then run full profile builds. This gives each amplifier a threat tier
+    // informed by their actual interactions with the protected user.
     let mut accounts_scored = 0;
+    {
+        let mut amplifier_handles: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
+        for event in &events {
+            amplifier_handles
+                .entry(event.amplifier_did.clone())
+                .or_insert_with(|| event.amplifier_handle.clone());
+        }
+
+        let amplifier_count = amplifier_handles.len();
+        if amplifier_count > 0 {
+            println!("\nScoring {} amplifiers…", amplifier_count);
+
+            for (did, handle) in &amplifier_handles {
+                if handle == protected_handle {
+                    continue;
+                }
+                if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
+                    continue;
+                }
+
+                // Gather direct text pairs from stored events
+                let mut pairs: Vec<(String, String)> = Vec::new();
+                if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
+                    for ev in db_events {
+                        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
+                        {
+                            if !orig.is_empty() && !amp.is_empty() {
+                                pairs.push((orig, amp));
+                            }
+                        }
+                    }
+                }
+
+                match profile::build_profile(
+                    client,
+                    scorer,
+                    handle,
+                    did,
+                    protected_fingerprint,
+                    weights,
+                    embedder,
+                    protected_embedding,
+                    median_engagement,
+                    pile_on_dids,
+                    nli_scorer,
+                    None, // No inferred pairs — using direct pairs
+                    Some(&pairs),
+                )
+                .await
+                {
+                    Ok(score) => {
+                        db.upsert_account_score(user_did, &score).await?;
+                        accounts_scored += 1;
+                        println!(
+                            "  @{}: {} (context: {})",
+                            handle,
+                            score.threat_tier.as_deref().unwrap_or("?"),
+                            score
+                                .context_score
+                                .map(|s| format!("{:.2}", s))
+                                .unwrap_or_else(|| "n/a".to_string())
+                        );
+                    }
+                    Err(e) => {
+                        warn!(handle = handle.as_str(), error = %e, "Failed to score amplifier");
+                    }
+                }
+            }
+        }
+    }
 
     // If --analyze flag is set, score the followers of each quote/reply amplifier.
     // Quotes and replies are direct hostile engagement vectors that warrant
