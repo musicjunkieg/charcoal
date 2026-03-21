@@ -47,6 +47,7 @@ pub async fn run(
     protected_embedding: Option<&[f64]>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<(usize, usize)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
@@ -147,6 +148,7 @@ pub async fn run(
                 None, // NLI scorer not used for sweep scoring
                 None, // No protected post embeddings for sweep
                 None, // No direct pairs for sweep
+                data_dir,
             ))
             .catch_unwind()
             .await

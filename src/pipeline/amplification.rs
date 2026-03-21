@@ -53,6 +53,7 @@ pub async fn run(
     original_text_cache: &std::collections::HashMap<String, String>,
     nli_scorer: Option<&NliScorer>,
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -110,12 +111,28 @@ pub async fn run(
         let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {
             (Some(nli), Some(amp_text), Some(orig_text)) => {
                 match nli.score_pair(orig_text, amp_text).await {
-                    Ok((score, _hypothesis_scores)) => {
+                    Ok((score, hypothesis_scores)) => {
                         info!(
                             handle = event.amplifier_handle,
                             context_score = format!("{:.3}", score),
                             "NLI scored event pair"
                         );
+                        if let Some(dir) = data_dir {
+                            crate::scoring::nli_audit::log_nli_audit(
+                                &crate::scoring::nli_audit::NliAuditEntry {
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                    target_did: event.amplifier_did.clone(),
+                                    target_handle: event.amplifier_handle.clone(),
+                                    pair_type: "direct".to_string(),
+                                    original_text: orig_text.to_string(),
+                                    response_text: amp_text.to_string(),
+                                    hypothesis_scores,
+                                    hostility_score: score,
+                                    similarity: None,
+                                },
+                                Some(dir),
+                            );
+                        }
                         Some(score)
                     }
                     Err(e) => {
@@ -215,6 +232,7 @@ pub async fn run(
                     nli_scorer,
                     None, // No inferred pairs — using direct pairs
                     Some(&pairs),
+                    data_dir,
                 )
                 .await
                 {
@@ -334,6 +352,7 @@ pub async fn run(
                                 None, // No NLI in pass 1
                                 None, // No protected post embeddings
                                 None, // No direct pairs
+                                None, // No audit logging in pass 1
                             ))
                             .catch_unwind()
                             .await
@@ -368,6 +387,7 @@ pub async fn run(
                                         nli_ref,  // NLI enabled
                                         ppwe_ref, // Inferred pairs
                                         None,     // No direct pairs
+                                        data_dir, // Audit logging
                                     ))
                                     .catch_unwind()
                                     .await

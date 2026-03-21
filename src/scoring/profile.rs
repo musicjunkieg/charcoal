@@ -48,6 +48,7 @@ pub async fn build_profile(
     nli_scorer: Option<&NliScorer>,
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     direct_pairs: Option<&[(String, String)]>,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
@@ -169,7 +170,25 @@ pub async fn build_profile(
                 let mut pair_scores = Vec::new();
                 for (original, response) in pairs {
                     match nli.score_pair(original, response).await {
-                        Ok((score, _hypothesis_scores)) => pair_scores.push(score),
+                        Ok((score, hypothesis_scores)) => {
+                            pair_scores.push(score);
+                            if let Some(dir) = data_dir {
+                                crate::scoring::nli_audit::log_nli_audit(
+                                    &crate::scoring::nli_audit::NliAuditEntry {
+                                        timestamp: chrono::Utc::now().to_rfc3339(),
+                                        target_did: target_did.to_string(),
+                                        target_handle: target_handle.to_string(),
+                                        pair_type: "direct".to_string(),
+                                        original_text: original.to_string(),
+                                        response_text: response.to_string(),
+                                        hypothesis_scores,
+                                        hostility_score: score,
+                                        similarity: None,
+                                    },
+                                    Some(dir),
+                                );
+                            }
+                        }
                         Err(e) => {
                             warn!(error = %e, "NLI scoring failed for direct pair");
                         }
@@ -209,7 +228,7 @@ pub async fn build_profile(
                         );
 
                         let mut pair_scores = Vec::new();
-                        for (target_text, _similarity) in &top_target_posts {
+                        for (target_text, similarity) in &top_target_posts {
                             let target_emb = target_with_emb
                                 .iter()
                                 .find(|(t, _)| t == target_text)
@@ -227,7 +246,25 @@ pub async fn build_profile(
                             }
 
                             match nli.score_pair(original, target_text).await {
-                                Ok((score, _hypothesis_scores)) => pair_scores.push(score),
+                                Ok((score, hypothesis_scores)) => {
+                                    pair_scores.push(score);
+                                    if let Some(dir) = data_dir {
+                                        crate::scoring::nli_audit::log_nli_audit(
+                                            &crate::scoring::nli_audit::NliAuditEntry {
+                                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                                target_did: target_did.to_string(),
+                                                target_handle: target_handle.to_string(),
+                                                pair_type: "inferred".to_string(),
+                                                original_text: original.to_string(),
+                                                response_text: target_text.to_string(),
+                                                hypothesis_scores,
+                                                hostility_score: score,
+                                                similarity: Some(*similarity),
+                                            },
+                                            Some(dir),
+                                        );
+                                    }
+                                }
                                 Err(e) => {
                                     warn!(error = %e, "NLI scoring failed for inferred pair");
                                 }

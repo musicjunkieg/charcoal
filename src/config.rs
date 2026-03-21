@@ -93,6 +93,13 @@ impl Config {
         })
     }
 
+    /// Data directory for audit logs and other persistent files.
+    /// On Railway: /data (parent of model_dir=/data/models).
+    /// Locally: falls back to model_dir itself.
+    pub fn data_dir(&self) -> &std::path::Path {
+        self.model_dir.parent().unwrap_or(&self.model_dir)
+    }
+
     /// Check that the Bluesky handle is configured.
     /// Call this before any operation that needs to identify the protected user.
     pub fn require_bluesky(&self) -> Result<()> {

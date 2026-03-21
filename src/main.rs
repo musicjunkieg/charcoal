@@ -318,6 +318,7 @@ async fn main() -> Result<()> {
                 &original_text_cache,
                 None, // NLI scorer not loaded in CLI mode (yet)
                 None, // No protected post embeddings in CLI mode
+                Some(config.data_dir()),
             )
             .await?;
 
@@ -372,6 +373,7 @@ async fn main() -> Result<()> {
                 protected_embedding.as_deref(),
                 median_engagement,
                 &pile_on_dids,
+                Some(config.data_dir()),
             )
             .await?;
 
@@ -426,6 +428,7 @@ async fn main() -> Result<()> {
                 None, // NLI scorer — not yet wired into CLI
                 None, // No protected post embeddings in CLI
                 None, // No direct pairs in CLI
+                Some(config.data_dir()),
             )
             .await?;
 
@@ -591,6 +594,7 @@ async fn main() -> Result<()> {
                     None, // NLI scorer — not yet wired into CLI
                     None, // No protected post embeddings in CLI
                     None, // No direct pairs in CLI
+                    Some(config.data_dir()),
                 )
                 .await
                 {

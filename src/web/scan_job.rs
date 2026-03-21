@@ -393,6 +393,7 @@ async fn run_scan(
         &original_text_cache,
         nli_scorer.as_ref(),
         protected_posts_with_embeddings.as_deref(),
+        Some(config.data_dir()),
     )
     .await;
 
