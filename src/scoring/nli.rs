@@ -26,7 +26,7 @@ use tokenizers::Tokenizer;
 use tracing::debug;
 
 /// Raw entailment scores from running NLI hypotheses on a text pair.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct HypothesisScores {
     pub attack: f64,
     pub contempt: f64,

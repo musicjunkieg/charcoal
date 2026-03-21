@@ -1,6 +1,7 @@
 //! Unit tests for NLI model integration and hostility scoring.
 
 use charcoal::scoring::nli::{avg_context_score, compute_hostility_score, HypothesisScores};
+use charcoal::scoring::nli_audit::{should_rotate, NliAuditEntry};
 use std::path::PathBuf;
 
 // --- NLI model file detection tests ---
@@ -179,4 +180,74 @@ fn avg_context_score_empty_returns_none() {
 fn avg_context_score_single_value() {
     let scores = vec![0.42];
     assert_eq!(avg_context_score(&scores), Some(0.42));
+}
+
+// --- NLI audit logging tests ---
+
+#[test]
+fn nli_audit_entry_serializes_to_json() {
+    let entry = NliAuditEntry {
+        timestamp: "2026-03-20T12:00:00Z".to_string(),
+        target_did: "did:plc:abc123".to_string(),
+        target_handle: "test.bsky.social".to_string(),
+        pair_type: "direct".to_string(),
+        original_text: "Original post".to_string(),
+        response_text: "Response post".to_string(),
+        hypothesis_scores: HypothesisScores {
+            attack: 0.8,
+            contempt: 0.3,
+            misrepresent: 0.1,
+            good_faith_disagree: 0.05,
+            support: 0.02,
+        },
+        hostility_score: 0.78,
+        similarity: None,
+    };
+    let json = serde_json::to_string(&entry).unwrap();
+    assert!(json.contains("\"pair_type\":\"direct\""));
+    assert!(json.contains("\"hostility_score\":0.78"));
+    assert!(!json.contains("similarity"));
+}
+
+#[test]
+fn nli_audit_entry_with_similarity() {
+    let entry = NliAuditEntry {
+        timestamp: "2026-03-20T12:00:00Z".to_string(),
+        target_did: "did:plc:abc123".to_string(),
+        target_handle: "test.bsky.social".to_string(),
+        pair_type: "inferred".to_string(),
+        original_text: "Original".to_string(),
+        response_text: "Response".to_string(),
+        hypothesis_scores: HypothesisScores {
+            attack: 0.1,
+            contempt: 0.1,
+            misrepresent: 0.1,
+            good_faith_disagree: 0.5,
+            support: 0.7,
+        },
+        hostility_score: 0.0,
+        similarity: Some(0.85),
+    };
+    let json = serde_json::to_string(&entry).unwrap();
+    assert!(json.contains("\"similarity\":0.85"));
+    assert!(json.contains("\"pair_type\":\"inferred\""));
+}
+
+#[test]
+fn should_rotate_true_for_old_entry() {
+    let old_ts = (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339();
+    let line = format!(r#"{{"timestamp":"{}","target_did":"x"}}"#, old_ts);
+    assert!(should_rotate(&line));
+}
+
+#[test]
+fn should_rotate_false_for_recent_entry() {
+    let recent_ts = (chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339();
+    let line = format!(r#"{{"timestamp":"{}","target_did":"x"}}"#, recent_ts);
+    assert!(!should_rotate(&line));
+}
+
+#[test]
+fn should_rotate_false_for_invalid_json() {
+    assert!(!should_rotate("not valid json"));
 }

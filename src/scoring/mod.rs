@@ -3,5 +3,6 @@
 pub mod behavioral;
 pub mod context;
 pub mod nli;
+pub mod nli_audit;
 pub mod profile;
 pub mod threat;
