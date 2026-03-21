@@ -59,10 +59,13 @@ pub fn avg_context_score(scores: &[f64]) -> Option<f64> {
 }
 
 /// Apply softmax to 3-class NLI logits and return the entailment probability.
+///
+/// DeBERTa NLI label order: [0: contradiction, 1: entailment, 2: neutral]
+/// See: https://huggingface.co/cross-encoder/nli-deberta-v3-xsmall
 fn softmax_entailment(logits: &[f32]) -> f64 {
     let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let exp_sum: f32 = logits.iter().map(|&x| (x - max_logit).exp()).sum();
-    let entailment_prob = (logits[2] - max_logit).exp() / exp_sum;
+    let entailment_prob = (logits[1] - max_logit).exp() / exp_sum;
     entailment_prob as f64
 }
 

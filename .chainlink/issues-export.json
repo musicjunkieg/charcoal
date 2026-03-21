@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-21T03:43:53.437293+00:00",
+  "exported_at": "2026-03-21T04:13:41.551649+00:00",
   "issues": [
     {
       "id": 134,
@@ -313,7 +313,7 @@
       "id": 117,
       "title": "Include context_score in account API response",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -321,8 +321,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-21T03:32:51.648437+00:00",
-      "updated_at": "2026-03-21T03:32:51.648437+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-21T04:07:52.346564+00:00",
+      "closed_at": "2026-03-21T04:07:52.346564+00:00"
     },
     {
       "id": 116,
@@ -374,7 +374,7 @@
       "id": 113,
       "title": "Investigate NLI hypothesis saturation — all 5 scores near 0.9",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -384,11 +384,15 @@
         {
           "content": "Part of Phase 1.75 contextual scoring (#102). Discovered during staging validation: all 5 NLI hypotheses score 0.82-0.97 for ashteranic.mycronite.net, meaning the model says 'yes' to contradictory hypotheses (attack AND support). The hostility formula partially compensates but discriminative power is low. Investigate: premise format, model capacity, hypothesis wording.",
           "created_at": "2026-03-21T03:14:21.111181+00:00"
+        },
+        {
+          "content": "ROOT CAUSE FOUND: softmax_entailment uses logits[2] but the model's label order is [contradiction=0, entailment=1, neutral=2]. We've been returning the neutral probability as entailment. Fix: logits[2] -> logits[1].",
+          "created_at": "2026-03-21T04:11:55.670676+00:00"
         }
       ],
       "created_at": "2026-03-21T03:13:34.038205+00:00",
-      "updated_at": "2026-03-21T03:13:34.038205+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-21T04:12:36.588878+00:00",
+      "closed_at": "2026-03-21T04:12:36.588878+00:00"
     },
     {
       "id": 112,
