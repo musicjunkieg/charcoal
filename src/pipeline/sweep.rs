@@ -149,6 +149,7 @@ pub async fn run(
                 None, // No protected post embeddings for sweep
                 None, // No direct pairs for sweep
                 data_dir,
+                None, // No graph distance for sweep
             ))
             .catch_unwind()
             .await

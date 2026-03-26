@@ -429,6 +429,7 @@ async fn main() -> Result<()> {
                 None, // No protected post embeddings in CLI
                 None, // No direct pairs in CLI
                 Some(config.data_dir()),
+                None, // No graph distance in CLI
             )
             .await?;
 
@@ -595,6 +596,7 @@ async fn main() -> Result<()> {
                     None, // No protected post embeddings in CLI
                     None, // No direct pairs in CLI
                     Some(config.data_dir()),
+                    None, // No graph distance in CLI
                 )
                 .await
                 {

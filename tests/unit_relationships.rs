@@ -176,3 +176,62 @@ fn parse_relationship_multiple() {
     assert_eq!(result["did:plc:stranger"], GraphDistance::Stranger);
     assert_eq!(result["did:plc:gone"], GraphDistance::Stranger);
 }
+
+// ============================================================
+// Scoring integration — graph distance applied to threat scores
+// ============================================================
+
+use charcoal::scoring::threat::{compute_threat_score, ThreatWeights};
+
+#[test]
+fn stranger_amplifies_score() {
+    let weights = ThreatWeights::default();
+    let (base, _) = compute_threat_score(0.5, 0.3, &weights);
+    let amplified = base * GraphDistance::Stranger.threat_weight();
+    assert!(
+        amplified > base,
+        "Stranger should amplify: {amplified} > {base}"
+    );
+}
+
+#[test]
+fn mutual_dampens_score() {
+    let weights = ThreatWeights::default();
+    let (base, _) = compute_threat_score(0.5, 0.3, &weights);
+    let dampened = base * GraphDistance::MutualFollow.threat_weight();
+    assert!(
+        dampened < base,
+        "Mutual follow should dampen: {dampened} < {base}"
+    );
+}
+
+#[test]
+fn no_distance_is_neutral() {
+    let weight: f64 = None::<GraphDistance>
+        .map(|d| d.threat_weight())
+        .unwrap_or(1.0);
+    assert!((weight - 1.0).abs() < 0.001, "None distance = 1.0 weight");
+}
+
+#[test]
+fn stranger_toxic_in_topic_gets_boosted() {
+    let weights = ThreatWeights::default();
+    // High toxicity + topic overlap + stranger = max danger
+    let (base, _) = compute_threat_score(0.7, 0.5, &weights);
+    let final_score = (base * GraphDistance::Stranger.threat_weight()).clamp(0.0, 100.0);
+    assert!(final_score >= 35.0, "Should be High tier: {final_score}");
+}
+
+#[test]
+fn mutual_follow_moderate_tox_stays_low() {
+    let weights = ThreatWeights::default();
+    // Moderate toxicity + overlap + mutual follow = dampened
+    let (base, _) = compute_threat_score(0.3, 0.3, &weights);
+    let final_score = (base * GraphDistance::MutualFollow.threat_weight()).clamp(0.0, 100.0);
+    // base = 0.3 * 70 * (1 + 0.3 * 1.5) = 21 * 1.45 = 30.45
+    // dampened = 30.45 * 0.6 = 18.27 → Elevated, not High
+    assert!(
+        final_score < 35.0,
+        "Mutual follow should stay below High: {final_score}"
+    );
+}

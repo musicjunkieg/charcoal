@@ -239,6 +239,7 @@ pub async fn run(
                     None, // No inferred pairs — using direct pairs
                     Some(&pairs),
                     data_dir,
+                    None, // Graph distance wired in Task 4
                 )
                 .await
                 {
@@ -359,6 +360,7 @@ pub async fn run(
                                 None, // No protected post embeddings
                                 None, // No direct pairs
                                 None, // No audit logging in pass 1
+                                None, // No graph distance for followers
                             ))
                             .catch_unwind()
                             .await
@@ -394,6 +396,7 @@ pub async fn run(
                                         ppwe_ref, // Inferred pairs
                                         None,     // No direct pairs
                                         data_dir, // Audit logging
+                                        None,     // No graph distance for followers
                                     ))
                                     .catch_unwind()
                                     .await
