@@ -9,4 +9,5 @@ pub mod followers;
 pub mod likes;
 pub mod posts;
 pub mod profiles;
+pub mod relationships;
 pub mod replies;

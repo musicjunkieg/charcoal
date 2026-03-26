@@ -1,7 +1,133 @@
 {
   "version": 1,
-  "exported_at": "2026-03-21T04:13:41.551649+00:00",
+  "exported_at": "2026-03-26T18:09:40.613579+00:00",
   "issues": [
+    {
+      "id": 143,
+      "title": "Display graph distance in reports and terminal output",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.231003+00:00",
+      "updated_at": "2026-03-26T18:07:27.231003+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 142,
+      "title": "Wire ensemble scorer into config and scan pipeline",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.226918+00:00",
+      "updated_at": "2026-03-26T18:07:27.226918+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 141,
+      "title": "Add OpenAI Moderation scorer and ensemble toxicity scorer",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.222761+00:00",
+      "updated_at": "2026-03-26T18:07:27.222761+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 140,
+      "title": "Wire graph distance classification into scan pipeline",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.218706+00:00",
+      "updated_at": "2026-03-26T18:07:27.218706+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 139,
+      "title": "Wire graph distance weight into scoring formula",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.214+00:00",
+      "updated_at": "2026-03-26T18:07:27.214+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 138,
+      "title": "Add graph_distance field to AccountScore and DB schema v6",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.209525+00:00",
+      "updated_at": "2026-03-26T18:07:27.209525+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 137,
+      "title": "Add GraphDistance enum and relationship response parsing",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 136,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:27.203530+00:00",
+      "updated_at": "2026-03-26T18:07:27.203530+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 136,
+      "title": "Add graph distance scoring and ensemble toxicity scorer",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-26T18:07:22.153925+00:00",
+      "updated_at": "2026-03-26T18:07:22.153925+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 135,
+      "title": "Evaluate context_score formula weight — multiplier may be too conservative",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [
+        {
+          "content": "Now that the NLI logit index is fixed (#113), context_scores are producing real signal. Examples from staging scan 2026-03-21:\n\n- amos-race.bsky.social: hostility 0.541 (attack 0.584, contempt 0.516) — BUT in Low tier because base toxicity is low\n- andyschwab.link: hostility 0.380 (misrepresent 0.616, good_faith 0.471) — also Low tier\n- ashteranic.mycronite.net: hostility 0.000 — correctly identified as non-hostile\n\nThe problem: context_multiplier range is 1.0-1.5x, so a Low-tier account with raw_score 3.0 and extreme context (1.0) only gets boosted to 4.5 — still Low. Someone who is specifically hostile to Bryan's content but generally non-toxic flies under the radar.\n\nOptions to evaluate:\n1. Widen multiplier range (1.0-2.0x or 1.0-2.5x) — simple, keeps multiplicative property\n2. Add context as independent signal (e.g. if context_score > 0.5, floor raw_score at Watch threshold) — catches concern trolls but risks false positives\n3. Hybrid: use higher multiplier AND lower the Watch threshold when context_score is high\n4. Keep as-is — the current design correctly says 'low general toxicity = low threat even with hostile interactions'\n\nKey question for Bryan: is someone who is ONLY hostile toward your content but polite everywhere else a threat worth flagging? If yes, option 2 or 3. If no, option 4 is correct.",
+          "created_at": "2026-03-21T04:35:15.109984+00:00"
+        }
+      ],
+      "created_at": "2026-03-21T04:35:01.469347+00:00",
+      "updated_at": "2026-03-21T04:35:01.469347+00:00",
+      "closed_at": null
+    },
     {
       "id": 134,
       "title": "Add manual fingerprint rebuild trigger from the UI",
