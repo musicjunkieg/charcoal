@@ -35,6 +35,8 @@ pub struct Config {
     pub model_dir: PathBuf,
     /// Constellation backlink index URL (primary amplification detection)
     pub constellation_url: String,
+    /// OpenAI API key for ensemble toxicity scoring (free moderation endpoint)
+    pub openai_api_key: Option<String>,
     /// DID that is allowed to authenticate (CHARCOAL_ALLOWED_DID env var).
     /// Find your DID at: bsky.app → Settings → Account
     #[cfg(feature = "web")]
@@ -84,6 +86,7 @@ impl Config {
             model_dir,
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
+            openai_api_key: env::var("OPENAI_API_KEY").ok(),
             #[cfg(feature = "web")]
             allowed_did,
             #[cfg(feature = "web")]
@@ -173,6 +176,7 @@ impl Config {
             scorer_backend: ScorerBackend::Onnx,
             model_dir: std::path::PathBuf::from("/tmp/test_models"),
             constellation_url: "https://constellation.microcosm.blue".to_string(),
+            openai_api_key: None,
             #[cfg(feature = "web")]
             allowed_did: "did:plc:testalloweddid0000000000".to_string(),
             #[cfg(feature = "web")]

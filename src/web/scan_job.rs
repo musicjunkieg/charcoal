@@ -82,7 +82,7 @@ async fn run_scan(
         s.progress_message = "Loading toxicity model…".to_string();
     }
 
-    let scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
+    let primary_scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
         let model_dir = config.model_dir.clone();
         // OnnxToxicityScorer::load is synchronous blocking I/O — offload to avoid
         // stalling the async runtime while the model is read from disk.
@@ -93,6 +93,28 @@ async fn run_scan(
     } else {
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
+
+    // Wrap in ensemble scorer if OpenAI API key is configured
+    let secondary_scorer: Option<Box<dyn ToxicityScorer>> =
+        config.openai_api_key.as_ref().and_then(|key| {
+            match crate::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
+                Ok(s) => {
+                    info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");
+                    Some(Box::new(s) as Box<dyn ToxicityScorer>)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to init OpenAI scorer, using ONNX only");
+                    None
+                }
+            }
+        });
+
+    let scorer: Box<dyn ToxicityScorer> =
+        Box::new(crate::toxicity::ensemble::EnsembleToxicityScorer::new(
+            primary_scorer,
+            secondary_scorer,
+            crate::toxicity::ensemble::DisagreementStrategy::TakeLower,
+        ));
 
     // Phase 2: load embedding model (optional — falls back to TF-IDF)
     //
