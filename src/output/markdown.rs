@@ -82,21 +82,23 @@ pub fn generate_report(
     writeln!(md)?;
     writeln!(
         md,
-        "| Rank | Handle | Score | Tier | Toxicity | Overlap | Posts |"
+        "| Rank | Handle | Score | Tier | Distance | Toxicity | Overlap | Posts |"
     )?;
     writeln!(
         md,
-        "|------|--------|-------|------|----------|---------|-------|"
+        "|------|--------|-------|------|----------|----------|---------|-------|"
     )?;
 
     for (i, account) in accounts.iter().enumerate() {
+        let distance = account.graph_distance.as_deref().unwrap_or("—");
         writeln!(
             md,
-            "| {} | @{} | {:.1} | {} | {:.2} | {:.2} | {} |",
+            "| {} | @{} | {:.1} | {} | {} | {:.2} | {:.2} | {} |",
             i + 1,
             account.handle,
             account.threat_score.unwrap_or(0.0),
             account.threat_tier.as_deref().unwrap_or("?"),
+            distance,
             account.toxicity_score.unwrap_or(0.0),
             account.topic_overlap.unwrap_or(0.0),
             account.posts_analyzed,
@@ -241,6 +243,7 @@ mod tests {
                 scored_at: "2026-02-08".to_string(),
                 behavioral_signals: None,
                 context_score: None,
+                graph_distance: None,
             },
             AccountScore {
                 did: "did:plc:def".to_string(),
@@ -254,6 +257,7 @@ mod tests {
                 scored_at: "2026-02-08".to_string(),
                 behavioral_signals: None,
                 context_score: None,
+                graph_distance: None,
             },
         ];
 

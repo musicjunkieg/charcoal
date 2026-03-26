@@ -23,26 +23,29 @@ pub fn display_threat_list(accounts: &[AccountScore]) {
 
     // Header
     println!(
-        "  {:>4}  {:<32} {:>6}  {:<10}  {:>5}  {:>7}",
+        "  {:>4}  {:<32} {:>6}  {:<10}  {:<14}  {:>5}  {:>7}",
         "Rank".dimmed(),
         "Handle".dimmed(),
         "Score".dimmed(),
         "Tier".dimmed(),
+        "Distance".dimmed(),
         "Tox".dimmed(),
         "Overlap".dimmed(),
     );
-    println!("  {}", "-".repeat(78).dimmed());
+    println!("  {}", "-".repeat(94).dimmed());
 
     for (i, account) in accounts.iter().enumerate() {
         let tier_str = account.threat_tier.as_deref().unwrap_or("?");
         let colored_tier = colorize_tier(tier_str);
+        let distance = account.graph_distance.as_deref().unwrap_or("—");
 
         println!(
-            "  {:>4}. @{:<30} {:>6.1}  {:<10}  {:>.2}  {:>7.2}",
+            "  {:>4}. @{:<30} {:>6.1}  {:<10}  {:<14}  {:>.2}  {:>7.2}",
             i + 1,
             account.handle,
             account.threat_score.unwrap_or(0.0),
             colored_tier,
+            distance,
             account.toxicity_score.unwrap_or(0.0),
             account.topic_overlap.unwrap_or(0.0),
         );
@@ -94,6 +97,9 @@ pub fn display_account_detail(score: &AccountScore) {
     }
     if let Some(overlap) = score.topic_overlap {
         println!("  Topic overlap: {:.2}", overlap);
+    }
+    if let Some(ref distance) = score.graph_distance {
+        println!("  Graph distance: {}", distance);
     }
     println!("  Posts analyzed: {}", score.posts_analyzed);
 

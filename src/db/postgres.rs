@@ -115,6 +115,10 @@ impl PgDatabase {
                     5,
                     include_str!("../../migrations/postgres/0005_contextual_scoring.sql"),
                 ),
+                (
+                    6,
+                    include_str!("../../migrations/postgres/0006_graph_distance.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
@@ -309,8 +313,8 @@ impl Database for PgDatabase {
         sqlx_core::query::query(
             "INSERT INTO account_scores
                 (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11)
+                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12)
              ON CONFLICT(user_did, did) DO UPDATE SET
                 handle = $3,
                 toxicity_score = $4,
@@ -321,7 +325,8 @@ impl Database for PgDatabase {
                 top_toxic_posts = $9,
                 scored_at = NOW(),
                 behavioral_signals = $10,
-                context_score = $11",
+                context_score = $11,
+                graph_distance = $12",
         )
         .bind(user_did)
         .bind(&score.did)
@@ -334,6 +339,7 @@ impl Database for PgDatabase {
         .bind(&top_posts_json)
         .bind(&behavioral_json)
         .bind(score.context_score)
+        .bind(&score.graph_distance)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -383,6 +389,7 @@ impl Database for PgDatabase {
                 scored_at: row.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
+                graph_distance: None,
             });
         }
         Ok(accounts)
@@ -663,6 +670,7 @@ impl Database for PgDatabase {
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
+                graph_distance: None,
             }
         }))
     }
@@ -701,6 +709,7 @@ impl Database for PgDatabase {
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
+                graph_distance: None,
             }
         }))
     }
@@ -790,6 +799,7 @@ impl Database for PgDatabase {
                 scored_at: row.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
+                graph_distance: None,
             });
         }
         Ok(accounts)

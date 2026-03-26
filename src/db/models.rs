@@ -23,6 +23,8 @@ pub struct AccountScore {
     pub behavioral_signals: Option<String>,
     /// NLI-derived contextual hostility score (max across all interaction pairs)
     pub context_score: Option<f64>,
+    /// Social graph distance to the protected user (None if not classified)
+    pub graph_distance: Option<String>,
 }
 
 /// A single post with its toxicity score, kept as evidence.

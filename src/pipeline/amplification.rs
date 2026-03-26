@@ -16,10 +16,13 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use std::collections::HashMap;
+
 use crate::bluesky::amplification::AmplificationNotification;
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
 use crate::bluesky::posts;
+use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
 use crate::scoring::nli::NliScorer;
 use crate::scoring::profile;
@@ -54,6 +57,7 @@ pub async fn run(
     nli_scorer: Option<&NliScorer>,
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     data_dir: Option<&std::path::Path>,
+    graph_distances: &HashMap<String, GraphDistance>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -239,6 +243,7 @@ pub async fn run(
                     None, // No inferred pairs — using direct pairs
                     Some(&pairs),
                     data_dir,
+                    graph_distances.get(did).copied(),
                 )
                 .await
                 {
@@ -359,6 +364,7 @@ pub async fn run(
                                 None, // No protected post embeddings
                                 None, // No direct pairs
                                 None, // No audit logging in pass 1
+                                None, // No graph distance for followers
                             ))
                             .catch_unwind()
                             .await
@@ -394,6 +400,7 @@ pub async fn run(
                                         ppwe_ref, // Inferred pairs
                                         None,     // No direct pairs
                                         data_dir, // Audit logging
+                                        None,     // No graph distance for followers
                                     ))
                                     .catch_unwind()
                                     .await

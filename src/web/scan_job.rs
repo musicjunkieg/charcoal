@@ -82,7 +82,7 @@ async fn run_scan(
         s.progress_message = "Loading toxicity model…".to_string();
     }
 
-    let scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
+    let primary_scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
         let model_dir = config.model_dir.clone();
         // OnnxToxicityScorer::load is synchronous blocking I/O — offload to avoid
         // stalling the async runtime while the model is read from disk.
@@ -93,6 +93,28 @@ async fn run_scan(
     } else {
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
+
+    // Wrap in ensemble scorer if OpenAI API key is configured
+    let secondary_scorer: Option<Box<dyn ToxicityScorer>> =
+        config.openai_api_key.as_ref().and_then(|key| {
+            match crate::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
+                Ok(s) => {
+                    info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");
+                    Some(Box::new(s) as Box<dyn ToxicityScorer>)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to init OpenAI scorer, using ONNX only");
+                    None
+                }
+            }
+        });
+
+    let scorer: Box<dyn ToxicityScorer> =
+        Box::new(crate::toxicity::ensemble::EnsembleToxicityScorer::new(
+            primary_scorer,
+            secondary_scorer,
+            crate::toxicity::ensemble::DisagreementStrategy::TakeLower,
+        ));
 
     // Phase 2: load embedding model (optional — falls back to TF-IDF)
     //
@@ -372,6 +394,22 @@ async fn run_scan(
             .collect::<Vec<_>>(),
     );
 
+    // Phase 5b: classify social graph distance for all amplifiers
+    let amplifier_did_set: std::collections::HashSet<String> =
+        events.iter().map(|e| e.amplifier_did.clone()).collect();
+    let graph_distances = if !amplifier_did_set.is_empty() {
+        let did_refs: Vec<&str> = amplifier_did_set.iter().map(|s| s.as_str()).collect();
+        crate::bluesky::relationships::classify_relationships(&client, user_did, &did_refs)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    info!(
+        classified = graph_distances.len(),
+        "Classified amplifier graph distances"
+    );
+
     // Phase 6: run amplification pipeline
     let weights = ThreatWeights::default();
     let result = crate::pipeline::amplification::run(
@@ -394,6 +432,7 @@ async fn run_scan(
         nli_scorer.as_ref(),
         protected_posts_with_embeddings.as_deref(),
         Some(config.data_dir()),
+        &graph_distances,
     )
     .await;
 

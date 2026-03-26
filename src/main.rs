@@ -319,6 +319,7 @@ async fn main() -> Result<()> {
                 None, // NLI scorer not loaded in CLI mode (yet)
                 None, // No protected post embeddings in CLI mode
                 Some(config.data_dir()),
+                &std::collections::HashMap::new(), // No graph distance in CLI
             )
             .await?;
 
@@ -429,6 +430,7 @@ async fn main() -> Result<()> {
                 None, // No protected post embeddings in CLI
                 None, // No direct pairs in CLI
                 Some(config.data_dir()),
+                None, // No graph distance in CLI
             )
             .await?;
 
@@ -595,6 +597,7 @@ async fn main() -> Result<()> {
                     None, // No protected post embeddings in CLI
                     None, // No direct pairs in CLI
                     Some(config.data_dir()),
+                    None, // No graph distance in CLI
                 )
                 .await
                 {
@@ -903,23 +906,47 @@ async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
 }
 
 /// Create a toxicity scorer based on the configured backend.
+/// When OPENAI_API_KEY is set, wraps the primary scorer in an ensemble
+/// with the OpenAI Moderation API as a secondary classifier.
 fn create_scorer(
     config: &config::Config,
 ) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
-    match config.scorer_backend {
+    let primary: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = match config.scorer_backend {
         config::ScorerBackend::Onnx => {
             info!("Using local ONNX toxicity scorer");
             let scorer = charcoal::toxicity::onnx::OnnxToxicityScorer::load(&config.model_dir)?;
-            Ok(Box::new(scorer))
+            Box::new(scorer)
         }
         config::ScorerBackend::Perspective => {
             info!("Using Perspective API toxicity scorer");
             let scorer = charcoal::toxicity::perspective::PerspectiveScorer::new(
                 config.perspective_api_key.clone(),
             );
-            Ok(Box::new(scorer))
+            Box::new(scorer)
         }
-    }
+    };
+
+    let secondary: Option<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> =
+        config.openai_api_key.as_ref().and_then(|key| {
+            match charcoal::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
+                Ok(s) => {
+                    info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");
+                    Some(Box::new(s) as Box<dyn charcoal::toxicity::traits::ToxicityScorer>)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to init OpenAI scorer, using primary only");
+                    None
+                }
+            }
+        });
+
+    Ok(Box::new(
+        charcoal::toxicity::ensemble::EnsembleToxicityScorer::new(
+            primary,
+            secondary,
+            charcoal::toxicity::ensemble::DisagreementStrategy::TakeLower,
+        ),
+    ))
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.

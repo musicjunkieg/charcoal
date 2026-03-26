@@ -13,6 +13,7 @@ use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, Post};
+use crate::bluesky::relationships::GraphDistance;
 use crate::db::models::{AccountScore, ToxicPost};
 use crate::scoring::behavioral;
 use crate::scoring::nli::NliScorer;
@@ -49,6 +50,7 @@ pub async fn build_profile(
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     direct_pairs: Option<&[(String, String)]>,
     data_dir: Option<&std::path::Path>,
+    graph_distance: Option<GraphDistance>,
 ) -> Result<AccountScore> {
     // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
     let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
@@ -71,6 +73,7 @@ pub async fn build_profile(
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         });
     }
 
@@ -306,7 +309,13 @@ pub async fn build_profile(
         Some(ctx) => 1.0 + (ctx * 0.5),
         None => 1.0,
     };
-    let final_score = (score_with_behavioral * context_multiplier).clamp(0.0, 100.0);
+
+    // Step 7: Apply graph distance weight
+    // Strangers get amplified (1.2x), mutual follows get dampened (0.6x).
+    // Applied AFTER benign gate so it cannot bypass ally protections.
+    let distance_weight = graph_distance.map(|d| d.threat_weight()).unwrap_or(1.0);
+    let final_score =
+        (score_with_behavioral * context_multiplier * distance_weight).clamp(0.0, 100.0);
 
     let tier = crate::db::models::ThreatTier::from_score(final_score);
 
@@ -349,6 +358,7 @@ pub async fn build_profile(
         scored_at: String::new(),
         behavioral_signals: Some(signals_json),
         context_score,
+        graph_distance: graph_distance.map(|d| d.as_str().to_string()),
     })
 }
 

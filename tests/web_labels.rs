@@ -35,6 +35,7 @@ mod tests {
             scored_at: "2026-03-19T12:00:00Z".to_string(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         db.upsert_account_score(TEST_DID, &account).await.unwrap();
     }

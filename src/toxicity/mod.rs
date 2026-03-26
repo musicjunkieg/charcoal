@@ -5,7 +5,9 @@
 // available as a fallback via CHARCOAL_SCORER=perspective.
 
 pub mod download;
+pub mod ensemble;
 pub mod onnx;
+pub mod openai_moderation;
 pub mod perspective;
 pub mod rate_limiter;
 pub mod traits;

@@ -325,6 +325,7 @@ mod tests {
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let ranked = db.get_ranked_threats(TEST_USER, 0.0).await.unwrap();
@@ -393,6 +394,7 @@ mod tests {
             scored_at: "2024-01-01".to_string(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         // Exact match
@@ -431,6 +433,7 @@ mod tests {
             scored_at: "2024-01-01".to_string(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let found = db
