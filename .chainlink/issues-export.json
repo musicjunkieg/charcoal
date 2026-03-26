@@ -1,19 +1,49 @@
 {
   "version": 1,
-  "exported_at": "2026-03-26T18:31:06.395455+00:00",
+  "exported_at": "2026-03-26T19:36:25.036197+00:00",
   "issues": [
+    {
+      "id": 145,
+      "title": "Run ensemble primary and secondary scorers concurrently with tokio::join",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-03-26T19:35:31.527598+00:00",
+      "updated_at": "2026-03-26T19:35:31.527598+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 144,
+      "title": "Merge graph distance + ensemble branch to staging",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-03-26T19:01:04.095747+00:00",
+      "updated_at": "2026-03-26T19:01:04.095747+00:00",
+      "closed_at": null
+    },
     {
       "id": 143,
       "title": "Display graph distance in reports and terminal output",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": 136,
       "labels": [],
       "comments": [],
       "created_at": "2026-03-26T18:07:27.231003+00:00",
-      "updated_at": "2026-03-26T18:07:27.231003+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-26T18:31:13.799595+00:00",
+      "closed_at": "2026-03-26T18:31:13.799595+00:00"
     },
     {
       "id": 142,
@@ -97,7 +127,7 @@
       "id": 136,
       "title": "Add graph distance scoring and ensemble toxicity scorer",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -105,8 +135,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-26T18:07:22.153925+00:00",
-      "updated_at": "2026-03-26T18:07:22.153925+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-26T18:32:04.924478+00:00",
+      "closed_at": "2026-03-26T18:32:04.924478+00:00"
     },
     {
       "id": 135,
