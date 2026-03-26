@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-03-26T18:21:57.029439+00:00",
+  "exported_at": "2026-03-26T18:24:06.460498+00:00",
   "issues": [
     {
       "id": 143,
@@ -58,14 +58,14 @@
       "id": 139,
       "title": "Wire graph distance weight into scoring formula",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": 136,
       "labels": [],
       "comments": [],
       "created_at": "2026-03-26T18:07:27.214+00:00",
-      "updated_at": "2026-03-26T18:07:27.214+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-26T18:22:05.958144+00:00",
+      "closed_at": "2026-03-26T18:22:05.958144+00:00"
     },
     {
       "id": 138,

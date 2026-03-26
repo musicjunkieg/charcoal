@@ -319,6 +319,7 @@ async fn main() -> Result<()> {
                 None, // NLI scorer not loaded in CLI mode (yet)
                 None, // No protected post embeddings in CLI mode
                 Some(config.data_dir()),
+                &std::collections::HashMap::new(), // No graph distance in CLI
             )
             .await?;
 

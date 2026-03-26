@@ -372,6 +372,22 @@ async fn run_scan(
             .collect::<Vec<_>>(),
     );
 
+    // Phase 5b: classify social graph distance for all amplifiers
+    let amplifier_did_set: std::collections::HashSet<String> =
+        events.iter().map(|e| e.amplifier_did.clone()).collect();
+    let graph_distances = if !amplifier_did_set.is_empty() {
+        let did_refs: Vec<&str> = amplifier_did_set.iter().map(|s| s.as_str()).collect();
+        crate::bluesky::relationships::classify_relationships(&client, user_did, &did_refs)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    info!(
+        classified = graph_distances.len(),
+        "Classified amplifier graph distances"
+    );
+
     // Phase 6: run amplification pipeline
     let weights = ThreatWeights::default();
     let result = crate::pipeline::amplification::run(
@@ -394,6 +410,7 @@ async fn run_scan(
         nli_scorer.as_ref(),
         protected_posts_with_embeddings.as_deref(),
         Some(config.data_dir()),
+        &graph_distances,
     )
     .await;
 
