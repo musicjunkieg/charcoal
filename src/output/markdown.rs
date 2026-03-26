@@ -241,6 +241,7 @@ mod tests {
                 scored_at: "2026-02-08".to_string(),
                 behavioral_signals: None,
                 context_score: None,
+                graph_distance: None,
             },
             AccountScore {
                 did: "did:plc:def".to_string(),
@@ -254,6 +255,7 @@ mod tests {
                 scored_at: "2026-02-08".to_string(),
                 behavioral_signals: None,
                 context_score: None,
+                graph_distance: None,
             },
         ];
 

@@ -82,6 +82,7 @@ fn account_score_has_context_score() {
         scored_at: "2026-03-19T12:00:00Z".to_string(),
         behavioral_signals: None,
         context_score: Some(0.65),
+        graph_distance: None,
     };
     assert_eq!(score.context_score, Some(0.65));
 }
@@ -100,6 +101,7 @@ fn account_score_context_score_defaults_none() {
         scored_at: "2026-03-19T12:00:00Z".to_string(),
         behavioral_signals: None,
         context_score: None,
+        graph_distance: None,
     };
     assert!(score.context_score.is_none());
 }
@@ -321,6 +323,7 @@ fn make_score(did: &str, handle: &str, threat_score: f64, tier: &str) -> Account
         scored_at: String::new(),
         behavioral_signals: None,
         context_score: None,
+        graph_distance: None,
     }
 }
 

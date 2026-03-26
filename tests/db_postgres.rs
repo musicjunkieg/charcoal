@@ -153,6 +153,7 @@ async fn test_pg_account_score_upsert_and_rank() {
         scored_at: String::new(),
         behavioral_signals: None,
         context_score: None,
+        graph_distance: None,
     };
     db.upsert_account_score(TEST_USER, &score).await.unwrap();
 

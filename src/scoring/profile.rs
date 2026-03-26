@@ -71,6 +71,7 @@ pub async fn build_profile(
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         });
     }
 
@@ -349,6 +350,7 @@ pub async fn build_profile(
         scored_at: String::new(),
         behavioral_signals: Some(signals_json),
         context_score,
+        graph_distance: None,
     })
 }
 

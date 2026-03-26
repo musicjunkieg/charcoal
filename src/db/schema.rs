@@ -259,6 +259,13 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // Migration v6: add graph_distance column to account_scores.
+    // Stores the social graph relationship label (Mutual follow, Follows you,
+    // You follow, Stranger) for scoring weight adjustments.
+    run_migration(conn, 6, |c| {
+        c.execute_batch("ALTER TABLE account_scores ADD COLUMN graph_distance TEXT;")
+    })?;
+
     Ok(())
 }
 
@@ -387,7 +394,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
@@ -499,6 +506,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
     }
 }

@@ -148,8 +148,8 @@ pub fn get_embedding(conn: &Connection, user_did: &str) -> Result<Option<Vec<f64
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, graph_distance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11)
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -159,7 +159,8 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             posts_analyzed = ?8,
             top_toxic_posts = ?9,
             scored_at = datetime('now'),
-            behavioral_signals = ?10",
+            behavioral_signals = ?10,
+            graph_distance = ?11",
         params![
             user_did,
             score.did,
@@ -171,6 +172,7 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             score.posts_analyzed,
             top_posts_json,
             score.behavioral_signals,
+            score.graph_distance,
         ],
     )?;
     Ok(())
@@ -184,7 +186,8 @@ pub fn get_ranked_threats(
 ) -> Result<Vec<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
+                graph_distance
          FROM account_scores
          WHERE user_did = ?1 AND threat_score >= ?2
          ORDER BY threat_score DESC",
@@ -210,6 +213,7 @@ pub fn get_ranked_threats(
             scored_at: row.get(8)?,
             behavioral_signals: row.get(9)?,
             context_score: None,
+            graph_distance: row.get(10)?,
         })
     })?;
 
@@ -476,6 +480,7 @@ pub fn get_account_by_handle(
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
                 context_score: None,
+                graph_distance: None,
             })
         })
         .optional()?;
@@ -514,6 +519,7 @@ pub fn get_account_by_did(
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
                 context_score: None,
+                graph_distance: None,
             })
         })
         .optional()?;
@@ -599,6 +605,7 @@ pub fn get_unlabeled_accounts(
             scored_at: row.get(8)?,
             behavioral_signals: row.get(9)?,
             context_score: row.get(10)?,
+            graph_distance: None,
         })
     })?;
 
@@ -870,6 +877,7 @@ mod tests {
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -988,6 +996,7 @@ mod tests {
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1018,6 +1027,7 @@ mod tests {
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1050,6 +1060,7 @@ mod tests {
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
+            graph_distance: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1113,6 +1124,7 @@ mod tests {
                 scored_at: String::new(),
                 behavioral_signals: Some(format!(r#"{{"avg_engagement":{eng}}}"#)),
                 context_score: None,
+                graph_distance: None,
             };
             upsert_account_score(&conn, TEST_USER, &score).unwrap();
         }
