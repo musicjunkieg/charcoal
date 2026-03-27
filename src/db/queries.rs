@@ -12,7 +12,7 @@ use rusqlite::{params, Connection};
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel,
+    UserLabel, UserRow,
 };
 
 // --- Users ---
@@ -758,6 +758,83 @@ pub fn get_inferred_pairs(
         pairs.push(row?);
     }
     Ok(pairs)
+}
+
+// --- Admin dashboard ---
+
+/// List all users in the system, ordered by creation date descending.
+pub fn list_users(conn: &Connection) -> Result<Vec<UserRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, created_at, last_login_at FROM users ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(UserRow {
+            did: row.get(0)?,
+            handle: row.get(1)?,
+            created_at: row.get(2)?,
+            last_login_at: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Count scored accounts for a user (only those with a non-null threat_score).
+pub fn get_scored_account_count(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_score IS NOT NULL",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Check if a topic fingerprint exists for a user.
+pub fn has_fingerprint(conn: &Connection, user_did: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM topic_fingerprint WHERE user_did = ?1",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Delete all data for a user (cascade across all user-scoped tables).
+pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM inferred_pairs WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM user_labels WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM amplification_events WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM account_scores WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM topic_fingerprint WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
+    Ok(())
+}
+
+/// Update last_login_at timestamp for a user.
+pub fn update_last_login(conn: &Connection, did: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET last_login_at = datetime('now') WHERE did = ?1",
+        params![did],
+    )?;
+    Ok(())
 }
 
 // rusqlite's optional() helper — converts "no rows" into None

@@ -13,7 +13,9 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
-use super::models::{AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel};
+use super::models::{
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+};
 use super::traits::Database;
 
 pub struct SqliteDatabase {
@@ -254,6 +256,31 @@ impl Database for SqliteDatabase {
     ) -> Result<Vec<InferredPair>> {
         let conn = self.conn.lock().await;
         super::queries::get_inferred_pairs(&conn, user_did, target_did)
+    }
+
+    async fn list_users(&self) -> Result<Vec<UserRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_users(&conn)
+    }
+
+    async fn get_scored_account_count(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::get_scored_account_count(&conn, user_did)
+    }
+
+    async fn has_fingerprint(&self, user_did: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::has_fingerprint(&conn, user_did)
+    }
+
+    async fn delete_user_data(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_user_data(&conn, user_did)
+    }
+
+    async fn update_last_login(&self, did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::update_last_login(&conn, did)
     }
 }
 

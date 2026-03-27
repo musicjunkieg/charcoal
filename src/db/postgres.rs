@@ -19,7 +19,7 @@ use sqlx_postgres::Postgres;
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel,
+    UserLabel, UserRow,
 };
 use super::traits::Database;
 
@@ -118,6 +118,10 @@ impl PgDatabase {
                 (
                     6,
                     include_str!("../../migrations/postgres/0006_graph_distance.sql"),
+                ),
+                (
+                    7,
+                    include_str!("../../migrations/postgres/0007_last_login_at.sql"),
                 ),
             ];
 
@@ -939,5 +943,88 @@ impl Database for PgDatabase {
             });
         }
         Ok(pairs)
+    }
+
+    async fn list_users(&self) -> Result<Vec<UserRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT did, handle,
+                    to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as created_at,
+                    to_char(last_login_at, 'YYYY-MM-DD HH24:MI:SS') as last_login_at
+             FROM users ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| UserRow {
+                did: r.get(0),
+                handle: r.get(1),
+                created_at: r.get(2),
+                last_login_at: r.get(3),
+            })
+            .collect())
+    }
+
+    async fn get_scored_account_count(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*)::bigint FROM account_scores
+             WHERE user_did = $1 AND threat_score IS NOT NULL",
+        )
+        .bind(user_did)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn has_fingerprint(&self, user_did: &str) -> Result<bool> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*) > 0 FROM topic_fingerprint WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<bool, _>(0))
+    }
+
+    async fn delete_user_data(&self, user_did: &str) -> Result<()> {
+        // Delete in dependency order to avoid FK issues if constraints are added later
+        sqlx_core::query::query("DELETE FROM inferred_pairs WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        sqlx_core::query::query("DELETE FROM user_labels WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        sqlx_core::query::query("DELETE FROM amplification_events WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        sqlx_core::query::query("DELETE FROM topic_fingerprint WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        sqlx_core::query::query("DELETE FROM users WHERE did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn update_last_login(&self, did: &str) -> Result<()> {
+        sqlx_core::query::query("UPDATE users SET last_login_at = NOW() WHERE did = $1")
+            .bind(did)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }
