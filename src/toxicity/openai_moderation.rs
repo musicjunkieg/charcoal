@@ -5,17 +5,29 @@
 // for compatibility with the existing scoring pipeline.
 //
 // The endpoint is free (no token charges) but requires an API key.
+// Rate limited — includes exponential backoff retry on 429 responses
+// and batch support via array input.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
 
 /// Pinned model version for reproducible scoring.
 const MODEL: &str = "omni-moderation-2024-09-26";
 const ENDPOINT: &str = "https://api.openai.com/v1/moderations";
+
+/// Maximum retry attempts on 429 rate limit responses.
+const MAX_RETRIES: u32 = 5;
+
+/// Initial backoff delay in milliseconds (doubles each retry).
+const INITIAL_BACKOFF_MS: u64 = 500;
+
+/// Maximum texts per batch request (OpenAI supports large batches,
+/// but we cap to keep request size reasonable).
+const MAX_BATCH_SIZE: usize = 32;
 
 /// OpenAI Moderation API scorer implementing the ToxicityScorer trait.
 pub struct OpenAiModerationScorer {
@@ -35,6 +47,54 @@ impl OpenAiModerationScorer {
             client,
             api_key: api_key.to_string(),
         })
+    }
+
+    /// Send a moderation request with retry on 429 rate limit errors.
+    async fn send_with_retry(&self, body: &serde_json::Value) -> Result<ModerationResponse> {
+        let mut backoff_ms = INITIAL_BACKOFF_MS;
+
+        for attempt in 0..=MAX_RETRIES {
+            let response = self
+                .client
+                .post(ENDPOINT)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .json(body)
+                .send()
+                .await
+                .context("OpenAI Moderation API request failed")?;
+
+            let status = response.status();
+
+            if status.as_u16() == 429 {
+                if attempt < MAX_RETRIES {
+                    warn!(
+                        attempt = attempt + 1,
+                        backoff_ms, "OpenAI rate limited (429), retrying after backoff"
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                    backoff_ms *= 2;
+                    continue;
+                }
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!(
+                    "OpenAI Moderation API rate limited after {MAX_RETRIES} retries: {error_body}"
+                );
+            }
+
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!("OpenAI Moderation API error {status}: {error_body}");
+            }
+
+            let moderation: ModerationResponse = response
+                .json()
+                .await
+                .context("Failed to parse OpenAI Moderation response")?;
+
+            return Ok(moderation);
+        }
+
+        anyhow::bail!("OpenAI Moderation API: exhausted retries")
     }
 }
 
@@ -108,25 +168,7 @@ impl ToxicityScorer for OpenAiModerationScorer {
             "input": text,
         });
 
-        let response = self
-            .client
-            .post(ENDPOINT)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&body)
-            .send()
-            .await
-            .context("OpenAI Moderation API request failed")?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
-            anyhow::bail!("OpenAI Moderation API error {status}: {error_body}");
-        }
-
-        let moderation: ModerationResponse = response
-            .json()
-            .await
-            .context("Failed to parse OpenAI Moderation response")?;
+        let moderation = self.send_with_retry(&body).await?;
 
         let result = moderation
             .results
@@ -141,5 +183,42 @@ impl ToxicityScorer for OpenAiModerationScorer {
         );
 
         Ok(toxicity_result)
+    }
+
+    /// Batch score multiple texts in a single API call.
+    /// The OpenAI Moderation API accepts an array of inputs and returns
+    /// results in the same order. We chunk into MAX_BATCH_SIZE groups
+    /// to keep request sizes reasonable.
+    async fn score_batch(&self, texts: &[String]) -> Result<Vec<ToxicityResult>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut all_results = Vec::with_capacity(texts.len());
+
+        for chunk in texts.chunks(MAX_BATCH_SIZE) {
+            let body = serde_json::json!({
+                "model": MODEL,
+                "input": chunk,
+            });
+
+            let moderation = self.send_with_retry(&body).await?;
+
+            if moderation.results.len() != chunk.len() {
+                anyhow::bail!(
+                    "OpenAI Moderation batch: expected {} results, got {}",
+                    chunk.len(),
+                    moderation.results.len()
+                );
+            }
+
+            for result in &moderation.results {
+                all_results.push(result.category_scores.to_toxicity_result());
+            }
+
+            debug!(batch_size = chunk.len(), "OpenAI Moderation scored batch");
+        }
+
+        Ok(all_results)
     }
 }
