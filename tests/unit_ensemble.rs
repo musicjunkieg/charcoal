@@ -229,3 +229,64 @@ async fn ensemble_handles_missing_secondary_profanity() {
     assert!(result.result.attributes.profanity.is_some());
     assert!((result.result.attributes.profanity.unwrap() - 0.8).abs() < 0.01);
 }
+
+// ============================================================
+// Groq Safeguard — parsing and category boost tests
+// ============================================================
+
+mod groq_parsing_tests {
+    use charcoal::toxicity::groq_safeguard::{boost_for_category, parse_safeguard_response};
+
+    #[test]
+    fn test_parse_violation() {
+        let json =
+            r#"{"violation": 1, "category": "Targeted harassment", "rationale": "Direct insult"}"#;
+        let result = parse_safeguard_response(json).unwrap();
+        assert!(result.violation);
+        assert_eq!(result.category, "Targeted harassment");
+        assert_eq!(result.rationale, "Direct insult");
+    }
+
+    #[test]
+    fn test_parse_safe() {
+        let json =
+            r#"{"violation": 0, "category": "none", "rationale": "Substantive disagreement"}"#;
+        let result = parse_safeguard_response(json).unwrap();
+        assert!(!result.violation);
+    }
+
+    #[test]
+    fn test_parse_malformed_json() {
+        let result = parse_safeguard_response("not json at all");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_missing_fields() {
+        let json = r#"{"violation": 1}"#;
+        let result = parse_safeguard_response(json);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_truncated() {
+        let json = r#"{"violation": 1, "categ"#;
+        let result = parse_safeguard_response(json);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_category_boost_identity() {
+        assert_eq!(boost_for_category("Identity-based hostility"), 2.0);
+    }
+
+    #[test]
+    fn test_category_boost_bad_faith() {
+        assert_eq!(boost_for_category("Bad-faith engagement"), 1.5);
+    }
+
+    #[test]
+    fn test_category_boost_unknown() {
+        assert_eq!(boost_for_category("Something else"), 1.5);
+    }
+}

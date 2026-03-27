@@ -6,6 +6,7 @@
 
 pub mod download;
 pub mod ensemble;
+pub mod groq_safeguard;
 pub mod onnx;
 pub mod openai_moderation;
 pub mod perspective;
