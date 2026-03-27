@@ -63,18 +63,25 @@ impl EnsembleToxicityScorer {
     }
 
     /// Score text using the ensemble, returning full metadata about agreement.
+    ///
+    /// When a secondary scorer is available, both run concurrently via
+    /// `tokio::join!` so the wall-clock cost is max(primary, secondary)
+    /// rather than primary + secondary.
     pub async fn score_ensemble(&self, text: &str) -> Result<EnsembleResult> {
-        let primary_result = self.primary.score_text(text).await?;
-
-        let secondary_result = match &self.secondary {
-            Some(scorer) => match scorer.score_text(text).await {
-                Ok(result) => Some(result),
-                Err(e) => {
-                    warn!(error = %e, "Secondary scorer failed, using primary only");
-                    None
-                }
-            },
-            None => None,
+        let (primary_result, secondary_result) = match &self.secondary {
+            Some(scorer) => {
+                let (primary, secondary) =
+                    tokio::join!(self.primary.score_text(text), scorer.score_text(text),);
+                let secondary_result = match secondary {
+                    Ok(result) => Some(result),
+                    Err(e) => {
+                        warn!(error = %e, "Secondary scorer failed, using primary only");
+                        None
+                    }
+                };
+                (primary?, secondary_result)
+            }
+            None => (self.primary.score_text(text).await?, None),
         };
 
         match secondary_result {
