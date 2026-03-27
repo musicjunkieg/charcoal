@@ -29,7 +29,7 @@ pub async fn get_status(
     };
 
     // Compute tier counts from DB. threat_tier is stored as Option<String>.
-    let threats = match state.db.get_ranked_threats(&auth.did, 0.0).await {
+    let threats = match state.db.get_ranked_threats(&auth.effective_did, 0.0).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "DB error in get_status");

@@ -236,7 +236,19 @@ pub fn api_error(status: StatusCode, message: &str) -> Response {
 /// Marker type indicating the request passed session authentication.
 /// Inserted into request extensions by `require_auth` middleware.
 /// Handlers can extract it to learn who is authenticated.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AuthUser {
+    /// The DID of the authenticated user (from session cookie)
     pub did: String,
+    /// The effective DID for DB queries (impersonated DID, or same as `did`)
+    pub effective_did: String,
+    /// Whether this user is an admin
+    pub is_admin: bool,
+}
+
+impl AuthUser {
+    /// Returns true if the user is viewing as someone else
+    pub fn is_impersonating(&self) -> bool {
+        self.did != self.effective_did
+    }
 }

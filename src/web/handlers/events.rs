@@ -23,7 +23,11 @@ pub async fn list_events(
     Query(params): Query<EventsQuery>,
 ) -> Response {
     let limit = params.limit.unwrap_or(50).min(500);
-    let events = match state.db.get_recent_events(&auth.did, limit as u32).await {
+    let events = match state
+        .db
+        .get_recent_events(&auth.effective_did, limit as u32)
+        .await
+    {
         Ok(events) => events,
         Err(e) => {
             tracing::error!(error = %e, "DB error listing events");

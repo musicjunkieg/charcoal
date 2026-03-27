@@ -127,6 +127,18 @@ pub fn did_is_allowed(did: &str, allowed_did: &str) -> bool {
         .any(|entry| constant_time_eq(did, entry.trim()))
 }
 
+/// Check if a DID is in the admin allowlist (comma-separated).
+/// Returns false if admin_dids is empty (no admins configured).
+pub fn did_is_admin(did: &str, admin_dids: &str) -> bool {
+    if admin_dids.is_empty() {
+        return false;
+    }
+    admin_dids
+        .split(',')
+        .map(|s| s.trim())
+        .any(|admin_did| constant_time_eq(admin_did, did))
+}
+
 /// Axum middleware: reject requests without a valid session cookie.
 ///
 /// Returns 401 if no valid session, 403 if the DID is not allowed.
@@ -148,7 +160,12 @@ pub async fn require_auth(
             super::api_error(axum::http::StatusCode::FORBIDDEN, "Access denied")
         }
         Some(did) => {
-            request.extensions_mut().insert(AuthUser { did });
+            let is_admin = did_is_admin(&did, &state.config.admin_dids);
+            request.extensions_mut().insert(AuthUser {
+                did: did.clone(),
+                effective_did: did,
+                is_admin,
+            });
             next.run(request).await
         }
     }
