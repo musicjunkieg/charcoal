@@ -6,6 +6,9 @@
 	import { AuthError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
 
+	let asUser = $derived($page.url.searchParams.get('as_user'));
+	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
+
 	const TIERS = ['All', 'High', 'Elevated', 'Watch', 'Low'] as const;
 	const TIER_COLORS: Record<string, string> = {
 		High: '#fca5a5',
@@ -138,10 +141,10 @@
 					{#each accounts as account, i (account.did || i)}
 						<tr
 							class="account-row"
-							onclick={() => goto(`/accounts/${account.handle}`)}
+							onclick={() => goto(`/accounts/${account.handle}${asUserSuffix}`)}
 							role="link"
 							tabindex="0"
-							onkeydown={(e) => e.key === 'Enter' && goto(`/accounts/${account.handle}`)}
+							onkeydown={(e) => e.key === 'Enter' && goto(`/accounts/${account.handle}${asUserSuffix}`)}
 						>
 							<td class="col-rank muted">{account.rank}</td>
 							<td class="col-handle">

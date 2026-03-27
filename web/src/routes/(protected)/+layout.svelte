@@ -11,6 +11,7 @@
 	let identity = $state<Identity | null>(null);
 
 	let asUser = $derived($page.url.searchParams.get('as_user'));
+	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
 
 	onMount(async () => {
 		try {
@@ -58,17 +59,17 @@
 
 			<div class="nav-links">
 				<a
-					href="/dashboard"
+					href="/dashboard{asUserSuffix}"
 					class="nav-link"
 					class:active={$page.url.pathname === '/dashboard'}
 				>Dashboard</a>
 				<a
-					href="/accounts"
+					href="/accounts{asUserSuffix}"
 					class="nav-link"
 					class:active={$page.url.pathname.startsWith('/accounts')}
 				>Accounts</a>
 				<a
-					href="/review"
+					href="/review{asUserSuffix}"
 					class="nav-link"
 					class:active={$page.url.pathname === '/review'}
 				>Review</a>

@@ -7,6 +7,9 @@
 	import type { Account } from '$lib/types.js';
 	import LabelButtons from '$lib/components/LabelButtons.svelte';
 
+	let asUser = $derived($page.url.searchParams.get('as_user'));
+	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
+
 	const TIER_COLORS: Record<string, string> = {
 		High: '#fca5a5',
 		Elevated: '#fdba74',
@@ -54,7 +57,7 @@
 </svelte:head>
 
 <div class="page">
-	<a href="/accounts" class="back-link">← All accounts</a>
+	<a href="/accounts{asUserSuffix}" class="back-link">← All accounts</a>
 
 	{#if loading}
 		<div class="loading-state"><div class="spinner"></div></div>
