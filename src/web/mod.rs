@@ -13,7 +13,7 @@ use anyhow::Result;
 use axum::body::Body;
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use include_dir::{include_dir, Dir};
 use tokio::sync::RwLock;
@@ -136,6 +136,19 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/api/review", get(handlers::labels::get_review_queue))
         .route("/api/accuracy", get(handlers::labels::get_accuracy))
         .route("/api/logout", post(handlers::auth::logout))
+        .route("/api/me", get(handlers::admin::get_identity))
+        .route(
+            "/api/admin/users",
+            get(handlers::admin::list_users).post(handlers::admin::pre_seed_user),
+        )
+        .route(
+            "/api/admin/users/{did}/scan",
+            post(handlers::admin::trigger_admin_scan),
+        )
+        .route(
+            "/api/admin/users/{did}",
+            delete(handlers::admin::delete_user),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -161,6 +174,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
+                    axum::http::Method::DELETE,
                     axum::http::Method::OPTIONS,
                 ])
                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
