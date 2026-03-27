@@ -239,27 +239,24 @@ async fn run_scan(
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
 
-    // Wrap in ensemble scorer if OpenAI API key is configured
-    let secondary_scorer: Option<Box<dyn ToxicityScorer>> =
+    // Wrap in ensemble scorer if Groq API key is configured
+    let secondary_scorer: Option<crate::toxicity::groq_safeguard::GroqSafeguardScorer> =
         config.groq_api_key.as_ref().and_then(|key| {
-            match crate::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
+            match crate::toxicity::groq_safeguard::GroqSafeguardScorer::new(key) {
                 Ok(s) => {
-                    info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");
-                    Some(Box::new(s) as Box<dyn ToxicityScorer>)
+                    info!("Groq Safeguard scorer loaded — ensemble scoring enabled");
+                    Some(s)
                 }
                 Err(e) => {
-                    warn!(error = %e, "Failed to init OpenAI scorer, using ONNX only");
+                    warn!(error = %e, "Failed to init Groq scorer, using ONNX only");
                     None
                 }
             }
         });
 
-    let scorer: Box<dyn ToxicityScorer> =
-        Box::new(crate::toxicity::ensemble::EnsembleToxicityScorer::new(
-            primary_scorer,
-            secondary_scorer,
-            crate::toxicity::ensemble::DisagreementStrategy::TakeLower,
-        ));
+    let scorer: Box<dyn ToxicityScorer> = Box::new(
+        crate::toxicity::ensemble::EnsembleToxicityScorer::new(primary_scorer, secondary_scorer),
+    );
 
     // Phase 2: load embedding model (optional — falls back to TF-IDF)
     //

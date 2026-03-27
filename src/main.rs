@@ -906,8 +906,8 @@ async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
 }
 
 /// Create a toxicity scorer based on the configured backend.
-/// When OPENAI_API_KEY is set, wraps the primary scorer in an ensemble
-/// with the OpenAI Moderation API as a secondary classifier.
+/// When GROQ_API_KEY is set, wraps the primary scorer in an ensemble
+/// with the Groq Safeguard model as a secondary classifier.
 fn create_scorer(
     config: &config::Config,
 ) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
@@ -926,26 +926,22 @@ fn create_scorer(
         }
     };
 
-    let secondary: Option<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> =
+    let secondary: Option<charcoal::toxicity::groq_safeguard::GroqSafeguardScorer> =
         config.groq_api_key.as_ref().and_then(|key| {
-            match charcoal::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
+            match charcoal::toxicity::groq_safeguard::GroqSafeguardScorer::new(key) {
                 Ok(s) => {
-                    info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");
-                    Some(Box::new(s) as Box<dyn charcoal::toxicity::traits::ToxicityScorer>)
+                    info!("Groq Safeguard scorer loaded — ensemble scoring enabled");
+                    Some(s)
                 }
                 Err(e) => {
-                    warn!(error = %e, "Failed to init OpenAI scorer, using primary only");
+                    warn!(error = %e, "Failed to init Groq scorer, using primary only");
                     None
                 }
             }
         });
 
     Ok(Box::new(
-        charcoal::toxicity::ensemble::EnsembleToxicityScorer::new(
-            primary,
-            secondary,
-            charcoal::toxicity::ensemble::DisagreementStrategy::TakeLower,
-        ),
+        charcoal::toxicity::ensemble::EnsembleToxicityScorer::new(primary, secondary),
     ))
 }
 
