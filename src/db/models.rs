@@ -80,6 +80,15 @@ pub struct InferredPair {
     pub created_at: String,
 }
 
+/// A row from the users table, used by admin endpoints.
+#[derive(Debug, Clone, Serialize)]
+pub struct UserRow {
+    pub did: String,
+    pub handle: String,
+    pub created_at: String,
+    pub last_login_at: Option<String>,
+}
+
 /// Accuracy metrics comparing predicted tiers to user labels.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccuracyMetrics {

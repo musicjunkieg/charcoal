@@ -32,6 +32,14 @@ pub async fn upsert_label(
     Path(target_did): Path<String>,
     Json(body): Json<LabelRequest>,
 ) -> Response {
+    // Admins impersonating another user cannot write labels on their behalf.
+    if auth.is_impersonating() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "Cannot write labels while impersonating another user",
+        );
+    }
+
     let label = body.label.to_lowercase();
     if !VALID_LABELS.contains(&label.as_str()) {
         return api_error(
@@ -52,7 +60,8 @@ pub async fn upsert_label(
         return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
     }
 
-    // Fetch the label back to get the labeled_at timestamp
+    // Fetch the label back to get the labeled_at timestamp.
+    // Uses auth.did (not effective_did) because we just wrote with auth.did above.
     let user_label = match state.db.get_user_label(&auth.did, &target_did).await {
         Ok(Some(l)) => l,
         Ok(None) => {
@@ -68,7 +77,11 @@ pub async fn upsert_label(
     };
 
     // Look up the predicted tier from account_scores
-    let predicted_tier = match state.db.get_account_by_did(&auth.did, &target_did).await {
+    let predicted_tier = match state
+        .db
+        .get_account_by_did(&auth.effective_did, &target_did)
+        .await
+    {
         Ok(Some(account)) => account.threat_tier,
         _ => None,
     };
@@ -92,7 +105,11 @@ pub async fn get_review_queue(
 ) -> Response {
     let limit = params.limit.unwrap_or(20).min(100);
 
-    match state.db.get_unlabeled_accounts(&auth.did, limit).await {
+    match state
+        .db
+        .get_unlabeled_accounts(&auth.effective_did, limit)
+        .await
+    {
         Ok(accounts) => {
             let json_accounts: Vec<serde_json::Value> = accounts
                 .into_iter()
@@ -129,7 +146,7 @@ pub async fn get_accuracy(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Response {
-    match state.db.get_accuracy_metrics(&auth.did).await {
+    match state.db.get_accuracy_metrics(&auth.effective_did).await {
         Ok(metrics) => Json(serde_json::json!({
             "total_labeled": metrics.total_labeled,
             "exact_matches": metrics.exact_matches,

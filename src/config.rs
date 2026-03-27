@@ -41,6 +41,10 @@ pub struct Config {
     /// Find your DID at: bsky.app → Settings → Account
     #[cfg(feature = "web")]
     pub allowed_did: String,
+    /// Comma-separated list of DIDs that have admin privileges (CHARCOAL_ADMIN_DIDS env var).
+    /// Admins can impersonate other users for read-only views.
+    #[cfg(feature = "web")]
+    pub admin_dids: String,
     /// Public URL of the OAuth client metadata document (CHARCOAL_OAUTH_CLIENT_ID env var).
     /// Dev: register at cimd-service.fly.dev to get a URL like https://cimd-service.fly.dev/clients/xxx
     /// Production: https://{RAILWAY_PUBLIC_DOMAIN}/oauth-client-metadata.json
@@ -70,6 +74,8 @@ impl Config {
         #[cfg(feature = "web")]
         let allowed_did = env::var("CHARCOAL_ALLOWED_DID").unwrap_or_default();
         #[cfg(feature = "web")]
+        let admin_dids = env::var("CHARCOAL_ADMIN_DIDS").unwrap_or_default();
+        #[cfg(feature = "web")]
         let oauth_client_id = env::var("CHARCOAL_OAUTH_CLIENT_ID").unwrap_or_default();
         #[cfg(feature = "web")]
         let session_secret = env::var("CHARCOAL_SESSION_SECRET").unwrap_or_default();
@@ -89,6 +95,8 @@ impl Config {
             openai_api_key: env::var("OPENAI_API_KEY").ok(),
             #[cfg(feature = "web")]
             allowed_did,
+            #[cfg(feature = "web")]
+            admin_dids,
             #[cfg(feature = "web")]
             oauth_client_id,
             #[cfg(feature = "web")]
@@ -180,9 +188,23 @@ impl Config {
             #[cfg(feature = "web")]
             allowed_did: "did:plc:testalloweddid0000000000".to_string(),
             #[cfg(feature = "web")]
+            admin_dids: String::new(),
+            #[cfg(feature = "web")]
             oauth_client_id: "https://test.example.com/oauth-client-metadata.json".to_string(),
             #[cfg(feature = "web")]
             session_secret: "test_session_secret_at_least_32_chars!".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "web")]
+    fn test_admin_dids_parsing() {
+        let config = Config::test_defaults();
+        assert!(config.admin_dids.is_empty());
     }
 }

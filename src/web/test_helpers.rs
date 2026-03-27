@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::config::Config;
 use crate::db::schema::create_tables;
 use crate::db::sqlite::SqliteDatabase;
-use crate::web::scan_job::ScanStatus;
+use crate::web::scan_job::ScanManager;
 use crate::web::{build_router, AppState};
 
 pub const TEST_SECRET: &str = "test_session_secret_at_least_32_chars!";
@@ -38,7 +38,7 @@ pub fn build_test_app_with_db() -> (axum::Router, Arc<dyn crate::db::Database>) 
     let state = AppState {
         db: db.clone(),
         config: Arc::new(config),
-        scan_status: Arc::new(RwLock::new(ScanStatus::default())),
+        scan_manager: Arc::new(RwLock::new(ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
         signing_key,

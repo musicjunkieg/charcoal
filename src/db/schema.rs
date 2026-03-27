@@ -266,6 +266,13 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         c.execute_batch("ALTER TABLE account_scores ADD COLUMN graph_distance TEXT;")
     })?;
 
+    // Migration v7: add last_login_at to users table.
+    // Tracks when each user last authenticated via OAuth, used by admin dashboard.
+    run_migration(conn, 7, |c| {
+        c.execute_batch("ALTER TABLE users ADD COLUMN last_login_at TEXT;")?;
+        Ok(())
+    })?;
+
     Ok(())
 }
 
@@ -394,7 +401,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -506,6 +513,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
     }
 }

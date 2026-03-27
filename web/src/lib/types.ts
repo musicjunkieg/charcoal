@@ -109,3 +109,28 @@ export interface ReviewResponse {
 	accounts: ReviewAccount[];
 	total: number;
 }
+
+export interface AdminUser {
+	did: string;
+	handle: string;
+	has_fingerprint: boolean;
+	fingerprint_building: boolean;
+	last_scan_at: string | null;
+	scored_accounts: number;
+	last_login_at: string | null;
+}
+
+export interface AdminUsersResponse {
+	users: AdminUser[];
+}
+
+export interface Identity {
+	did: string;
+	handle: string;
+	is_admin: boolean;
+}
+
+export interface PreSeedResponse {
+	did: string;
+	handle: string;
+}

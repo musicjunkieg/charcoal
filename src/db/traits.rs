@@ -11,7 +11,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::models::{AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel};
+use super::models::{
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+};
 
 #[async_trait]
 pub trait Database: Send + Sync {
@@ -179,4 +181,21 @@ pub trait Database: Send + Sync {
         user_did: &str,
         target_did: &str,
     ) -> Result<Vec<InferredPair>>;
+
+    // --- Admin dashboard ---
+
+    /// List all users in the system.
+    async fn list_users(&self) -> Result<Vec<UserRow>>;
+
+    /// Count scored accounts for a user.
+    async fn get_scored_account_count(&self, user_did: &str) -> Result<i64>;
+
+    /// Check if a topic fingerprint exists for a user.
+    async fn has_fingerprint(&self, user_did: &str) -> Result<bool>;
+
+    /// Delete all data for a user (cascade across all user-scoped tables).
+    async fn delete_user_data(&self, user_did: &str) -> Result<()>;
+
+    /// Update last_login_at timestamp for a user.
+    async fn update_last_login(&self, did: &str) -> Result<()>;
 }

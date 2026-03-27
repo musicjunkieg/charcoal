@@ -36,7 +36,7 @@ pub async fn list_accounts(
     Extension(auth): Extension<AuthUser>,
     Query(params): Query<AccountsQuery>,
 ) -> Response {
-    let mut accounts = match state.db.get_ranked_threats(&auth.did, 0.0).await {
+    let mut accounts = match state.db.get_ranked_threats(&auth.effective_did, 0.0).await {
         Ok(accounts) => accounts,
         Err(e) => {
             tracing::error!(error = %e, "DB error fetching accounts");
@@ -98,11 +98,19 @@ pub async fn get_account(
     Extension(auth): Extension<AuthUser>,
     Path(handle): Path<String>,
 ) -> Response {
-    match state.db.get_account_by_handle(&auth.did, &handle).await {
+    match state
+        .db
+        .get_account_by_handle(&auth.effective_did, &handle)
+        .await
+    {
         Ok(Some(account)) => {
             let mut json = account_to_json(account.clone(), 0);
             // Include user label if one exists for this account
-            let label_json = match state.db.get_user_label(&auth.did, &account.did).await {
+            let label_json = match state
+                .db
+                .get_user_label(&auth.effective_did, &account.did)
+                .await
+            {
                 Ok(Some(label)) => serde_json::json!({
                     "label": label.label,
                     "labeled_at": label.labeled_at,

@@ -13,7 +13,7 @@ use anyhow::Result;
 use axum::body::Body;
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use include_dir::{include_dir, Dir};
 use tokio::sync::RwLock;
@@ -39,7 +39,7 @@ static ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/build");
 pub struct AppState {
     pub db: Arc<dyn Database>,
     pub config: Arc<Config>,
-    pub scan_status: Arc<RwLock<scan_job::ScanStatus>>,
+    pub scan_manager: Arc<RwLock<scan_job::ScanManager>>,
     /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
     /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
     pub pending_oauth: Arc<RwLock<HashMap<String, handlers::oauth::PendingOAuth>>>,
@@ -98,7 +98,7 @@ pub async fn run_server(
     let state = AppState {
         db,
         config: Arc::new(config),
-        scan_status: Arc::new(RwLock::new(scan_job::ScanStatus::default())),
+        scan_manager: Arc::new(RwLock::new(scan_job::ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
         signing_key,
@@ -136,6 +136,19 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/api/review", get(handlers::labels::get_review_queue))
         .route("/api/accuracy", get(handlers::labels::get_accuracy))
         .route("/api/logout", post(handlers::auth::logout))
+        .route("/api/me", get(handlers::admin::get_identity))
+        .route(
+            "/api/admin/users",
+            get(handlers::admin::list_users).post(handlers::admin::pre_seed_user),
+        )
+        .route(
+            "/api/admin/users/{did}/scan",
+            post(handlers::admin::trigger_admin_scan),
+        )
+        .route(
+            "/api/admin/users/{did}",
+            delete(handlers::admin::delete_user),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -161,6 +174,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
+                    axum::http::Method::DELETE,
                     axum::http::Method::OPTIONS,
                 ])
                 .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
@@ -236,7 +250,19 @@ pub fn api_error(status: StatusCode, message: &str) -> Response {
 /// Marker type indicating the request passed session authentication.
 /// Inserted into request extensions by `require_auth` middleware.
 /// Handlers can extract it to learn who is authenticated.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AuthUser {
+    /// The DID of the authenticated user (from session cookie)
     pub did: String,
+    /// The effective DID for DB queries (impersonated DID, or same as `did`)
+    pub effective_did: String,
+    /// Whether this user is an admin
+    pub is_admin: bool,
+}
+
+impl AuthUser {
+    /// Returns true if the user is viewing as someone else
+    pub fn is_impersonating(&self) -> bool {
+        self.did != self.effective_did
+    }
 }
