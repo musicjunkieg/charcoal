@@ -148,6 +148,70 @@ pub fn launch_scan(
     });
 }
 
+/// Build a topic fingerprint and embeddings for a user.
+/// Fetches their recent posts, runs TF-IDF, and computes MiniLM embeddings.
+/// Used by both the scan pipeline (auto-fingerprint) and the admin pre-seed handler.
+pub async fn build_user_fingerprint(
+    config: &Config,
+    db: &dyn Database,
+    user_did: &str,
+    handle: &str,
+) -> anyhow::Result<()> {
+    info!("No fingerprint found for {user_did}, building automatically");
+
+    let client = PublicAtpClient::new(&config.public_api_url)?;
+    let fp_posts = crate::bluesky::posts::fetch_recent_posts(&client, handle, 500).await?;
+    if fp_posts.is_empty() {
+        anyhow::bail!(
+            "No posts found — Charcoal needs posting history to build a topic fingerprint."
+        );
+    }
+
+    let post_texts: Vec<String> = fp_posts.iter().map(|p| p.text.clone()).collect();
+    let extractor = crate::topics::tfidf::TfIdfExtractor::default();
+    let fp = crate::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
+
+    let json = serde_json::to_string(&fp)?;
+    db.save_fingerprint(user_did, &json, fp.post_count).await?;
+    info!(
+        post_count = fp.post_count,
+        clusters = fp.clusters.len(),
+        "Topic fingerprint built and saved"
+    );
+
+    // Compute and save sentence embedding if the embedding model is available
+    let embed_dir = embedding_model_dir(&config.model_dir);
+    if embedding_files_present(&config.model_dir) {
+        match tokio::task::spawn_blocking(move || {
+            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
+        })
+        .await
+        {
+            Ok(Ok(embedder)) => match embedder.embed_batch(&post_texts).await {
+                Ok(post_embeddings) => {
+                    let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
+                    if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
+                        warn!(error = %e, "Failed to save embedding during fingerprint build");
+                    } else {
+                        info!("Sentence embedding computed and saved");
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "embed_batch failed during fingerprint build");
+                }
+            },
+            Ok(Err(e)) => {
+                warn!(error = %e, "Embedding model failed to load during fingerprint build");
+            }
+            Err(e) => {
+                warn!(error = %e, "spawn_blocking panicked loading embedder during fingerprint build");
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
@@ -281,7 +345,8 @@ async fn run_scan(
     let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
         Some((json, _, _)) => serde_json::from_str(&json)?,
         None => {
-            // Auto-fingerprint: fetch posts, run TF-IDF, save to DB
+            // Auto-fingerprint: fetch posts, run TF-IDF, compute embeddings, save to DB.
+            // build_user_fingerprint handles the full pipeline including embeddings.
             {
                 let mut mgr = scan_manager.write().await;
                 if let Some(s) = mgr.get_status_mut(user_did) {
@@ -289,52 +354,15 @@ async fn run_scan(
                         "Building your topic fingerprint from recent posts…".to_string();
                 }
             }
-            info!("No fingerprint found for {user_did}, building automatically");
 
-            let fp_posts =
-                crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 500).await?;
-            if fp_posts.is_empty() {
-                anyhow::bail!(
-                    "No posts found — Charcoal needs posting history to build a topic fingerprint."
-                );
-            }
+            build_user_fingerprint(&config, &*db, user_did, actor_handle).await?;
 
-            let post_texts: Vec<String> = fp_posts.iter().map(|p| p.text.clone()).collect();
-            let extractor = crate::topics::tfidf::TfIdfExtractor::default();
-            let fp = crate::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
-
-            let json = serde_json::to_string(&fp)?;
-            db.save_fingerprint(user_did, &json, fp.post_count).await?;
-            info!(
-                post_count = fp.post_count,
-                clusters = fp.clusters.len(),
-                "Topic fingerprint built and saved"
-            );
-
-            // Compute and save sentence embedding using the already-loaded embedder
-            if let Some(ref embedder) = embedder {
-                {
-                    let mut mgr = scan_manager.write().await;
-                    if let Some(s) = mgr.get_status_mut(user_did) {
-                        s.progress_message = "Computing sentence embeddings…".to_string();
-                    }
-                }
-                match embedder.embed_batch(&post_texts).await {
-                    Ok(post_embeddings) => {
-                        let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
-                        if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
-                            warn!(error = %e, "Failed to save embedding during auto-fingerprint");
-                        } else {
-                            info!("Sentence embedding computed and saved");
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "embed_batch failed during auto-fingerprint, using TF-IDF fallback");
-                    }
-                }
-            }
-
-            fp
+            // Load the fingerprint we just built
+            let (json, _, _) = db
+                .get_fingerprint(user_did)
+                .await?
+                .expect("Fingerprint was just saved");
+            serde_json::from_str(&json)?
         }
     };
 
