@@ -72,12 +72,26 @@
 					class="nav-link"
 					class:active={$page.url.pathname === '/review'}
 				>Review</a>
+				{#if identity?.is_admin}
+					<a
+						href="/admin"
+						class="nav-link"
+						class:active={$page.url.pathname === '/admin'}
+					>Admin</a>
+				{/if}
 				<button
 					class="nav-logout"
 					onclick={async () => { await logout(); await goto('/login'); }}
 				>Sign out</button>
 			</div>
 		</nav>
+
+		{#if asUser}
+			<div class="impersonation-banner">
+				Viewing as <strong>{asUser}</strong> (read-only)
+				<button class="impersonation-exit" onclick={() => goto('/admin')}>Exit</button>
+			</div>
+		{/if}
 
 		<main class="main">
 			{@render children()}
@@ -201,6 +215,30 @@
 	}
 
 	.nav-logout:hover { color: var(--charcoal-300); }
+
+	.impersonation-banner {
+		background: rgba(245, 158, 11, 0.15);
+		border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+		padding: 0.5rem 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 0.875rem;
+		color: var(--amber-500);
+	}
+
+	.impersonation-exit {
+		padding: 0.25rem 0.75rem;
+		font-size: 0.75rem;
+		background: rgba(245, 158, 11, 0.2);
+		border: 1px solid rgba(245, 158, 11, 0.4);
+		color: var(--amber-500);
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: var(--font-body);
+	}
+
+	.impersonation-exit:hover { background: rgba(245, 158, 11, 0.3); }
 
 	.main {
 		max-width: 1200px;

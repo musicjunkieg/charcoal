@@ -1,12 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-03-27T06:03:38.492743+00:00",
+  "exported_at": "2026-03-27T06:14:37.770551+00:00",
   "issues": [
+    {
+      "id": 148,
+      "title": "Fix missing Admin nav link and impersonation banner in layout",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-27T06:12:12.147759+00:00",
+      "updated_at": "2026-03-27T06:12:12.147759+00:00",
+      "closed_at": null
+    },
     {
       "id": 147,
       "title": "Fix OpenAI Moderation API rate limiting — 429 errors cause ensemble scorer to fail on every request",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -16,11 +31,15 @@
         {
           "content": "Staging logs show hundreds of 429 Too Many Requests from OpenAI Moderation API during scans. The concurrent tokio::join! fires both ONNX and OpenAI scorers simultaneously for every post, immediately exhausting the rate limit. Fallback to ONNX-only works, but ensemble scoring is effectively dead. Need rate limiting, batching, or both.",
           "created_at": "2026-03-27T06:01:14.747865+00:00"
+        },
+        {
+          "content": "Fixed in PR #36. Added exponential backoff retry (5 attempts, 500ms-8s) and batch scoring (32 texts per API call). Merged to staging.",
+          "created_at": "2026-03-27T06:04:16.849146+00:00"
         }
       ],
       "created_at": "2026-03-27T06:01:03.172523+00:00",
-      "updated_at": "2026-03-27T06:01:03.172523+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-27T06:04:16.843896+00:00",
+      "closed_at": "2026-03-27T06:04:16.843896+00:00"
     },
     {
       "id": 146,
