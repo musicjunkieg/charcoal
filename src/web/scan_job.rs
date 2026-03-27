@@ -241,7 +241,7 @@ async fn run_scan(
 
     // Wrap in ensemble scorer if OpenAI API key is configured
     let secondary_scorer: Option<Box<dyn ToxicityScorer>> =
-        config.openai_api_key.as_ref().and_then(|key| {
+        config.groq_api_key.as_ref().and_then(|key| {
             match crate::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
                 Ok(s) => {
                     info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");

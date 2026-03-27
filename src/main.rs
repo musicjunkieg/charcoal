@@ -927,7 +927,7 @@ fn create_scorer(
     };
 
     let secondary: Option<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> =
-        config.openai_api_key.as_ref().and_then(|key| {
+        config.groq_api_key.as_ref().and_then(|key| {
             match charcoal::toxicity::openai_moderation::OpenAiModerationScorer::new(key) {
                 Ok(s) => {
                     info!("OpenAI Moderation scorer loaded — ensemble scoring enabled");
