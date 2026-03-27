@@ -1,12 +1,32 @@
 {
   "version": 1,
-  "exported_at": "2026-03-27T12:43:18.965497+00:00",
+  "exported_at": "2026-03-27T20:57:17.720539+00:00",
   "issues": [
+    {
+      "id": 154,
+      "title": "Replace OpenAI Moderation with Groq GPT-OSS-Safeguard as ensemble secondary scorer",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "OpenAI Moderation API has been unreliable — omni-moderation has extremely low TPM limits at Tier 1, text-moderation-latest returns 400 invalid model on this service account. Switching to Groq GPT-OSS-Safeguard-20B which offers 30 RPM free tier and policy-based moderation with structured JSON output. This changes the ensemble from score-comparison to ONNX-score + Groq-second-opinion.",
+          "created_at": "2026-03-27T16:28:38.853077+00:00"
+        }
+      ],
+      "created_at": "2026-03-27T16:28:31.984994+00:00",
+      "updated_at": "2026-03-27T16:28:31.984994+00:00",
+      "closed_at": null
+    },
     {
       "id": 153,
       "title": "Fix invalid model ID — drop explicit model param from OpenAI Moderation requests",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -14,8 +34,8 @@
       ],
       "comments": [],
       "created_at": "2026-03-27T12:41:49.652605+00:00",
-      "updated_at": "2026-03-27T12:41:49.652605+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-27T12:43:58.870103+00:00",
+      "closed_at": "2026-03-27T12:43:58.870103+00:00"
     },
     {
       "id": 152,
