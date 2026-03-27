@@ -26,6 +26,37 @@ use sha2::Sha256;
 
 use super::{AppState, AuthUser};
 
+/// Decode percent-encoded URL values (e.g., `did%3Aplc%3Axxx` → `did:plc:xxx`).
+fn percent_decode(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let hi = chars.next().and_then(hex_val);
+            let lo = chars.next().and_then(hex_val);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                result.push((h << 4 | l) as char);
+            } else {
+                result.push('%');
+            }
+        } else if b == b'+' {
+            result.push(' ');
+        } else {
+            result.push(b as char);
+        }
+    }
+    result
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 type HmacSha256 = Hmac<Sha256>;
 
 /// Session cookie name.
@@ -182,17 +213,19 @@ pub async fn require_auth(
         Some(did) => {
             let is_admin = did_is_admin(&did, &state.config.admin_dids);
 
-            // Extract as_user query param for impersonation
-            let as_user = request.uri().query().and_then(|q| {
+            // Extract as_user query param for impersonation (URL-decode the value)
+            let as_user_raw = request.uri().query().and_then(|q| {
                 q.split('&').find_map(|pair| {
                     let (key, value) = pair.split_once('=')?;
                     if key == "as_user" {
-                        Some(value)
+                        Some(value.to_string())
                     } else {
                         None
                     }
                 })
             });
+            let as_user_decoded = as_user_raw.as_ref().map(|v| percent_decode(v));
+            let as_user = as_user_decoded.as_deref();
 
             let effective_did = match resolve_effective_did(&did, is_admin, as_user) {
                 Ok(d) => d,

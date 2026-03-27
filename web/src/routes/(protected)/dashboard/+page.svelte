@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { getStatus, getEvents, triggerScan, getAccuracy } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import type { ScanStatus, AmplificationEvent, AccuracyMetrics } from '$lib/types.js';
+
+	let isImpersonating = $derived(!!$page.url.searchParams.get('as_user'));
 
 	let status = $state<ScanStatus | null>(null);
 	let events = $state<AmplificationEvent[]>([]);
@@ -143,7 +146,7 @@
 						{/if}
 					</div>
 				</div>
-			{:else}
+			{:else if !isImpersonating}
 				<button class="btn-scan" onclick={handleScan} disabled={scanning}>
 					{scanning ? 'Starting…' : 'Trigger Scan'}
 				</button>
@@ -172,9 +175,11 @@
 					then find who's amplifying them and score each account for toxicity
 					and topic overlap. This usually takes a few minutes.
 				</p>
-				<button class="btn-scan btn-scan-welcome" onclick={handleScan} disabled={scanning}>
-					{scanning ? 'Starting…' : 'Start your first scan'}
-				</button>
+				{#if !isImpersonating}
+					<button class="btn-scan btn-scan-welcome" onclick={handleScan} disabled={scanning}>
+						{scanning ? 'Starting…' : 'Start your first scan'}
+					</button>
+				{/if}
 				{#if scanError}
 					<p class="scan-error">{scanError}</p>
 				{/if}
