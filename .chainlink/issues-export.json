@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-03-27T09:45:03.539692+00:00",
+  "exported_at": "2026-03-27T09:57:43.818783+00:00",
   "issues": [
     {
-      "id": 150,
-      "title": "Add global rate limiter to OpenAI Moderation scorer — backoff alone is insufficient",
+      "id": 151,
+      "title": "Fix impersonation not persisting across nav links — as_user lost on page navigation",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -13,9 +13,24 @@
         "bug"
       ],
       "comments": [],
-      "created_at": "2026-03-27T09:42:54.423492+00:00",
-      "updated_at": "2026-03-27T09:42:54.423492+00:00",
+      "created_at": "2026-03-27T09:53:49.782821+00:00",
+      "updated_at": "2026-03-27T09:53:49.782821+00:00",
       "closed_at": null
+    },
+    {
+      "id": 150,
+      "title": "Add global rate limiter to OpenAI Moderation scorer — backoff alone is insufficient",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-27T09:42:54.423492+00:00",
+      "updated_at": "2026-03-27T09:45:53.565647+00:00",
+      "closed_at": "2026-03-27T09:45:53.565647+00:00"
     },
     {
       "id": 149,
