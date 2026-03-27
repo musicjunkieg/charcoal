@@ -1,5 +1,69 @@
 [
   {
+    "hash": "9802b9ebce07094cc866acccccb77a309a2eca15",
+    "short_hash": "9802b9e",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T12:36:24-07:00",
+    "message": "perf: run ensemble primary and secondary scorers concurrently\n\nUses tokio::join! to run ONNX and OpenAI Moderation scoring in parallel\nwhen both are available. Wall-clock cost is now max(primary, secondary)\ninstead of primary + secondary. No change when secondary is absent.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "c39bb1681cc61b0e4bfc5eac715dbff6adf251f5",
+    "short_hash": "c39bb16",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:31:06-07:00",
+    "message": "feat: display graph distance in reports and terminal output\n\nThreat reports now show the social graph relationship (Stranger, Follows\nyou, You follow, Mutual follow) alongside the threat tier. Added as a\ncolumn in the markdown report table and terminal threat list, plus shown\nin account detail view.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "88b4c5104ac7e231857330c9aea066b3fca4d6a1",
+    "short_hash": "88b4c51",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:29:39-07:00",
+    "message": "feat: wire ensemble scorer into scan pipeline and CLI\n\nWhen OPENAI_API_KEY is set, the scanner uses EnsembleToxicityScorer\n(ONNX primary + OpenAI Moderation secondary with TakeLower disagreement\nstrategy). When absent, falls back to ONNX-only (same as before).\nNo behavior change without the env var.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "3339c64202f2f3c30c71a044bfee280c43145a12",
+    "short_hash": "3339c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:26:38-07:00",
+    "message": "feat: add OpenAI Moderation scorer and ensemble toxicity scorer\n\nOpenAiModerationScorer wraps the free moderation endpoint (pinned to\nomni-moderation-2024-09-26). EnsembleToxicityScorer runs primary (ONNX)\nand secondary (OpenAI) concurrently, detects agreement (threshold 0.25),\nand applies configurable disagreement strategy (TakeLower default).\nImplements ToxicityScorer trait so it is invisible to downstream pipeline.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6be187080b944fdb3183c9fbb0bd791a51c34d14",
+    "short_hash": "6be1870",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:24:06-07:00",
+    "message": "feat: classify drive-by repliers via getRelationships in scan pipeline\n\nBatch-classifies all amplifier DIDs using getRelationships (30 per\nAPI call). Graph distance is threaded through the amplification pipeline\nto build_profile where it multiplies the final threat score. CLI commands\npass empty graph distances (web-only feature for now).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "a67990191edc7e5404cc8786fcc89481746cf07a",
+    "short_hash": "a679901",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:21:56-07:00",
+    "message": "feat: apply graph distance weight in scoring formula\n\nGraph distance multiplier is the final step in the scoring chain:\nraw → behavioral → context → graph_distance. Strangers get 1.2x,\nmutual follows get 0.6x. Applied after benign gate so allies stay\nprotected. All callers pass None for now (wired in next task).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "334b8981f91807795398fc27e31fd036689588a1",
+    "short_hash": "334b898",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:18:36-07:00",
+    "message": "feat: add graph_distance field to AccountScore and DB schema v6\n\nNew nullable TEXT column on account_scores stores the social graph\ndistance label (Mutual follow, Follows you, You follow, Stranger).\nSchema migration v5→v6 for SQLite, corresponding Postgres migration.\nAll existing tests pass with graph_distance: None (neutral).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 13
+  },
+  {
+    "hash": "4ac5805c902a8ad1027fe0635aa1b444a68580b6",
+    "short_hash": "4ac5805",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:09:40-07:00",
+    "message": "feat: add GraphDistance enum and relationship response parsing\n\nGraphDistance classifies the social relationship between the protected\nuser and another account into MutualFollow, InboundFollow, OutboundFollow,\nor Stranger. Each category has a threat_weight() used as a scoring\nmultiplier. Response parsing handles both relationship and notFoundActor\nentries from the AT Protocol getRelationships endpoint.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
     "hash": "b7bb93b2bf1eb7d3e4f7c65766c4ca8351837cd5",
     "short_hash": "b7bb93b",
     "author": "Bryan Guffey",

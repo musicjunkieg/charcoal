@@ -1968,6 +1968,116 @@
       "created_at": "2026-03-20T18:01:46.599010-07:00",
       "updated_at": "2026-03-20T18:01:46.599010-07:00",
       "metadata_json": "{\"branch\":\"feat/nli-scoring-redesign\",\"commit\":\"b7bb93b\",\"confidence\":95,\"files\":[\"src/scoring/nli.rs\",\"src/scoring/nli_audit.rs\",\"src/scoring/profile.rs\",\"src/scoring/threat.rs\",\"src/pipeline/amplification.rs\"]}"
+    },
+    {
+      "id": 186,
+      "change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "node_type": "goal",
+      "title": "Phase 2: Graph distance scoring + ensemble toxicity",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:15.707381-07:00",
+      "updated_at": "2026-03-26T12:40:15.707381-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"9802b9e\",\"confidence\":95,\"prompt\":\"Implement the plan at docs/plans/2026-03-26-graph-distance-ensemble-impl.md following our standard conventions\"}"
+    },
+    {
+      "id": 187,
+      "change_id": "42a762cc-2e35-42c5-b6fc-79ca3e6723a1",
+      "node_type": "action",
+      "title": "Implemented GraphDistance enum + getRelationships parsing",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.265207-07:00",
+      "updated_at": "2026-03-26T12:40:37.265207-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"4ac5805\",\"confidence\":100,\"files\":[\"src/bluesky/relationships.rs\",\"tests/unit_relationships.rs\"]}"
+    },
+    {
+      "id": 188,
+      "change_id": "809f5c6d-6533-45b6-aa76-a27142c0d2b8",
+      "node_type": "action",
+      "title": "Added graph_distance field to AccountScore + DB schema v6 migration",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.273859-07:00",
+      "updated_at": "2026-03-26T12:40:37.273859-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"334b898\",\"confidence\":100,\"files\":[\"src/db/models.rs\",\"src/db/schema.rs\",\"migrations/postgres/0006_graph_distance.sql\"]}"
+    },
+    {
+      "id": 189,
+      "change_id": "0d5031ba-021e-4a7b-8384-1a8f6335a220",
+      "node_type": "action",
+      "title": "Wired graph distance weight as final scoring multiplier",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.282187-07:00",
+      "updated_at": "2026-03-26T12:40:37.282187-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"a679901\",\"confidence\":100,\"files\":[\"src/scoring/profile.rs\"]}"
+    },
+    {
+      "id": 190,
+      "change_id": "416705c5-03d5-42bd-9590-653203873966",
+      "node_type": "action",
+      "title": "Wired getRelationships classification into scan pipeline",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.289788-07:00",
+      "updated_at": "2026-03-26T12:40:37.289788-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"6be1870\",\"confidence\":100,\"files\":[\"src/web/scan_job.rs\",\"src/pipeline/amplification.rs\"]}"
+    },
+    {
+      "id": 191,
+      "change_id": "9943b2e5-bfc5-43e4-9572-b210dc25eb4f",
+      "node_type": "action",
+      "title": "Implemented OpenAI Moderation scorer + ensemble toxicity scorer",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.298157-07:00",
+      "updated_at": "2026-03-26T12:40:37.298157-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"3339c64\",\"confidence\":100,\"files\":[\"src/toxicity/openai_moderation.rs\",\"src/toxicity/ensemble.rs\",\"tests/unit_ensemble.rs\"]}"
+    },
+    {
+      "id": 192,
+      "change_id": "1aeed3f6-316c-4e22-8be0-e97d0c3d472b",
+      "node_type": "action",
+      "title": "Wired ensemble scorer into config and scan pipeline",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.305873-07:00",
+      "updated_at": "2026-03-26T12:40:37.305873-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"88b4c51\",\"confidence\":100,\"files\":[\"src/config.rs\",\"src/web/scan_job.rs\",\"src/main.rs\"]}"
+    },
+    {
+      "id": 193,
+      "change_id": "9509a72b-4e4f-49df-8541-81411cbd1fd7",
+      "node_type": "action",
+      "title": "Added graph distance display in reports and terminal",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.314023-07:00",
+      "updated_at": "2026-03-26T12:40:37.314023-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"c39bb16\",\"confidence\":100,\"files\":[\"src/output/markdown.rs\",\"src/output/terminal.rs\"]}"
+    },
+    {
+      "id": 194,
+      "change_id": "afd97aa1-4f0d-43e9-bc79-ca0c8763bef2",
+      "node_type": "action",
+      "title": "Concurrent ensemble scoring with tokio::join",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:37.321555-07:00",
+      "updated_at": "2026-03-26T12:40:37.321555-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"9802b9e\",\"confidence\":100,\"files\":[\"src/toxicity/ensemble.rs\"]}"
+    },
+    {
+      "id": 195,
+      "change_id": "319e1c9e-eca5-40a4-9180-e925370fe690",
+      "node_type": "outcome",
+      "title": "Phase 2 complete: 8 commits, 347 tests, deployed to staging for verification",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-03-26T12:40:45.674265-07:00",
+      "updated_at": "2026-03-26T12:40:45.674265-07:00",
+      "metadata_json": "{\"branch\":\"feat/concurrent-ensemble\",\"commit\":\"9802b9e\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -3829,6 +3939,105 @@
       "weight": 1.0,
       "rationale": "Implementation complete",
       "created_at": "2026-03-20T18:01:49.941663-07:00"
+    },
+    {
+      "id": 176,
+      "from_node_id": 186,
+      "to_node_id": 187,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "42a762cc-2e35-42c5-b6fc-79ca3e6723a1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 1: types and parsing",
+      "created_at": "2026-03-26T12:40:45.679733-07:00"
+    },
+    {
+      "id": 177,
+      "from_node_id": 186,
+      "to_node_id": 188,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "809f5c6d-6533-45b6-aa76-a27142c0d2b8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 2: DB schema",
+      "created_at": "2026-03-26T12:40:45.685013-07:00"
+    },
+    {
+      "id": 178,
+      "from_node_id": 186,
+      "to_node_id": 189,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "0d5031ba-021e-4a7b-8384-1a8f6335a220",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 3: scoring formula",
+      "created_at": "2026-03-26T12:40:45.690532-07:00"
+    },
+    {
+      "id": 179,
+      "from_node_id": 186,
+      "to_node_id": 190,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "416705c5-03d5-42bd-9590-653203873966",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 4: pipeline wiring",
+      "created_at": "2026-03-26T12:40:45.695629-07:00"
+    },
+    {
+      "id": 180,
+      "from_node_id": 186,
+      "to_node_id": 191,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "9943b2e5-bfc5-43e4-9572-b210dc25eb4f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 5: ensemble scorer",
+      "created_at": "2026-03-26T12:40:45.700898-07:00"
+    },
+    {
+      "id": 181,
+      "from_node_id": 186,
+      "to_node_id": 192,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "1aeed3f6-316c-4e22-8be0-e97d0c3d472b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 6: config wiring",
+      "created_at": "2026-03-26T12:40:45.706232-07:00"
+    },
+    {
+      "id": 182,
+      "from_node_id": 186,
+      "to_node_id": 193,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "9509a72b-4e4f-49df-8541-81411cbd1fd7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 7: display",
+      "created_at": "2026-03-26T12:40:45.711539-07:00"
+    },
+    {
+      "id": 183,
+      "from_node_id": 186,
+      "to_node_id": 194,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "afd97aa1-4f0d-43e9-bc79-ca0c8763bef2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Performance: concurrent scoring",
+      "created_at": "2026-03-26T12:40:45.716759-07:00"
+    },
+    {
+      "id": 184,
+      "from_node_id": 186,
+      "to_node_id": 195,
+      "from_change_id": "1802ad96-fac0-42e6-bebe-96a5dd8b50b9",
+      "to_change_id": "319e1c9e-eca5-40a4-9180-e925370fe690",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-03-26T12:40:45.721931-07:00"
     }
   ],
   "documents": [

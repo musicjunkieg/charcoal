@@ -1,12 +1,25 @@
 {
   "version": 1,
-  "exported_at": "2026-03-26T19:36:25.036197+00:00",
+  "exported_at": "2026-03-27T04:50:03.173285+00:00",
   "issues": [
+    {
+      "id": 146,
+      "title": "Session bookkeeping — deciduous, memory, downstream issues",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [],
+      "comments": [],
+      "created_at": "2026-03-26T19:39:59.457185+00:00",
+      "updated_at": "2026-03-26T19:41:57.951889+00:00",
+      "closed_at": "2026-03-26T19:41:57.951889+00:00"
+    },
     {
       "id": 145,
       "title": "Run ensemble primary and secondary scorers concurrently with tokio::join",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -14,23 +27,28 @@
       ],
       "comments": [],
       "created_at": "2026-03-26T19:35:31.527598+00:00",
-      "updated_at": "2026-03-26T19:35:31.527598+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-26T19:36:41.714900+00:00",
+      "closed_at": "2026-03-26T19:36:41.714900+00:00"
     },
     {
       "id": 144,
       "title": "Merge graph distance + ensemble branch to staging",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
         "feature"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "PR #34 created: feat/concurrent-ensemble → staging. 8 commits, 27 files, +1272 lines.",
+          "created_at": "2026-03-27T04:29:56.282817+00:00"
+        }
+      ],
       "created_at": "2026-03-26T19:01:04.095747+00:00",
-      "updated_at": "2026-03-26T19:01:04.095747+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-27T04:29:56.277100+00:00",
+      "closed_at": "2026-03-27T04:29:56.277100+00:00"
     },
     {
       "id": 143,
@@ -152,6 +170,10 @@
         {
           "content": "Now that the NLI logit index is fixed (#113), context_scores are producing real signal. Examples from staging scan 2026-03-21:\n\n- amos-race.bsky.social: hostility 0.541 (attack 0.584, contempt 0.516) — BUT in Low tier because base toxicity is low\n- andyschwab.link: hostility 0.380 (misrepresent 0.616, good_faith 0.471) — also Low tier\n- ashteranic.mycronite.net: hostility 0.000 — correctly identified as non-hostile\n\nThe problem: context_multiplier range is 1.0-1.5x, so a Low-tier account with raw_score 3.0 and extreme context (1.0) only gets boosted to 4.5 — still Low. Someone who is specifically hostile to Bryan's content but generally non-toxic flies under the radar.\n\nOptions to evaluate:\n1. Widen multiplier range (1.0-2.0x or 1.0-2.5x) — simple, keeps multiplicative property\n2. Add context as independent signal (e.g. if context_score > 0.5, floor raw_score at Watch threshold) — catches concern trolls but risks false positives\n3. Hybrid: use higher multiplier AND lower the Watch threshold when context_score is high\n4. Keep as-is — the current design correctly says 'low general toxicity = low threat even with hostile interactions'\n\nKey question for Bryan: is someone who is ONLY hostile toward your content but polite everywhere else a threat worth flagging? If yes, option 2 or 3. If no, option 4 is correct.",
           "created_at": "2026-03-21T04:35:15.109984+00:00"
+        },
+        {
+          "content": "Graph distance scoring now implemented and deployed to staging. The context_multiplier (1.0-1.5x) is augmented by graph_distance weight (0.6-1.2x). Strangers with hostile context scores now get a meaningful boost. Need to re-evaluate tier distribution after staging scan completes to see if the combined effect of context_multiplier * graph_distance_weight is sufficient to promote accounts across tier boundaries.",
+          "created_at": "2026-03-26T19:41:44.516419+00:00"
         }
       ],
       "created_at": "2026-03-21T04:35:01.469347+00:00",
@@ -520,6 +542,10 @@
         {
           "content": "Part of Phase 1.75 contextual scoring (#102). Discovered during staging validation: ashteranic's post about ICE shooting scored 67% toxicity due to keywords (kill, shot, abused) despite being political commentary, not hostility. The ONNX model (unbiased-toxic-roberta) scores words in isolation. Options: accept it (avg toxicity is only 0.07), add news-context detector, or evaluate alternative models.",
           "created_at": "2026-03-21T03:14:28.375933+00:00"
+        },
+        {
+          "content": "Ensemble toxicity scorer (ONNX + OpenAI Moderation with TakeLower) deployed to staging. This should reduce false positives on news commentary with violent keywords — when ONNX flags it as toxic but OpenAI Moderation doesn't, TakeLower will use the lower score. Verify after staging scan whether the false positive rate on news-adjacent accounts improves.",
+          "created_at": "2026-03-26T19:41:44.521239+00:00"
         }
       ],
       "created_at": "2026-03-21T03:13:37.454265+00:00",
@@ -695,7 +721,12 @@
       "labels": [
         "feature"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Blocker #102 is now closed — NLI context scoring is complete. Admin dashboard epic is unblocked. Next: implement #104 (pre-seed by handle), then #105 (trigger scan), #106 (impersonation view), #107 (match on OAuth login).",
+          "created_at": "2026-03-27T04:29:59.847292+00:00"
+        }
+      ],
       "created_at": "2026-03-20T19:34:35.707609+00:00",
       "updated_at": "2026-03-20T19:34:35.707609+00:00",
       "closed_at": null
@@ -704,7 +735,7 @@
       "id": 102,
       "title": "Wire NLI context scoring into scan pipeline (Task 17)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -722,11 +753,15 @@
         {
           "content": "Spec approved: docs/superpowers/specs/2026-03-20-nli-scoring-redesign.md. Covers: amplifier scoring with direct pairs, threshold-based follower NLI, avg context_score, context_multiplier formula, NLI audit logging with JSONL + Railway Buckets rotation.",
           "created_at": "2026-03-20T21:27:38.708172+00:00"
+        },
+        {
+          "content": "NLI context scoring fully wired — direct pairs, threshold-gated follower NLI, avg context_score, context_multiplier, audit logging. All landed on staging via feat/concurrent-ensemble.",
+          "created_at": "2026-03-27T04:29:58.478398+00:00"
         }
       ],
       "created_at": "2026-03-20T16:44:30.209770+00:00",
-      "updated_at": "2026-03-20T16:44:30.209770+00:00",
-      "closed_at": null
+      "updated_at": "2026-03-27T04:29:58.472738+00:00",
+      "closed_at": "2026-03-27T04:29:58.472738+00:00"
     },
     {
       "id": 101,
@@ -1488,7 +1523,12 @@
       "labels": [
         "architecture"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Ensemble scoring adds a second concurrent scorer per text. When evaluating ONNX concurrency, need to account for the ensemble wrapper — the tokio::join\\! in ensemble.rs already handles concurrency between primary and secondary, but ONNX model inference itself is still sequential (spawn_blocking).",
+          "created_at": "2026-03-26T19:41:44.526177+00:00"
+        }
+      ],
       "created_at": "2026-02-18T03:14:42.053989449+00:00",
       "updated_at": "2026-02-18T03:14:42.053989449+00:00",
       "closed_at": null
