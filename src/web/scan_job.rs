@@ -5,7 +5,7 @@
 //
 // Only one scan can run at a time; POST /api/scan returns 409 if one is already active.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
@@ -24,6 +24,83 @@ use crate::toxicity::download::{
 use crate::toxicity::onnx::OnnxToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
 
+/// Manages per-user scan status with a global one-at-a-time gate.
+pub struct ScanManager {
+    statuses: HashMap<String, ScanStatus>,
+    fingerprint_building: HashSet<String>,
+    any_running: bool,
+}
+
+impl Default for ScanManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScanManager {
+    pub fn new() -> Self {
+        Self {
+            statuses: HashMap::new(),
+            fingerprint_building: HashSet::new(),
+            any_running: false,
+        }
+    }
+
+    /// Atomically check the global gate and start a scan.
+    pub fn try_start_scan(&mut self, user_did: &str) -> Result<(), String> {
+        if self.any_running {
+            return Err("A scan is already running".to_string());
+        }
+        self.any_running = true;
+        self.statuses.insert(
+            user_did.to_string(),
+            ScanStatus {
+                running: true,
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                progress_message: "Starting scan...".to_string(),
+                last_error: None,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn finish_scan(&mut self, user_did: &str) {
+        self.any_running = false;
+        if let Some(status) = self.statuses.get_mut(user_did) {
+            status.running = false;
+        }
+    }
+
+    pub fn get_status(&self, user_did: &str) -> Option<&ScanStatus> {
+        self.statuses.get(user_did)
+    }
+
+    pub fn get_status_mut(&mut self, user_did: &str) -> Option<&mut ScanStatus> {
+        self.statuses.get_mut(user_did)
+    }
+
+    pub fn is_any_running(&self) -> bool {
+        self.any_running
+    }
+
+    #[allow(dead_code)]
+    pub fn is_scan_running_for(&self, user_did: &str) -> bool {
+        self.statuses.get(user_did).is_some_and(|s| s.running)
+    }
+
+    pub fn start_fingerprint_build(&mut self, user_did: &str) {
+        self.fingerprint_building.insert(user_did.to_string());
+    }
+
+    pub fn finish_fingerprint_build(&mut self, user_did: &str) {
+        self.fingerprint_building.remove(user_did);
+    }
+
+    pub fn is_fingerprint_building(&self, user_did: &str) -> bool {
+        self.fingerprint_building.contains(user_did)
+    }
+}
+
 /// Live status of the background scan, exposed via GET /api/status.
 #[derive(Debug, Clone, Default)]
 pub struct ScanStatus {
@@ -40,11 +117,11 @@ pub struct ScanStatus {
 use tokio::sync::RwLock;
 
 /// Launch the scan pipeline in a background tokio task.
-/// Returns immediately. Callers poll `scan_status.running` to track progress.
+/// Returns immediately. Callers poll `scan_manager` to track progress.
 pub fn launch_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
-    scan_status: Arc<RwLock<ScanStatus>>,
+    scan_manager: Arc<RwLock<ScanManager>>,
     user_did: String,
     actor_handle: String,
 ) {
@@ -52,7 +129,7 @@ pub fn launch_scan(
         let result = AssertUnwindSafe(run_scan(
             config,
             db,
-            scan_status.clone(),
+            scan_manager.clone(),
             &user_did,
             &actor_handle,
         ))
@@ -61,10 +138,12 @@ pub fn launch_scan(
         .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
         if let Err(e) = result {
             error!(error = %e, "Background scan failed");
-            let mut status = scan_status.write().await;
-            status.running = false;
-            status.last_error = Some(e.to_string());
-            status.progress_message = "Scan failed — see server logs".to_string();
+            let mut mgr = scan_manager.write().await;
+            mgr.finish_scan(&user_did);
+            if let Some(status) = mgr.get_status_mut(&user_did) {
+                status.last_error = Some(e.to_string());
+                status.progress_message = "Scan failed — see server logs".to_string();
+            }
         }
     });
 }
@@ -72,14 +151,16 @@ pub fn launch_scan(
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
-    scan_status: Arc<RwLock<ScanStatus>>,
+    scan_manager: Arc<RwLock<ScanManager>>,
     user_did: &str,
     actor_handle: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: load toxicity scorer
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading toxicity model…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading toxicity model…".to_string();
+        }
     }
 
     let primary_scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
@@ -121,8 +202,10 @@ async fn run_scan(
     // Loaded early so it can be reused for both auto-fingerprint embedding
     // (if needed) and amplifier scoring in the pipeline.
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading embedding model…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading embedding model…".to_string();
+        }
     }
 
     let embed_dir = embedding_model_dir(&config.model_dir);
@@ -153,8 +236,10 @@ async fn run_scan(
 
     // Phase 2b: load NLI model (optional — falls back gracefully if unavailable)
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading NLI model…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading NLI model…".to_string();
+        }
     }
 
     let nli_scorer = if nli_files_present(&config.model_dir) {
@@ -185,8 +270,10 @@ async fn run_scan(
     // For web users there is no CLI step — if no fingerprint exists yet,
     // we build one automatically from the user's recent posts.
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading topic fingerprint…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading topic fingerprint…".to_string();
+        }
     }
 
     let client = PublicAtpClient::new(&config.public_api_url)?;
@@ -196,9 +283,11 @@ async fn run_scan(
         None => {
             // Auto-fingerprint: fetch posts, run TF-IDF, save to DB
             {
-                let mut s = scan_status.write().await;
-                s.progress_message =
-                    "Building your topic fingerprint from recent posts…".to_string();
+                let mut mgr = scan_manager.write().await;
+                if let Some(s) = mgr.get_status_mut(user_did) {
+                    s.progress_message =
+                        "Building your topic fingerprint from recent posts…".to_string();
+                }
             }
             info!("No fingerprint found for {user_did}, building automatically");
 
@@ -225,8 +314,10 @@ async fn run_scan(
             // Compute and save sentence embedding using the already-loaded embedder
             if let Some(ref embedder) = embedder {
                 {
-                    let mut s = scan_status.write().await;
-                    s.progress_message = "Computing sentence embeddings…".to_string();
+                    let mut mgr = scan_manager.write().await;
+                    if let Some(s) = mgr.get_status_mut(user_did) {
+                        s.progress_message = "Computing sentence embeddings…".to_string();
+                    }
                 }
                 match embedder.embed_batch(&post_texts).await {
                     Ok(post_embeddings) => {
@@ -280,8 +371,10 @@ async fn run_scan(
 
     // Phase 4: fetch amplification events from Constellation
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Fetching amplification events…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Fetching amplification events…".to_string();
+        }
     }
 
     let constellation =
@@ -301,8 +394,10 @@ async fn run_scan(
 
     // Also fetch likes via Constellation backlinks
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Detecting likes via Constellation…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Detecting likes via Constellation…".to_string();
+        }
     }
     let like_events = constellation.find_likers(&post_uris).await;
     info!(
@@ -313,8 +408,10 @@ async fn run_scan(
 
     // Fetch reply threads and detect drive-by replies
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Detecting drive-by replies…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Detecting drive-by replies…".to_string();
+        }
     }
     let follows_set = crate::bluesky::replies::fetch_follows_set(&client, user_did)
         .await
@@ -381,8 +478,10 @@ async fn run_scan(
 
     // Phase 5: behavioral context
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
+        }
     }
 
     let median_engagement = db.get_median_engagement(user_did).await?;
@@ -436,21 +535,25 @@ async fn run_scan(
     )
     .await;
 
-    let mut status = scan_status.write().await;
-    status.running = false;
-    status.last_error = None;
+    let mut mgr = scan_manager.write().await;
+    mgr.finish_scan(user_did);
 
     match result {
         Ok((events, accounts)) => {
             info!(events, accounts, "Background scan completed");
-            status.progress_message =
-                format!("Completed: {events} events, {accounts} accounts scored");
+            if let Some(s) = mgr.get_status_mut(user_did) {
+                s.last_error = None;
+                s.progress_message =
+                    format!("Completed: {events} events, {accounts} accounts scored");
+            }
         }
         Err(e) => {
             error!(error = %e, "Pipeline error");
-            status.last_error = Some(e.to_string());
-            status.progress_message =
-                "Scan encountered an error — partial results may have been saved".to_string();
+            if let Some(s) = mgr.get_status_mut(user_did) {
+                s.last_error = Some(e.to_string());
+                s.progress_message =
+                    "Scan encountered an error — partial results may have been saved".to_string();
+            }
         }
     }
 

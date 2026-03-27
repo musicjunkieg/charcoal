@@ -39,7 +39,7 @@ static ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/build");
 pub struct AppState {
     pub db: Arc<dyn Database>,
     pub config: Arc<Config>,
-    pub scan_status: Arc<RwLock<scan_job::ScanStatus>>,
+    pub scan_manager: Arc<RwLock<scan_job::ScanManager>>,
     /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
     /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
     pub pending_oauth: Arc<RwLock<HashMap<String, handlers::oauth::PendingOAuth>>>,
@@ -98,7 +98,7 @@ pub async fn run_server(
     let state = AppState {
         db,
         config: Arc::new(config),
-        scan_status: Arc::new(RwLock::new(scan_job::ScanStatus::default())),
+        scan_manager: Arc::new(RwLock::new(scan_job::ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
         signing_key,

@@ -131,3 +131,56 @@ mod db_tests {
         assert!(users.is_empty());
     }
 }
+
+#[cfg(feature = "web")]
+mod scan_manager_tests {
+    use charcoal::web::scan_job::ScanManager;
+
+    #[test]
+    fn test_scan_manager_starts_empty() {
+        let mgr = ScanManager::new();
+        assert!(!mgr.is_any_running());
+    }
+
+    #[test]
+    fn test_scan_manager_try_start_succeeds() {
+        let mut mgr = ScanManager::new();
+        assert!(mgr.try_start_scan("did:plc:abc").is_ok());
+        assert!(mgr.is_any_running());
+    }
+
+    #[test]
+    fn test_scan_manager_try_start_rejects_second() {
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        assert!(mgr.try_start_scan("did:plc:def").is_err());
+    }
+
+    #[test]
+    fn test_scan_manager_finish_allows_next() {
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        mgr.finish_scan("did:plc:abc");
+        assert!(mgr.try_start_scan("did:plc:def").is_ok());
+    }
+
+    #[test]
+    fn test_scan_manager_per_user_status() {
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        let status = mgr.get_status("did:plc:abc");
+        assert!(status.is_some());
+        assert!(status.unwrap().running);
+        assert!(mgr.get_status("did:plc:other").is_none());
+    }
+
+    #[test]
+    fn test_fingerprint_building_tracking() {
+        let mut mgr = ScanManager::new();
+        assert!(!mgr.is_fingerprint_building("did:plc:abc"));
+        mgr.start_fingerprint_build("did:plc:abc");
+        assert!(mgr.is_fingerprint_building("did:plc:abc"));
+        mgr.finish_fingerprint_build("did:plc:abc");
+        assert!(!mgr.is_fingerprint_building("did:plc:abc"));
+    }
+}
