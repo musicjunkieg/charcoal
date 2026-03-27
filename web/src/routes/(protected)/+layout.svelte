@@ -2,15 +2,21 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getStatus, logout } from '$lib/api.js';
+	import { getStatus, logout, getIdentity } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
+	import type { Identity } from '$lib/types.js';
 
 	let { children } = $props();
 	let checking = $state(true);
+	let identity = $state<Identity | null>(null);
+
+	let asUser = $derived($page.url.searchParams.get('as_user'));
 
 	onMount(async () => {
 		try {
 			await getStatus();
+			// Load identity in background for admin nav visibility
+			getIdentity().then((id) => { identity = id; }).catch(() => {});
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');

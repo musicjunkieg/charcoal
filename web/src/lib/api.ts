@@ -11,7 +11,10 @@ import type {
 	FingerprintResponse,
 	UserLabel,
 	AccuracyMetrics,
-	ReviewResponse
+	ReviewResponse,
+	Identity,
+	AdminUsersResponse,
+	PreSeedResponse
 } from './types.js';
 
 export class AuthError extends Error {
@@ -21,7 +24,17 @@ export class AuthError extends Error {
 	}
 }
 
+function getAsUser(): string | null {
+	if (typeof window === 'undefined') return null;
+	return new URLSearchParams(window.location.search).get('as_user');
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+	const asUser = getAsUser();
+	if (asUser) {
+		const separator = path.includes('?') ? '&' : '?';
+		path = `${path}${separator}as_user=${encodeURIComponent(asUser)}`;
+	}
 	const res = await fetch(path, {
 		credentials: 'include', // send session cookie
 		...options
@@ -129,4 +142,36 @@ export async function getReviewQueue(limit = 20): Promise<ReviewResponse> {
 
 export async function getAccuracy(): Promise<AccuracyMetrics> {
 	return apiFetch<AccuracyMetrics>('/api/accuracy');
+}
+
+// ---- Identity ----
+
+export async function getIdentity(): Promise<Identity> {
+	return apiFetch<Identity>('/api/me');
+}
+
+// ---- Admin ----
+
+export async function getAdminUsers(): Promise<AdminUsersResponse> {
+	return apiFetch<AdminUsersResponse>('/api/admin/users');
+}
+
+export async function preSeedUser(handle: string): Promise<PreSeedResponse> {
+	return apiFetch<PreSeedResponse>('/api/admin/users', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ handle }),
+	});
+}
+
+export async function triggerAdminScan(did: string): Promise<void> {
+	await apiFetch(`/api/admin/users/${encodeURIComponent(did)}/scan`, {
+		method: 'POST',
+	});
+}
+
+export async function deleteAdminUser(did: string): Promise<void> {
+	await apiFetch(`/api/admin/users/${encodeURIComponent(did)}`, {
+		method: 'DELETE',
+	});
 }
