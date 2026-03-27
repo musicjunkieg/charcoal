@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-03-27T12:36:43.994764+00:00",
+  "exported_at": "2026-03-27T12:43:18.965497+00:00",
   "issues": [
     {
-      "id": 152,
-      "title": "Switch OpenAI Moderation from omni-moderation to text-moderation-latest for higher rate limits",
+      "id": 153,
+      "title": "Fix invalid model ID — drop explicit model param from OpenAI Moderation requests",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -13,9 +13,24 @@
         "bug"
       ],
       "comments": [],
-      "created_at": "2026-03-27T12:32:42.962477+00:00",
-      "updated_at": "2026-03-27T12:32:42.962477+00:00",
+      "created_at": "2026-03-27T12:41:49.652605+00:00",
+      "updated_at": "2026-03-27T12:41:49.652605+00:00",
       "closed_at": null
+    },
+    {
+      "id": 152,
+      "title": "Switch OpenAI Moderation from omni-moderation to text-moderation-latest for higher rate limits",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-03-27T12:32:42.962477+00:00",
+      "updated_at": "2026-03-27T12:37:32.959608+00:00",
+      "closed_at": "2026-03-27T12:37:32.959608+00:00"
     },
     {
       "id": 151,

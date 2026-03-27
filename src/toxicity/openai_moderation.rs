@@ -18,11 +18,6 @@ use tracing::{debug, warn};
 
 use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
 
-/// Model for text moderation scoring.
-/// Using text-moderation-latest (legacy) instead of omni-moderation because
-/// omni-moderation has a 10,000 TPM limit at Tier 1 (~7 req/min effective),
-/// while text-moderation-latest has 500 RPM + 150k TPM — adequate for scans.
-const MODEL: &str = "text-moderation-latest";
 const ENDPOINT: &str = "https://api.openai.com/v1/moderations";
 
 /// Maximum retry attempts on 429 rate limit responses.
@@ -200,7 +195,6 @@ impl ModerationCategoryScores {
 impl ToxicityScorer for OpenAiModerationScorer {
     async fn score_text(&self, text: &str) -> Result<ToxicityResult> {
         let body = serde_json::json!({
-            "model": MODEL,
             "input": text,
         });
 
@@ -234,7 +228,6 @@ impl ToxicityScorer for OpenAiModerationScorer {
 
         for chunk in texts.chunks(MAX_BATCH_SIZE) {
             let body = serde_json::json!({
-                "model": MODEL,
                 "input": chunk,
             });
 
