@@ -50,6 +50,35 @@ mod admin_tests {
 }
 
 #[cfg(feature = "web")]
+mod impersonation_tests {
+    use charcoal::web::auth::resolve_effective_did;
+
+    #[test]
+    fn test_no_as_user_returns_own_did() {
+        let result = resolve_effective_did("did:plc:me", true, None);
+        assert_eq!(result.unwrap(), "did:plc:me");
+    }
+
+    #[test]
+    fn test_admin_with_as_user_returns_target() {
+        let result = resolve_effective_did("did:plc:me", true, Some("did:plc:other"));
+        assert_eq!(result.unwrap(), "did:plc:other");
+    }
+
+    #[test]
+    fn test_non_admin_with_as_user_returns_error() {
+        let result = resolve_effective_did("did:plc:me", false, Some("did:plc:other"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_non_admin_without_as_user_returns_own_did() {
+        let result = resolve_effective_did("did:plc:me", false, None);
+        assert_eq!(result.unwrap(), "did:plc:me");
+    }
+}
+
+#[cfg(feature = "web")]
 mod db_tests {
     use charcoal::db::sqlite::SqliteDatabase;
     use charcoal::db::Database;

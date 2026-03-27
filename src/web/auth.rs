@@ -127,6 +127,26 @@ pub fn did_is_allowed(did: &str, allowed_did: &str) -> bool {
         .any(|entry| constant_time_eq(did, entry.trim()))
 }
 
+/// Resolve the effective DID for a request.
+/// If as_user is provided and requester is admin, returns the as_user DID.
+/// If as_user is provided but requester is not admin, returns Err.
+/// Otherwise returns the requester's own DID.
+pub fn resolve_effective_did(
+    own_did: &str,
+    is_admin: bool,
+    as_user: Option<&str>,
+) -> Result<String, &'static str> {
+    match as_user {
+        Some(target_did) => {
+            if !is_admin {
+                return Err("Only admins can use as_user");
+            }
+            Ok(target_did.to_string())
+        }
+        None => Ok(own_did.to_string()),
+    }
+}
+
 /// Check if a DID is in the admin allowlist (comma-separated).
 /// Returns false if admin_dids is empty (no admins configured).
 pub fn did_is_admin(did: &str, admin_dids: &str) -> bool {
@@ -161,9 +181,51 @@ pub async fn require_auth(
         }
         Some(did) => {
             let is_admin = did_is_admin(&did, &state.config.admin_dids);
+
+            // Extract as_user query param for impersonation
+            let as_user = request.uri().query().and_then(|q| {
+                q.split('&').find_map(|pair| {
+                    let (key, value) = pair.split_once('=')?;
+                    if key == "as_user" {
+                        Some(value)
+                    } else {
+                        None
+                    }
+                })
+            });
+
+            let effective_did = match resolve_effective_did(&did, is_admin, as_user) {
+                Ok(d) => d,
+                Err(_) => {
+                    return super::api_error(
+                        axum::http::StatusCode::FORBIDDEN,
+                        "Only admins can impersonate",
+                    );
+                }
+            };
+
+            // Validate target user exists (if impersonating)
+            if as_user.is_some() {
+                match state.db.get_user_handle(&effective_did).await {
+                    Ok(Some(_)) => {} // User exists, proceed
+                    Ok(None) => {
+                        return super::api_error(
+                            axum::http::StatusCode::NOT_FOUND,
+                            "Target user not found",
+                        );
+                    }
+                    Err(_) => {
+                        return super::api_error(
+                            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            "Database error",
+                        );
+                    }
+                }
+            }
+
             request.extensions_mut().insert(AuthUser {
                 did: did.clone(),
-                effective_did: did,
+                effective_did,
                 is_admin,
             });
             next.run(request).await
