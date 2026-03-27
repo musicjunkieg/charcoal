@@ -5,12 +5,15 @@
 // for compatibility with the existing scoring pipeline.
 //
 // The endpoint is free (no token charges) but requires an API key.
-// Rate limited — includes exponential backoff retry on 429 responses
-// and batch support via array input.
+// Rate limited with a concurrency semaphore (1 in-flight request at a time)
+// and a minimum delay between requests to stay within OpenAI's rate limits.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
+use std::sync::Arc;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
@@ -23,16 +26,25 @@ const ENDPOINT: &str = "https://api.openai.com/v1/moderations";
 const MAX_RETRIES: u32 = 5;
 
 /// Initial backoff delay in milliseconds (doubles each retry).
-const INITIAL_BACKOFF_MS: u64 = 500;
+const INITIAL_BACKOFF_MS: u64 = 1000;
 
-/// Maximum texts per batch request (OpenAI supports large batches,
-/// but we cap to keep request size reasonable).
+/// Maximum texts per batch request.
 const MAX_BATCH_SIZE: usize = 32;
 
+/// Minimum delay between API requests (200ms = ~5 requests/sec max).
+const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(200);
+
 /// OpenAI Moderation API scorer implementing the ToxicityScorer trait.
+///
+/// Uses a semaphore to ensure only one API request is in-flight at a time,
+/// and a minimum interval between requests to avoid rate limiting.
 pub struct OpenAiModerationScorer {
     client: reqwest::Client,
     api_key: String,
+    /// Only one request at a time to avoid rate limiting.
+    semaphore: Arc<Semaphore>,
+    /// Track when the last request was sent to enforce minimum interval.
+    last_request: Arc<Mutex<Instant>>,
 }
 
 impl OpenAiModerationScorer {
@@ -46,14 +58,35 @@ impl OpenAiModerationScorer {
         Ok(Self {
             client,
             api_key: api_key.to_string(),
+            semaphore: Arc::new(Semaphore::new(1)),
+            last_request: Arc::new(Mutex::new(Instant::now() - MIN_REQUEST_INTERVAL)),
         })
     }
 
-    /// Send a moderation request with retry on 429 rate limit errors.
+    /// Send a moderation request with rate limiting and retry on 429.
+    ///
+    /// Acquires the semaphore (ensuring only one request at a time),
+    /// waits for the minimum interval since the last request, then sends.
     async fn send_with_retry(&self, body: &serde_json::Value) -> Result<ModerationResponse> {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("Semaphore closed: {e}"))?;
+
         let mut backoff_ms = INITIAL_BACKOFF_MS;
 
         for attempt in 0..=MAX_RETRIES {
+            // Enforce minimum interval between requests
+            {
+                let mut last = self.last_request.lock().await;
+                let elapsed = last.elapsed();
+                if elapsed < MIN_REQUEST_INTERVAL {
+                    tokio::time::sleep(MIN_REQUEST_INTERVAL - elapsed).await;
+                }
+                *last = Instant::now();
+            }
+
             let response = self
                 .client
                 .post(ENDPOINT)
@@ -71,7 +104,7 @@ impl OpenAiModerationScorer {
                         attempt = attempt + 1,
                         backoff_ms, "OpenAI rate limited (429), retrying after backoff"
                     );
-                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                     backoff_ms *= 2;
                     continue;
                 }
