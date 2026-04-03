@@ -469,3 +469,42 @@ fn weighted_toxicity(result: &ToxicityResult) -> f64 {
 
     identity_attack * 0.35 + insult * 0.25 + threat * 0.25 + severe * 0.10 + profanity * 0.05
 }
+
+// ============================================================
+// Adaptive sampling — stage decision functions
+// ============================================================
+
+/// ONNX clean-pass threshold. Posts below this are genuinely clean — no
+/// identity terms, no hostility. Posts at or above need secondary classification.
+const ONNX_CLEAN_THRESHOLD: f64 = 0.10;
+
+/// Check if an account can exit early at Stage 1 (25 posts).
+///
+/// Exits when ALL ONNX scores are below the clean threshold AND topic
+/// overlap is below the gate threshold. This catches the ~50-60% of
+/// sweep accounts that are clearly clean and topically irrelevant.
+///
+/// ONNX is ONLY reliable for low scores. A low score genuinely means
+/// no hostile language or identity terms. High scores are NOT trustworthy
+/// (keyword triggering on identity terms).
+pub fn should_early_exit_stage1(
+    onnx_scores: &[f64],
+    topic_overlap: f64,
+    overlap_gate_threshold: f64,
+) -> bool {
+    topic_overlap < overlap_gate_threshold && onnx_scores.iter().all(|&s| s < ONNX_CLEAN_THRESHOLD)
+}
+
+/// Tier boundary proximity thresholds.
+const TIER_BOUNDARIES: [f64; 3] = [8.0, 15.0, 35.0]; // Watch, Elevated, High
+const BOUNDARY_MARGIN: f64 = 5.0;
+
+/// Check if a Stage 2 score is near a tier boundary and needs Stage 3.
+///
+/// Returns true if the score is within ±5 points of any tier boundary,
+/// meaning more data could change the tier classification.
+pub fn should_continue_to_stage3(score: f64) -> bool {
+    TIER_BOUNDARIES
+        .iter()
+        .any(|&boundary| (score - boundary).abs() <= BOUNDARY_MARGIN)
+}

@@ -437,3 +437,66 @@ fn scoring_confidence_staleness_days() {
     assert_eq!(ScoringConfidence::Standard.staleness_days(), 7);
     assert_eq!(ScoringConfidence::High.staleness_days(), 14);
 }
+
+// ============================================================
+// Adaptive sampling — stage decision functions
+// ============================================================
+
+#[test]
+fn early_exit_clean_and_irrelevant() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    let topic_overlap = 0.08;
+    assert!(should_early_exit_stage1(&onnx_scores, topic_overlap, 0.15));
+}
+
+#[test]
+fn no_early_exit_if_any_onnx_above_threshold() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.15, 0.01, 0.08];
+    let topic_overlap = 0.08;
+    assert!(!should_early_exit_stage1(&onnx_scores, topic_overlap, 0.15));
+}
+
+#[test]
+fn no_early_exit_if_overlap_above_gate() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    let topic_overlap = 0.20;
+    assert!(!should_early_exit_stage1(&onnx_scores, topic_overlap, 0.15));
+}
+
+#[test]
+fn stage2_resolves_when_clear_signal() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 22.0 is not near any boundary (8, 15, 35) ± 5
+    assert!(!should_continue_to_stage3(22.0));
+}
+
+#[test]
+fn stage2_continues_when_near_watch_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 6.0 is within ±5 of Watch boundary at 8.0
+    assert!(should_continue_to_stage3(6.0));
+}
+
+#[test]
+fn stage2_continues_when_near_elevated_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 13.0 is within ±5 of Elevated boundary at 15.0
+    assert!(should_continue_to_stage3(13.0));
+}
+
+#[test]
+fn stage2_continues_when_near_high_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 37.0 is within ±5 of High boundary at 35.0
+    assert!(should_continue_to_stage3(37.0));
+}
