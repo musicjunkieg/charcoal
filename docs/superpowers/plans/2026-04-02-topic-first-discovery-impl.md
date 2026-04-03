@@ -40,14 +40,33 @@
 // Spike: test Zentropi CoPE API for binary toxicity classification.
 // This is temporary code for validation — will be promoted to production
 // or deleted based on spike results.
+//
+// Uses Bryan's pre-built Zentropi labeler (labeler_id) which has a
+// conversation-scoped toxic content policy. The policy only flags content
+// directed at conversation participants — NOT third-party discussions,
+// political commentary, or general venting. This is exactly right for
+// Charcoal's use case (predicting reply harassment).
+//
+// The labeler policy is stored in refs/labeler_prompt.txt for reference.
+// The labeler_id is configured via ZENTROPI_LABELER_ID env var.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const ZENTROPI_API_URL: &str = "https://api.zentropi.ai/v1/label";
 
+/// Request using a pre-built labeler (saves tokens, ensures consistency).
 #[derive(Serialize)]
-struct ZentropiRequest {
+struct ZentropiLabelerRequest {
+    content_text: String,
+    labeler_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    labeler_version_id: Option<String>,
+}
+
+/// Request using inline criteria (fallback if labeler unavailable).
+#[derive(Serialize)]
+struct ZentropiCriteriaRequest {
     content_text: String,
     criteria_text: String,
 }
@@ -65,57 +84,29 @@ impl ZentropiResponse {
     }
 }
 
-/// Policy prompt for Charcoal's content moderation.
-/// Distinguishes hostile intent from ally use of identity terms.
-const MODERATION_POLICY: &str = r#"
-## Overview
-Classify social media posts as toxic (1) or not toxic (0) in the context
-of online harassment and community safety.
-
-## Definition of Terms
-- "Toxic content" means posts that attack, demean, threaten, or belittle
-  individuals or groups based on identity, appearance, or beliefs.
-- "Reclaimed language" means identity terms used positively or neutrally
-  by members of that community (e.g., "fat liberation", "queer joy").
-
-## Label: Toxic (1)
-### Includes
-- Direct personal attacks, insults, or name-calling
-- Dehumanizing language about identity groups
-- Threats of violence or harm
-- Mockery or contempt directed at specific people or groups
-- Patronizing dismissal ("you people don't understand")
-- Passive-aggressive hostility disguised as concern
-- Sealioning or bad-faith questioning designed to exhaust
-
-### Excludes
-- Legitimate disagreement or criticism of ideas (not people)
-- Profanity used for emphasis without targeting anyone ("fuck yeah!")
-- Reclaimed identity language used positively ("fat liberation is important")
-- Academic or journalistic discussion of sensitive topics
-- Humor that isn't targeting a person or group
-- Venting about systems or institutions (not individuals)
-- Supportive or affirming use of identity terms
-"#;
-
 pub struct ZentropiSpike {
     client: reqwest::Client,
     api_key: String,
+    labeler_id: String,
+    labeler_version_id: Option<String>,
 }
 
 impl ZentropiSpike {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String, labeler_id: String, labeler_version_id: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
             api_key,
+            labeler_id,
+            labeler_version_id,
         }
     }
 
-    /// Classify a single text. Returns the raw API response.
+    /// Classify a single text using the pre-built labeler.
     pub async fn classify(&self, text: &str) -> Result<ZentropiResponse> {
-        let request = ZentropiRequest {
+        let request = ZentropiLabelerRequest {
             content_text: text.to_string(),
-            criteria_text: MODERATION_POLICY.to_string(),
+            labeler_id: self.labeler_id.clone(),
+            labeler_version_id: self.labeler_version_id.clone(),
         };
 
         let response = self
@@ -140,7 +131,11 @@ impl ZentropiSpike {
     }
 
     /// Classify a reply in the context of its parent post.
-    /// Concatenates parent + reply into a single content field.
+    ///
+    /// The labeler policy is conversation-scoped — it expects content
+    /// that addresses participants. Framing as a conversation exchange
+    /// lets the policy correctly evaluate whether the reply is toxic
+    /// toward the parent post's author.
     pub async fn classify_pair(
         &self,
         parent_text: &str,
@@ -154,25 +149,45 @@ impl ZentropiSpike {
     }
 
     /// Run the spike validation suite.
-    /// Tests the policy with known ally vs hostile examples.
+    ///
+    /// Tests the labeler with known ally vs hostile examples. The test
+    /// cases are designed to exercise the policy's key distinctions:
+    /// - Ally use of identity terms (should NOT be toxic)
+    /// - Third-party political commentary (should NOT be toxic per policy)
+    /// - Direct participant attacks (SHOULD be toxic)
+    /// - Passive-aggressive/patronizing patterns (SHOULD be toxic)
     pub async fn run_validation(&self) -> Result<SpikeResults> {
         let test_cases = vec![
             // Ally content — should be NOT toxic (label: 0)
+            // These use identity terms positively — the ONNX model gets these wrong
             ("Fuck yeah, fat liberation!", false),
             ("Fat people deserve respect and dignity", false),
             ("As a queer person, I love seeing this representation", false),
             ("Trans rights are human rights, full stop", false),
             ("This is such a powerful discussion about body politics", false),
-            // Hostile content — should be toxic (label: 1)
-            ("Fat people are disgusting and lazy", true),
+
+            // Third-party commentary — should NOT be toxic per policy
+            // (discussing non-participants, even with strong language)
+            ("Politicians who cut disability funding are despicable", false),
+            ("I can't believe the Supreme Court ruled that way", false),
+
+            // Hostile content directed at participants — SHOULD be toxic
+            ("You're disgusting and everyone knows it", true),
             ("You people are mentally ill and need help", true),
             ("Imagine being this stupid about basic biology", true),
-            ("Another day, another delusional take from the woke mob", true),
+            ("Allow me to break this down into simpler concepts for you", true),
             ("I bet your parents are so disappointed in what you became", true),
-            // Ambiguous / edge cases
+
+            // Passive-aggressive / patronizing — SHOULD be toxic
+            ("It's actually surprising you arrived punctually this time", true),
+            ("Oh, here comes the supposed expert", true),
+
+            // Legitimate disagreement — should NOT be toxic
             ("I disagree with this policy approach entirely", false),
-            ("This take is problematic and here's why...", false),
-            ("You're wrong and this is harmful to the community", true),
+            ("That assertion is wrong — here's the real data", false),
+
+            // Reply context pairs (parent + reply)
+            // Will test via classify_pair separately
         ];
 
         let mut results = SpikeResults::default();
@@ -199,6 +214,50 @@ impl ZentropiSpike {
                 }
             }
         }
+
+        // Test reply pair classification
+        let pair_cases = vec![
+            (
+                "I've been working on fat liberation advocacy for years",
+                "You're delusional if you think that's healthy",
+                true,
+            ),
+            (
+                "I've been working on fat liberation advocacy for years",
+                "That's amazing work, keep it up!",
+                false,
+            ),
+            (
+                "Here's my take on the new policy",
+                "I disagree — the data doesn't support that conclusion",
+                false,
+            ),
+        ];
+
+        for (parent, reply, expected_toxic) in &pair_cases {
+            match self.classify_pair(parent, reply).await {
+                Ok(response) => {
+                    let actual_toxic = response.is_toxic();
+                    let correct = *expected_toxic == actual_toxic;
+                    results.total += 1;
+                    if correct {
+                        results.correct += 1;
+                    }
+                    results.details.push(SpikeDetail {
+                        text: format!("[pair] {} → {}", parent, reply),
+                        expected_toxic: *expected_toxic,
+                        actual_toxic,
+                        confidence: response.confidence,
+                        compute_time: response.compute_time,
+                        correct,
+                    });
+                }
+                Err(e) => {
+                    results.errors.push(format!("Failed on pair: {}", e));
+                }
+            }
+        }
+
         results.accuracy = if results.total > 0 {
             results.correct as f64 / results.total as f64
         } else {
@@ -239,14 +298,19 @@ pub mod zentropi_spike;
 
 Add a `zentropi-spike` subcommand to `src/main.rs` (or wherever CLI commands are defined). It should:
 1. Read `ZENTROPI_API_KEY` from env
-2. Run `ZentropiSpike::run_validation()`
-3. Print results: accuracy, per-case results, average latency, any errors
-4. Print a go/no-go recommendation based on accuracy >= 0.85 and avg latency < 2s
+2. Read `ZENTROPI_LABELER_ID` from env (default: the labeler ID from refs/zentropi_info.txt)
+3. Optionally read `ZENTROPI_LABELER_VERSION_ID` from env
+4. Construct `ZentropiSpike::new(api_key, labeler_id, version_id)`
+5. Run `ZentropiSpike::run_validation()`
+6. Print results: accuracy, per-case results (with confidence + compute_time), average latency, any errors
+7. Print a go/no-go recommendation based on accuracy >= 0.85 and avg latency < 2s
+
+**Note:** The API key is in `refs/zentropi_info.txt` but MUST be loaded from env var, not committed. Add `ZENTROPI_API_KEY`, `ZENTROPI_LABELER_ID`, and `ZENTROPI_LABELER_VERSION_ID` to `.env.example`.
 
 - [ ] **Step 4: Run the spike manually**
 
 ```bash
-ZENTROPI_API_KEY=<key> cargo run -- zentropi-spike
+ZENTROPI_API_KEY=<key> ZENTROPI_LABELER_ID=<id> cargo run -- zentropi-spike
 ```
 
 Document results in a markdown file at `docs/spike-results/2026-04-XX-zentropi-spike.md`.
@@ -257,11 +321,32 @@ Document results in a markdown file at `docs/spike-results/2026-04-XX-zentropi-s
 - No rate limit errors on 13 sequential requests
 - If no-go: document why, evaluate self-hosted CoPE-A-9B or Llama Guard 4
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Add Zentropi env vars to config**
+
+Add to `src/config.rs`:
+```rust
+    /// Zentropi API key for binary toxicity classification
+    pub zentropi_api_key: Option<String>,
+    /// Zentropi labeler ID (pre-built policy prompt)
+    pub zentropi_labeler_id: Option<String>,
+    /// Zentropi labeler version ID (optional, pins specific version)
+    pub zentropi_labeler_version_id: Option<String>,
+```
+
+Load in `Config::load()`:
+```rust
+    zentropi_api_key: env::var("ZENTROPI_API_KEY").ok(),
+    zentropi_labeler_id: env::var("ZENTROPI_LABELER_ID").ok(),
+    zentropi_labeler_version_id: env::var("ZENTROPI_LABELER_VERSION_ID").ok(),
+```
+
+Also add to `test_defaults()` with `None` values.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/toxicity/zentropi_spike.rs src/toxicity/mod.rs src/main.rs
-git commit -m 'feat: add Zentropi CoPE API spike for binary toxicity classification'
+git add src/toxicity/zentropi_spike.rs src/toxicity/mod.rs src/main.rs src/config.rs
+git commit -m 'feat: add Zentropi CoPE API spike with pre-built labeler support'
 ```
 
 ---
@@ -2298,13 +2383,17 @@ git commit -m 'feat: wire topic-first discovery as primary sweep pipeline'
 **When to implement:** After Phase 0 spike passes go/no-go criteria AND Phases 1a+1b are deployed.
 
 **Key changes (contingent on spike):**
-- Add `src/toxicity/zentropi.rs` — production Zentropi client
+- Add `src/toxicity/zentropi.rs` — production Zentropi client using pre-built labeler
+- Uses `labeler_id` (not inline `criteria_text`) for consistency and token savings
+- The labeler policy is conversation-scoped (see `refs/labeler_prompt.txt`) — only
+  flags content directed at participants, not third-party commentary
 - ONNX becomes clean-pass filter only (< 0.10 = cleared, everything else → Zentropi)
 - Toxicity rate computed from Zentropi binary labels, not ONNX continuous scores
 - `weighted_toxicity()` removed from scoring path (kept as ONNX-only fallback)
-- Reply pairs sent as `(parent_text, reply_text)` to Zentropi
-- Groq Safeguard removed (if still present)
-- Remove ensemble scorer's dependency on OpenAI Moderation
+- Reply pairs sent as `[Parent post]: ...\n\n[Reply]: ...` to Zentropi
+- Groq Safeguard removed (was on the deleted `feat/groq-ensemble` branch, not in staging)
+- OpenAI Moderation scorer remains available as fallback if Zentropi is unavailable
+- Env vars: `ZENTROPI_API_KEY`, `ZENTROPI_LABELER_ID`, `ZENTROPI_LABELER_VERSION_ID`
 
 **Fallback if Zentropi no-go:**
 - Self-host CoPE-A-9B via llama.cpp/MLX on Mac Studio
