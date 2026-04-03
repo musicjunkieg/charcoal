@@ -108,6 +108,34 @@ async fn fetch_posts_with_replies_partitions_correctly() {
     }
 }
 
+#[test]
+fn parent_uri_deduplication() {
+    use charcoal::bluesky::posts::ReplyPost;
+    use std::collections::HashSet;
+
+    let mut all_replies = make_reply_posts(5);
+    // Add one with a duplicate parent URI (same as index 0)
+    all_replies.push(ReplyPost {
+        post: Post {
+            uri: "at://did:plc:test/app.bsky.feed.post/extra".to_string(),
+            text: "duplicate parent reply".to_string(),
+            created_at: None,
+            like_count: 0,
+            repost_count: 0,
+            quote_count: 0,
+            is_quote: false,
+        },
+        parent_uri: "at://did:plc:other/app.bsky.feed.post/0".to_string(),
+    });
+
+    let unique_uris: HashSet<&str> = all_replies.iter().map(|r| r.parent_uri.as_str()).collect();
+    assert_eq!(
+        unique_uris.len(),
+        5,
+        "Should have 5 unique parent URIs (one was a duplicate)"
+    );
+}
+
 fn make_posts(n: usize) -> Vec<Post> {
     (0..n)
         .map(|i| Post {

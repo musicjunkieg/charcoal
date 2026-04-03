@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use atrium_api::app::bsky::feed::{get_author_feed, get_posts};
 use atrium_api::types::TryFromUnknown;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::client::PublicAtpClient;
 
@@ -386,6 +386,69 @@ pub async fn fetch_post_text(client: &PublicAtpClient, uri: &str) -> Result<Opti
     });
 
     Ok(text)
+}
+
+/// Batch-fetch parent post texts for reply context pair formation.
+///
+/// Given a set of AT URIs, fetches the post texts via `getPosts` (up to 25
+/// per call, as per API limit). Returns a map from URI to text.
+///
+/// Used to form (parent_text, reply_text) pairs for Zentropi or NLI scoring.
+pub async fn fetch_parent_posts(
+    client: &PublicAtpClient,
+    parent_uris: &[String],
+) -> Result<std::collections::HashMap<String, String>> {
+    use std::collections::HashMap;
+
+    let mut result = HashMap::new();
+    if parent_uris.is_empty() {
+        return Ok(result);
+    }
+
+    // Deduplicate URIs — multiple replies may share the same parent thread.
+    let unique_uris: Vec<&str> = {
+        let mut seen = std::collections::HashSet::new();
+        parent_uris
+            .iter()
+            .filter(|u| seen.insert(u.as_str()))
+            .map(|u| u.as_str())
+            .collect()
+    };
+
+    // getPosts accepts up to 25 URIs per call.
+    for chunk in unique_uris.chunks(25) {
+        let params: Vec<(&str, &str)> = chunk.iter().map(|uri| ("uris", *uri)).collect();
+
+        match client
+            .xrpc_get::<get_posts::Output>("app.bsky.feed.getPosts", &params)
+            .await
+        {
+            Ok(output) => {
+                for post_view in &output.posts {
+                    if let Ok(record) = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+                        post_view.record.clone(),
+                    ) {
+                        result.insert(post_view.uri.clone(), record.data.text.clone());
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    chunk_size = chunk.len(),
+                    error = %e,
+                    "Failed to fetch parent posts batch, skipping"
+                );
+            }
+        }
+    }
+
+    debug!(
+        requested = parent_uris.len(),
+        fetched = result.len(),
+        "Fetched parent posts for context pairs"
+    );
+
+    Ok(result)
 }
 
 /// Fetch the reply ratio for an account by sampling one page of posts.
