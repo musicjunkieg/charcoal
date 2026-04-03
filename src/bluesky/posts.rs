@@ -7,6 +7,7 @@
 use anyhow::{Context, Result};
 use atrium_api::app::bsky::feed::{get_author_feed, get_posts};
 use atrium_api::types::TryFromUnknown;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use super::client::PublicAtpClient;
@@ -22,6 +23,79 @@ pub struct Post {
     pub quote_count: i64,
     /// Whether this post is a quote-post (embeds another post).
     pub is_quote: bool,
+}
+
+/// A reply post with its parent URI for context pair formation.
+#[derive(Debug, Clone)]
+pub struct ReplyPost {
+    pub post: Post,
+    /// AT URI of the post being replied to (for fetching parent text)
+    pub parent_uri: String,
+}
+
+/// Partitioned post sample from an account's feed.
+///
+/// Separates posts into originals, replies, and quotes so different
+/// consumers can use the appropriate subset:
+/// - Topic fingerprinting: originals (chosen topics, not inherited from arguments)
+/// - Toxicity scoring: all posts, with replies weighted 70%
+/// - Context pairs: replies with parent URIs for NLI/Zentropi pair scoring
+#[derive(Debug, Clone)]
+pub struct PostSample {
+    /// Original posts (not replies, not quotes)
+    pub originals: Vec<Post>,
+    /// Reply posts with parent URI for context pair fetching
+    pub replies: Vec<ReplyPost>,
+    /// Quote posts (embed another post)
+    pub quotes: Vec<Post>,
+    /// Computed reply ratio (replies / total non-repost posts)
+    pub reply_ratio: f64,
+    /// Computed quote ratio (quotes / total non-repost posts)
+    pub quote_ratio: f64,
+    /// Total non-repost posts seen (denominator for ratios)
+    pub total_posts: usize,
+}
+
+/// Quality of a topic fingerprint based on data availability.
+///
+/// When an account is reply-heavy, fingerprinting from originals alone
+/// may produce unreliable results. This flag lets downstream scoring
+/// account for fingerprint confidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FingerprintQuality {
+    /// >= 15 originals — fingerprint from originals only
+    Normal,
+    /// < 15 originals but >= 15 total — fingerprint from all posts
+    Degraded,
+    /// < 15 total posts OR 0 originals — fingerprint is unreliable
+    Unreliable,
+}
+
+impl FingerprintQuality {
+    /// Determine fingerprint quality from post counts.
+    ///
+    /// Special case: 0 originals is always Unreliable even if total >= 15,
+    /// because fingerprinting entirely from replies captures the topics of
+    /// people they're arguing with, not their own interests.
+    pub fn from_counts(originals: usize, replies_and_quotes: usize) -> Self {
+        if originals >= 15 {
+            FingerprintQuality::Normal
+        } else if originals == 0 {
+            FingerprintQuality::Unreliable
+        } else if originals + replies_and_quotes >= 15 {
+            FingerprintQuality::Degraded
+        } else {
+            FingerprintQuality::Unreliable
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FingerprintQuality::Normal => "normal",
+            FingerprintQuality::Degraded => "degraded",
+            FingerprintQuality::Unreliable => "unreliable",
+        }
+    }
 }
 
 /// Fetch recent posts for a given account, handling pagination automatically.
