@@ -372,6 +372,60 @@ fn context_score_at_boundary() {
 }
 
 // ============================================================
+// compute_reply_weighted_toxicity
+// ============================================================
+
+#[test]
+fn reply_weighted_toxicity_hostile_replies_clean_originals() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    // 12/30 replies toxic, 0/20 originals toxic
+    let result = compute_reply_weighted_toxicity(12, 30, 0, 20);
+    // reply_tox_rate = 0.40, original_tox_rate = 0.0
+    // weighted = 0.40 * 0.7 + 0.0 * 0.3 = 0.28
+    assert!(
+        (result - 0.28).abs() < 0.001,
+        "Expected 0.28, got {}",
+        result
+    );
+}
+
+#[test]
+fn reply_weighted_toxicity_falls_back_when_few_replies() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    // Only 3 replies — below threshold of 5, falls back to flat rate
+    let result = compute_reply_weighted_toxicity(2, 3, 4, 20);
+    // flat rate = (2 + 4) / (3 + 20) = 6/23
+    assert!(
+        (result - 6.0 / 23.0).abs() < 0.001,
+        "Expected flat rate, got {}",
+        result
+    );
+}
+
+#[test]
+fn reply_weighted_toxicity_zero_posts() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+    let result = compute_reply_weighted_toxicity(0, 0, 0, 0);
+    assert!((result - 0.0).abs() < 0.001);
+}
+
+#[test]
+fn reply_weighted_toxicity_all_replies_toxic() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    let result = compute_reply_weighted_toxicity(20, 20, 5, 10);
+    // reply_tox_rate = 1.0, original_tox_rate = 0.5
+    // weighted = 1.0 * 0.7 + 0.5 * 0.3 = 0.85
+    assert!(
+        (result - 0.85).abs() < 0.001,
+        "Expected 0.85, got {}",
+        result
+    );
+}
+
+// ============================================================
 // ScoringConfidence — staleness days
 // ============================================================
 

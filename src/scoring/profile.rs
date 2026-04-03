@@ -371,6 +371,54 @@ pub async fn build_profile(
     })
 }
 
+/// Minimum number of replies to use reply-weighted toxicity.
+/// Below this, falls back to flat rate across all posts.
+const MIN_REPLIES_FOR_WEIGHTING: usize = 5;
+
+/// Compute reply-weighted toxicity rate.
+///
+/// Reply toxicity is weighted 70% and original toxicity 30%, because
+/// hostile behavior manifests in replies — not original posts. An account
+/// can post wholesome original content and be vicious in replies.
+///
+/// Falls back to flat rate when there are fewer than 5 replies (insufficient
+/// interactive data to weight reliably).
+///
+/// Arguments are counts of toxic posts by type, not continuous scores.
+/// When using ONNX only (pre-Zentropi), these counts come from
+/// `weighted_toxicity()` exceeding 0.5 (the category-weighted threshold).
+/// When Zentropi is active (Phase 5), counts come from Zentropi binary labels.
+pub fn compute_reply_weighted_toxicity(
+    toxic_replies: usize,
+    total_replies: usize,
+    toxic_originals: usize,
+    total_originals: usize,
+) -> f64 {
+    let total = total_replies + total_originals;
+    if total == 0 {
+        return 0.0;
+    }
+
+    if total_replies < MIN_REPLIES_FOR_WEIGHTING {
+        let toxic_total = toxic_replies + toxic_originals;
+        return toxic_total as f64 / total as f64;
+    }
+
+    let reply_tox_rate = if total_replies > 0 {
+        toxic_replies as f64 / total_replies as f64
+    } else {
+        0.0
+    };
+
+    let original_tox_rate = if total_originals > 0 {
+        toxic_originals as f64 / total_originals as f64
+    } else {
+        0.0
+    };
+
+    reply_tox_rate * 0.7 + original_tox_rate * 0.3
+}
+
 /// Compute a weighted toxicity score from individual category scores.
 ///
 /// The raw model `toxicity` score treats all categories equally, but for
