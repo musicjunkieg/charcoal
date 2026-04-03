@@ -110,6 +110,9 @@ enum Commands {
         bind: String,
     },
 
+    /// Run Zentropi CoPE API spike validation
+    ZentropiSpike,
+
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
     Migrate {
@@ -761,6 +764,122 @@ async fn main() -> Result<()> {
 
             info!(port, %bind, "Starting Charcoal web server");
             charcoal::web::run_server(config, db, port, &bind).await?;
+        }
+
+        Commands::ZentropiSpike => {
+            let config = config::Config::load()?;
+
+            let api_key = config
+                .zentropi_api_key
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("ZENTROPI_API_KEY not set. Add it to your .env file.")
+                })?;
+            let labeler_id = config
+                .zentropi_labeler_id
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("ZENTROPI_LABELER_ID not set. Add it to your .env file.")
+                })?;
+            let version_id = config.zentropi_labeler_version_id.filter(|k| !k.is_empty());
+
+            println!("{}", "=== Zentropi CoPE API Spike ===".bold());
+            println!("  Labeler ID: {labeler_id}");
+            if let Some(ref v) = version_id {
+                println!("  Version ID: {v}");
+            }
+            println!();
+
+            let spike = charcoal::toxicity::zentropi_spike::ZentropiSpike::new(
+                api_key, labeler_id, version_id,
+            );
+
+            let results = spike.run_validation().await?;
+
+            // Print results table
+            println!(
+                "  {:<4} {:<60} {:>8} {:>8} {:>6} {:>8}",
+                "#", "Text", "Expected", "Actual", "OK?", "Conf"
+            );
+            println!("  {}", "-".repeat(100));
+
+            for (i, detail) in results.details.iter().enumerate() {
+                let text_preview = if detail.text.len() > 57 {
+                    format!("{}...", &detail.text[..57])
+                } else {
+                    detail.text.clone()
+                };
+                let expected = if detail.expected_toxic {
+                    "toxic"
+                } else {
+                    "safe"
+                };
+                let actual = if detail.actual_toxic { "toxic" } else { "safe" };
+                let ok_mark = if detail.correct {
+                    "Y".green().to_string()
+                } else {
+                    "N".red().bold().to_string()
+                };
+
+                println!(
+                    "  {:<4} {:<60} {:>8} {:>8} {:>6} {:>7.1}%",
+                    format!("{}.", i + 1),
+                    text_preview,
+                    expected,
+                    actual,
+                    ok_mark,
+                    detail.confidence * 100.0,
+                );
+            }
+
+            // Summary
+            let total_time: f64 = results.details.iter().map(|d| d.compute_time).sum();
+            let avg_latency = if results.total > 0 {
+                total_time / results.total as f64
+            } else {
+                0.0
+            };
+
+            println!("\n{}", "=== Summary ===".bold());
+            println!(
+                "  Accuracy:      {:.1}% ({}/{})",
+                results.accuracy * 100.0,
+                results.correct,
+                results.total
+            );
+            println!("  Avg latency:   {:.2}s", avg_latency);
+            println!("  Errors:        {}", results.errors.len());
+
+            if !results.errors.is_empty() {
+                println!("\n{}", "Errors:".red().bold());
+                for err in &results.errors {
+                    println!("  - {err}");
+                }
+            }
+
+            // Go/no-go recommendation
+            println!();
+            if results.accuracy >= 0.85 && avg_latency < 2.0 {
+                println!(
+                    "  {} Zentropi spike PASSES: accuracy {:.0}% >= 85%, latency {:.2}s < 2s",
+                    "GO".green().bold(),
+                    results.accuracy * 100.0,
+                    avg_latency,
+                );
+            } else {
+                let mut reasons = Vec::new();
+                if results.accuracy < 0.85 {
+                    reasons.push(format!("accuracy {:.0}% < 85%", results.accuracy * 100.0));
+                }
+                if avg_latency >= 2.0 {
+                    reasons.push(format!("latency {:.2}s >= 2s", avg_latency));
+                }
+                println!(
+                    "  {} Zentropi spike FAILS: {}",
+                    "NO-GO".red().bold(),
+                    reasons.join(", "),
+                );
+            }
         }
 
         #[cfg(feature = "postgres")]

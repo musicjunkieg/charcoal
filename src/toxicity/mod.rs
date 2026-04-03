@@ -11,3 +11,4 @@ pub mod openai_moderation;
 pub mod perspective;
 pub mod rate_limiter;
 pub mod traits;
+pub mod zentropi_spike;

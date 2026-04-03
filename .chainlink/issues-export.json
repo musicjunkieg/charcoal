@@ -1,12 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-04-03T03:21:03.788758+00:00",
+  "exported_at": "2026-04-03T03:32:55.471755+00:00",
   "issues": [
+    {
+      "id": 159,
+      "title": "Add Zentropi CoPE API spike for binary toxicity validation",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-04-03T03:29:07.667574+00:00",
+      "updated_at": "2026-04-03T03:29:07.667574+00:00",
+      "closed_at": null
+    },
     {
       "id": 158,
       "title": "Update plan to use Zentropi labeler_id and Bryan's policy prompt",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
@@ -14,8 +29,8 @@
       ],
       "comments": [],
       "created_at": "2026-04-03T03:19:22.572306+00:00",
-      "updated_at": "2026-04-03T03:19:22.572306+00:00",
-      "closed_at": null
+      "updated_at": "2026-04-03T03:21:16.139467+00:00",
+      "closed_at": "2026-04-03T03:21:16.139467+00:00"
     },
     {
       "id": 157,

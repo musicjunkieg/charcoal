@@ -37,6 +37,12 @@ pub struct Config {
     pub constellation_url: String,
     /// OpenAI API key for ensemble toxicity scoring (free moderation endpoint)
     pub openai_api_key: Option<String>,
+    /// Zentropi API key for binary toxicity classification
+    pub zentropi_api_key: Option<String>,
+    /// Zentropi labeler ID (pre-built policy prompt)
+    pub zentropi_labeler_id: Option<String>,
+    /// Zentropi labeler version ID (optional, pins specific version)
+    pub zentropi_labeler_version_id: Option<String>,
     /// DID that is allowed to authenticate (CHARCOAL_ALLOWED_DID env var).
     /// Find your DID at: bsky.app → Settings → Account
     #[cfg(feature = "web")]
@@ -93,6 +99,9 @@ impl Config {
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
             openai_api_key: env::var("OPENAI_API_KEY").ok(),
+            zentropi_api_key: env::var("ZENTROPI_API_KEY").ok(),
+            zentropi_labeler_id: env::var("ZENTROPI_LABELER_ID").ok(),
+            zentropi_labeler_version_id: env::var("ZENTROPI_LABELER_VERSION_ID").ok(),
             #[cfg(feature = "web")]
             allowed_did,
             #[cfg(feature = "web")]
@@ -185,6 +194,9 @@ impl Config {
             model_dir: std::path::PathBuf::from("/tmp/test_models"),
             constellation_url: "https://constellation.microcosm.blue".to_string(),
             openai_api_key: None,
+            zentropi_api_key: None,
+            zentropi_labeler_id: None,
+            zentropi_labeler_version_id: None,
             #[cfg(feature = "web")]
             allowed_did: "did:plc:testalloweddid0000000000".to_string(),
             #[cfg(feature = "web")]
