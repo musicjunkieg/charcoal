@@ -55,6 +55,18 @@ pub fn compute_avg_engagement(posts: &[Post]) -> f64 {
     total / posts.len() as f64
 }
 
+/// Compute mean engagement from post references (avoids cloning).
+pub fn compute_avg_engagement_refs(posts: &[&Post]) -> f64 {
+    if posts.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = posts
+        .iter()
+        .map(|p| (p.like_count + p.repost_count) as f64)
+        .sum();
+    total / posts.len() as f64
+}
+
 /// Compute the fraction of posts that are quote-posts.
 /// Returns 0.0 if total_posts is 0.
 pub fn compute_quote_ratio(quote_count: usize, total_posts: usize) -> f64 {

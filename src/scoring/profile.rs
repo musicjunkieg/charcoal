@@ -12,7 +12,7 @@ use anyhow::Result;
 use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
-use crate::bluesky::posts::{self, Post};
+use crate::bluesky::posts::{self, FingerprintQuality, Post};
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::models::{AccountScore, ToxicPost};
 use crate::scoring::behavioral;
@@ -52,13 +52,13 @@ pub async fn build_profile(
     data_dir: Option<&std::path::Path>,
     graph_distance: Option<GraphDistance>,
 ) -> Result<AccountScore> {
-    // Step 1: Fetch the target's recent posts (up to 50 for stable TF-IDF fingerprints)
-    let target_posts = posts::fetch_recent_posts(client, target_handle, 50).await?;
+    // Step 1: Fetch the target's posts with replies included
+    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
 
-    if target_posts.len() < 5 {
+    if sample.total_posts < 5 {
         info!(
             handle = target_handle,
-            post_count = target_posts.len(),
+            post_count = sample.total_posts,
             "Insufficient posts for reliable scoring"
         );
         return Ok(AccountScore {
@@ -68,7 +68,7 @@ pub async fn build_profile(
             topic_overlap: None,
             threat_score: None,
             threat_tier: Some("Insufficient Data".to_string()),
-            posts_analyzed: target_posts.len() as u32,
+            posts_analyzed: sample.total_posts as u32,
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
@@ -79,9 +79,45 @@ pub async fn build_profile(
         });
     }
 
-    // Step 2: Score posts for toxicity
-    let post_texts: Vec<String> = target_posts.iter().map(|p| p.text.clone()).collect();
-    let toxicity_results = scorer.score_batch(&post_texts).await?;
+    // Step 2: Determine fingerprint quality and select posts for fingerprinting
+    let fp_quality = FingerprintQuality::from_counts(
+        sample.originals.len(),
+        sample.replies.len() + sample.quotes.len(),
+    );
+
+    // Fingerprinting uses originals when available (chosen topics, not inherited)
+    let fingerprint_posts: Vec<String> = if sample.originals.len() >= 15 {
+        sample.originals.iter().map(|p| p.text.clone()).collect()
+    } else {
+        // Fall back to all posts for fingerprinting
+        sample
+            .originals
+            .iter()
+            .map(|p| p.text.clone())
+            .chain(sample.replies.iter().map(|r| r.post.text.clone()))
+            .chain(sample.quotes.iter().map(|p| p.text.clone()))
+            .collect()
+    };
+
+    // All posts go to toxicity scoring
+    let all_post_texts: Vec<String> = sample
+        .originals
+        .iter()
+        .map(|p| p.text.clone())
+        .chain(sample.replies.iter().map(|r| r.post.text.clone()))
+        .chain(sample.quotes.iter().map(|p| p.text.clone()))
+        .collect();
+
+    // Build flat list of all posts for evidence collection
+    let all_posts_flat: Vec<&Post> = sample
+        .originals
+        .iter()
+        .chain(sample.replies.iter().map(|r| &r.post))
+        .chain(sample.quotes.iter())
+        .collect();
+
+    // Step 3: Score posts for toxicity
+    let toxicity_results = scorer.score_batch(&all_post_texts).await?;
 
     // Calculate weighted toxicity that emphasizes hostile intent over profanity.
     //
@@ -105,9 +141,10 @@ pub async fn build_profile(
     // Sort by weighted_toxicity (which drives the threat score) so the evidence
     // shown to the user matches what actually determined the tier — not the raw
     // model toxicity score, which can be misleading for ally-style profanity.
-    let mut scored_posts: Vec<(&Post, f64)> = target_posts
+    let mut scored_posts: Vec<(&Post, f64)> = all_posts_flat
         .iter()
         .zip(toxicity_results.iter().map(weighted_toxicity))
+        .map(|(post, score)| (*post, score))
         .collect();
     scored_posts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -128,7 +165,7 @@ pub async fn build_profile(
     // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
     let topic_overlap = if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
         // Embedding path: embed target's posts, average, compare
-        let target_embeddings = emb.embed_batch(&post_texts).await?;
+        let target_embeddings = emb.embed_batch(&fingerprint_posts).await?;
         let target_mean = embeddings::mean_embedding(&target_embeddings);
         embeddings::cosine_similarity_embeddings(protected_emb, &target_mean)
     } else {
@@ -137,28 +174,15 @@ pub async fn build_profile(
             top_n_keywords: 40,
             max_clusters: 7,
         };
-        let target_fingerprint = topic_extractor.extract(&post_texts)?;
+        let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
         overlap::cosine_similarity(protected_fingerprint, &target_fingerprint)
     };
 
-    // Step 4b: Compute behavioral signals
-    let quote_count = target_posts.iter().filter(|p| p.is_quote).count();
-    let quote_ratio = behavioral::compute_quote_ratio(quote_count, target_posts.len());
+    // Step 4b: Compute behavioral signals (from PostSample — no separate API call)
+    let quote_ratio = sample.quote_ratio;
+    let reply_ratio = sample.reply_ratio;
 
-    let (reply_count, reply_total) = match posts::fetch_reply_ratio(client, target_handle).await {
-        Ok(counts) => counts,
-        Err(e) => {
-            warn!(
-                handle = target_handle,
-                error = %e,
-                "Reply ratio fetch failed, defaulting to 0"
-            );
-            (0, 0)
-        }
-    };
-    let reply_ratio = behavioral::compute_reply_ratio(reply_count, reply_total);
-
-    let avg_engagement = behavioral::compute_avg_engagement(&target_posts);
+    let avg_engagement = behavioral::compute_avg_engagement_refs(&all_posts_flat);
     let pile_on = pile_on_dids.contains(target_did);
 
     // Step 5: Compute context score via NLI
@@ -206,9 +230,9 @@ pub async fn build_profile(
             if user_posts.is_empty() {
                 None
             } else {
-                match emb.embed_batch(&post_texts).await {
+                match emb.embed_batch(&all_post_texts).await {
                     Ok(target_embeddings) => {
-                        let target_with_emb: Vec<(String, Vec<f64>)> = post_texts
+                        let target_with_emb: Vec<(String, Vec<f64>)> = all_post_texts
                             .iter()
                             .zip(target_embeddings.into_iter())
                             .map(|(text, emb)| (text.clone(), emb))
@@ -349,7 +373,7 @@ pub async fn build_profile(
         reply_ratio = format!("{:.2}", reply_ratio),
         benign_gate = benign_gate,
         behavioral_boost = format!("{:.2}", behavioral_boost),
-        posts = target_posts.len(),
+        posts = sample.total_posts,
         "Scored account"
     );
 
@@ -360,14 +384,14 @@ pub async fn build_profile(
         topic_overlap: Some(topic_overlap),
         threat_score: Some(final_score),
         threat_tier: Some(tier.to_string()),
-        posts_analyzed: target_posts.len() as u32,
+        posts_analyzed: sample.total_posts as u32,
         top_toxic_posts,
         scored_at: String::new(),
         behavioral_signals: Some(signals_json),
         context_score,
         graph_distance: graph_distance.map(|d| d.as_str().to_string()),
-        fingerprint_quality: None,
-        scoring_confidence: None,
+        fingerprint_quality: Some(fp_quality.as_str().to_string()),
+        scoring_confidence: Some("standard".to_string()),
     })
 }
 
