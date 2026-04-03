@@ -1040,4 +1040,13 @@ impl Database for PgDatabase {
             .await?;
         Ok(())
     }
+
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
+        let rows = sqlx_core::query::query("SELECT did FROM account_scores WHERE user_did = $1")
+            .bind(user_did)
+            .fetch_all(&self.pool)
+            .await?;
+        let dids = rows.iter().map(|row| row.get::<String, _>("did")).collect();
+        Ok(dids)
+    }
 }

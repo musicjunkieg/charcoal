@@ -849,6 +849,15 @@ pub fn update_last_login(conn: &Connection, did: &str) -> Result<()> {
     Ok(())
 }
 
+/// Get all DIDs that have been scored for a user.
+pub fn get_all_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT did FROM account_scores WHERE user_did = ?1")?;
+    let dids = stmt
+        .query_map(params![user_did], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<String>, _>>()?;
+    Ok(dids)
+}
+
 // rusqlite's optional() helper — converts "no rows" into None
 use rusqlite::OptionalExtension;
 

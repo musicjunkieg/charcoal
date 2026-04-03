@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-04-03T04:42:18.760413+00:00",
+  "exported_at": "2026-04-03T04:47:41.797447+00:00",
   "issues": [
     {
-      "id": 171,
-      "title": "Wire adaptive sampling early exit into build_profile",
+      "id": 172,
+      "title": "Wire topic-first discovery into sweep pipeline with --sweep-mode flag",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -13,9 +13,24 @@
         "feature"
       ],
       "comments": [],
-      "created_at": "2026-04-03T04:39:55.374467+00:00",
-      "updated_at": "2026-04-03T04:39:55.374467+00:00",
+      "created_at": "2026-04-03T04:43:18.613868+00:00",
+      "updated_at": "2026-04-03T04:43:18.613868+00:00",
       "closed_at": null
+    },
+    {
+      "id": 171,
+      "title": "Wire adaptive sampling early exit into build_profile",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-04-03T04:39:55.374467+00:00",
+      "updated_at": "2026-04-03T04:43:13.033647+00:00",
+      "closed_at": "2026-04-03T04:43:13.033647+00:00"
     },
     {
       "id": 170,

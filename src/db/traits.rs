@@ -198,4 +198,7 @@ pub trait Database: Send + Sync {
 
     /// Update last_login_at timestamp for a user.
     async fn update_last_login(&self, did: &str) -> Result<()>;
+
+    /// Get all DIDs that have been scored for a user (for deduplication during discovery).
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
 }

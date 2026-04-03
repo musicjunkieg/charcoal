@@ -282,6 +282,11 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::update_last_login(&conn, did)
     }
+
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_all_scored_dids(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
