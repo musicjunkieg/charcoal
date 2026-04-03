@@ -244,6 +244,8 @@ mod tests {
                 behavioral_signals: None,
                 context_score: None,
                 graph_distance: None,
+                fingerprint_quality: None,
+                scoring_confidence: None,
             },
             AccountScore {
                 did: "did:plc:def".to_string(),
@@ -258,6 +260,8 @@ mod tests {
                 behavioral_signals: None,
                 context_score: None,
                 graph_distance: None,
+                fingerprint_quality: None,
+                scoring_confidence: None,
             },
         ];
 

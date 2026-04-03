@@ -74,6 +74,8 @@ pub async fn build_profile(
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         });
     }
 
@@ -364,6 +366,8 @@ pub async fn build_profile(
         behavioral_signals: Some(signals_json),
         context_score,
         graph_distance: graph_distance.map(|d| d.as_str().to_string()),
+        fingerprint_quality: None,
+        scoring_confidence: None,
     })
 }
 

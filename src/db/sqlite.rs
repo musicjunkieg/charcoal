@@ -353,6 +353,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let ranked = db.get_ranked_threats(TEST_USER, 0.0).await.unwrap();
@@ -422,6 +424,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         // Exact match
@@ -461,6 +465,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let found = db

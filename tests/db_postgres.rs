@@ -154,6 +154,8 @@ async fn test_pg_account_score_upsert_and_rank() {
         behavioral_signals: None,
         context_score: None,
         graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     };
     db.upsert_account_score(TEST_USER, &score).await.unwrap();
 

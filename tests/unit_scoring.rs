@@ -370,3 +370,16 @@ fn context_score_at_boundary() {
         expected
     );
 }
+
+// ============================================================
+// ScoringConfidence — staleness days
+// ============================================================
+
+#[test]
+fn scoring_confidence_staleness_days() {
+    use charcoal::db::models::ScoringConfidence;
+
+    assert_eq!(ScoringConfidence::Low.staleness_days(), 3);
+    assert_eq!(ScoringConfidence::Standard.staleness_days(), 7);
+    assert_eq!(ScoringConfidence::High.staleness_days(), 14);
+}

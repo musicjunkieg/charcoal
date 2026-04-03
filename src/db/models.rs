@@ -25,6 +25,43 @@ pub struct AccountScore {
     pub context_score: Option<f64>,
     /// Social graph distance to the protected user (None if not classified)
     pub graph_distance: Option<String>,
+    /// Quality of the topic fingerprint used for overlap scoring
+    pub fingerprint_quality: Option<String>,
+    /// Confidence level of this scoring result
+    pub scoring_confidence: Option<String>,
+}
+
+/// Confidence level of a scoring result based on data volume.
+///
+/// Used to prioritize re-scoring: Low confidence accounts are re-scored
+/// sooner (3 days) than High confidence accounts (14 days).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScoringConfidence {
+    /// < 25 posts analyzed, early exit
+    Low,
+    /// 25-50 posts, standard sampling
+    Standard,
+    /// 50+ posts, full analysis with context pairs
+    High,
+}
+
+impl ScoringConfidence {
+    /// Number of days before this score is considered stale.
+    pub fn staleness_days(&self) -> i64 {
+        match self {
+            ScoringConfidence::Low => 3,
+            ScoringConfidence::Standard => 7,
+            ScoringConfidence::High => 14,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScoringConfidence::Low => "low",
+            ScoringConfidence::Standard => "standard",
+            ScoringConfidence::High => "high",
+        }
+    }
 }
 
 /// A single post with its toxicity score, kept as evidence.

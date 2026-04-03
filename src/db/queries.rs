@@ -148,8 +148,8 @@ pub fn get_embedding(conn: &Connection, user_did: &str) -> Result<Option<Vec<f64
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, graph_distance)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, graph_distance, fingerprint_quality, scoring_confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13)
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -160,7 +160,9 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             top_toxic_posts = ?9,
             scored_at = datetime('now'),
             behavioral_signals = ?10,
-            graph_distance = ?11",
+            graph_distance = ?11,
+            fingerprint_quality = ?12,
+            scoring_confidence = ?13",
         params![
             user_did,
             score.did,
@@ -173,6 +175,8 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             top_posts_json,
             score.behavioral_signals,
             score.graph_distance,
+            score.fingerprint_quality,
+            score.scoring_confidence,
         ],
     )?;
     Ok(())
@@ -214,6 +218,8 @@ pub fn get_ranked_threats(
             behavioral_signals: row.get(9)?,
             context_score: None,
             graph_distance: row.get(10)?,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         })
     })?;
 
@@ -481,6 +487,8 @@ pub fn get_account_by_handle(
                 behavioral_signals: row.get(9)?,
                 context_score: None,
                 graph_distance: None,
+                fingerprint_quality: None,
+                scoring_confidence: None,
             })
         })
         .optional()?;
@@ -520,6 +528,8 @@ pub fn get_account_by_did(
                 behavioral_signals: row.get(9)?,
                 context_score: None,
                 graph_distance: None,
+                fingerprint_quality: None,
+                scoring_confidence: None,
             })
         })
         .optional()?;
@@ -606,6 +616,8 @@ pub fn get_unlabeled_accounts(
             behavioral_signals: row.get(9)?,
             context_score: row.get(10)?,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         })
     })?;
 
@@ -955,6 +967,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1074,6 +1088,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1105,6 +1121,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1138,6 +1156,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -1202,6 +1222,8 @@ mod tests {
                 behavioral_signals: Some(format!(r#"{{"avg_engagement":{eng}}}"#)),
                 context_score: None,
                 graph_distance: None,
+                fingerprint_quality: None,
+                scoring_confidence: None,
             };
             upsert_account_score(&conn, TEST_USER, &score).unwrap();
         }
