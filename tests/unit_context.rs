@@ -78,3 +78,26 @@ fn find_best_matching_user_post_returns_none_for_empty() {
     let target_embedding = vec![1.0, 0.0, 0.0];
     assert!(find_best_matching_user_post(&target_embedding, &user_posts).is_none());
 }
+
+#[test]
+fn context_score_no_double_application() {
+    use charcoal::scoring::behavioral;
+
+    let raw_score = 20.0;
+    let (score, _benign_gate, gate_was_bypassed) = behavioral::apply_behavioral_modifier_contextual(
+        raw_score,
+        0.05,  // low quote ratio (benign)
+        0.10,  // low reply ratio (benign)
+        false, // no pile-on
+        50.0,  // above median engagement
+        10.0,  // median
+        Some(0.8),
+    );
+
+    assert!(gate_was_bypassed, "Gate should have been bypassed");
+    assert!(
+        score < 25.0,
+        "Score should not be double-amplified by context, got {}",
+        score
+    );
+}

@@ -295,19 +295,24 @@ pub async fn build_profile(
     //   4. final_score = score_with_behavioral * context_multiplier
     let (raw_score, _) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
 
-    let (score_with_behavioral, benign_gate) = behavioral::apply_behavioral_modifier_contextual(
-        raw_score,
-        quote_ratio,
-        reply_ratio,
-        pile_on,
-        avg_engagement,
-        median_engagement,
-        context_score,
-    );
+    let (score_with_behavioral, benign_gate, gate_was_bypassed) =
+        behavioral::apply_behavioral_modifier_contextual(
+            raw_score,
+            quote_ratio,
+            reply_ratio,
+            pile_on,
+            avg_engagement,
+            median_engagement,
+            context_score,
+        );
 
-    let context_multiplier = match context_score {
-        Some(ctx) => 1.0 + (ctx * 0.5),
-        None => 1.0,
+    // Only apply context multiplier if gate wasn't bypassed by context.
+    // When the gate is bypassed due to context_score >= 0.5, context has
+    // already done its work — don't multiply again on top of it.
+    let context_multiplier = match (context_score, gate_was_bypassed) {
+        (Some(ctx), false) => 1.0 + (ctx * 0.5), // normal: context boosts
+        (Some(_), true) => 1.0,                  // gate bypass consumed context
+        (None, _) => 1.0,
     };
 
     // Step 7: Apply graph distance weight
