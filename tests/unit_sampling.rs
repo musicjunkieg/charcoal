@@ -72,6 +72,42 @@ fn fingerprint_quality_boundary_14_originals_with_replies() {
     );
 }
 
+/// Integration test — requires network access.
+/// Fetches posts for a known public account and verifies partitioning.
+#[tokio::test]
+async fn fetch_posts_with_replies_partitions_correctly() {
+    use charcoal::bluesky::client::PublicAtpClient;
+    use charcoal::bluesky::posts;
+
+    let client = PublicAtpClient::new("https://public.api.bsky.app").unwrap();
+    // Use a well-known active account that posts replies
+    let sample = posts::fetch_posts_with_replies(&client, "bsky.app", 50).await;
+
+    match sample {
+        Ok(sample) => {
+            assert!(sample.total_posts > 0, "Should have fetched some posts");
+            assert_eq!(
+                sample.total_posts,
+                sample.originals.len() + sample.replies.len() + sample.quotes.len(),
+                "total_posts should equal sum of partitions"
+            );
+            assert!(sample.reply_ratio >= 0.0 && sample.reply_ratio <= 1.0);
+            assert!(sample.quote_ratio >= 0.0 && sample.quote_ratio <= 1.0);
+
+            for reply in &sample.replies {
+                assert!(!reply.parent_uri.is_empty(), "Reply should have parent_uri");
+                assert!(
+                    reply.parent_uri.starts_with("at://"),
+                    "Parent URI should be an AT URI"
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Network test skipped: {}", e);
+        }
+    }
+}
+
 fn make_posts(n: usize) -> Vec<Post> {
     (0..n)
         .map(|i| Post {

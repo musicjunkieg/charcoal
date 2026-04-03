@@ -209,6 +209,166 @@ pub async fn fetch_recent_posts(
     Ok(posts)
 }
 
+/// Fetch recent posts with replies included, partitioned into a PostSample.
+///
+/// Uses the `posts_with_replies` filter to get both original posts and replies
+/// from the same API call. Partitions into originals, replies (with parent URIs),
+/// and quotes. Computes reply and quote ratios from the same data.
+///
+/// This replaces the pattern of calling `fetch_recent_posts` + `fetch_reply_ratio`
+/// separately — one API call yields both toxicity-scoreable text AND behavioral ratios.
+pub async fn fetch_posts_with_replies(
+    client: &PublicAtpClient,
+    handle: &str,
+    max_posts: usize,
+) -> Result<PostSample> {
+    let mut originals = Vec::new();
+    let mut replies = Vec::new();
+    let mut quotes = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut total_collected: usize = 0;
+
+    // How many to request per page (API max is 100).
+    let page_size = max_posts.min(100).to_string();
+
+    loop {
+        let mut params: Vec<(&str, &str)> = vec![
+            ("actor", handle),
+            ("filter", "posts_with_replies"),
+            ("limit", &page_size),
+        ];
+        if let Some(ref c) = cursor {
+            params.push(("cursor", c));
+        }
+
+        let output: get_author_feed::Output = client
+            .xrpc_get("app.bsky.feed.getAuthorFeed", &params)
+            .await
+            .with_context(|| format!("Failed to fetch feed for @{}", handle))?;
+
+        for feed_item in &output.feed {
+            // Skip reposts — we only want posts authored by this account.
+            if feed_item.reason.is_some() {
+                continue;
+            }
+
+            let post_view = &feed_item.post;
+
+            // Decode the record to get the post text and reply reference.
+            let record = match atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+                post_view.record.clone(),
+            ) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            let text = record.data.text.clone();
+
+            // Skip empty posts and very short posts (likely just links/images).
+            if text.chars().count() < 15 {
+                continue;
+            }
+
+            // Detect quote-posts by checking the embed type.
+            let is_quote = post_view.embed.as_ref().is_some_and(|embed| {
+                use atrium_api::types::Union;
+                matches!(
+                    embed,
+                    Union::Refs(
+                        atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordView(_)
+                            | atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(_)
+                    )
+                )
+            });
+
+            let post = Post {
+                uri: post_view.uri.clone(),
+                text,
+                created_at: Some(post_view.indexed_at.as_ref().to_string()),
+                like_count: post_view.like_count.unwrap_or(0),
+                repost_count: post_view.repost_count.unwrap_or(0),
+                quote_count: post_view.quote_count.unwrap_or(0),
+                is_quote,
+            };
+
+            total_collected += 1;
+
+            // Classify: reply takes priority over quote (reply context is more
+            // important for NLI pair scoring than the quote relationship).
+            if feed_item.reply.is_some() {
+                let parent_uri = record
+                    .data
+                    .reply
+                    .as_ref()
+                    .map(|r| r.parent.uri.clone())
+                    .unwrap_or_default();
+
+                if parent_uri.is_empty() {
+                    // Edge case: feed says it's a reply but no parent URI in record.
+                    // Treat as original.
+                    originals.push(post);
+                } else {
+                    replies.push(ReplyPost { post, parent_uri });
+                }
+            } else if is_quote {
+                quotes.push(post);
+            } else {
+                originals.push(post);
+            }
+
+            if total_collected >= max_posts {
+                break;
+            }
+        }
+
+        debug!(
+            page_posts = output.feed.len(),
+            total_collected = total_collected,
+            "Fetched page of posts (with replies) for @{}",
+            handle
+        );
+
+        if total_collected >= max_posts {
+            break;
+        }
+
+        cursor = output.data.cursor.clone();
+        if cursor.is_none() || output.feed.is_empty() {
+            break;
+        }
+    }
+
+    let reply_ratio = if total_collected > 0 {
+        replies.len() as f64 / total_collected as f64
+    } else {
+        0.0
+    };
+    let quote_ratio = if total_collected > 0 {
+        quotes.len() as f64 / total_collected as f64
+    } else {
+        0.0
+    };
+
+    info!(
+        originals = originals.len(),
+        replies = replies.len(),
+        quotes = quotes.len(),
+        reply_ratio = format!("{:.2}", reply_ratio),
+        quote_ratio = format!("{:.2}", quote_ratio),
+        handle = handle,
+        "Partitioned post sample"
+    );
+
+    Ok(PostSample {
+        originals,
+        replies,
+        quotes,
+        reply_ratio,
+        quote_ratio,
+        total_posts: total_collected,
+    })
+}
+
 /// Fetch a single post's text by its AT URI.
 ///
 /// Used to retrieve quote-post text for amplification events. The Constellation
