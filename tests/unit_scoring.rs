@@ -470,6 +470,16 @@ fn no_early_exit_if_overlap_above_gate() {
 }
 
 #[test]
+fn scoring_confidence_near_boundary_is_low() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Near Watch boundary (8.0 ± 5) → should re-score sooner
+    assert!(should_continue_to_stage3(10.0));
+    // Not near any boundary → standard confidence
+    assert!(!should_continue_to_stage3(22.0));
+}
+
+#[test]
 fn stage2_resolves_when_clear_signal() {
     use charcoal::scoring::profile::should_continue_to_stage3;
 

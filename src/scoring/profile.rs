@@ -52,13 +52,16 @@ pub async fn build_profile(
     data_dir: Option<&std::path::Path>,
     graph_distance: Option<GraphDistance>,
 ) -> Result<AccountScore> {
-    // Step 1: Fetch the target's posts with replies included
-    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
+    // ── Stage 1: Quick check with 25 posts ──
+    // Fetch a small sample and run ONNX + TF-IDF overlap.
+    // If the account is clearly clean AND topically irrelevant, exit early.
+    // This catches ~50-60% of sweep accounts with minimal cost.
+    let stage1_sample = posts::fetch_posts_with_replies(client, target_handle, 25).await?;
 
-    if sample.total_posts < 5 {
+    if stage1_sample.total_posts < 5 {
         info!(
             handle = target_handle,
-            post_count = sample.total_posts,
+            post_count = stage1_sample.total_posts,
             "Insufficient posts for reliable scoring"
         );
         return Ok(AccountScore {
@@ -68,7 +71,7 @@ pub async fn build_profile(
             topic_overlap: None,
             threat_score: None,
             threat_tier: Some("Insufficient Data".to_string()),
-            posts_analyzed: sample.total_posts as u32,
+            posts_analyzed: stage1_sample.total_posts as u32,
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
@@ -78,6 +81,78 @@ pub async fn build_profile(
             scoring_confidence: None,
         });
     }
+
+    // Quick ONNX scores for clean-pass check
+    let stage1_texts: Vec<String> = stage1_sample
+        .originals
+        .iter()
+        .map(|p| p.text.clone())
+        .chain(stage1_sample.replies.iter().map(|r| r.post.text.clone()))
+        .chain(stage1_sample.quotes.iter().map(|p| p.text.clone()))
+        .collect();
+    let stage1_onnx = scorer.score_batch(&stage1_texts).await?;
+    let stage1_raw_scores: Vec<f64> = stage1_onnx.iter().map(|r| r.toxicity).collect();
+
+    // Preliminary topic overlap via TF-IDF (cheap, always available)
+    let stage1_fp_texts: Vec<String> = if stage1_sample.originals.len() >= 15 {
+        stage1_sample
+            .originals
+            .iter()
+            .map(|p| p.text.clone())
+            .collect()
+    } else {
+        stage1_texts.clone()
+    };
+    let stage1_overlap = {
+        let topic_extractor = TfIdfExtractor {
+            top_n_keywords: 40,
+            max_clusters: 7,
+        };
+        match topic_extractor.extract(&stage1_fp_texts) {
+            Ok(fp) => overlap::cosine_similarity(protected_fingerprint, &fp),
+            Err(_) => 0.0, // Can't compute overlap — don't early exit
+        }
+    };
+
+    // Early exit: all ONNX scores clean AND topic overlap below gate
+    if should_early_exit_stage1(
+        &stage1_raw_scores,
+        stage1_overlap,
+        weights.overlap_gate_threshold,
+    ) {
+        info!(
+            handle = target_handle,
+            posts = stage1_sample.total_posts,
+            overlap = format!("{:.3}", stage1_overlap),
+            "Stage 1 early exit: clean and topically irrelevant"
+        );
+
+        let fp_quality = FingerprintQuality::from_counts(
+            stage1_sample.originals.len(),
+            stage1_sample.replies.len() + stage1_sample.quotes.len(),
+        );
+
+        return Ok(AccountScore {
+            did: target_did.to_string(),
+            handle: target_handle.to_string(),
+            toxicity_score: Some(0.0),
+            topic_overlap: Some(stage1_overlap),
+            threat_score: Some(0.0),
+            threat_tier: Some("Low".to_string()),
+            posts_analyzed: stage1_sample.total_posts as u32,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: Some(fp_quality.as_str().to_string()),
+            scoring_confidence: Some("low".to_string()),
+        });
+    }
+
+    // ── Stage 2: Full pipeline with 50 posts ──
+    // Account wasn't clean enough for early exit — run the full analysis.
+    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
 
     // Step 2: Determine fingerprint quality and select posts for fingerprinting
     let fp_quality = FingerprintQuality::from_counts(
@@ -391,7 +466,11 @@ pub async fn build_profile(
         context_score,
         graph_distance: graph_distance.map(|d| d.as_str().to_string()),
         fingerprint_quality: Some(fp_quality.as_str().to_string()),
-        scoring_confidence: Some("standard".to_string()),
+        scoring_confidence: Some(if should_continue_to_stage3(final_score) {
+            "low".to_string() // Near tier boundary — flag for sooner re-scoring
+        } else {
+            "standard".to_string()
+        }),
     })
 }
 

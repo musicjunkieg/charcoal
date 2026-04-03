@@ -1,5 +1,77 @@
 [
   {
+    "hash": "4d4071ae06b49699926826c96b77d1a9a2208421",
+    "short_hash": "4d4071a",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:18:54-07:00",
+    "message": "feat: add topic-first discovery pipeline via searchPosts",
+    "files_changed": 6
+  },
+  {
+    "hash": "27258c8914e6f1c428975502e3292addb2932f95",
+    "short_hash": "27258c8",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:14:31-07:00",
+    "message": "feat: add adaptive sampling stage decision functions\n\nAdd should_early_exit_stage1() and should_continue_to_stage3() for\nadaptive sampling. Stage 1 exits early when all ONNX scores are clean\nand topic overlap is below threshold. Stage 2 continues to Stage 3\nwhen the score is within ±5 of a tier boundary (8, 15, 35).\n\n7 new tests covering both functions.",
+    "files_changed": 3
+  },
+  {
+    "hash": "2f3065425cfdef82de32f38094052936291e0c12",
+    "short_hash": "2f30654",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:09:28-07:00",
+    "message": "feat: refactor build_profile to use reply-inclusive sampling and originals-first fingerprinting",
+    "files_changed": 3
+  },
+  {
+    "hash": "b75736a3c18f5163c1012ee23f15e72d02ed79a7",
+    "short_hash": "b75736a",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:49:33-07:00",
+    "message": "fix: prevent context score double-application in concern troll scoring\n\nWhen context_score >= 0.5 bypasses the benign gate, the context multiplier\nno longer applies on top. The gate bypass consumes the context signal.\nThird return value (gate_was_bypassed_by_context) tracks this.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "8c3e5d0e4ce9a5d44656d78efe32489881a04f3a",
+    "short_hash": "8c3e5d0",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:46:02-07:00",
+    "message": "feat: add batch parent post fetching for reply context pairs",
+    "files_changed": 3
+  },
+  {
+    "hash": "8278173fad1ced9c1889f2527b7a9e423b7eea41",
+    "short_hash": "8278173",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:43:48-07:00",
+    "message": "feat: add fetch_posts_with_replies for reply-inclusive post sampling",
+    "files_changed": 3
+  },
+  {
+    "hash": "b165fa596bdb547897d9361f44d3a1ffe3618f6c",
+    "short_hash": "b165fa5",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:38:17-07:00",
+    "message": "fix: address code review — env.example, truncation safety, spike comment",
+    "files_changed": 4
+  },
+  {
+    "hash": "b68b243723f063488bd88d41ae0ed5b7d2e7c1d2",
+    "short_hash": "b68b243",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:32:55-07:00",
+    "message": "feat: add Zentropi CoPE API spike with pre-built labeler support",
+    "files_changed": 5
+  },
+  {
+    "hash": "bc75cab82c380261bbb4a53ebcbb7a0151792a39",
+    "short_hash": "bc75cab",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T19:13:54-07:00",
+    "message": "docs: add topic-first discovery and adaptive sampling implementation plan",
+    "files_changed": 2
+  },
+  {
     "hash": "9802b9ebce07094cc866acccccb77a309a2eca15",
     "short_hash": "9802b9e",
     "author": "Bryan Guffey",
