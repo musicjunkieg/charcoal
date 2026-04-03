@@ -19,6 +19,9 @@ use serde::{Deserialize, Serialize};
 const ZENTROPI_API_URL: &str = "https://api.zentropi.ai/v1/label";
 
 /// Request using a pre-built labeler (saves tokens, ensures consistency).
+/// Note: An inline `criteria_text` fallback was intentionally omitted for this
+/// spike. If the labeler becomes unavailable, evaluate whether to add a
+/// `ZentropiCriteriaRequest` variant with the policy from refs/labeler_prompt.txt.
 #[derive(Serialize)]
 struct ZentropiLabelerRequest {
     content_text: String,

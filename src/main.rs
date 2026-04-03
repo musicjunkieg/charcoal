@@ -805,7 +805,7 @@ async fn main() -> Result<()> {
 
             for (i, detail) in results.details.iter().enumerate() {
                 let text_preview = if detail.text.len() > 57 {
-                    format!("{}...", &detail.text[..57])
+                    format!("{}...", charcoal::output::truncate_chars(&detail.text, 57))
                 } else {
                     detail.text.clone()
                 };
