@@ -35,8 +35,8 @@ pub struct Config {
     pub model_dir: PathBuf,
     /// Constellation backlink index URL (primary amplification detection)
     pub constellation_url: String,
-    /// OpenAI API key for ensemble toxicity scoring (free moderation endpoint)
-    pub openai_api_key: Option<String>,
+    /// Groq API key for ensemble toxicity scoring (GPT-OSS-Safeguard)
+    pub groq_api_key: Option<String>,
     /// Zentropi API key for binary toxicity classification
     pub zentropi_api_key: Option<String>,
     /// Zentropi labeler ID (pre-built policy prompt)
@@ -98,7 +98,7 @@ impl Config {
             model_dir,
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
-            openai_api_key: env::var("OPENAI_API_KEY").ok(),
+            groq_api_key: env::var("GROQ_API_KEY").ok(),
             zentropi_api_key: env::var("ZENTROPI_API_KEY").ok(),
             zentropi_labeler_id: env::var("ZENTROPI_LABELER_ID").ok(),
             zentropi_labeler_version_id: env::var("ZENTROPI_LABELER_VERSION_ID").ok(),
@@ -193,7 +193,7 @@ impl Config {
             scorer_backend: ScorerBackend::Onnx,
             model_dir: std::path::PathBuf::from("/tmp/test_models"),
             constellation_url: "https://constellation.microcosm.blue".to_string(),
-            openai_api_key: None,
+            groq_api_key: None,
             zentropi_api_key: None,
             zentropi_labeler_id: None,
             zentropi_labeler_version_id: None,

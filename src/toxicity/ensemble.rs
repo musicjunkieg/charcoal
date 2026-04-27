@@ -1,142 +1,131 @@
-// Ensemble toxicity scorer — runs primary + secondary concurrently.
-//
-// Detects agreement between classifiers and applies a configurable
-// disagreement strategy. When both agree, averages their scores.
-// When they disagree, applies the chosen strategy (TakeLower is
-// the default — protects against false positives from a single model).
+//! Ensemble toxicity scorer — ONNX primary + Groq secondary with two-way correction.
+//!
+//! Correction matrix:
+//! - ONNX high + Groq violation = agree (keep ONNX score)
+//! - ONNX high + Groq safe = dampen (0.4x — ONNX false positive)
+//! - ONNX low + Groq violation = boost (category-dependent + floor)
+//! - ONNX low + Groq safe = agree (keep ONNX score)
 
 use anyhow::Result;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
+use super::groq_safeguard::{boost_for_category, GroqSafeguardScorer};
+use super::traits::{ToxicityResult, ToxicityScorer};
 
-/// Agreement threshold — if the absolute difference in toxicity scores
-/// exceeds this value, the classifiers are considered to disagree.
-const AGREEMENT_THRESHOLD: f64 = 0.25;
+/// ONNX toxicity threshold: above this is "high", at or below is "low".
+const ONNX_HIGH_THRESHOLD: f64 = 0.15;
 
-/// Strategy for resolving disagreement between primary and secondary scorers.
-#[derive(Debug, Clone, Copy)]
-pub enum DisagreementStrategy {
-    /// Use the lower score (conservative — reduces false positives)
-    TakeLower,
-    /// Use the higher score (aggressive — reduces false negatives)
-    TakeHigher,
-    /// Average both scores
-    Average,
-}
+/// Dampening factor for ONNX false positives (Groq says safe).
+const DAMPEN_FACTOR: f64 = 0.4;
 
-/// Result from the ensemble scorer with metadata about agreement.
+/// Minimum toxicity floor when Groq flags a violation.
+const GROQ_FLOOR: f64 = 0.15;
+
+/// Result from the ensemble scorer with correction metadata.
 pub struct EnsembleResult {
-    /// The merged toxicity result
     pub result: ToxicityResult,
-    /// Whether the primary and secondary classifiers agreed
-    pub classifiers_agree: bool,
-    /// Absolute difference between primary and secondary toxicity scores
-    pub score_difference: f64,
-    /// The secondary scorer's raw result (None if secondary failed or absent)
-    pub secondary_score: Option<ToxicityResult>,
+    pub groq_flagged: bool,
+    pub groq_category: Option<String>,
+    pub groq_rationale: Option<String>,
+    pub correction_applied: f64,
+    pub models_agree: bool,
 }
 
-/// Ensemble scorer that wraps a primary and optional secondary ToxicityScorer.
+/// Ensemble scorer: ONNX primary + optional Groq secondary (concrete type).
 ///
-/// When both scorers are available, they run concurrently and their results
-/// are merged based on agreement. When only the primary is available (or the
-/// secondary fails), the primary result is used directly.
+/// Holds GroqSafeguardScorer directly (not Box<dyn ToxicityScorer>) so we
+/// can access the full SafeguardResult with category and rationale.
 pub struct EnsembleToxicityScorer {
     primary: Box<dyn ToxicityScorer>,
-    secondary: Option<Box<dyn ToxicityScorer>>,
-    strategy: DisagreementStrategy,
+    secondary: Option<GroqSafeguardScorer>,
 }
 
 impl EnsembleToxicityScorer {
-    pub fn new(
-        primary: Box<dyn ToxicityScorer>,
-        secondary: Option<Box<dyn ToxicityScorer>>,
-        strategy: DisagreementStrategy,
-    ) -> Self {
-        Self {
-            primary,
-            secondary,
-            strategy,
-        }
+    pub fn new(primary: Box<dyn ToxicityScorer>, secondary: Option<GroqSafeguardScorer>) -> Self {
+        Self { primary, secondary }
     }
 
-    /// Score text using the ensemble, returning full metadata about agreement.
-    ///
-    /// When a secondary scorer is available, both run concurrently via
-    /// `tokio::join!` so the wall-clock cost is max(primary, secondary)
-    /// rather than primary + secondary.
-    pub async fn score_ensemble(&self, text: &str) -> Result<EnsembleResult> {
-        let (primary_result, secondary_result) = match &self.secondary {
-            Some(scorer) => {
-                let (primary, secondary) =
-                    tokio::join!(self.primary.score_text(text), scorer.score_text(text),);
-                let secondary_result = match secondary {
-                    Ok(result) => Some(result),
+    pub async fn score_ensemble_with_context(
+        &self,
+        text: &str,
+        context: Option<&str>,
+    ) -> Result<EnsembleResult> {
+        let (primary_result, safeguard_result) = match &self.secondary {
+            Some(groq) => {
+                let (primary, groq_result) = tokio::join!(
+                    self.primary.score_text(text),
+                    groq.score_with_safeguard(text, context),
+                );
+                let safeguard = match groq_result {
+                    Ok(result) => result,
                     Err(e) => {
-                        warn!(error = %e, "Secondary scorer failed, using primary only");
+                        warn!(error = %e, "Groq scorer failed, using ONNX only");
                         None
                     }
                 };
-                (primary?, secondary_result)
+                (primary?, safeguard)
             }
             None => (self.primary.score_text(text).await?, None),
         };
 
-        match secondary_result {
-            Some(secondary) => {
-                let diff = (primary_result.toxicity - secondary.toxicity).abs();
-                let agree = diff <= AGREEMENT_THRESHOLD;
+        let onnx_tox = primary_result.toxicity;
 
-                debug!(
-                    primary = format!("{:.3}", primary_result.toxicity),
-                    secondary = format!("{:.3}", secondary.toxicity),
-                    diff = format!("{:.3}", diff),
-                    agree,
-                    "Ensemble comparison"
-                );
+        match &safeguard_result {
+            Some(sr) => {
+                let groq_flagged = sr.violation;
+                let onnx_high = onnx_tox > ONNX_HIGH_THRESHOLD;
 
-                let merged = if agree {
-                    // Agreement: average both scores
-                    merge_results(&primary_result, &secondary)
-                } else {
-                    // Disagreement: apply strategy
-                    match self.strategy {
-                        DisagreementStrategy::TakeLower => {
-                            if primary_result.toxicity <= secondary.toxicity {
-                                primary_result.clone()
-                            } else {
-                                secondary.clone()
-                            }
-                        }
-                        DisagreementStrategy::TakeHigher => {
-                            if primary_result.toxicity >= secondary.toxicity {
-                                primary_result.clone()
-                            } else {
-                                secondary.clone()
-                            }
-                        }
-                        DisagreementStrategy::Average => merge_results(&primary_result, &secondary),
+                let (correction, models_agree) = match (onnx_high, groq_flagged) {
+                    (true, true) => {
+                        debug!(onnx_tox, category = %sr.category, "Ensemble: agree (both hostile)");
+                        (1.0, true)
+                    }
+                    (true, false) => {
+                        debug!(
+                            onnx_tox,
+                            dampened = onnx_tox * DAMPEN_FACTOR,
+                            "Ensemble: dampening ONNX false positive"
+                        );
+                        (DAMPEN_FACTOR, false)
+                    }
+                    (false, true) => {
+                        let boost = boost_for_category(&sr.category);
+                        debug!(onnx_tox, boost, category = %sr.category, "Ensemble: boosting missed hostility");
+                        (boost, false)
+                    }
+                    (false, false) => {
+                        debug!(onnx_tox, "Ensemble: agree (both safe)");
+                        (1.0, true)
                     }
                 };
 
+                let corrected_tox = if groq_flagged && !onnx_high {
+                    (onnx_tox * correction).clamp(GROQ_FLOOR, 1.0)
+                } else {
+                    (onnx_tox * correction).min(1.0)
+                };
+
+                let mut result = primary_result;
+                result.toxicity = corrected_tox;
+
                 Ok(EnsembleResult {
-                    result: merged,
-                    classifiers_agree: agree,
-                    score_difference: diff,
-                    secondary_score: Some(secondary),
+                    result,
+                    groq_flagged,
+                    groq_category: Some(sr.category.clone()),
+                    groq_rationale: Some(sr.rationale.clone()),
+                    correction_applied: correction,
+                    models_agree,
                 })
             }
-            None => {
-                // No secondary or secondary failed — use primary directly
-                Ok(EnsembleResult {
-                    result: primary_result,
-                    classifiers_agree: true, // Vacuously true
-                    score_difference: 0.0,
-                    secondary_score: None,
-                })
-            }
+            None => Ok(EnsembleResult {
+                result: primary_result,
+                groq_flagged: false,
+                groq_category: None,
+                groq_rationale: None,
+                correction_applied: 1.0,
+                models_agree: true,
+            }),
         }
     }
 }
@@ -144,38 +133,16 @@ impl EnsembleToxicityScorer {
 #[async_trait]
 impl ToxicityScorer for EnsembleToxicityScorer {
     async fn score_text(&self, text: &str) -> Result<ToxicityResult> {
-        let ensemble_result = self.score_ensemble(text).await?;
-        Ok(ensemble_result.result)
+        let r = self.score_ensemble_with_context(text, None).await?;
+        Ok(r.result)
     }
-}
 
-/// Average two toxicity results, merging their attributes.
-fn merge_results(a: &ToxicityResult, b: &ToxicityResult) -> ToxicityResult {
-    ToxicityResult {
-        toxicity: (a.toxicity + b.toxicity) / 2.0,
-        attributes: merge_attributes(&a.attributes, &b.attributes),
-    }
-}
-
-/// Average two sets of toxicity attributes. When one side has None for a
-/// field and the other has Some, keeps the Some value (e.g., OpenAI lacks
-/// profanity but ONNX has it).
-fn merge_attributes(a: &ToxicityAttributes, b: &ToxicityAttributes) -> ToxicityAttributes {
-    ToxicityAttributes {
-        severe_toxicity: merge_option(a.severe_toxicity, b.severe_toxicity),
-        identity_attack: merge_option(a.identity_attack, b.identity_attack),
-        insult: merge_option(a.insult, b.insult),
-        profanity: merge_option(a.profanity, b.profanity),
-        threat: merge_option(a.threat, b.threat),
-    }
-}
-
-/// Merge two optional f64 values: average if both present, keep whichever
-/// exists if only one is present, None if both are None.
-fn merge_option(a: Option<f64>, b: Option<f64>) -> Option<f64> {
-    match (a, b) {
-        (Some(x), Some(y)) => Some((x + y) / 2.0),
-        (Some(x), None) | (None, Some(x)) => Some(x),
-        (None, None) => None,
+    async fn score_with_context(
+        &self,
+        text: &str,
+        context: Option<&str>,
+    ) -> Result<ToxicityResult> {
+        let r = self.score_ensemble_with_context(text, context).await?;
+        Ok(r.result)
     }
 }

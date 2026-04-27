@@ -78,11 +78,19 @@ pub async fn run(
         let mut amplifier_text: Option<String> = None;
         let mut quote_toxicity: Option<f64> = None;
 
+        // Look up the original (protected user's) post text from the cache
+        // (resolved before scoring so the ensemble scorer can use it as context)
+        let original_post_text = event
+            .original_post_uri
+            .as_deref()
+            .and_then(|uri| original_text_cache.get(uri))
+            .map(|s| s.as_str());
+
         // For quote and reply events, fetch the amplifier's text and score it
         if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
             match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {
-                    match scorer.score_text(&text).await {
+                    match scorer.score_with_context(&text, original_post_text).await {
                         Ok(result) => {
                             quote_toxicity = Some(result.toxicity);
                         }
@@ -103,13 +111,6 @@ pub async fn run(
                 }
             }
         }
-
-        // Look up the original (protected user's) post text from the cache
-        let original_post_text = event
-            .original_post_uri
-            .as_deref()
-            .and_then(|uri| original_text_cache.get(uri))
-            .map(|s| s.as_str());
 
         // Score the interaction pair via NLI when both texts are available
         let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {

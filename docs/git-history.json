@@ -1,5 +1,21 @@
 [
   {
+    "hash": "c521cdd43fdf339f47a4ccd8984abad7c3d39d0b",
+    "short_hash": "c521cdd",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:47:41-07:00",
+    "message": "feat: wire topic-first discovery into sweep pipeline with --sweep-mode flag\n\nAdd SweepMode enum (topic/graph/both) defaulting to topic-first discovery.\nNew run_topic_first function in sweep.rs searches by topic keywords,\ndeduplicates via get_all_scored_dids, resolves DIDs to handles, and\nscores discoveries in parallel. Graph mode preserved as legacy path.",
+    "files_changed": 7
+  },
+  {
+    "hash": "f6f5f84ab0ac07a690e9dd879427e00fea89964e",
+    "short_hash": "f6f5f84",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:42:18-07:00",
+    "message": "feat: wire adaptive sampling early exit into build_profile\n\nStage 1 (25 posts): quick ONNX + TF-IDF overlap check. Clean,\ntopically irrelevant accounts exit immediately as Low with\nscoring_confidence \"low\". Saves ~50-60% of scoring work during sweeps.\n\nStage 2 (50 posts): full pipeline for accounts that did not early\nexit. Scoring confidence set to \"low\" when near tier boundaries\n(via should_continue_to_stage3), \"standard\" otherwise.",
+    "files_changed": 5
+  },
+  {
     "hash": "4d4071ae06b49699926826c96b77d1a9a2208421",
     "short_hash": "4d4071a",
     "author": "Bryan Guffey",
@@ -256,6 +272,14 @@
     "files_changed": 0
   },
   {
+    "hash": "9832bdd4775d85611d1c7277bd7b6726367ffda7",
+    "short_hash": "9832bdd",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T17:54:10-07:00",
+    "message": "fix: address CodeRabbit review findings on PR #21\n\n- Make embed_batch non-fatal in auto-fingerprint (warn + skip instead\n  of propagating error that kills the scan)\n- Tighten scan test assertion to assert_eq 202 Accepted\n- Fix stale \"234\" test count reference in CLAUDE.md (should be 227)\n- Improve first-run detection: require !started_at in addition to\n  zero tier counts, so completed scans with no results show the\n  empty dashboard instead of the welcome screen\n- Refactor test_helpers: build_test_app delegates to build_test_app_with_db\n- Regenerate decision graph export with nodes 157-159\n\nCloses #138.",
+    "files_changed": 8
+  },
+  {
     "hash": "638e535927e6277f60b56c4432d7b00500e32f04",
     "short_hash": "638e535",
     "author": "Bryan Guffey",
@@ -272,12 +296,28 @@
     "files_changed": 4
   },
   {
+    "hash": "1b74c64d3b6ddf3e15c765b71166f4271ad99a3f",
+    "short_hash": "1b74c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:35:37-07:00",
+    "message": "feat: add first-run welcome screen for new users\n\nWhen the dashboard loads with zero scored accounts and no scan\nrunning, show a centered welcome message explaining what Charcoal\ndoes and a \"Start your first scan\" button. After the scan starts,\nthe view flips to the normal dashboard with progress indicator.\n\nCloses #113.",
+    "files_changed": 4
+  },
+  {
     "hash": "630b17a291c9f01c1829082c90866b7a3ee31d6b",
     "short_hash": "630b17a",
     "author": "Bryan Guffey",
     "date": "2026-03-17T13:26:37-07:00",
     "message": "fix: register user in DB during OAuth callback\n\nThe OAuth callback authenticated users and set session cookies but\nnever called upsert_user(), so the users table had no row for them.\nThis caused POST /api/scan to fail with \"User not found\".\n\nThread the handle through PendingOAuth and call upsert_user after\nthe DID gate passes. Closes #121.",
     "files_changed": 3
+  },
+  {
+    "hash": "3c15470b5858be83d652536b99a23c4ca1098f0d",
+    "short_hash": "3c15470",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:25:33-07:00",
+    "message": "test: add tests for user registration and scan endpoint contract\n\nAdd build_test_app_with_db helper that returns both router and DB.\nAdd two tests: one documenting the bug (scan fails with no user row),\none proving the fix contract (scan works when user is registered).",
+    "files_changed": 4
   },
   {
     "hash": "e7df2409d50dfcaa5fc168a7abfedf950e42c13c",
@@ -334,6 +374,14 @@
     "date": "2026-02-20T23:27:38Z",
     "message": "fix #71 and feat #67: save_embedding error on missing row, behavioral\n  signals in reports\n\n  fix: save_embedding now returns an error (instead of silently doing nothing)\n  when no fingerprint row exists in topic_fingerprint. Fixed in both SQLite\n  (queries.rs) and Postgres (postgres.rs) backends. Added a unit test that\n  exercises the failure path.\n\n  feat: behavioral signals (quote ratio, reply ratio, avg engagement, pile-on,\n  benign gate, boost multiplier) are now rendered in terminal detail view\n  (display_account_detail) and in the markdown report evidence section for\n  Elevated+ accounts. Data was already stored as JSON in account_scores — this\n  just wires it up for display. No schema or model changes needed.",
     "files_changed": 4
+  },
+  {
+    "hash": "8bcaa5ea99f8717a2ad0dd588a36ae293452d706",
+    "short_hash": "8bcaa5e",
+    "author": "musicjunkieg",
+    "date": "2026-02-20T05:27:30Z",
+    "message": "fix: correct inverted credential redaction in migrate command display",
+    "files_changed": 1
   },
   {
     "hash": "0752aeb79b2a42ec06be48e0a4e888336ed326d0",
@@ -536,11 +584,27 @@
     "files_changed": 3
   },
   {
+    "hash": "1a6477174b29bc64f39ecf60eed95ff1d0346f64",
+    "short_hash": "1a64771",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T22:00:06Z",
+    "message": "feat: Phase 7 — markdown report generation and terminal output formatting\n\nComplete the output subsystem:\n- output/terminal.rs: Colored threat list display with tier summaries,\n  account detail view with evidence posts\n- output/markdown.rs: Full .md report with summary table, ranked accounts,\n  topic fingerprint, and evidence section for elevated+ threats\n- main.rs: Wire report command to generate both terminal and markdown output,\n  delegate score display to output::terminal module\n\n1 new test (markdown generation), 21 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "99d9f519b3ebd26f4577ad9e330b91f5ee78e027",
     "short_hash": "99d9f51",
     "author": "Bryan Guffey",
     "date": "2026-02-08T21:57:47Z",
     "message": "feat: Phases 5+6 — amplification pipeline, threat scoring, and full CLI wiring\n\nComplete the core threat detection pipeline:\n- pipeline/amplification.rs: Full scan workflow — poll notifications for\n  quote/repost events, store in DB, optionally fetch amplifier followers\n  and score each one\n- scoring/threat.rs: Combined threat score formula (70% toxicity + 30%\n  topic overlap) with gate that caps scores for irrelevant hostile accounts\n- scoring/profile.rs: Profile builder that orchestrates post fetching,\n  toxicity scoring, topic extraction, and threat computation for one account\n\nWire all CLI commands to real implementations:\n- `fingerprint`: Fetches posts, runs TF-IDF, displays bar chart, caches in DB\n- `scan [--analyze]`: Polls notifications, stores events, optionally scores\n- `score @handle`: Full single-account scoring with evidence display\n- `report [--min-score N]`: Ranked threat list from DB\n\n5 new tests (threat formula), 20 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6dcb11233f83f5c04e8029eb32684bd8065f2049",
+    "short_hash": "6dcb112",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:54:20Z",
+    "message": "feat: Phase 4 — toxicity scoring with Perspective API and rate limiter\n\nImplement the toxicity scoring subsystem:\n- traits.rs: ToxicityScorer async trait with ToxicityResult/ToxicityAttributes\n  types, designed for provider swappability (Perspective sunsets Dec 2026)\n- perspective.rs: Google Perspective API client requesting TOXICITY,\n  SEVERE_TOXICITY, IDENTITY_ATTACK, INSULT, PROFANITY, and THREAT scores\n- rate_limiter.rs: Token-bucket rate limiter enforcing 1 QPS for the\n  free tier, with async sleep to avoid busy-waiting\n\nAdded async-trait crate dependency.\n2 new tests (rate limiter), 15 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
     "files_changed": 5
   },
   {
@@ -560,12 +624,36 @@
     "files_changed": 6
   },
   {
+    "hash": "6470b006afe23db6853b83b21c01451abd25b073",
+    "short_hash": "6470b00",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:52:47Z",
+    "message": "feat: Phase 3 — TF-IDF topic fingerprint with clustering and overlap scoring\n\nImplement the complete topic analysis subsystem:\n- traits.rs: TopicExtractor trait for swappable implementations\n- tfidf.rs: TF-IDF keyword extraction using keyword_extraction crate,\n  with co-occurrence based clustering into labeled topic groups\n- fingerprint.rs: TopicFingerprint/TopicCluster structs with colored\n  terminal bar chart display and keyword weight extraction\n- overlap.rs: Weighted Jaccard similarity for comparing two fingerprints\n\nAdded stop-words crate for English stop word filtering.\n7 new tests, 13 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
     "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
     "short_hash": "272ff53",
     "author": "Bryan Guffey",
     "date": "2026-02-08T21:48:07Z",
     "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
     "files_changed": 4
+  },
+  {
+    "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
+    "short_hash": "272ff53",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:48:07Z",
+    "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",
+    "short_hash": "b5e1599",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:40:21Z",
+    "message": "feat: Phase 1 — project skeleton, CLI, config, and database\n\nSet up the complete Charcoal project structure with all module directories,\nCargo.toml with dependencies (bsky-sdk, rusqlite, keyword_extraction, clap,\ntokio, etc.), clap-based CLI with all planned subcommands, environment\nconfig loading via dotenvy, and SQLite database with schema for topic\nfingerprints, account scores, amplification events, and scan state.\n\nAll 6 database tests pass. `cargo run -- init` creates the DB,\n`cargo run -- status` shows system state, `cargo run -- --help` works.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 39
   },
   {
     "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",

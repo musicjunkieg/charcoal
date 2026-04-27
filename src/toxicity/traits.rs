@@ -55,4 +55,14 @@ pub trait ToxicityScorer: Send + Sync {
         }
         Ok(results)
     }
+
+    /// Score text with optional context (e.g., the original post being
+    /// replied to or quoted). Default implementation ignores context.
+    async fn score_with_context(
+        &self,
+        text: &str,
+        _context: Option<&str>,
+    ) -> Result<ToxicityResult> {
+        self.score_text(text).await
+    }
 }

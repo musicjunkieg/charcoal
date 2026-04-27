@@ -1,10 +1,30 @@
 {
   "version": 1,
-  "exported_at": "2026-04-03T04:47:41.797447+00:00",
+  "exported_at": "2026-04-27T23:06:03.145414+00:00",
   "issues": [
     {
-      "id": 172,
-      "title": "Wire topic-first discovery into sweep pipeline with --sweep-mode flag",
+      "id": 174,
+      "title": "Branch sync: ff staging, push topic-first-discovery, prune gone branches",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "chore"
+      ],
+      "comments": [
+        {
+          "content": "staging fast-forwarded to origin (8 commits ahead — Groq ensemble work). feat/topic-first-discovery pushed to origin with upstream tracking. Pruned stale branches: feat/admin-dashboard and fix/admin-nav-link.",
+          "created_at": "2026-04-26T16:42:38.089108+00:00"
+        }
+      ],
+      "created_at": "2026-04-25T23:58:09.293374+00:00",
+      "updated_at": "2026-04-26T16:42:38.095876+00:00",
+      "closed_at": "2026-04-26T16:42:38.095876+00:00"
+    },
+    {
+      "id": 173,
+      "title": "Integrate Zentropi CoPE as production toxicity classifier",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -12,10 +32,30 @@
       "labels": [
         "feature"
       ],
+      "comments": [
+        {
+          "content": "Phase 5 from the topic-first discovery plan. Spike passed GO (100% accuracy, 190ms latency — see deciduous node 202).\n\nKey changes:\n- Add src/toxicity/zentropi.rs — production client using labeler_id (not inline criteria_text)\n- ONNX becomes clean-pass filter only: < 0.10 = cleared, everything >= 0.10 goes to Zentropi\n- Toxicity rate computed from Zentropi binary labels, not ONNX continuous scores\n- weighted_toxicity() removed from scoring path (kept as ONNX-only fallback)\n- Reply pairs sent as [Parent post]/[Reply] format to Zentropi\n- Env vars: ZENTROPI_API_KEY, ZENTROPI_LABELER_ID, ZENTROPI_LABELER_VERSION_ID (already in config)\n- Spike code in src/toxicity/zentropi_spike.rs can be promoted to production client\n- Labeler policy in refs/labeler_prompt.txt, labeler ID in refs/zentropi_info.txt\n\nBlocked by: feat/topic-first-discovery merging to staging\nDesign: docs/2026-04-02-architecture-correction-briefing.md (scoring pipeline section)\nPlan: docs/superpowers/plans/2026-04-02-topic-first-discovery-impl.md (Phase 5 section)",
+          "created_at": "2026-04-03T05:15:41.112570+00:00"
+        }
+      ],
+      "created_at": "2026-04-03T05:15:28.597248+00:00",
+      "updated_at": "2026-04-03T05:15:28.597248+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 172,
+      "title": "Wire topic-first discovery into sweep pipeline with --sweep-mode flag",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
       "comments": [],
       "created_at": "2026-04-03T04:43:18.613868+00:00",
-      "updated_at": "2026-04-03T04:43:18.613868+00:00",
-      "closed_at": null
+      "updated_at": "2026-04-03T04:48:17.324385+00:00",
+      "closed_at": "2026-04-03T04:48:17.324385+00:00"
     },
     {
       "id": 171,
