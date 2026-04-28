@@ -23,7 +23,7 @@ use crate::topics::fingerprint::TopicFingerprint;
 use crate::topics::overlap;
 use crate::topics::tfidf::TfIdfExtractor;
 use crate::topics::traits::TopicExtractor;
-use crate::toxicity::traits::{ToxicityResult, ToxicityScorer};
+use crate::toxicity::traits::ToxicityScorer;
 
 /// Build a complete threat profile for a single account.
 ///
@@ -174,7 +174,10 @@ pub async fn build_profile(
             .collect()
     };
 
-    // All posts go to toxicity scoring
+    // All posts go to toxicity scoring, with per-post context for replies.
+    // Originals and quotes are scored solo; replies are scored as a parent/reply
+    // pair so the conversation-scoped Zentropi labeler can correctly evaluate
+    // whether the reply is hostile toward the parent's author.
     let all_post_texts: Vec<String> = sample
         .originals
         .iter()
@@ -183,7 +186,6 @@ pub async fn build_profile(
         .chain(sample.quotes.iter().map(|p| p.text.clone()))
         .collect();
 
-    // Build flat list of all posts for evidence collection
     let all_posts_flat: Vec<&Post> = sample
         .originals
         .iter()
@@ -191,36 +193,71 @@ pub async fn build_profile(
         .chain(sample.quotes.iter())
         .collect();
 
-    // Step 3: Score posts for toxicity
-    let toxicity_results = scorer.score_batch(&all_post_texts).await?;
+    let parent_uris: Vec<String> = sample
+        .replies
+        .iter()
+        .map(|r| r.parent_uri.clone())
+        .collect();
+    let parent_texts = posts::fetch_parent_posts(client, &parent_uris).await?;
 
-    // Calculate weighted toxicity that emphasizes hostile intent over profanity.
-    //
-    // The raw `toxicity` score treats all toxicity equally — but "fuck yeah,
-    // fat liberation!" (high obscene, low identity_attack) is very different
-    // from "fat people are disgusting" (high identity_attack, high insult).
-    // We weight the categories to surface genuine hostility:
-    //   identity_attack: 0.35 — directly targets people for who they are
-    //   insult:          0.25 — hostile personal attacks
-    //   threat:          0.25 — threatening language
-    //   severe_toxicity: 0.10 — extreme toxicity signal
-    //   profanity:       0.05 — swearing alone is not hostility
-    let avg_toxicity: f64 = if toxicity_results.is_empty() {
-        0.0
+    // contexts[i] aligns with all_post_texts[i]: parent text for replies, None otherwise.
+    let mut contexts: Vec<Option<String>> = Vec::with_capacity(all_post_texts.len());
+    contexts.extend(std::iter::repeat_n(None, sample.originals.len()));
+    for r in &sample.replies {
+        contexts.push(parent_texts.get(&r.parent_uri).cloned());
+    }
+    contexts.extend(std::iter::repeat_n(None, sample.quotes.len()));
+
+    // Step 3: Two-stage classification — ONNX clean-pass + Zentropi binary verdict.
+    // Each verdict carries the binary `is_toxic` flag plus the underlying ONNX
+    // score (for evidence sorting and audit).
+    let verdicts = scorer
+        .classify_batch_with_contexts(&all_post_texts, &contexts)
+        .await?;
+
+    // Reply-weighted binary toxicity rate. Replies count 70% (where harassment
+    // manifests), originals 30% (where stated views show). Quotes are bucketed
+    // with originals — they are first-person commentary, not a reply pair.
+    let originals_len = sample.originals.len();
+    let replies_len = sample.replies.len();
+    let quotes_len = sample.quotes.len();
+
+    let originals_verdicts = &verdicts[..originals_len];
+    let replies_verdicts = &verdicts[originals_len..originals_len + replies_len];
+    let quotes_verdicts = &verdicts[originals_len + replies_len..];
+
+    let toxic_replies = replies_verdicts.iter().filter(|v| v.is_toxic).count();
+    let toxic_originals = originals_verdicts.iter().filter(|v| v.is_toxic).count()
+        + quotes_verdicts.iter().filter(|v| v.is_toxic).count();
+    let total_originals = originals_len + quotes_len;
+    let avg_toxicity = compute_reply_weighted_toxicity(
+        toxic_replies,
+        replies_len,
+        toxic_originals,
+        total_originals,
+    );
+
+    // Evidence: surface the worst-flagged posts (Zentropi-toxic, ranked by ONNX
+    // score). When no posts are flagged, surface the top-3 highest-ONNX posts as
+    // a "watchlist" so users still see *something* explanatory.
+    let toxic_evidence: Vec<(&Post, f64)> = all_posts_flat
+        .iter()
+        .zip(verdicts.iter())
+        .filter(|(_, v)| v.is_toxic)
+        .map(|(p, v)| (*p, v.onnx_score))
+        .collect();
+
+    let evidence_pool: Vec<(&Post, f64)> = if !toxic_evidence.is_empty() {
+        toxic_evidence
     } else {
-        let sum: f64 = toxicity_results.iter().map(weighted_toxicity).sum();
-        sum / toxicity_results.len() as f64
+        all_posts_flat
+            .iter()
+            .zip(verdicts.iter())
+            .map(|(p, v)| (*p, v.onnx_score))
+            .collect()
     };
 
-    // Collect the top 3 most toxic posts as evidence.
-    // Sort by weighted_toxicity (which drives the threat score) so the evidence
-    // shown to the user matches what actually determined the tier — not the raw
-    // model toxicity score, which can be misleading for ally-style profanity.
-    let mut scored_posts: Vec<(&Post, f64)> = all_posts_flat
-        .iter()
-        .zip(toxicity_results.iter().map(weighted_toxicity))
-        .map(|(post, score)| (*post, score))
-        .collect();
+    let mut scored_posts = evidence_pool;
     scored_posts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let top_toxic_posts: Vec<ToxicPost> = scored_posts
@@ -520,33 +557,6 @@ pub fn compute_reply_weighted_toxicity(
     };
 
     reply_tox_rate * 0.7 + original_tox_rate * 0.3
-}
-
-/// Compute a weighted toxicity score from individual category scores.
-///
-/// The raw model `toxicity` score treats all categories equally, but for
-/// threat detection we care much more about identity attacks, insults, and
-/// threats than about profanity. An ally who says "fuck yeah, fat liberation!"
-/// scores high on obscene/profanity but low on identity_attack — they should
-/// NOT be flagged as toxic.
-///
-/// Falls back to the raw toxicity score if category attributes are missing
-/// (e.g. when using a scorer that doesn't provide breakdowns).
-fn weighted_toxicity(result: &ToxicityResult) -> f64 {
-    let attrs = &result.attributes;
-
-    // If we don't have category breakdowns, fall back to raw score
-    let identity_attack = match attrs.identity_attack {
-        Some(v) => v,
-        None => return result.toxicity,
-    };
-
-    let insult = attrs.insult.unwrap_or(0.0);
-    let threat = attrs.threat.unwrap_or(0.0);
-    let severe = attrs.severe_toxicity.unwrap_or(0.0);
-    let profanity = attrs.profanity.unwrap_or(0.0);
-
-    identity_attack * 0.35 + insult * 0.25 + threat * 0.25 + severe * 0.10 + profanity * 0.05
 }
 
 // ============================================================

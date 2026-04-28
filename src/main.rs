@@ -133,8 +133,10 @@ enum Commands {
         bind: String,
     },
 
-    /// Run Zentropi CoPE API spike validation
-    ZentropiSpike,
+    /// Run Zentropi CoPE diagnostic suite — verifies the API key + labeler are
+    /// configured correctly. Useful as a smoke test before relying on Zentropi
+    /// in production scoring.
+    ZentropiCheck,
 
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
@@ -865,7 +867,7 @@ async fn main() -> Result<()> {
             charcoal::web::run_server(config, db, port, &bind).await?;
         }
 
-        Commands::ZentropiSpike => {
+        Commands::ZentropiCheck => {
             let config = config::Config::load()?;
 
             let api_key = config
@@ -882,18 +884,17 @@ async fn main() -> Result<()> {
                 })?;
             let version_id = config.zentropi_labeler_version_id.filter(|k| !k.is_empty());
 
-            println!("{}", "=== Zentropi CoPE API Spike ===".bold());
+            println!("{}", "=== Zentropi CoPE Diagnostic ===".bold());
             println!("  Labeler ID: {labeler_id}");
             if let Some(ref v) = version_id {
                 println!("  Version ID: {v}");
             }
             println!();
 
-            let spike = charcoal::toxicity::zentropi_spike::ZentropiSpike::new(
-                api_key, labeler_id, version_id,
-            );
+            let client =
+                charcoal::toxicity::zentropi::ZentropiClient::new(api_key, labeler_id, version_id)?;
 
-            let results = spike.run_validation().await?;
+            let results = client.run_diagnostic().await?;
 
             // Print results table
             println!(
@@ -956,12 +957,11 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // Go/no-go recommendation
             println!();
             if results.accuracy >= 0.85 && avg_latency < 2.0 {
                 println!(
-                    "  {} Zentropi spike PASSES: accuracy {:.0}% >= 85%, latency {:.2}s < 2s",
-                    "GO".green().bold(),
+                    "  {} Zentropi healthy: accuracy {:.0}% >= 85%, latency {:.2}s < 2s",
+                    "OK".green().bold(),
                     results.accuracy * 100.0,
                     avg_latency,
                 );
@@ -974,8 +974,8 @@ async fn main() -> Result<()> {
                     reasons.push(format!("latency {:.2}s >= 2s", avg_latency));
                 }
                 println!(
-                    "  {} Zentropi spike FAILS: {}",
-                    "NO-GO".red().bold(),
+                    "  {} Zentropi degraded: {}",
+                    "WARN".red().bold(),
                     reasons.join(", "),
                 );
             }
@@ -1124,8 +1124,12 @@ async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
 }
 
 /// Create a toxicity scorer based on the configured backend.
-/// When GROQ_API_KEY is set, wraps the primary scorer in an ensemble
-/// with the Groq Safeguard model as a secondary classifier.
+///
+/// Builds a `TwoStageToxicityScorer` that pairs a continuous primary scorer
+/// (ONNX local or Perspective API) with an optional Zentropi binary classifier.
+/// When ZENTROPI_API_KEY + ZENTROPI_LABELER_ID are set, ONNX acts as a clean-pass
+/// filter (< 0.10 = cleared) and posts above the threshold are sent to Zentropi
+/// for the binary verdict that drives the threat formula's toxicity rate.
 fn create_scorer(
     config: &config::Config,
 ) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
@@ -1144,23 +1148,44 @@ fn create_scorer(
         }
     };
 
-    let secondary: Option<charcoal::toxicity::groq_safeguard::GroqSafeguardScorer> =
-        config.groq_api_key.as_ref().and_then(|key| {
-            match charcoal::toxicity::groq_safeguard::GroqSafeguardScorer::new(key) {
-                Ok(s) => {
-                    info!("Groq Safeguard scorer loaded — ensemble scoring enabled");
-                    Some(s)
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to init Groq scorer, using primary only");
-                    None
-                }
-            }
-        });
+    let zentropi = build_zentropi(config);
 
     Ok(Box::new(
-        charcoal::toxicity::ensemble::EnsembleToxicityScorer::new(primary, secondary),
+        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, zentropi),
     ))
+}
+
+/// Build a Zentropi client when both API key and labeler ID are configured.
+/// Returns `None` (with a logged warning) on misconfiguration so the pipeline
+/// degrades gracefully to ONNX-only.
+fn build_zentropi(
+    config: &config::Config,
+) -> Option<std::sync::Arc<charcoal::toxicity::zentropi::ZentropiClient>> {
+    let api_key = config.zentropi_api_key.as_ref().filter(|k| !k.is_empty())?;
+    let labeler_id = config
+        .zentropi_labeler_id
+        .as_ref()
+        .filter(|k| !k.is_empty())?;
+    let version_id = config
+        .zentropi_labeler_version_id
+        .as_ref()
+        .filter(|k| !k.is_empty())
+        .cloned();
+
+    match charcoal::toxicity::zentropi::ZentropiClient::new(
+        api_key.clone(),
+        labeler_id.clone(),
+        version_id,
+    ) {
+        Ok(c) => {
+            info!("Zentropi binary classifier loaded — two-stage scoring enabled");
+            Some(std::sync::Arc::new(c))
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to init Zentropi client, using ONNX-only fallback");
+            None
+        }
+    }
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.
