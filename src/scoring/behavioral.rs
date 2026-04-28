@@ -55,6 +55,18 @@ pub fn compute_avg_engagement(posts: &[Post]) -> f64 {
     total / posts.len() as f64
 }
 
+/// Compute mean engagement from post references (avoids cloning).
+pub fn compute_avg_engagement_refs(posts: &[&Post]) -> f64 {
+    if posts.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = posts
+        .iter()
+        .map(|p| (p.like_count + p.repost_count) as f64)
+        .sum();
+    total / posts.len() as f64
+}
+
 /// Compute the fraction of posts that are quote-posts.
 /// Returns 0.0 if total_posts is 0.
 pub fn compute_quote_ratio(quote_count: usize, total_posts: usize) -> f64 {
@@ -151,6 +163,11 @@ pub fn apply_behavioral_modifier(
 /// When context_score >= 0.5, the benign gate is bypassed — an account that
 /// looks benign in isolation but is hostile in direct interactions with the
 /// protected user's content is exactly the concern troll this system detects.
+///
+/// Returns (modified_score, benign_gate_applied, gate_was_bypassed_by_context).
+/// The third element lets callers avoid double-applying context: when the gate
+/// bypass already consumed the context signal, the context multiplier should
+/// not be applied again on top.
 pub fn apply_behavioral_modifier_contextual(
     raw_score: f64,
     quote_ratio: f64,
@@ -159,22 +176,23 @@ pub fn apply_behavioral_modifier_contextual(
     avg_engagement: f64,
     median_engagement: f64,
     context_score: Option<f64>,
-) -> (f64, bool) {
+) -> (f64, bool, bool) {
     let context_overrides_gate = context_score.map(|cs| cs >= 0.5).unwrap_or(false);
 
     if context_overrides_gate {
         // Skip benign gate check, but still apply hostile multiplier
         let boost = compute_behavioral_boost(quote_ratio, reply_ratio, pile_on);
-        ((raw_score * boost).clamp(0.0, 100.0), false)
+        ((raw_score * boost).clamp(0.0, 100.0), false, true)
     } else {
-        apply_behavioral_modifier(
+        let (score, benign_gate) = apply_behavioral_modifier(
             raw_score,
             quote_ratio,
             reply_ratio,
             pile_on,
             avg_engagement,
             median_engagement,
-        )
+        );
+        (score, benign_gate, false)
     }
 }
 

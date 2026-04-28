@@ -36,6 +36,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_DID, &account).await.unwrap();
     }

@@ -273,6 +273,19 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         Ok(())
     })?;
 
+    // Migration v8: add fingerprint_quality and scoring_confidence to account_scores.
+    // fingerprint_quality tracks whether the fingerprint was built from originals only
+    // (normal), mixed (degraded), or insufficient data (unreliable).
+    // scoring_confidence tracks the depth of analysis (low/standard/high).
+    run_migration(conn, 8, |c| {
+        c.execute_batch(
+            "
+            ALTER TABLE account_scores ADD COLUMN fingerprint_quality TEXT;
+            ALTER TABLE account_scores ADD COLUMN scoring_confidence TEXT;
+            ",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -401,7 +414,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]
@@ -513,6 +526,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

@@ -116,6 +116,39 @@ pub struct ScanStatus {
 
 use tokio::sync::RwLock;
 
+/// Build a Zentropi client when both API key and labeler ID are configured.
+/// Returns `None` (with a logged warning) on misconfiguration so the pipeline
+/// degrades gracefully to ONNX-only.
+fn build_zentropi_client(
+    config: &Config,
+) -> Option<Arc<crate::toxicity::zentropi::ZentropiClient>> {
+    let api_key = config.zentropi_api_key.as_ref().filter(|k| !k.is_empty())?;
+    let labeler_id = config
+        .zentropi_labeler_id
+        .as_ref()
+        .filter(|k| !k.is_empty())?;
+    let version_id = config
+        .zentropi_labeler_version_id
+        .as_ref()
+        .filter(|k| !k.is_empty())
+        .cloned();
+
+    match crate::toxicity::zentropi::ZentropiClient::new(
+        api_key.clone(),
+        labeler_id.clone(),
+        version_id,
+    ) {
+        Ok(c) => {
+            info!("Zentropi binary classifier loaded — two-stage scoring enabled");
+            Some(Arc::new(c))
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to init Zentropi client, using ONNX-only fallback");
+            None
+        }
+    }
+}
+
 /// Launch the scan pipeline in a background tokio task.
 /// Returns immediately. Callers poll `scan_manager` to track progress.
 pub fn launch_scan(
@@ -239,23 +272,14 @@ async fn run_scan(
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
 
-    // Wrap in ensemble scorer if Groq API key is configured
-    let secondary_scorer: Option<crate::toxicity::groq_safeguard::GroqSafeguardScorer> =
-        config.groq_api_key.as_ref().and_then(|key| {
-            match crate::toxicity::groq_safeguard::GroqSafeguardScorer::new(key) {
-                Ok(s) => {
-                    info!("Groq Safeguard scorer loaded — ensemble scoring enabled");
-                    Some(s)
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to init Groq scorer, using ONNX only");
-                    None
-                }
-            }
-        });
+    // Wrap in two-stage scorer when Zentropi is configured. ONNX runs as a
+    // clean-pass filter (< 0.10 = cleared); posts at or above the threshold are
+    // sent to Zentropi for a binary verdict. Falls back to ONNX-only with a
+    // 0.50 binary threshold when Zentropi is unavailable.
+    let zentropi = build_zentropi_client(config.as_ref());
 
     let scorer: Box<dyn ToxicityScorer> = Box::new(
-        crate::toxicity::ensemble::EnsembleToxicityScorer::new(primary_scorer, secondary_scorer),
+        crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, zentropi),
     );
 
     // Phase 2: load embedding model (optional — falls back to TF-IDF)

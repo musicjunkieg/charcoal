@@ -83,6 +83,8 @@ fn account_score_has_context_score() {
         behavioral_signals: None,
         context_score: Some(0.65),
         graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     };
     assert_eq!(score.context_score, Some(0.65));
 }
@@ -102,6 +104,8 @@ fn account_score_context_score_defaults_none() {
         behavioral_signals: None,
         context_score: None,
         graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     };
     assert!(score.context_score.is_none());
 }
@@ -324,6 +328,8 @@ fn make_score(did: &str, handle: &str, threat_score: f64, tier: &str) -> Account
         behavioral_signals: None,
         context_score: None,
         graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     }
 }
 

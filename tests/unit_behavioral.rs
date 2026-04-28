@@ -385,7 +385,7 @@ fn persona_high_tox_benign_behavior() {
 #[test]
 fn benign_gate_bypassed_when_context_score_high() {
     // Account looks benign in isolation but context_score is 0.7 (hostile in direct interactions)
-    let (score, benign_gate) = apply_behavioral_modifier_contextual(
+    let (score, benign_gate, gate_bypassed) = apply_behavioral_modifier_contextual(
         30.0,      // raw_score (Elevated)
         0.05,      // quote_ratio (low — benign)
         0.10,      // reply_ratio (low — benign)
@@ -405,11 +405,12 @@ fn benign_gate_bypassed_when_context_score_high() {
         !benign_gate,
         "benign_gate should be false when context bypasses it"
     );
+    assert!(gate_bypassed, "gate_was_bypassed_by_context should be true");
 }
 
 #[test]
 fn benign_gate_still_applies_when_context_score_low() {
-    let (score, benign_gate) = apply_behavioral_modifier_contextual(
+    let (score, benign_gate, gate_bypassed) = apply_behavioral_modifier_contextual(
         30.0,
         0.05,
         0.10,
@@ -423,30 +424,36 @@ fn benign_gate_still_applies_when_context_score_low() {
         "Benign gate should apply when context_score < 0.5"
     );
     assert!(benign_gate);
+    assert!(
+        !gate_bypassed,
+        "gate should not be bypassed with low context"
+    );
 }
 
 #[test]
 fn benign_gate_applies_when_no_context_score() {
-    let (score, benign_gate) =
+    let (score, benign_gate, gate_bypassed) =
         apply_behavioral_modifier_contextual(30.0, 0.05, 0.10, false, 5.0, 3.0, None);
     assert_eq!(score, 12.0);
     assert!(benign_gate);
+    assert!(!gate_bypassed);
 }
 
 #[test]
 fn contextual_modifier_matches_original_when_no_context() {
     // Without context score, contextual version should produce same result
     let (score_orig, gate_orig) = apply_behavioral_modifier(30.0, 0.05, 0.10, false, 5.0, 3.0);
-    let (score_ctx, gate_ctx) =
+    let (score_ctx, gate_ctx, gate_bypassed) =
         apply_behavioral_modifier_contextual(30.0, 0.05, 0.10, false, 5.0, 3.0, None);
     assert!((score_orig - score_ctx).abs() < f64::EPSILON);
     assert_eq!(gate_orig, gate_ctx);
+    assert!(!gate_bypassed);
 }
 
 #[test]
 fn contextual_modifier_hostile_account_still_boosted() {
     // Non-benign account with high context score — should still get boost
-    let (score, benign_gate) = apply_behavioral_modifier_contextual(
+    let (score, benign_gate, _gate_bypassed) = apply_behavioral_modifier_contextual(
         30.0,      // raw_score
         0.25,      // quote_ratio (high — not benign)
         0.35,      // reply_ratio (high — not benign)

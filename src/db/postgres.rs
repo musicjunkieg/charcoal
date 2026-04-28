@@ -123,6 +123,10 @@ impl PgDatabase {
                     7,
                     include_str!("../../migrations/postgres/0007_last_login_at.sql"),
                 ),
+                (
+                    8,
+                    include_str!("../../migrations/postgres/0008_fingerprint_scoring.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
@@ -317,8 +321,9 @@ impl Database for PgDatabase {
         sqlx_core::query::query(
             "INSERT INTO account_scores
                 (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12)
+                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
+                 fingerprint_quality, scoring_confidence)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14)
              ON CONFLICT(user_did, did) DO UPDATE SET
                 handle = $3,
                 toxicity_score = $4,
@@ -330,7 +335,9 @@ impl Database for PgDatabase {
                 scored_at = NOW(),
                 behavioral_signals = $10,
                 context_score = $11,
-                graph_distance = $12",
+                graph_distance = $12,
+                fingerprint_quality = $13,
+                scoring_confidence = $14",
         )
         .bind(user_did)
         .bind(&score.did)
@@ -344,6 +351,8 @@ impl Database for PgDatabase {
         .bind(&behavioral_json)
         .bind(score.context_score)
         .bind(&score.graph_distance)
+        .bind(&score.fingerprint_quality)
+        .bind(&score.scoring_confidence)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -358,7 +367,8 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals, context_score
+                    behavioral_signals, context_score,
+                    fingerprint_quality, scoring_confidence
              FROM account_scores
              WHERE user_did = $1 AND threat_score >= $2
              ORDER BY threat_score DESC",
@@ -394,6 +404,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
                 graph_distance: None,
+                fingerprint_quality: row.get(11),
+                scoring_confidence: row.get(12),
             });
         }
         Ok(accounts)
@@ -645,7 +657,8 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals, context_score
+                    behavioral_signals, context_score,
+                    fingerprint_quality, scoring_confidence
              FROM account_scores
              WHERE user_did = $1 AND lower(handle) = lower($2)
              LIMIT 1",
@@ -675,6 +688,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
                 graph_distance: None,
+                fingerprint_quality: r.get(11),
+                scoring_confidence: r.get(12),
             }
         }))
     }
@@ -684,7 +699,8 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals, context_score
+                    behavioral_signals, context_score,
+                    fingerprint_quality, scoring_confidence
              FROM account_scores
              WHERE user_did = $1 AND did = $2
              LIMIT 1",
@@ -714,6 +730,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
                 graph_distance: None,
+                fingerprint_quality: r.get(11),
+                scoring_confidence: r.get(12),
             }
         }))
     }
@@ -770,7 +788,8 @@ impl Database for PgDatabase {
             "SELECT a.did, a.handle, a.toxicity_score, a.topic_overlap, a.threat_score, a.threat_tier,
                     a.posts_analyzed, a.top_toxic_posts,
                     to_char(a.scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    a.behavioral_signals, a.context_score
+                    a.behavioral_signals, a.context_score,
+                    a.fingerprint_quality, a.scoring_confidence
              FROM account_scores a
              LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
              WHERE a.user_did = $1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
@@ -804,6 +823,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
                 graph_distance: None,
+                fingerprint_quality: row.get(11),
+                scoring_confidence: row.get(12),
             });
         }
         Ok(accounts)
@@ -1026,5 +1047,14 @@ impl Database for PgDatabase {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
+        let rows = sqlx_core::query::query("SELECT did FROM account_scores WHERE user_did = $1")
+            .bind(user_did)
+            .fetch_all(&self.pool)
+            .await?;
+        let dids = rows.iter().map(|row| row.get::<String, _>("did")).collect();
+        Ok(dids)
     }
 }

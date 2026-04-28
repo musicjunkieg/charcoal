@@ -370,3 +370,174 @@ fn context_score_at_boundary() {
         expected
     );
 }
+
+// ============================================================
+// compute_reply_weighted_toxicity
+// ============================================================
+
+#[test]
+fn reply_weighted_toxicity_hostile_replies_clean_originals() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    // 12/30 replies toxic, 0/20 originals toxic
+    let result = compute_reply_weighted_toxicity(12, 30, 0, 20);
+    // reply_tox_rate = 0.40, original_tox_rate = 0.0
+    // weighted = 0.40 * 0.7 + 0.0 * 0.3 = 0.28
+    assert!(
+        (result - 0.28).abs() < 0.001,
+        "Expected 0.28, got {}",
+        result
+    );
+}
+
+#[test]
+fn reply_weighted_toxicity_falls_back_when_few_replies() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    // Only 3 replies — below threshold of 5, falls back to flat rate
+    let result = compute_reply_weighted_toxicity(2, 3, 4, 20);
+    // flat rate = (2 + 4) / (3 + 20) = 6/23
+    assert!(
+        (result - 6.0 / 23.0).abs() < 0.001,
+        "Expected flat rate, got {}",
+        result
+    );
+}
+
+#[test]
+fn reply_weighted_toxicity_zero_posts() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+    let result = compute_reply_weighted_toxicity(0, 0, 0, 0);
+    assert!((result - 0.0).abs() < 0.001);
+}
+
+#[test]
+fn reply_weighted_toxicity_all_replies_toxic() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    let result = compute_reply_weighted_toxicity(20, 20, 5, 10);
+    // reply_tox_rate = 1.0, original_tox_rate = 0.5
+    // weighted = 1.0 * 0.7 + 0.5 * 0.3 = 0.85
+    assert!(
+        (result - 0.85).abs() < 0.001,
+        "Expected 0.85, got {}",
+        result
+    );
+}
+
+// ============================================================
+// ScoringConfidence — staleness days
+// ============================================================
+
+#[test]
+fn scoring_confidence_staleness_days() {
+    use charcoal::db::models::ScoringConfidence;
+
+    assert_eq!(ScoringConfidence::Low.staleness_days(), 3);
+    assert_eq!(ScoringConfidence::Standard.staleness_days(), 7);
+    assert_eq!(ScoringConfidence::High.staleness_days(), 14);
+}
+
+// ============================================================
+// Adaptive sampling — stage decision functions
+// ============================================================
+
+#[test]
+fn early_exit_clean_and_irrelevant() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
+}
+
+#[test]
+fn no_early_exit_if_any_onnx_above_threshold() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.15, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
+}
+
+#[test]
+fn no_early_exit_if_overlap_above_gate() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.20), 0.15));
+}
+
+#[test]
+fn no_early_exit_when_overlap_unknown() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // TF-IDF extraction failure → overlap unknown → never early-exit, even
+    // when ONNX scores look clean. Sparse-vocabulary or reply-heavy accounts
+    // shouldn't slip through just because we couldn't compute their topics.
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, None, 0.15));
+}
+
+#[test]
+fn no_early_exit_with_too_few_first_person_posts() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Reply-heavy account with only 2 originals — the clean-pass filter
+    // would vacuously pass on those 2 entries, but stage 2 needs to score
+    // the un-checked replies in pair context. Min-originals guard prevents
+    // the false-clear.
+    let onnx_scores = vec![0.02, 0.05];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+}
+
+#[test]
+fn no_early_exit_when_first_person_scores_empty() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Reply-only sample — `iter().all()` on empty slice returns true, but
+    // the empty list means we never actually checked any post. The guard
+    // forces stage 2.
+    let onnx_scores: Vec<f64> = vec![];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+}
+
+#[test]
+fn scoring_confidence_near_boundary_is_low() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Near Watch boundary (8.0 ± 5) → should re-score sooner
+    assert!(should_continue_to_stage3(10.0));
+    // Not near any boundary → standard confidence
+    assert!(!should_continue_to_stage3(22.0));
+}
+
+#[test]
+fn stage2_resolves_when_clear_signal() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 22.0 is not near any boundary (8, 15, 35) ± 5
+    assert!(!should_continue_to_stage3(22.0));
+}
+
+#[test]
+fn stage2_continues_when_near_watch_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 6.0 is within ±5 of Watch boundary at 8.0
+    assert!(should_continue_to_stage3(6.0));
+}
+
+#[test]
+fn stage2_continues_when_near_elevated_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 13.0 is within ±5 of Elevated boundary at 15.0
+    assert!(should_continue_to_stage3(13.0));
+}
+
+#[test]
+fn stage2_continues_when_near_high_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 37.0 is within ±5 of High boundary at 35.0
+    assert!(should_continue_to_stage3(37.0));
+}

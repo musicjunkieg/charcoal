@@ -282,6 +282,11 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::update_last_login(&conn, did)
     }
+
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_all_scored_dids(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
@@ -353,6 +358,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let ranked = db.get_ranked_threats(TEST_USER, 0.0).await.unwrap();
@@ -422,6 +429,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         // Exact match
@@ -461,6 +470,8 @@ mod tests {
             behavioral_signals: None,
             context_score: None,
             graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let found = db

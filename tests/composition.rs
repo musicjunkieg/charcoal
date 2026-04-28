@@ -406,6 +406,8 @@ fn make_account(handle: &str, score: f64, tier: &str, toxicity: f64, overlap: f6
         behavioral_signals: None,
         context_score: None,
         graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     }
 }
 

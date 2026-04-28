@@ -31,6 +31,17 @@ struct Cli {
     command: Commands,
 }
 
+/// How to discover accounts for the sweep
+#[derive(Debug, Clone, clap::ValueEnum)]
+enum SweepMode {
+    /// Search for accounts by topic keywords (recommended)
+    Topic,
+    /// Walk follower graph (legacy, expensive)
+    Graph,
+    /// Both topic search + graph walk
+    Both,
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize the database and configuration
@@ -61,19 +72,31 @@ enum Commands {
         concurrency: u32,
     },
 
-    /// Sweep second-degree network (followers-of-followers) for threats
+    /// Sweep for threats using topic search or follower graph
     Sweep {
-        /// Max first-degree followers to scan (default: 200)
+        /// Discovery mode: topic (recommended), graph (legacy), or both
+        #[arg(long, default_value = "topic")]
+        sweep_mode: SweepMode,
+
+        /// Max first-degree followers to scan (graph mode only, default: 200)
         #[arg(long, default_value = "200")]
         max_followers: u32,
 
-        /// Max second-degree followers per first-degree (default: 50)
+        /// Max second-degree followers per first-degree (graph mode only, default: 50)
         #[arg(long, default_value = "50")]
         depth: u32,
 
         /// Number of accounts to score in parallel (default: 8)
         #[arg(long, default_value = "8")]
         concurrency: u32,
+
+        /// Topic keywords to search per cycle (topic mode only, default: 5)
+        #[arg(long, default_value = "5")]
+        keywords: u32,
+
+        /// Max search results per keyword (topic mode only, default: 100)
+        #[arg(long, default_value = "100")]
+        results_per_keyword: u32,
     },
 
     /// Score a specific Bluesky account
@@ -109,6 +132,11 @@ enum Commands {
         #[arg(long, default_value = "0.0.0.0")]
         bind: String,
     },
+
+    /// Run Zentropi CoPE diagnostic suite — verifies the API key + labeler are
+    /// configured correctly. Useful as a smoke test before relying on Zentropi
+    /// in production scoring.
+    ZentropiCheck,
 
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
@@ -331,16 +359,17 @@ async fn main() -> Result<()> {
         }
 
         Commands::Sweep {
+            sweep_mode,
             max_followers,
             depth,
             concurrency,
+            keywords,
+            results_per_keyword,
         } => {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             config.require_scorer()?;
             let db = open_database(&config).await?;
-
-            println!("Running second-degree network sweep...");
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
             let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;
@@ -359,28 +388,103 @@ async fn main() -> Result<()> {
             let pile_on_dids =
                 charcoal::scoring::behavioral::detect_pile_on_participants(&pile_on_refs);
 
-            let (pool_size, scored) = charcoal::pipeline::sweep::run(
-                &client,
-                scorer.as_ref(),
-                &db,
-                &did,
-                &config.bluesky_handle,
-                &protected_fingerprint,
-                &weights,
-                max_followers as usize,
-                depth as usize,
-                concurrency as usize,
-                embedder.as_ref(),
-                protected_embedding.as_deref(),
-                median_engagement,
-                &pile_on_dids,
-                Some(config.data_dir()),
-            )
-            .await?;
+            match sweep_mode {
+                SweepMode::Topic => {
+                    println!("Running topic-first discovery sweep...");
+                    let (discovered, scored) = charcoal::pipeline::sweep::run_topic_first(
+                        &client,
+                        scorer.as_ref(),
+                        &db,
+                        &did,
+                        &protected_fingerprint,
+                        &weights,
+                        concurrency as usize,
+                        embedder.as_ref(),
+                        protected_embedding.as_deref(),
+                        median_engagement,
+                        &pile_on_dids,
+                        Some(config.data_dir()),
+                        keywords as usize,
+                        results_per_keyword as usize,
+                    )
+                    .await?;
 
-            println!("\n{}", "Sweep complete.".bold());
-            println!("  Second-degree pool: {pool_size}");
-            println!("  Accounts scored: {scored}");
+                    println!("\n{}", "Topic sweep complete.".bold());
+                    println!("  Accounts discovered: {discovered}");
+                    println!("  Accounts scored: {scored}");
+                }
+                SweepMode::Graph => {
+                    println!("Running graph-based network sweep...");
+                    let (pool_size, scored) = charcoal::pipeline::sweep::run(
+                        &client,
+                        scorer.as_ref(),
+                        &db,
+                        &did,
+                        &config.bluesky_handle,
+                        &protected_fingerprint,
+                        &weights,
+                        max_followers as usize,
+                        depth as usize,
+                        concurrency as usize,
+                        embedder.as_ref(),
+                        protected_embedding.as_deref(),
+                        median_engagement,
+                        &pile_on_dids,
+                        Some(config.data_dir()),
+                    )
+                    .await?;
+
+                    println!("\n{}", "Graph sweep complete.".bold());
+                    println!("  Second-degree pool: {pool_size}");
+                    println!("  Accounts scored: {scored}");
+                }
+                SweepMode::Both => {
+                    println!("Running topic-first discovery...");
+                    let (discovered, topic_scored) = charcoal::pipeline::sweep::run_topic_first(
+                        &client,
+                        scorer.as_ref(),
+                        &db,
+                        &did,
+                        &protected_fingerprint,
+                        &weights,
+                        concurrency as usize,
+                        embedder.as_ref(),
+                        protected_embedding.as_deref(),
+                        median_engagement,
+                        &pile_on_dids,
+                        Some(config.data_dir()),
+                        keywords as usize,
+                        results_per_keyword as usize,
+                    )
+                    .await?;
+                    println!("  Topic: discovered {discovered}, scored {topic_scored}");
+
+                    println!("Running graph-based sweep...");
+                    let (pool_size, graph_scored) = charcoal::pipeline::sweep::run(
+                        &client,
+                        scorer.as_ref(),
+                        &db,
+                        &did,
+                        &config.bluesky_handle,
+                        &protected_fingerprint,
+                        &weights,
+                        max_followers as usize,
+                        depth as usize,
+                        concurrency as usize,
+                        embedder.as_ref(),
+                        protected_embedding.as_deref(),
+                        median_engagement,
+                        &pile_on_dids,
+                        Some(config.data_dir()),
+                    )
+                    .await?;
+
+                    println!("\n{}", "Combined sweep complete.".bold());
+                    println!("  Topic: discovered {discovered}, scored {topic_scored}");
+                    println!("  Graph: pool {pool_size}, scored {graph_scored}");
+                    println!("  Total scored: {}", topic_scored + graph_scored);
+                }
+            }
         }
 
         Commands::Score { handle } => {
@@ -763,6 +867,120 @@ async fn main() -> Result<()> {
             charcoal::web::run_server(config, db, port, &bind).await?;
         }
 
+        Commands::ZentropiCheck => {
+            let config = config::Config::load()?;
+
+            let api_key = config
+                .zentropi_api_key
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("ZENTROPI_API_KEY not set. Add it to your .env file.")
+                })?;
+            let labeler_id = config
+                .zentropi_labeler_id
+                .filter(|k| !k.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("ZENTROPI_LABELER_ID not set. Add it to your .env file.")
+                })?;
+            let version_id = config.zentropi_labeler_version_id.filter(|k| !k.is_empty());
+
+            println!("{}", "=== Zentropi CoPE Diagnostic ===".bold());
+            println!("  Labeler ID: {labeler_id}");
+            if let Some(ref v) = version_id {
+                println!("  Version ID: {v}");
+            }
+            println!();
+
+            let client =
+                charcoal::toxicity::zentropi::ZentropiClient::new(api_key, labeler_id, version_id)?;
+
+            let results = client.run_diagnostic().await?;
+
+            // Print results table
+            println!(
+                "  {:<4} {:<60} {:>8} {:>8} {:>6} {:>8}",
+                "#", "Text", "Expected", "Actual", "OK?", "Conf"
+            );
+            println!("  {}", "-".repeat(100));
+
+            for (i, detail) in results.details.iter().enumerate() {
+                let text_preview = if detail.text.len() > 57 {
+                    format!("{}...", charcoal::output::truncate_chars(&detail.text, 57))
+                } else {
+                    detail.text.clone()
+                };
+                let expected = if detail.expected_toxic {
+                    "toxic"
+                } else {
+                    "safe"
+                };
+                let actual = if detail.actual_toxic { "toxic" } else { "safe" };
+                let ok_mark = if detail.correct {
+                    "Y".green().to_string()
+                } else {
+                    "N".red().bold().to_string()
+                };
+
+                println!(
+                    "  {:<4} {:<60} {:>8} {:>8} {:>6} {:>7.1}%",
+                    format!("{}.", i + 1),
+                    text_preview,
+                    expected,
+                    actual,
+                    ok_mark,
+                    detail.confidence * 100.0,
+                );
+            }
+
+            // Summary
+            let total_time: f64 = results.details.iter().map(|d| d.compute_time).sum();
+            let avg_latency = if results.total > 0 {
+                total_time / results.total as f64
+            } else {
+                0.0
+            };
+
+            println!("\n{}", "=== Summary ===".bold());
+            println!(
+                "  Accuracy:      {:.1}% ({}/{})",
+                results.accuracy * 100.0,
+                results.correct,
+                results.total
+            );
+            println!("  Avg latency:   {:.2}s", avg_latency);
+            println!("  Errors:        {}", results.errors.len());
+
+            if !results.errors.is_empty() {
+                println!("\n{}", "Errors:".red().bold());
+                for err in &results.errors {
+                    println!("  - {err}");
+                }
+            }
+
+            println!();
+            if results.accuracy >= 0.85 && avg_latency < 2.0 {
+                println!(
+                    "  {} Zentropi healthy: accuracy {:.0}% >= 85%, latency {:.2}s < 2s",
+                    "OK".green().bold(),
+                    results.accuracy * 100.0,
+                    avg_latency,
+                );
+            } else {
+                let mut reasons = Vec::new();
+                if results.accuracy < 0.85 {
+                    reasons.push(format!("accuracy {:.0}% < 85%", results.accuracy * 100.0));
+                }
+                if avg_latency >= 2.0 {
+                    reasons.push(format!("latency {:.2}s >= 2s", avg_latency));
+                }
+                println!(
+                    "  {} Zentropi degraded: {}",
+                    "WARN".red().bold(),
+                    reasons.join(", "),
+                );
+            }
+        }
+
         #[cfg(feature = "postgres")]
         Commands::Migrate { database_url } => {
             let config = config::Config::load()?;
@@ -906,8 +1124,12 @@ async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
 }
 
 /// Create a toxicity scorer based on the configured backend.
-/// When GROQ_API_KEY is set, wraps the primary scorer in an ensemble
-/// with the Groq Safeguard model as a secondary classifier.
+///
+/// Builds a `TwoStageToxicityScorer` that pairs a continuous primary scorer
+/// (ONNX local or Perspective API) with an optional Zentropi binary classifier.
+/// When ZENTROPI_API_KEY + ZENTROPI_LABELER_ID are set, ONNX acts as a clean-pass
+/// filter (< 0.10 = cleared) and posts above the threshold are sent to Zentropi
+/// for the binary verdict that drives the threat formula's toxicity rate.
 fn create_scorer(
     config: &config::Config,
 ) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
@@ -926,23 +1148,44 @@ fn create_scorer(
         }
     };
 
-    let secondary: Option<charcoal::toxicity::groq_safeguard::GroqSafeguardScorer> =
-        config.groq_api_key.as_ref().and_then(|key| {
-            match charcoal::toxicity::groq_safeguard::GroqSafeguardScorer::new(key) {
-                Ok(s) => {
-                    info!("Groq Safeguard scorer loaded — ensemble scoring enabled");
-                    Some(s)
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to init Groq scorer, using primary only");
-                    None
-                }
-            }
-        });
+    let zentropi = build_zentropi(config);
 
     Ok(Box::new(
-        charcoal::toxicity::ensemble::EnsembleToxicityScorer::new(primary, secondary),
+        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, zentropi),
     ))
+}
+
+/// Build a Zentropi client when both API key and labeler ID are configured.
+/// Returns `None` (with a logged warning) on misconfiguration so the pipeline
+/// degrades gracefully to ONNX-only.
+fn build_zentropi(
+    config: &config::Config,
+) -> Option<std::sync::Arc<charcoal::toxicity::zentropi::ZentropiClient>> {
+    let api_key = config.zentropi_api_key.as_ref().filter(|k| !k.is_empty())?;
+    let labeler_id = config
+        .zentropi_labeler_id
+        .as_ref()
+        .filter(|k| !k.is_empty())?;
+    let version_id = config
+        .zentropi_labeler_version_id
+        .as_ref()
+        .filter(|k| !k.is_empty())
+        .cloned();
+
+    match charcoal::toxicity::zentropi::ZentropiClient::new(
+        api_key.clone(),
+        labeler_id.clone(),
+        version_id,
+    ) {
+        Ok(c) => {
+            info!("Zentropi binary classifier loaded — two-stage scoring enabled");
+            Some(std::sync::Arc::new(c))
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to init Zentropi client, using ONNX-only fallback");
+            None
+        }
+    }
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.
