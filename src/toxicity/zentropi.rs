@@ -223,11 +223,15 @@ impl ZentropiClient {
         let mut results = DiagnosticResults::default();
 
         for (text, expected_toxic) in &solo_cases {
+            // Every test case counts toward `total` — including failures —
+            // so accuracy reflects the end-to-end pass rate. Otherwise a
+            // half-failing labeler would still print 100% accuracy across
+            // the surviving subset, masking the outage.
+            results.total += 1;
             match self.classify(text).await {
                 Ok(response) => {
                     let actual_toxic = response.is_toxic();
                     let correct = *expected_toxic == actual_toxic;
-                    results.total += 1;
                     if correct {
                         results.correct += 1;
                     }
@@ -243,16 +247,24 @@ impl ZentropiClient {
                 Err(e) => {
                     warn!(text, error = %e, "Zentropi diagnostic failed on solo case");
                     results.errors.push(format!("Failed on '{}': {}", text, e));
+                    results.details.push(DiagnosticDetail {
+                        text: format!("{} [API ERROR]", text),
+                        expected_toxic: *expected_toxic,
+                        actual_toxic: false,
+                        confidence: 0.0,
+                        compute_time: 0.0,
+                        correct: false,
+                    });
                 }
             }
         }
 
         for (parent, reply, expected_toxic) in &pair_cases {
+            results.total += 1;
             match self.classify_pair(parent, reply).await {
                 Ok(response) => {
                     let actual_toxic = response.is_toxic();
                     let correct = *expected_toxic == actual_toxic;
-                    results.total += 1;
                     if correct {
                         results.correct += 1;
                     }
@@ -268,6 +280,14 @@ impl ZentropiClient {
                 Err(e) => {
                     warn!(parent, reply, error = %e, "Zentropi diagnostic failed on pair case");
                     results.errors.push(format!("Failed on pair: {}", e));
+                    results.details.push(DiagnosticDetail {
+                        text: format!("[pair] {} -> {} [API ERROR]", parent, reply),
+                        expected_toxic: *expected_toxic,
+                        actual_toxic: false,
+                        confidence: 0.0,
+                        compute_time: 0.0,
+                        correct: false,
+                    });
                 }
             }
         }

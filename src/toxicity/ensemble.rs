@@ -90,7 +90,21 @@ impl TwoStageToxicityScorer {
         text: &str,
         context: Option<&str>,
     ) -> Result<TwoStageVerdict> {
-        let primary = self.primary.score_text(text).await?;
+        // For replies, score the [Parent post] / [Reply] envelope so the ONNX
+        // clean-pass filter can detect context-dependent toxicity. Without this,
+        // a benign-looking reply ("I agree") to a hostile parent slips through
+        // the < 0.10 short-circuit and never reaches Zentropi. Same envelope
+        // format as Zentropi's classify_pair, so the two stages stay aligned.
+        let envelope_owned;
+        let primary_input = match context {
+            Some(parent) => {
+                envelope_owned = format!("[Parent post]: {}\n\n[Reply]: {}", parent, text);
+                envelope_owned.as_str()
+            }
+            None => text,
+        };
+
+        let primary = self.primary.score_text(primary_input).await?;
         let onnx_score = primary.toxicity;
         let onnx_attributes = primary.attributes;
 

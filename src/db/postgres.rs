@@ -123,6 +123,10 @@ impl PgDatabase {
                     7,
                     include_str!("../../migrations/postgres/0007_last_login_at.sql"),
                 ),
+                (
+                    8,
+                    include_str!("../../migrations/postgres/0008_fingerprint_scoring.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
@@ -363,7 +367,8 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals, context_score
+                    behavioral_signals, context_score,
+                    fingerprint_quality, scoring_confidence
              FROM account_scores
              WHERE user_did = $1 AND threat_score >= $2
              ORDER BY threat_score DESC",
@@ -399,8 +404,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
                 graph_distance: None,
-                fingerprint_quality: None,
-                scoring_confidence: None,
+                fingerprint_quality: row.get(11),
+                scoring_confidence: row.get(12),
             });
         }
         Ok(accounts)
@@ -652,7 +657,8 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals, context_score
+                    behavioral_signals, context_score,
+                    fingerprint_quality, scoring_confidence
              FROM account_scores
              WHERE user_did = $1 AND lower(handle) = lower($2)
              LIMIT 1",
@@ -682,8 +688,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
                 graph_distance: None,
-                fingerprint_quality: None,
-                scoring_confidence: None,
+                fingerprint_quality: r.get(11),
+                scoring_confidence: r.get(12),
             }
         }))
     }
@@ -693,7 +699,8 @@ impl Database for PgDatabase {
             "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    behavioral_signals, context_score
+                    behavioral_signals, context_score,
+                    fingerprint_quality, scoring_confidence
              FROM account_scores
              WHERE user_did = $1 AND did = $2
              LIMIT 1",
@@ -723,8 +730,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
                 graph_distance: None,
-                fingerprint_quality: None,
-                scoring_confidence: None,
+                fingerprint_quality: r.get(11),
+                scoring_confidence: r.get(12),
             }
         }))
     }
@@ -781,7 +788,8 @@ impl Database for PgDatabase {
             "SELECT a.did, a.handle, a.toxicity_score, a.topic_overlap, a.threat_score, a.threat_tier,
                     a.posts_analyzed, a.top_toxic_posts,
                     to_char(a.scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
-                    a.behavioral_signals, a.context_score
+                    a.behavioral_signals, a.context_score,
+                    a.fingerprint_quality, a.scoring_confidence
              FROM account_scores a
              LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
              WHERE a.user_did = $1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
@@ -815,8 +823,8 @@ impl Database for PgDatabase {
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
                 graph_distance: None,
-                fingerprint_quality: None,
-                scoring_confidence: None,
+                fingerprint_quality: row.get(11),
+                scoring_confidence: row.get(12),
             });
         }
         Ok(accounts)

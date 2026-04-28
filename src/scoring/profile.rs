@@ -103,18 +103,23 @@ pub async fn build_profile(
     } else {
         stage1_texts.clone()
     };
-    let stage1_overlap = {
+    let stage1_overlap: Option<f64> = {
         let topic_extractor = TfIdfExtractor {
             top_n_keywords: 40,
             max_clusters: 7,
         };
         match topic_extractor.extract(&stage1_fp_texts) {
-            Ok(fp) => overlap::cosine_similarity(protected_fingerprint, &fp),
-            Err(_) => 0.0, // Can't compute overlap — don't early exit
+            Ok(fp) => Some(overlap::cosine_similarity(protected_fingerprint, &fp)),
+            // TF-IDF extraction failed (e.g. no usable tokens). Treat overlap as
+            // unknown rather than 0.0 — the prior `Err => 0.0` path inverted the
+            // intent in the comment and let extraction failures slip through the
+            // early-exit gate as if the account were topically irrelevant.
+            Err(_) => None,
         }
     };
 
-    // Early exit: all ONNX scores clean AND topic overlap below gate
+    // Early exit: all ONNX scores clean AND topic overlap below gate.
+    // When overlap is unknown (extraction failed), do not early-exit.
     if should_early_exit_stage1(
         &stage1_raw_scores,
         stage1_overlap,
@@ -123,7 +128,7 @@ pub async fn build_profile(
         info!(
             handle = target_handle,
             posts = stage1_sample.total_posts,
-            overlap = format!("{:.3}", stage1_overlap),
+            overlap = format!("{:.3}", stage1_overlap.unwrap_or(0.0)),
             "Stage 1 early exit: clean and topically irrelevant"
         );
 
@@ -136,7 +141,7 @@ pub async fn build_profile(
             did: target_did.to_string(),
             handle: target_handle.to_string(),
             toxicity_score: Some(0.0),
-            topic_overlap: Some(stage1_overlap),
+            topic_overlap: stage1_overlap,
             threat_score: Some(0.0),
             threat_tier: Some("Low".to_string()),
             posts_analyzed: stage1_sample.total_posts as u32,
@@ -563,9 +568,9 @@ pub fn compute_reply_weighted_toxicity(
 // Adaptive sampling — stage decision functions
 // ============================================================
 
-/// ONNX clean-pass threshold. Posts below this are genuinely clean — no
-/// identity terms, no hostility. Posts at or above need secondary classification.
-const ONNX_CLEAN_THRESHOLD: f64 = 0.10;
+// Re-export the canonical clean-pass threshold so build_profile and the stage
+// decision functions stay in lockstep with TwoStageToxicityScorer.
+use crate::toxicity::ensemble::ONNX_CLEAN_THRESHOLD;
 
 /// Check if an account can exit early at Stage 1 (25 posts).
 ///
@@ -573,15 +578,22 @@ const ONNX_CLEAN_THRESHOLD: f64 = 0.10;
 /// overlap is below the gate threshold. This catches the ~50-60% of
 /// sweep accounts that are clearly clean and topically irrelevant.
 ///
+/// `topic_overlap` is `None` when TF-IDF extraction failed — in that case
+/// we cannot judge topical relevance and should NOT early-exit, lest a
+/// reply-heavy or sparse-vocabulary account silently slip through.
+///
 /// ONNX is ONLY reliable for low scores. A low score genuinely means
 /// no hostile language or identity terms. High scores are NOT trustworthy
 /// (keyword triggering on identity terms).
 pub fn should_early_exit_stage1(
     onnx_scores: &[f64],
-    topic_overlap: f64,
+    topic_overlap: Option<f64>,
     overlap_gate_threshold: f64,
 ) -> bool {
-    topic_overlap < overlap_gate_threshold && onnx_scores.iter().all(|&s| s < ONNX_CLEAN_THRESHOLD)
+    let Some(overlap) = topic_overlap else {
+        return false;
+    };
+    overlap < overlap_gate_threshold && onnx_scores.iter().all(|&s| s < ONNX_CLEAN_THRESHOLD)
 }
 
 /// Tier boundary proximity thresholds.

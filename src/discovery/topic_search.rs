@@ -60,7 +60,11 @@ pub async fn search_posts_for_authors(
 ) -> Result<Vec<String>> {
     use atrium_api::app::bsky::feed::search_posts;
 
-    let mut author_dids = Vec::new();
+    // Dedup-as-we-collect: a single author often shows up across multiple
+    // posts for the same query. Counting duplicates toward `max_results`
+    // would short-circuit pagination before we've seen enough unique people.
+    let mut author_dids: Vec<String> = Vec::new();
+    let mut seen_authors: HashSet<String> = HashSet::new();
     let mut cursor: Option<String> = None;
     let limit = max_results.min(100).to_string();
 
@@ -76,17 +80,20 @@ pub async fn search_posts_for_authors(
             .with_context(|| format!("searchPosts failed for query: {}", query))?;
 
         for post_view in &output.posts {
-            author_dids.push(post_view.author.did.as_str().to_string());
+            let did = post_view.author.did.as_str().to_string();
+            if seen_authors.insert(did.clone()) {
+                author_dids.push(did);
+            }
         }
 
         debug!(
             query,
             page_results = output.posts.len(),
-            total_authors = author_dids.len(),
+            unique_authors = seen_authors.len(),
             "searchPosts page"
         );
 
-        if author_dids.len() >= max_results {
+        if seen_authors.len() >= max_results {
             break;
         }
 
@@ -98,7 +105,7 @@ pub async fn search_posts_for_authors(
 
     info!(
         query,
-        unique_authors = author_dids.len(),
+        unique_authors = seen_authors.len(),
         "Collected author DIDs from search"
     );
 

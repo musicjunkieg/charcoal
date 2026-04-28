@@ -447,8 +447,7 @@ fn early_exit_clean_and_irrelevant() {
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
-    let topic_overlap = 0.08;
-    assert!(should_early_exit_stage1(&onnx_scores, topic_overlap, 0.15));
+    assert!(should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
 }
 
 #[test]
@@ -456,8 +455,7 @@ fn no_early_exit_if_any_onnx_above_threshold() {
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     let onnx_scores = vec![0.02, 0.05, 0.15, 0.01, 0.08];
-    let topic_overlap = 0.08;
-    assert!(!should_early_exit_stage1(&onnx_scores, topic_overlap, 0.15));
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
 }
 
 #[test]
@@ -465,8 +463,18 @@ fn no_early_exit_if_overlap_above_gate() {
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
-    let topic_overlap = 0.20;
-    assert!(!should_early_exit_stage1(&onnx_scores, topic_overlap, 0.15));
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.20), 0.15));
+}
+
+#[test]
+fn no_early_exit_when_overlap_unknown() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // TF-IDF extraction failure → overlap unknown → never early-exit, even
+    // when ONNX scores look clean. Sparse-vocabulary or reply-heavy accounts
+    // shouldn't slip through just because we couldn't compute their topics.
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, None, 0.15));
 }
 
 #[test]

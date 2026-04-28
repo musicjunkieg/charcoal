@@ -191,7 +191,7 @@ pub fn get_ranked_threats(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                graph_distance
+                graph_distance, fingerprint_quality, scoring_confidence
          FROM account_scores
          WHERE user_did = ?1 AND threat_score >= ?2
          ORDER BY threat_score DESC",
@@ -218,8 +218,8 @@ pub fn get_ranked_threats(
             behavioral_signals: row.get(9)?,
             context_score: None,
             graph_distance: row.get(10)?,
-            fingerprint_quality: None,
-            scoring_confidence: None,
+            fingerprint_quality: row.get(11)?,
+            scoring_confidence: row.get(12)?,
         })
     })?;
 
@@ -462,7 +462,8 @@ pub fn get_account_by_handle(
 ) -> Result<Option<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
+                fingerprint_quality, scoring_confidence
          FROM account_scores
          WHERE user_did = ?1 AND lower(handle) = lower(?2)
          LIMIT 1",
@@ -487,8 +488,8 @@ pub fn get_account_by_handle(
                 behavioral_signals: row.get(9)?,
                 context_score: None,
                 graph_distance: None,
-                fingerprint_quality: None,
-                scoring_confidence: None,
+                fingerprint_quality: row.get(10)?,
+                scoring_confidence: row.get(11)?,
             })
         })
         .optional()?;
@@ -503,7 +504,8 @@ pub fn get_account_by_did(
 ) -> Result<Option<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
+                fingerprint_quality, scoring_confidence
          FROM account_scores
          WHERE user_did = ?1 AND did = ?2
          LIMIT 1",
@@ -528,8 +530,8 @@ pub fn get_account_by_did(
                 behavioral_signals: row.get(9)?,
                 context_score: None,
                 graph_distance: None,
-                fingerprint_quality: None,
-                scoring_confidence: None,
+                fingerprint_quality: row.get(10)?,
+                scoring_confidence: row.get(11)?,
             })
         })
         .optional()?;
@@ -589,7 +591,8 @@ pub fn get_unlabeled_accounts(
 ) -> Result<Vec<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT a.did, a.handle, a.toxicity_score, a.topic_overlap, a.threat_score, a.threat_tier,
-                a.posts_analyzed, a.top_toxic_posts, a.scored_at, a.behavioral_signals, a.context_score
+                a.posts_analyzed, a.top_toxic_posts, a.scored_at, a.behavioral_signals,
+                a.context_score, a.fingerprint_quality, a.scoring_confidence
          FROM account_scores a
          LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
          WHERE a.user_did = ?1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
@@ -616,8 +619,8 @@ pub fn get_unlabeled_accounts(
             behavioral_signals: row.get(9)?,
             context_score: row.get(10)?,
             graph_distance: None,
-            fingerprint_quality: None,
-            scoring_confidence: None,
+            fingerprint_quality: row.get(11)?,
+            scoring_confidence: row.get(12)?,
         })
     })?;
 
