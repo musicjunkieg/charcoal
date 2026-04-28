@@ -82,7 +82,15 @@ pub async fn build_profile(
         });
     }
 
-    // Quick ONNX scores for clean-pass check
+    // Quick ONNX scores for clean-pass check.
+    //
+    // Originals + quotes are scored solo against ONNX_CLEAN_THRESHOLD — those
+    // are first-person posts and ONNX in isolation is a reliable "obviously
+    // clean" filter for them. Reply texts in isolation are NOT reliable: a
+    // benign-looking "I agree" only becomes hostile in conversation context,
+    // and stage 1 has no parent texts available. Excluding replies from the
+    // early-exit decision means reply-context-dependent toxicity makes it to
+    // stage 2 where Zentropi can do pair classification with parent text.
     let stage1_texts: Vec<String> = stage1_sample
         .originals
         .iter()
@@ -91,7 +99,21 @@ pub async fn build_profile(
         .chain(stage1_sample.quotes.iter().map(|p| p.text.clone()))
         .collect();
     let stage1_onnx = scorer.score_batch(&stage1_texts).await?;
-    let stage1_raw_scores: Vec<f64> = stage1_onnx.iter().map(|r| r.toxicity).collect();
+    let originals_count = stage1_sample.originals.len();
+    let quotes_offset = originals_count + stage1_sample.replies.len();
+    let stage1_clean_pass_scores: Vec<f64> = stage1_onnx
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| {
+            // Keep only originals (indices 0..originals_count) and quotes
+            // (indices quotes_offset..). Skip replies (the middle range).
+            if i < originals_count || i >= quotes_offset {
+                Some(r.toxicity)
+            } else {
+                None
+            }
+        })
+        .collect();
 
     // Preliminary topic overlap via TF-IDF (cheap, always available)
     let stage1_fp_texts: Vec<String> = if stage1_sample.originals.len() >= 15 {
@@ -121,7 +143,7 @@ pub async fn build_profile(
     // Early exit: all ONNX scores clean AND topic overlap below gate.
     // When overlap is unknown (extraction failed), do not early-exit.
     if should_early_exit_stage1(
-        &stage1_raw_scores,
+        &stage1_clean_pass_scores,
         stage1_overlap,
         weights.overlap_gate_threshold,
     ) {
@@ -508,11 +530,21 @@ pub async fn build_profile(
         context_score,
         graph_distance: graph_distance.map(|d| d.as_str().to_string()),
         fingerprint_quality: Some(fp_quality.as_str().to_string()),
-        scoring_confidence: Some(if should_continue_to_stage3(final_score) {
-            "low".to_string() // Near tier boundary — flag for sooner re-scoring
-        } else {
-            "standard".to_string()
-        }),
+        // Confidence reflects the *depth* of the analysis, not the score's
+        // tier-boundary distance:
+        //   - High: full pipeline (50 posts), reliable fingerprint, normal staleness
+        //   - Standard: full pipeline but fingerprint quality degraded/unreliable
+        //   - Low: stage 1 early-exit (set on the early-return branch)
+        // Near-tier-boundary accounts are still re-scored sooner via
+        // `should_continue_to_stage3`, but that signal is consumed elsewhere
+        // (it gates additional work) and shouldn't override the depth signal.
+        scoring_confidence: Some(
+            match fp_quality {
+                FingerprintQuality::Normal => "high",
+                FingerprintQuality::Degraded | FingerprintQuality::Unreliable => "standard",
+            }
+            .to_string(),
+        ),
     })
 }
 

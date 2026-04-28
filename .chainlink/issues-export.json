@@ -1,7 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-04-28T05:29:24.777932+00:00",
+  "exported_at": "2026-04-28T06:52:34.171489+00:00",
   "issues": [
+    {
+      "id": 176,
+      "title": "Update Zentropi labeler policy: taxonomy + target-clarity fixes",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "improvement"
+      ],
+      "comments": [
+        {
+          "content": "PR #46 CodeRabbit flagged two real policy improvements for refs/labeler_prompt.txt:\n\n1. Line 44: 'Exclusion' nested inside an 'Includes' block is internally inconsistent. Rename to 'Boundary' — it is a non-toxic behavioral pattern that could be confused with toxic intent, not an actual exclusion. Suggested wording in the PR comment.\n\n2. Line 74: 'Responding to Toxic Content in Conversations' exclusion is too broad. Add explicit target-clarity guard: terms like 'disgusting' or 'appalling' are non-toxic ONLY when directed at the content/behavior, not at a participant. Otherwise lets through patterns like 'you are disgusting' -> 'I disagree' where the target is the participant.\n\nImplementation requires:\n- Edit refs/labeler_prompt.txt with the new wording\n- Re-upload the policy to Zentropi (mints a new labeler_version_id)\n- Update ZENTROPI_LABELER_VERSION_ID in Railway production + staging env\n- Re-run charcoal zentropi-check to confirm accuracy still >= 85%\n\nRefs:\nhttps://github.com/musicjunkieg/charcoal/pull/46#discussion_r3151702822\nhttps://github.com/musicjunkieg/charcoal/pull/46#discussion_r3151702836",
+          "created_at": "2026-04-28T06:32:34.304605+00:00"
+        }
+      ],
+      "created_at": "2026-04-28T06:32:25.038544+00:00",
+      "updated_at": "2026-04-28T06:32:25.038544+00:00",
+      "closed_at": null
+    },
     {
       "id": 175,
       "title": "PR #46 CodeRabbit review: verify and fix findings",

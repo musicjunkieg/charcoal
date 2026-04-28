@@ -15,6 +15,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, warn};
 
+use super::format_parent_reply;
+
 const ZENTROPI_API_URL: &str = "https://api.zentropi.ai/v1/label";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RETRIES: u32 = 3;
@@ -129,8 +131,8 @@ impl ZentropiClient {
         parent_text: &str,
         reply_text: &str,
     ) -> Result<ZentropiResponse> {
-        let combined = format!("[Parent post]: {}\n\n[Reply]: {}", parent_text, reply_text);
-        self.classify(&combined).await
+        self.classify(&format_parent_reply(parent_text, reply_text))
+            .await
     }
 
     async fn send_once(&self, request: &ZentropiLabelerRequest) -> Result<ZentropiResponse> {

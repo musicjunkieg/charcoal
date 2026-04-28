@@ -17,6 +17,7 @@ use futures::stream::{self, StreamExt};
 use std::sync::Arc;
 use tracing::{debug, warn};
 
+use super::format_parent_reply;
 use super::traits::{BinaryVerdict, ToxicityResult, ToxicityScorer};
 use super::zentropi::ZentropiClient;
 
@@ -93,12 +94,13 @@ impl TwoStageToxicityScorer {
         // For replies, score the [Parent post] / [Reply] envelope so the ONNX
         // clean-pass filter can detect context-dependent toxicity. Without this,
         // a benign-looking reply ("I agree") to a hostile parent slips through
-        // the < 0.10 short-circuit and never reaches Zentropi. Same envelope
-        // format as Zentropi's classify_pair, so the two stages stay aligned.
+        // the < 0.10 short-circuit and never reaches Zentropi. The shared
+        // `format_parent_reply` helper keeps this in lockstep with what
+        // Zentropi's `classify_pair` sees — both stages get identical text.
         let envelope_owned;
         let primary_input = match context {
             Some(parent) => {
-                envelope_owned = format!("[Parent post]: {}\n\n[Reply]: {}", parent, text);
+                envelope_owned = format_parent_reply(parent, text);
                 envelope_owned.as_str()
             }
             None => text,

@@ -60,15 +60,26 @@ pub async fn search_posts_for_authors(
 ) -> Result<Vec<String>> {
     use atrium_api::app::bsky::feed::search_posts;
 
+    // Caller passed an empty budget — bail before sending an API call with
+    // limit=0 (undefined behavior on the AT Proto side).
+    if max_results == 0 {
+        return Ok(Vec::new());
+    }
+
     // Dedup-as-we-collect: a single author often shows up across multiple
     // posts for the same query. Counting duplicates toward `max_results`
     // would short-circuit pagination before we've seen enough unique people.
     let mut author_dids: Vec<String> = Vec::new();
     let mut seen_authors: HashSet<String> = HashSet::new();
     let mut cursor: Option<String> = None;
-    let limit = max_results.min(100).to_string();
 
-    loop {
+    'outer: loop {
+        // Recompute limit each iteration: ask only for what we still need
+        // (capped at the API's 100 max). When `seen_authors.len()` is close
+        // to `max_results` we shrink the request to avoid wasting bandwidth.
+        let remaining = max_results - seen_authors.len();
+        let limit = remaining.min(100).to_string();
+
         let mut params: Vec<(&str, &str)> = vec![("q", query), ("limit", &limit)];
         if let Some(ref c) = cursor {
             params.push(("cursor", c));
@@ -84,6 +95,11 @@ pub async fn search_posts_for_authors(
             if seen_authors.insert(did.clone()) {
                 author_dids.push(did);
             }
+            // Stop processing posts the moment we've hit the unique-author
+            // budget — no need to walk the rest of this page.
+            if seen_authors.len() >= max_results {
+                break 'outer;
+            }
         }
 
         debug!(
@@ -92,10 +108,6 @@ pub async fn search_posts_for_authors(
             unique_authors = seen_authors.len(),
             "searchPosts page"
         );
-
-        if seen_authors.len() >= max_results {
-            break;
-        }
 
         cursor = output.cursor.clone();
         if cursor.is_none() || output.posts.is_empty() {

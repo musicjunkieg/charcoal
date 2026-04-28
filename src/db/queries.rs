@@ -148,8 +148,8 @@ pub fn get_embedding(conn: &Connection, user_did: &str) -> Result<Option<Vec<f64
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, graph_distance, fingerprint_quality, scoring_confidence)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -160,9 +160,10 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             top_toxic_posts = ?9,
             scored_at = datetime('now'),
             behavioral_signals = ?10,
-            graph_distance = ?11,
-            fingerprint_quality = ?12,
-            scoring_confidence = ?13",
+            context_score = ?11,
+            graph_distance = ?12,
+            fingerprint_quality = ?13,
+            scoring_confidence = ?14",
         params![
             user_did,
             score.did,
@@ -174,6 +175,7 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             score.posts_analyzed,
             top_posts_json,
             score.behavioral_signals,
+            score.context_score,
             score.graph_distance,
             score.fingerprint_quality,
             score.scoring_confidence,
@@ -191,7 +193,7 @@ pub fn get_ranked_threats(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                graph_distance, fingerprint_quality, scoring_confidence
+                graph_distance, fingerprint_quality, scoring_confidence, context_score
          FROM account_scores
          WHERE user_did = ?1 AND threat_score >= ?2
          ORDER BY threat_score DESC",
@@ -216,7 +218,7 @@ pub fn get_ranked_threats(
             top_toxic_posts,
             scored_at: row.get(8)?,
             behavioral_signals: row.get(9)?,
-            context_score: None,
+            context_score: row.get(13)?,
             graph_distance: row.get(10)?,
             fingerprint_quality: row.get(11)?,
             scoring_confidence: row.get(12)?,
@@ -463,7 +465,7 @@ pub fn get_account_by_handle(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                fingerprint_quality, scoring_confidence
+                fingerprint_quality, scoring_confidence, context_score, graph_distance
          FROM account_scores
          WHERE user_did = ?1 AND lower(handle) = lower(?2)
          LIMIT 1",
@@ -486,8 +488,8 @@ pub fn get_account_by_handle(
                 top_toxic_posts,
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
-                context_score: None,
-                graph_distance: None,
+                context_score: row.get(12)?,
+                graph_distance: row.get(13)?,
                 fingerprint_quality: row.get(10)?,
                 scoring_confidence: row.get(11)?,
             })
@@ -505,7 +507,7 @@ pub fn get_account_by_did(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                fingerprint_quality, scoring_confidence
+                fingerprint_quality, scoring_confidence, context_score, graph_distance
          FROM account_scores
          WHERE user_did = ?1 AND did = ?2
          LIMIT 1",
@@ -528,8 +530,8 @@ pub fn get_account_by_did(
                 top_toxic_posts,
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
-                context_score: None,
-                graph_distance: None,
+                context_score: row.get(12)?,
+                graph_distance: row.get(13)?,
                 fingerprint_quality: row.get(10)?,
                 scoring_confidence: row.get(11)?,
             })
