@@ -1,9 +1,22 @@
 //! Zentropi CoPE production client — binary toxicity classification.
 //!
 //! Calls the Zentropi `/v1/label` endpoint with a pre-built labeler ID.
-//! The labeler holds a conversation-scoped policy (see `refs/labeler_prompt.txt`)
-//! that flags content directed at conversation participants but not third-party
-//! commentary or general venting.
+//! The labeler holds a conversation-scoped policy that flags content directed
+//! at conversation participants but not third-party commentary or general
+//! venting.
+//!
+//! ## Policy source of truth
+//!
+//! `refs/labeler_prompt.txt` is a **checked-in reference snapshot** of the
+//! policy text — it is *not* the runtime source. The active policy lives on
+//! Zentropi's side, identified by `ZENTROPI_LABELER_ID` (and optionally pinned
+//! to a specific version via `ZENTROPI_LABELER_VERSION_ID` — see
+//! `src/config.rs`). Editing the reference file alone has no runtime effect;
+//! production behavior changes only after the policy is re-uploaded to
+//! Zentropi (which mints a new labeler version) and the version ID env var is
+//! bumped to point at it.
+//!
+//! ## Two-stage role
 //!
 //! Used as the secondary classifier in `TwoStageToxicityScorer`. ONNX runs first
 //! as a clean-pass filter (< 0.10 = cleared, no Zentropi call). Posts at or above

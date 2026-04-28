@@ -140,20 +140,41 @@ pub async fn discover_by_topic(
 
     info!(keywords = ?keywords, "Running topic-first discovery cycle");
 
+    // Track success vs total so we can distinguish "no matches found" (a
+    // legitimate empty result) from "every keyword search failed" (a
+    // hard failure that callers MUST treat differently — otherwise an
+    // outage in searchPosts looks identical to a clean topic neighborhood).
     let mut all_dids = Vec::new();
+    let mut successful_searches = 0usize;
+    let mut last_error: Option<anyhow::Error> = None;
     for keyword in &keywords {
         match search_posts_for_authors(client, keyword, results_per_keyword).await {
-            Ok(dids) => all_dids.extend(dids),
+            Ok(dids) => {
+                all_dids.extend(dids);
+                successful_searches += 1;
+            }
             Err(e) => {
                 tracing::warn!(keyword, error = %e, "searchPosts failed, skipping keyword");
+                last_error = Some(e);
             }
         }
+    }
+
+    if successful_searches == 0 && !keywords.is_empty() {
+        return Err(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!(
+                "All searchPosts calls failed for {} keywords",
+                keywords.len()
+            )
+        }));
     }
 
     let new_dids = deduplicate_dids(&all_dids, already_scored);
     info!(
         raw = all_dids.len(),
         new = new_dids.len(),
+        successful_searches,
+        total_keywords = keywords.len(),
         "Topic discovery: found new accounts to score"
     );
 

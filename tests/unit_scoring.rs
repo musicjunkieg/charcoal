@@ -478,6 +478,29 @@ fn no_early_exit_when_overlap_unknown() {
 }
 
 #[test]
+fn no_early_exit_with_too_few_first_person_posts() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Reply-heavy account with only 2 originals — the clean-pass filter
+    // would vacuously pass on those 2 entries, but stage 2 needs to score
+    // the un-checked replies in pair context. Min-originals guard prevents
+    // the false-clear.
+    let onnx_scores = vec![0.02, 0.05];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+}
+
+#[test]
+fn no_early_exit_when_first_person_scores_empty() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Reply-only sample — `iter().all()` on empty slice returns true, but
+    // the empty list means we never actually checked any post. The guard
+    // forces stage 2.
+    let onnx_scores: Vec<f64> = vec![];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+}
+
+#[test]
 fn scoring_confidence_near_boundary_is_low() {
     use charcoal::scoring::profile::should_continue_to_stage3;
 

@@ -76,7 +76,10 @@ pub async fn build_profile(
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
-            graph_distance: None,
+            // Preserve the graph distance even on insufficient-data accounts —
+            // it was computed by the caller and is independent of the post
+            // sample. Downstream consumers (sweep ranking, UI) want it.
+            graph_distance: graph_distance.map(|d| d.as_str().to_string()),
             fingerprint_quality: None,
             scoring_confidence: None,
         });
@@ -171,7 +174,9 @@ pub async fn build_profile(
             scored_at: String::new(),
             behavioral_signals: None,
             context_score: None,
-            graph_distance: None,
+            // Preserve the caller-computed graph distance — it's independent
+            // of the post sample and downstream ranking still needs it.
+            graph_distance: graph_distance.map(|d| d.as_str().to_string()),
             fingerprint_quality: Some(fp_quality.as_str().to_string()),
             scoring_confidence: Some("low".to_string()),
         });
@@ -604,15 +609,27 @@ pub fn compute_reply_weighted_toxicity(
 // decision functions stay in lockstep with TwoStageToxicityScorer.
 use crate::toxicity::ensemble::ONNX_CLEAN_THRESHOLD;
 
+/// Minimum number of first-person posts (originals + quotes) required for the
+/// Stage 1 clean-pass filter to be considered reliable. A reply-heavy account
+/// with only 1–2 originals could otherwise vacuously pass even if the bulk of
+/// their (un-checked) reply content is hostile.
+pub const MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT: usize = 5;
+
 /// Check if an account can exit early at Stage 1 (25 posts).
 ///
 /// Exits when ALL ONNX scores are below the clean threshold AND topic
 /// overlap is below the gate threshold. This catches the ~50-60% of
 /// sweep accounts that are clearly clean and topically irrelevant.
 ///
+/// `onnx_scores` should be the ONNX toxicity values for first-person posts
+/// (originals + quotes) only — reply texts in isolation aren't reliable for
+/// the < 0.10 clean-pass and need conversation context. The function
+/// requires at least `MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT` scores so a
+/// reply-heavy sample with 0–1 originals cannot vacuously pass.
+///
 /// `topic_overlap` is `None` when TF-IDF extraction failed — in that case
 /// we cannot judge topical relevance and should NOT early-exit, lest a
-/// reply-heavy or sparse-vocabulary account silently slip through.
+/// sparse-vocabulary account silently slip through.
 ///
 /// ONNX is ONLY reliable for low scores. A low score genuinely means
 /// no hostile language or identity terms. High scores are NOT trustworthy
@@ -622,6 +639,9 @@ pub fn should_early_exit_stage1(
     topic_overlap: Option<f64>,
     overlap_gate_threshold: f64,
 ) -> bool {
+    if onnx_scores.len() < MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT {
+        return false;
+    }
     let Some(overlap) = topic_overlap else {
         return false;
     };
