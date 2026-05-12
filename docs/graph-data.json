@@ -2364,6 +2364,72 @@
       "created_at": "2026-04-26T09:42:57.129491-07:00",
       "updated_at": "2026-04-26T09:42:57.129491-07:00",
       "metadata_json": "{\"branch\":\"feat/topic-first-discovery\",\"confidence\":100}"
+    },
+    {
+      "id": 222,
+      "change_id": "eef65c63-9c6b-4f30-9e7e-46e9579ff4cc",
+      "node_type": "action",
+      "title": "Phase 5 implementation: promote zentropi spike to production, build TwoStageToxicityScorer, refactor scoring formula to binary rate, remove Groq Safeguard",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-04-28T00:19:37.116655-07:00",
+      "updated_at": "2026-04-28T00:19:37.116655-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"9656c2c\",\"confidence\":95,\"files\":[\"src/toxicity/zentropi.rs\",\"src/toxicity/ensemble.rs\",\"src/scoring/profile.rs\",\"src/toxicity/traits.rs\",\"src/main.rs\",\"src/web/scan_job.rs\",\"src/config.rs\",\"tests/unit_ensemble.rs\"]}"
+    },
+    {
+      "id": 223,
+      "change_id": "9ad0aa2c-7b4f-4924-8a8f-a8aa0ac1bdb7",
+      "node_type": "outcome",
+      "title": "Phase 5 complete: ONNX clean-pass + Zentropi binary classifier wired end-to-end, weighted_toxicity removed, 416 tests green",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-04-28T00:19:41.885968-07:00",
+      "updated_at": "2026-04-28T00:19:41.885968-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"9656c2c\",\"confidence\":100}"
+    },
+    {
+      "id": 224,
+      "change_id": "52ca31e3-0711-40a0-b0cd-96c0cdd4f1bb",
+      "node_type": "action",
+      "title": "Three rounds of CodeRabbit review fixes on PR #46",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-04-28T00:19:49.171503-07:00",
+      "updated_at": "2026-04-28T00:19:49.171503-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"e4e77c0\",\"confidence\":90,\"files\":[\"src/discovery/topic_search.rs\",\"src/scoring/profile.rs\",\"src/db/queries.rs\",\"src/db/postgres.rs\",\"src/toxicity/zentropi.rs\",\"src/toxicity/ensemble.rs\",\"src/toxicity/mod.rs\",\"migrations/postgres/0008_fingerprint_scoring.sql\",\"tests/unit_scoring.rs\"]}"
+    },
+    {
+      "id": 225,
+      "change_id": "c9f613f6-d026-44a2-986d-190f3fac8298",
+      "node_type": "outcome",
+      "title": "All 13 CodeRabbit threads resolved on PR #46, 419 tests green, 8 findings fixed, 2 deferred to issue #176 (Zentropi labeler policy)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-04-28T00:19:54.419006-07:00",
+      "updated_at": "2026-04-28T00:19:54.419006-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"e4e77c0\",\"confidence\":100}"
+    },
+    {
+      "id": 226,
+      "change_id": "76a8eb59-8d4c-4f61-bd71-040fd3bd4c69",
+      "node_type": "observation",
+      "title": "Security incident: refs/zentropi_info.txt with live API key was committed in d4394f9, pushed to GitHub for ~10 min. Detected, key rotated, file deleted, BFG-scrubbed history, force-pushed. No exposure beyond the feature branch.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-04-28T00:20:01.753821-07:00",
+      "updated_at": "2026-04-28T00:20:01.753821-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"06e1e48\",\"confidence\":100}"
+    },
+    {
+      "id": 227,
+      "change_id": "c9b0f313-c1ef-44c7-9020-e7d96f59307a",
+      "node_type": "outcome",
+      "title": "PR #46 merged to staging: topic-first discovery + Phase 5 Zentropi production deployed via 6 commits, feature branch deleted, 419 tests passing on staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-04-28T00:20:08.051618-07:00",
+      "updated_at": "2026-04-28T00:20:08.051618-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":100}"
     }
   ],
   "edges": [
@@ -4621,6 +4687,83 @@
       "weight": 1.0,
       "rationale": "Result of cleanup actions",
       "created_at": "2026-04-26T09:42:57.143992-07:00"
+    },
+    {
+      "id": 212,
+      "from_node_id": 215,
+      "to_node_id": 222,
+      "from_change_id": "042e6503-f12c-473b-83eb-1cccc5f3c5b5",
+      "to_change_id": "eef65c63-9c6b-4f30-9e7e-46e9579ff4cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spike validates GO; Phase 5 promotion follows",
+      "created_at": "2026-04-28T00:20:17.227507-07:00"
+    },
+    {
+      "id": 213,
+      "from_node_id": 222,
+      "to_node_id": 223,
+      "from_change_id": "eef65c63-9c6b-4f30-9e7e-46e9579ff4cc",
+      "to_change_id": "9ad0aa2c-7b4f-4924-8a8f-a8aa0ac1bdb7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation produces production scoring chain",
+      "created_at": "2026-04-28T00:20:17.233960-07:00"
+    },
+    {
+      "id": 214,
+      "from_node_id": 223,
+      "to_node_id": 224,
+      "from_change_id": "9ad0aa2c-7b4f-4924-8a8f-a8aa0ac1bdb7",
+      "to_change_id": "52ca31e3-0711-40a0-b0cd-96c0cdd4f1bb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR review surfaces 8 real findings + 2 policy deferrals",
+      "created_at": "2026-04-28T00:20:17.239142-07:00"
+    },
+    {
+      "id": 215,
+      "from_node_id": 224,
+      "to_node_id": 225,
+      "from_change_id": "52ca31e3-0711-40a0-b0cd-96c0cdd4f1bb",
+      "to_change_id": "c9f613f6-d026-44a2-986d-190f3fac8298",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "All threads resolved across three review rounds",
+      "created_at": "2026-04-28T00:20:17.244502-07:00"
+    },
+    {
+      "id": 216,
+      "from_node_id": 226,
+      "to_node_id": 224,
+      "from_change_id": "76a8eb59-8d4c-4f61-bd71-040fd3bd4c69",
+      "to_change_id": "52ca31e3-0711-40a0-b0cd-96c0cdd4f1bb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Incident remediation rolled into review-fix commit chain",
+      "created_at": "2026-04-28T00:20:17.250758-07:00"
+    },
+    {
+      "id": 217,
+      "from_node_id": 225,
+      "to_node_id": 227,
+      "from_change_id": "c9f613f6-d026-44a2-986d-190f3fac8298",
+      "to_change_id": "c9b0f313-c1ef-44c7-9020-e7d96f59307a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approved branch merges to staging",
+      "created_at": "2026-04-28T00:20:17.257178-07:00"
+    },
+    {
+      "id": 218,
+      "from_node_id": 196,
+      "to_node_id": 222,
+      "from_change_id": "3cb5a6fe-0361-46bc-96a0-047ecc8cd2ef",
+      "to_change_id": "eef65c63-9c6b-4f30-9e7e-46e9579ff4cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Architecture pivot's terminal milestone — Phase 5 lands",
+      "created_at": "2026-04-28T00:20:17.262546-07:00"
     }
   ],
   "documents": [

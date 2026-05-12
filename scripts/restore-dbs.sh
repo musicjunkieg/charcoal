@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Restore chainlink issues and deciduous decision graph from Tigris blob storage.
+# Restore chainlink issues and deciduous decision graph from S3-compatible
+# blob storage (Cloudflare R2, Backblaze B2, etc.).
 #
 # Usage:
 #   ./scripts/restore-dbs.sh
 #
-# Requires TIGRIS_BUCKET, TIGRIS_ACCESS_KEY_ID, TIGRIS_SECRET_ACCESS_KEY,
-# and TIGRIS_ENDPOINT to be set — either in .env or the environment.
+# Requires BACKUP_S3_BUCKET, BACKUP_S3_ACCESS_KEY_ID, BACKUP_S3_SECRET_ACCESS_KEY,
+# and BACKUP_S3_ENDPOINT to be set — either in .env or the environment.
 #
 # The restored files:
 #   .chainlink/issues.db    — chainlink issue tracker database
@@ -17,7 +18,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Pre-flight: require aws CLI
 if ! command -v aws &>/dev/null; then
-    echo "❌ aws CLI not found. Install it: sudo apt install awscli"
+    echo "❌ aws CLI not found. Install it: brew install awscli"
     exit 1
 fi
 
@@ -43,7 +44,7 @@ if [ -f "$REPO_ROOT/.env" ]; then
 fi
 
 # Validate required vars
-for var in TIGRIS_BUCKET TIGRIS_ACCESS_KEY_ID TIGRIS_SECRET_ACCESS_KEY TIGRIS_ENDPOINT; do
+for var in BACKUP_S3_BUCKET BACKUP_S3_ACCESS_KEY_ID BACKUP_S3_SECRET_ACCESS_KEY BACKUP_S3_ENDPOINT; do
     if [ -z "${!var}" ]; then
         echo "❌ Missing required variable: $var"
         echo "   Add it to .env (see .env.example for format)"
@@ -51,13 +52,13 @@ for var in TIGRIS_BUCKET TIGRIS_ACCESS_KEY_ID TIGRIS_SECRET_ACCESS_KEY TIGRIS_EN
     fi
 done
 
-export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
-export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
+export AWS_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
 
-S3="s3://$TIGRIS_BUCKET"
-ENDPOINT="--endpoint-url=$TIGRIS_ENDPOINT --region=auto"
+S3="s3://$BACKUP_S3_BUCKET"
+ENDPOINT="--endpoint-url=$BACKUP_S3_ENDPOINT --region=${BACKUP_S3_REGION:-auto}"
 
-echo "🗄️  Restoring databases from Tigris ($TIGRIS_BUCKET)..."
+echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET..."
 
 # ── chainlink issues ─────────────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.chainlink"

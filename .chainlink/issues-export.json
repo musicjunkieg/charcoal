@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-04-28T07:10:05.796130+00:00",
+  "exported_at": "2026-05-12T03:19:41.539532+00:00",
   "issues": [
     {
       "id": 176,
@@ -15,7 +15,8 @@
       "comments": [
         {
           "content": "PR #46 CodeRabbit flagged two real policy improvements for refs/labeler_prompt.txt:\n\n1. Line 44: 'Exclusion' nested inside an 'Includes' block is internally inconsistent. Rename to 'Boundary' — it is a non-toxic behavioral pattern that could be confused with toxic intent, not an actual exclusion. Suggested wording in the PR comment.\n\n2. Line 74: 'Responding to Toxic Content in Conversations' exclusion is too broad. Add explicit target-clarity guard: terms like 'disgusting' or 'appalling' are non-toxic ONLY when directed at the content/behavior, not at a participant. Otherwise lets through patterns like 'you are disgusting' -> 'I disagree' where the target is the participant.\n\nImplementation requires:\n- Edit refs/labeler_prompt.txt with the new wording\n- Re-upload the policy to Zentropi (mints a new labeler_version_id)\n- Update ZENTROPI_LABELER_VERSION_ID in Railway production + staging env\n- Re-run charcoal zentropi-check to confirm accuracy still >= 85%\n\nRefs:\nhttps://github.com/musicjunkieg/charcoal/pull/46#discussion_r3151702822\nhttps://github.com/musicjunkieg/charcoal/pull/46#discussion_r3151702836",
-          "created_at": "2026-04-28T06:32:34.304605+00:00"
+          "created_at": "2026-04-28T06:32:34.304605+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-04-28T06:32:25.038544+00:00",
@@ -26,16 +27,22 @@
       "id": 175,
       "title": "PR #46 CodeRabbit review: verify and fix findings",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
         "review"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Merged via PR #46 (2026-04-28). Three review rounds, 13/13 CodeRabbit threads resolved: dedup author DIDs, TF-IDF Option fallback, context-aware ONNX clean-pass, diagnostic accuracy total counter, postgres migration 8, SQLite context_score persistence, fingerprint-quality-driven scoring_confidence, min-first-person-posts guard, graph_distance preserved on early returns, format_parent_reply helper, discover_by_topic error propagation, zentropi.rs source-of-truth doc. Two policy improvements deferred to #176 (require Zentropi labeler re-upload).",
+          "created_at": "2026-04-28T07:19:20.957980+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-04-28T05:15:40.254856+00:00",
-      "updated_at": "2026-04-28T05:15:40.254856+00:00",
-      "closed_at": null
+      "updated_at": "2026-04-28T07:19:20.963045+00:00",
+      "closed_at": "2026-04-28T07:19:20.963045+00:00"
     },
     {
       "id": 174,
@@ -50,7 +57,8 @@
       "comments": [
         {
           "content": "staging fast-forwarded to origin (8 commits ahead — Groq ensemble work). feat/topic-first-discovery pushed to origin with upstream tracking. Pruned stale branches: feat/admin-dashboard and fix/admin-nav-link.",
-          "created_at": "2026-04-26T16:42:38.089108+00:00"
+          "created_at": "2026-04-26T16:42:38.089108+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-04-25T23:58:09.293374+00:00",
@@ -61,7 +69,7 @@
       "id": 173,
       "title": "Integrate Zentropi CoPE as production toxicity classifier",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
@@ -70,12 +78,18 @@
       "comments": [
         {
           "content": "Phase 5 from the topic-first discovery plan. Spike passed GO (100% accuracy, 190ms latency — see deciduous node 202).\n\nKey changes:\n- Add src/toxicity/zentropi.rs — production client using labeler_id (not inline criteria_text)\n- ONNX becomes clean-pass filter only: < 0.10 = cleared, everything >= 0.10 goes to Zentropi\n- Toxicity rate computed from Zentropi binary labels, not ONNX continuous scores\n- weighted_toxicity() removed from scoring path (kept as ONNX-only fallback)\n- Reply pairs sent as [Parent post]/[Reply] format to Zentropi\n- Env vars: ZENTROPI_API_KEY, ZENTROPI_LABELER_ID, ZENTROPI_LABELER_VERSION_ID (already in config)\n- Spike code in src/toxicity/zentropi_spike.rs can be promoted to production client\n- Labeler policy in refs/labeler_prompt.txt, labeler ID in refs/zentropi_info.txt\n\nBlocked by: feat/topic-first-discovery merging to staging\nDesign: docs/2026-04-02-architecture-correction-briefing.md (scoring pipeline section)\nPlan: docs/superpowers/plans/2026-04-02-topic-first-discovery-impl.md (Phase 5 section)",
-          "created_at": "2026-04-03T05:15:41.112570+00:00"
+          "created_at": "2026-04-03T05:15:41.112570+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Landed via PR #46 (merged 2026-04-28). Phase 5 production integration complete: ZentropiClient with retry/timeout, TwoStageToxicityScorer (ONNX clean-pass + Zentropi binary classifier), reply-weighted binary toxicity rate, weighted_toxicity removed from scoring path, Groq Safeguard removed entirely. Diagnostic suite still green at 100% accuracy / 180ms latency.",
+          "created_at": "2026-04-28T07:19:11.131882+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-04-03T05:15:28.597248+00:00",
-      "updated_at": "2026-04-03T05:15:28.597248+00:00",
-      "closed_at": null
+      "updated_at": "2026-04-28T07:19:11.137219+00:00",
+      "closed_at": "2026-04-28T07:19:11.137219+00:00"
     },
     {
       "id": 172,
@@ -360,11 +374,13 @@
       "comments": [
         {
           "content": "OpenAI Moderation API has been unreliable — omni-moderation has extremely low TPM limits at Tier 1, text-moderation-latest returns 400 invalid model on this service account. Switching to Groq GPT-OSS-Safeguard-20B which offers 30 RPM free tier and policy-based moderation with structured JSON output. This changes the ensemble from score-comparison to ONNX-score + Groq-second-opinion.",
-          "created_at": "2026-03-27T16:28:38.853077+00:00"
+          "created_at": "2026-03-27T16:28:38.853077+00:00",
+          "kind": "note"
         },
         {
           "content": "Merged PR #43 to staging. Groq GPT-OSS-Safeguard replaces OpenAI Moderation. Two-way correction, context-aware text pairs, category-dependent boosts. Set GROQ_API_KEY on staging to enable.",
-          "created_at": "2026-03-27T21:01:05.437723+00:00"
+          "created_at": "2026-03-27T21:01:05.437723+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-27T16:28:31.984994+00:00",
@@ -474,11 +490,13 @@
       "comments": [
         {
           "content": "Staging logs show hundreds of 429 Too Many Requests from OpenAI Moderation API during scans. The concurrent tokio::join! fires both ONNX and OpenAI scorers simultaneously for every post, immediately exhausting the rate limit. Fallback to ONNX-only works, but ensemble scoring is effectively dead. Need rate limiting, batching, or both.",
-          "created_at": "2026-03-27T06:01:14.747865+00:00"
+          "created_at": "2026-03-27T06:01:14.747865+00:00",
+          "kind": "note"
         },
         {
           "content": "Fixed in PR #36. Added exponential backoff retry (5 attempts, 500ms-8s) and batch scoring (32 texts per API call). Merged to staging.",
-          "created_at": "2026-03-27T06:04:16.849146+00:00"
+          "created_at": "2026-03-27T06:04:16.849146+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-27T06:01:03.172523+00:00",
@@ -526,7 +544,8 @@
       "comments": [
         {
           "content": "PR #34 created: feat/concurrent-ensemble → staging. 8 commits, 27 files, +1272 lines.",
-          "created_at": "2026-03-27T04:29:56.282817+00:00"
+          "created_at": "2026-03-27T04:29:56.282817+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-26T19:01:04.095747+00:00",
@@ -652,11 +671,13 @@
       "comments": [
         {
           "content": "Now that the NLI logit index is fixed (#113), context_scores are producing real signal. Examples from staging scan 2026-03-21:\n\n- amos-race.bsky.social: hostility 0.541 (attack 0.584, contempt 0.516) — BUT in Low tier because base toxicity is low\n- andyschwab.link: hostility 0.380 (misrepresent 0.616, good_faith 0.471) — also Low tier\n- ashteranic.mycronite.net: hostility 0.000 — correctly identified as non-hostile\n\nThe problem: context_multiplier range is 1.0-1.5x, so a Low-tier account with raw_score 3.0 and extreme context (1.0) only gets boosted to 4.5 — still Low. Someone who is specifically hostile to Bryan's content but generally non-toxic flies under the radar.\n\nOptions to evaluate:\n1. Widen multiplier range (1.0-2.0x or 1.0-2.5x) — simple, keeps multiplicative property\n2. Add context as independent signal (e.g. if context_score > 0.5, floor raw_score at Watch threshold) — catches concern trolls but risks false positives\n3. Hybrid: use higher multiplier AND lower the Watch threshold when context_score is high\n4. Keep as-is — the current design correctly says 'low general toxicity = low threat even with hostile interactions'\n\nKey question for Bryan: is someone who is ONLY hostile toward your content but polite everywhere else a threat worth flagging? If yes, option 2 or 3. If no, option 4 is correct.",
-          "created_at": "2026-03-21T04:35:15.109984+00:00"
+          "created_at": "2026-03-21T04:35:15.109984+00:00",
+          "kind": "note"
         },
         {
           "content": "Graph distance scoring now implemented and deployed to staging. The context_multiplier (1.0-1.5x) is augmented by graph_distance weight (0.6-1.2x). Strangers with hostile context scores now get a meaningful boost. Need to re-evaluate tier distribution after staging scan completes to see if the combined effect of context_multiplier * graph_distance_weight is sufficient to promote accounts across tier boundaries.",
-          "created_at": "2026-03-26T19:41:44.516419+00:00"
+          "created_at": "2026-03-26T19:41:44.516419+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T04:35:01.469347+00:00",
@@ -674,7 +695,8 @@
       "comments": [
         {
           "content": "Add a 'Rebuild fingerprint' button that re-fetches posts and regenerates the TF-IDF fingerprint + embeddings. The backend already supports this (auto-fingerprint on first scan). Wire it as a POST endpoint. Show progress and the before/after difference.",
-          "created_at": "2026-03-21T03:42:21.731953+00:00"
+          "created_at": "2026-03-21T03:42:21.731953+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:42:09.852478+00:00",
@@ -692,7 +714,8 @@
       "comments": [
         {
           "content": "Let users say 'this topic is wrong' or 'you're missing X'. Could be: toggle clusters on/off, add custom keywords, or free-text feedback. Start simple — a feedback form that stores responses in a new table. This feeds into future fingerprint improvements. Don't auto-apply yet, just collect.",
-          "created_at": "2026-03-21T03:42:21.727300+00:00"
+          "created_at": "2026-03-21T03:42:21.727300+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:42:09.847506+00:00",
@@ -710,7 +733,8 @@
       "comments": [
         {
           "content": "Display the TF-IDF keyword clusters from the stored fingerprint JSON. Show: cluster labels, top keywords with weights, post count used. The /api/fingerprint endpoint already exists and returns this data. Design as a dedicated page or section within a profile/settings area. Visualize clusters — word cloud, bar chart, or simple ranked list.",
-          "created_at": "2026-03-21T03:42:21.722492+00:00"
+          "created_at": "2026-03-21T03:42:21.722492+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:42:09.842646+00:00",
@@ -730,7 +754,8 @@
       "comments": [
         {
           "content": "Phase 2 (Core UX). Users need to see what Charcoal thinks their topics are and correct it. The fingerprint drives overlap scoring — if it's wrong, the whole pipeline is miscalibrated. Currently the fingerprint is built automatically from recent posts but the user never sees it.",
-          "created_at": "2026-03-21T03:42:21.717776+00:00"
+          "created_at": "2026-03-21T03:42:21.717776+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:42:05.452275+00:00",
@@ -748,7 +773,8 @@
       "comments": [
         {
           "content": "Explain: labels (High/Elevated/Watch/Safe) are YOUR judgment calls that help Charcoal learn. The review queue shows accounts the system is least confident about. Labeling helps us measure accuracy and will eventually tune the model. Show where to find labels, how to apply them, that they're private to you.",
-          "created_at": "2026-03-21T03:42:01.312101+00:00"
+          "created_at": "2026-03-21T03:42:01.312101+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:41:42.476218+00:00",
@@ -766,7 +792,8 @@
       "comments": [
         {
           "content": "Explain in simple terms: the NLI model reads what someone said AND what you said, then judges if their response was attacking, dismissive, misrepresenting, respectfully disagreeing, or supporting. This catches 'concern trolls' who sound polite in isolation but are hostile in context. Only runs on accounts that already show warning signs (Watch tier+).",
-          "created_at": "2026-03-21T03:42:01.307704+00:00"
+          "created_at": "2026-03-21T03:42:01.307704+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:41:42.472053+00:00",
@@ -784,7 +811,8 @@
       "comments": [
         {
           "content": "Explain the 4 tiers: High (score >= 35, likely hostile + active in your topics), Elevated (>= 15, concerning pattern), Watch (>= 8, worth monitoring), Low (< 8, probably fine). Explain benign gate (allies get capped even with high overlap). Emphasize: tiers are signals, not verdicts.",
-          "created_at": "2026-03-21T03:42:01.303393+00:00"
+          "created_at": "2026-03-21T03:42:01.303393+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:41:42.467769+00:00",
@@ -802,7 +830,8 @@
       "comments": [
         {
           "content": "Explain the scan pipeline in user terms: finds who quoted/replied/reposted/liked your recent posts (via Constellation), scores those amplifiers for hostility, then checks their followers too. Mention: scan takes a few minutes, scores are cached for 7 days, you can re-scan anytime, data is incremental (doesn't lose previous results).",
-          "created_at": "2026-03-21T03:42:01.298651+00:00"
+          "created_at": "2026-03-21T03:42:01.298651+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:41:42.462516+00:00",
@@ -820,7 +849,8 @@
       "comments": [
         {
           "content": "Explain: threat score (0-100 composite), toxicity (0-1 from ONNX model, weighted categories), topic overlap (how much their posts overlap with yours semantically), context score (NLI hostility when interacting with your content specifically), behavioral signals (quote ratio, reply ratio, pile-on). Use plain language — 'how hostile are they' not 'weighted toxicity formula'. Include what makes a score go up or down.",
-          "created_at": "2026-03-21T03:42:01.293777+00:00"
+          "created_at": "2026-03-21T03:42:01.293777+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:41:42.457806+00:00",
@@ -840,7 +870,8 @@
       "comments": [
         {
           "content": "Phase 2 (Core UX). In-app help accessible from the nav. Plain language, not developer docs. Target audience: Bluesky users who want to understand what Charcoal is telling them. Could be a single /help page with sections or a sidebar/modal system. Keep it scannable — nobody reads walls of text.",
-          "created_at": "2026-03-21T03:42:01.288981+00:00"
+          "created_at": "2026-03-21T03:42:01.288981+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:41:37.491496+00:00",
@@ -858,7 +889,8 @@
       "comments": [
         {
           "content": "README is stale — still describes MVP phases. Update to reflect: current feature set (NLI contextual scoring, OAuth, web dashboard, dual DB backend), quick start (clone, download-model, configure, serve), env var reference, test commands, link to docs/ for deeper dives. Keep it concise — architecture.md has the depth.",
-          "created_at": "2026-03-21T03:39:17.302466+00:00"
+          "created_at": "2026-03-21T03:39:17.302466+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:38:50.426019+00:00",
@@ -876,7 +908,8 @@
       "comments": [
         {
           "content": "Add //! module-level doc comments to: src/scoring/{mod,profile,threat,nli,nli_audit,behavioral,context}.rs, src/pipeline/{amplification,sweep}.rs, src/bluesky/{client,posts,followers,amplification,profiles,replies}.rs, src/topics/{fingerprint,embeddings,overlap,tfidf}.rs, src/toxicity/{mod,onnx,download,traits}.rs, src/db/{mod,traits,sqlite,postgres,queries,schema,models}.rs, src/web/{mod,scan_job,handlers/*.rs}. Focus on what each module does and how it fits in the pipeline.",
-          "created_at": "2026-03-21T03:39:14.313258+00:00"
+          "created_at": "2026-03-21T03:39:14.313258+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:38:49.913831+00:00",
@@ -894,7 +927,8 @@
       "comments": [
         {
           "content": "Document all API endpoints with request/response JSON shapes: GET /api/status, GET /api/accounts (pagination, sorting), GET /api/accounts/{handle}, GET /api/events, GET /api/fingerprint, POST /api/scan, POST /api/labels, GET /api/labels/review, GET /api/labels/accuracy, OAuth endpoints (login, callback, logout). Include auth requirements and error shapes.",
-          "created_at": "2026-03-21T03:39:09.925345+00:00"
+          "created_at": "2026-03-21T03:39:09.925345+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:38:49.019575+00:00",
@@ -912,7 +946,8 @@
       "comments": [
         {
           "content": "Cover: Railway setup (Dockerfile, multi-stage build, Ubuntu 24.04 for glibc 2.39), env vars (all CHARCOAL_* vars, DATABASE_URL, CONSTELLATION_URL), persistent volume (/data for models + audit logs), staging vs production (branches, separate Postgres + volumes), custom domain (charcoal.watch via Porkbun ALIAS), model auto-download on startup, Tigris S3 backup.",
-          "created_at": "2026-03-21T03:39:07.206971+00:00"
+          "created_at": "2026-03-21T03:39:07.206971+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:38:48.570795+00:00",
@@ -930,7 +965,8 @@
       "comments": [
         {
           "content": "Document the full scoring pipeline with math: weighted toxicity formula (identity_attack 0.35, insult 0.25, threat 0.25, severe 0.10, profanity 0.05), threat score (tox * 70 * (1 + overlap * 1.5)), overlap gate (< 0.15 caps at 25), behavioral boost (1.0-1.5x from quote/reply/pile-on), benign gate (cap at 12.0), context_multiplier (1.0 + ctx * 0.5), benign gate bypass (ctx >= 0.5). Include worked examples for: hostile amplifier, ally, concern troll, news commenter false positive.",
-          "created_at": "2026-03-21T03:39:03.925674+00:00"
+          "created_at": "2026-03-21T03:39:03.925674+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:38:48.118804+00:00",
@@ -948,7 +984,8 @@
       "comments": [
         {
           "content": "Top-to-bottom system overview. Cover: data flow (Constellation → events → amplifier scoring → follower scoring → tiers), database architecture (dual SQLite/Postgres backend, schema v5), NLI pipeline (model loading, hypothesis scoring, hostility formula, direct vs inferred pairs, two-pass follower scoring), web layer (Axum + SvelteKit SPA, OAuth, session cookies), and how CLI vs web modes differ. Use the /document skill to shake the tree first.",
-          "created_at": "2026-03-21T03:38:58.300291+00:00"
+          "created_at": "2026-03-21T03:38:58.300291+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:38:47.635833+00:00",
@@ -1024,11 +1061,13 @@
       "comments": [
         {
           "content": "Part of Phase 1.75 contextual scoring (#102). Discovered during staging validation: ashteranic's post about ICE shooting scored 67% toxicity due to keywords (kill, shot, abused) despite being political commentary, not hostility. The ONNX model (unbiased-toxic-roberta) scores words in isolation. Options: accept it (avg toxicity is only 0.07), add news-context detector, or evaluate alternative models.",
-          "created_at": "2026-03-21T03:14:28.375933+00:00"
+          "created_at": "2026-03-21T03:14:28.375933+00:00",
+          "kind": "note"
         },
         {
           "content": "Ensemble toxicity scorer (ONNX + OpenAI Moderation with TakeLower) deployed to staging. This should reduce false positives on news commentary with violent keywords — when ONNX flags it as toxic but OpenAI Moderation doesn't, TakeLower will use the lower score. Verify after staging scan whether the false positive rate on news-adjacent accounts improves.",
-          "created_at": "2026-03-26T19:41:44.521239+00:00"
+          "created_at": "2026-03-26T19:41:44.521239+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:13:37.454265+00:00",
@@ -1048,11 +1087,13 @@
       "comments": [
         {
           "content": "Part of Phase 1.75 contextual scoring (#102). Discovered during staging validation: all 5 NLI hypotheses score 0.82-0.97 for ashteranic.mycronite.net, meaning the model says 'yes' to contradictory hypotheses (attack AND support). The hostility formula partially compensates but discriminative power is low. Investigate: premise format, model capacity, hypothesis wording.",
-          "created_at": "2026-03-21T03:14:21.111181+00:00"
+          "created_at": "2026-03-21T03:14:21.111181+00:00",
+          "kind": "note"
         },
         {
           "content": "ROOT CAUSE FOUND: softmax_entailment uses logits[2] but the model's label order is [contradiction=0, entailment=1, neutral=2]. We've been returning the neutral probability as entailment. Fix: logits[2] -> logits[1].",
-          "created_at": "2026-03-21T04:11:55.670676+00:00"
+          "created_at": "2026-03-21T04:11:55.670676+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-21T03:13:34.038205+00:00",
@@ -1207,11 +1248,13 @@
       "comments": [
         {
           "content": "Blocker #102 is now closed — NLI context scoring is complete. Admin dashboard epic is unblocked. Next: implement #104 (pre-seed by handle), then #105 (trigger scan), #106 (impersonation view), #107 (match on OAuth login).",
-          "created_at": "2026-03-27T04:29:59.847292+00:00"
+          "created_at": "2026-03-27T04:29:59.847292+00:00",
+          "kind": "note"
         },
         {
           "content": "PR #35 created: feat/admin-dashboard → staging. 8 commits, 371 tests, all 4 subissues (#104-#107) implemented.",
-          "created_at": "2026-03-27T05:47:42.635352+00:00"
+          "created_at": "2026-03-27T05:47:42.635352+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-20T19:34:35.707609+00:00",
@@ -1231,19 +1274,23 @@
       "comments": [
         {
           "content": "[action] Merging feat/contextual-scoring into staging for deploy",
-          "created_at": "2026-03-20T17:19:19.574867+00:00"
+          "created_at": "2026-03-20T17:19:19.574867+00:00",
+          "kind": "note"
         },
         {
           "content": "Scope expanded: score amplifiers via build_profile() with direct pairs, NLI for high-signal followers (Watch+ threshold), average context_score across pairs, wire into threat formula. Original wiring (model loading, event-level NLI) is done.",
-          "created_at": "2026-03-20T19:34:30.851686+00:00"
+          "created_at": "2026-03-20T19:34:30.851686+00:00",
+          "kind": "note"
         },
         {
           "content": "Spec approved: docs/superpowers/specs/2026-03-20-nli-scoring-redesign.md. Covers: amplifier scoring with direct pairs, threshold-based follower NLI, avg context_score, context_multiplier formula, NLI audit logging with JSONL + Railway Buckets rotation.",
-          "created_at": "2026-03-20T21:27:38.708172+00:00"
+          "created_at": "2026-03-20T21:27:38.708172+00:00",
+          "kind": "note"
         },
         {
           "content": "NLI context scoring fully wired — direct pairs, threshold-gated follower NLI, avg context_score, context_multiplier, audit logging. All landed on staging via feat/concurrent-ensemble.",
-          "created_at": "2026-03-27T04:29:58.478398+00:00"
+          "created_at": "2026-03-27T04:29:58.478398+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-20T16:44:30.209770+00:00",
@@ -1338,7 +1385,8 @@
       "comments": [
         {
           "content": "Phase 1.75 Chunk 3 Task 10: Integrate likes + replies into src/pipeline/amplification.rs and src/web/scan_job.rs. Call find_likers() and fetch_replies_to_post() during scan. Store original_post_text via fetch_post_text(). Process all event types (quotes, reposts, likes, replies) through the scoring pipeline.",
-          "created_at": "2026-03-20T02:46:20.045154+00:00"
+          "created_at": "2026-03-20T02:46:20.045154+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-03-20T02:46:03.032271+00:00",
@@ -1723,7 +1771,8 @@
       "comments": [
         {
           "content": "Code review findings from PR #6 (SQLite-to-PostgreSQL). Fix before merge.\n\nCRITICAL:\n1. Migration race condition: run_migrations() has no transaction wrapping. Partial failure leaves DB corrupt. Wrap each migration in BEGIN/COMMIT. Note: CREATE EXTENSION cannot run in a transaction — handle migration 1 specially.\n2. Fragile interval in is_score_stale: uses string concat ($2 || ' days'). Replace with make_interval(days => $2) and bind i32 directly.\n\nHIGH:\n3. status::show breaks for Postgres: checks SQLite file existence, prints 'not initialized' when no .db file exists. Need backend-aware status display.\n4. u32::MAX to i32 overflow: migrate command calls get_recent_events(u32::MAX), cast to i32 wraps to -1. Cap at i32::MAX or add get_all_events method.\n5. Migration only copies 2 hardcoded scan_state keys: add get_all_scan_state() to trait or query SQLite directly.\n6. Migration loses event timestamps/IDs: insert_amplification_event sets detected_at=NOW(). All migrated events get same timestamp, breaking pile-on detection. Need raw INSERT preserving original timestamps.\n\nMEDIUM (fix later):\n7. save_embedding UPDATE silently does nothing if no fingerprint row exists\n8. No concurrent migration protection (advisory locks)\n9. CREATE EXTENSION vector needs superuser (document requirement)\n10. Postgres tests dont clean up (consider sqlx::test or transaction rollback)\n11. post_count as i32 could overflow\n12. sqlite feature flag defined but never gated",
-          "created_at": "2026-02-20T02:25:54.788065796+00:00"
+          "created_at": "2026-02-20T02:25:54.788065796+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-20T02:25:42.867741830+00:00",
@@ -1743,7 +1792,8 @@
       "comments": [
         {
           "content": "End-to-end migration tested successfully against PostgreSQL 17 + pgvector. Found and fixed runtime bug: _rt-tokio feature missing on sqlx-core (compilation succeeded but PgPool::connect panicked at runtime). PR #6 created.",
-          "created_at": "2026-02-20T02:15:59.218878954+00:00"
+          "created_at": "2026-02-20T02:15:59.218878954+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-20T01:27:43.644009786+00:00",
@@ -1793,7 +1843,8 @@
       "comments": [
         {
           "content": "[action] Completed Tasks 1-6: BehavioralSignals struct, boost/gate functions, quote/reply detection, pile-on detection. 33 behavioral tests + 139 existing all passing. Starting Tasks 7-9: DB migration + pipeline wiring.",
-          "created_at": "2026-02-19T06:06:15.540443110+00:00"
+          "created_at": "2026-02-19T06:06:15.540443110+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-19T05:28:06.876681055+00:00",
@@ -1858,7 +1909,8 @@
       "comments": [
         {
           "content": "Epic: Remove authentication from the intelligence pipeline. Constellation (1+ year of data) replaces notification polling for amplification detection. All AT Protocol read endpoints are public via https://public.api.bsky.app. Auth only needed for future blocking/muting features. Plan: create PublicAtpClient struct, migrate all functions from BskyAgent, make Constellation always-on, remove --constellation flag, remove bsky-sdk dependency. See plan file: .claude/plans/zippy-seeking-quill.md",
-          "created_at": "2026-02-19T02:04:53.338067242+00:00"
+          "created_at": "2026-02-19T02:04:53.338067242+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-19T02:04:47.282093288+00:00",
@@ -2013,7 +2065,8 @@
       "comments": [
         {
           "content": "Ensemble scoring adds a second concurrent scorer per text. When evaluating ONNX concurrency, need to account for the ensemble wrapper — the tokio::join\\! in ensemble.rs already handles concurrency between primary and secondary, but ONNX model inference itself is still sequential (spawn_blocking).",
-          "created_at": "2026-03-26T19:41:44.526177+00:00"
+          "created_at": "2026-03-26T19:41:44.526177+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-18T03:14:42.053989449+00:00",
@@ -2078,15 +2131,18 @@
       "comments": [
         {
           "content": "Implementation plan written to docs/plans/2026-02-19-sqlite-to-postgres.md. Architecture: Trait-based dual backend (Approach 1). Database async trait with 11 methods, SqliteDatabase wraps rusqlite in Mutex (delegates to existing queries.rs — zero SQL duplication), PgDatabase uses sqlx + pgvector. 16 tasks across 5 phases. Phase 1-2: trait foundation + wiring (no behavior change). Phase 3: Postgres backend. Phase 4: migrate command. Phase 5: docs.",
-          "created_at": "2026-02-19T23:12:42.735342793+00:00"
+          "created_at": "2026-02-19T23:12:42.735342793+00:00",
+          "kind": "note"
         },
         {
           "content": "[action] Context about to auto-compact. Phase 1-4 (feature-dev discovery/exploration/questions/architecture) complete. Plan written to docs/plans/2026-02-19-sqlite-to-postgres.md. Approach 1 chosen: trait-based dual backend with Mutex wrapper for SQLite. About to dispatch implementer subagent for Phase 1 tasks (1-4: feature flags, Database trait, SqliteDatabase wrapper, trait tests). Base SHA: 98d91d8. Branch: feat/sqlite-to-postgres. TodoWrite tasks #8-#17 track all 16 implementation tasks. Task #8 (feature flags) is in_progress. No code written yet.",
-          "created_at": "2026-02-19T23:16:20.326343497+00:00"
+          "created_at": "2026-02-19T23:16:20.326343497+00:00",
+          "kind": "note"
         },
         {
           "content": "All 16 plan tasks complete across 5 phases. 7 commits on feat/sqlite-to-postgres branch. 186 tests passing, clippy clean, both feature configurations compile. Implemented: Database async trait, SqliteDatabase wrapper, PgDatabase with pgvector/JSONB, pipeline wiring, runtime backend selection, migrate command, documentation. Branch ready for PR.",
-          "created_at": "2026-02-20T01:24:11.845379683+00:00"
+          "created_at": "2026-02-20T01:24:11.845379683+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-18T03:14:33.629912017+00:00",
@@ -2151,7 +2207,8 @@
       "comments": [
         {
           "content": "Problem: With sentence embeddings, topic overlap values are 0.45-0.85 for most accounts in the social neighborhood, vs 0.05-0.24 with TF-IDF. The current formula (toxicity*70 + overlap*30) gives scores of 15-25 from overlap alone, putting nearly everyone at Elevated or higher regardless of toxicity.\n\nReal data from fresh scan: 12 High, 160 Elevated, 32 Watch, 9 Low out of 213 accounts. Most 'High' accounts have toxicity <0.10 — they're allies.\n\nFix approach: \n1. Change formula so toxicity is the PRIMARY driver and overlap is a multiplier/modifier rather than additive\n2. New formula: score = toxicity_component * (1 + overlap_boost). High overlap with low toxicity = low score. High overlap WITH toxicity = amplified score.\n3. Raise tier thresholds to reflect real-world score distributions\n4. Keep the overlap gate (below threshold = capped) but adjust threshold for embedding scale\n5. Update all unit tests and composition tests to match new formula",
-          "created_at": "2026-02-18T02:31:39.307274406+00:00"
+          "created_at": "2026-02-18T02:31:39.307274406+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-18T02:31:28.766946638+00:00",
@@ -2351,7 +2408,8 @@
       "comments": [
         {
           "content": "Per research in docs/research-vader.md: Instead of adding VADER, first reweight the existing Detoxify model categories. Weight identity_attack, insult, and threat higher than obscene/sexual_explicit. This fixes the false positive problem where allies who swear get flagged as toxic.",
-          "created_at": "2026-02-16T02:37:04.806047191+00:00"
+          "created_at": "2026-02-16T02:37:04.806047191+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-16T02:37:04.680299481+00:00",
@@ -2371,7 +2429,8 @@
       "comments": [
         {
           "content": "Per research in docs/research-overlap-diagnosis.md and docs/research-alternative-approaches.md: Weighted Jaccard requires exact keyword matches and produces max 0.09 scores across 426 accounts. Replacing with cosine similarity on the same TF-IDF weight vectors is a 30-minute fix that should dramatically improve overlap scoring. Keep keyword_weights() method, just change the comparison math.",
-          "created_at": "2026-02-16T02:37:04.779518868+00:00"
+          "created_at": "2026-02-16T02:37:04.779518868+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-16T02:36:54.025660368+00:00",
@@ -2541,7 +2600,8 @@
       "comments": [
         {
           "content": "Currently the protected user must be the authenticated user (notifications are per-account). To protect a different user, either: (1) they provide an app password, or (2) switch to search API / Jetstream for amplification detection. Posts and fingerprinting work with any public account already.",
-          "created_at": "2026-02-15T23:47:13.123587459+00:00"
+          "created_at": "2026-02-15T23:47:13.123587459+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-15T23:47:07.636214023+00:00",
@@ -2621,7 +2681,8 @@
       "comments": [
         {
           "content": "[action] Closing #9, creating #14, committing CHANGELOG and issue DB",
-          "created_at": "2026-02-15T22:20:30.412147968+00:00"
+          "created_at": "2026-02-15T22:20:30.412147968+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-15T22:19:32.890145932+00:00",
@@ -2642,15 +2703,18 @@
       "comments": [
         {
           "content": "Research complete (issue #11). Full report at docs/toxicity-alternatives-report.md. Top recommendation: Detoxify unbiased-toxic-roberta via ONNX Runtime (ort crate). Backup: OpenAI Moderation API. Future complement: CoPE by Zentropi for policy-steerable edge cases. This issue blocks scaling the MVP since Perspective API has a 1 QPS rate limit and sunsets Dec 31, 2026.",
-          "created_at": "2026-02-09T02:53:30.470280446+00:00"
+          "created_at": "2026-02-09T02:53:30.470280446+00:00",
+          "kind": "note"
         },
         {
           "content": "DECISION POINTS:\n\n1. Primary scorer: Detoxify unbiased-toxic-roberta via ONNX (recommended) vs alternatives\n   - Returns continuous 0-1 scores across 7 categories (matches existing ToxicityScorer trait)\n   - Identity-bias mitigation (critical for Bryan's topic areas: fat liberation, queer identity, DEI)\n   - Pre-exported ONNX at protectai/unbiased-toxic-roberta-onnx (~125 MB quantized)\n   - Runs on CPU, no API dependency, Apache 2.0\n   - Alternative: MiniLMv2-toxic-jigsaw-onnx (22M params, even smaller, ROC-AUC 0.98)\n\n2. Integration approach: ort crate (pure Rust ONNX Runtime bindings) recommended\n   - Production-proven (SurrealDB, Bloop, Google Magika)\n   - Pair with tokenizers crate for text tokenization\n   - Alternative: rust-bert (adds ~2GB libtorch dep), candle (pure Rust but more manual work)\n\n3. Fallback strategy: OpenAI Moderation API as cloud backup\n   - Free, 13 harm categories, 95% accuracy, easy reqwest integration\n   - Useful when local inference isn't available or for cross-validation\n\n4. Timeline: Replace now vs keep Perspective and swap later\n   - Perspective works until Dec 31, 2026, but has 1 QPS rate limit blocking pipeline scaling\n   - Local ONNX scorer eliminates rate limits entirely\n   - Replacing now unblocks issues #9 (rate limiting) and #10 (pipeline scaling)\n\nRELATED ISSUES:\n- #9 (rate limiting) becomes moot with local scorer\n- #10 (pipeline scaling) partially unblocked by removing API rate limits\n- #11 (research) completed, report at docs/toxicity-alternatives-report.md",
-          "created_at": "2026-02-09T02:54:43.353683818+00:00"
+          "created_at": "2026-02-09T02:54:43.353683818+00:00",
+          "kind": "note"
         },
         {
           "content": "Implementation complete. Added OnnxToxicityScorer using Detoxify unbiased-toxic-roberta model via ort crate. New files: src/toxicity/onnx.rs (scorer), src/toxicity/download.rs (model download helper). Updated: config.rs (ScorerBackend enum, CHARCOAL_SCORER/CHARCOAL_MODEL_DIR env vars), main.rs (download-model command, create_scorer() helper replacing hardcoded Perspective). Cargo.toml adds ort 2.0.0-rc.11, tokenizers 0.22, dirs 6. Default backend is now ONNX (local, no API key needed). Perspective kept as fallback via CHARCOAL_SCORER=perspective. 31 tests pass, clippy clean. Checkpointed at v4.",
-          "created_at": "2026-02-09T05:44:46.131241974+00:00"
+          "created_at": "2026-02-09T05:44:46.131241974+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-09T02:53:22.728999767+00:00",
@@ -2685,7 +2749,8 @@
       "comments": [
         {
           "content": "Research complete. Report written to docs/toxicity-alternatives-report.md. Top recommendation: Detoxify unbiased-toxic-roberta via ONNX Runtime (ort crate) as primary Perspective API replacement.",
-          "created_at": "2026-02-09T02:50:37.127677104+00:00"
+          "created_at": "2026-02-09T02:50:37.127677104+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-09T02:24:18.131949984+00:00",
@@ -2705,7 +2770,8 @@
       "comments": [
         {
           "content": "Rate limit bottleneck resolved by issue #13 — local ONNX scorer has no API rate limits. Remaining pipeline scaling work (parallelism, batch sizes) can proceed independently.",
-          "created_at": "2026-02-09T05:44:56.655304187+00:00"
+          "created_at": "2026-02-09T05:44:56.655304187+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-09T02:24:17.250000048+00:00",
@@ -2725,7 +2791,8 @@
       "comments": [
         {
           "content": "Closed as moot — local ONNX scorer has no rate limits, replacing the Perspective API 1 QPS bottleneck that motivated this issue.",
-          "created_at": "2026-02-15T22:19:32.168074577+00:00"
+          "created_at": "2026-02-15T22:19:32.168074577+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-09T02:24:16.296955699+00:00",
@@ -2761,11 +2828,13 @@
       "comments": [
         {
           "content": "[auto] Session resumed after context compression.",
-          "created_at": "2026-02-09T02:00:24.595828779+00:00"
+          "created_at": "2026-02-09T02:00:24.595828779+00:00",
+          "kind": "note"
         },
         {
           "content": "[auto] Session resumed after context compression.",
-          "created_at": "2026-02-09T02:00:42.080122506+00:00"
+          "created_at": "2026-02-09T02:00:42.080122506+00:00",
+          "kind": "note"
         }
       ],
       "created_at": "2026-02-08T23:28:05.596179148+00:00",
