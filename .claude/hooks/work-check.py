@@ -187,9 +187,9 @@ def main():
     nudge_msg = (
         "No active chainlink issue. "
         "Create and work on an issue before making changes.\n\n"
-        "  chainlink quick \"<describe your task>\" -p <priority> -l <label>\n\n"
+        "  chainlink issue quick \"<describe your task>\" -p <priority> -l <label>\n\n"
         "Or pick an existing issue:\n"
-        "  chainlink list -s open\n"
+        "  chainlink issue list -s open\n"
         "  chainlink session work <id>"
     )
 

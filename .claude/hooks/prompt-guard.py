@@ -453,15 +453,15 @@ When writing code: write it. When making changes: make them. Skip the narration.
 
 ### Large File Management (500+ lines)
 If you need to write or modify code that will exceed 500 lines:
-1. Create a parent issue for the overall feature: `chainlink create "<feature name>" -p high`
-2. Break down into subissues: `chainlink subissue <parent_id> "<component 1>"`, etc.
+1. Create a parent issue for the overall feature: `chainlink issue create "<feature name>" -p high`
+2. Break down into subissues: `chainlink issue subissue <parent_id> "<component 1>"`, etc.
 3. Inform the user: "This implementation will require multiple files/components. I've created issue #X with Y subissues to track progress."
 4. Work on one subissue at a time, marking each complete before moving on.
 
 ### Context Window Management
 If the conversation is getting long OR the task requires many more steps:
-1. Create a chainlink issue to track remaining work: `chainlink create "Continue: <task summary>" -p high`
-2. Add detailed notes as a comment: `chainlink comment <id> "<what's done, what's next>"`
+1. Create a chainlink issue to track remaining work: `chainlink issue create "Continue: <task summary>" -p high`
+2. Add detailed notes as a comment: `chainlink issue comment <id> "<what's done, what's next>"`
 3. Inform the user: "This task will require additional turns. I've created issue #X to track progress."
 
 Use `chainlink session work <id>` to mark what you're working on.
@@ -561,13 +561,13 @@ def load_tracking_rules(chainlink_dir, tracking_mode):
 CONDENSED_REMINDERS = {
     "strict": (
         "- **MANDATORY — Chainlink Issue Tracking**: You MUST create a chainlink issue BEFORE writing ANY code. "
-        "NO EXCEPTIONS. Use `chainlink quick \"title\" -p <priority> -l <label>` BEFORE your first Write/Edit/Bash. "
+        "NO EXCEPTIONS. Use `chainlink issue quick \"title\" -p <priority> -l <label>` BEFORE your first Write/Edit/Bash. "
         "If you skip this, the PreToolUse hook WILL block you. Do NOT treat this as optional.\n"
         "- **Session**: ALWAYS use `chainlink session work <id>` to mark focus. "
         "End with `chainlink session end --notes \"...\"`. This is NOT optional."
     ),
     "normal": (
-        "- **Chainlink**: Create issues before work. Use `chainlink quick` for create+label+work. Close with `chainlink close`.\n"
+        "- **Chainlink**: Create issues before work. Use `chainlink issue quick` for create+label+work. Close with `chainlink issue close`.\n"
         "- **Session**: Use `chainlink session work <id>`. End with `chainlink session end --notes \"...\"`."
     ),
     "relaxed": "",
@@ -587,7 +587,7 @@ def build_condensed_reminder(languages, tracking_mode):
 - **Quality**: No stubs/TODOs. Read before write. Complete features fully. Proper error handling.
 - **Testing**: Run tests after changes. Fix warnings, don't suppress them.
 
-Full rules were injected on first prompt. Use `chainlink list -s open` to see current issues.
+Full rules were injected on first prompt. Use `chainlink issue list -s open` to see current issues.
 </chainlink-behavioral-guard>"""
 
 
