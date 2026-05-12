@@ -33,3 +33,8 @@ refs/zentropi_info.txt
 # Git worktrees (local ephemeral state)
 .worktrees/
 .claude/worktrees/
+
+# Downloaded ML model artifacts — fetched via `charcoal download-model`,
+# never committed (the binary blobs are ~210 MB and derivable from
+# upstream Hugging Face releases)
+models/
