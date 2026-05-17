@@ -368,7 +368,7 @@ impl Database for PgDatabase {
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals, context_score,
-                    fingerprint_quality, scoring_confidence
+                    fingerprint_quality, scoring_confidence, graph_distance
              FROM account_scores
              WHERE user_did = $1 AND threat_score >= $2
              ORDER BY threat_score DESC",
@@ -403,7 +403,7 @@ impl Database for PgDatabase {
                 scored_at: row.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
-                graph_distance: None,
+                graph_distance: row.get(13),
                 fingerprint_quality: row.get(11),
                 scoring_confidence: row.get(12),
             });
@@ -658,7 +658,7 @@ impl Database for PgDatabase {
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals, context_score,
-                    fingerprint_quality, scoring_confidence
+                    fingerprint_quality, scoring_confidence, graph_distance
              FROM account_scores
              WHERE user_did = $1 AND lower(handle) = lower($2)
              LIMIT 1",
@@ -687,7 +687,7 @@ impl Database for PgDatabase {
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
-                graph_distance: None,
+                graph_distance: r.get(13),
                 fingerprint_quality: r.get(11),
                 scoring_confidence: r.get(12),
             }
@@ -700,7 +700,7 @@ impl Database for PgDatabase {
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals, context_score,
-                    fingerprint_quality, scoring_confidence
+                    fingerprint_quality, scoring_confidence, graph_distance
              FROM account_scores
              WHERE user_did = $1 AND did = $2
              LIMIT 1",
@@ -729,7 +729,7 @@ impl Database for PgDatabase {
                 scored_at: r.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: r.get(10),
-                graph_distance: None,
+                graph_distance: r.get(13),
                 fingerprint_quality: r.get(11),
                 scoring_confidence: r.get(12),
             }
@@ -789,7 +789,7 @@ impl Database for PgDatabase {
                     a.posts_analyzed, a.top_toxic_posts,
                     to_char(a.scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     a.behavioral_signals, a.context_score,
-                    a.fingerprint_quality, a.scoring_confidence
+                    a.fingerprint_quality, a.scoring_confidence, a.graph_distance
              FROM account_scores a
              LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
              WHERE a.user_did = $1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
@@ -822,7 +822,7 @@ impl Database for PgDatabase {
                 scored_at: row.get(8),
                 behavioral_signals: behavioral_signals.map(|v| v.to_string()),
                 context_score: row.get(10),
-                graph_distance: None,
+                graph_distance: row.get(13),
                 fingerprint_quality: row.get(11),
                 scoring_confidence: row.get(12),
             });
