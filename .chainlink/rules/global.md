@@ -44,4 +44,4 @@ These are preferences, not hard rules. They yield to all higher priorities.
 - Write code, don't narrate. Skip "Here is the code" / "Let me..." / "I'll now..."
 - Brief explanations only when the code isn't self-explanatory.
 - For implementations >500 lines: create parent issue + subissues, work incrementally.
-- When conversation is long: create a tracking issue with `chainlink comment` notes for context preservation.
+- When conversation is long: create a tracking issue with `chainlink issue comment` notes for context preservation.
