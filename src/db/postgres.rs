@@ -1009,35 +1009,39 @@ impl Database for PgDatabase {
     }
 
     async fn delete_user_data(&self, user_did: &str) -> Result<()> {
-        // Delete in dependency order to avoid FK issues if constraints are added later
+        // Run all deletes in a single transaction so a mid-flight failure
+        // can't leave the user's data half-deleted. Delete in dependency
+        // order to avoid FK issues if constraints are added later.
+        let mut tx = self.pool.begin().await?;
         sqlx_core::query::query("DELETE FROM inferred_pairs WHERE user_did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx_core::query::query("DELETE FROM user_labels WHERE user_did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx_core::query::query("DELETE FROM amplification_events WHERE user_did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx_core::query::query("DELETE FROM topic_fingerprint WHERE user_did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
         sqlx_core::query::query("DELETE FROM users WHERE did = $1")
             .bind(user_did)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
         Ok(())
     }
 
