@@ -405,7 +405,7 @@ async fn run_scan(
 
         if let Some(ref emb) = embedder {
             match emb.embed_batch(&pp_texts).await {
-                Ok(embeddings) => Some(pp_texts.into_iter().zip(embeddings.into_iter()).collect()),
+                Ok(embeddings) => Some(pp_texts.into_iter().zip(embeddings).collect()),
                 Err(e) => {
                     warn!(error = %e, "Failed to embed protected posts for NLI pairs");
                     None

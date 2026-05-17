@@ -515,7 +515,7 @@ fn cluster_keywords(
             .filter(|&i| !assigned[i] && cooccurrence[seed_idx][i] > 0)
             .map(|i| (i, cooccurrence[seed_idx][i]))
             .collect();
-        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        candidates.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Pull in up to 5 related keywords per cluster
         for (idx, _count) in candidates.into_iter().take(5) {

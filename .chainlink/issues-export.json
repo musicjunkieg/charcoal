@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-05-12T03:21:07.268252+00:00",
+  "exported_at": "2026-05-17T21:59:19.180719+00:00",
   "issues": [
+    {
+      "id": 177,
+      "title": "PR #47 CI: fix clippy errors blocking staging→main promotion",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-05-17T21:51:45.382020+00:00",
+      "updated_at": "2026-05-17T21:51:45.382020+00:00",
+      "closed_at": null
+    },
     {
       "id": 176,
       "title": "Update Zentropi labeler policy: taxonomy + target-clarity fixes",
