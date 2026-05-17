@@ -152,6 +152,10 @@ async fn test_pg_account_score_upsert_and_rank() {
         top_toxic_posts: vec![],
         scored_at: String::new(),
         behavioral_signals: None,
+        context_score: None,
+        graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     };
     db.upsert_account_score(TEST_USER, &score).await.unwrap();
 
@@ -176,6 +180,8 @@ async fn test_pg_amplification_event() {
             "at://did:plc:me/app.bsky.feed.post/pgtest1",
             Some("at://did:plc:pgtest_amp/app.bsky.feed.post/q1"),
             Some("test quote text"),
+            None,
+            None,
         )
         .await
         .unwrap();

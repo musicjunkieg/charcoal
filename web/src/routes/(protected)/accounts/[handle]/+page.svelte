@@ -5,6 +5,10 @@
 	import { getAccount } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
+	import LabelButtons from '$lib/components/LabelButtons.svelte';
+
+	let asUser = $derived($page.url.searchParams.get('as_user'));
+	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
 
 	const TIER_COLORS: Record<string, string> = {
 		High: '#fca5a5',
@@ -53,7 +57,7 @@
 </svelte:head>
 
 <div class="page">
-	<a href="/accounts" class="back-link">← All accounts</a>
+	<a href="/accounts{asUserSuffix}" class="back-link">← All accounts</a>
 
 	{#if loading}
 		<div class="loading-state"><div class="spinner"></div></div>
@@ -82,6 +86,17 @@
 			>View on Bluesky ↗</a>
 		</div>
 
+		<!-- Label -->
+		{#if account.did}
+			<div class="label-section">
+				<LabelButtons
+					targetDid={account.did}
+					currentLabel={(account as any).user_label?.label ?? null}
+					predictedTier={account.threat_tier}
+				/>
+			</div>
+		{/if}
+
 		<!-- Score Overview -->
 		<div class="score-grid">
 			<div class="score-card">
@@ -106,6 +121,12 @@
 				<div class="score-value">{formatPct(account.topic_overlap)}</div>
 				<div class="score-label">Topic Overlap</div>
 			</div>
+			{#if account.context_score != null}
+				<div class="score-card">
+					<div class="score-value">{formatScore(account.context_score)}</div>
+					<div class="score-label">Context Score</div>
+				</div>
+			{/if}
 		</div>
 
 		<p class="meta">
@@ -269,9 +290,17 @@
 
 	.bsky-link:hover { background: rgba(201, 149, 108, 0.18); }
 
+	.label-section {
+		margin-bottom: 1.5rem;
+		padding: 1rem 1.25rem;
+		background: rgba(28, 25, 23, 0.4);
+		border: 1px solid rgba(168, 162, 158, 0.08);
+		border-radius: 12px;
+	}
+
 	.score-grid {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 		gap: 1rem;
 		margin-bottom: 1rem;
 	}

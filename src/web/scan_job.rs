@@ -5,7 +5,7 @@
 //
 // Only one scan can run at a time; POST /api/scan returns 409 if one is already active.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
@@ -19,10 +19,87 @@ use crate::scoring::behavioral::detect_pile_on_participants;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::download::{
-    embedding_files_present, embedding_model_dir, model_files_present,
+    embedding_files_present, embedding_model_dir, model_files_present, nli_files_present,
 };
 use crate::toxicity::onnx::OnnxToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
+
+/// Manages per-user scan status with a global one-at-a-time gate.
+pub struct ScanManager {
+    statuses: HashMap<String, ScanStatus>,
+    fingerprint_building: HashSet<String>,
+    any_running: bool,
+}
+
+impl Default for ScanManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScanManager {
+    pub fn new() -> Self {
+        Self {
+            statuses: HashMap::new(),
+            fingerprint_building: HashSet::new(),
+            any_running: false,
+        }
+    }
+
+    /// Atomically check the global gate and start a scan.
+    pub fn try_start_scan(&mut self, user_did: &str) -> Result<(), String> {
+        if self.any_running {
+            return Err("A scan is already running".to_string());
+        }
+        self.any_running = true;
+        self.statuses.insert(
+            user_did.to_string(),
+            ScanStatus {
+                running: true,
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                progress_message: "Starting scan...".to_string(),
+                last_error: None,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn finish_scan(&mut self, user_did: &str) {
+        self.any_running = false;
+        if let Some(status) = self.statuses.get_mut(user_did) {
+            status.running = false;
+        }
+    }
+
+    pub fn get_status(&self, user_did: &str) -> Option<&ScanStatus> {
+        self.statuses.get(user_did)
+    }
+
+    pub fn get_status_mut(&mut self, user_did: &str) -> Option<&mut ScanStatus> {
+        self.statuses.get_mut(user_did)
+    }
+
+    pub fn is_any_running(&self) -> bool {
+        self.any_running
+    }
+
+    #[allow(dead_code)]
+    pub fn is_scan_running_for(&self, user_did: &str) -> bool {
+        self.statuses.get(user_did).is_some_and(|s| s.running)
+    }
+
+    pub fn start_fingerprint_build(&mut self, user_did: &str) {
+        self.fingerprint_building.insert(user_did.to_string());
+    }
+
+    pub fn finish_fingerprint_build(&mut self, user_did: &str) {
+        self.fingerprint_building.remove(user_did);
+    }
+
+    pub fn is_fingerprint_building(&self, user_did: &str) -> bool {
+        self.fingerprint_building.contains(user_did)
+    }
+}
 
 /// Live status of the background scan, exposed via GET /api/status.
 #[derive(Debug, Clone, Default)]
@@ -39,12 +116,45 @@ pub struct ScanStatus {
 
 use tokio::sync::RwLock;
 
+/// Build a Zentropi client when both API key and labeler ID are configured.
+/// Returns `None` (with a logged warning) on misconfiguration so the pipeline
+/// degrades gracefully to ONNX-only.
+fn build_zentropi_client(
+    config: &Config,
+) -> Option<Arc<crate::toxicity::zentropi::ZentropiClient>> {
+    let api_key = config.zentropi_api_key.as_ref().filter(|k| !k.is_empty())?;
+    let labeler_id = config
+        .zentropi_labeler_id
+        .as_ref()
+        .filter(|k| !k.is_empty())?;
+    let version_id = config
+        .zentropi_labeler_version_id
+        .as_ref()
+        .filter(|k| !k.is_empty())
+        .cloned();
+
+    match crate::toxicity::zentropi::ZentropiClient::new(
+        api_key.clone(),
+        labeler_id.clone(),
+        version_id,
+    ) {
+        Ok(c) => {
+            info!("Zentropi binary classifier loaded — two-stage scoring enabled");
+            Some(Arc::new(c))
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to init Zentropi client, using ONNX-only fallback");
+            None
+        }
+    }
+}
+
 /// Launch the scan pipeline in a background tokio task.
-/// Returns immediately. Callers poll `scan_status.running` to track progress.
+/// Returns immediately. Callers poll `scan_manager` to track progress.
 pub fn launch_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
-    scan_status: Arc<RwLock<ScanStatus>>,
+    scan_manager: Arc<RwLock<ScanManager>>,
     user_did: String,
     actor_handle: String,
 ) {
@@ -52,7 +162,7 @@ pub fn launch_scan(
         let result = AssertUnwindSafe(run_scan(
             config,
             db,
-            scan_status.clone(),
+            scan_manager.clone(),
             &user_did,
             &actor_handle,
         ))
@@ -61,28 +171,96 @@ pub fn launch_scan(
         .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
         if let Err(e) = result {
             error!(error = %e, "Background scan failed");
-            let mut status = scan_status.write().await;
-            status.running = false;
-            status.last_error = Some(e.to_string());
-            status.progress_message = "Scan failed — see server logs".to_string();
+            let mut mgr = scan_manager.write().await;
+            mgr.finish_scan(&user_did);
+            if let Some(status) = mgr.get_status_mut(&user_did) {
+                status.last_error = Some(e.to_string());
+                status.progress_message = "Scan failed — see server logs".to_string();
+            }
         }
     });
+}
+
+/// Build a topic fingerprint and embeddings for a user.
+/// Fetches their recent posts, runs TF-IDF, and computes MiniLM embeddings.
+/// Used by both the scan pipeline (auto-fingerprint) and the admin pre-seed handler.
+pub async fn build_user_fingerprint(
+    config: &Config,
+    db: &dyn Database,
+    user_did: &str,
+    handle: &str,
+) -> anyhow::Result<()> {
+    info!("No fingerprint found for {user_did}, building automatically");
+
+    let client = PublicAtpClient::new(&config.public_api_url)?;
+    let fp_posts = crate::bluesky::posts::fetch_recent_posts(&client, handle, 500).await?;
+    if fp_posts.is_empty() {
+        anyhow::bail!(
+            "No posts found — Charcoal needs posting history to build a topic fingerprint."
+        );
+    }
+
+    let post_texts: Vec<String> = fp_posts.iter().map(|p| p.text.clone()).collect();
+    let extractor = crate::topics::tfidf::TfIdfExtractor::default();
+    let fp = crate::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
+
+    let json = serde_json::to_string(&fp)?;
+    db.save_fingerprint(user_did, &json, fp.post_count).await?;
+    info!(
+        post_count = fp.post_count,
+        clusters = fp.clusters.len(),
+        "Topic fingerprint built and saved"
+    );
+
+    // Compute and save sentence embedding if the embedding model is available
+    let embed_dir = embedding_model_dir(&config.model_dir);
+    if embedding_files_present(&config.model_dir) {
+        match tokio::task::spawn_blocking(move || {
+            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
+        })
+        .await
+        {
+            Ok(Ok(embedder)) => match embedder.embed_batch(&post_texts).await {
+                Ok(post_embeddings) => {
+                    let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
+                    if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
+                        warn!(error = %e, "Failed to save embedding during fingerprint build");
+                    } else {
+                        info!("Sentence embedding computed and saved");
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "embed_batch failed during fingerprint build");
+                }
+            },
+            Ok(Err(e)) => {
+                warn!(error = %e, "Embedding model failed to load during fingerprint build");
+            }
+            Err(e) => {
+                warn!(error = %e, "spawn_blocking panicked loading embedder during fingerprint build");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
-    scan_status: Arc<RwLock<ScanStatus>>,
+    scan_manager: Arc<RwLock<ScanManager>>,
     user_did: &str,
     actor_handle: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: load toxicity scorer
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading toxicity model…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading toxicity model…".to_string();
+        }
     }
 
-    let scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
+    let primary_scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
         let model_dir = config.model_dir.clone();
         // OnnxToxicityScorer::load is synchronous blocking I/O — offload to avoid
         // stalling the async runtime while the model is read from disk.
@@ -94,13 +272,25 @@ async fn run_scan(
         anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
     };
 
+    // Wrap in two-stage scorer when Zentropi is configured. ONNX runs as a
+    // clean-pass filter (< 0.10 = cleared); posts at or above the threshold are
+    // sent to Zentropi for a binary verdict. Falls back to ONNX-only with a
+    // 0.50 binary threshold when Zentropi is unavailable.
+    let zentropi = build_zentropi_client(config.as_ref());
+
+    let scorer: Box<dyn ToxicityScorer> = Box::new(
+        crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, zentropi),
+    );
+
     // Phase 2: load embedding model (optional — falls back to TF-IDF)
     //
     // Loaded early so it can be reused for both auto-fingerprint embedding
     // (if needed) and amplifier scoring in the pipeline.
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading embedding model…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading embedding model…".to_string();
+        }
     }
 
     let embed_dir = embedding_model_dir(&config.model_dir);
@@ -129,13 +319,46 @@ async fn run_scan(
         None
     };
 
+    // Phase 2b: load NLI model (optional — falls back gracefully if unavailable)
+    {
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading NLI model…".to_string();
+        }
+    }
+
+    let nli_scorer = if nli_files_present(&config.model_dir) {
+        let model_dir = config.model_dir.clone();
+        match tokio::task::spawn_blocking(move || crate::scoring::nli::NliScorer::load(&model_dir))
+            .await
+        {
+            Ok(Ok(scorer)) => {
+                info!("NLI cross-encoder model loaded");
+                Some(scorer)
+            }
+            Ok(Err(e)) => {
+                warn!(error = %e, "NLI model failed to load, context scoring disabled");
+                None
+            }
+            Err(e) => {
+                warn!(error = %e, "spawn_blocking panicked loading NLI model");
+                None
+            }
+        }
+    } else {
+        info!("NLI model not found, context scoring disabled");
+        None
+    };
+
     // Phase 3: load or build topic fingerprint
     //
     // For web users there is no CLI step — if no fingerprint exists yet,
     // we build one automatically from the user's recent posts.
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Loading topic fingerprint…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Loading topic fingerprint…".to_string();
+        }
     }
 
     let client = PublicAtpClient::new(&config.public_api_url)?;
@@ -143,65 +366,63 @@ async fn run_scan(
     let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
         Some((json, _, _)) => serde_json::from_str(&json)?,
         None => {
-            // Auto-fingerprint: fetch posts, run TF-IDF, save to DB
+            // Auto-fingerprint: fetch posts, run TF-IDF, compute embeddings, save to DB.
+            // build_user_fingerprint handles the full pipeline including embeddings.
             {
-                let mut s = scan_status.write().await;
-                s.progress_message =
-                    "Building your topic fingerprint from recent posts…".to_string();
-            }
-            info!("No fingerprint found for {user_did}, building automatically");
-
-            let fp_posts =
-                crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 500).await?;
-            if fp_posts.is_empty() {
-                anyhow::bail!(
-                    "No posts found — Charcoal needs posting history to build a topic fingerprint."
-                );
-            }
-
-            let post_texts: Vec<String> = fp_posts.iter().map(|p| p.text.clone()).collect();
-            let extractor = crate::topics::tfidf::TfIdfExtractor::default();
-            let fp = crate::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
-
-            let json = serde_json::to_string(&fp)?;
-            db.save_fingerprint(user_did, &json, fp.post_count).await?;
-            info!(
-                post_count = fp.post_count,
-                clusters = fp.clusters.len(),
-                "Topic fingerprint built and saved"
-            );
-
-            // Compute and save sentence embedding using the already-loaded embedder
-            if let Some(ref embedder) = embedder {
-                {
-                    let mut s = scan_status.write().await;
-                    s.progress_message = "Computing sentence embeddings…".to_string();
-                }
-                match embedder.embed_batch(&post_texts).await {
-                    Ok(post_embeddings) => {
-                        let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
-                        if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
-                            warn!(error = %e, "Failed to save embedding during auto-fingerprint");
-                        } else {
-                            info!("Sentence embedding computed and saved");
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "embed_batch failed during auto-fingerprint, using TF-IDF fallback");
-                    }
+                let mut mgr = scan_manager.write().await;
+                if let Some(s) = mgr.get_status_mut(user_did) {
+                    s.progress_message =
+                        "Building your topic fingerprint from recent posts…".to_string();
                 }
             }
 
-            fp
+            build_user_fingerprint(&config, &*db, user_did, actor_handle).await?;
+
+            // Load the fingerprint we just built
+            let (json, _, _) = db
+                .get_fingerprint(user_did)
+                .await?
+                .expect("Fingerprint was just saved");
+            serde_json::from_str(&json)?
         }
     };
 
     let protected_embedding = db.get_embedding(user_did).await?;
 
+    // Build per-post embeddings for follower NLI inferred pair matching.
+    // Each protected post gets its own embedding so followers' posts can be
+    // matched to the closest protected post for NLI pair scoring.
+    let protected_posts_with_embeddings: Option<Vec<(String, Vec<f64>)>> =
+        if embedder.is_some() && nli_scorer.is_some() {
+            let pp_texts: Vec<String> =
+                crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|p| p.text.clone())
+                    .collect();
+
+            if let Some(ref emb) = embedder {
+                match emb.embed_batch(&pp_texts).await {
+                    Ok(embeddings) => Some(pp_texts.into_iter().zip(embeddings).collect()),
+                    Err(e) => {
+                        warn!(error = %e, "Failed to embed protected posts for NLI pairs");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
     // Phase 4: fetch amplification events from Constellation
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = "Fetching amplification events…".to_string();
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Fetching amplification events…".to_string();
+        }
     }
 
     let constellation =
@@ -210,9 +431,70 @@ async fn run_scan(
     let posts = crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50).await?;
     let post_uris: Vec<String> = posts.iter().map(|p| p.uri.clone()).collect();
 
+    // Build a cache of original post text keyed by URI — avoids redundant fetches
+    // when multiple events reference the same protected post.
+    let original_text_cache: std::collections::HashMap<String, String> = posts
+        .iter()
+        .map(|p| (p.uri.clone(), p.text.clone()))
+        .collect();
+
     let mut events = constellation.find_amplification_events(&post_uris).await;
 
-    // Resolve DIDs to handles
+    // Also fetch likes via Constellation backlinks
+    {
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Detecting likes via Constellation…".to_string();
+        }
+    }
+    let like_events = constellation.find_likers(&post_uris).await;
+    info!(
+        like_count = like_events.len(),
+        "Constellation likes detected"
+    );
+    events.extend(like_events);
+
+    // Fetch reply threads and detect drive-by replies
+    {
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = "Detecting drive-by replies…".to_string();
+        }
+    }
+    let follows_set = crate::bluesky::replies::fetch_follows_set(&client, user_did)
+        .await
+        .unwrap_or_default();
+    for post in &posts {
+        match crate::bluesky::replies::fetch_replies_to_post(&client, &post.uri).await {
+            Ok(replies) => {
+                let reply_dids: Vec<String> =
+                    replies.iter().map(|(did, _, _)| did.clone()).collect();
+                let drive_by_dids = crate::bluesky::replies::filter_drive_by_replies_excluding_self(
+                    &reply_dids,
+                    &follows_set,
+                    user_did,
+                );
+                // Create events for drive-by replies
+                for (did, _text, uri) in &replies {
+                    if drive_by_dids.contains(did) {
+                        events.push(crate::bluesky::amplification::AmplificationNotification {
+                            event_type: "reply".to_string(),
+                            amplifier_did: did.clone(),
+                            amplifier_handle: did.clone(), // resolved below
+                            original_post_uri: Some(post.uri.clone()),
+                            amplifier_post_uri: uri.clone(),
+                            indexed_at: String::new(),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(uri = post.uri, error = %e, "Failed to fetch replies");
+            }
+        }
+    }
+
+    // Resolve DIDs to handles for all event types
     let unresolved_dids: Vec<String> = events
         .iter()
         .filter(|e| e.amplifier_handle.starts_with("did:"))
@@ -230,15 +512,24 @@ async fn run_scan(
         }
     }
 
-    // Deduplicate by amplifier_post_uri
-    let mut seen = HashSet::new();
-    events.retain(|e| seen.insert(e.amplifier_post_uri.clone()));
+    // Deduplicate: by amplifier_post_uri for quotes/replies, by (did, post_uri) for likes
+    let mut seen_uris = HashSet::new();
+    let mut seen_likes = HashSet::new();
+    events.retain(|e| {
+        if e.event_type == "like" {
+            seen_likes.insert((e.amplifier_did.clone(), e.original_post_uri.clone()))
+        } else {
+            seen_uris.insert(e.amplifier_post_uri.clone())
+        }
+    });
     let event_count = events.len();
 
     // Phase 5: behavioral context
     {
-        let mut s = scan_status.write().await;
-        s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
+        let mut mgr = scan_manager.write().await;
+        if let Some(s) = mgr.get_status_mut(user_did) {
+            s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
+        }
     }
 
     let median_engagement = db.get_median_engagement(user_did).await?;
@@ -248,6 +539,22 @@ async fn run_scan(
             .iter()
             .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
             .collect::<Vec<_>>(),
+    );
+
+    // Phase 5b: classify social graph distance for all amplifiers
+    let amplifier_did_set: std::collections::HashSet<String> =
+        events.iter().map(|e| e.amplifier_did.clone()).collect();
+    let graph_distances = if !amplifier_did_set.is_empty() {
+        let did_refs: Vec<&str> = amplifier_did_set.iter().map(|s| s.as_str()).collect();
+        crate::bluesky::relationships::classify_relationships(&client, user_did, &did_refs)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+    info!(
+        classified = graph_distances.len(),
+        "Classified amplifier graph distances"
     );
 
     // Phase 6: run amplification pipeline
@@ -268,24 +575,33 @@ async fn run_scan(
         events,
         median_engagement,
         &pile_on_dids,
+        &original_text_cache,
+        nli_scorer.as_ref(),
+        protected_posts_with_embeddings.as_deref(),
+        Some(config.data_dir()),
+        &graph_distances,
     )
     .await;
 
-    let mut status = scan_status.write().await;
-    status.running = false;
-    status.last_error = None;
+    let mut mgr = scan_manager.write().await;
+    mgr.finish_scan(user_did);
 
     match result {
         Ok((events, accounts)) => {
             info!(events, accounts, "Background scan completed");
-            status.progress_message =
-                format!("Completed: {events} events, {accounts} accounts scored");
+            if let Some(s) = mgr.get_status_mut(user_did) {
+                s.last_error = None;
+                s.progress_message =
+                    format!("Completed: {events} events, {accounts} accounts scored");
+            }
         }
         Err(e) => {
             error!(error = %e, "Pipeline error");
-            status.last_error = Some(e.to_string());
-            status.progress_message =
-                "Scan encountered an error — partial results may have been saved".to_string();
+            if let Some(s) = mgr.get_status_mut(user_did) {
+                s.last_error = Some(e.to_string());
+                s.progress_message =
+                    "Scan encountered an error — partial results may have been saved".to_string();
+            }
         }
     }
 

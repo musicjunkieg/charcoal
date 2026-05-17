@@ -21,6 +21,47 @@ pub struct AccountScore {
     pub scored_at: String,
     /// Behavioral signals (JSON-serialized), present when behavioral analysis ran
     pub behavioral_signals: Option<String>,
+    /// NLI-derived contextual hostility score (max across all interaction pairs)
+    pub context_score: Option<f64>,
+    /// Social graph distance to the protected user (None if not classified)
+    pub graph_distance: Option<String>,
+    /// Quality of the topic fingerprint used for overlap scoring
+    pub fingerprint_quality: Option<String>,
+    /// Confidence level of this scoring result
+    pub scoring_confidence: Option<String>,
+}
+
+/// Confidence level of a scoring result based on data volume.
+///
+/// Used to prioritize re-scoring: Low confidence accounts are re-scored
+/// sooner (3 days) than High confidence accounts (14 days).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScoringConfidence {
+    /// < 25 posts analyzed, early exit
+    Low,
+    /// 25-50 posts, standard sampling
+    Standard,
+    /// 50+ posts, full analysis with context pairs
+    High,
+}
+
+impl ScoringConfidence {
+    /// Number of days before this score is considered stale.
+    pub fn staleness_days(&self) -> i64 {
+        match self {
+            ScoringConfidence::Low => 3,
+            ScoringConfidence::Standard => 7,
+            ScoringConfidence::High => 14,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScoringConfidence::Low => "low",
+            ScoringConfidence::Standard => "standard",
+            ScoringConfidence::High => "high",
+        }
+    }
 }
 
 /// A single post with its toxicity score, kept as evidence.
@@ -44,6 +85,55 @@ pub struct AmplificationEvent {
     pub detected_at: String,
     pub followers_fetched: bool,
     pub followers_scored: bool,
+    /// The protected user's original post text (for pair display and NLI scoring)
+    pub original_post_text: Option<String>,
+    /// NLI contextual hostility score for this interaction pair
+    pub context_score: Option<f64>,
+}
+
+/// A user-provided label for an account (ground truth for scoring accuracy).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserLabel {
+    pub user_did: String,
+    pub target_did: String,
+    /// One of: "high", "elevated", "watch", "safe"
+    pub label: String,
+    pub labeled_at: String,
+    pub notes: Option<String>,
+}
+
+/// A topic-matched post pair for NLI scoring (second-degree accounts).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferredPair {
+    pub id: i64,
+    pub user_did: String,
+    pub target_did: String,
+    pub target_post_text: String,
+    pub target_post_uri: String,
+    pub user_post_text: String,
+    pub user_post_uri: String,
+    pub similarity: f64,
+    pub context_score: Option<f64>,
+    pub created_at: String,
+}
+
+/// A row from the users table, used by admin endpoints.
+#[derive(Debug, Clone, Serialize)]
+pub struct UserRow {
+    pub did: String,
+    pub handle: String,
+    pub created_at: String,
+    pub last_login_at: Option<String>,
+}
+
+/// Accuracy metrics comparing predicted tiers to user labels.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccuracyMetrics {
+    pub total_labeled: i64,
+    pub exact_matches: i64,
+    pub overscored: i64,
+    pub underscored: i64,
+    pub accuracy: f64,
 }
 
 /// Threat tier thresholds — these are configurable constants.

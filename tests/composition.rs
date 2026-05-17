@@ -404,6 +404,10 @@ fn make_account(handle: &str, score: f64, tier: &str, toxicity: f64, overlap: f6
         },
         scored_at: "2026-02-16".to_string(),
         behavioral_signals: None,
+        context_score: None,
+        graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
     }
 }
 
@@ -489,6 +493,8 @@ fn report_quotes_but_not_reposts() {
             detected_at: "2026-02-15".to_string(),
             followers_fetched: false,
             followers_scored: false,
+            original_post_text: None,
+            context_score: None,
         },
         // Repost — no quote text, should NOT appear in quotes table
         AmplificationEvent {
@@ -502,6 +508,8 @@ fn report_quotes_but_not_reposts() {
             detected_at: "2026-02-15".to_string(),
             followers_fetched: false,
             followers_scored: false,
+            original_post_text: None,
+            context_score: None,
         },
     ];
 
@@ -532,6 +540,8 @@ fn report_escapes_pipe_in_quote_text() {
         detected_at: "2026-02-15".to_string(),
         followers_fetched: false,
         followers_scored: false,
+        original_post_text: None,
+        context_score: None,
     }];
 
     let tmp_path = "/tmp/charcoal_test_pipe_escape.md";
@@ -579,4 +589,46 @@ async fn noop_scorer_batch_also_errors() {
     let texts = vec!["hello".to_string(), "world".to_string()];
     let result = scorer.score_batch(&texts).await;
     assert!(result.is_err());
+}
+
+// ============================================================
+// Amplification event types: likes and replies
+// ============================================================
+
+#[test]
+fn amplification_event_types_include_like_and_reply() {
+    let like_event = AmplificationEvent {
+        id: 1,
+        event_type: "like".to_string(),
+        amplifier_did: "did:plc:liker".to_string(),
+        amplifier_handle: "liker.bsky.social".to_string(),
+        original_post_uri: "at://did:plc:user/app.bsky.feed.post/abc".to_string(),
+        amplifier_post_uri: None,
+        amplifier_text: None,
+        detected_at: "2026-03-19T12:00:00Z".to_string(),
+        followers_fetched: false,
+        followers_scored: false,
+        original_post_text: Some("my post about fat liberation".to_string()),
+        context_score: None,
+    };
+    assert_eq!(like_event.event_type, "like");
+    assert!(like_event.amplifier_post_uri.is_none()); // likes don't have posts
+
+    let reply_event = AmplificationEvent {
+        id: 2,
+        event_type: "reply".to_string(),
+        amplifier_did: "did:plc:replier".to_string(),
+        amplifier_handle: "replier.bsky.social".to_string(),
+        original_post_uri: "at://did:plc:user/app.bsky.feed.post/abc".to_string(),
+        amplifier_post_uri: Some("at://did:plc:replier/app.bsky.feed.post/def".to_string()),
+        amplifier_text: Some("have you tried not being fat".to_string()),
+        detected_at: "2026-03-19T12:00:00Z".to_string(),
+        followers_fetched: false,
+        followers_scored: false,
+        original_post_text: Some("my post about fat liberation".to_string()),
+        context_score: Some(0.82),
+    };
+    assert_eq!(reply_event.event_type, "reply");
+    assert!(reply_event.amplifier_text.is_some());
+    assert!(reply_event.context_score.is_some());
 }

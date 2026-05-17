@@ -2,15 +2,22 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getStatus, logout } from '$lib/api.js';
+	import { getStatus, logout, getIdentity } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
+	import type { Identity } from '$lib/types.js';
 
 	let { children } = $props();
 	let checking = $state(true);
+	let identity = $state<Identity | null>(null);
+
+	let asUser = $derived($page.url.searchParams.get('as_user'));
+	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
 
 	onMount(async () => {
 		try {
 			await getStatus();
+			// Load identity in background for admin nav visibility
+			getIdentity().then((id) => { identity = id; }).catch(() => {});
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
@@ -52,21 +59,40 @@
 
 			<div class="nav-links">
 				<a
-					href="/dashboard"
+					href="/dashboard{asUserSuffix}"
 					class="nav-link"
 					class:active={$page.url.pathname === '/dashboard'}
 				>Dashboard</a>
 				<a
-					href="/accounts"
+					href="/accounts{asUserSuffix}"
 					class="nav-link"
 					class:active={$page.url.pathname.startsWith('/accounts')}
 				>Accounts</a>
+				<a
+					href="/review{asUserSuffix}"
+					class="nav-link"
+					class:active={$page.url.pathname === '/review'}
+				>Review</a>
+				{#if identity?.is_admin}
+					<a
+						href="/admin"
+						class="nav-link"
+						class:active={$page.url.pathname === '/admin'}
+					>Admin</a>
+				{/if}
 				<button
 					class="nav-logout"
 					onclick={async () => { await logout(); await goto('/login'); }}
 				>Sign out</button>
 			</div>
 		</nav>
+
+		{#if asUser}
+			<div class="impersonation-banner">
+				Viewing as <strong>{asUser}</strong> (read-only)
+				<button class="impersonation-exit" onclick={() => goto('/admin')}>Exit</button>
+			</div>
+		{/if}
 
 		<main class="main">
 			{@render children()}
@@ -190,6 +216,30 @@
 	}
 
 	.nav-logout:hover { color: var(--charcoal-300); }
+
+	.impersonation-banner {
+		background: rgba(245, 158, 11, 0.15);
+		border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+		padding: 0.5rem 2rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 0.875rem;
+		color: var(--amber-500);
+	}
+
+	.impersonation-exit {
+		padding: 0.25rem 0.75rem;
+		font-size: 0.75rem;
+		background: rgba(245, 158, 11, 0.2);
+		border: 1px solid rgba(245, 158, 11, 0.4);
+		color: var(--amber-500);
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: var(--font-body);
+	}
+
+	.impersonation-exit:hover { background: rgba(245, 158, 11, 0.3); }
 
 	.main {
 		max-width: 1200px;

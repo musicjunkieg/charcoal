@@ -13,7 +13,9 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
-use super::models::{AccountScore, AmplificationEvent};
+use super::models::{
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+};
 use super::traits::Database;
 
 pub struct SqliteDatabase {
@@ -115,6 +117,8 @@ impl Database for SqliteDatabase {
         original_post_uri: &str,
         amplifier_post_uri: Option<&str>,
         amplifier_text: Option<&str>,
+        original_post_text: Option<&str>,
+        context_score: Option<f64>,
     ) -> Result<i64> {
         let conn = self.conn.lock().await;
         super::queries::insert_amplification_event(
@@ -126,6 +130,8 @@ impl Database for SqliteDatabase {
             original_post_uri,
             amplifier_post_uri,
             amplifier_text,
+            original_post_text,
+            context_score,
         )
     }
 
@@ -144,6 +150,15 @@ impl Database for SqliteDatabase {
     ) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock().await;
         super::queries::get_events_for_pile_on(&conn, user_did)
+    }
+
+    async fn get_events_by_amplifier(
+        &self,
+        user_did: &str,
+        amplifier_did: &str,
+    ) -> Result<Vec<AmplificationEvent>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_events_by_amplifier(&conn, user_did, amplifier_did)
     }
 
     async fn get_median_engagement(&self, user_did: &str) -> Result<f64> {
@@ -172,6 +187,105 @@ impl Database for SqliteDatabase {
     async fn get_account_by_did(&self, user_did: &str, did: &str) -> Result<Option<AccountScore>> {
         let conn = self.conn.lock().await;
         super::queries::get_account_by_did(&conn, user_did, did)
+    }
+
+    async fn upsert_user_label(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        label: &str,
+        notes: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_user_label(&conn, user_did, target_did, label, notes)
+    }
+
+    async fn get_user_label(&self, user_did: &str, target_did: &str) -> Result<Option<UserLabel>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_user_label(&conn, user_did, target_did)
+    }
+
+    async fn get_unlabeled_accounts(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<AccountScore>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_unlabeled_accounts(&conn, user_did, limit)
+    }
+
+    async fn get_accuracy_metrics(&self, user_did: &str) -> Result<AccuracyMetrics> {
+        let conn = self.conn.lock().await;
+        super::queries::get_accuracy_metrics(&conn, user_did)
+    }
+
+    async fn delete_inferred_pairs(&self, user_did: &str, target_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_inferred_pairs(&conn, user_did, target_did)
+    }
+
+    async fn insert_inferred_pair(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        target_post_text: &str,
+        target_post_uri: &str,
+        user_post_text: &str,
+        user_post_uri: &str,
+        similarity: f64,
+        context_score: Option<f64>,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::insert_inferred_pair(
+            &conn,
+            user_did,
+            target_did,
+            target_post_text,
+            target_post_uri,
+            user_post_text,
+            user_post_uri,
+            similarity,
+            context_score,
+        )
+    }
+
+    async fn get_inferred_pairs(
+        &self,
+        user_did: &str,
+        target_did: &str,
+    ) -> Result<Vec<InferredPair>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_inferred_pairs(&conn, user_did, target_did)
+    }
+
+    async fn list_users(&self) -> Result<Vec<UserRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_users(&conn)
+    }
+
+    async fn get_scored_account_count(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::get_scored_account_count(&conn, user_did)
+    }
+
+    async fn has_fingerprint(&self, user_did: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::has_fingerprint(&conn, user_did)
+    }
+
+    async fn delete_user_data(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_user_data(&conn, user_did)
+    }
+
+    async fn update_last_login(&self, did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::update_last_login(&conn, did)
+    }
+
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_all_scored_dids(&conn, user_did)
     }
 }
 
@@ -242,6 +356,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let ranked = db.get_ranked_threats(TEST_USER, 0.0).await.unwrap();
@@ -261,6 +379,8 @@ mod tests {
                 "at://did:plc:me/app.bsky.feed.post/abc",
                 Some("at://did:plc:xyz/app.bsky.feed.post/def"),
                 Some("lol look at this"),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -274,7 +394,7 @@ mod tests {
     async fn test_trait_table_count() {
         let db = test_db().await;
         let count = db.table_count().await.unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 8);
     }
 
     #[tokio::test]
@@ -307,6 +427,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: "2024-01-01".to_string(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         // Exact match
@@ -344,6 +468,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: "2024-01-01".to_string(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         db.upsert_account_score(TEST_USER, &score).await.unwrap();
         let found = db

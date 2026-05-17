@@ -19,17 +19,20 @@ pub async fn get_status(
     // Holding the read guard across an async DB call would block writers (e.g.
     // the scan job updating progress) for the duration of the query.
     let (scan_running, started_at, progress_message, last_error) = {
-        let s = state.scan_status.read().await;
-        (
-            s.running,
-            s.started_at.clone(),
-            s.progress_message.clone(),
-            s.last_error.clone(),
-        )
+        let mgr = state.scan_manager.read().await;
+        match mgr.get_status(&auth.effective_did) {
+            Some(s) => (
+                s.running,
+                s.started_at.clone(),
+                s.progress_message.clone(),
+                s.last_error.clone(),
+            ),
+            None => (false, None, String::new(), None),
+        }
     };
 
     // Compute tier counts from DB. threat_tier is stored as Option<String>.
-    let threats = match state.db.get_ranked_threats(&auth.did, 0.0).await {
+    let threats = match state.db.get_ranked_threats(&auth.effective_did, 0.0).await {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "DB error in get_status");

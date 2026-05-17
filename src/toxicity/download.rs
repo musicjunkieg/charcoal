@@ -21,6 +21,9 @@ const TOXICITY_HF_URL: &str =
 const EMBEDDING_HF_URL: &str =
     "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main";
 
+/// HuggingFace repo for the NLI cross-encoder model (contextual hostility scoring).
+const NLI_HF_URL: &str = "https://huggingface.co/Xenova/nli-deberta-v3-xsmall/resolve/main";
+
 /// Files for the toxicity model.
 const TOXICITY_MODEL_FILE: &str = "model_quantized.onnx";
 const TOXICITY_TOKENIZER_FILE: &str = "tokenizer.json";
@@ -52,6 +55,17 @@ pub fn model_files_present(dir: &Path) -> bool {
 pub fn embedding_files_present(dir: &Path) -> bool {
     let embed_dir = embedding_model_dir(dir);
     embed_dir.join("model.onnx").exists() && embed_dir.join("tokenizer.json").exists()
+}
+
+/// Subdirectory within model_dir for the NLI cross-encoder model.
+pub fn nli_model_dir(base: &Path) -> PathBuf {
+    base.join("nli-deberta-v3-xsmall")
+}
+
+/// Check whether both required NLI model files exist.
+pub fn nli_files_present(dir: &Path) -> bool {
+    let nli_dir = nli_model_dir(dir);
+    nli_dir.join("model_quantized.onnx").exists() && nli_dir.join("tokenizer.json").exists()
 }
 
 /// Download all ONNX models (toxicity + embedding).
@@ -127,6 +141,45 @@ pub async fn download_model(dir: &Path) -> Result<()> {
         download_file(
             &format!("{}/{}", EMBEDDING_HF_URL, EMBEDDING_MODEL_FILE),
             &embed_model_path,
+            true,
+        )
+        .await?;
+    }
+
+    // --- NLI cross-encoder model (DeBERTa-v3-xsmall for contextual scoring) ---
+    println!("\nNLI cross-encoder model (nli-deberta-v3-xsmall):");
+
+    let nli_dir = nli_model_dir(dir);
+    std::fs::create_dir_all(&nli_dir).with_context(|| {
+        format!(
+            "Failed to create NLI model directory: {}",
+            nli_dir.display()
+        )
+    })?;
+
+    let nli_tokenizer_path = nli_dir.join("tokenizer.json");
+    if nli_tokenizer_path.exists() {
+        info!("NLI tokenizer already exists, skipping");
+        println!("  tokenizer.json (already exists)");
+    } else {
+        println!("  Downloading tokenizer.json...");
+        download_file(
+            &format!("{}/tokenizer.json", NLI_HF_URL),
+            &nli_tokenizer_path,
+            false,
+        )
+        .await?;
+    }
+
+    let nli_model_path = nli_dir.join("model_quantized.onnx");
+    if nli_model_path.exists() {
+        info!("NLI model already exists, skipping");
+        println!("  model_quantized.onnx (already exists)");
+    } else {
+        println!("  Downloading model_quantized.onnx (~87 MB)...");
+        download_file(
+            &format!("{}/onnx/model_quantized.onnx", NLI_HF_URL),
+            &nli_model_path,
             true,
         )
         .await?;

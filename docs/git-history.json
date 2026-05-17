@@ -1,11 +1,307 @@
 [
   {
+    "hash": "e4e77c0aad1ad1cbfa96b451436ce25c3a9cfb79",
+    "short_hash": "e4e77c0",
+    "author": "Bryan Guffey",
+    "date": "2026-04-28T00:10:05-07:00",
+    "message": "fix: address PR #46 round-3 CodeRabbit findings\n\nFour findings from the third review pass. All real, all fixed.\n\nFixed:\n\n- topic_search.rs (discover_by_topic error swallowing): the loop over\n  keywords previously logged each `search_posts_for_authors` failure\n  via `tracing::warn!` and continued. If every keyword search failed\n  (e.g., AT Proto outage), the function returned `Ok(vec![])` —\n  indistinguishable from a clean topic neighborhood with no matches.\n  Now tracks a `successful_searches` counter and a `last_error` chain;\n  if the keyword list was non-empty and zero searches succeeded, returns\n  an `Err` so callers can react to the outage. Single-keyword failures\n  still fall through (best-effort across the cycle).\n\n- profile.rs (Stage 1 vacuous-pass guard): the round-2 fix excluded\n  reply scores from `stage1_clean_pass_scores`, but a reply-only or\n  reply-heavy sample (e.g., 1 original + 24 replies) could still pass\n  vacuously because `iter().all()` returns true for empty slices and\n  for tiny \"all 1 entry below threshold\" slices that didn't actually\n  inspect the bulk of the content. Added\n  `MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT = 5` constant and a guard in\n  `should_early_exit_stage1`: samples with fewer than 5 originals+quotes\n  always proceed to Stage 2, where Zentropi can do pair classification\n  with parent context. New tests pin both the empty-slice and the\n  too-few-entries cases.\n\n- profile.rs (graph_distance dropped on early returns): the\n  \"Insufficient Data\" early return and the Stage 1 early-exit return\n  both set `graph_distance: None`, throwing away the value the caller\n  had computed. `GraphDistance` is `Copy` so the same value is reachable\n  from all three return sites; both early returns now set\n  `graph_distance: graph_distance.map(|d| d.as_str().to_string())`,\n  matching the full-pipeline branch. Downstream consumers (sweep\n  ranking, UI) preserve the signal even on insufficient-data and\n  early-exit accounts.\n\n- zentropi.rs (module-doc clarity): the doc comment didn't make clear\n  that `refs/labeler_prompt.txt` is a checked-in reference snapshot\n  rather than the runtime source. Added an explicit \"Policy source of\n  truth\" section: the active policy lives on Zentropi's side,\n  identified by `ZENTROPI_LABELER_ID` and pinned by\n  `ZENTROPI_LABELER_VERSION_ID`; runtime behavior changes only after\n  re-uploading the policy and bumping the version env var. Maintainers\n  who edit the reference file should now know it has no runtime effect\n  on its own.\n\nTests: 419 passing (was 417 — gained 2 new tests for the early-exit\nguards). Clippy `-D warnings` clean across `--features web`,\n`--features postgres`, and no-features. Rustfmt clean.\n\nRefs: #173, #175",
+    "files_changed": 5
+  },
+  {
+    "hash": "06e1e483c93d9e32bfee24b60aad9d259c687d0b",
+    "short_hash": "06e1e48",
+    "author": "Bryan Guffey",
+    "date": "2026-04-27T22:00:32-07:00",
+    "message": "security: remove leaked Zentropi credentials and gitignore the file\n\nrefs/zentropi_info.txt was committed in d4394f9 with live API key and\nlabeler IDs. Code never read this file — credentials come from env vars\nexclusively (see .env.example). Treat the API key as compromised: rotate\nin the Zentropi dashboard, then update local .env. The file path is now\ngitignored to prevent reintroduction.\n\nRefs: #173",
+    "files_changed": 3
+  },
+  {
+    "hash": "9656c2c1a31c83d5b6bbafd00e998c3066e98a82",
+    "short_hash": "9656c2c",
+    "author": "Bryan Guffey",
+    "date": "2026-04-27T19:07:07-07:00",
+    "message": "feat: Phase 5 — Zentropi binary classifier replaces Groq ensemble\n\nONNX becomes a clean-pass filter (< 0.10 = cleared); posts at or above\nthe threshold go to Zentropi for a binary toxic/safe verdict that drives\nthe threat formula's toxicity rate. Replaces the ONNX+Groq Safeguard\nensemble approach with a two-stage pipeline matching the architecture\nbriefing's target state.\n\nWhy: Phase 0 spike (#173) validated Zentropi at 100% accuracy / 190ms\nlatency. Groq Safeguard was an unsustainable-cost stopgap; Zentropi's\nconversation-scoped labeler policy correctly distinguishes ally use of\nidentity terms from hostile use, which the ONNX model cannot.\n\nToxicity scoring:\n- New `src/toxicity/zentropi.rs` — production `ZentropiClient` with\n  10s timeout, 3-retry exponential backoff on 5xx/429/network errors,\n  and a `run_diagnostic` smoke-test method.\n- New `TwoStageToxicityScorer` (in `ensemble.rs`) wraps a continuous\n  primary (ONNX or Perspective) with an optional Zentropi binary\n  classifier. Bounded parallelism via `buffer_unordered(4)`. Falls back\n  to ONNX 0.50 threshold when Zentropi is unavailable so local dev\n  still works without a key.\n- Added `BinaryVerdict` + `classify_batch_with_contexts` to the\n  `ToxicityScorer` trait. Default impl uses a 0.50 threshold;\n  `TwoStageToxicityScorer` overrides with the real two-stage pipeline.\n\nScoring formula:\n- `build_profile` now batch-classifies with per-post parent context for\n  replies (so the Zentropi labeler evaluates reply-toward-author\n  hostility correctly).\n- Toxicity rate = reply-weighted binary count via the existing\n  `compute_reply_weighted_toxicity`. Replies count 70%, originals +\n  quotes count 30%.\n- Evidence ranking: surface Zentropi-flagged posts first, sorted by\n  ONNX score; fall back to highest-ONNX when nothing is flagged.\n- `weighted_toxicity` (the ONNX-category-weighted patch for ONNX's\n  inability to distinguish intent) removed from the scoring path.\n\nWiring:\n- `src/main.rs` and `src/web/scan_job.rs` build `TwoStageToxicityScorer`\n  from a new `build_zentropi[_client]` helper. `Commands::ZentropiSpike`\n  renamed to `Commands::ZentropiCheck` with neutral OK/WARN messaging\n  (the spike was the validation; this is now the smoke test).\n\nRemoved:\n- `src/toxicity/groq_safeguard.rs` and `groq_api_key` config field.\n- `src/toxicity/zentropi_spike.rs` (promoted to `zentropi.rs`).\n- `docs/superpowers/{plans,specs}/2026-03-27-groq-ensemble-scorer-*.md`.\n\nTests: 416 passing (was 410 — gained 12 new two-stage tests, lost the\n6 Groq parsing tests). Clippy `-D warnings` clean across `--features\nweb`, `--features postgres`, and no-features. Rustfmt clean.\n\nRefs: #173",
+    "files_changed": 16
+  },
+  {
+    "hash": "c521cdd43fdf339f47a4ccd8984abad7c3d39d0b",
+    "short_hash": "c521cdd",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:47:41-07:00",
+    "message": "feat: wire topic-first discovery into sweep pipeline with --sweep-mode flag\n\nAdd SweepMode enum (topic/graph/both) defaulting to topic-first discovery.\nNew run_topic_first function in sweep.rs searches by topic keywords,\ndeduplicates via get_all_scored_dids, resolves DIDs to handles, and\nscores discoveries in parallel. Graph mode preserved as legacy path.",
+    "files_changed": 7
+  },
+  {
+    "hash": "f6f5f84ab0ac07a690e9dd879427e00fea89964e",
+    "short_hash": "f6f5f84",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:42:18-07:00",
+    "message": "feat: wire adaptive sampling early exit into build_profile\n\nStage 1 (25 posts): quick ONNX + TF-IDF overlap check. Clean,\ntopically irrelevant accounts exit immediately as Low with\nscoring_confidence \"low\". Saves ~50-60% of scoring work during sweeps.\n\nStage 2 (50 posts): full pipeline for accounts that did not early\nexit. Scoring confidence set to \"low\" when near tier boundaries\n(via should_continue_to_stage3), \"standard\" otherwise.",
+    "files_changed": 5
+  },
+  {
+    "hash": "4d4071ae06b49699926826c96b77d1a9a2208421",
+    "short_hash": "4d4071a",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:18:54-07:00",
+    "message": "feat: add topic-first discovery pipeline via searchPosts",
+    "files_changed": 6
+  },
+  {
+    "hash": "27258c8914e6f1c428975502e3292addb2932f95",
+    "short_hash": "27258c8",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:14:31-07:00",
+    "message": "feat: add adaptive sampling stage decision functions\n\nAdd should_early_exit_stage1() and should_continue_to_stage3() for\nadaptive sampling. Stage 1 exits early when all ONNX scores are clean\nand topic overlap is below threshold. Stage 2 continues to Stage 3\nwhen the score is within ±5 of a tier boundary (8, 15, 35).\n\n7 new tests covering both functions.",
+    "files_changed": 3
+  },
+  {
+    "hash": "2f3065425cfdef82de32f38094052936291e0c12",
+    "short_hash": "2f30654",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:09:28-07:00",
+    "message": "feat: refactor build_profile to use reply-inclusive sampling and originals-first fingerprinting",
+    "files_changed": 3
+  },
+  {
+    "hash": "b75736a3c18f5163c1012ee23f15e72d02ed79a7",
+    "short_hash": "b75736a",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:49:33-07:00",
+    "message": "fix: prevent context score double-application in concern troll scoring\n\nWhen context_score >= 0.5 bypasses the benign gate, the context multiplier\nno longer applies on top. The gate bypass consumes the context signal.\nThird return value (gate_was_bypassed_by_context) tracks this.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "8c3e5d0e4ce9a5d44656d78efe32489881a04f3a",
+    "short_hash": "8c3e5d0",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:46:02-07:00",
+    "message": "feat: add batch parent post fetching for reply context pairs",
+    "files_changed": 3
+  },
+  {
+    "hash": "8278173fad1ced9c1889f2527b7a9e423b7eea41",
+    "short_hash": "8278173",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:43:48-07:00",
+    "message": "feat: add fetch_posts_with_replies for reply-inclusive post sampling",
+    "files_changed": 3
+  },
+  {
+    "hash": "b165fa596bdb547897d9361f44d3a1ffe3618f6c",
+    "short_hash": "b165fa5",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:38:17-07:00",
+    "message": "fix: address code review — env.example, truncation safety, spike comment",
+    "files_changed": 4
+  },
+  {
+    "hash": "b68b243723f063488bd88d41ae0ed5b7d2e7c1d2",
+    "short_hash": "b68b243",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:32:55-07:00",
+    "message": "feat: add Zentropi CoPE API spike with pre-built labeler support",
+    "files_changed": 5
+  },
+  {
+    "hash": "bc75cab82c380261bbb4a53ebcbb7a0151792a39",
+    "short_hash": "bc75cab",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T19:13:54-07:00",
+    "message": "docs: add topic-first discovery and adaptive sampling implementation plan",
+    "files_changed": 2
+  },
+  {
+    "hash": "9802b9ebce07094cc866acccccb77a309a2eca15",
+    "short_hash": "9802b9e",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T12:36:24-07:00",
+    "message": "perf: run ensemble primary and secondary scorers concurrently\n\nUses tokio::join! to run ONNX and OpenAI Moderation scoring in parallel\nwhen both are available. Wall-clock cost is now max(primary, secondary)\ninstead of primary + secondary. No change when secondary is absent.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "c39bb1681cc61b0e4bfc5eac715dbff6adf251f5",
+    "short_hash": "c39bb16",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:31:06-07:00",
+    "message": "feat: display graph distance in reports and terminal output\n\nThreat reports now show the social graph relationship (Stranger, Follows\nyou, You follow, Mutual follow) alongside the threat tier. Added as a\ncolumn in the markdown report table and terminal threat list, plus shown\nin account detail view.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "88b4c5104ac7e231857330c9aea066b3fca4d6a1",
+    "short_hash": "88b4c51",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:29:39-07:00",
+    "message": "feat: wire ensemble scorer into scan pipeline and CLI\n\nWhen OPENAI_API_KEY is set, the scanner uses EnsembleToxicityScorer\n(ONNX primary + OpenAI Moderation secondary with TakeLower disagreement\nstrategy). When absent, falls back to ONNX-only (same as before).\nNo behavior change without the env var.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "3339c64202f2f3c30c71a044bfee280c43145a12",
+    "short_hash": "3339c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:26:38-07:00",
+    "message": "feat: add OpenAI Moderation scorer and ensemble toxicity scorer\n\nOpenAiModerationScorer wraps the free moderation endpoint (pinned to\nomni-moderation-2024-09-26). EnsembleToxicityScorer runs primary (ONNX)\nand secondary (OpenAI) concurrently, detects agreement (threshold 0.25),\nand applies configurable disagreement strategy (TakeLower default).\nImplements ToxicityScorer trait so it is invisible to downstream pipeline.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6be187080b944fdb3183c9fbb0bd791a51c34d14",
+    "short_hash": "6be1870",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:24:06-07:00",
+    "message": "feat: classify drive-by repliers via getRelationships in scan pipeline\n\nBatch-classifies all amplifier DIDs using getRelationships (30 per\nAPI call). Graph distance is threaded through the amplification pipeline\nto build_profile where it multiplies the final threat score. CLI commands\npass empty graph distances (web-only feature for now).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "a67990191edc7e5404cc8786fcc89481746cf07a",
+    "short_hash": "a679901",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:21:56-07:00",
+    "message": "feat: apply graph distance weight in scoring formula\n\nGraph distance multiplier is the final step in the scoring chain:\nraw → behavioral → context → graph_distance. Strangers get 1.2x,\nmutual follows get 0.6x. Applied after benign gate so allies stay\nprotected. All callers pass None for now (wired in next task).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "334b8981f91807795398fc27e31fd036689588a1",
+    "short_hash": "334b898",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:18:36-07:00",
+    "message": "feat: add graph_distance field to AccountScore and DB schema v6\n\nNew nullable TEXT column on account_scores stores the social graph\ndistance label (Mutual follow, Follows you, You follow, Stranger).\nSchema migration v5→v6 for SQLite, corresponding Postgres migration.\nAll existing tests pass with graph_distance: None (neutral).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 13
+  },
+  {
+    "hash": "4ac5805c902a8ad1027fe0635aa1b444a68580b6",
+    "short_hash": "4ac5805",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:09:40-07:00",
+    "message": "feat: add GraphDistance enum and relationship response parsing\n\nGraphDistance classifies the social relationship between the protected\nuser and another account into MutualFollow, InboundFollow, OutboundFollow,\nor Stranger. Each category has a threat_weight() used as a scoring\nmultiplier. Response parsing handles both relationship and notFoundActor\nentries from the AT Protocol getRelationships endpoint.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b7bb93b2bf1eb7d3e4f7c65766c4ca8351837cd5",
+    "short_hash": "b7bb93b",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T18:00:20-07:00",
+    "message": "feat: wire NLI audit logging into all scoring paths\n\nEvery NLI score_pair call now emits structured tracing + JSONL audit\nentry with full hypothesis breakdown, pair type, and similarity.\nConfig.data_dir() returns model_dir parent (/data on Railway).\n\nSpec: nli-scoring-redesign §NLI Audit Logging",
+    "files_changed": 7
+  },
+  {
+    "hash": "a85a52dd2abb46d94c88bffe62c592b13ba6e603",
+    "short_hash": "a85a52d",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T11:57:35-07:00",
+    "message": "fix: exclude unscored accounts from review queue\n\n  Accounts with NULL threat_score (insufficient posts) were showing\n  first in the triage queue with all dashes. Filter them out with\n  AND a.threat_score IS NOT NULL in both SQLite and Postgres queries.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "e4fafa5d1777cbddb8ac6931c3eb107d769a4235",
+    "short_hash": "e4fafa5",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T09:51:34-07:00",
+    "message": "feat: wire NLI context scoring into scan and amplification pipelines\n\nLoad NLI cross-encoder model during scan startup. Score quote/reply\nevent pairs via NLI when both original and amplifier text are available.\nThread NLI scorer and protected post embeddings through pipeline for\nprofile-level scoring. Add find_best_matching_user_post() for real\ntext pair matching instead of placeholder strings.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "5284b6fc5649e7302137756184f6ca5f01269ae2",
+    "short_hash": "5284b6f",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T20:30:44-07:00",
+    "message": "feat: wire NLI contextual scoring into profile building pipeline\n\nfind_most_similar_posts matches target posts to user fingerprint\nvia embedding cosine similarity. build_profile now accepts optional\nNliScorer, computes context_score from inferred pairs, and uses\nblended formula + benign gate bypass. 4 new context tests.\n322 total tests passing.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 8
+  },
+  {
+    "hash": "7ca8e3facf7a5f0b6eff3df6c8207f73ca4f4d46",
+    "short_hash": "7ca8e3f",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T16:44:40-07:00",
+    "message": "feat: add blended scoring formula and benign gate bypass\n\n  compute_threat_score_contextual blends toxicity with context_score\n  (40% weight) when pair data available. apply_behavioral_modifier_contextual\n  bypasses benign gate when context_score >= 0.5. 9 new tests covering\n  blending, fallback, and gate bypass scenarios.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "c39180e568a63f8dc0df66faacf85d4d02f53fe2",
+    "short_hash": "c39180e",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:35:45-07:00",
+    "message": "feat: add Database trait methods for labels, inferred pairs, and events\n\n  7 new trait methods: upsert/get user labels, get unlabeled accounts,\n  accuracy metrics, insert/get/delete inferred pairs. Updated\n  insert_amplification_event with original_post_text and context_score.\n  Both SQLite and PostgreSQL backends implemented. 255 tests passing.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "a0bc878cfcd289c699d5d3f65671be30961374fe",
+    "short_hash": "a0bc878",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:22:24-07:00",
+    "message": "feat: add schema migration v5 for contextual scoring\n\n  New tables: user_labels (with upsert support), inferred_pairs\n  (with dedup unique index). New columns: amplification_events\n  gets original_post_text and context_score, account_scores gets\n  context_score. Updated table count tests (6 -> 8 tables).\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b0a00b64fbb89d707ed49e3ae2ec4367f3e26bf5",
+    "short_hash": "b0a00b6",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:15:07-07:00",
+    "message": "feat: add contextual scoring data models\n\n  Add UserLabel, InferredPair, AccuracyMetrics structs.\n  Add context_score to AccountScore.\n  Add original_post_text and context_score to AmplificationEvent.\n  All 240 tests pass (8 new + 232 existing).\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "15911a2a59b876efeb7ec35a4638c98d1c654450",
+    "short_hash": "15911a2",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T14:26:51-07:00",
+    "message": "docs: update staging strategy — long-lived staging branch with promotion flow\n\nstaging branch persists permanently. Feature branches merge into\nstaging for validation, staging merges into main for production.\nSeparate persistent volume for ONNX models on staging.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "f44530363a0214b839830c162119d608fef9e3df",
+    "short_hash": "f445303",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T22:16:02-07:00",
+    "message": "Merge pull request #32 from musicjunkieg/fix/repost-links-and-account-fallback\n\nfix: null safety for unscored accounts + pre-push hook features",
+    "files_changed": 0
+  },
+  {
+    "hash": "3b3f20156b04ca0ffbc22b792db68bf8a6237e90",
+    "short_hash": "3b3f201",
+    "author": "Bryan Guffey",
+    "date": "2026-03-18T21:22:43-07:00",
+    "message": "fix: run clippy and tests with --features web in pre-push hook\n\nLocal pre-push hook was running clippy without --features web, so\nweb module code was not checked. This let a clippy::manual_map\nwarning through to CI. Both the installed hook and the install\nscript now include --features web.\n\nCloses #100.",
+    "files_changed": 2
+  },
+  {
+    "hash": "f6b68ed93ec824184c91d660179d45219a3f3810",
+    "short_hash": "f6b68ed",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T21:21:38-07:00",
+    "message": "Merge pull request #31 from musicjunkieg/fix/repost-links-and-account-fallback\n\nfix: fix repost links and add unscored account fallback",
+    "files_changed": 0
+  },
+  {
+    "hash": "683c5bfd388cc26bfdc555ca76eb00e74ab73705",
+    "short_hash": "683c5bf",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T09:18:13-07:00",
+    "message": "Merge pull request #30 from musicjunkieg/fix/railway-dockerfile-builder\n\nfix: fix Dockerfile for Railway deployment and also update to root user to access volume",
+    "files_changed": 0
+  },
+  {
+    "hash": "ac304fcbc0bee095b99f41efa0db886bd9eec73f",
+    "short_hash": "ac304fc",
+    "author": "chaos gremlin",
+    "date": "2026-03-17T21:39:20-07:00",
+    "message": "Merge pull request #27 from musicjunkieg/fix/rust-1.94\n\nfix: bump Rust to 1.94.0 to match local toolchain",
+    "files_changed": 0
+  },
+  {
     "hash": "cfabfc25aabd26b61b2a7416df38c7f2dbf1ed91",
     "short_hash": "cfabfc2",
     "author": "chaos gremlin",
     "date": "2026-03-17T18:57:10-07:00",
     "message": "Merge pull request #21 from musicjunkieg/feat/onboarding-flow\n\nfeat: onboarding flow — OAuth fix, welcome screen, auto-fingerprint",
     "files_changed": 0
+  },
+  {
+    "hash": "9832bdd4775d85611d1c7277bd7b6726367ffda7",
+    "short_hash": "9832bdd",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T17:54:10-07:00",
+    "message": "fix: address CodeRabbit review findings on PR #21\n\n- Make embed_batch non-fatal in auto-fingerprint (warn + skip instead\n  of propagating error that kills the scan)\n- Tighten scan test assertion to assert_eq 202 Accepted\n- Fix stale \"234\" test count reference in CLAUDE.md (should be 227)\n- Improve first-run detection: require !started_at in addition to\n  zero tier counts, so completed scans with no results show the\n  empty dashboard instead of the welcome screen\n- Refactor test_helpers: build_test_app delegates to build_test_app_with_db\n- Regenerate decision graph export with nodes 157-159\n\nCloses #138.",
+    "files_changed": 8
   },
   {
     "hash": "638e535927e6277f60b56c4432d7b00500e32f04",
@@ -24,12 +320,28 @@
     "files_changed": 4
   },
   {
+    "hash": "1b74c64d3b6ddf3e15c765b71166f4271ad99a3f",
+    "short_hash": "1b74c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:35:37-07:00",
+    "message": "feat: add first-run welcome screen for new users\n\nWhen the dashboard loads with zero scored accounts and no scan\nrunning, show a centered welcome message explaining what Charcoal\ndoes and a \"Start your first scan\" button. After the scan starts,\nthe view flips to the normal dashboard with progress indicator.\n\nCloses #113.",
+    "files_changed": 4
+  },
+  {
     "hash": "630b17a291c9f01c1829082c90866b7a3ee31d6b",
     "short_hash": "630b17a",
     "author": "Bryan Guffey",
     "date": "2026-03-17T13:26:37-07:00",
     "message": "fix: register user in DB during OAuth callback\n\nThe OAuth callback authenticated users and set session cookies but\nnever called upsert_user(), so the users table had no row for them.\nThis caused POST /api/scan to fail with \"User not found\".\n\nThread the handle through PendingOAuth and call upsert_user after\nthe DID gate passes. Closes #121.",
     "files_changed": 3
+  },
+  {
+    "hash": "3c15470b5858be83d652536b99a23c4ca1098f0d",
+    "short_hash": "3c15470",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:25:33-07:00",
+    "message": "test: add tests for user registration and scan endpoint contract\n\nAdd build_test_app_with_db helper that returns both router and DB.\nAdd two tests: one documenting the bug (scan fails with no user row),\none proving the fix contract (scan works when user is registered).",
+    "files_changed": 4
   },
   {
     "hash": "e7df2409d50dfcaa5fc168a7abfedf950e42c13c",
@@ -86,6 +398,14 @@
     "date": "2026-02-20T23:27:38Z",
     "message": "fix #71 and feat #67: save_embedding error on missing row, behavioral\n  signals in reports\n\n  fix: save_embedding now returns an error (instead of silently doing nothing)\n  when no fingerprint row exists in topic_fingerprint. Fixed in both SQLite\n  (queries.rs) and Postgres (postgres.rs) backends. Added a unit test that\n  exercises the failure path.\n\n  feat: behavioral signals (quote ratio, reply ratio, avg engagement, pile-on,\n  benign gate, boost multiplier) are now rendered in terminal detail view\n  (display_account_detail) and in the markdown report evidence section for\n  Elevated+ accounts. Data was already stored as JSON in account_scores — this\n  just wires it up for display. No schema or model changes needed.",
     "files_changed": 4
+  },
+  {
+    "hash": "8bcaa5ea99f8717a2ad0dd588a36ae293452d706",
+    "short_hash": "8bcaa5e",
+    "author": "musicjunkieg",
+    "date": "2026-02-20T05:27:30Z",
+    "message": "fix: correct inverted credential redaction in migrate command display",
+    "files_changed": 1
   },
   {
     "hash": "0752aeb79b2a42ec06be48e0a4e888336ed326d0",
@@ -288,11 +608,27 @@
     "files_changed": 3
   },
   {
+    "hash": "1a6477174b29bc64f39ecf60eed95ff1d0346f64",
+    "short_hash": "1a64771",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T22:00:06Z",
+    "message": "feat: Phase 7 — markdown report generation and terminal output formatting\n\nComplete the output subsystem:\n- output/terminal.rs: Colored threat list display with tier summaries,\n  account detail view with evidence posts\n- output/markdown.rs: Full .md report with summary table, ranked accounts,\n  topic fingerprint, and evidence section for elevated+ threats\n- main.rs: Wire report command to generate both terminal and markdown output,\n  delegate score display to output::terminal module\n\n1 new test (markdown generation), 21 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "99d9f519b3ebd26f4577ad9e330b91f5ee78e027",
     "short_hash": "99d9f51",
     "author": "Bryan Guffey",
     "date": "2026-02-08T21:57:47Z",
     "message": "feat: Phases 5+6 — amplification pipeline, threat scoring, and full CLI wiring\n\nComplete the core threat detection pipeline:\n- pipeline/amplification.rs: Full scan workflow — poll notifications for\n  quote/repost events, store in DB, optionally fetch amplifier followers\n  and score each one\n- scoring/threat.rs: Combined threat score formula (70% toxicity + 30%\n  topic overlap) with gate that caps scores for irrelevant hostile accounts\n- scoring/profile.rs: Profile builder that orchestrates post fetching,\n  toxicity scoring, topic extraction, and threat computation for one account\n\nWire all CLI commands to real implementations:\n- `fingerprint`: Fetches posts, runs TF-IDF, displays bar chart, caches in DB\n- `scan [--analyze]`: Polls notifications, stores events, optionally scores\n- `score @handle`: Full single-account scoring with evidence display\n- `report [--min-score N]`: Ranked threat list from DB\n\n5 new tests (threat formula), 20 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6dcb11233f83f5c04e8029eb32684bd8065f2049",
+    "short_hash": "6dcb112",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:54:20Z",
+    "message": "feat: Phase 4 — toxicity scoring with Perspective API and rate limiter\n\nImplement the toxicity scoring subsystem:\n- traits.rs: ToxicityScorer async trait with ToxicityResult/ToxicityAttributes\n  types, designed for provider swappability (Perspective sunsets Dec 2026)\n- perspective.rs: Google Perspective API client requesting TOXICITY,\n  SEVERE_TOXICITY, IDENTITY_ATTACK, INSULT, PROFANITY, and THREAT scores\n- rate_limiter.rs: Token-bucket rate limiter enforcing 1 QPS for the\n  free tier, with async sleep to avoid busy-waiting\n\nAdded async-trait crate dependency.\n2 new tests (rate limiter), 15 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
     "files_changed": 5
   },
   {
@@ -312,12 +648,36 @@
     "files_changed": 6
   },
   {
+    "hash": "6470b006afe23db6853b83b21c01451abd25b073",
+    "short_hash": "6470b00",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:52:47Z",
+    "message": "feat: Phase 3 — TF-IDF topic fingerprint with clustering and overlap scoring\n\nImplement the complete topic analysis subsystem:\n- traits.rs: TopicExtractor trait for swappable implementations\n- tfidf.rs: TF-IDF keyword extraction using keyword_extraction crate,\n  with co-occurrence based clustering into labeled topic groups\n- fingerprint.rs: TopicFingerprint/TopicCluster structs with colored\n  terminal bar chart display and keyword weight extraction\n- overlap.rs: Weighted Jaccard similarity for comparing two fingerprints\n\nAdded stop-words crate for English stop word filtering.\n7 new tests, 13 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
     "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
     "short_hash": "272ff53",
     "author": "Bryan Guffey",
     "date": "2026-02-08T21:48:07Z",
     "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
     "files_changed": 4
+  },
+  {
+    "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
+    "short_hash": "272ff53",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:48:07Z",
+    "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",
+    "short_hash": "b5e1599",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:40:21Z",
+    "message": "feat: Phase 1 — project skeleton, CLI, config, and database\n\nSet up the complete Charcoal project structure with all module directories,\nCargo.toml with dependencies (bsky-sdk, rusqlite, keyword_extraction, clap,\ntokio, etc.), clap-based CLI with all planned subcommands, environment\nconfig loading via dotenvy, and SQLite database with schema for topic\nfingerprints, account scores, amplification events, and scan state.\n\nAll 6 database tests pass. `cargo run -- init` creates the DB,\n`cargo run -- status` shows system state, `cargo run -- --help` works.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 39
   },
   {
     "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",

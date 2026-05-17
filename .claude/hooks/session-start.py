@@ -111,7 +111,7 @@ def auto_comment_on_resume(session_status):
     else:
         comment = "[auto] Session resumed after context compression."
 
-    run_chainlink(["comment", issue_id, comment])
+    run_chainlink(["issue", "comment", issue_id, comment])
 
 
 def main():
@@ -170,12 +170,12 @@ def main():
         context_parts.append(f"## Current Session\n{session_status}")
 
     # Get ready issues (unblocked work)
-    ready_issues = run_chainlink(["ready"])
+    ready_issues = run_chainlink(["issue", "ready"])
     if ready_issues:
         context_parts.append(f"## Ready Issues (unblocked)\n{ready_issues}")
 
     # Get open issues summary
-    open_issues = run_chainlink(["list", "-s", "open"])
+    open_issues = run_chainlink(["issue", "list", "-s", "open"])
     if open_issues:
         context_parts.append(f"## Open Issues\n{open_issues}")
 
@@ -184,7 +184,7 @@ def main():
 - Use `chainlink session start` at the beginning of work
 - Use `chainlink session work <id>` to mark current focus
 - Use `chainlink session action "..."` to record breadcrumbs before context compression
-- Add comments as you discover things: `chainlink comment <id> "..."`
+- Add comments as you discover things: `chainlink issue comment <id> "..."`
 - End with handoff notes: `chainlink session end --notes "..."`
 </chainlink-session-context>""")
 

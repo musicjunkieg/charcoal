@@ -6,7 +6,9 @@
 
 use charcoal::db::models::ThreatTier;
 use charcoal::output::truncate_chars;
-use charcoal::scoring::threat::{compute_threat_score, ThreatWeights};
+use charcoal::scoring::threat::{
+    compute_threat_score, compute_threat_score_contextual, ThreatWeights,
+};
 
 // ============================================================
 // ThreatTier::from_score — boundary conditions
@@ -311,4 +313,231 @@ fn truncate_long_string() {
     let result = truncate_chars(&text, 100);
     assert_eq!(result.chars().count(), 103); // 100 + "..."
     assert!(result.ends_with("..."));
+}
+
+// --- Blended contextual scoring tests ---
+
+#[test]
+fn blended_score_uses_context_when_available() {
+    let weights = ThreatWeights::default();
+    // toxicity=0.3, context_score=0.8, overlap=0.5
+    // blended = 0.3 * 0.6 + 0.8 * 0.4 = 0.18 + 0.32 = 0.50
+    // threat = 0.50 * 70 * (1 + 0.5 * 1.5) = 35.0 * 1.75 = 61.25
+    let (score, tier) = compute_threat_score_contextual(0.3, 0.5, Some(0.8), &weights);
+    assert!(
+        score > 50.0,
+        "Blended score should be high when context hostile, got {}",
+        score
+    );
+    assert_eq!(tier.as_str(), "High");
+}
+
+#[test]
+fn blended_score_falls_back_without_context() {
+    let weights = ThreatWeights::default();
+    let (score_ctx, _tier_ctx) = compute_threat_score_contextual(0.5, 0.3, None, &weights);
+    let (score_orig, _tier_orig) = compute_threat_score(0.5, 0.3, &weights);
+    assert!((score_ctx - score_orig).abs() < f64::EPSILON);
+}
+
+#[test]
+fn low_context_score_does_not_lower_threat() {
+    let weights = ThreatWeights::default();
+    // Under the multiplicative formula, context_score=0.05 produces a 1.025x multiplier.
+    // Context can only amplify existing threat signals, never reduce them.
+    let (with_ctx, _) = compute_threat_score_contextual(0.5, 0.5, Some(0.05), &weights);
+    let (without_ctx, _) = compute_threat_score(0.5, 0.5, &weights);
+    assert!(
+        with_ctx >= without_ctx,
+        "Context multiplier should never reduce score: {} vs {}",
+        with_ctx,
+        without_ctx
+    );
+}
+
+#[test]
+fn context_score_at_boundary() {
+    let weights = ThreatWeights::default();
+    // context_score=0.5 produces a 1.25x multiplier over the base score.
+    // The result should be 25% higher than the base (no context) score.
+    let (with_ctx, _) = compute_threat_score_contextual(0.5, 0.3, Some(0.5), &weights);
+    let (without_ctx, _) = compute_threat_score(0.5, 0.3, &weights);
+    let expected = without_ctx * 1.25;
+    assert!(
+        (with_ctx - expected).abs() < 0.1,
+        "ctx=0.5 should give 1.25x base: got {} vs expected {}",
+        with_ctx,
+        expected
+    );
+}
+
+// ============================================================
+// compute_reply_weighted_toxicity
+// ============================================================
+
+#[test]
+fn reply_weighted_toxicity_hostile_replies_clean_originals() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    // 12/30 replies toxic, 0/20 originals toxic
+    let result = compute_reply_weighted_toxicity(12, 30, 0, 20);
+    // reply_tox_rate = 0.40, original_tox_rate = 0.0
+    // weighted = 0.40 * 0.7 + 0.0 * 0.3 = 0.28
+    assert!(
+        (result - 0.28).abs() < 0.001,
+        "Expected 0.28, got {}",
+        result
+    );
+}
+
+#[test]
+fn reply_weighted_toxicity_falls_back_when_few_replies() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    // Only 3 replies — below threshold of 5, falls back to flat rate
+    let result = compute_reply_weighted_toxicity(2, 3, 4, 20);
+    // flat rate = (2 + 4) / (3 + 20) = 6/23
+    assert!(
+        (result - 6.0 / 23.0).abs() < 0.001,
+        "Expected flat rate, got {}",
+        result
+    );
+}
+
+#[test]
+fn reply_weighted_toxicity_zero_posts() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+    let result = compute_reply_weighted_toxicity(0, 0, 0, 0);
+    assert!((result - 0.0).abs() < 0.001);
+}
+
+#[test]
+fn reply_weighted_toxicity_all_replies_toxic() {
+    use charcoal::scoring::profile::compute_reply_weighted_toxicity;
+
+    let result = compute_reply_weighted_toxicity(20, 20, 5, 10);
+    // reply_tox_rate = 1.0, original_tox_rate = 0.5
+    // weighted = 1.0 * 0.7 + 0.5 * 0.3 = 0.85
+    assert!(
+        (result - 0.85).abs() < 0.001,
+        "Expected 0.85, got {}",
+        result
+    );
+}
+
+// ============================================================
+// ScoringConfidence — staleness days
+// ============================================================
+
+#[test]
+fn scoring_confidence_staleness_days() {
+    use charcoal::db::models::ScoringConfidence;
+
+    assert_eq!(ScoringConfidence::Low.staleness_days(), 3);
+    assert_eq!(ScoringConfidence::Standard.staleness_days(), 7);
+    assert_eq!(ScoringConfidence::High.staleness_days(), 14);
+}
+
+// ============================================================
+// Adaptive sampling — stage decision functions
+// ============================================================
+
+#[test]
+fn early_exit_clean_and_irrelevant() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
+}
+
+#[test]
+fn no_early_exit_if_any_onnx_above_threshold() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.15, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
+}
+
+#[test]
+fn no_early_exit_if_overlap_above_gate() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.20), 0.15));
+}
+
+#[test]
+fn no_early_exit_when_overlap_unknown() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // TF-IDF extraction failure → overlap unknown → never early-exit, even
+    // when ONNX scores look clean. Sparse-vocabulary or reply-heavy accounts
+    // shouldn't slip through just because we couldn't compute their topics.
+    let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
+    assert!(!should_early_exit_stage1(&onnx_scores, None, 0.15));
+}
+
+#[test]
+fn no_early_exit_with_too_few_first_person_posts() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Reply-heavy account with only 2 originals — the clean-pass filter
+    // would vacuously pass on those 2 entries, but stage 2 needs to score
+    // the un-checked replies in pair context. Min-originals guard prevents
+    // the false-clear.
+    let onnx_scores = vec![0.02, 0.05];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+}
+
+#[test]
+fn no_early_exit_when_first_person_scores_empty() {
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Reply-only sample — `iter().all()` on empty slice returns true, but
+    // the empty list means we never actually checked any post. The guard
+    // forces stage 2.
+    let onnx_scores: Vec<f64> = vec![];
+    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+}
+
+#[test]
+fn scoring_confidence_near_boundary_is_low() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Near Watch boundary (8.0 ± 5) → should re-score sooner
+    assert!(should_continue_to_stage3(10.0));
+    // Not near any boundary → standard confidence
+    assert!(!should_continue_to_stage3(22.0));
+}
+
+#[test]
+fn stage2_resolves_when_clear_signal() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 22.0 is not near any boundary (8, 15, 35) ± 5
+    assert!(!should_continue_to_stage3(22.0));
+}
+
+#[test]
+fn stage2_continues_when_near_watch_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 6.0 is within ±5 of Watch boundary at 8.0
+    assert!(should_continue_to_stage3(6.0));
+}
+
+#[test]
+fn stage2_continues_when_near_elevated_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 13.0 is within ±5 of Elevated boundary at 15.0
+    assert!(should_continue_to_stage3(13.0));
+}
+
+#[test]
+fn stage2_continues_when_near_high_boundary() {
+    use charcoal::scoring::profile::should_continue_to_stage3;
+
+    // Score 37.0 is within ±5 of High boundary at 35.0
+    assert!(should_continue_to_stage3(37.0));
 }

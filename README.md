@@ -168,6 +168,15 @@ Google's Perspective API is available as a fallback by setting
 `CHARCOAL_SCORER=perspective` in your `.env` file (requires a
 `PERSPECTIVE_API_KEY`). Note: Perspective API is sunsetting December 2026.
 
+### Ensemble scoring (optional)
+
+When `OPENAI_API_KEY` is set, Charcoal runs both the ONNX model and OpenAI's
+free Moderation API concurrently. When both classifiers agree, their scores
+are averaged. When they disagree (difference > 0.25), the lower score is used
+by default — this reduces false positives from reclaimed language and cultural
+context that a single model may misclassify. No env var = ONNX-only (same as
+before).
+
 ## PostgreSQL backend (optional)
 
 Charcoal uses SQLite by default. For server deployments you can switch to

@@ -456,6 +456,11 @@ pub async fn callback(
         return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Could not register user");
     }
 
+    // Update last login timestamp
+    if let Err(e) = state.db.update_last_login(&authenticated_did).await {
+        tracing::warn!("Failed to update last_login_at: {e}");
+    }
+
     // Store tokens in-memory for future XRPC calls (muting/blocking milestone).
     // TokenResponse doesn't derive Serialize, so store the fields we need manually.
     *state.oauth_tokens.write().await = Some(serde_json::json!({

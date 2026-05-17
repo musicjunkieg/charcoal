@@ -10,7 +10,10 @@
 use anyhow::Result;
 use rusqlite::{params, Connection};
 
-use super::models::{AccountScore, AmplificationEvent, ThreatTier, ToxicPost};
+use super::models::{
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
+    UserLabel, UserRow,
+};
 
 // --- Users ---
 
@@ -145,8 +148,8 @@ pub fn get_embedding(conn: &Connection, user_did: &str) -> Result<Option<Vec<f64
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -156,7 +159,11 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             posts_analyzed = ?8,
             top_toxic_posts = ?9,
             scored_at = datetime('now'),
-            behavioral_signals = ?10",
+            behavioral_signals = ?10,
+            context_score = ?11,
+            graph_distance = ?12,
+            fingerprint_quality = ?13,
+            scoring_confidence = ?14",
         params![
             user_did,
             score.did,
@@ -168,6 +175,10 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             score.posts_analyzed,
             top_posts_json,
             score.behavioral_signals,
+            score.context_score,
+            score.graph_distance,
+            score.fingerprint_quality,
+            score.scoring_confidence,
         ],
     )?;
     Ok(())
@@ -181,7 +192,8 @@ pub fn get_ranked_threats(
 ) -> Result<Vec<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
+                graph_distance, fingerprint_quality, scoring_confidence, context_score
          FROM account_scores
          WHERE user_did = ?1 AND threat_score >= ?2
          ORDER BY threat_score DESC",
@@ -206,6 +218,10 @@ pub fn get_ranked_threats(
             top_toxic_posts,
             scored_at: row.get(8)?,
             behavioral_signals: row.get(9)?,
+            context_score: row.get(13)?,
+            graph_distance: row.get(10)?,
+            fingerprint_quality: row.get(11)?,
+            scoring_confidence: row.get(12)?,
         })
     })?;
 
@@ -255,8 +271,8 @@ pub fn insert_amplification_event_with_detected_at(
     conn.execute(
         "INSERT INTO amplification_events
             (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
-             amplifier_post_uri, amplifier_text, detected_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             amplifier_post_uri, amplifier_text, detected_at, original_post_text, context_score)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             user_did,
             event.event_type,
@@ -266,6 +282,8 @@ pub fn insert_amplification_event_with_detected_at(
             event.amplifier_post_uri,
             event.amplifier_text,
             event.detected_at,
+            event.original_post_text,
+            event.context_score,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -282,12 +300,14 @@ pub fn insert_amplification_event(
     original_post_uri: &str,
     amplifier_post_uri: Option<&str>,
     amplifier_text: Option<&str>,
+    original_post_text: Option<&str>,
+    context_score: Option<f64>,
 ) -> Result<i64> {
     conn.execute(
         "INSERT INTO amplification_events
             (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
-             amplifier_post_uri, amplifier_text)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             amplifier_post_uri, amplifier_text, original_post_text, context_score)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             user_did,
             event_type,
@@ -296,6 +316,8 @@ pub fn insert_amplification_event(
             original_post_uri,
             amplifier_post_uri,
             amplifier_text,
+            original_post_text,
+            context_score,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -309,7 +331,8 @@ pub fn get_recent_events(
 ) -> Result<Vec<AmplificationEvent>> {
     let mut stmt = conn.prepare(
         "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
-                amplifier_post_uri, amplifier_text, detected_at, followers_fetched, followers_scored
+                amplifier_post_uri, amplifier_text, detected_at, followers_fetched, followers_scored,
+                original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1
          ORDER BY detected_at DESC
@@ -328,6 +351,8 @@ pub fn get_recent_events(
             detected_at: row.get(7)?,
             followers_fetched: row.get::<_, i32>(8)? != 0,
             followers_scored: row.get::<_, i32>(9)? != 0,
+            original_post_text: row.get(10)?,
+            context_score: row.get(11)?,
         })
     })?;
 
@@ -353,6 +378,44 @@ pub fn get_events_for_pile_on(
 
     let rows = stmt.query_map(params![user_did], |row| {
         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
+/// Get all amplification events for a specific amplifier DID.
+pub fn get_events_by_amplifier(
+    conn: &Connection,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<Vec<AmplificationEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                amplifier_post_uri, amplifier_text, detected_at, followers_fetched,
+                followers_scored, original_post_text, context_score
+         FROM amplification_events
+         WHERE user_did = ?1 AND amplifier_did = ?2
+         ORDER BY detected_at DESC",
+    )?;
+    let rows = stmt.query_map(params![user_did, amplifier_did], |row| {
+        Ok(AmplificationEvent {
+            id: row.get(0)?,
+            event_type: row.get(1)?,
+            amplifier_did: row.get(2)?,
+            amplifier_handle: row.get(3)?,
+            original_post_uri: row.get(4)?,
+            amplifier_post_uri: row.get(5)?,
+            amplifier_text: row.get(6)?,
+            detected_at: row.get(7)?,
+            followers_fetched: row.get::<_, i32>(8)? != 0,
+            followers_scored: row.get::<_, i32>(9)? != 0,
+            original_post_text: row.get(10)?,
+            context_score: row.get(11)?,
+        })
     })?;
 
     let mut events = Vec::new();
@@ -401,7 +464,8 @@ pub fn get_account_by_handle(
 ) -> Result<Option<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
+                fingerprint_quality, scoring_confidence, context_score, graph_distance
          FROM account_scores
          WHERE user_did = ?1 AND lower(handle) = lower(?2)
          LIMIT 1",
@@ -424,6 +488,10 @@ pub fn get_account_by_handle(
                 top_toxic_posts,
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
+                context_score: row.get(12)?,
+                graph_distance: row.get(13)?,
+                fingerprint_quality: row.get(10)?,
+                scoring_confidence: row.get(11)?,
             })
         })
         .optional()?;
@@ -438,7 +506,8 @@ pub fn get_account_by_did(
 ) -> Result<Option<AccountScore>> {
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
-                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals
+                posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
+                fingerprint_quality, scoring_confidence, context_score, graph_distance
          FROM account_scores
          WHERE user_did = ?1 AND did = ?2
          LIMIT 1",
@@ -461,10 +530,337 @@ pub fn get_account_by_did(
                 top_toxic_posts,
                 scored_at: row.get(8)?,
                 behavioral_signals: row.get(9)?,
+                context_score: row.get(12)?,
+                graph_distance: row.get(13)?,
+                fingerprint_quality: row.get(10)?,
+                scoring_confidence: row.get(11)?,
             })
         })
         .optional()?;
     Ok(result)
+}
+
+// --- User labels ---
+
+/// Create or update a user-provided label for a target account.
+pub fn upsert_user_label(
+    conn: &Connection,
+    user_did: &str,
+    target_did: &str,
+    label: &str,
+    notes: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO user_labels (user_did, target_did, label, labeled_at, notes)
+         VALUES (?1, ?2, ?3, datetime('now'), ?4)
+         ON CONFLICT(user_did, target_did) DO UPDATE SET
+            label = ?3, labeled_at = datetime('now'), notes = ?4",
+        params![user_did, target_did, label, notes],
+    )?;
+    Ok(())
+}
+
+/// Get the user-provided label for a target account, if one exists.
+pub fn get_user_label(
+    conn: &Connection,
+    user_did: &str,
+    target_did: &str,
+) -> Result<Option<UserLabel>> {
+    let mut stmt = conn.prepare(
+        "SELECT user_did, target_did, label, labeled_at, notes
+         FROM user_labels
+         WHERE user_did = ?1 AND target_did = ?2",
+    )?;
+    let result = stmt
+        .query_row(params![user_did, target_did], |row| {
+            Ok(UserLabel {
+                user_did: row.get(0)?,
+                target_did: row.get(1)?,
+                label: row.get(2)?,
+                labeled_at: row.get(3)?,
+                notes: row.get(4)?,
+            })
+        })
+        .optional()?;
+    Ok(result)
+}
+
+/// Get scored accounts that have no user label, sorted by threat_score DESC.
+pub fn get_unlabeled_accounts(
+    conn: &Connection,
+    user_did: &str,
+    limit: i64,
+) -> Result<Vec<AccountScore>> {
+    let mut stmt = conn.prepare(
+        "SELECT a.did, a.handle, a.toxicity_score, a.topic_overlap, a.threat_score, a.threat_tier,
+                a.posts_analyzed, a.top_toxic_posts, a.scored_at, a.behavioral_signals,
+                a.context_score, a.fingerprint_quality, a.scoring_confidence
+         FROM account_scores a
+         LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
+         WHERE a.user_did = ?1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
+         ORDER BY a.threat_score DESC
+         LIMIT ?2",
+    )?;
+
+    let rows = stmt.query_map(params![user_did, limit], |row| {
+        let top_posts_json: String = row.get(7)?;
+        let top_toxic_posts: Vec<ToxicPost> =
+            serde_json::from_str(&top_posts_json).unwrap_or_default();
+        let threat_score: Option<f64> = row.get(4)?;
+        let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+        Ok(AccountScore {
+            did: row.get(0)?,
+            handle: row.get(1)?,
+            toxicity_score: row.get(2)?,
+            topic_overlap: row.get(3)?,
+            threat_score,
+            threat_tier,
+            posts_analyzed: row.get(6)?,
+            top_toxic_posts,
+            scored_at: row.get(8)?,
+            behavioral_signals: row.get(9)?,
+            context_score: row.get(10)?,
+            graph_distance: None,
+            fingerprint_quality: row.get(11)?,
+            scoring_confidence: row.get(12)?,
+        })
+    })?;
+
+    let mut accounts = Vec::new();
+    for row in rows {
+        accounts.push(row?);
+    }
+    Ok(accounts)
+}
+
+/// Compute accuracy metrics comparing predicted tiers to user labels.
+///
+/// Tier ordering for comparison: high=3, elevated=2, watch=1, low=0, safe=0.
+pub fn get_accuracy_metrics(conn: &Connection, user_did: &str) -> Result<AccuracyMetrics> {
+    // Helper to convert a tier/label string to a numeric rank for comparison.
+    fn tier_rank(tier: &str) -> i64 {
+        match tier {
+            "high" => 3,
+            "elevated" => 2,
+            "watch" => 1,
+            _ => 0, // "low" and "safe" both rank 0
+        }
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT lower(a.threat_tier), lower(ul.label)
+         FROM user_labels ul
+         INNER JOIN account_scores a ON a.user_did = ul.user_did AND a.did = ul.target_did
+         WHERE ul.user_did = ?1",
+    )?;
+
+    let rows = stmt.query_map(params![user_did], |row| {
+        let tier: String = row.get::<_, Option<String>>(0)?.unwrap_or_default();
+        let label: String = row.get(1)?;
+        Ok((tier, label))
+    })?;
+
+    let mut total_labeled: i64 = 0;
+    let mut exact_matches: i64 = 0;
+    let mut overscored: i64 = 0;
+    let mut underscored: i64 = 0;
+
+    for row in rows {
+        let (tier, label) = row?;
+        total_labeled += 1;
+
+        let predicted = tier_rank(&tier);
+        let actual = tier_rank(&label);
+
+        if predicted == actual {
+            exact_matches += 1;
+        } else if predicted > actual {
+            overscored += 1;
+        } else {
+            underscored += 1;
+        }
+    }
+
+    let accuracy = if total_labeled > 0 {
+        exact_matches as f64 / total_labeled as f64
+    } else {
+        0.0
+    };
+
+    Ok(AccuracyMetrics {
+        total_labeled,
+        exact_matches,
+        overscored,
+        underscored,
+        accuracy,
+    })
+}
+
+// --- Inferred pairs ---
+
+/// Delete all inferred pairs for a target account (before re-inferring).
+pub fn delete_inferred_pairs(conn: &Connection, user_did: &str, target_did: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM inferred_pairs WHERE user_did = ?1 AND target_did = ?2",
+        params![user_did, target_did],
+    )?;
+    Ok(())
+}
+
+/// Insert a topic-matched post pair for NLI scoring.
+#[allow(clippy::too_many_arguments)]
+pub fn insert_inferred_pair(
+    conn: &Connection,
+    user_did: &str,
+    target_did: &str,
+    target_post_text: &str,
+    target_post_uri: &str,
+    user_post_text: &str,
+    user_post_uri: &str,
+    similarity: f64,
+    context_score: Option<f64>,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO inferred_pairs
+            (user_did, target_did, target_post_text, target_post_uri,
+             user_post_text, user_post_uri, similarity, context_score)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(user_did, target_did, target_post_uri, user_post_uri)
+         DO UPDATE SET similarity = ?7, context_score = ?8",
+        params![
+            user_did,
+            target_did,
+            target_post_text,
+            target_post_uri,
+            user_post_text,
+            user_post_uri,
+            similarity,
+            context_score,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Get all inferred pairs for a target account.
+pub fn get_inferred_pairs(
+    conn: &Connection,
+    user_did: &str,
+    target_did: &str,
+) -> Result<Vec<InferredPair>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, user_did, target_did, target_post_text, target_post_uri,
+                user_post_text, user_post_uri, similarity, context_score, created_at
+         FROM inferred_pairs
+         WHERE user_did = ?1 AND target_did = ?2
+         ORDER BY similarity DESC",
+    )?;
+
+    let rows = stmt.query_map(params![user_did, target_did], |row| {
+        Ok(InferredPair {
+            id: row.get(0)?,
+            user_did: row.get(1)?,
+            target_did: row.get(2)?,
+            target_post_text: row.get(3)?,
+            target_post_uri: row.get(4)?,
+            user_post_text: row.get(5)?,
+            user_post_uri: row.get(6)?,
+            similarity: row.get(7)?,
+            context_score: row.get(8)?,
+            created_at: row.get(9)?,
+        })
+    })?;
+
+    let mut pairs = Vec::new();
+    for row in rows {
+        pairs.push(row?);
+    }
+    Ok(pairs)
+}
+
+// --- Admin dashboard ---
+
+/// List all users in the system, ordered by creation date descending.
+pub fn list_users(conn: &Connection) -> Result<Vec<UserRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, created_at, last_login_at FROM users ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(UserRow {
+            did: row.get(0)?,
+            handle: row.get(1)?,
+            created_at: row.get(2)?,
+            last_login_at: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Count scored accounts for a user (only those with a non-null threat_score).
+pub fn get_scored_account_count(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_score IS NOT NULL",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Check if a topic fingerprint exists for a user.
+pub fn has_fingerprint(conn: &Connection, user_did: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM topic_fingerprint WHERE user_did = ?1",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Delete all data for a user (cascade across all user-scoped tables).
+pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM inferred_pairs WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM user_labels WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM amplification_events WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM account_scores WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM topic_fingerprint WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
+    Ok(())
+}
+
+/// Update last_login_at timestamp for a user.
+pub fn update_last_login(conn: &Connection, did: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET last_login_at = datetime('now') WHERE did = ?1",
+        params![did],
+    )?;
+    Ok(())
+}
+
+/// Get all DIDs that have been scored for a user.
+pub fn get_all_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT did FROM account_scores WHERE user_did = ?1")?;
+    let dids = stmt
+        .query_map(params![user_did], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<String>, _>>()?;
+    Ok(dids)
 }
 
 // rusqlite's optional() helper — converts "no rows" into None
@@ -583,6 +979,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -673,6 +1073,8 @@ mod tests {
             "at://did:plc:me/app.bsky.feed.post/abc",
             Some("at://did:plc:xyz/app.bsky.feed.post/def"),
             Some("lol look at this"),
+            None,
+            None,
         )
         .unwrap();
         assert!(id > 0);
@@ -698,6 +1100,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -727,6 +1133,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -758,6 +1168,10 @@ mod tests {
             top_toxic_posts: vec![],
             scored_at: String::new(),
             behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
         };
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
@@ -778,6 +1192,8 @@ mod tests {
             "at://did:plc:me/app.bsky.feed.post/1",
             None,
             None,
+            None,
+            None,
         )
         .unwrap();
         insert_amplification_event(
@@ -787,6 +1203,8 @@ mod tests {
             "did:plc:b",
             "b.bsky.social",
             "at://did:plc:me/app.bsky.feed.post/1",
+            None,
+            None,
             None,
             None,
         )
@@ -816,6 +1234,10 @@ mod tests {
                 top_toxic_posts: vec![],
                 scored_at: String::new(),
                 behavioral_signals: Some(format!(r#"{{"avg_engagement":{eng}}}"#)),
+                context_score: None,
+                graph_distance: None,
+                fingerprint_quality: None,
+                scoring_confidence: None,
             };
             upsert_account_score(&conn, TEST_USER, &score).unwrap();
         }

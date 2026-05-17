@@ -11,7 +11,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::models::{AccountScore, AmplificationEvent};
+use super::models::{
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+};
 
 #[async_trait]
 pub trait Database: Send + Sync {
@@ -84,6 +86,8 @@ pub trait Database: Send + Sync {
         original_post_uri: &str,
         amplifier_post_uri: Option<&str>,
         amplifier_text: Option<&str>,
+        original_post_text: Option<&str>,
+        context_score: Option<f64>,
     ) -> Result<i64>;
 
     /// Get recent amplification events for a user, ordered by detection time descending.
@@ -97,6 +101,13 @@ pub trait Database: Send + Sync {
     /// Returns (amplifier_did, original_post_uri, detected_at) tuples.
     async fn get_events_for_pile_on(&self, user_did: &str)
         -> Result<Vec<(String, String, String)>>;
+
+    /// Get all amplification events for a specific amplifier DID.
+    async fn get_events_by_amplifier(
+        &self,
+        user_did: &str,
+        amplifier_did: &str,
+    ) -> Result<Vec<AmplificationEvent>>;
 
     /// Insert an amplification event for a user, preserving its original detected_at timestamp.
     /// Used only by the migrate command so historical events keep their real timestamps
@@ -123,4 +134,71 @@ pub trait Database: Send + Sync {
 
     /// Get a single account score by DID, scoped to a user.
     async fn get_account_by_did(&self, user_did: &str, did: &str) -> Result<Option<AccountScore>>;
+
+    // --- User labels (ground truth for accuracy measurement) ---
+
+    /// Create or update a user-provided label for a target account.
+    async fn upsert_user_label(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        label: &str,
+        notes: Option<&str>,
+    ) -> Result<()>;
+
+    /// Get the user-provided label for a target account, if one exists.
+    async fn get_user_label(&self, user_did: &str, target_did: &str) -> Result<Option<UserLabel>>;
+
+    /// Get scored accounts that have no user label, sorted by threat_score DESC.
+    async fn get_unlabeled_accounts(&self, user_did: &str, limit: i64)
+        -> Result<Vec<AccountScore>>;
+
+    /// Compute accuracy metrics comparing predicted tiers to user labels.
+    async fn get_accuracy_metrics(&self, user_did: &str) -> Result<AccuracyMetrics>;
+
+    // --- Inferred pairs (topic-matched post pairs for NLI scoring) ---
+
+    /// Delete all inferred pairs for a target account (before re-inferring).
+    async fn delete_inferred_pairs(&self, user_did: &str, target_did: &str) -> Result<()>;
+
+    /// Insert a topic-matched post pair for NLI scoring.
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_inferred_pair(
+        &self,
+        user_did: &str,
+        target_did: &str,
+        target_post_text: &str,
+        target_post_uri: &str,
+        user_post_text: &str,
+        user_post_uri: &str,
+        similarity: f64,
+        context_score: Option<f64>,
+    ) -> Result<i64>;
+
+    /// Get all inferred pairs for a target account.
+    async fn get_inferred_pairs(
+        &self,
+        user_did: &str,
+        target_did: &str,
+    ) -> Result<Vec<InferredPair>>;
+
+    // --- Admin dashboard ---
+
+    /// List all users in the system.
+    async fn list_users(&self) -> Result<Vec<UserRow>>;
+
+    /// Count scored accounts for a user.
+    async fn get_scored_account_count(&self, user_did: &str) -> Result<i64>;
+
+    /// Check if a topic fingerprint exists for a user.
+    async fn has_fingerprint(&self, user_did: &str) -> Result<bool>;
+
+    /// Delete all data for a user (cascade across all user-scoped tables).
+    async fn delete_user_data(&self, user_did: &str) -> Result<()>;
+
+    /// Update last_login_at timestamp for a user.
+    async fn update_last_login(&self, did: &str) -> Result<()>;
+
+    /// Get all DIDs that have been scored for a user (for deduplication during discovery).
+    async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
 }

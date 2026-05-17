@@ -16,11 +16,15 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use std::collections::HashMap;
+
 use crate::bluesky::amplification::AmplificationNotification;
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
 use crate::bluesky::posts;
+use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
+use crate::scoring::nli::NliScorer;
 use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -49,6 +53,11 @@ pub async fn run(
     events: Vec<AmplificationNotification>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
+    original_text_cache: &std::collections::HashMap<String, String>,
+    nli_scorer: Option<&NliScorer>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    data_dir: Option<&std::path::Path>,
+    graph_distances: &HashMap<String, GraphDistance>,
 ) -> Result<(usize, usize)> {
     info!(
         total_events = events.len(),
@@ -63,34 +72,82 @@ pub async fn run(
     )
     .await?;
 
-    // Store each event in the database, fetching quote text when available
+    // Store each event in the database, fetching quote text when available.
+    // Look up original post text from the cache for all event types.
     for event in &events {
-        let mut quote_text: Option<String> = None;
+        let mut amplifier_text: Option<String> = None;
         let mut quote_toxicity: Option<f64> = None;
 
-        // For quote events, fetch the quote post text and score it
-        if event.event_type == "quote" && analyze_followers {
+        // Look up the original (protected user's) post text from the cache
+        // (resolved before scoring so the ensemble scorer can use it as context)
+        let original_post_text = event
+            .original_post_uri
+            .as_deref()
+            .and_then(|uri| original_text_cache.get(uri))
+            .map(|s| s.as_str());
+
+        // For quote and reply events, fetch the amplifier's text and score it
+        if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
             match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {
-                    // Score the quote text for toxicity
-                    match scorer.score_text(&text).await {
+                    match scorer.score_with_context(&text, original_post_text).await {
                         Ok(result) => {
                             quote_toxicity = Some(result.toxicity);
                         }
                         Err(e) => {
-                            warn!(error = %e, "Failed to score quote text");
+                            warn!(error = %e, "Failed to score amplifier text");
                         }
                     }
-                    quote_text = Some(text);
+                    amplifier_text = Some(text);
                 }
                 Ok(None) => {
-                    info!(uri = event.amplifier_post_uri, "Quote post text not found");
+                    info!(
+                        uri = event.amplifier_post_uri,
+                        "Amplifier post text not found"
+                    );
                 }
                 Err(e) => {
-                    warn!(error = %e, "Failed to fetch quote post text");
+                    warn!(error = %e, "Failed to fetch amplifier post text");
                 }
             }
         }
+
+        // Score the interaction pair via NLI when both texts are available
+        let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {
+            (Some(nli), Some(amp_text), Some(orig_text)) => {
+                match nli.score_pair(orig_text, amp_text).await {
+                    Ok((score, hypothesis_scores)) => {
+                        info!(
+                            handle = event.amplifier_handle,
+                            context_score = format!("{:.3}", score),
+                            "NLI scored event pair"
+                        );
+                        if let Some(dir) = data_dir {
+                            crate::scoring::nli_audit::log_nli_audit(
+                                &crate::scoring::nli_audit::NliAuditEntry {
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                    target_did: event.amplifier_did.clone(),
+                                    target_handle: event.amplifier_handle.clone(),
+                                    pair_type: "direct".to_string(),
+                                    original_text: orig_text.to_string(),
+                                    response_text: amp_text.to_string(),
+                                    hypothesis_scores,
+                                    hostility_score: score,
+                                    similarity: None,
+                                },
+                                Some(dir),
+                            );
+                        }
+                        Some(score)
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "NLI scoring failed for event pair");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
 
         db.insert_amplification_event(
             user_did,
@@ -99,21 +156,24 @@ pub async fn run(
             &event.amplifier_handle,
             event.original_post_uri.as_deref().unwrap_or("unknown"),
             Some(&event.amplifier_post_uri),
-            quote_text.as_deref(),
+            amplifier_text.as_deref(),
+            original_post_text,
+            context_score,
         )
         .await?;
 
-        // Display the event with quote context if available
-        let event_label = if event.event_type == "quote" {
-            "Quote"
-        } else {
-            "Repost"
+        let event_label = match event.event_type.as_str() {
+            "quote" => "Quote",
+            "repost" => "Repost",
+            "like" => "Like",
+            "reply" => "Reply",
+            other => other,
         };
         println!(
             "  {} by @{} ({})",
             event_label, event.amplifier_handle, event.indexed_at,
         );
-        if let Some(ref text) = quote_text {
+        if let Some(ref text) = amplifier_text {
             let preview = crate::output::truncate_chars(text, 120);
             let tox_str = quote_toxicity
                 .map(|t| format!(" [tox: {:.2}]", t))
@@ -122,32 +182,121 @@ pub async fn run(
         }
     }
 
+    // Phase B: Score amplifiers via build_profile() with direct NLI pairs.
+    //
+    // Collect unique amplifier DIDs and their text pairs from stored events,
+    // then run full profile builds. This gives each amplifier a threat tier
+    // informed by their actual interactions with the protected user.
     let mut accounts_scored = 0;
+    {
+        let mut amplifier_handles: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
 
-    // If --analyze flag is set, score the followers of each quote amplifier.
-    // Reposts are recorded as events but don't trigger follower analysis —
-    // quotes are the primary harassment vector (hostile commentary framing
-    // the original post), while reposts are usually supportive sharing.
+        for event in &events {
+            amplifier_handles
+                .entry(event.amplifier_did.clone())
+                .or_insert_with(|| event.amplifier_handle.clone());
+        }
+
+        let amplifier_count = amplifier_handles.len();
+        if amplifier_count > 0 {
+            println!("\nScoring {} amplifiers…", amplifier_count);
+
+            for (did, handle) in &amplifier_handles {
+                if handle == protected_handle {
+                    continue;
+                }
+                if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
+                    continue;
+                }
+
+                // Gather direct text pairs from stored events, deduplicating
+                // across scans (the same event can be recorded multiple times)
+                let mut seen_pairs: std::collections::HashSet<(String, String)> =
+                    std::collections::HashSet::new();
+                let mut pairs: Vec<(String, String)> = Vec::new();
+                if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
+                    for ev in db_events {
+                        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
+                        {
+                            if !orig.is_empty()
+                                && !amp.is_empty()
+                                && seen_pairs.insert((orig.clone(), amp.clone()))
+                            {
+                                pairs.push((orig, amp));
+                            }
+                        }
+                    }
+                }
+
+                match profile::build_profile(
+                    client,
+                    scorer,
+                    handle,
+                    did,
+                    protected_fingerprint,
+                    weights,
+                    embedder,
+                    protected_embedding,
+                    median_engagement,
+                    pile_on_dids,
+                    nli_scorer,
+                    None, // No inferred pairs — using direct pairs
+                    Some(&pairs),
+                    data_dir,
+                    graph_distances.get(did).copied(),
+                )
+                .await
+                {
+                    Ok(score) => {
+                        db.upsert_account_score(user_did, &score).await?;
+                        accounts_scored += 1;
+                        println!(
+                            "  @{}: {} (context: {})",
+                            handle,
+                            score.threat_tier.as_deref().unwrap_or("?"),
+                            score
+                                .context_score
+                                .map(|s| format!("{:.2}", s))
+                                .unwrap_or_else(|| "n/a".to_string())
+                        );
+                    }
+                    Err(e) => {
+                        warn!(handle = handle.as_str(), error = %e, "Failed to score amplifier");
+                    }
+                }
+            }
+        }
+    }
+
+    // If --analyze flag is set, score the followers of each quote/reply amplifier.
+    // Quotes and replies are direct hostile engagement vectors that warrant
+    // follower analysis. Reposts and likes are recorded but don't trigger
+    // follower analysis — reposts are usually supportive sharing, and likes
+    // are low-signal engagement.
     if analyze_followers && !events.is_empty() {
-        let quote_events: Vec<_> = events.iter().filter(|e| e.event_type == "quote").collect();
-        let repost_count = events.len() - quote_events.len();
+        let scorable_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "quote" || e.event_type == "reply")
+            .collect();
+        let skipped_count = events.len() - scorable_events.len();
 
-        if repost_count > 0 {
+        if skipped_count > 0 {
             info!(
-                reposts_skipped = repost_count,
-                "Skipping follower analysis for reposts"
+                skipped = skipped_count,
+                "Skipping follower analysis for reposts/likes"
             );
             println!(
-                "  Skipping {} reposts (follower analysis is quote-only)",
-                repost_count
+                "  Skipping {} reposts/likes (follower analysis is quote/reply-only)",
+                skipped_count
             );
         }
 
-        if quote_events.is_empty() {
-            info!("No quote events to analyze");
+        if scorable_events.is_empty() {
+            info!("No quote/reply events to analyze");
         }
 
-        for event in &quote_events {
+        for event in &scorable_events {
             println!("\nFetching followers of @{}...", event.amplifier_handle);
 
             match followers::fetch_followers(
@@ -191,12 +340,17 @@ pub async fn run(
                             .unwrap(),
                     );
 
-                    // Phase 2: Score in parallel — each future does network I/O + ONNX inference
-                    // Results are written incrementally so a crash doesn't lose everything
+                    // Phase 2: Two-pass scoring in parallel
+                    // Pass 1: score without NLI (fast). If raw_score >= 8.0 (Watch threshold),
+                    // pass 2 re-scores with NLI inferred pairs. Falls back to pass 1 on panic.
+                    let nli_ref = nli_scorer;
+                    let ppwe_ref = protected_posts_with_embeddings;
+
                     let mut stream = stream::iter(stale_followers.into_iter().map(|follower| {
                         let handle_for_panic = follower.handle.clone();
                         async move {
-                            AssertUnwindSafe(profile::build_profile(
+                            // Pass 1: score without NLI (fast)
+                            let result = AssertUnwindSafe(profile::build_profile(
                                 client,
                                 scorer,
                                 &follower.handle,
@@ -207,12 +361,54 @@ pub async fn run(
                                 protected_embedding,
                                 median_engagement,
                                 pile_on_dids,
+                                None, // No NLI in pass 1
+                                None, // No protected post embeddings
+                                None, // No direct pairs
+                                None, // No audit logging in pass 1
+                                None, // No graph distance for followers
                             ))
                             .catch_unwind()
                             .await
                             .unwrap_or_else(|_| {
                                 Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
-                            })
+                            });
+
+                            match result {
+                                Ok(ref score)
+                                    if score.threat_score.unwrap_or(0.0) >= 8.0
+                                        && nli_ref.is_some()
+                                        && ppwe_ref.is_some() =>
+                                {
+                                    // Pass 2: above Watch threshold — re-score with NLI
+                                    info!(
+                                        handle = follower.handle.as_str(),
+                                        raw_score =
+                                            format!("{:.1}", score.threat_score.unwrap_or(0.0)),
+                                        "Follower above Watch threshold, running NLI"
+                                    );
+                                    AssertUnwindSafe(profile::build_profile(
+                                        client,
+                                        scorer,
+                                        &follower.handle,
+                                        &follower.did,
+                                        protected_fingerprint,
+                                        weights,
+                                        embedder,
+                                        protected_embedding,
+                                        median_engagement,
+                                        pile_on_dids,
+                                        nli_ref,  // NLI enabled
+                                        ppwe_ref, // Inferred pairs
+                                        None,     // No direct pairs
+                                        data_dir, // Audit logging
+                                        None,     // No graph distance for followers
+                                    ))
+                                    .catch_unwind()
+                                    .await
+                                    .unwrap_or(result) // Fall back to pass 1 on panic
+                                }
+                                other => other,
+                            }
                         }
                     }))
                     .buffer_unordered(concurrency);

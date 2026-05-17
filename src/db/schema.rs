@@ -211,6 +211,81 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // Migration v5: contextual scoring support. Adds new columns for NLI
+    // pair scoring, a user_labels table for ground truth, and an
+    // inferred_pairs table for topic-matched post pairs.
+    run_migration(conn, 5, |c| {
+        c.execute_batch(
+            "
+            BEGIN;
+
+            -- Add original post text and NLI context score to amplification events
+            ALTER TABLE amplification_events ADD COLUMN original_post_text TEXT;
+            ALTER TABLE amplification_events ADD COLUMN context_score REAL;
+
+            -- Add NLI context score to account scores
+            ALTER TABLE account_scores ADD COLUMN context_score REAL;
+
+            -- User-provided labels for scoring accuracy measurement
+            CREATE TABLE IF NOT EXISTS user_labels (
+                user_did TEXT NOT NULL,
+                target_did TEXT NOT NULL,
+                label TEXT NOT NULL,
+                labeled_at TEXT NOT NULL DEFAULT (datetime('now')),
+                notes TEXT,
+                PRIMARY KEY (user_did, target_did)
+            );
+
+            -- Topic-matched post pairs for second-degree NLI scoring
+            CREATE TABLE IF NOT EXISTS inferred_pairs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_did TEXT NOT NULL,
+                target_did TEXT NOT NULL,
+                target_post_text TEXT NOT NULL,
+                target_post_uri TEXT NOT NULL,
+                user_post_text TEXT NOT NULL,
+                user_post_uri TEXT NOT NULL,
+                similarity REAL NOT NULL,
+                context_score REAL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_inferred_pairs_target
+                ON inferred_pairs(user_did, target_did);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_inferred_pairs_dedup
+                ON inferred_pairs(user_did, target_did, target_post_uri, user_post_uri);
+
+            COMMIT;
+            ",
+        )
+    })?;
+
+    // Migration v6: add graph_distance column to account_scores.
+    // Stores the social graph relationship label (Mutual follow, Follows you,
+    // You follow, Stranger) for scoring weight adjustments.
+    run_migration(conn, 6, |c| {
+        c.execute_batch("ALTER TABLE account_scores ADD COLUMN graph_distance TEXT;")
+    })?;
+
+    // Migration v7: add last_login_at to users table.
+    // Tracks when each user last authenticated via OAuth, used by admin dashboard.
+    run_migration(conn, 7, |c| {
+        c.execute_batch("ALTER TABLE users ADD COLUMN last_login_at TEXT;")?;
+        Ok(())
+    })?;
+
+    // Migration v8: add fingerprint_quality and scoring_confidence to account_scores.
+    // fingerprint_quality tracks whether the fingerprint was built from originals only
+    // (normal), mixed (degraded), or insufficient data (unreliable).
+    // scoring_confidence tracks the depth of analysis (low/standard/high).
+    run_migration(conn, 8, |c| {
+        c.execute_batch(
+            "
+            ALTER TABLE account_scores ADD COLUMN fingerprint_quality TEXT;
+            ALTER TABLE account_scores ADD COLUMN scoring_confidence TEXT;
+            ",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -265,8 +340,9 @@ mod tests {
         create_tables(&conn).unwrap();
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
-        // amplification_events, scan_state, users = 6 tables
-        assert_eq!(count, 6i64);
+        // amplification_events, scan_state, users, user_labels,
+        // inferred_pairs = 8 tables
+        assert_eq!(count, 8i64);
     }
 
     #[test]
@@ -338,7 +414,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]
@@ -438,8 +514,9 @@ mod tests {
         create_tables(&conn).unwrap();
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
-        // amplification_events, scan_state, users = 6 tables
-        assert_eq!(count, 6i64);
+        // amplification_events, scan_state, users, user_labels,
+        // inferred_pairs = 8 tables
+        assert_eq!(count, 8i64);
 
         // Verify schema_version includes v4
         let versions: Vec<i64> = conn
@@ -449,6 +526,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

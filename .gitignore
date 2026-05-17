@@ -7,6 +7,10 @@
 # Environment secrets (but NOT .env.example — that's the template)
 /.env
 
+# Local credential files — these contain live API keys and must never be
+# committed. Code reads creds from env vars (see .env.example) only.
+refs/zentropi_info.txt
+
 # SQLite database files
 *.db
 *.db-wal
@@ -21,11 +25,16 @@
 # Research scratch files
 /docs/research/
 
-# Chainlink local state — DB and cache are local; export JSON is tracked
+# Chainlink local state — DB backed up to Tigris, no need to track exports
 .chainlink/issues.db
 .chainlink/.cache/
-# issues-export.json is explicitly tracked (see pre-commit hook)
+.chainlink/issues-export.json
 
 # Git worktrees (local ephemeral state)
 .worktrees/
 .claude/worktrees/
+
+# Downloaded ML model artifacts — fetched via `charcoal download-model`,
+# never committed (the binary blobs are ~210 MB and derivable from
+# upstream Hugging Face releases)
+models/

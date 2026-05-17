@@ -47,6 +47,7 @@ pub async fn run(
     protected_embedding: Option<&[f64]>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
+    data_dir: Option<&std::path::Path>,
 ) -> Result<(usize, usize)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
@@ -144,6 +145,11 @@ pub async fn run(
                 protected_embedding,
                 median_engagement,
                 pile_on_dids,
+                None, // NLI scorer not used for sweep scoring
+                None, // No protected post embeddings for sweep
+                None, // No direct pairs for sweep
+                data_dir,
+                None, // No graph distance for sweep
             ))
             .catch_unwind()
             .await
@@ -170,4 +176,125 @@ pub async fn run(
     pb.finish_and_clear();
 
     Ok((second_degree_pool.len(), accounts_scored))
+}
+
+/// Run topic-first discovery sweep.
+///
+/// Instead of walking the follower graph, searches for posts matching the
+/// protected user's topic fingerprint via searchPosts. Deduplicates against
+/// already-scored accounts and scores new discoveries.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_topic_first(
+    client: &PublicAtpClient,
+    scorer: &dyn ToxicityScorer,
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    concurrency: usize,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
+    median_engagement: f64,
+    pile_on_dids: &std::collections::HashSet<String>,
+    data_dir: Option<&std::path::Path>,
+    keywords_per_cycle: usize,
+    results_per_keyword: usize,
+) -> Result<(usize, usize)> {
+    // Step 1: Get already-scored DIDs for deduplication
+    let scored_dids: HashSet<String> = db
+        .get_all_scored_dids(user_did)
+        .await?
+        .into_iter()
+        .collect();
+
+    println!(
+        "  {} accounts already scored, searching for new discoveries...",
+        scored_dids.len()
+    );
+
+    // Step 2: Discover new accounts via topic search
+    let new_dids = crate::discovery::topic_search::discover_by_topic(
+        client,
+        protected_fingerprint,
+        &scored_dids,
+        keywords_per_cycle,
+        results_per_keyword,
+    )
+    .await?;
+
+    println!("  Found {} new accounts to score", new_dids.len());
+
+    if new_dids.is_empty() {
+        return Ok((0, 0));
+    }
+
+    // Step 3: Resolve DIDs to handles via getProfiles (batch, 25 per call)
+    let did_handle_map =
+        crate::bluesky::profiles::resolve_dids_to_handles(client, &new_dids).await?;
+
+    let did_handle_pairs: Vec<(String, String)> = did_handle_map.into_iter().collect();
+
+    println!(
+        "  Resolved {}/{} DIDs to handles",
+        did_handle_pairs.len(),
+        new_dids.len()
+    );
+
+    if did_handle_pairs.is_empty() {
+        return Ok((new_dids.len(), 0));
+    }
+
+    // Step 4: Score accounts in parallel (same pattern as existing sweep)
+    let pb = ProgressBar::new(did_handle_pairs.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  Scoring [{bar:30}] {pos}/{len} ({eta})")
+            .unwrap(),
+    );
+
+    let discovered = did_handle_pairs.len();
+
+    let mut stream = stream::iter(did_handle_pairs.into_iter().map(|(did, handle)| {
+        let handle_for_panic = handle.clone();
+        async move {
+            AssertUnwindSafe(profile::build_profile(
+                client,
+                scorer,
+                &handle,
+                &did,
+                protected_fingerprint,
+                weights,
+                embedder,
+                protected_embedding,
+                median_engagement,
+                pile_on_dids,
+                None, // No NLI for discovery sweep
+                None, // No protected post embeddings
+                None, // No direct pairs
+                data_dir,
+                None, // No graph distance for discovery
+            ))
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic)))
+        }
+    }))
+    .buffer_unordered(concurrency);
+
+    let mut accounts_scored = 0;
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(score) => {
+                db.upsert_account_score(user_did, &score).await?;
+                accounts_scored += 1;
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to score discovered account, skipping");
+            }
+        }
+        pb.inc(1);
+    }
+    pb.finish_and_clear();
+
+    Ok((discovered, accounts_scored))
 }

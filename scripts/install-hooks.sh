@@ -96,23 +96,23 @@ else
     echo "⚠️  Deciduous sync failed (non-blocking)"
 fi
 
-# ── 5. Upload DBs to Tigris blob storage ────────────────────────────
-if [ -n "$TIGRIS_BUCKET" ] && [ -n "$TIGRIS_ACCESS_KEY_ID" ] && [ -n "$TIGRIS_SECRET_ACCESS_KEY" ]; then
+# ── 5. Upload DBs to S3-compatible blob storage (Cloudflare R2, Backblaze B2, etc.) ──
+if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BACKUP_S3_SECRET_ACCESS_KEY" ] && [ -n "$BACKUP_S3_ENDPOINT" ]; then
     if ! command -v aws &>/dev/null; then
-        echo "⚠️  Tigris configured but aws CLI not found — skipping backup (run: sudo apt install awscli)"
+        echo "⚠️  Backup configured but aws CLI not found — skipping (run: brew install awscli)"
     else
-    echo "☁️  Pre-commit: backing up databases to Tigris..."
-    ENDPOINT="--endpoint-url=${TIGRIS_ENDPOINT:-https://fly.storage.tigris.dev} --region=auto"
+    echo "☁️  Pre-commit: backing up databases to $BACKUP_S3_BUCKET..."
+    ENDPOINT="--endpoint-url=$BACKUP_S3_ENDPOINT --region=${BACKUP_S3_REGION:-auto}"
 
-    export AWS_ACCESS_KEY_ID="$TIGRIS_ACCESS_KEY_ID"
-    export AWS_SECRET_ACCESS_KEY="$TIGRIS_SECRET_ACCESS_KEY"
-    S3="s3://$TIGRIS_BUCKET"
+    export AWS_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY_ID"
+    export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
+    S3="s3://$BACKUP_S3_BUCKET"
 
     BACKUP_OK=true
 
     if [ -f "$REPO_ROOT/.chainlink/issues.db" ]; then
         if aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1; then
-            echo "  ✅ issues.db → Tigris"
+            echo "  ✅ issues.db → $BACKUP_S3_BUCKET"
         else
             echo "  ⚠️  issues.db upload failed (non-blocking)"
             BACKUP_OK=false
@@ -121,7 +121,7 @@ if [ -n "$TIGRIS_BUCKET" ] && [ -n "$TIGRIS_ACCESS_KEY_ID" ] && [ -n "$TIGRIS_SE
 
     if [ -f "$REPO_ROOT/.deciduous/deciduous.db" ]; then
         if aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1; then
-            echo "  ✅ deciduous.db → Tigris"
+            echo "  ✅ deciduous.db → $BACKUP_S3_BUCKET"
         else
             echo "  ⚠️  deciduous.db upload failed (non-blocking)"
             BACKUP_OK=false
@@ -129,11 +129,11 @@ if [ -n "$TIGRIS_BUCKET" ] && [ -n "$TIGRIS_ACCESS_KEY_ID" ] && [ -n "$TIGRIS_SE
     fi
 
     if [ "$BACKUP_OK" = true ]; then
-        echo "✅ Tigris backup complete"
+        echo "✅ Backup complete"
     fi
     fi  # end aws CLI check
 else
-    echo "⏭️  Tigris not configured (set TIGRIS_BUCKET/TIGRIS_ACCESS_KEY_ID/TIGRIS_SECRET_ACCESS_KEY in .env)"
+    echo "⏭️  Backup not configured (set BACKUP_S3_BUCKET/BACKUP_S3_ACCESS_KEY_ID/BACKUP_S3_SECRET_ACCESS_KEY/BACKUP_S3_ENDPOINT in .env)"
 fi
 
 echo "✅ Pre-commit: all checks passed."

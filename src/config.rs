@@ -35,10 +35,20 @@ pub struct Config {
     pub model_dir: PathBuf,
     /// Constellation backlink index URL (primary amplification detection)
     pub constellation_url: String,
+    /// Zentropi API key for binary toxicity classification
+    pub zentropi_api_key: Option<String>,
+    /// Zentropi labeler ID (pre-built policy prompt)
+    pub zentropi_labeler_id: Option<String>,
+    /// Zentropi labeler version ID (optional, pins specific version)
+    pub zentropi_labeler_version_id: Option<String>,
     /// DID that is allowed to authenticate (CHARCOAL_ALLOWED_DID env var).
     /// Find your DID at: bsky.app → Settings → Account
     #[cfg(feature = "web")]
     pub allowed_did: String,
+    /// Comma-separated list of DIDs that have admin privileges (CHARCOAL_ADMIN_DIDS env var).
+    /// Admins can impersonate other users for read-only views.
+    #[cfg(feature = "web")]
+    pub admin_dids: String,
     /// Public URL of the OAuth client metadata document (CHARCOAL_OAUTH_CLIENT_ID env var).
     /// Dev: register at cimd-service.fly.dev to get a URL like https://cimd-service.fly.dev/clients/xxx
     /// Production: https://{RAILWAY_PUBLIC_DOMAIN}/oauth-client-metadata.json
@@ -68,6 +78,8 @@ impl Config {
         #[cfg(feature = "web")]
         let allowed_did = env::var("CHARCOAL_ALLOWED_DID").unwrap_or_default();
         #[cfg(feature = "web")]
+        let admin_dids = env::var("CHARCOAL_ADMIN_DIDS").unwrap_or_default();
+        #[cfg(feature = "web")]
         let oauth_client_id = env::var("CHARCOAL_OAUTH_CLIENT_ID").unwrap_or_default();
         #[cfg(feature = "web")]
         let session_secret = env::var("CHARCOAL_SESSION_SECRET").unwrap_or_default();
@@ -84,13 +96,25 @@ impl Config {
             model_dir,
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
+            zentropi_api_key: env::var("ZENTROPI_API_KEY").ok(),
+            zentropi_labeler_id: env::var("ZENTROPI_LABELER_ID").ok(),
+            zentropi_labeler_version_id: env::var("ZENTROPI_LABELER_VERSION_ID").ok(),
             #[cfg(feature = "web")]
             allowed_did,
+            #[cfg(feature = "web")]
+            admin_dids,
             #[cfg(feature = "web")]
             oauth_client_id,
             #[cfg(feature = "web")]
             session_secret,
         })
+    }
+
+    /// Data directory for audit logs and other persistent files.
+    /// On Railway: /data (parent of model_dir=/data/models).
+    /// Locally: falls back to model_dir itself.
+    pub fn data_dir(&self) -> &std::path::Path {
+        self.model_dir.parent().unwrap_or(&self.model_dir)
     }
 
     /// Check that the Bluesky handle is configured.
@@ -166,12 +190,30 @@ impl Config {
             scorer_backend: ScorerBackend::Onnx,
             model_dir: std::path::PathBuf::from("/tmp/test_models"),
             constellation_url: "https://constellation.microcosm.blue".to_string(),
+            zentropi_api_key: None,
+            zentropi_labeler_id: None,
+            zentropi_labeler_version_id: None,
             #[cfg(feature = "web")]
             allowed_did: "did:plc:testalloweddid0000000000".to_string(),
+            #[cfg(feature = "web")]
+            admin_dids: String::new(),
             #[cfg(feature = "web")]
             oauth_client_id: "https://test.example.com/oauth-client-metadata.json".to_string(),
             #[cfg(feature = "web")]
             session_secret: "test_session_secret_at_least_32_chars!".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    #[cfg(feature = "web")]
+    fn test_admin_dids_parsing() {
+        let config = Config::test_defaults();
+        assert!(config.admin_dids.is_empty());
     }
 }
