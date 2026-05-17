@@ -378,7 +378,7 @@ pub async fn build_profile(
                     Ok(target_embeddings) => {
                         let target_with_emb: Vec<(String, Vec<f64>)> = all_post_texts
                             .iter()
-                            .zip(target_embeddings.into_iter())
+                            .zip(target_embeddings)
                             .map(|(text, emb)| (text.clone(), emb))
                             .collect();
 
