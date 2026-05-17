@@ -3,3 +3,5 @@
 -- You follow, Stranger) used as a scoring weight multiplier.
 
 ALTER TABLE account_scores ADD COLUMN IF NOT EXISTS graph_distance TEXT;
+
+INSERT INTO schema_version (version) VALUES (6) ON CONFLICT DO NOTHING;

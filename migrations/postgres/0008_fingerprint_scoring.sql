@@ -10,3 +10,5 @@
 
 ALTER TABLE account_scores ADD COLUMN IF NOT EXISTS fingerprint_quality TEXT;
 ALTER TABLE account_scores ADD COLUMN IF NOT EXISTS scoring_confidence TEXT;
+
+INSERT INTO schema_version (version) VALUES (8) ON CONFLICT DO NOTHING;
