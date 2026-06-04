@@ -30,7 +30,9 @@ use charcoal::config::Config;
 use charcoal::constellation::client::ConstellationClient;
 use charcoal::discovery::candidate::CandidateSource;
 use charcoal::discovery::counting_scorer::CountingScorer;
-use charcoal::discovery::{candidate, dry_run, engagement, jetstream, profile_filter, seeds};
+use charcoal::discovery::{
+    aggregate, candidate, dry_run, engagement, jetstream, profile_filter, seeds,
+};
 use charcoal::toxicity::download::model_files_present;
 use charcoal::toxicity::onnx::OnnxToxicityScorer;
 
@@ -41,6 +43,39 @@ struct OutputRecord<'a> {
     #[serde(flatten)]
     stats: &'a profile_filter::ProfileStats,
     source: CandidateSource,
+}
+
+/// Parse a `--population-weights` string ("none=5000,low=800,…") into a map of
+/// stratum name → relative population count. Validates stratum names so a typo
+/// fails loudly rather than silently zeroing a stratum's weight.
+fn parse_population_weights(s: &str) -> Result<BTreeMap<String, f64>> {
+    const VALID: [&str; 5] = ["none", "low", "medium", "high", "viral"];
+    let mut map = BTreeMap::new();
+    for pair in s.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let (name, value) = pair
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("Invalid weight '{pair}', expected stratum=count"))?;
+        let name = name.trim().to_lowercase();
+        if !VALID.contains(&name.as_str()) {
+            anyhow::bail!("Unknown stratum '{name}' (valid: {})", VALID.join(", "));
+        }
+        let count: f64 = value
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid count '{value}' for stratum '{name}'"))?;
+        if count < 0.0 {
+            anyhow::bail!("Negative weight for stratum '{name}'");
+        }
+        map.insert(name, count);
+    }
+    if map.is_empty() {
+        anyhow::bail!("No valid weights parsed from '{s}'");
+    }
+    Ok(map)
 }
 
 /// Harvest candidate protected-user accounts for Zentropi call-volume estimation.
@@ -126,6 +161,16 @@ struct Cli {
     /// Followers to score per quote/reply amplifier during the dry run.
     #[arg(long, default_value_t = 50)]
     max_followers: usize,
+
+    /// Project the dry-run estimate to a network of this many candidate accounts.
+    #[arg(long)]
+    population_size: Option<f64>,
+
+    /// Reweight strata by true population shares, as comma-separated
+    /// stratum=count pairs (e.g. "none=5000,low=800,medium=120,high=25,viral=4").
+    /// Without this, the dry-run sample's own stratum distribution is used.
+    #[arg(long)]
+    population_weights: Option<String>,
 }
 
 #[tokio::main]
@@ -281,6 +326,13 @@ async fn main() -> Result<()> {
     // with a CountingScorer to tally would-be Zentropi calls. Replaces the
     // engagement stage when set. Requires the ONNX model; makes no Zentropi calls.
     if cli.dry_run {
+        // Parse reweighting input first so a malformed string fails before we
+        // spend time loading the model and scanning.
+        let population_weights = match &cli.population_weights {
+            Some(s) => Some(parse_population_weights(s)?),
+            None => None,
+        };
+
         if !model_files_present(&config.model_dir) {
             anyhow::bail!(
                 "ONNX model files not found at {}. Run `charcoal download-model` first — \
@@ -355,10 +407,53 @@ async fn main() -> Result<()> {
         eprintln!("  posts classified:        {total_classified}");
         eprintln!("  ONNX clean-pass rate:    {:.1}%", clean_pass_rate * 100.0);
         eprintln!("  would-be Zentropi calls: {total_zentropi}");
+
+        // Roll the per-candidate counts into a (optionally reweighted) network
+        // distribution.
+        let estimate =
+            aggregate::aggregate(&results, population_weights.as_ref(), cli.population_size);
+
+        eprintln!();
+        eprintln!("Network estimate — would-be Zentropi calls per candidate scan:");
+        eprintln!(
+            "  {:<7} {:>5} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7}",
+            "stratum", "n", "mean", "median", "p90", "p99", "max", "share"
+        );
+        for s in &estimate.per_stratum {
+            eprintln!(
+                "  {:<7} {:>5} {:>9.1} {:>8.1} {:>8.1} {:>8.1} {:>7} {:>6.1}%",
+                s.stratum,
+                s.sample_size,
+                s.mean,
+                s.median,
+                s.p90,
+                s.p99,
+                s.max,
+                s.population_share * 100.0
+            );
+        }
+        eprintln!();
+        eprintln!(
+            "  expected calls/candidate (reweighted): {:.1}",
+            estimate.expected_calls_per_candidate
+        );
+        if let Some(total) = estimate.projected_network_total {
+            eprintln!("  projected network total:               {total:.0}");
+        }
+        if !estimate.unsampled_weighted_strata.is_empty() {
+            eprintln!(
+                "  WARNING: strata weighted but unsampled (estimate biased low): {}",
+                estimate.unsampled_weighted_strata.join(", ")
+            );
+        }
         eprintln!();
 
         if cli.json {
-            println!("{}", serde_json::to_string_pretty(&results)?);
+            let out = serde_json::json!({
+                "estimate": estimate,
+                "candidates": results,
+            });
+            println!("{}", serde_json::to_string_pretty(&out)?);
         } else {
             for r in &results {
                 println!(
