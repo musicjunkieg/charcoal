@@ -165,3 +165,81 @@ scan, and the product vision is many protected users scanning on a daily
 cadence. We'd like to understand your free-tier and paid-tier ceilings so we
 can size this correctly (our documented fallback if needed is self-hosting
 CoPE, but we'd much rather stay on your API).
+
+## 6. Pipeline diagrams
+
+The Mermaid sources below render inline on GitHub. Pre-rendered PNGs are also
+checked in under `docs/diagrams/` (`pipeline-overview.png`,
+`per-account-scoring.png`) for pasting into slides or email.
+
+### 6.1 Overall scan pipeline (one protected account)
+
+This is what runs end-to-end when a scan is triggered (web dashboard
+`POST /api/scan` or the CLI `scan` command). The Zentropi calls all happen
+inside the per-account "Score account" step, expanded in 6.2.
+
+```mermaid
+flowchart TD
+    A["Scan triggered<br/>(POST /api/scan or CLI scan)"] --> B["Load models:<br/>ONNX toxicity · MiniLM embeddings · NLI cross-encoder<br/>+ build Zentropi client if configured"]
+    B --> C{"Topic fingerprint<br/>exists?"}
+    C -->|No| C1["Build fingerprint from<br/>protected user's ~500 posts<br/>(TF-IDF + embeddings)"]
+    C -->|Yes| D
+    C1 --> D["Fetch protected user's<br/>~50 most recent posts → URIs"]
+
+    D --> E["Constellation backlink index<br/>+ reply threads"]
+    E --> E1["Quotes"]
+    E --> E2["Reposts"]
+    E --> E3["Likes"]
+    E --> E4["Drive-by replies"]
+    E1 & E2 & E3 & E4 --> F["Collect amplification events<br/>resolve DIDs→handles · dedup"]
+
+    F --> G["Context signals:<br/>median engagement · pile-on detection ·<br/>graph distance per amplifier"]
+
+    G --> H["Phase B — score every unique amplifier<br/>(build_profile + direct NLI pairs)"]
+    H --> I{"analyze_followers?<br/>(quote/reply amplifiers only)"}
+    I -->|Yes| J["For each quote/reply amplifier:<br/>fetch up to 50 followers"]
+    J --> K["Score each stale follower<br/>(build_profile, two-pass NLI)"]
+    I -->|No| L
+    H --> L["Store AccountScores + events in DB"]
+    K --> L
+    L --> M["Threat report<br/>(tiers · evidence · dashboard/markdown)"]
+
+    H -.->|per account| SCORE["⤵ Score account (see 6.2)"]
+    K -.->|per account| SCORE
+```
+
+### 6.2 Per-account scoring (`build_profile`) — where Zentropi is called
+
+Every candidate account (amplifier or follower) runs through this staged flow.
+Stage 1 is entirely local and free; Stage 2 is the only place Zentropi is
+called. Accounts already scored within 7 days are skipped before this runs.
+
+```mermaid
+flowchart TD
+    S0["Score account"] --> S1["Stage 1 — triage<br/>fetch 25 posts · ONNX-score locally · TF-IDF overlap"]
+    S1 --> Q1{"Clean (all first-person<br/>posts &lt; 0.10) AND<br/>topic overlap below gate?"}
+    Q1 -->|Yes| EXIT["Early exit → tier Low<br/>0 Zentropi calls<br/>(~50–60% of accounts)"]
+    Q1 -->|No| S2["Stage 2 — full analysis<br/>fetch up to 50 posts · ONNX-score all"]
+
+    S2 --> F1{"Per post:<br/>ONNX ≥ 0.10?"}
+    F1 -->|No| CLEAR["Cleared locally<br/>(not toxic, no API call)"]
+    F1 -->|Yes| Z["Send to Zentropi /v1/label<br/>replies as [parent]/[reply] pairs<br/>originals + quotes solo"]
+    Z --> ZV["Binary verdict 1/0 per post"]
+
+    ZV --> TOX["Reply-weighted toxicity rate<br/>(replies 70% · originals 30%)"]
+    CLEAR --> TOX
+    TOX --> FORM["Threat formula:<br/>tox × 70 × (1 + overlap × 1.5)<br/>× behavioral · ally gate · NLI context · graph distance"]
+    FORM --> TIER["Threat score 0–100 → tier<br/>Low / Watch / Elevated / High"]
+    TIER --> P2{"Follower scoring<br/>≥ Watch (8.0)?"}
+    P2 -->|Yes| RE["Re-run build_profile with NLI<br/>(2nd pass ⇒ ~2× Zentropi for this account)"]
+    P2 -->|No| DONE["Write AccountScore to DB"]
+    RE --> DONE
+
+    Z -.->|"calls per account = posts clearing the 0.10 filter<br/>(off-topic ~5–15 · identity-adjacent ~20–30)"| Z
+```
+
+**Reading the call volume off the diagram:** Zentropi is hit only on the
+`ONNX ≥ 0.10 → Send to Zentropi` edge in 6.2, and only for accounts that pass
+Stage 1 triage in 6.1. Multiply (accounts reaching Stage 2) × (posts per
+account clearing the 0.10 filter) to get total calls per scan — on the order of
+1,500–2,500 for one active protected account.
