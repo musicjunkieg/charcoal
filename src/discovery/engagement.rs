@@ -162,11 +162,26 @@ pub async fn collect_engagement(
     handle: &str,
     opts: &EngagementOptions,
 ) -> EngagementProfile {
+    let (post_count, events) = collect_events(client, constellation, did, handle, opts).await;
+    summarize(did, handle, post_count, &events)
+}
+
+/// Collect the raw amplification events for a candidate (the I/O behind
+/// `collect_engagement`). Returns `(post_count, events)`. Shared with the
+/// dry-run stage, which needs the individual events — not just the summary — to
+/// drive per-amplifier scoring.
+pub async fn collect_events(
+    client: &PublicAtpClient,
+    constellation: &ConstellationClient,
+    did: &str,
+    handle: &str,
+    opts: &EngagementOptions,
+) -> (usize, Vec<AmplificationNotification>) {
     let posts = match posts::fetch_recent_posts(client, handle, opts.max_posts).await {
         Ok(p) => p,
         Err(e) => {
             warn!(handle, error = %e, "Failed to fetch posts for engagement, treating as empty");
-            return summarize(did, handle, 0, &[]);
+            return (0, Vec::new());
         }
     };
 
@@ -214,7 +229,7 @@ pub async fn collect_engagement(
         }
     }
 
-    summarize(did, handle, posts.len(), &events)
+    (posts.len(), events)
 }
 
 #[cfg(test)]

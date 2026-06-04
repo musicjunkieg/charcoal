@@ -29,7 +29,10 @@ use charcoal::bluesky::client::PublicAtpClient;
 use charcoal::config::Config;
 use charcoal::constellation::client::ConstellationClient;
 use charcoal::discovery::candidate::CandidateSource;
-use charcoal::discovery::{candidate, engagement, jetstream, profile_filter, seeds};
+use charcoal::discovery::counting_scorer::CountingScorer;
+use charcoal::discovery::{candidate, dry_run, engagement, jetstream, profile_filter, seeds};
+use charcoal::toxicity::download::model_files_present;
+use charcoal::toxicity::onnx::OnnxToxicityScorer;
 
 /// One JSON output record: the surviving profile's stats plus its harvest
 /// provenance, flattened into a single object.
@@ -112,6 +115,17 @@ struct Cli {
     /// Concurrent candidates to measure during engagement stratification.
     #[arg(long, default_value_t = 4)]
     concurrency: usize,
+
+    /// Run the instrumented dry-run instead of engagement stratification: drive
+    /// the real scoring pipeline with a counting scorer to tally would-be
+    /// Zentropi calls. Requires the ONNX model (`charcoal download-model`) and
+    /// makes NO Zentropi calls.
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Followers to score per quote/reply amplifier during the dry run.
+    #[arg(long, default_value_t = 50)]
+    max_followers: usize,
 }
 
 #[tokio::main]
@@ -257,6 +271,104 @@ async fn main() -> Result<()> {
                     s.posts_count.unwrap_or(0),
                     s.followers_count.unwrap_or(0),
                     source_of(&s.did),
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Stage 4 (opt-in): instrumented dry-run. Drives the real scoring pipeline
+    // with a CountingScorer to tally would-be Zentropi calls. Replaces the
+    // engagement stage when set. Requires the ONNX model; makes no Zentropi calls.
+    if cli.dry_run {
+        if !model_files_present(&config.model_dir) {
+            anyhow::bail!(
+                "ONNX model files not found at {}. Run `charcoal download-model` first — \
+                 the dry run needs ONNX to replicate the clean-pass gate.",
+                config.model_dir.display()
+            );
+        }
+        let model_dir = config.model_dir.clone();
+        let onnx = tokio::task::spawn_blocking(move || OnnxToxicityScorer::load(&model_dir))
+            .await
+            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked loading ONNX: {e}"))??;
+        let scorer = CountingScorer::new(Box::new(onnx));
+
+        let constellation = ConstellationClient::new(&config.constellation_url)?;
+        let opts = dry_run::DryRunOptions {
+            engagement: engagement::EngagementOptions {
+                max_posts: cli.max_posts,
+                include_likes: cli.include_likes,
+                include_replies: cli.include_replies,
+            },
+            max_followers: cli.max_followers,
+            concurrency: cli.concurrency.max(1),
+        };
+
+        eprintln!(
+            "Dry-run scanning {} viable candidates (max_followers={}, follower_concurrency={}) — no Zentropi calls…",
+            report.kept.len(),
+            cli.max_followers,
+            cli.concurrency.max(1)
+        );
+
+        // Candidates run sequentially: each shares the one ONNX scorer and does
+        // its own internal follower concurrency, which bounds load and keeps
+        // per-candidate attribution exact.
+        let mut results: Vec<dry_run::CandidateDryRun> = Vec::with_capacity(report.kept.len());
+        for s in &report.kept {
+            let r = dry_run::dry_run_candidate(
+                &client,
+                &constellation,
+                &scorer,
+                &s.did,
+                &s.handle,
+                &opts,
+            )
+            .await;
+            eprintln!(
+                "  @{}  Q={}  scored={}  would-be Zentropi={}",
+                r.handle,
+                r.fanout_amplifiers,
+                r.amplifiers_scored + r.followers_scored,
+                r.counts.zentropi_calls
+            );
+            results.push(r);
+        }
+
+        let total_zentropi: u64 = results.iter().map(|r| r.counts.zentropi_calls).sum();
+        let total_classified: u64 = results.iter().map(|r| r.counts.posts_classified).sum();
+        let total_cleared: u64 = results.iter().map(|r| r.counts.posts_cleared).sum();
+        let total_accounts: usize = results
+            .iter()
+            .map(|r| r.amplifiers_scored + r.followers_scored)
+            .sum();
+        let clean_pass_rate = if total_classified > 0 {
+            total_cleared as f64 / total_classified as f64
+        } else {
+            0.0
+        };
+
+        eprintln!();
+        eprintln!("Dry-run totals across {} candidates:", results.len());
+        eprintln!("  accounts scored:         {total_accounts}");
+        eprintln!("  posts classified:        {total_classified}");
+        eprintln!("  ONNX clean-pass rate:    {:.1}%", clean_pass_rate * 100.0);
+        eprintln!("  would-be Zentropi calls: {total_zentropi}");
+        eprintln!();
+
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&results)?);
+        } else {
+            for r in &results {
+                println!(
+                    "{}\t@{}\tQ={}\taccounts={}\tzentropi={}\t{}",
+                    r.did,
+                    r.handle,
+                    r.fanout_amplifiers,
+                    r.amplifiers_scored + r.followers_scored,
+                    r.counts.zentropi_calls,
+                    r.stratum.as_str(),
                 );
             }
         }

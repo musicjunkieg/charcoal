@@ -6,6 +6,10 @@ pub mod topic_search;
 #[cfg(feature = "estimate")]
 pub mod candidate;
 #[cfg(feature = "estimate")]
+pub mod counting_scorer;
+#[cfg(feature = "estimate")]
+pub mod dry_run;
+#[cfg(feature = "estimate")]
 pub mod engagement;
 #[cfg(feature = "estimate")]
 pub mod jetstream;
