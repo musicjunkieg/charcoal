@@ -16,18 +16,20 @@
 // public, read-only API calls — no Zentropi calls, no third-party content sent
 // anywhere — so it's safe to run broadly.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use tracing::warn;
 
 use charcoal::bluesky::client::PublicAtpClient;
 use charcoal::config::Config;
+use charcoal::constellation::client::ConstellationClient;
 use charcoal::discovery::candidate::CandidateSource;
-use charcoal::discovery::{candidate, jetstream, profile_filter, seeds};
+use charcoal::discovery::{candidate, engagement, jetstream, profile_filter, seeds};
 
 /// One JSON output record: the surviving profile's stats plus its harvest
 /// provenance, flattened into a single object.
@@ -89,6 +91,27 @@ struct Cli {
     /// Minimum account age in days for the viability filter (0 = no age gate).
     #[arg(long, default_value_t = 0)]
     min_account_age_days: i64,
+
+    /// Skip engagement stratification; stop after the viability filter.
+    #[arg(long)]
+    skip_engagement: bool,
+
+    /// Recent posts to examine per candidate when measuring engagement.
+    #[arg(long, default_value_t = 50)]
+    max_posts: usize,
+
+    /// Also count likes when measuring engagement (affects A, not Q).
+    #[arg(long)]
+    include_likes: bool,
+
+    /// Also detect drive-by replies when measuring engagement (more accurate Q,
+    /// but API-heavy: a thread fetch per post plus the candidate's follow graph).
+    #[arg(long)]
+    include_replies: bool,
+
+    /// Concurrent candidates to measure during engagement stratification.
+    #[arg(long, default_value_t = 4)]
+    concurrency: usize,
 }
 
 #[tokio::main]
@@ -213,25 +236,96 @@ async fn main() -> Result<()> {
             .unwrap_or(CandidateSource::Both)
     };
 
+    // --skip-engagement: emit the filtered survivors and stop here.
+    if cli.skip_engagement {
+        if cli.json {
+            let records: Vec<OutputRecord> = report
+                .kept
+                .iter()
+                .map(|stats| OutputRecord {
+                    source: source_of(&stats.did),
+                    stats,
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&records)?);
+        } else {
+            for s in &report.kept {
+                println!(
+                    "{}\t@{}\tposts={}\tfollowers={}\t{:?}",
+                    s.did,
+                    s.handle,
+                    s.posts_count.unwrap_or(0),
+                    s.followers_count.unwrap_or(0),
+                    source_of(&s.did),
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Stage 3: engagement stratification — measure each survivor's cost driver
+    // (distinct quote/reply amplifiers Q) via free Constellation/reply reads.
+    let constellation = ConstellationClient::new(&config.constellation_url)?;
+    let opts = engagement::EngagementOptions {
+        max_posts: cli.max_posts,
+        include_likes: cli.include_likes,
+        include_replies: cli.include_replies,
+    };
+    let concurrency = cli.concurrency.max(1);
+    eprintln!(
+        "Measuring engagement for {} viable candidates (posts={}, likes={}, replies={}, concurrency={})…",
+        report.kept.len(),
+        cli.max_posts,
+        cli.include_likes,
+        cli.include_replies,
+        concurrency
+    );
+
+    let client_ref = &client;
+    let constellation_ref = &constellation;
+    let opts_ref = &opts;
+    let profiles: Vec<engagement::EngagementProfile> = stream::iter(report.kept.iter())
+        .map(|s| async move {
+            engagement::collect_engagement(
+                client_ref,
+                constellation_ref,
+                &s.did,
+                &s.handle,
+                opts_ref,
+            )
+            .await
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    // Stratum histogram — the headline distribution for the estimate.
+    let mut hist: BTreeMap<&str, usize> = BTreeMap::new();
+    for p in &profiles {
+        *hist.entry(p.stratum.as_str()).or_insert(0) += 1;
+    }
+    eprintln!();
+    eprintln!("Engagement strata (by distinct quote/reply amplifiers Q):");
+    for stratum in ["none", "low", "medium", "high", "viral"] {
+        eprintln!(
+            "  {:<7} {}",
+            stratum,
+            hist.get(stratum).copied().unwrap_or(0)
+        );
+    }
+    eprintln!();
+
     if cli.json {
-        let records: Vec<OutputRecord> = report
-            .kept
-            .iter()
-            .map(|stats| OutputRecord {
-                source: source_of(&stats.did),
-                stats,
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&records)?);
+        println!("{}", serde_json::to_string_pretty(&profiles)?);
     } else {
-        for s in &report.kept {
+        for p in &profiles {
             println!(
-                "{}\t@{}\tposts={}\tfollowers={}\t{:?}",
-                s.did,
-                s.handle,
-                s.posts_count.unwrap_or(0),
-                s.followers_count.unwrap_or(0),
-                source_of(&s.did),
+                "{}\t@{}\tA={}\tQ={}\t{}",
+                p.did,
+                p.handle,
+                p.total_amplifiers,
+                p.fanout_amplifiers,
+                p.stratum.as_str(),
             );
         }
     }

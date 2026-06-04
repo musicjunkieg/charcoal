@@ -6,6 +6,8 @@ pub mod topic_search;
 #[cfg(feature = "estimate")]
 pub mod candidate;
 #[cfg(feature = "estimate")]
+pub mod engagement;
+#[cfg(feature = "estimate")]
 pub mod jetstream;
 #[cfg(feature = "estimate")]
 pub mod profile_filter;
