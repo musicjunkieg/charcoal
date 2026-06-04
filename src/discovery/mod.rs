@@ -8,4 +8,6 @@ pub mod candidate;
 #[cfg(feature = "estimate")]
 pub mod jetstream;
 #[cfg(feature = "estimate")]
+pub mod profile_filter;
+#[cfg(feature = "estimate")]
 pub mod seeds;

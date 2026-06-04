@@ -16,15 +16,27 @@
 // public, read-only API calls — no Zentropi calls, no third-party content sent
 // anywhere — so it's safe to run broadly.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
+use serde::Serialize;
 use tracing::warn;
 
 use charcoal::bluesky::client::PublicAtpClient;
 use charcoal::config::Config;
-use charcoal::discovery::{candidate, jetstream, seeds};
+use charcoal::discovery::candidate::CandidateSource;
+use charcoal::discovery::{candidate, jetstream, profile_filter, seeds};
+
+/// One JSON output record: the surviving profile's stats plus its harvest
+/// provenance, flattened into a single object.
+#[derive(Serialize)]
+struct OutputRecord<'a> {
+    #[serde(flatten)]
+    stats: &'a profile_filter::ProfileStats,
+    source: CandidateSource,
+}
 
 /// Harvest candidate protected-user accounts for Zentropi call-volume estimation.
 #[derive(Parser)]
@@ -60,6 +72,23 @@ struct Cli {
     /// Emit candidates as a JSON array instead of a human-readable summary.
     #[arg(long)]
     json: bool,
+
+    /// Skip the viability filter and emit the raw merged candidate set.
+    #[arg(long)]
+    skip_filter: bool,
+
+    /// Minimum post count for the viability filter (below this Charcoal can't
+    /// score the account reliably).
+    #[arg(long, default_value_t = 5)]
+    min_posts: i64,
+
+    /// Minimum follower count for the viability filter (0 = no follower gate).
+    #[arg(long, default_value_t = 0)]
+    min_followers: i64,
+
+    /// Minimum account age in days for the viability filter (0 = no age gate).
+    #[arg(long, default_value_t = 0)]
+    min_account_age_days: i64,
 }
 
 #[tokio::main]
@@ -123,19 +152,87 @@ async fn main() -> Result<()> {
     };
 
     let candidates = candidate::merge_candidates(&firehose, &topic);
+    let (firehose_only, topic_only, both) = candidate::source_breakdown(&candidates);
+    eprintln!();
+    eprintln!(
+        "Harvested {} candidates (firehose only: {firehose_only}, topic only: {topic_only}, both: {both})",
+        candidates.len()
+    );
+
+    // --skip-filter: emit the raw merged set without fetching any profiles.
+    if cli.skip_filter {
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&candidates)?);
+        } else {
+            for c in &candidates {
+                println!("{}\t{:?}", c.did, c.source);
+            }
+        }
+        return Ok(());
+    }
+
+    // Viability filter: fetch profiles and drop accounts that can't be scored.
+    let source_by_did: HashMap<String, CandidateSource> = candidates
+        .iter()
+        .map(|c| (c.did.clone(), c.source))
+        .collect();
+    let dids: Vec<String> = candidates.iter().map(|c| c.did.clone()).collect();
+
+    let thresholds = profile_filter::FilterThresholds {
+        min_posts: cli.min_posts,
+        min_followers: cli.min_followers,
+        min_account_age_days: cli.min_account_age_days,
+    };
+    eprintln!(
+        "Filtering {} candidates (min_posts={}, min_followers={}, min_age_days={})…",
+        dids.len(),
+        cli.min_posts,
+        cli.min_followers,
+        cli.min_account_age_days
+    );
+    let report = profile_filter::filter_candidates(&client, &dids, &thresholds).await;
+
+    eprintln!();
+    eprintln!(
+        "Viable candidates: {} / {}",
+        report.kept.len(),
+        report.requested
+    );
+    eprintln!("  not found (unresolvable): {}", report.not_found);
+    for (reason, count) in &report.rejected_by_reason {
+        eprintln!("  rejected [{reason}]: {count}");
+    }
+    eprintln!();
+
+    // A kept profile's DID always came from the candidate set, so the source
+    // lookup never misses; default to Both only to satisfy the type.
+    let source_of = |did: &str| {
+        source_by_did
+            .get(did)
+            .copied()
+            .unwrap_or(CandidateSource::Both)
+    };
 
     if cli.json {
-        println!("{}", serde_json::to_string_pretty(&candidates)?);
+        let records: Vec<OutputRecord> = report
+            .kept
+            .iter()
+            .map(|stats| OutputRecord {
+                source: source_of(&stats.did),
+                stats,
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&records)?);
     } else {
-        let (firehose_only, topic_only, both) = candidate::source_breakdown(&candidates);
-        eprintln!();
-        eprintln!("Candidate accounts: {}", candidates.len());
-        eprintln!("  firehose only: {firehose_only}");
-        eprintln!("  topic only:    {topic_only}");
-        eprintln!("  both sources:  {both}");
-        eprintln!();
-        for c in &candidates {
-            println!("{}\t{:?}", c.did, c.source);
+        for s in &report.kept {
+            println!(
+                "{}\t@{}\tposts={}\tfollowers={}\t{:?}",
+                s.did,
+                s.handle,
+                s.posts_count.unwrap_or(0),
+                s.followers_count.unwrap_or(0),
+                source_of(&s.did),
+            );
         }
     }
 
