@@ -66,29 +66,88 @@ RunPod Serverless (gpu/cope-b-runpod/, NEW directory in repo)
   └── runpod.yml                  ← endpoint config
 ```
 
-### The classifier trait
+### The classifier trait and how it composes with the existing ensemble
+
+The trait represents *only the Stage-2 classifier outcome* — not the full
+two-stage verdict. The existing `TwoStageVerdict` (in `src/toxicity/ensemble.rs`)
+stays as the type the scoring pipeline consumes; it now composes ONNX output +
+classifier output rather than ONNX + Zentropi specifically.
 
 ```rust
+// NEW: src/toxicity/classifier.rs
 #[async_trait]
 pub trait ToxicityClassifier: Send + Sync {
-    async fn classify(&self, content: &str) -> Result<Verdict>;
-    async fn classify_pair(&self, parent: &str, reply: &str) -> Result<Verdict>;
-    fn name(&self) -> &'static str;
+    async fn classify(&self, content: &str) -> Result<ClassifierVerdict>;
+    async fn classify_pair(&self, parent: &str, reply: &str) -> Result<ClassifierVerdict>;
+    fn name(&self) -> &'static str;        // for logging / audit
+    fn model_id(&self) -> &'static str;    // for audit JSONL
 }
 
-pub struct Verdict {
-    pub toxic: bool,           // binary classification
-    pub confidence: f32,        // normalized logprob of emitted token
-    pub model_id: String,       // for audit log
+#[derive(Debug, Clone)]
+pub struct ClassifierVerdict {
+    /// Raw binary output: did the model emit "1" (or its hosted-API equivalent)?
+    pub toxic_token: bool,
+    /// Normalized confidence in [0.0, 1.0] — logprob of emitted token for
+    /// self-hosted, hosted-API confidence for Zentropi.
+    pub confidence: f32,
+    /// Wall-clock latency for audit / metrics.
     pub latency_ms: u32,
+}
+
+impl dyn ToxicityClassifier {
+    /// Apply a per-backend confidence threshold. Each implementation owns its
+    /// threshold constant (calibrated for its specific model).
+    /// Default impl: toxic if model said toxic AND confidence ≥ threshold.
+    fn is_toxic_with_threshold(&self, v: &ClassifierVerdict, threshold: f32) -> bool {
+        v.toxic_token && v.confidence >= threshold
+    }
 }
 ```
 
-Backend selection happens at startup via `CHARCOAL_CLASSIFIER`:
+Refactor of `TwoStageVerdict` and `VerdictSource`:
 
-- `runpod` → `RunPodCopeBClient` (primary, self-hosted)
-- `zentropi` → `ZentropiClient` (fallback; uses Zentropi-hosted CoPE-B if available, else CoPE-A)
+```rust
+// src/toxicity/ensemble.rs — modified
+pub struct TwoStageVerdict {
+    pub is_toxic: bool,
+    pub onnx_score: f64,
+    pub onnx_attributes: super::traits::ToxicityAttributes,
+    pub source: VerdictSource,
+    pub classifier_confidence: Option<f64>,   // was `zentropi_confidence`
+    pub classifier_model_id: Option<String>,  // NEW: tracks which model fired
+}
+
+pub enum VerdictSource {
+    OnnxCleared,                    // unchanged
+    ClassifierToxic,                // renamed from ZentropiToxic
+    ClassifierSafe,                 // renamed from ZentropiSafe
+    // OnnxFallback REMOVED — no silent fallback in new design
+}
+
+pub struct TwoStageToxicityScorer {
+    primary: Box<dyn ToxicityScorer>,                // unchanged (ONNX)
+    classifier: Arc<dyn ToxicityClassifier>,         // was Option<Arc<ZentropiClient>>; now required
+    classifier_threshold: f32,                       // per-backend, set at construction
+}
+```
+
+`zentropi_confidence: Option<f64>` field rename + `OnnxFallback` removal are
+breaking changes to call sites in `src/scoring/profile.rs` and audit logging.
+Implementation step 3 includes migrating those call sites; tests in
+`tests/unit_scoring.rs` and `tests/composition.rs` will need parallel updates.
+
+### Backend selection and per-backend thresholds
+
+Selection at startup via `CHARCOAL_CLASSIFIER`:
+
+- `runpod` → `RunPodCopeBClient` with `RUNPOD_COPE_B_THRESHOLD` (default tuned in Step 5)
+- `zentropi` → `ZentropiClient` with `ZENTROPI_THRESHOLD` (existing — unchanged unless Zentropi-hosted CoPE-B requires recalibration)
 - unset or unreachable → app refuses to boot (`anyhow::bail!`)
+
+**Critical:** each backend carries its own threshold constant. In the fallback
+gap scenario (Zentropi-hosted CoPE-B not available at cutover, see Step 6),
+Zentropi's threshold remains tuned for CoPE-A; RunPod's threshold is tuned for
+CoPE-B. No cross-contamination of calibrations.
 
 No ONNX-only degraded mode. ONNX stays the clean-pass filter at Stage 1; the
 LLM classifier is required at Stage 2. Tests use a `StubClassifier`.
@@ -99,12 +158,42 @@ LLM classifier is required at Stage 2. Tests use a `StubClassifier`.
   the scoring failure to the user. **No silent fallback to ONNX threshold.**
 - GPU service 4xx → log and fail the scoring job (indicates a bug or misconfig).
 - Startup with no reachable backend → boot fails loudly.
+- Cost ceiling exceeded mid-scan → abort, log loudly, surface to user.
 
-### Cold-start UX
+### Cold-start UX and timeout strategy
 
 On the first request after idle, the scan manager sets
 `scan_state.status = "warming_classifier"` so the SvelteKit UI shows a
 "warming up classifier (~30s)" message rather than a stalled spinner.
+
+**Two-tier timeout:**
+- `CHARCOAL_CLASSIFIER_TIMEOUT_MS=60000` is the *steady-state* request timeout,
+  applied to second-and-subsequent requests in a scan
+- `CHARCOAL_CLASSIFIER_WARMUP_TIMEOUT_MS=180000` (3 min) is applied only to
+  the first request after idle (i.e., a likely cold start). This accommodates
+  the worst-case FlashBoot cold path (30–60s) plus the request itself, plus
+  some safety margin for image-not-cached scenarios.
+
+The scan manager detects "first request after idle" by tracking
+`last_classifier_call_at` per backend; if more than `idle_timeout` seconds have
+passed, the next call uses the warmup timeout.
+
+**Optional warm-up ping (Step 7 onwards):**
+The scan job can fire a synchronous `classifier-check` ping at the very start
+of a scan (before any user-facing scoring) to absorb cold start into the
+"warming up" UX message. If the ping succeeds quickly, scoring begins
+immediately on a warm worker; if the ping reveals a deep cold start, the user
+sees the wait time accounted for upfront rather than mid-scan.
+
+**Retry interaction:** `CHARCOAL_CLASSIFIER_MAX_RETRIES=3` only fires after a
+timeout *expires*. With the two-tier timeout, a cold-start case won't burn
+through retries on the first cold call.
+
+**Image-not-cached case** (first-ever request after image push): can take 2–5
+minutes. This is operationally exceptional and not user-facing — it happens
+during deploy, not during normal onboarding. If it occurs during onboarding
+(e.g., a deploy mid-day), the scan fails with a clear "GPU service initializing
+after recent deploy, please retry in 5 min" error.
 
 ## GPU service (RunPod side)
 
@@ -176,6 +265,48 @@ max_workers: 3            # absorbs concurrent onboardings; cheap with scale-to-
 execution_timeout: 600    # 10 min hard cap per request
 ```
 
+### Image and endpoint lifecycle
+
+The GPU image and the RunPod endpoint are infrastructure artifacts that need
+explicit operational discipline; `policy.txt` is versioned in git but only
+takes effect after image rebuild and endpoint redeploy.
+
+**Image build:**
+- Trigger: GitHub Actions workflow on push to `main` or `staging` when files
+  under `gpu/cope-b-runpod/**` change
+- Registry: GitHub Container Registry (`ghcr.io/musicjunkieg/charcoal-cope-b`)
+- Container digest pinned per release (not just the `v0.20.2` tag) so we have
+  a known-good rollback point if vLLM minor versions break MoE behavior
+- Cache layer for the ~50 GB weight download keyed on model revision hash, so
+  rebuilds for `policy.txt`-only changes complete in ~5 min instead of ~45 min
+
+**Endpoint creation (one-time, documented):**
+- Manual via RunPod web console for initial setup (avoid IaC overhead until
+  scale demands it)
+- Endpoint config (`runpod.yml`) is the source of truth; deviations get noticed
+  and reconciled
+- Endpoint ID written to Railway env var `RUNPOD_ENDPOINT_ID` on prod + staging
+
+**Region selection:**
+- Railway production runs in us-west by default
+- RunPod endpoint pinned to a nearby US region (us-west or us-east, whichever
+  has best A100 80GB availability at endpoint-creation time)
+- Cross-region round-trip target: < 50 ms
+
+**Policy change checklist** (when `policy.txt` is edited):
+1. Update fixtures if policy semantics shifted
+2. Push to `feat/` branch, GH Actions rebuilds image
+3. Tag image with policy version (e.g., `policy-v3-2026-07-01`)
+4. Deploy to staging endpoint first, re-run A/B harness
+5. Promote to prod endpoint via env-var swap
+
+**Secrets rotation runbook** (`RUNPOD_API_KEY`, `ZENTROPI_API_KEY`):
+1. Generate new key in RunPod/Zentropi console
+2. Update Railway env var on staging, restart service, verify health check passes
+3. Repeat for prod
+4. Revoke old key in RunPod/Zentropi console
+5. No app-side caching — keys are read fresh from env on each request
+
 ### Performance levers
 
 1. `enable_prefix_caching=True` — policy text is identical per call (thousands of
@@ -186,14 +317,26 @@ execution_timeout: 600    # 10 min hard cap per request
 4. `logprobs=2` — returns top-2 token probabilities so we can extract the
    confidence as the normalized logprob of the emitted `0` or `1`.
 
-### Expected throughput
+### Expected throughput (UNVERIFIED — must validate in Step 2)
 
-- Sustained: **50–150 req/s per worker** with prefix caching on our short inputs
+Estimates based on vLLM + MoE behavior with greedy single-token decoding and
+prefix caching. **No vendor-published numbers exist for CoPE-B-A4B on A100.**
+These are educated guesses to be replaced with measured values during Step 2.
+
+- Sustained (estimate): **50–150 req/s per worker** with prefix caching
 - Cold start (image cached, FlashBoot warm): **2–5 s**
 - Cold start (image cached, FlashBoot cold): **30–60 s**
 - Cold start (image not cached): **2–5 min** for the first-ever request after image push
 
-Target of 8.3 req/s sustained has 6–18× headroom.
+**Step 2 must measure actual sustained req/s against a Charcoal-shaped input
+set on A100 80GB.** Minimum acceptable threshold to keep the architecture as
+designed: **≥ 20 req/s sustained** per worker. Below that, revisit options:
+H100 upgrade despite cost penalty, multi-worker fan-out with smaller batches,
+or revisit Modal vs RunPod decision.
+
+Target of 8.3 req/s sustained has 6–18× headroom *if* the estimate holds — but
+the architecture's resilience to concurrent onboardings depends on it being
+materially above the threshold.
 
 ## CoPE-A → CoPE-B migration plan
 
@@ -236,10 +379,32 @@ Runs the same input through both backends and logs both verdicts + confidences.
 
 - Run on labeled examples from `user_labels`, a grimalkina-scan sample, and a
   hand-curated edge-case set Bryan provides
-- Output is **informational, not a hard gate** — used to characterize where
-  CoPE-A and CoPE-B disagree and judge whether those differences matter
-  qualitatively based on accuracy on labeled cases
+- **Agreement-with-CoPE-A is NOT a gate.** Per Bryan's framing, agreement-for-its-own-sake
+  is the wrong target. The A/B output is used to characterize where CoPE-A and
+  CoPE-B disagree and judge whether the differences make decisions better or
+  worse on labeled cases.
 - Reused as a regression-detection tool any time policy text or threshold changes
+
+### Step 4.5 — Accuracy gate on labeled fixtures (HARD GATE)
+
+Before any prod cutover, CoPE-B must demonstrate measurable quality on
+Charcoal's hand-curated labeled fixtures (`tests/fixtures/cope_b/`):
+
+- **Known-toxic fixture set** (≥20 hand-curated examples): CoPE-B must classify
+  ≥ 90% as toxic.
+- **Known-clean fixture set** (≥20 hand-curated examples): CoPE-B must classify
+  ≥ 90% as clean.
+- **Edge case fixture set** (sarcasm, counter-speech, news commentary on violent
+  topics — cf. chainlink #114, reclaimed slurs): no hard gate, but disagreements
+  are reviewed by Bryan. A pattern of regressions vs CoPE-A → halt migration
+  and revisit policy text.
+
+The 90%/90% bar is intentionally floor-level; Phase 5's binary toxicity rate
+calibration (chainlink #135) is already fragile, so an explicit floor here
+prevents quality regressions from cascading into tier shifts.
+
+This gate runs after Step 5 (threshold calibration), since the threshold
+affects accuracy.
 
 ### Step 5 — Recalibrate confidence threshold
 
@@ -248,7 +413,7 @@ CoPE-B's logprobs concentrate differently than CoPE-A's. Using A/B output:
 - Pick the CoPE-B threshold that maximizes accuracy on labeled examples, or
 - Match CoPE-A on the unlabeled distribution if labels are too thin
 
-Update the threshold constant in scoring code.
+Update the per-backend threshold constant in scoring code (`RUNPOD_COPE_B_THRESHOLD`).
 
 ### Step 6 — Zentropi-hosted CoPE-B for fallback
 
@@ -257,8 +422,18 @@ new endpoint?). Update `ZentropiClient` to call CoPE-B via hosted. Re-run A/B
 harness to confirm RunPod-CoPE-B ≈ Zentropi-hosted-CoPE-B.
 
 **Fallback gap policy:** if Zentropi can't host CoPE-B at cutover time, the
-fallback path runs CoPE-A and we document the mismatch. Fallback fires rarely;
-when it does, the user gets the old model's verdict. Acceptable degradation.
+fallback path runs CoPE-A under its own threshold. Because per-backend thresholds
+are stored on each implementation (see Architecture section), there's no
+threshold-bleed between primary and fallback — Zentropi-CoPE-A keeps its
+existing CoPE-A threshold; RunPod-CoPE-B uses the Step-5-calibrated threshold.
+
+Fallback fires rarely; when it does, the user gets the old model's verdict at
+the old model's calibration. Acceptable degradation. Document clearly in the
+runtime audit log so post-hoc analysis can identify which classifier produced
+which verdict.
+
+Once Zentropi-hosted CoPE-B is available, the fallback path is also CoPE-B
+end-to-end with a (possibly different) hosted-side threshold.
 
 ### Step 7 — Staging rollout
 
@@ -305,7 +480,22 @@ Tests written first per Bryan's TDD mandate.
 - `pytest` for the Python handler: prompt assembly, vLLM mock, response shape
 - Local smoke test script: `vllm serve` + curl script with 10 hand-picked
   inputs (5 clearly-toxic, 5 clearly-clean), assert all 10 classify correctly
+- **Prefix-caching benchmark**: send N identical-policy requests with varying
+  CONTENT, assert that median time-to-second-request is materially lower than
+  time-to-first (e.g., ≤ 50% of first-request latency). Detects silent prefix-
+  caching breakage between vLLM versions.
+- **vLLM version pinning**: container digest pinned per release in `Dockerfile`
+  comments and CI workflow; not just the `:v0.20.2` tag
 - "Before we deploy" gate. Cheaper than burning RunPod credits on broken policy.
+
+### Concurrent-onboarding load test (Step 7, staging only)
+
+Before prod cutover, run a synthetic load test on staging:
+- 3 concurrent simulated onboarding scans, each issuing ~1000 classifications
+- Assert: all complete without 5xx storms, cost stays within ceiling, latency
+  remains within target
+- This is the test that catches `max_workers=3` being too low or too high,
+  cold-start cascade under burst, and queue starvation
 
 ### Test fixtures
 
@@ -327,6 +517,8 @@ them with visual inspection.
 
 ### Per-onboarding cost model (RunPod A100 80GB at $2.72/hr)
 
+Single-onboarding case (one worker):
+
 | Phase | Cost basis | Per onboarding |
 |-------|------------|----------------|
 | Cold start, image cached, FlashBoot warm | 2–5 s | ~$0.002 |
@@ -334,11 +526,43 @@ them with visual inspection.
 | Inference, 10 min worst case | 600 s | ~$0.45 |
 | Inference, 2–3 min likely | 180 s | ~$0.14 |
 | Idle window (60 s default before scale-to-zero) | 60 s | ~$0.045 |
-| **Realistic total** | | **$0.20 – $0.55** |
+| **Realistic total per onboarding** | | **$0.20 – $0.55** |
+
+Concurrent-onboarding case (worker billing is per-instance, not per-user):
+
+| Scenario | Workers active | Wall clock | Total $ | Per onboarding |
+|----------|----------------|------------|---------|----------------|
+| 2 concurrent (3 min each, separate workers) | 2 | 3 min | ~$0.27 | ~$0.14 |
+| 3 concurrent (max_workers cap, 3 min each) | 3 | 3 min | ~$0.41 | ~$0.14 |
+| 4+ concurrent (queue beyond max_workers) | 3 | 5–7 min | ~$0.55–$0.95 | ~$0.18–$0.24 |
+
+Per-onboarding cost stays under the $1 ceiling even under burst load, because
+single-worker throughput has 6–18× headroom on our 8.3 req/s target — more
+workers don't help much when one worker isn't saturated.
+
+**Retry amplification:** the default `CHARCOAL_CLASSIFIER_MAX_RETRIES=3` with
+exponential backoff means a transient 5xx cluster bills the worker time for
+each retry attempt plus the backoff sleep (worker stays alive during sleep).
+Worst case for a single classification under retry pressure: ~6× the
+single-call cost. Aggregate effect on a scan is small (rare events × low base
+cost), but it's not zero — flagged here so the cost guardrail can catch a
+pathological retry storm.
 
 Egress is free on RunPod, so Railway→RunPod traffic doesn't add cost. The
 dominant tunable lever is `idle_timeout` — start at 60 s, tune down to 5–10 s
 once warm-restore probability is measured.
+
+### Cost guardrail scope
+
+The `CHARCOAL_SCAN_COST_CEILING_CENTS=200` ceiling applies **per scan attempt
+instance** — not per user-day. A user whose scan aborts due to overrun can
+retry (their next scan starts a fresh budget). This prevents user-level lock-out
+from a single misbehaving scan and matches the "fail loudly" stance.
+
+The ceiling is not a billing cap — that's set on the RunPod side. It's a
+safety brake to abort runaway *individual scans*. A higher-level monthly cap
+should be set on RunPod's account-level billing dashboard separately
+(operational concern, not in this spec).
 
 ### Throughput budget
 
@@ -357,15 +581,22 @@ GPU utilization, request count, error rate.
 **Charcoal-side classifier metrics** (`src/observability/classifier_metrics.rs`,
 emitted via `tracing::info!`):
 
-- `cope_b_request_latency_ms` (histogram)
-- `cope_b_cold_start_detected` (counter — latency > 5 s on first call after idle)
-- `cope_b_retry_count` (counter)
-- `cope_b_fallback_to_zentropi_count` (counter — non-zero is a signal)
-- `cope_b_classification_count` (counter, labeled `toxic=true|false`)
-- `cope_b_cost_estimate_cents` (gauge — elapsed RunPod time × rate)
+- `classifier_request_latency_ms` (histogram, labeled by backend name)
+- `classifier_cold_start_detected` (counter — latency > 5 s on first call after idle)
+- `classifier_retry_count` (counter)
+- `classifier_fallback_to_zentropi_count` (counter — non-zero is a signal)
+- `classifier_classification_count` (counter, labeled `toxic=true|false`)
+- `classifier_cost_estimate_cents` (gauge — elapsed RunPod time × rate)
+- `classifier_idle_window_seconds` (histogram — time between scan-end and next
+  scan-start per worker; used to tune `runpod.yml` `idle_timeout` data-driven)
+
+Metric names use the generic `classifier_*` prefix (not `cope_b_*`) so the
+adapter stays backend-agnostic in observability too. Backend identity is
+carried in the `backend` label.
 
 Aggregated per scan and written to a new `scan_metrics` JSONB column on the
-scan row. Scan-complete log line carries `classifier_cost_cents=X`.
+scan row. Scan-complete log line carries `classifier_cost_cents=X` and
+`classifier_backend=runpod|zentropi`.
 
 ### Cost guardrail
 
@@ -377,15 +608,25 @@ Runtime check (not just observability):
 - Backstop against "RunPod billing bug or our concurrency is wrong." Better to
   lose one scan than discover a $400 surprise the next morning.
 
-### Audit log
+### Audit log (generalized)
 
-`src/scoring/classifier_audit.rs` (new) writes one JSONL line per classification
-when `CHARCOAL_AUDIT_CLASSIFIER=1`. Fields: timestamp, model_id, prompt_hash,
-verdict, confidence, latency_ms. Rotated daily. Used for:
+Charcoal already has NLI audit JSONL infrastructure (`src/scoring/nli_audit.rs`).
+Rather than introduce a parallel rotator, **generalize** the existing module
+into `src/scoring/audit_log.rs` parameterized by event type (`nli`,
+`classifier`), with a common JSONL writer and rotation policy.
 
+Classifier audit event fields: timestamp, backend, model_id, prompt_hash
+(content hash, not full text — privacy), verdict, confidence, latency_ms,
+fallback_invoked (bool).
+
+Enabled via `CHARCOAL_AUDIT_CLASSIFIER=1`. Used for:
 - A/B harness output capture
 - Debugging surprising verdicts after the fact
 - Recalibration if/when we change policy text
+
+Migrating the existing NLI audit to the generalized module is a separate small
+PR that lands before this work (so this spec's audit module change is purely
+additive).
 
 ### Health check
 
@@ -405,8 +646,11 @@ reports latency. Run after env-var changes and as a Railway healthcheck prefligh
 | `ZENTROPI_LABELER_VERSION_ID` | (none) | Existing — pins labeler version |
 | `CHARCOAL_SCAN_COST_CEILING_CENTS` | `200` | Hard cap per scan, aborts on overrun |
 | `CHARCOAL_AUDIT_CLASSIFIER` | `0` | Set `1` to emit per-call audit JSONL |
-| `CHARCOAL_CLASSIFIER_TIMEOUT_MS` | `60000` | Per-request timeout |
+| `CHARCOAL_CLASSIFIER_TIMEOUT_MS` | `60000` | Steady-state per-request timeout |
+| `CHARCOAL_CLASSIFIER_WARMUP_TIMEOUT_MS` | `180000` | First-call-after-idle timeout (cold start) |
 | `CHARCOAL_CLASSIFIER_MAX_RETRIES` | `3` | Bounded retries on 5xx |
+| `RUNPOD_COPE_B_THRESHOLD` | (set in Step 5) | Confidence threshold for RunPod CoPE-B verdicts |
+| `ZENTROPI_THRESHOLD` | (existing) | Confidence threshold for Zentropi verdicts |
 
 ## Open questions and TBDs
 
