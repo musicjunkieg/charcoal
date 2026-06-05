@@ -2430,6 +2430,116 @@
       "created_at": "2026-04-28T00:20:08.051618-07:00",
       "updated_at": "2026-04-28T00:20:08.051618-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":100}"
+    },
+    {
+      "id": 228,
+      "change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "node_type": "goal",
+      "title": "Phase 6: Self-host CoPE-B-A4B replacing Zentropi-hosted CoPE-A",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:05:25.747878-07:00",
+      "updated_at": "2026-06-05T15:05:25.747878-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95,\"prompt\":\"we're going to make some larger moves now. we need to move to zentropi's new model, cope-b-a4b, which will use some different prompt structures than cope-a, which is what we're using in their hosted API. we're also going to move to running the new model, which is available on hugging face, on Modal or RunPod. we want to be able to scale to zero and not get hit with a massive cold start situation, and we're gonna run on an A100 80GB on RunPod or an H100 on Modal. the goal is to build an adapter than can work with this architecture so we can get through 5000 classifications in under 10 minutes so the onboarding experienceis solid. build a plan that researches the best option between modal and runpod (dont want to spend more than $1 per onboarding) and present it to me for approval, and then use your tools and process to wire rhings together\"}"
+    },
+    {
+      "id": 229,
+      "change_id": "b36c6290-d5d6-4ed6-aac4-6fd6c9dd66e1",
+      "node_type": "option",
+      "title": "Modal H100 (Pythonic ergonomics, ~/bin/zsh.79/scan)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:05:34.573894-07:00",
+      "updated_at": "2026-06-05T15:05:34.573894-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":70}"
+    },
+    {
+      "id": 230,
+      "change_id": "96a4a943-85ac-46c6-922f-b323ab65f168",
+      "node_type": "option",
+      "title": "RunPod Serverless A100 80GB + FlashBoot + vLLM (~/bin/zsh.46/scan, free egress)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:05:34.580844-07:00",
+      "updated_at": "2026-06-05T15:05:34.580844-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90}"
+    },
+    {
+      "id": 231,
+      "change_id": "ca682f06-a503-4500-9353-4da6d1f0048c",
+      "node_type": "option",
+      "title": "RunPod primary + Modal failover (operationally consistent, double cold-start cost)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:05:34.587061-07:00",
+      "updated_at": "2026-06-05T15:05:34.587061-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":40}"
+    },
+    {
+      "id": 232,
+      "change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "node_type": "decision",
+      "title": "Choose RunPod A100 + adapter trait + Zentropi-hosted as fallback (Option A)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:05:52.473036-07:00",
+      "updated_at": "2026-06-05T15:05:52.473036-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90}"
+    },
+    {
+      "id": 233,
+      "change_id": "d33558fb-1d48-412a-abe2-6fb8d796aa09",
+      "node_type": "action",
+      "title": "Write CoPE-B self-host design spec (5 review iterations to APPROVED)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:06:04.889569-07:00",
+      "updated_at": "2026-06-05T15:06:04.889569-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"6ed45bf\",\"confidence\":95,\"files\":[\"docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md\"]}"
+    },
+    {
+      "id": 234,
+      "change_id": "00c61fb2-ecf2-4ddc-9368-8c3cf5c2d5c9",
+      "node_type": "action",
+      "title": "Write 8-chunk implementation plan with reviewer-loop catch on every chunk",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:06:10.510176-07:00",
+      "updated_at": "2026-06-05T15:06:10.510176-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"52d4e72\",\"confidence\":95,\"files\":[\"docs/superpowers/plans/2026-06-05-cope-b-self-host.md\"]}"
+    },
+    {
+      "id": 235,
+      "change_id": "fd1ee587-7f2e-45cd-80f6-d2a20e9a5fa6",
+      "node_type": "outcome",
+      "title": "Spec + plan committed; reviewer caught real BLOCKERs in every chunk that would have wasted executor time (envelope format, thiserror dep, async-iter mocking, .format() braces crash)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:06:16.203434-07:00",
+      "updated_at": "2026-06-05T15:06:16.203434-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
+    },
+    {
+      "id": 236,
+      "change_id": "1bd0384a-2ddd-4370-9320-5f9508581f1a",
+      "node_type": "action",
+      "title": "Open draft PR #54 (feat/cope-b-self-host -> staging) for spec+plan review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:06:22.228059-07:00",
+      "updated_at": "2026-06-05T15:06:22.228059-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90}"
+    },
+    {
+      "id": 237,
+      "change_id": "10432ea1-152e-4490-8e50-2eff7c77efbf",
+      "node_type": "observation",
+      "title": "Real-time deciduous logging was skipped during the design+plan flow; this batch is a catch-up. Per project CLAUDE.md this is wrong — log nodes BEFORE actions next time.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-05T15:06:28.205879-07:00",
+      "updated_at": "2026-06-05T15:06:28.205879-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":100}"
     }
   ],
   "edges": [
@@ -4764,6 +4874,127 @@
       "weight": 1.0,
       "rationale": "Architecture pivot's terminal milestone — Phase 5 lands",
       "created_at": "2026-04-28T00:20:17.262546-07:00"
+    },
+    {
+      "id": 219,
+      "from_node_id": 228,
+      "to_node_id": 229,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "b36c6290-d5d6-4ed6-aac4-6fd6c9dd66e1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Modal explored as alternative",
+      "created_at": "2026-06-05T15:05:59.124948-07:00"
+    },
+    {
+      "id": 220,
+      "from_node_id": 228,
+      "to_node_id": 230,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "96a4a943-85ac-46c6-922f-b323ab65f168",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "RunPod explored as alternative",
+      "created_at": "2026-06-05T15:05:59.130650-07:00"
+    },
+    {
+      "id": 221,
+      "from_node_id": 228,
+      "to_node_id": 231,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "ca682f06-a503-4500-9353-4da6d1f0048c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Hybrid failover explored as alternative",
+      "created_at": "2026-06-05T15:05:59.137106-07:00"
+    },
+    {
+      "id": 222,
+      "from_node_id": 229,
+      "to_node_id": 232,
+      "from_change_id": "b36c6290-d5d6-4ed6-aac4-6fd6c9dd66e1",
+      "to_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Modal rejected: Memory Snapshots dont help weight-loading cold start, billed egress, ~70% more expensive",
+      "created_at": "2026-06-05T15:05:59.142762-07:00"
+    },
+    {
+      "id": 223,
+      "from_node_id": 230,
+      "to_node_id": 232,
+      "from_change_id": "96a4a943-85ac-46c6-922f-b323ab65f168",
+      "to_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "RunPod selected: FlashBoot p95 2.3s, free egress, cheapest under $1/scan",
+      "created_at": "2026-06-05T15:05:59.147928-07:00"
+    },
+    {
+      "id": 224,
+      "from_node_id": 231,
+      "to_node_id": 232,
+      "from_change_id": "ca682f06-a503-4500-9353-4da6d1f0048c",
+      "to_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Hybrid rejected: operational overhead not justified at current scale",
+      "created_at": "2026-06-05T15:05:59.152986-07:00"
+    },
+    {
+      "id": 225,
+      "from_node_id": 232,
+      "to_node_id": 233,
+      "from_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "to_change_id": "d33558fb-1d48-412a-abe2-6fb8d796aa09",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision led to writing the spec",
+      "created_at": "2026-06-05T15:06:22.233983-07:00"
+    },
+    {
+      "id": 226,
+      "from_node_id": 233,
+      "to_node_id": 234,
+      "from_change_id": "d33558fb-1d48-412a-abe2-6fb8d796aa09",
+      "to_change_id": "00c61fb2-ecf2-4ddc-9368-8c3cf5c2d5c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approved spec led to writing the plan",
+      "created_at": "2026-06-05T15:06:22.239277-07:00"
+    },
+    {
+      "id": 227,
+      "from_node_id": 234,
+      "to_node_id": 235,
+      "from_change_id": "00c61fb2-ecf2-4ddc-9368-8c3cf5c2d5c9",
+      "to_change_id": "fd1ee587-7f2e-45cd-80f6-d2a20e9a5fa6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan completion is the outcome",
+      "created_at": "2026-06-05T15:06:22.245388-07:00"
+    },
+    {
+      "id": 228,
+      "from_node_id": 235,
+      "to_node_id": 236,
+      "from_change_id": "fd1ee587-7f2e-45cd-80f6-d2a20e9a5fa6",
+      "to_change_id": "1bd0384a-2ddd-4370-9320-5f9508581f1a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome triggers PR for human review",
+      "created_at": "2026-06-05T15:06:22.250611-07:00"
+    },
+    {
+      "id": 229,
+      "from_node_id": 228,
+      "to_node_id": 237,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "10432ea1-152e-4490-8e50-2eff7c77efbf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Process observation captured retroactively",
+      "created_at": "2026-06-05T15:06:28.212958-07:00"
     }
   ],
   "documents": [

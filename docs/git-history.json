@@ -1,5 +1,21 @@
 [
   {
+    "hash": "52d4e721bd8487dc101c120f3fa4d3fd472e0229",
+    "short_hash": "52d4e72",
+    "author": "Bryan Guffey",
+    "date": "2026-06-05T14:54:45-07:00",
+    "message": "docs(plan): CoPE-B impl plan Chunks 5-8 — A/B harness, gate, calibration, staging, cutover\n\nChunk 5: classify-compare (informational A/B per spec Step 4) +\n  classify-gate (Step 4.5 hard accuracy gate, 90%/90% bar, fixture\n  minimum 20 entries). Pure summarize() / evaluate() helpers separated\n  from UI so unit tests assert numbers.\n\nChunk 6: COPE_B_THRESHOLD calibration via classify-gate sweeps (note on\n  divergence from spec wording: gate-driven equivalent to spec A/B-driven,\n  simpler iteration). Zentropi-hosted CoPE-B research path with explicit\n  branch for \"available\" vs \"fall back to CoPE-A under existing threshold.\"\n\nChunk 7: feat -> staging PR, env-var setup including\n  CHARCOAL_SCAN_COST_CEILING_CENTS=200 safety net on staging (the\n  cheapest blast radius window for billing surprises), grimalkina re-scan\n  + metrics capture vs the chainlink #182 baseline.\n\nChunk 8: staging -> main PR via project staging promotion workflow,\n  prod env-var flip, smoke test, 24h monitoring with corrected metric\n  names (backend_selected_total{backend=zentropi} for fallback detection),\n  rollback plan with explicit data-state note (CoPE-B verdicts persist on\n  rollback; audit log carries per-call backend provenance).\n\nSingle end-to-end reviewer pass on these chunks caught:\n- Stale classifier_fallback_to_zentropi_count name (was renamed in Chunk 4)\n- Missing CHARCOAL_SCAN_COST_CEILING_CENTS on staging\n- Calibration mechanism divergence not explained\n- summarize() vs evaluate() threshold-handling difference unmarked\n\nChainlink #185.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "6ed45bf854401cd1ff2a5e1795aa448232066123",
+    "short_hash": "6ed45bf",
+    "author": "Bryan Guffey",
+    "date": "2026-06-05T12:47:30-07:00",
+    "message": "docs(spec): retry policy uses exponential backoff + decorrelated jitter\n\nPer Bryan note on iteration-5 spec. Plain exponential backoff causes\nthundering-herd against the upstream when many concurrent classifications\nhit the same transient failure window — jitter spreads retries across the\nbackoff window. Updated all four retry references (Failure modes, unit\ntest list, retry-amplification cost note, env var table) plus added a\ngolden-file test on jitter window bounds so future tuning does not\nsilently widen the spread.\n\nChainlink #185.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
     "hash": "e4e77c0aad1ad1cbfa96b451436ce25c3a9cfb79",
     "short_hash": "e4e77c0",
     "author": "Bryan Guffey",
