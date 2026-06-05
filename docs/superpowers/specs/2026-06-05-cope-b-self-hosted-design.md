@@ -194,8 +194,10 @@ LLM classifier is required at Stage 2. Tests use a `StubClassifier`.
 
 ### Failure modes
 
-- GPU service 5xx → retry with exponential backoff up to N attempts, then surface
-  the scoring failure to the user. **No silent fallback to ONNX threshold.**
+- GPU service 5xx → retry with **exponential backoff + decorrelated jitter** up to
+  N attempts (default 3), then surface the scoring failure to the user. Jitter
+  prevents thundering-herd on the upstream when many concurrent classifications
+  hit the same transient failure window. **No silent fallback to ONNX threshold.**
 - GPU service 4xx → log and fail the scoring job (indicates a bug or misconfig).
 - Startup with no reachable backend → boot fails loudly.
 - Cost ceiling exceeded mid-scan → abort, log loudly, surface to user.
@@ -521,7 +523,7 @@ Tests written first per Bryan's TDD mandate.
 - Charcoal envelope `[Parent post] / [Reply]` integration into `CONTENT` slot
 - JSON wire-format parse (success, error, malformed)
 - Confidence threshold logic with boundary cases
-- Retry policy: exponential backoff, max attempts, timeout escalation
+- Retry policy: exponential backoff with decorrelated jitter, max attempts, timeout escalation (golden-file test on the jitter window bounds so future tuning doesn't silently widen)
 
 ### Rust integration tests (`tests/web_classifier.rs`, `--features web`)
 
@@ -599,8 +601,10 @@ single-worker throughput has 6–18× headroom on our 8.3 req/s target — more
 workers don't help much when one worker isn't saturated.
 
 **Retry amplification:** the default `CHARCOAL_CLASSIFIER_MAX_RETRIES=3` with
-exponential backoff means a transient 5xx cluster bills the worker time for
-each retry attempt plus the backoff sleep (worker stays alive during sleep).
+exponential backoff + jitter means a transient 5xx cluster bills the worker
+time for each retry attempt plus the backoff sleep (worker stays alive during
+sleep). Jitter spreads concurrent retries across the backoff window, reducing
+peak retry cost relative to no-jitter exponential backoff.
 Worst case for a single classification under retry pressure: ~6× the
 single-call cost. Aggregate effect on a scan is small (rare events × low base
 cost), but it's not zero — flagged here so the cost guardrail can catch a
@@ -717,7 +721,7 @@ reports latency. Run after env-var changes and as a Railway healthcheck prefligh
 | `CHARCOAL_AUDIT_CLASSIFIER` | `0` | Set `1` to emit per-call audit JSONL |
 | `CHARCOAL_CLASSIFIER_TIMEOUT_MS` | `60000` | Steady-state per-request timeout |
 | `CHARCOAL_CLASSIFIER_WARMUP_TIMEOUT_MS` | `180000` | First-call-after-idle timeout (cold start) |
-| `CHARCOAL_CLASSIFIER_MAX_RETRIES` | `3` | Bounded retries on 5xx |
+| `CHARCOAL_CLASSIFIER_MAX_RETRIES` | `3` | Bounded retries on 5xx (exponential backoff + decorrelated jitter) |
 
 ## Open questions and TBDs
 
