@@ -3467,3 +3467,863 @@ chainlink session work <Phase 6.4 issue id>   # A/B harness + accuracy gate
 ```
 
 ---
+
+## Chunk 5: A/B characterization harness + Step 4.5 accuracy gate
+
+**Subissue:** `Phase 6.4 — A/B harness + accuracy gate`.
+
+**Spec sections to re-read first:** Migration Step 4 and Step 4.5.
+
+Chunk 5 adds two CLI subcommands. `classify-compare` runs the same JSONL input through both backends and emits a side-by-side comparison report. `classify-gate` runs only the configured backend against the labeled fixtures (`tests/fixtures/cope_b/known_toxic.jsonl` + `known_clean.jsonl`) and prints per-class accuracy; exits non-zero if the spec's 90%/90% bar isn't met or fixtures are below the minimum count. Both reuse the trait + factory from Chunk 4.
+
+### Task 5.1: Failing test for the A/B comparison rendering
+
+**Files:** Create `tests/unit_classify_compare.rs`.
+
+- [ ] **Step 1: Create the test**
+
+Path: `tests/unit_classify_compare.rs`
+
+```rust
+//! Unit tests for the A/B comparison summarizer. The pure summarize function
+//! takes two backends names + per-fixture verdicts and returns a comparison
+//! row + aggregate counts; UI rendering is separated from data so we can
+//! assert numbers without parsing terminal output.
+
+use charcoal::cli::classify_compare::{summarize, Pair, Summary};
+use charcoal::toxicity::classifier::ClassifierVerdict;
+
+fn v(t: bool, c: f32) -> ClassifierVerdict {
+    ClassifierVerdict {
+        toxic_token: t, confidence: c, latency_ms: 10,
+        model_id: "x".into(), policy_version: "p".into(),
+    }
+}
+
+#[test]
+fn agreement_counted_when_both_backends_agree_on_toxic_token() {
+    let pairs = vec![
+        Pair { id: "kt-001".into(), label: "toxic".into(), a: v(true, 0.9),  b: v(true, 0.85) },
+        Pair { id: "kt-002".into(), label: "toxic".into(), a: v(false, 0.6), b: v(true, 0.9) },
+        Pair { id: "kc-001".into(), label: "clean".into(), a: v(false, 0.1), b: v(false, 0.05) },
+    ];
+    let s: Summary = summarize(&pairs, "cope-a", "cope-b");
+    assert_eq!(s.total, 3);
+    assert_eq!(s.agreements, 2);
+    assert_eq!(s.disagreements, 1);
+    assert_eq!(s.a_toxic_only, 0);
+    assert_eq!(s.b_toxic_only, 1);
+}
+
+#[test]
+fn summarize_breaks_out_by_expected_label() {
+    let pairs = vec![
+        Pair { id: "kt-001".into(), label: "toxic".into(), a: v(true, 0.9),  b: v(true, 0.9) },
+        Pair { id: "kt-002".into(), label: "toxic".into(), a: v(false, 0.1), b: v(false, 0.1) },
+        Pair { id: "kc-001".into(), label: "clean".into(), a: v(false, 0.1), b: v(false, 0.1) },
+    ];
+    let s = summarize(&pairs, "cope-a", "cope-b");
+    assert_eq!(s.a_correct_on_toxic, 1);
+    assert_eq!(s.a_correct_on_clean, 1);
+    assert_eq!(s.b_correct_on_toxic, 1);
+    assert_eq!(s.b_correct_on_clean, 1);
+}
+
+#[test]
+fn uncertain_rows_skipped_from_correctness_totals() {
+    let pairs = vec![
+        Pair { id: "ec-001".into(), label: "uncertain".into(), a: v(true, 0.5), b: v(false, 0.5) },
+        Pair { id: "kt-001".into(), label: "toxic".into(),     a: v(true, 0.5), b: v(true, 0.5) },
+    ];
+    let s = summarize(&pairs, "cope-a", "cope-b");
+    assert_eq!(s.scored_for_accuracy, 1);   // only the kt- row counts
+    assert_eq!(s.a_correct_on_toxic, 1);
+}
+```
+
+- [ ] **Step 2: Verify failure**
+
+Run: `cargo test --test unit_classify_compare`
+Expected: module not found.
+
+### Task 5.2: Implement `src/cli/classify_compare.rs`
+
+**Files:**
+- Create: `src/cli/classify_compare.rs`
+- Modify: `src/cli/mod.rs` (add `pub mod classify_compare;`)
+- Modify: `src/main.rs` or `src/bin/charcoal/main.rs` — register the subcommand
+
+- [ ] **Step 1: Module + types**
+
+Path: `src/cli/classify_compare.rs`
+
+```rust
+//! `charcoal classify-compare` — run the same JSONL input through two
+//! classifiers and emit a side-by-side comparison report.
+//!
+//! Per spec migration Step 4: A/B is informational, not a hard gate. Use this
+//! command during development to characterize where backends diverge.
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::sync::Arc;
+
+use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixtureRow {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub category: String,
+    pub content: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Pair {
+    pub id: String,
+    pub label: String,
+    pub a: ClassifierVerdict,
+    pub b: ClassifierVerdict,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct Summary {
+    pub total: usize,
+    pub scored_for_accuracy: usize,
+    pub agreements: usize,
+    pub disagreements: usize,
+    pub a_toxic_only: usize,
+    pub b_toxic_only: usize,
+    pub a_correct_on_toxic: usize,
+    pub a_correct_on_clean: usize,
+    pub b_correct_on_toxic: usize,
+    pub b_correct_on_clean: usize,
+    pub a_name: String,
+    pub b_name: String,
+}
+
+/// Pure summary — UI-free so unit tests can assert on numbers.
+///
+/// Uses raw `toxic_token` from each verdict. Threshold/confidence gating is
+/// NOT applied here — for the threshold-aware accuracy gate, see
+/// `crate::cli::classify_gate::correct_fraction`. For A/B characterization at
+/// default thresholds (the typical use case for this command), the raw token
+/// is what we want to compare.
+pub fn summarize(pairs: &[Pair], a_name: &str, b_name: &str) -> Summary {
+    let mut s = Summary { a_name: a_name.into(), b_name: b_name.into(), ..Default::default() };
+    for p in pairs {
+        s.total += 1;
+        if p.a.toxic_token == p.b.toxic_token { s.agreements += 1; } else { s.disagreements += 1; }
+        if p.a.toxic_token && !p.b.toxic_token { s.a_toxic_only += 1; }
+        if !p.a.toxic_token && p.b.toxic_token { s.b_toxic_only += 1; }
+        let want = match p.label.as_str() {
+            "toxic" => Some(true),
+            "clean" => Some(false),
+            _ => None,
+        };
+        if let Some(want) = want {
+            s.scored_for_accuracy += 1;
+            if p.a.toxic_token == want {
+                if want { s.a_correct_on_toxic += 1; } else { s.a_correct_on_clean += 1; }
+            }
+            if p.b.toxic_token == want {
+                if want { s.b_correct_on_toxic += 1; } else { s.b_correct_on_clean += 1; }
+            }
+        }
+    }
+    s
+}
+
+pub async fn run(
+    a: Arc<dyn ToxicityClassifier>,
+    b: Arc<dyn ToxicityClassifier>,
+    input: &Path,
+) -> Result<Summary> {
+    let body = std::fs::read_to_string(input).with_context(|| format!("read {input:?}"))?;
+    let mut pairs = Vec::new();
+    for (i, line) in body.lines().enumerate() {
+        let row: FixtureRow = serde_json::from_str(line)
+            .with_context(|| format!("parse fixture line {} in {input:?}", i + 1))?;
+        let va = a.classify(&row.content).await
+            .with_context(|| format!("backend {} failed on {}", a.name(), row.id))?;
+        let vb = b.classify(&row.content).await
+            .with_context(|| format!("backend {} failed on {}", b.name(), row.id))?;
+        pairs.push(Pair { id: row.id, label: row.label, a: va, b: vb });
+    }
+    let summary = summarize(&pairs, a.name(), b.name());
+    let report_path = input.with_extension("compare.jsonl");
+    std::fs::write(
+        &report_path,
+        pairs.iter().map(|p| serde_json::to_string(p).unwrap()).collect::<Vec<_>>().join("\n"),
+    )
+    .with_context(|| format!("write {report_path:?}"))?;
+    print_summary(&summary);
+    Ok(summary)
+}
+
+fn print_summary(s: &Summary) {
+    println!("=== A/B comparison ({} vs {}) ===", s.a_name, s.b_name);
+    println!("total: {}    agreements: {}    disagreements: {}", s.total, s.agreements, s.disagreements);
+    println!("scored_for_accuracy: {}", s.scored_for_accuracy);
+    println!(
+        "{}: {} correct on toxic, {} correct on clean",
+        s.a_name, s.a_correct_on_toxic, s.a_correct_on_clean
+    );
+    println!(
+        "{}: {} correct on toxic, {} correct on clean",
+        s.b_name, s.b_correct_on_toxic, s.b_correct_on_clean
+    );
+}
+```
+
+- [ ] **Step 2: Register CLI subcommand**
+
+In `src/main.rs` (the clap-derived `Commands` enum), add:
+
+```rust
+/// A/B characterize two classifier backends against a JSONL input set.
+ClassifyCompare {
+    /// JSONL file path (each line: {id,label,category,content,note}).
+    #[arg(long)]
+    input: std::path::PathBuf,
+    /// Backend A — one of: runpod | zentropi
+    #[arg(long, default_value = "zentropi")]
+    a: String,
+    /// Backend B — one of: runpod | zentropi
+    #[arg(long, default_value = "runpod")]
+    b: String,
+},
+```
+
+Handler:
+
+```rust
+Commands::ClassifyCompare { input, a, b } => {
+    let backend_a = build_backend_named(&a)?;
+    let backend_b = build_backend_named(&b)?;
+    crate::cli::classify_compare::run(backend_a, backend_b, &input).await?;
+    Ok(())
+}
+```
+
+`build_backend_named(name)` is a small helper next to `build_from_env` in `classifier.rs` that constructs one specific backend by name (reading the per-backend env vars but ignoring `CHARCOAL_CLASSIFIER`); add it in Task 5.2 Step 3.
+
+- [ ] **Step 3: Add `build_backend_named` helper**
+
+Append to `src/toxicity/classifier.rs`:
+
+```rust
+pub fn build_backend_named(name: &str) -> Result<Arc<dyn ToxicityClassifier>> {
+    match name.trim().to_lowercase().as_str() {
+        "runpod" => {
+            let endpoint = std::env::var("RUNPOD_ENDPOINT_URL")?;
+            let api_key = std::env::var("RUNPOD_API_KEY")?;
+            let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?;
+            Ok(Arc::new(client))
+        }
+        "zentropi" => {
+            let api_key = std::env::var("ZENTROPI_API_KEY")?;
+            let labeler_id = std::env::var("ZENTROPI_LABELER_ID")?;
+            let labeler_version_id = std::env::var("ZENTROPI_LABELER_VERSION_ID").ok();
+            let client = crate::toxicity::zentropi::ZentropiClient::new(api_key, labeler_id, labeler_version_id)?;
+            Ok(Arc::new(client))
+        }
+        other => anyhow::bail!("unknown backend: {other:?}"),
+    }
+}
+```
+
+- [ ] **Step 4: Run tests, commit**
+
+Run: `cargo test --test unit_classify_compare && cargo clippy --features web -- -D warnings`. Then:
+
+```bash
+git add src/cli/classify_compare.rs src/cli/mod.rs src/main.rs src/toxicity/classifier.rs tests/unit_classify_compare.rs
+git commit -m 'feat(cli): classify-compare subcommand for A/B characterization
+
+Reads a JSONL fixture file, runs every row through two named backends
+(default a=zentropi b=runpod), emits per-pair JSONL + a printed summary
+covering agreements/disagreements and per-class accuracy. Pure summarize
+helper isolates the numbers from the UI for unit testing.
+
+build_backend_named factory bypasses CHARCOAL_CLASSIFIER so an operator
+can compare backends without changing the prod backend selection at boot.
+
+Per spec migration Step 4: A/B is informational, not a hard gate.
+
+Chainlink #<Phase 6.4 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+### Task 5.3: Step 4.5 accuracy gate — `classify-gate` subcommand
+
+**Files:**
+- Create: `src/cli/classify_gate.rs`
+- Modify: `src/cli/mod.rs`
+- Modify: `src/main.rs`
+
+The gate runs the configured backend against `known_toxic.jsonl` + `known_clean.jsonl`, applies the per-backend threshold via `classifier.threshold()`, and asserts the spec's 90%/90% bar. Fails fast if either fixture is missing or has < 20 entries (Chunk 2 contract).
+
+- [ ] **Step 1: Failing test**
+
+Path: `tests/unit_classify_gate.rs`
+
+```rust
+use charcoal::cli::classify_gate::{evaluate, GateInputs, GateOutcome, GateRow};
+use charcoal::toxicity::classifier::ClassifierVerdict;
+
+fn row(label: &str, verdict_toxic: bool, conf: f32) -> GateRow {
+    GateRow {
+        id: format!("{label}-x"),
+        label: label.into(),
+        verdict: ClassifierVerdict {
+            toxic_token: verdict_toxic, confidence: conf, latency_ms: 1,
+            model_id: "m".into(), policy_version: "p".into(),
+        },
+    }
+}
+
+#[test]
+fn gate_passes_when_both_classes_clear_90pct() {
+    let toxic = (0..20).map(|_| row("toxic", true, 0.99)).collect::<Vec<_>>();
+    let clean = (0..20).map(|_| row("clean", false, 0.01)).collect::<Vec<_>>();
+    let inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic, clean_rows: clean };
+    let out = evaluate(&inputs);
+    assert!(matches!(out, GateOutcome::Pass { .. }));
+}
+
+#[test]
+fn gate_fails_when_toxic_recall_below_90pct() {
+    let mut toxic = vec![row("toxic", true, 0.99); 18];
+    toxic.extend(vec![row("toxic", false, 0.01); 2]);   // 18/20 = 90% — passes by the bar
+    let mut toxic_fail = vec![row("toxic", true, 0.99); 17];
+    toxic_fail.extend(vec![row("toxic", false, 0.01); 3]);   // 17/20 = 85% — fails
+    let clean = vec![row("clean", false, 0.01); 20];
+
+    let pass_inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic, clean_rows: clean.clone() };
+    let fail_inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic_fail, clean_rows: clean };
+
+    assert!(matches!(evaluate(&pass_inputs), GateOutcome::Pass { .. }));
+    assert!(matches!(evaluate(&fail_inputs), GateOutcome::Fail { .. }));
+}
+
+#[test]
+fn gate_fails_when_fixture_too_small() {
+    let toxic = vec![row("toxic", true, 0.99); 5];
+    let clean = vec![row("clean", false, 0.01); 20];
+    let inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic, clean_rows: clean };
+    let out = evaluate(&inputs);
+    match out {
+        GateOutcome::Fail { reason, .. } => assert!(reason.contains("fixture too small")),
+        _ => panic!("expected Fail for tiny fixture"),
+    }
+}
+```
+
+- [ ] **Step 2: Implement `classify_gate.rs`**
+
+Path: `src/cli/classify_gate.rs`
+
+```rust
+//! `charcoal classify-gate` — spec migration Step 4.5 accuracy gate.
+//!
+//! Runs the configured backend against known_toxic.jsonl + known_clean.jsonl
+//! and asserts per-class accuracy >= 90% (spec floor). Exits non-zero on any
+//! failure so CI can gate prod cutover.
+
+use anyhow::{Context, Result};
+use serde::Serialize;
+use std::path::Path;
+use std::sync::Arc;
+
+use crate::toxicity::classifier::{is_toxic, ClassifierVerdict, ToxicityClassifier};
+
+pub const MIN_FIXTURE_SIZE: usize = 20;
+pub const PASS_THRESHOLD: f32 = 0.90;
+
+#[derive(Debug, Clone)]
+pub struct GateRow {
+    pub id: String,
+    pub label: String,
+    pub verdict: ClassifierVerdict,
+}
+
+#[derive(Debug)]
+pub struct GateInputs {
+    pub backend_name: String,
+    pub threshold: f32,
+    pub toxic_rows: Vec<GateRow>,
+    pub clean_rows: Vec<GateRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum GateOutcome {
+    Pass { toxic_accuracy: f32, clean_accuracy: f32 },
+    Fail { toxic_accuracy: f32, clean_accuracy: f32, reason: String },
+}
+
+pub fn evaluate(inputs: &GateInputs) -> GateOutcome {
+    if inputs.toxic_rows.len() < MIN_FIXTURE_SIZE || inputs.clean_rows.len() < MIN_FIXTURE_SIZE {
+        return GateOutcome::Fail {
+            toxic_accuracy: 0.0, clean_accuracy: 0.0,
+            reason: format!(
+                "fixture too small: toxic={} clean={} (minimum {})",
+                inputs.toxic_rows.len(), inputs.clean_rows.len(), MIN_FIXTURE_SIZE
+            ),
+        };
+    }
+
+    let t_acc = correct_fraction(&inputs.toxic_rows, inputs.threshold, /*expect_toxic=*/ true);
+    let c_acc = correct_fraction(&inputs.clean_rows, inputs.threshold, /*expect_toxic=*/ false);
+    if t_acc >= PASS_THRESHOLD && c_acc >= PASS_THRESHOLD {
+        GateOutcome::Pass { toxic_accuracy: t_acc, clean_accuracy: c_acc }
+    } else {
+        GateOutcome::Fail {
+            toxic_accuracy: t_acc, clean_accuracy: c_acc,
+            reason: format!(
+                "accuracy below {:.0}%: toxic={:.1}% clean={:.1}%",
+                PASS_THRESHOLD * 100.0, t_acc * 100.0, c_acc * 100.0
+            ),
+        }
+    }
+}
+
+fn correct_fraction(rows: &[GateRow], threshold: f32, expect_toxic: bool) -> f32 {
+    if rows.is_empty() { return 0.0; }
+    let mut correct = 0;
+    for r in rows {
+        let toxic = r.verdict.toxic_token && r.verdict.confidence >= threshold;
+        if toxic == expect_toxic { correct += 1; }
+    }
+    correct as f32 / rows.len() as f32
+}
+
+pub async fn run(
+    classifier: Arc<dyn ToxicityClassifier>,
+    toxic_path: &Path,
+    clean_path: &Path,
+) -> Result<GateOutcome> {
+    let toxic_rows = classify_file(&*classifier, toxic_path).await?;
+    let clean_rows = classify_file(&*classifier, clean_path).await?;
+    let inputs = GateInputs {
+        backend_name: classifier.name().into(),
+        threshold: classifier.threshold(),
+        toxic_rows, clean_rows,
+    };
+    Ok(evaluate(&inputs))
+}
+
+async fn classify_file(c: &dyn ToxicityClassifier, path: &Path) -> Result<Vec<GateRow>> {
+    let body = std::fs::read_to_string(path).with_context(|| format!("read {path:?}"))?;
+    let mut rows = Vec::new();
+    for (i, line) in body.lines().enumerate() {
+        let row: super::classify_compare::FixtureRow = serde_json::from_str(line)
+            .with_context(|| format!("parse line {} in {path:?}", i + 1))?;
+        let verdict = c.classify(&row.content).await
+            .with_context(|| format!("backend {} failed on {}", c.name(), row.id))?;
+        rows.push(GateRow { id: row.id, label: row.label, verdict });
+    }
+    Ok(rows)
+}
+```
+
+- [ ] **Step 3: Register CLI subcommand**
+
+In `src/main.rs`:
+
+```rust
+ClassifyGate {
+    #[arg(long, default_value = "tests/fixtures/cope_b/known_toxic.jsonl")]
+    toxic: std::path::PathBuf,
+    #[arg(long, default_value = "tests/fixtures/cope_b/known_clean.jsonl")]
+    clean: std::path::PathBuf,
+},
+```
+
+Handler — uses the existing `build_from_env` (gate runs the *configured* backend, not a named one):
+
+```rust
+Commands::ClassifyGate { toxic, clean } => {
+    let backend = crate::toxicity::classifier::build_from_env()?;
+    let outcome = crate::cli::classify_gate::run(backend, &toxic, &clean).await?;
+    match outcome {
+        charcoal::cli::classify_gate::GateOutcome::Pass { toxic_accuracy, clean_accuracy } => {
+            println!("GATE PASS — toxic {:.1}%, clean {:.1}%", toxic_accuracy * 100.0, clean_accuracy * 100.0);
+            Ok(())
+        }
+        charcoal::cli::classify_gate::GateOutcome::Fail { toxic_accuracy, clean_accuracy, reason } => {
+            eprintln!("GATE FAIL — {reason} (toxic {:.1}%, clean {:.1}%)", toxic_accuracy * 100.0, clean_accuracy * 100.0);
+            std::process::exit(1);
+        }
+    }
+}
+```
+
+- [ ] **Step 4: Run + commit**
+
+Run: `cargo test --test unit_classify_gate && cargo clippy --features web -- -D warnings`. Then:
+
+```bash
+git add src/cli/classify_gate.rs src/cli/mod.rs src/main.rs tests/unit_classify_gate.rs
+git commit -m 'feat(cli): classify-gate Step 4.5 accuracy gate
+
+Runs the configured backend against tests/fixtures/cope_b/known_toxic.jsonl
++ known_clean.jsonl. Per-class accuracy must reach 90% with the
+backend-owned threshold; fixtures must each have >= 20 entries. Fails
+fast with a clear reason; exits non-zero on miss so CI can gate prod
+cutover.
+
+evaluate() is pure (in-memory inputs only) so unit tests can assert
+pass/fail/too-small without mocking a classifier.
+
+Chainlink #<Phase 6.4 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+- [ ] **Step 5: Close subissue, switch to Chunk 6**
+
+```
+chainlink issue close <Phase 6.4 issue id>
+chainlink session work <Phase 6.5 issue id>   # threshold calibration + Zentropi-hosted CoPE-B
+```
+
+---
+
+## Chunk 6: Threshold calibration + Zentropi-hosted CoPE-B research / CoPE-A fallback
+
+**Subissue:** `Phase 6.5 — Confidence threshold calibration`.
+
+This chunk is short on code, heavy on calibration + research. Two artifacts:
+1. Concrete `COPE_B_THRESHOLD` value set in `src/toxicity/runpod_cope_b.rs` (code change, not env).
+2. Decision on whether `ZentropiClient` can call CoPE-B via the hosted API (versus staying on CoPE-A as fallback).
+
+### Task 6.1: Calibrate `COPE_B_THRESHOLD`
+
+**Prereqs:** Chunk 3 deployed image, Chunk 4 adapter merged on `feat/cope-b-self-host`, Chunk 5 `classify-gate` CLI available, Chunk 2 fixtures authored.
+
+**Note on spec divergence:** spec Step 5 frames calibration as "pick the
+threshold that maximizes accuracy on labeled examples [using A/B output]."
+We use `classify-gate` sweeps rather than an A/B pipeline because the
+threshold lives on the impl, not in the `Pair` data the A/B harness collects —
+sweep-and-gate is the equivalent operation with simpler iteration.
+
+- [ ] **Step 1: Run gate at current threshold (0.5)**
+
+Locally (or against the staging RunPod endpoint):
+
+```
+CHARCOAL_CLASSIFIER=runpod \
+RUNPOD_ENDPOINT_URL=<staging endpoint> \
+RUNPOD_API_KEY=<key> \
+cargo run --features web -- classify-gate
+```
+
+Capture the printed `toxic` and `clean` accuracy numbers.
+
+- [ ] **Step 2: Sweep thresholds**
+
+Manually walk thresholds in `runpod_cope_b.rs::COPE_B_THRESHOLD` across `0.3, 0.5, 0.7, 0.85, 0.9` (one branch commit per sweep value, or use a quick shell loop with sed + `cargo run`). For each, rerun the gate and record numbers. Pick the threshold that maximizes the minimum of (toxic accuracy, clean accuracy).
+
+- [ ] **Step 3: Commit the chosen value**
+
+Update `pub const COPE_B_THRESHOLD: f32 = <chosen>;` in `src/toxicity/runpod_cope_b.rs`. Replace the `TODO(migration-step-5)` doc-comment with a one-line note recording the calibration date + accuracy numbers.
+
+```bash
+git add src/toxicity/runpod_cope_b.rs
+git commit -m 'feat(toxicity): calibrate COPE_B_THRESHOLD against labeled fixtures
+
+classify-gate sweep at thresholds 0.3, 0.5, 0.7, 0.85, 0.9 against
+tests/fixtures/cope_b/{known_toxic,known_clean}.jsonl on the staging
+RunPod endpoint. Chose <X> — toxic accuracy <T%>, clean accuracy <C%>.
+
+Chainlink #<Phase 6.5 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+### Task 6.2: Research Zentropi-hosted CoPE-B
+
+Per spec Step 6 fallback gap policy: if Zentropi hosts CoPE-B we point `ZentropiClient` at it; if not, fallback runs CoPE-A under its own threshold and the mismatch is documented.
+
+- [ ] **Step 1: Check Zentropi docs / dashboard**
+
+Visit https://zentropi.ai (or whatever the current dashboard URL is) and confirm:
+- Is CoPE-B available as a labeler version?
+- If yes, what's the labeler version ID? Does the API call shape change?
+- If no, is there a public ETA?
+
+Record findings as a comment on the Phase 6.5 chainlink issue:
+
+```
+chainlink issue comment <Phase 6.5 issue id> '<summary of findings>'
+```
+
+- [ ] **Step 2a: If hosted CoPE-B IS available — update ZentropiClient**
+
+Bump `ZENTROPI_LABELER_VERSION_ID` env var on Railway prod + staging to the CoPE-B labeler version. Update `ZentropiClient::model_id()` from `"cope-a-9b"` → `"cope-b-a4b"`. Re-run the A/B harness with `cargo run -- classify-compare --a zentropi --b runpod`; agreement should be high since both backends now run CoPE-B.
+
+Commit message:
+```
+refactor(zentropi): point hosted client at CoPE-B labeler version
+```
+
+- [ ] **Step 2b: If hosted CoPE-B IS NOT available — document fallback gap**
+
+Update the spec's "Open questions and TBDs" subsection: TBD #1 resolved as "Zentropi-hosted CoPE-B not yet available; fallback runs CoPE-A under ZENTROPI_THRESHOLD = 0.0 (current behavior). Re-evaluate when Zentropi ships it (<ETA>)."
+
+Commit the spec edit:
+
+```bash
+git add docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md
+git commit -m 'docs(spec): resolve TBD #1 — Zentropi-hosted CoPE-B not yet available
+
+Per Step 6 fallback gap policy, fallback runs CoPE-A under its existing
+threshold. Re-evaluate when Zentropi ships hosted CoPE-B (ETA per
+research: <ETA>).
+
+Chainlink #<Phase 6.5 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+- [ ] **Step 3: Close subissue, switch to Chunk 7**
+
+```
+chainlink issue close <Phase 6.5 issue id>
+chainlink session work <Phase 6.6 issue id>   # Zentropi-hosted CoPE-B
+chainlink issue close <Phase 6.6 issue id>   # nothing to land beyond the research note
+chainlink session work <Phase 6.7 issue id>   # Staging gate
+```
+
+(Phase 6.6 was opened for the Zentropi-hosted CoPE-B work; if the research in Task 6.2 lands on the "not yet available" path, the subissue closes immediately with a comment recording the decision.)
+
+---
+
+## Chunk 7: Staging gate — grimalkina re-scan + tier-distribution comparison
+
+**Subissue:** `Phase 6.7 — Staging gate (grimalkina re-scan)`.
+
+**Spec sections:** Migration Step 7.
+
+This chunk is operational. The goal: re-scan a known-baseline user (grimalkina from chainlink #182) on staging with `CHARCOAL_CLASSIFIER=runpod` and compare against the baseline. No new code lands here; this is a verification gate before prod cutover.
+
+### Task 7.1: Deploy `feat/cope-b-self-host` → `staging`
+
+- [ ] **Step 1: Open PR to staging**
+
+Run:
+```
+gh pr create --base staging --head feat/cope-b-self-host \
+  --title 'Phase 6: Self-host CoPE-B-A4B on RunPod' \
+  --body-file docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md
+```
+(Use `--body-file` to avoid heredoc per project rule.)
+
+- [ ] **Step 2: CI must pass**
+
+Wait for GH Actions to finish:
+```
+gh pr checks --watch
+```
+If anything fails, fix locally and push.
+
+- [ ] **Step 3: Merge to staging**
+
+Once green and reviewed (or self-reviewed if Bryan is the only reviewer):
+```
+gh pr merge --squash --delete-branch
+```
+Railway auto-deploys `staging` branch to the staging environment.
+
+### Task 7.2: Configure staging env vars on Railway
+
+- [ ] **Step 1: Set classifier env vars**
+
+```
+railway environment staging
+railway service charcoal-web
+railway variables --set CHARCOAL_CLASSIFIER=runpod
+railway variables --set RUNPOD_ENDPOINT_URL=<staging endpoint URL>
+railway variables --set RUNPOD_API_KEY=<staging API key>
+railway variables --set CHARCOAL_AUDIT_CLASSIFIER=1
+railway variables --set CHARCOAL_SCAN_COST_CEILING_CENTS=200
+```
+
+The cost ceiling matters most during the verification window — staging is
+exactly when an unexpected billing pattern is most likely to surface, so
+setting the abort safety net here gives the cheapest possible blast radius.
+
+- [ ] **Step 2: Restart staging service**
+
+```
+railway up --detach
+```
+(or trigger via the Railway dashboard if `up` is unwanted.) Tail logs to confirm boot:
+```
+railway logs --since 5m --lines 30 --filter "Starting Charcoal web server\|build_from_env\|classifier_backend_selected_total"
+```
+Expected: `Starting Charcoal web server` then a classifier-banner log showing `backend=runpod-cope-b`.
+
+### Task 7.3: Re-scan grimalkina, capture metrics
+
+- [ ] **Step 1: Trigger admin scan**
+
+Bryan logs into the staging dashboard (`charcoal-web-staging.up.railway.app`), goes to `/admin`, ensures grimalkina is pre-seeded, and clicks Scan. If not pre-seeded, pre-seed first (chainlink #182 walked this).
+
+- [ ] **Step 2: Tail metrics during scan**
+
+```
+railway logs --since 30m --lines 100 --filter "classifier_request_latency_ms\|classifier_retry_count\|classifier_cost_estimate_cents\|Background scan completed"
+```
+Capture:
+- Total `classifier_classification_count` (sum)
+- Median + p95 `classifier_request_latency_ms`
+- `classifier_retry_count` (any non-zero values are signals)
+- Scan completion timestamp + events/accounts
+
+- [ ] **Step 3: Compare against baseline**
+
+Baseline (from chainlink #182, prod CoPE-A 2026-06-05):
+- 1994 events, 3671 accounts, 2h 34min duration
+- 45 Zentropi 403s, ZERO 429s
+- ~112k post classifications
+
+Compare staging-on-RunPod numbers — flag anything material:
+- Scan duration > 1.5× baseline → investigate (cold start? batching?)
+- Tier distribution shift (re-run `charcoal report` on the same target) — any `Low` → `Watch+` movements
+- Per-classification cost summing to > $1 per scan (RunPod-side estimate)
+
+Record findings as a comment on Phase 6.7 chainlink issue. **Hold here for at least one full scan before promoting to Chunk 8.**
+
+### Task 7.4: Close subissue, switch to Chunk 8
+
+```
+chainlink issue close <Phase 6.7 issue id>
+chainlink session work <Phase 6.8 issue id>   # Prod cutover
+```
+
+---
+
+## Chunk 8: Prod cutover + monitoring
+
+**Subissue:** `Phase 6.8 — Prod cutover + monitoring`.
+
+**Spec sections:** Migration Step 8.
+
+This is the env-var flip on prod. Code is unchanged from Chunk 7; only Railway configuration changes.
+
+### Task 8.1: Open staging → main PR
+
+- [ ] **Step 1: PR**
+
+```
+gh pr create --base main --head staging \
+  --title 'Promote Phase 6 CoPE-B self-host to production' \
+  --body-file docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md
+```
+
+- [ ] **Step 2: Wait for CI + review**
+
+Per project rule (chainlink memory note): production promotions go through a PR, never direct local merge+push. Wait for GH Actions to pass and self-review (or wait for human review).
+
+- [ ] **Step 3: Merge with squash**
+
+```
+gh pr merge --squash
+```
+Railway auto-deploys `main` to production.
+
+### Task 8.2: Configure prod env vars
+
+- [ ] **Step 1: Set classifier env vars**
+
+```
+railway environment production
+railway service charcoal-web
+railway variables --set CHARCOAL_CLASSIFIER=runpod
+railway variables --set RUNPOD_ENDPOINT_URL=<prod endpoint URL>
+railway variables --set RUNPOD_API_KEY=<prod API key>
+railway variables --set CHARCOAL_AUDIT_CLASSIFIER=1
+railway variables --set CHARCOAL_SCAN_COST_CEILING_CENTS=200
+```
+
+- [ ] **Step 2: Restart prod service**
+
+```
+railway up --detach
+```
+
+- [ ] **Step 3: Smoke test**
+
+Visit `charcoal.watch`, sign in, run `charcoal classifier-check` from a Railway shell (or trigger via the admin /api/me endpoint if classifier-check has an HTTP entrypoint). Expected: backend reports as `runpod-cope-b` and three smoke pings succeed.
+
+### Task 8.3: Watch first prod scans
+
+- [ ] **Step 1: Tail logs for 24h**
+
+Use `railway logs --filter 'classifier_'` and a small Monitor task to watch for:
+- `classifier_backend_selected_total{backend="zentropi"}` (would indicate the boot-time selection landed on Zentropi — surprising on prod where we just set `CHARCOAL_CLASSIFIER=runpod`)
+- `classifier_cost_estimate_cents` > 200 per scan (cost ceiling — should abort, but verify)
+- `Background scan completed` events with `events=` and `accounts=` matching healthy historical ranges
+- Any `ERROR` or `WARN` lines from `charcoal::toxicity` modules indicating retry exhaustion or 4xx from RunPod
+
+Compare the first 3–5 prod scans against the staging baseline from Chunk 7. Any unexpected behavior → rollback (Task 8.4).
+
+### Task 8.4: Rollback plan (do not execute unless needed)
+
+If anything goes wrong in the first 24h:
+
+```
+railway environment production
+railway service charcoal-web
+railway variables --set CHARCOAL_CLASSIFIER=zentropi
+railway up --detach
+```
+Total round-trip < 10 min. Prod returns to Zentropi-hosted CoPE-A.
+
+**Data-state note:** rollback flips the *boot-time backend* but does NOT
+invalidate CoPE-B verdicts already written to `account_scores` /
+`amplification_events`. The audit log
+(`classifier_backend_selected_total` at scan start + per-event audit JSONL
+from `audit_log` module + `classifier_model_id`/`classifier_policy_version`
+on `TwoStageVerdict`) is the source of truth for which backend produced
+which verdict. If significant tier disagreement is observed post-rollback
+on previously-scored accounts, manually re-trigger scans for the affected
+users so their `account_scores` rows are regenerated under CoPE-A.
+
+### Task 8.5: Final sweep + close out
+
+- [ ] **Step 1: Close Phase 6.8 subissue**
+
+```
+chainlink issue comment <Phase 6.8 issue id> 'Prod cutover complete. First N scans nominal — see logs YYYY-MM-DD.'
+chainlink issue close <Phase 6.8 issue id>
+```
+
+- [ ] **Step 2: Close the Phase 6 epic**
+
+```
+chainlink issue comment 185 'All sub-issues closed. CoPE-B self-host live on prod. Deprecate Zentropi env vars after 2-4 weeks of nominal operation.'
+chainlink issue close 185
+```
+
+- [ ] **Step 3: Memory update**
+
+Update `MEMORY.md` to reflect:
+- Phase 6 ✅ COMPLETE
+- Classifier backend: RunPod CoPE-B-A4B
+- Zentropi kept as fallback for 2–4 weeks
+
+- [ ] **Step 4: Session end**
+
+```
+chainlink session end --notes 'Phase 6 complete. CoPE-B self-host on RunPod live on prod. Zentropi remains configured as fallback.'
+```
+
+---
