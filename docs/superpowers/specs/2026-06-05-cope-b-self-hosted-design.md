@@ -77,10 +77,24 @@ classifier output rather than ONNX + Zentropi specifically.
 // NEW: src/toxicity/classifier.rs
 #[async_trait]
 pub trait ToxicityClassifier: Send + Sync {
+    /// Classify a single text. For replies-with-parent, callers compose the
+    /// envelope via `format_parent_reply(parent, reply)` and pass it as `content`
+    /// — there is no `classify_pair` shortcut. This keeps prompt assembly
+    /// uniform across backends (RunPod bakes the envelope into the Gemma
+    /// CONTENT slot; Zentropi-hosted sees the same envelope text).
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict>;
-    async fn classify_pair(&self, parent: &str, reply: &str) -> Result<ClassifierVerdict>;
-    fn name(&self) -> &'static str;        // for logging / audit
-    fn model_id(&self) -> &'static str;    // for audit JSONL
+    /// Stable identifier for logging / startup banner.
+    fn name(&self) -> &'static str;
+    /// Model identity for audit JSONL — e.g. "cope-b-a4b" or "cope-a-9b".
+    fn model_id(&self) -> &'static str;
+    /// Policy version applied at request time (e.g. "policy-v3-2026-07-01").
+    /// Self-hosted backends read from a constant baked at image build time;
+    /// Zentropi-hosted returns the configured labeler version ID.
+    fn policy_version(&self) -> &'static str;
+    /// Per-backend confidence threshold. Set as a const on each impl, calibrated
+    /// in migration Step 5 for the model the impl wraps. **Sole source of
+    /// truth for thresholds** — callers must not override.
+    fn threshold(&self) -> f32;
 }
 
 #[derive(Debug, Clone)]
@@ -92,15 +106,17 @@ pub struct ClassifierVerdict {
     pub confidence: f32,
     /// Wall-clock latency for audit / metrics.
     pub latency_ms: u32,
+    /// Model identity (mirrors the trait's `model_id()`) — captured per-call so
+    /// audit events carry it without lifetime juggling.
+    pub model_id: String,
+    /// Policy version applied to this call. See `ToxicityClassifier::policy_version`.
+    pub policy_version: String,
 }
 
-impl dyn ToxicityClassifier {
-    /// Apply a per-backend confidence threshold. Each implementation owns its
-    /// threshold constant (calibrated for its specific model).
-    /// Default impl: toxic if model said toxic AND confidence ≥ threshold.
-    fn is_toxic_with_threshold(&self, v: &ClassifierVerdict, threshold: f32) -> bool {
-        v.toxic_token && v.confidence >= threshold
-    }
+/// Helper used by `TwoStageToxicityScorer` — never called with an externally
+/// supplied threshold. Threshold ownership stays with the implementation.
+pub fn is_toxic(classifier: &dyn ToxicityClassifier, v: &ClassifierVerdict) -> bool {
+    v.toxic_token && v.confidence >= classifier.threshold()
 }
 ```
 
@@ -127,7 +143,10 @@ pub enum VerdictSource {
 pub struct TwoStageToxicityScorer {
     primary: Box<dyn ToxicityScorer>,                // unchanged (ONNX)
     classifier: Arc<dyn ToxicityClassifier>,         // was Option<Arc<ZentropiClient>>; now required
-    classifier_threshold: f32,                       // per-backend, set at construction
+    // NOTE: no `classifier_threshold` field. The threshold is owned by the
+    // classifier implementation and accessed via `classifier.threshold()`.
+    // This prevents the threshold from drifting away from the model it was
+    // calibrated for during fallback or in tests.
 }
 ```
 
@@ -344,10 +363,13 @@ Eight steps, ordered to fail loudly and reversibly. Steps 1–4 happen on the
 `feat/cope-b-self-host` branch with zero prod impact. Step 7 is the staging
 gate. Step 8 is the prod cutover.
 
-### Step 1 — Author the policy text
+### Step 1 — Author the policy text AND labeled fixtures
 
-`gpu/cope-b-runpod/policy.txt` defines "toxic" for CoPE-B — the artifact that
-plays the role `ZENTROPI_LABELER_ID` plays invisibly on the hosted API.
+Both artifacts authored together because Step 4.5 (accuracy gate) depends on
+the fixtures existing, and the fixtures define the policy in practice.
+
+**`gpu/cope-b-runpod/policy.txt`** defines "toxic" for CoPE-B — the artifact
+that plays the role `ZENTROPI_LABELER_ID` plays invisibly on the hosted API.
 
 - Start from the reference snapshot at `refs/labeler_prompt.txt`
 - Translate into CoPE-B's `POLICY` slot format (no INSTRUCTIONS/ANSWER headers)
@@ -355,9 +377,18 @@ plays the role `ZENTROPI_LABELER_ID` plays invisibly on the hosted API.
   notebook to sanity-check the policy
 - Commit to git so policy is versioned alongside code
 
-**This step requires real human judgment from Bryan** about what counts as
-toxic in Charcoal's specific community context — sarcasm, counter-speech,
-reclaimed slurs, news commentary on violent topics. Cannot be fully automated.
+**Labeled fixtures** (`tests/fixtures/cope_b/`):
+- `known_toxic.jsonl` — minimum 20 hand-curated toxic examples
+- `known_clean.jsonl` — minimum 20 hand-curated clean examples
+- `edge_cases.jsonl` — sarcasm, counter-speech, reclaimed slurs, news
+  commentary on violent topics (cf. chainlink #114)
+
+**Both steps require real human judgment from Bryan** about what counts as
+toxic in Charcoal's specific community context. Cannot be fully automated.
+
+**Step 4.5 blocks** if `known_toxic.jsonl` or `known_clean.jsonl` has fewer
+than 20 entries — the accuracy gate can't run on insufficient samples. The
+implementation should fail loudly with a clear "fixture set too small" error.
 
 ### Step 2 — Build the RunPod GPU service
 
@@ -457,7 +488,7 @@ Tests written first per Bryan's TDD mandate.
 
 ### Rust unit tests (`tests/unit_classifier.rs`)
 
-- `Verdict` serde roundtrip
+- `ClassifierVerdict` serde roundtrip (model_id, policy_version, confidence, etc.)
 - Gemma chat template prompt assembly — golden-file test, asserts known input
   → exact known prompt string including BOS/EOS tokens and role markers
 - Charcoal envelope `[Parent post] / [Reply]` integration into `CONTENT` slot
@@ -552,17 +583,23 @@ Egress is free on RunPod, so Railway→RunPod traffic doesn't add cost. The
 dominant tunable lever is `idle_timeout` — start at 60 s, tune down to 5–10 s
 once warm-restore probability is measured.
 
-### Cost guardrail scope
+### Cost guardrail
 
-The `CHARCOAL_SCAN_COST_CEILING_CENTS=200` ceiling applies **per scan attempt
-instance** — not per user-day. A user whose scan aborts due to overrun can
-retry (their next scan starts a fresh budget). This prevents user-level lock-out
-from a single misbehaving scan and matches the "fail loudly" stance.
+Runtime check (not just observability):
 
-The ceiling is not a billing cap — that's set on the RunPod side. It's a
-safety brake to abort runaway *individual scans*. A higher-level monthly cap
-should be set on RunPod's account-level billing dashboard separately
-(operational concern, not in this spec).
+- Track running cost estimate during a scan. If it exceeds a hard ceiling
+  (default $2/scan), abort the scan and log loudly. Surface a clear error to
+  the user.
+- `CHARCOAL_SCAN_COST_CEILING_CENTS=200` (default).
+- **Scope:** per scan attempt instance — not per user-day. A user whose scan
+  aborts due to overrun can retry (their next scan starts a fresh budget).
+  This prevents user-level lock-out from a single misbehaving scan and matches
+  the "fail loudly" stance.
+- **Not a billing cap.** The ceiling is a safety brake to abort runaway
+  individual scans. Account-level monthly billing limits should be configured
+  separately on the RunPod side (operational concern outside this spec).
+- Backstop against "RunPod billing bug or our concurrency is wrong." Better to
+  lose one scan than discover a $400 surprise the next morning.
 
 ### Throughput budget
 
@@ -584,7 +621,10 @@ emitted via `tracing::info!`):
 - `classifier_request_latency_ms` (histogram, labeled by backend name)
 - `classifier_cold_start_detected` (counter — latency > 5 s on first call after idle)
 - `classifier_retry_count` (counter)
-- `classifier_fallback_to_zentropi_count` (counter — non-zero is a signal)
+- `classifier_backend_selected_total` (counter, labeled `backend=runpod|zentropi`) —
+  emitted once at startup. **Not a runtime auto-fallback signal**; the design has
+  no silent fallback. This metric reflects which backend was selected at boot
+  based on `CHARCOAL_CLASSIFIER` and availability checks.
 - `classifier_classification_count` (counter, labeled `toxic=true|false`)
 - `classifier_cost_estimate_cents` (gauge — elapsed RunPod time × rate)
 - `classifier_idle_window_seconds` (histogram — time between scan-end and next
@@ -598,16 +638,6 @@ Aggregated per scan and written to a new `scan_metrics` JSONB column on the
 scan row. Scan-complete log line carries `classifier_cost_cents=X` and
 `classifier_backend=runpod|zentropi`.
 
-### Cost guardrail
-
-Runtime check (not just observability):
-
-- Track running cost estimate during a scan. If it exceeds a hard ceiling
-  (default $2/scan), abort the scan and log loudly.
-- `CHARCOAL_SCAN_COST_CEILING_CENTS=200` default.
-- Backstop against "RunPod billing bug or our concurrency is wrong." Better to
-  lose one scan than discover a $400 surprise the next morning.
-
 ### Audit log (generalized)
 
 Charcoal already has NLI audit JSONL infrastructure (`src/scoring/nli_audit.rs`).
@@ -615,9 +645,16 @@ Rather than introduce a parallel rotator, **generalize** the existing module
 into `src/scoring/audit_log.rs` parameterized by event type (`nli`,
 `classifier`), with a common JSONL writer and rotation policy.
 
-Classifier audit event fields: timestamp, backend, model_id, prompt_hash
-(content hash, not full text — privacy), verdict, confidence, latency_ms,
-fallback_invoked (bool).
+Classifier audit event fields: timestamp, backend, model_id, **policy_version**,
+prompt_hash (content hash, not full text — privacy), verdict, confidence,
+latency_ms, fallback_invoked (bool).
+
+Carrying `policy_version` separately from `model_id` is critical because
+two different content surfaces drive the verdict — model weights and policy
+text. A policy-text-only change rebuilds the image and bumps the policy version
+tag (cf. "Image and endpoint lifecycle"). Without `policy_version` in the
+audit log, the same `model_id` would silently span two different effective
+classifiers across a policy edit, making post-hoc analysis ambiguous.
 
 Enabled via `CHARCOAL_AUDIT_CLASSIFIER=1`. Used for:
 - A/B harness output capture
