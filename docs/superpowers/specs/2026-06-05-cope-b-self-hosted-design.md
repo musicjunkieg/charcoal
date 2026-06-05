@@ -180,8 +180,8 @@ Step 3 also includes a `cargo grep` pass for `classify_pair` / `ZentropiToxic`
 
 Selection at startup via `CHARCOAL_CLASSIFIER`:
 
-- `runpod` → `RunPodCopeBClient` with `RUNPOD_COPE_B_THRESHOLD` (default tuned in Step 5)
-- `zentropi` → `ZentropiClient` with `ZENTROPI_THRESHOLD` (existing — unchanged unless Zentropi-hosted CoPE-B requires recalibration)
+- `runpod` → `RunPodCopeBClient` with `const COPE_B_THRESHOLD: f32` (Rust source; tuned in Step 5)
+- `zentropi` → `ZentropiClient` with its own `const` threshold (Rust source; existing value carried forward unless Zentropi-hosted CoPE-B requires recalibration)
 - unset or unreachable → app refuses to boot (`anyhow::bail!`)
 
 **Critical:** each backend carries its own threshold constant. In the fallback
