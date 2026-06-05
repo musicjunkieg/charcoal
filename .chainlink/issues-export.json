@@ -1,7 +1,132 @@
 {
   "version": 1,
-  "exported_at": "2026-05-17T23:00:43.865243+00:00",
+  "exported_at": "2026-06-05T17:23:00.798735+00:00",
   "issues": [
+    {
+      "id": 185,
+      "title": "Phase 6: Self-host CoPE-b-a4b on GPU (Modal or RunPod), replace Zentropi",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Goal: replace Zentropi hosted API (CoPE-a) with self-hosted CoPE-b-a4b on GPU infrastructure.\n\nConfirmed scope (from brainstorming with Bryan, 2026-06-05):\n- ONNX clean-pass filter STAYS (<0.10) — CoPE-b replaces only the Zentropi stage\n- 5000 classifications in <10 min per user (latency target for solid onboarding UX)\n- Must absorb concurrent onboardings gracefully (queue-and-degrade acceptable; single-user latency is the hard constraint)\n- Cost ceiling: <$1 per onboarding scan\n- Hardware: A100 80GB on RunPod OR H100 on Modal\n- Scale-to-zero with minimal cold-start\n- Build an adapter so backend is swappable (Zentropi-hosted ↔ self-hosted CoPE-b ↔ future)\n- Prompt structure for CoPE-b differs from CoPE-a — research from HF model card\n\nPhase plan (TBD pending design):\n- Phase 6.1: Provider research + spec\n- Phase 6.2: GPU deployment (Modal or RunPod) with CoPE-b\n- Phase 6.3: Charcoal adapter (trait + implementations)\n- Phase 6.4: Integration + staging rollout\n- Phase 6.5: Prod cutover + Zentropi deprecation\n\nTracking: this is the Phase 6 epic. Subissues will be opened as design solidifies.",
+          "created_at": "2026-06-05T16:55:00.998725+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T16:54:50.182807+00:00",
+      "updated_at": "2026-06-05T16:54:50.182807+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 184,
+      "title": "Investigate ONNX inference failures during long-running scans",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Observed during the 2026-06-05 grimalkina.bsky.social scan (#182):\n\n- 12 ONNX inference failures over a 2h 34min scan\n- Source: src/pipeline/amplification.rs WARN \"Failed to score follower, skipping\" with error=\"ONNX inference failed\"\n- Pattern: sparse, scattered throughout the scan (not clustered)\n- Effect: affected followers skipped entirely — counted in completion `accounts=` total but no score row written\n- Benign on a small scale (12 / ~3300 = 0.4%), but worth investigating if rate scales with scan length\n\nPossible causes:\n1. Memory pressure under long-running scan — ort session may degrade after many calls\n2. Specific post content triggers tokenizer/model edge case (UTF-8, length, repeated chars)\n3. ort 2.0.0-rc.11 session pool exhaustion / locking issue\n4. Tokenizers crate bug on certain inputs\n\nInvestigation plan:\n1. Add post-content snapshot logging when ONNX fails — capture text length, presence of non-BMP unicode, language markers\n2. Track memory usage on Railway during scan (current Phase 5 scans are RAM-heavy due to Zentropi + NLI + ONNX in parallel)\n3. Confirm 12 failures are random vs. correlated (same follower? same post pattern?)\n4. Consider rebuilding ort session periodically (every N inferences) as defensive measure\n\nLow priority unless ONNX failure rate grows with scan size.",
+          "created_at": "2026-06-05T15:58:26.381165+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T15:58:16.103721+00:00",
+      "updated_at": "2026-06-05T15:58:16.103721+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 183,
+      "title": "Investigate sporadic Zentropi 403 Forbidden errors during long scans",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Observed during the 2026-06-05 grimalkina.bsky.social scan (#182):\n\n- 45 Zentropi failures over a 2h 34min scan, all HTTP 403 Forbidden\n- Response body is HTML (`<!doctype html>...<title>403</title>403 Forbidden`), NOT a JSON error body — suggests block at CDN/proxy layer (Cloudflare/CloudFront/WAF) rather than Zentropi service itself\n- First 403 hit at 06:09:54Z, 2h 19min into the scan — late-onset, not present at scan start\n- Sporadic after that (45 over remaining ~15 min)\n- Code path: src/toxicity/ensemble.rs WARN \"Zentropi failed, falling back to ONNX threshold\" — fallback works, no scoring impact, but bypasses Zentropi for affected posts\n\nContrast with chaosgreml.in 2026-05-17 scan: hundreds-to-thousands of 429s, no 403s.\n\nHypotheses to investigate:\n1. Zentropi auth token (API key) has a TTL or rotation — may invalidate mid-scan\n2. Upstream CDN (Cloudflare?) blocks long-lived connections or specific IP patterns after sustained usage\n3. Zentropi changed billing/auth — sporadic 403 may indicate quota/credit exhaustion partway through\n4. Specific labeler version (ZENTROPI_LABELER_VERSION_ID) deprecated mid-scan\n\nNext steps:\n1. Run `charcoal zentropi-check` to confirm current auth health\n2. Add 403-specific logging: capture response headers (especially `cf-ray`, `x-amz-cf-id`, `server`, `www-authenticate`) to identify whether the block is at CDN or origin\n3. Implement bounded retry with backoff on 403 (currently we just fall back to ONNX)\n4. Consider env-var rotation strategy if auth has a TTL\n\nRelated: #181 (Zentropi concurrency) — original 429-rate-limit concern not reproducing at 5x the load; this 403 pattern is the new failure mode worth tracking.",
+          "created_at": "2026-06-05T15:58:12.979998+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T15:57:58.472580+00:00",
+      "updated_at": "2026-06-05T15:57:58.472580+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 182,
+      "title": "Pull Zentropi call count from last full scan of grimalkina.bsky.social",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [
+        {
+          "content": "Goal: quantify Zentropi API usage on a real scan to inform whether per-key rate limiting / concurrency caps are needed.\n\nTarget: most recent full scan for protected user grimalkina.bsky.social (DID resolution needed).\n\nSources to check:\n- NLI/Zentropi audit JSONL logs (Phase 1.75 added per-pair JSONL audit). Check Railway production logs / volume for path.\n- amplification_events / account_scores rows from the last scan window — count of scored accounts × post-sample size gives an upper bound.\n- scan_state table for last scan start/end timestamps to scope the window.\n\nWanted output:\n- Total Zentropi requests during the window\n- Breakdown by call type (classify vs classify_pair)\n- Peak in-flight concurrency observed (if surfaced in logs)\n- Any 429 / rate-limit responses\n\nUse this to decide whether to add a semaphore around ZentropiClient (follow-up to #181).",
+          "created_at": "2026-06-05T03:26:06.677544+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Findings — grimalkina has NO scan history in Railway logs (90-day retention) for either prod or staging.\n\nSearched:\n- production env (charcoal-web): 90d logs filtered for \"grimalkina\" → zero hits\n- staging env (charcoal-web): 90d logs filtered for \"grimalkina\" → zero hits\n- production env: only ONE full scan in 90 days, target was chaosgreml.in (Bryan), started 2026-05-17T23:21:14Z, completed 2026-05-18T00:08:16Z (~47 min), 704 amplifier accounts, 447 events\n- staging env: no scan_job activity in 90 days\n\nINCIDENTAL FINDING from the chaosgreml.in scan: Zentropi was getting HAMMERED with 429s. Sample raw count from logs (single grep, sequential timestamps clustered within seconds):\n\n- Pulled ~100 lines around 23:27-23:28 → seen at least 30+ \"Zentropi API error 429 Too Many Requests\" lines\n- Pattern: bursts of 4-8 simultaneous 429s, then a few seconds quiet, then another burst\n- Code falls back to ONNX threshold on 429 (src/toxicity/ensemble.rs WARN), so scoring keeps working — but Zentropi binary classification was effectively bypassed for a large fraction of posts on this scan\n- This validates the #181 concern: ~32 concurrent peak (8 accounts × 4 in-flight) is over the Zentropi rate limit\n\nSo the rate-limit/semaphore work proposed as a follow-up to #181 is NOT hypothetical — it actively degraded the 2026-05-17 chaosgreml.in scan.\n\nNext steps for this issue:\n1. Confirm with Bryan whether they meant the chaosgreml.in scan, or want a fresh grimalkina scan triggered\n2. If grimalkina scan is wanted, trigger via /api/scan after OAuth login as grimalkina, then re-pull logs filtered to that scan window\n3. Quantify the chaosgreml.in scan more precisely: count total Zentropi 429s vs total successful Zentropi calls (needs full-window log dump)",
+          "created_at": "2026-06-05T03:29:02.476468+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Staging confirmed: NO grimalkina scan, AND no scans at all in 90 days.\n\nFull staging log dump for last 90d returned just 5 lines — a single container boot on 2026-05-18T01:41:32Z (post-PR-#47 staging→main promotion deploy), then idle. No scan_job lines, no \"Collected posts for analysis\", no did:plc references.\n\nDefinitive: grimalkina.bsky.social has never been scanned in either Railway environment within Railway log retention (90 days).\n\nPossible explanations:\n1. Confusion with chaosgreml.in scan (only real prod scan in the window)\n2. Local-only scan (not on Railway) — would need to query local Postgres or SQLite\n3. Memory of a scan from before 2026-02-04 (outside Railway retention)\n\nReady for direction.",
+          "created_at": "2026-06-05T03:30:54.843231+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "CORRECTION: I was wrong about admin-triggered scan being unbuilt. Phase 1.5 shipped via PR #35 on 2026-03-27 (#103 epic + #104-107 subissues all closed). Memory updated.\n\nConfirmed working endpoints on prod:\n- POST /api/admin/users — pre-seed by handle (resolves to DID, kicks off fingerprint build)\n- POST /api/admin/users/{did}/scan — trigger scan for a pre-seeded DID\n- GET /api/admin/users — list pre-seeded users\n- Admin route in SvelteKit at /admin\n\nProd admin allowlist: CHARCOAL_ADMIN_DIDS=did:plc:h3wpawnrlptr4534chevddo6 (Bryan)\n\nPath forward to capture grimalkina Zentropi metrics:\n1. Bryan signs in at https://charcoal.watch as @chaosgreml.in\n2. Goes to /admin → pre-seeds grimalkina.bsky.social (or hits POST /api/admin/users with {\"handle\":\"grimalkina.bsky.social\"})\n3. Waits for fingerprint build to complete (watch logs for \"Fingerprint build complete\")\n4. Triggers scan via /admin UI or POST /api/admin/users/{grimalkina_did}/scan\n5. I tail prod logs filtered for grimalkina-related lines and count Zentropi 200 vs 429 responses\n\nWill await Bryans go-ahead to start tailing.",
+          "created_at": "2026-06-05T03:41:48.484640+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "COMPLETE — grimalkina.bsky.social scan finished.\n\nScan window: 2026-06-05T03:50:30Z → 2026-06-05T06:24:26Z (2h 33min 56s)\nTarget: did:plc:yjvayj5thzisljwor7yykhlx\nConstellation source: 1703 likes, 1024 amplifiers classified\n\nCompletion line: events=1994 accounts=3671\n\nAccount processing breakdown (from logs, may differ slightly from completion accounts= due to filtering):\n- 2414 fully Scored\n- 895 Stage 1 early-exits (clean + irrelevant)\n- 12 ONNX inference failures (followers skipped)\n- 3321 total touched (matches completion 3671 within ~10% — diff likely failed/skipped or counted differently)\n\nZentropi API call profile:\n- Total posts sampled across Scored accounts: 112,587 (avg 46.6 posts/account)\n- Plus Stage 1 early-exits at 25 posts each: ~22,375 posts seen but skipped Zentropi\n- Stage 2 Zentropi-eligible posts: ~112,587 (assumes all Scored hit Stage 2)\n- Zentropi failures: 45 (0.04% of Stage 2 eligible posts)\n- **All 45 failures are HTTP 403 Forbidden** (HTML body, looks like upstream CDN/proxy block, not rate-limit)\n- **Zero HTTP 429 Too Many Requests**\n\nThis is materially different from the 2026-05-17 chaosgreml.in scan:\n- chaosgreml.in: hundreds-to-thousands of 429s, sustained rate-limit storm\n- grimalkina: 0 429s, 45 sporadic 403s starting at 06:09Z (2h19m into scan), HTML body suggests Cloudflare/CloudFront/WAF-level block, not Zentropi service throttling\n\nPossible explanations for the change:\n1. Zentropi raised rate limits or added concurrency capacity since May 17\n2. Zentropi changed billing/auth model — 403s may indicate a sporadic auth issue (key rotation? token TTL?)\n3. Upstream CDN at Zentropi is blocking long-lived clients (rare but plausible — would explain late-onset)\n\nCross-reference to #181 (Zentropi concurrency follow-up):\n- The original concern (32 concurrent peak hammering 429s) is NOT reproducing on grimalkina with ~5x more amplifiers\n- Lower priority than I previously suggested — still worth a semaphore as defense-in-depth, but no longer \"actively degrading prod scans\"\n- The 403 pattern is the more interesting puzzle now and probably deserves its own investigation (transient Zentropi auth or CDN-level block?)\n\n12 ONNX inference failures over 2h34m is benign but worth noting — could indicate memory pressure or model-state issues under long-running scan.\n\nClosing this issue. Recommend a fresh issue to investigate the 403 pattern (separate from the 429 work in #181).",
+          "created_at": "2026-06-05T06:57:51.768821+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T03:25:57.676242+00:00",
+      "updated_at": "2026-06-05T06:57:56.186347+00:00",
+      "closed_at": "2026-06-05T06:57:56.186347+00:00"
+    },
+    {
+      "id": 181,
+      "title": "Investigate Zentropi API call concurrency pattern",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [
+        {
+          "content": "Findings:\n\nZentropi calls are parallel on both axes.\n\nClient: src/toxicity/zentropi.rs\n- ZentropiClient::classify(text) — single post\n- ZentropiClient::classify_pair(parent, reply) — reply-in-context\n\nBatch fan-out: src/toxicity/ensemble.rs:177-215\n- classify_batch_with_contexts() uses stream::iter(...).buffer_unordered(ZENTROPI_CONCURRENCY)\n- ZENTROPI_CONCURRENCY = 4 — up to 4 in-flight Zentropi calls per account\n\nAccount fan-out: src/pipeline/sweep.rs:134-159\n- Sweep stream uses buffer_unordered(concurrency), default 8 from CLI\n\nPeak: ~8 accounts × 4 posts = ~32 concurrent Zentropi requests.\n\nNo rate-limit handling visible in zentropi.rs — worth a follow-up if Zentropi has per-key concurrency caps. Closing as informational.",
+          "created_at": "2026-06-04T23:19:39.854669+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-04T23:19:32.351591+00:00",
+      "updated_at": "2026-06-04T23:19:44.986185+00:00",
+      "closed_at": "2026-06-04T23:19:44.986185+00:00"
+    },
     {
       "id": 180,
       "title": "Address deferred CodeRabbit findings from PR #47 (non-blocking)",
@@ -52,6 +177,11 @@
         {
           "content": "Two distinct gaps surfaced during the PR #47 (staging->main) promotion on 2026-05-17:\n\n**1. Local toolchain drift**: local cargo is on Rust 1.94, CI is on Rust 1.95. Two new clippy lints (useless_conversion, unnecessary_sort_by) fire under 1.95 but not 1.94 — pre-commit/pre-push gates passed locally, CI failed. Rustfmt opinion also drifted between versions, causing a separate CI fmt failure even after the clippy fix landed.\n\n**2. Pre-push \"no Rust changes\" false negative**: the push of fix/rustfmt-after-clippy produced this output before the gate-skip:\n```\nfatal: ambiguous argument origin/fix/rustfmt-after-clippy..HEAD: unknown revision or path not in the working tree.\nPre-push: no Rust changes, skipping quality gate.\n```\nThe hook diffed against an upstream tracking branch that did not yet exist (new branch first push). It errored, swallowed the error, and defaulted to \"no Rust changes\" — which was wrong; this push contained a Rust file change. The skip path needs to detect the \"no upstream yet\" case and fall back to diffing against the merge-base of staging/main instead.\n\n**Suggested fixes**:\n- Pin local toolchain: add `rust-toolchain.toml` at repo root with `channel = \"stable\"` AND run `rustup update stable` regularly, OR pin to a specific version that matches CI\n- Fix pre-push: when no upstream exists, diff against `git merge-base HEAD origin/staging` (or origin/main) to detect changes being pushed for the first time\n- Consider running fmt/clippy in pre-push unconditionally on any Rust-touching commit reachable from HEAD but not from origin/staging\n\n**Impact**: cost two extra CI cycles and two extra fix PRs (#48 clippy, #49 fmt) to land the staging->main promotion.",
           "created_at": "2026-05-17T22:15:58.397764+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Additional observation from 2026-05-17 session: the bug appears to trigger only on **truly-new-everywhere** branches. When pushing local `staging` (which had a stale tracking ref to a now-deleted `origin/staging`), the pre-push hook **did** run the quality gate normally — clippy + 419 tests, all passed — even though the push created a brand new `staging` ref on the remote.\n\nHypothesis: the failing path is `git rev-list origin/<branch>..HEAD` when `origin/<branch>` does not exist as a ref. The staging push worked because the local-tracking ref `refs/remotes/origin/staging` still existed from before deletion (git keeps local tracking refs until next `git fetch --prune`), so the rev-list succeeded against the stale-but-present ref.\n\nThis narrows the repro: the bug needs a branch whose remote tracking ref has **never existed locally**, which matches every first-push of a freshly-created `fix/*` branch. Suggests the fix is to detect that case specifically and fall back to `git merge-base HEAD origin/main` (or origin/staging) as the diff base.\n\nEncountered 4 times today (PR #48, #49, #50, #51 first-pushes) and zero times on the staging push.",
+          "created_at": "2026-05-17T23:31:06.341160+00:00",
           "kind": "note"
         }
       ],
