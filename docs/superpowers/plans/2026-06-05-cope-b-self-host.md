@@ -1065,3 +1065,1119 @@ chainlink session work <Phase 6.2 issue id>   # GPU service
 ```
 
 ---
+
+## Chunk 3: RunPod GPU service (Dockerfile, vLLM handler, prompt assembly, tests, CI)
+
+**Subissue:** `Phase 6.2 — RunPod GPU service`. Confirm with `chainlink session status`.
+
+**Spec sections to re-read first:** the "GPU service" section and the "Image and endpoint lifecycle" subsection.
+
+**Prerequisite:** Chunk 2 must be complete — `gpu/cope-b-runpod/policy.txt`
+must exist before the Dockerfile build will succeed (Task 3.6 hard-fails
+without it). Verify with `[ -f gpu/cope-b-runpod/policy.txt ] && echo OK`
+at the start of this chunk.
+
+**Hardware caveat for Bryan's M4 Mac mini:** `vllm serve` requires CUDA;
+Apple Silicon won't run it. Local smoke testing (Task 3.6 Step 3) needs a
+rented Linux+CUDA box or the deployed staging RunPod endpoint. CPU-only
+pytest still works for `test_prompt.py` and `test_handler.py` (they mock
+vLLM).
+
+This chunk is Python-side only. The Rust side that calls into this service is Chunk 4. All work lives under `gpu/cope-b-runpod/`. Tests are written first (TDD); implementation follows.
+
+### Task 3.1: Project metadata and pytest harness
+
+**Files:**
+- Create: `gpu/cope-b-runpod/pyproject.toml`
+- Create: `gpu/cope-b-runpod/requirements.txt`
+- Create: `gpu/cope-b-runpod/tests/__init__.py`
+- Create: `gpu/cope-b-runpod/tests/conftest.py`
+
+- [ ] **Step 1: Create `pyproject.toml`**
+
+Path: `gpu/cope-b-runpod/pyproject.toml`
+
+```toml
+[project]
+name = "charcoal-cope-b"
+version = "0.1.0"
+description = "Charcoal CoPE-B-A4B classifier service for RunPod"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+```
+
+- [ ] **Step 2: Create `requirements.txt`**
+
+Pinned versions match the spec's vLLM ≥ 0.20.2 and the model card's recommendation. RunPod's base image provides `runpod`; vLLM is the heavy import.
+
+```
+# Runtime
+vllm==0.20.2
+transformers>=4.50,<5
+runpod>=1.7,<2
+# Dev / test (installed locally for pytest runs; not in image)
+pytest>=8
+pytest-asyncio>=0.24
+```
+
+The Dockerfile (Task 3.6) only installs the runtime triplet; dev tooling stays out of the image.
+
+- [ ] **Step 3: Empty test package marker**
+
+Path: `gpu/cope-b-runpod/tests/__init__.py` — empty file.
+
+- [ ] **Step 4: pytest conftest with shared fixtures**
+
+Path: `gpu/cope-b-runpod/tests/conftest.py`
+
+```python
+"""Shared fixtures for handler + prompt tests."""
+
+from pathlib import Path
+import pytest
+
+ROOT = Path(__file__).parent.parent
+POLICY_PATH = ROOT / "policy.txt"
+
+
+@pytest.fixture
+def policy_text() -> str:
+    """Loads the live policy.txt so tests reflect what production sees."""
+    return POLICY_PATH.read_text()
+
+
+@pytest.fixture
+def sample_content_pair() -> str:
+    """An envelope identical to Charcoal's format_parent_reply output."""
+    return (
+        "[Parent post]: I just got home after a brutal commute.\n\n"
+        "[Reply]: Yeah, same — those train delays are killing me."
+    )
+
+
+@pytest.fixture
+def sample_content_solo() -> str:
+    """An original post (no parent), as Charcoal would pass it."""
+    return "Excited to share a piece I've been working on about labor unions."
+```
+
+No commit yet — tests come next.
+
+### Task 3.2: Write the failing prompt-assembly test
+
+**Files:**
+- Create: `gpu/cope-b-runpod/tests/test_prompt.py`
+
+The test golden-files the exact prompt that `build_prompt` must produce. Any
+drift (extra newline, missing role marker, header reordering) fails the test.
+Spec section "Handler sketch" and the model card excerpt are the source of
+truth for the body shape; the Gemma chat template wraps it.
+
+- [ ] **Step 1: Create the test**
+
+Path: `gpu/cope-b-runpod/tests/test_prompt.py`
+
+```python
+"""Unit tests for prompt.py — Gemma chat template + POLICY/CONTENT body.
+
+The build_prompt() function must produce the exact text the model expects.
+We verify the body shape against the model card's verbatim template
+(no INSTRUCTIONS or ANSWER headers; literal POLICY and CONTENT slots) and
+verify the Gemma chat-template wrapping by checking the role markers.
+"""
+
+import pytest
+
+
+EXPECTED_BODY = """Examine the given POLICY and determine if the given CONTENT meets the criteria for ANY of the LABELS. Answer "1" if yes, and "0" if no.
+
+
+POLICY
+======
+
+This is a test policy.
+
+
+CONTENT
+=======
+
+[Parent post]: Hello.
+
+[Reply]: World."""
+
+
+def test_build_body_matches_model_card_template():
+    """The body text fed into the chat template must match the model card
+    structure exactly: two blank lines before POLICY header, '=' underline,
+    blank line, policy slot, two blank lines, CONTENT header, etc."""
+    from prompt import build_body
+
+    body = build_body(
+        policy="This is a test policy.",
+        content="[Parent post]: Hello.\n\n[Reply]: World.",
+    )
+    assert body == EXPECTED_BODY
+
+
+def test_build_prompt_wraps_body_in_gemma_chat_template(policy_text, sample_content_pair):
+    """build_prompt() runs tokenizer.apply_chat_template with role=user. The
+    resulting prompt must include the user-role marker and end with the
+    assistant-generation prompt suffix so the model emits a 0/1 token next."""
+    from prompt import build_prompt
+
+    prompt = build_prompt(policy=policy_text, content=sample_content_pair)
+    # Gemma chat-template markers (these are stable strings the template emits)
+    assert "<start_of_turn>user" in prompt, "expected user-role start marker"
+    assert "<start_of_turn>model" in prompt, "expected assistant-role generation prompt"
+    # The body must appear inside the user turn (between user-start and end_of_turn)
+    user_block = prompt.split("<start_of_turn>user")[1].split("<end_of_turn>")[0]
+    assert "POLICY" in user_block
+    assert "CONTENT" in user_block
+    assert sample_content_pair in user_block
+
+
+def test_build_prompt_handles_solo_content(policy_text, sample_content_solo):
+    """Original posts (no parent) pass content through unchanged — no envelope.
+    The model sees the bare body text in the CONTENT slot."""
+    from prompt import build_prompt
+
+    prompt = build_prompt(policy=policy_text, content=sample_content_solo)
+    assert sample_content_solo in prompt
+    # We did NOT prepend a [Parent post] envelope:
+    assert "[Parent post]:" not in prompt or sample_content_solo.startswith("[Parent post]:")
+
+
+def test_build_prompt_is_deterministic(policy_text, sample_content_pair):
+    """Same inputs must produce byte-identical output. Prefix caching relies
+    on this — a non-deterministic prompt invalidates the policy KV cache
+    every call."""
+    from prompt import build_prompt
+
+    a = build_prompt(policy=policy_text, content=sample_content_pair)
+    b = build_prompt(policy=policy_text, content=sample_content_pair)
+    assert a == b
+
+
+def test_build_prompt_policy_appears_before_content(policy_text):
+    """Order matters for prefix caching: identical policy text must sit at
+    the front so the same prefix is reused across calls with different
+    content. Verify policy header precedes content header in the output."""
+    from prompt import build_prompt
+
+    prompt = build_prompt(policy=policy_text, content="anything")
+    p_idx = prompt.index("POLICY")
+    c_idx = prompt.index("CONTENT")
+    assert p_idx < c_idx, "POLICY must precede CONTENT for prefix caching"
+
+
+def test_build_body_handles_literal_braces_in_policy_and_content():
+    """Policies often contain `{handle}`-style placeholders or JSON examples.
+    A str.format()-based template would crash on these; sentinel-replace
+    must pass them through verbatim."""
+    from prompt import build_body
+
+    body = build_body(
+        policy="Rule {1}: don't address users as {their_handle}.",
+        content="Reply to {parent_handle}: hello {there}",
+    )
+    assert "{1}" in body
+    assert "{their_handle}" in body
+    assert "{parent_handle}" in body
+    assert "{there}" in body
+```
+
+- [ ] **Step 2: Run the test, verify it fails**
+
+Run: `cd gpu/cope-b-runpod && python3 -m pytest tests/test_prompt.py -v`
+Expected: `ModuleNotFoundError: prompt`. (Run from inside `gpu/cope-b-runpod/` so the test's `from prompt import ...` resolves; alternatively prepend `PYTHONPATH=.`.)
+
+### Task 3.3: Implement `prompt.py`
+
+**Files:**
+- Create: `gpu/cope-b-runpod/prompt.py`
+
+- [ ] **Step 1: Implement the module**
+
+Path: `gpu/cope-b-runpod/prompt.py`
+
+```python
+"""Prompt assembly for the CoPE-B-A4B classifier.
+
+The model expects two layers:
+1. A POLICY/CONTENT body matching the structure on the HF model card
+   (https://huggingface.co/zentropi-ai/cope-b-a4b — "Usage" section).
+2. The body wrapped in Gemma-4's chat template via `apply_chat_template`,
+   with `add_generation_prompt=True` so the model emits the next token
+   (which will be the "1" or "0" verdict).
+
+We expose `build_body` separately so unit tests can golden-file the body
+without instantiating a tokenizer.
+"""
+
+from __future__ import annotations
+
+# Body template — keep formatting EXACTLY as on the model card.
+# Two blank lines before POLICY, '=' underline, blank line, slot, two blank
+# lines before CONTENT, '=' underline, blank line, slot. Changing whitespace
+# breaks the model's expected prefix.
+#
+# Sentinels `__POLICY__` / `__CONTENT__` are used instead of str.format so
+# policy text can contain literal `{` or `}` (common in policies that
+# discuss handle placeholders, JSON examples, etc.) without exploding.
+_BODY_TEMPLATE = (
+    'Examine the given POLICY and determine if the given CONTENT meets the '
+    'criteria for ANY of the LABELS. Answer "1" if yes, and "0" if no.\n'
+    '\n'
+    '\n'
+    'POLICY\n'
+    '======\n'
+    '\n'
+    '__POLICY__\n'
+    '\n'
+    '\n'
+    'CONTENT\n'
+    '=======\n'
+    '\n'
+    '__CONTENT__'
+)
+
+
+def build_body(policy: str, content: str) -> str:
+    """Return the POLICY/CONTENT body text, before chat-template wrapping."""
+    return _BODY_TEMPLATE.replace("__POLICY__", policy).replace("__CONTENT__", content)
+
+
+_TOKENIZER = None
+
+
+def _get_tokenizer():
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        # Lazy-import to keep test files from forcing transformers on every
+        # collection pass; tokenizer load is ~50 MB of metadata.
+        from transformers import AutoTokenizer
+        import os
+        model_path = os.environ.get("MODEL_PATH", "zentropi-ai/cope-b-a4b")
+        _TOKENIZER = AutoTokenizer.from_pretrained(model_path)
+    return _TOKENIZER
+
+
+def build_prompt(policy: str, content: str) -> str:
+    """Build the full prompt for vLLM: body wrapped in the Gemma chat template,
+    with an assistant generation prompt at the end so the model emits "1"/"0"."""
+    body = build_body(policy=policy, content=content)
+    tokenizer = _get_tokenizer()
+    return tokenizer.apply_chat_template(
+        [{"role": "user", "content": body}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+```
+
+- [ ] **Step 2: Run the test**
+
+Run: `cd gpu/cope-b-runpod && PYTHONPATH=. python3 -m pytest tests/test_prompt.py -v`
+Expected: `test_build_body_matches_model_card_template` passes immediately (no tokenizer needed). The remaining three tests will require the tokenizer; if `transformers` is not installed locally, those will skip / error. Either:
+- Install dev requirements locally: `python3 -m pip install -r requirements.txt` (heavy — pulls vllm)
+- Or skip the tokenizer-dependent tests locally and rely on CI:
+  ```python
+  pytest.importorskip("transformers")
+  ```
+  Adding this at the top of `test_prompt.py` makes the suite gracefully skip tokenizer-dependent tests when `transformers` is missing.
+
+Add the `importorskip` guard now if your machine doesn't have `transformers`:
+
+```python
+import pytest
+pytest.importorskip("transformers")  # required for chat-template tests
+```
+
+After adding it, re-run. Expected: `test_build_body_matches_model_card_template` passes; the others skip locally and run in CI.
+
+- [ ] **Step 3: Commit prompt + tests**
+
+```bash
+git add gpu/cope-b-runpod/pyproject.toml gpu/cope-b-runpod/requirements.txt gpu/cope-b-runpod/tests/__init__.py gpu/cope-b-runpod/tests/conftest.py gpu/cope-b-runpod/tests/test_prompt.py gpu/cope-b-runpod/prompt.py
+git commit -m 'feat(cope-b): prompt assembly with Gemma chat template + POLICY/CONTENT body
+
+prompt.build_body returns the verbatim model-card body shape (POLICY
+header + === underline + slot, then CONTENT header + === underline +
+slot). prompt.build_prompt wraps the body via tokenizer.apply_chat_template
+with role=user and add_generation_prompt=True so the model emits the
+binary verdict token next.
+
+Body is deterministic across calls so vLLMs prefix caching can reuse
+the policy KV state for every classification.
+
+test_prompt.py golden-files the body and asserts Gemma chat-template
+markers + POLICY-before-CONTENT ordering. importorskip(transformers)
+keeps the suite runnable on machines without the heavy ML deps.
+
+Chainlink #<Phase 6.2 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+### Task 3.4: Write the failing handler test
+
+**Files:**
+- Create: `gpu/cope-b-runpod/tests/test_handler.py`
+
+The handler test mocks `vllm.AsyncLLMEngine` so we don't load a 50 GB model
+during pytest. We exercise the request → prompt → engine call → response
+shape pipeline with controllable outputs.
+
+- [ ] **Step 1: Create the test**
+
+Path: `gpu/cope-b-runpod/tests/test_handler.py`
+
+```python
+"""Handler tests — RunPod request/response shape, verdict + confidence
+calculation, and error handling. The vLLM engine is mocked so tests run
+on CPU machines without GPU."""
+
+import sys
+from unittest.mock import MagicMock, patch
+import pytest
+
+# Stub heavy GPU-only deps before any handler import so collection works on CPU.
+sys.modules.setdefault("vllm", MagicMock())
+sys.modules.setdefault("runpod", MagicMock())
+
+pytest.importorskip("transformers")  # build_prompt loads the tokenizer
+
+pytestmark = pytest.mark.asyncio
+
+
+async def _async_iter(*items):
+    """Wrap a sequence of values as an async iterator (matches vLLM's
+    AsyncLLMEngine.generate, which is an async generator yielding partial
+    RequestOutputs)."""
+    for item in items:
+        yield item
+
+
+def _mock_engine_result(
+    token: str,
+    logprob: float = -0.1,
+    other_logprob: float = -3.0,
+    decoded_prefix: str = "",
+):
+    """Build a MagicMock that looks like vllm's RequestOutput.outputs[0].
+    `decoded_prefix` lets tests simulate Gemma's SentencePiece behavior
+    where decoded_token may carry a leading space or ▁ marker."""
+    other_token = "0" if token == "1" else "1"
+    logprobs_map = {
+        1: MagicMock(logprob=logprob, decoded_token=f"{decoded_prefix}{token}"),
+        2: MagicMock(logprob=other_logprob, decoded_token=f"{decoded_prefix}{other_token}"),
+    }
+    out = MagicMock()
+    out.text = token
+    out.logprobs = [logprobs_map]
+    result = MagicMock()
+    result.outputs = [out]
+    return result
+
+
+@pytest.fixture
+def patched_engine(monkeypatch, tmp_path):
+    """Patch AsyncLLMEngine.from_engine_args at the import boundary so handler
+    sees a mock instead of trying to load a real model."""
+    policy_file = tmp_path / "policy.txt"
+    policy_file.write_text("Test policy.")
+    monkeypatch.setenv("MODEL_PATH", "zentropi-ai/cope-b-a4b")
+    monkeypatch.setenv("POLICY_PATH", str(policy_file))
+
+    fake_engine = MagicMock()
+    # AsyncLLMEngine.generate is an async generator; replace with a callable
+    # that returns an async iterator on every call. Tests set
+    # fake_engine.generate_result on the returned MagicMock to control what
+    # _async_iter yields.
+    fake_engine.generate_result = _mock_engine_result(token="1")
+    fake_engine.generate = MagicMock(
+        side_effect=lambda *args, **kwargs: _async_iter(fake_engine.generate_result)
+    )
+
+    with patch("vllm.AsyncLLMEngine.from_engine_args", return_value=fake_engine):
+        import importlib
+        import handler  # type: ignore
+        importlib.reload(handler)
+        yield handler, fake_engine
+
+
+async def test_handler_returns_toxic_true_when_model_emits_1(patched_engine):
+    handler, fake_engine = patched_engine
+    fake_engine.generate_result = _mock_engine_result(token="1", logprob=-0.05)
+    result = await handler.handler({"id": "req-1", "input": {"content": "test"}})
+    out = result["output"]
+    assert out["toxic"] is True
+    assert out["model"] == "cope-b-a4b"
+    # Confidence is exp(logprob), so exp(-0.05) ≈ 0.95
+    assert 0.9 < out["confidence"] < 1.0
+
+
+async def test_handler_returns_toxic_false_when_model_emits_0(patched_engine):
+    handler, fake_engine = patched_engine
+    fake_engine.generate_result = _mock_engine_result(token="0", logprob=-0.2)
+    result = await handler.handler({"id": "req-2", "input": {"content": "test"}})
+    out = result["output"]
+    assert out["toxic"] is False
+    assert 0.7 < out["confidence"] < 0.9   # exp(-0.2) ≈ 0.819
+
+
+async def test_handler_normalizes_decoded_token_with_sentinel_prefix(patched_engine):
+    """Gemma's SentencePiece tokenizer may return decoded_token with a leading
+    space or ▁ marker (`'▁1'` or `' 1'`). out.text.strip() is the bare token;
+    the logprobs lookup must normalize both sides before comparing or the
+    confidence calculation silently falls through to ValueError."""
+    handler, fake_engine = patched_engine
+    fake_engine.generate_result = _mock_engine_result(
+        token="1", logprob=-0.05, decoded_prefix="▁"
+    )
+    result = await handler.handler({"id": "req-norm-1", "input": {"content": "test"}})
+    assert result["output"]["toxic"] is True
+    assert 0.9 < result["output"]["confidence"] < 1.0
+
+    fake_engine.generate_result = _mock_engine_result(
+        token="0", logprob=-0.1, decoded_prefix=" "
+    )
+    result = await handler.handler({"id": "req-norm-2", "input": {"content": "test"}})
+    assert result["output"]["toxic"] is False
+
+
+async def test_handler_returns_policy_version_from_env(patched_engine, monkeypatch):
+    handler, fake_engine = patched_engine
+    monkeypatch.setenv("POLICY_VERSION", "policy-v3-2026-07-01")
+    import importlib
+    importlib.reload(handler)
+    # Reload reset the fake_engine reference; re-patch the new module's engine.
+    # (Simpler: assert that handler reads POLICY_VERSION at module import.)
+    fake_engine.generate_result = _mock_engine_result(token="1")
+    handler._engine = fake_engine  # type: ignore[attr-defined]
+    result = await handler.handler({"id": "req-3", "input": {"content": "test"}})
+    assert result["output"]["policy_version"] == "policy-v3-2026-07-01"
+
+
+async def test_handler_raises_on_missing_input(patched_engine):
+    handler, _ = patched_engine
+    with pytest.raises(KeyError):
+        await handler.handler({"id": "req-4", "input": {}})
+
+
+async def test_handler_raises_on_unexpected_model_output(patched_engine):
+    """If the model emits something other than "0" or "1", surface the failure
+    rather than silently falling back. Spec: "No silent fallbacks."""
+    handler, fake_engine = patched_engine
+    fake_engine.generate_result = _mock_engine_result(token="maybe", logprob=-1.0)
+    with pytest.raises(ValueError, match="unexpected"):
+        await handler.handler({"id": "req-5", "input": {"content": "test"}})
+```
+
+- [ ] **Step 2: Run the test, verify it fails**
+
+Run: `cd gpu/cope-b-runpod && PYTHONPATH=. python3 -m pytest tests/test_handler.py -v`
+Expected: `ModuleNotFoundError: handler` (or `vllm` if not installed locally — fine; the test patches it but the import-time check still needs the module attribute path).
+
+### Task 3.5: Implement `handler.py`
+
+**Files:**
+- Create: `gpu/cope-b-runpod/handler.py`
+
+- [ ] **Step 1: Implement the module**
+
+Path: `gpu/cope-b-runpod/handler.py`
+
+```python
+"""RunPod Serverless worker entrypoint for the CoPE-B-A4B classifier.
+
+vLLM AsyncLLMEngine handles the model + KV cache. Each request feeds a
+prompt assembled via prompt.build_prompt, samples a single token greedily,
+and returns the binary verdict + normalized confidence.
+
+Spec: docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md
+"""
+
+from __future__ import annotations
+
+import math
+import os
+import uuid
+
+import runpod
+from vllm import AsyncLLMEngine, AsyncEngineArgs, SamplingParams
+
+from prompt import build_prompt
+
+
+MODEL_PATH = os.environ["MODEL_PATH"]
+POLICY_PATH = os.environ["POLICY_PATH"]
+POLICY_VERSION = os.environ.get("POLICY_VERSION", "policy-unversioned")
+
+with open(POLICY_PATH, "r", encoding="utf-8") as fp:
+    POLICY = fp.read()
+
+# Build the engine once at module import.
+_engine = AsyncLLMEngine.from_engine_args(
+    AsyncEngineArgs(
+        model=MODEL_PATH,
+        dtype="bfloat16",
+        max_model_len=4096,          # 256K default is wasteful for ~300-tok inputs
+        max_num_seqs=32,             # tune empirically post-deploy
+        enable_prefix_caching=True,  # critical — policy text is identical per call
+    )
+)
+
+# Greedy single-token decode, top-2 logprobs so we can extract confidence.
+_SAMPLING = SamplingParams(
+    max_tokens=1,
+    temperature=0.0,
+    logprobs=2,
+)
+
+
+async def handler(event):
+    """Classify a single content string. event = {"id": ..., "input": {"content": ...}}.
+
+    Returns {"output": {"toxic": bool, "confidence": float, "model": str,
+                        "policy_version": str}}.
+
+    Raises:
+        KeyError: input missing "content"
+        ValueError: model emitted a token other than "0" or "1"
+    """
+    inp = event["input"]
+    content = inp["content"]   # raises KeyError if missing — surfaced to caller
+
+    prompt = build_prompt(policy=POLICY, content=content)
+    request_id = event.get("id") or uuid.uuid4().hex
+
+    # AsyncLLMEngine.generate is an async iterator; the last yield contains the
+    # finished output. For max_tokens=1 there's exactly one yield.
+    final = None
+    async for partial in _engine.generate(prompt, _SAMPLING, request_id):
+        final = partial
+    if final is None:
+        raise RuntimeError("vLLM engine produced no output")
+
+    out = final.outputs[0]
+    token = out.text.strip()
+    if token not in {"0", "1"}:
+        raise ValueError(f"unexpected model token: {token!r}")
+
+    # Confidence: exp(logprob of emitted token). vLLM logprobs[0] is a dict
+    # keyed by token_id; find the entry whose normalized decoded_token matches
+    # `token`. Gemma's SentencePiece tokenizer may return decoded_token with
+    # a leading space or ▁ (U+2581) marker; normalize both sides.
+    logprob_map = out.logprobs[0]
+
+    def _norm(s: str) -> str:
+        return s.strip().lstrip("▁")
+
+    emitted_logprob = next(
+        (lp.logprob for lp in logprob_map.values() if _norm(lp.decoded_token) == token),
+        None,
+    )
+    if emitted_logprob is None:
+        raise ValueError(f"emitted token {token!r} missing from logprobs map")
+    confidence = float(math.exp(emitted_logprob))
+
+    return {
+        "output": {
+            "toxic": token == "1",
+            "confidence": confidence,
+            "model": "cope-b-a4b",
+            "policy_version": POLICY_VERSION,
+        }
+    }
+
+
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})
+```
+
+- [ ] **Step 2: Run the test**
+
+Run: `cd gpu/cope-b-runpod && PYTHONPATH=. python3 -m pytest tests/test_handler.py -v`
+Expected: all 5 tests pass. If vLLM-import errors block collection (vLLM is GPU-only on import in some versions), add a stub at top of `test_handler.py`:
+
+```python
+import sys
+sys.modules.setdefault("vllm", MagicMock())
+sys.modules.setdefault("runpod", MagicMock())
+```
+
+(Inserted ABOVE the `pytest.importorskip("transformers")` line so the stubs are in place before handler is imported.)
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add gpu/cope-b-runpod/handler.py gpu/cope-b-runpod/tests/test_handler.py
+git commit -m 'feat(cope-b): RunPod handler with vLLM AsyncLLMEngine + greedy single-token decode
+
+handler.py loads model + policy once at module import (RunPod keeps the
+process alive between requests). Per request: build_prompt -> engine.generate
+(temperature=0, max_tokens=1, logprobs=2) -> extract emitted token -> verdict
++ confidence (exp(logprob)). Raises ValueError on tokens other than 0/1
+per the spec no-silent-fallback rule.
+
+Tests mock vllm to run on CPU; cover toxic/clean verdicts, confidence math,
+POLICY_VERSION env propagation, missing-input error, and unexpected-token
+error. importorskip(transformers) keeps the suite portable.
+
+Chainlink #<Phase 6.2 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+### Task 3.6: Dockerfile, runpod.yml, smoke + prefix-cache scripts
+
+**Files:**
+- Create: `gpu/cope-b-runpod/Dockerfile`
+- Create: `gpu/cope-b-runpod/runpod.yml`
+- Create: `gpu/cope-b-runpod/tests/smoke_test.sh`
+- Create: `gpu/cope-b-runpod/tests/test_prefix_cache.py`
+- Modify: `gpu/cope-b-runpod/README.md` (expand from Chunk 2 stub)
+
+- [ ] **Step 0: Verify policy.txt exists (Chunk 2 prerequisite)**
+
+Run: `[ -f gpu/cope-b-runpod/policy.txt ] && echo OK || { echo "MISSING — complete Chunk 2 first"; exit 1; }`
+Expected: `OK`. If missing, the rest of this task fails on `COPY` in the Dockerfile.
+
+- [ ] **Step 1: Dockerfile**
+
+Path: `gpu/cope-b-runpod/Dockerfile`
+
+```dockerfile
+# Pinned vLLM image; matches the version pinned in requirements.txt. The
+# container digest is captured in CI when the image is published — see
+# .github/workflows/build-cope-b-image.yml for the digest pin used at deploy.
+FROM vllm/vllm-openai:v0.20.2
+
+WORKDIR /app
+
+# Copy app code first so requirements layer caches on weight changes (which
+# are the slow part). vllm is already in the base image; we add runpod and
+# transformers explicitly so handler+prompt imports don't depend on whatever
+# transformers version the base image happens to ship (or lack).
+COPY requirements.txt /app/requirements.txt
+RUN python3 -m pip install --no-cache-dir \
+        'runpod>=1.7,<2' \
+        'transformers>=4.50,<5'
+
+COPY handler.py prompt.py policy.txt /app/
+
+# Bake weights into the image. Build-arg lets CI override the revision for
+# pinned-version builds.
+ARG MODEL_REVISION=main
+ENV MODEL_PATH=/weights \
+    POLICY_PATH=/app/policy.txt
+RUN python3 -m pip install --no-cache-dir huggingface-hub && \
+    huggingface-cli download zentropi-ai/cope-b-a4b \
+        --local-dir /weights \
+        --revision ${MODEL_REVISION}
+
+# POLICY_VERSION is injected at build time by CI from the git short SHA + date.
+ARG POLICY_VERSION=policy-unversioned
+ENV POLICY_VERSION=${POLICY_VERSION}
+
+CMD ["python3", "-u", "handler.py"]
+```
+
+- [ ] **Step 2: RunPod endpoint config**
+
+Path: `gpu/cope-b-runpod/runpod.yml`
+
+```yaml
+# Source of truth for the RunPod Serverless endpoint config. Endpoint is
+# created manually in the RunPod web console (one-time); deviations from
+# this file should be reconciled.
+name: charcoal-cope-b
+gpu: NVIDIA A100 80GB PCIe
+flashboot: true
+scale_to_zero: true
+idle_timeout: 60          # seconds; tune down to 5-10 after measuring warm-restore rate
+min_workers: 0
+max_workers: 3            # absorbs concurrent onboardings; cheap thanks to scale-to-zero
+execution_timeout: 600    # 10-min hard cap per request
+region: us-west           # match Railways production region (verify via `railway status`)
+```
+
+- [ ] **Step 3: Local smoke test script**
+
+Path: `gpu/cope-b-runpod/tests/smoke_test.sh`
+
+```bash
+#!/usr/bin/env bash
+# Local smoke test: serve the model under vLLM and walk fixture inputs.
+# Default mode uses /v1/chat/completions (matches production handler's
+# apply_chat_template path). Override with SMOKE_MODE=completions to use
+# the raw /v1/completions endpoint with a hand-rolled body — useful when
+# debugging whether the chat-template wrapper is hiding a problem.
+#
+# Requires a CUDA GPU (80 GB for full BF16). Apple Silicon will not run vllm.
+# Run from gpu/cope-b-runpod/. Aborts after $MAX_FAILURES misses.
+set -euo pipefail
+
+POLICY_PATH=${POLICY_PATH:-policy.txt}
+MODEL=${MODEL:-zentropi-ai/cope-b-a4b}
+SMOKE_MODE=${SMOKE_MODE:-chat}        # chat | completions
+MAX_FAILURES=${MAX_FAILURES:-5}        # abort after N misses
+
+if [[ ! -f "$POLICY_PATH" ]]; then
+    echo "ERROR: $POLICY_PATH not found"; exit 1
+fi
+
+vllm serve "$MODEL" \
+    --dtype bfloat16 \
+    --max-model-len 4096 \
+    --enable-prefix-caching \
+    --port 8000 &
+VLLM_PID=$!
+trap "kill $VLLM_PID 2>/dev/null || true" EXIT
+
+# Wait up to 5 min for the OpenAI-compatible endpoint to come up.
+echo "Waiting for vLLM to start..."
+for _ in $(seq 1 60); do
+    if curl -sf http://localhost:8000/v1/models >/dev/null; then
+        break
+    fi
+    sleep 5
+done
+
+POLICY=$(cat "$POLICY_PATH")
+FAIL=0
+
+# Build the POLICY/CONTENT body the same way prompt.build_body does so the
+# raw-completions and chat-completions modes share a body. The chat path then
+# wraps the body in the Gemma role markers via the server's chat template;
+# the completions path sends the body as a plain prompt.
+build_body() {
+    local content="$1"
+    printf 'Examine the given POLICY and determine if the given CONTENT meets the criteria for ANY of the LABELS. Answer "1" if yes, and "0" if no.\n\n\nPOLICY\n======\n\n%s\n\n\nCONTENT\n=======\n\n%s' "$POLICY" "$content"
+}
+
+classify() {
+    local content="$1"
+    local body request
+    body=$(build_body "$content")
+    if [[ "$SMOKE_MODE" == "chat" ]]; then
+        request=$(jq -nc --arg model "$MODEL" --arg body "$body" \
+            '{model: $model, max_tokens: 1, temperature: 0, messages: [{role: "user", content: $body}]}')
+        curl -sf -X POST http://localhost:8000/v1/chat/completions \
+            -H 'content-type: application/json' -d "$request" \
+            | jq -r '.choices[0].message.content' | tr -d '[:space:]'
+    else
+        request=$(jq -nc --arg model "$MODEL" --arg prompt "$body" \
+            '{model: $model, max_tokens: 1, temperature: 0, prompt: $prompt}')
+        curl -sf -X POST http://localhost:8000/v1/completions \
+            -H 'content-type: application/json' -d "$request" \
+            | jq -r '.choices[0].text' | tr -d '[:space:]'
+    fi
+}
+
+walk_fixture() {
+    local fixture="$1"
+    while IFS= read -r line; do
+        local id expected content want verdict
+        id=$(echo "$line" | jq -r .id)
+        expected=$(echo "$line" | jq -r .label)
+        content=$(echo "$line" | jq -r .content)
+        case "$expected" in
+            toxic)   want=1 ;;
+            clean)   want=0 ;;
+            *)       continue ;;   # skip uncertain
+        esac
+        verdict=$(classify "$content")
+        if [[ "$verdict" != "$want" ]]; then
+            echo "FAIL $id: expected $want got $verdict"
+            FAIL=$((FAIL + 1))
+            if [[ $FAIL -ge $MAX_FAILURES ]]; then
+                echo "Aborting after $MAX_FAILURES failures"
+                return $FAIL
+            fi
+        else
+            echo "OK   $id"
+        fi
+    done < "$fixture"
+}
+
+walk_fixture ../../tests/fixtures/cope_b/known_toxic.jsonl
+walk_fixture ../../tests/fixtures/cope_b/known_clean.jsonl
+
+echo "Mode: $SMOKE_MODE   Failures: $FAIL"
+exit $FAIL
+```
+
+(Default mode hits `/v1/chat/completions`, which lets vLLM's server-side
+chat template wrap the body in Gemma role markers — exactly what
+`handler.py`'s `apply_chat_template` path does in production. Setting
+`SMOKE_MODE=completions` falls back to the hand-rolled body for debugging
+chat-template behavior.)
+
+Mark executable: `chmod +x gpu/cope-b-runpod/tests/smoke_test.sh`.
+
+- [ ] **Step 4: Prefix-cache benchmark test**
+
+Path: `gpu/cope-b-runpod/tests/test_prefix_cache.py`
+
+```python
+"""Benchmark: assert that vLLMs prefix caching is actually firing.
+
+We send N identical-policy requests with varying CONTENT and assert that
+the median time-to-second-request is materially lower than time-to-first.
+Without prefix caching, every call reprocesses the policy KV state — easy
+~10x cost difference under our workload.
+
+Requires a live vLLM endpoint (gpu/cope-b-runpod/tests/smoke_test.sh
+must be running, or a deployed RunPod endpoint). Skip if neither is
+available.
+"""
+
+import os
+import statistics
+import time
+import urllib.request
+import urllib.error
+import json
+import pytest
+
+
+VLLM_URL = os.environ.get("VLLM_URL", "http://localhost:8000")
+
+
+def _is_endpoint_up() -> bool:
+    try:
+        with urllib.request.urlopen(f"{VLLM_URL}/v1/models", timeout=2):
+            return True
+    except urllib.error.URLError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _is_endpoint_up(),
+    reason="vLLM endpoint not reachable; run smoke_test.sh or set VLLM_URL",
+)
+
+
+def _call(content: str) -> float:
+    body = json.dumps({
+        "model": os.environ.get("MODEL", "zentropi-ai/cope-b-a4b"),
+        "prompt": "POLICY\n======\n\nshared policy text\n\nCONTENT\n=======\n\n" + content,
+        "max_tokens": 1,
+        "temperature": 0,
+    }).encode()
+    req = urllib.request.Request(
+        f"{VLLM_URL}/v1/completions",
+        data=body,
+        headers={"content-type": "application/json"},
+    )
+    start = time.perf_counter()
+    with urllib.request.urlopen(req, timeout=30) as r:
+        r.read()
+    return time.perf_counter() - start
+
+
+def test_prefix_cache_warm_calls_are_materially_faster():
+    # Warm the cache once
+    first = _call("First content — establishes the prefix cache")
+    # Now measure several warm calls
+    warm = [_call(f"Warm content variant {i}") for i in range(5)]
+    median_warm = statistics.median(warm)
+
+    # Heuristic: warm median should be < 50% of cold first.
+    # Tune this threshold once we have real numbers from Task 3.6 smoke runs.
+    assert median_warm < first * 0.5, (
+        f"Prefix caching not firing: first={first:.2f}s, median warm={median_warm:.2f}s. "
+        f"Investigate --enable-prefix-caching flag."
+    )
+```
+
+- [ ] **Step 5: Expand the README**
+
+Path: `gpu/cope-b-runpod/README.md` — replace the Chunk 2 stub with the full operator doc:
+
+```markdown
+# Charcoal CoPE-B-A4B GPU service
+
+vLLM-on-RunPod-Serverless harness for Charcoal's Stage-2 toxicity classifier.
+
+## Files
+
+- `Dockerfile` — image build. Bakes the model weights and `policy.txt` into the image.
+- `handler.py` — RunPod Serverless worker entrypoint. Wraps vLLM's AsyncLLMEngine.
+- `prompt.py` — Gemma chat template + POLICY/CONTENT body assembly.
+- `policy.txt` — toxicity policy (versioned in git; see `docs/superpowers/specs/...` for authoring guidance).
+- `runpod.yml` — RunPod endpoint config (manual via web console at create time).
+- `requirements.txt` — Python runtime pins.
+- `tests/test_prompt.py` — prompt assembly unit tests (CPU-only).
+- `tests/test_handler.py` — handler unit tests with mocked vLLM.
+- `tests/test_prefix_cache.py` — benchmark that prefix caching is firing.
+- `tests/smoke_test.sh` — local end-to-end smoke against `vllm serve`.
+
+## Local development
+
+```bash
+cd gpu/cope-b-runpod
+python3 -m pip install -r requirements.txt    # heavy: pulls vllm
+python3 -m pytest tests/                       # runs prompt + handler tests
+./tests/smoke_test.sh                          # requires a CUDA GPU
+```
+
+## Deploying
+
+Images are built and published by `.github/workflows/build-cope-b-image.yml`
+on pushes to `staging` and `main` when files under `gpu/cope-b-runpod/**`
+change. The workflow publishes to `ghcr.io/musicjunkieg/charcoal-cope-b:<sha>`
+with a manifest digest pinned in the resulting GitHub Actions summary.
+
+RunPod endpoint is configured per `runpod.yml`. Updates to that file
+require manual reconciliation in the RunPod web console (no IaC yet).
+
+## Policy changes
+
+Editing `policy.txt` requires an image rebuild. CI bumps `POLICY_VERSION`
+to `policy-<short-sha>-<date>` automatically. Audit log captures
+`policy_version` per classification so a change can be located post-hoc.
+
+## Region
+
+Endpoint runs in `us-west` to minimize round-trip from Railway production.
+Verify before creating: `railway status` should show a us-west default region.
+```
+
+- [ ] **Step 6: Commit infra + smoke + prefix-cache**
+
+```bash
+git add gpu/cope-b-runpod/Dockerfile gpu/cope-b-runpod/runpod.yml gpu/cope-b-runpod/tests/smoke_test.sh gpu/cope-b-runpod/tests/test_prefix_cache.py gpu/cope-b-runpod/README.md
+git commit -m 'feat(cope-b): Dockerfile + runpod.yml + smoke + prefix-cache benchmark
+
+Dockerfile bakes zentropi-ai/cope-b-a4b weights (MODEL_REVISION arg
+defaults to main; CI pins per release) and policy.txt into the image.
+POLICY_VERSION env injected at build time so audit logs capture the
+exact policy + image combo per classification.
+
+runpod.yml documents the endpoint config (A100 80GB, FlashBoot,
+scale-to-zero, idle_timeout=60s, max_workers=3, execution_timeout=600s,
+region=us-west).
+
+smoke_test.sh runs vllm serve locally and walks every fixture line
+through /v1/completions, asserting 0/1 verdicts match expected labels.
+
+test_prefix_cache.py is a runtime benchmark — given a live endpoint
+(local vllm serve or deployed RunPod), it asserts median warm-call
+latency is <50% of cold first-call latency, catching silent prefix-
+caching regressions between vLLM minor versions.
+
+Chainlink #<Phase 6.2 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+### Task 3.7: GitHub Actions image build workflow
+
+**Files:**
+- Create: `.github/workflows/build-cope-b-image.yml`
+
+- [ ] **Step 1: Create the workflow**
+
+Path: `.github/workflows/build-cope-b-image.yml`
+
+```yaml
+name: Build CoPE-B image
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'gpu/cope-b-runpod/**'
+      - '.github/workflows/build-cope-b-image.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive policy version
+        id: policyver
+        run: |
+          short_sha=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y-%m-%d)
+          echo "value=policy-${short_sha}-${date}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./gpu/cope-b-runpod
+          file: ./gpu/cope-b-runpod/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.ref_name }}
+          build-args: |
+            MODEL_REVISION=main
+            POLICY_VERSION=${{ steps.policyver.outputs.value }}
+          # Cache the weight-download layer between runs. The huggingface-cli
+          # download layer is ~50 GB and cache hit is keyed by MODEL_REVISION,
+          # so a policy.txt-only edit reuses the cached weight layer.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "Built ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Policy version: ${{ steps.policyver.outputs.value }}" >> $GITHUB_STEP_SUMMARY
+          echo "Next: update RunPod endpoint to use this image digest." >> $GITHUB_STEP_SUMMARY
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add .github/workflows/build-cope-b-image.yml
+git commit -m 'ci(cope-b): GH Actions workflow to build + push image on gpu/ changes
+
+Triggered on push to main or staging when gpu/cope-b-runpod/** changes
+(or manually via workflow_dispatch). Builds the Dockerfile, pushes to
+ghcr.io/<owner>/charcoal-cope-b tagged with both git SHA and branch
+name. POLICY_VERSION build-arg is derived from short-sha + UTC date so
+the value is unique per commit.
+
+RunPod endpoint update is manual — after the workflow succeeds, the
+image digest from the GH Actions summary gets pasted into the RunPod
+endpoint config in the web console.
+
+Chainlink #<Phase 6.2 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+- [ ] **Step 3: Push**
+
+Run: `git push origin feat/cope-b-self-host`
+Expected: branch updated; GH Actions workflow may run automatically on the next push touching `gpu/cope-b-runpod/**`.
+
+- [ ] **Step 4: Close subissue and switch to Chunk 4**
+
+```
+chainlink issue close <Phase 6.2 issue id>
+chainlink session work <Phase 6.3 issue id>   # Rust trait + RunPodCopeBClient
+```
+
+---
