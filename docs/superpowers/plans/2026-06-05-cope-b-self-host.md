@@ -745,3 +745,323 @@ Expected: pushes branch (or updates if already pushed in design phase).
 Run: `chainlink issue close 186` then `chainlink session work <Chunk 2 subissue ID>` (the issue ID created for "Phase 6.1 — policy text + labeled fixtures").
 
 ---
+
+## Chunk 2: Policy text + labeled fixtures (Bryan-authored)
+
+This chunk produces three artifacts that require Bryan's judgment about what
+counts as toxic in Charcoal's specific community context. The plan's job is to
+specify the **contract** (format, fields, quality bars) — not the content. Bryan
+fills in the content with optional Claude assistance for tedium (formatting,
+parallel construction of variants).
+
+**Subissue:** `Phase 6.1 — policy text + labeled fixtures (Bryan-authored)`. Confirm
+focus with `chainlink session status`; if not active, `chainlink session work <id>`.
+
+**Spec sections to re-read first:** Step 1 (policy authoring) and Step 4.5
+(accuracy gate fixture requirements).
+
+### Task 2.1: Create the `gpu/cope-b-runpod/` directory scaffold
+
+**Files:**
+- Create: `gpu/cope-b-runpod/policy.txt`
+- Create: `gpu/cope-b-runpod/README.md` (stub; expanded in Chunk 3)
+- Create: `gpu/cope-b-runpod/.gitkeep` if the directory will otherwise be empty pending Chunk 3 files
+
+- [ ] **Step 1: Create the directory**
+
+Run: `mkdir -p gpu/cope-b-runpod`
+Expected: directory exists; `ls gpu/` shows `cope-b-runpod`.
+
+- [ ] **Step 2: Stub the README**
+
+Path: `gpu/cope-b-runpod/README.md`
+
+```markdown
+# Charcoal CoPE-B-A4B GPU service
+
+vLLM-on-RunPod-Serverless harness for the Stage-2 toxicity classifier.
+See `docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md` for design.
+
+Files (filled in by Chunk 3):
+- `Dockerfile` — image build
+- `handler.py` — RunPod worker entrypoint
+- `prompt.py` — Gemma chat template + POLICY/CONTENT assembly
+- `policy.txt` — toxicity policy (versioned per Bryan; **not** silently
+  derivable from CoPE-A's hosted labeler)
+- `runpod.yml` — endpoint config
+- `tests/` — handler unit tests + smoke script
+```
+
+### Task 2.2: Author `gpu/cope-b-runpod/policy.txt`
+
+**Files:**
+- Create: `gpu/cope-b-runpod/policy.txt`
+
+**Input:** `refs/labeler_prompt.txt` (81 lines) — the current Zentropi CoPE-A labeler policy snapshot. Re-read it before writing.
+
+**Output format contract:**
+
+CoPE-B expects the policy in the `POLICY` slot of the prompt — see the spec's
+"GPU service" section. The slot is freeform text; CoPE-B uses it as instructions
+on what classes of CONTENT count as `1` (toxic) and which count as `0` (clean).
+Bryan owns the wording. Constraints:
+
+- No `INSTRUCTIONS:` or `ANSWER:` headers (CoPE-B drops them; the chat template's
+  role markers replace them)
+- Aim for ~50–500 tokens (longer slows inference; shorter loses signal)
+- Concrete examples are valuable; abstract definitions are not
+- Cover at least: identity-based hostility, dehumanization, dogpiling/incitement,
+  bad-faith concern trolling, sarcastic/coded hostility, news-commentary
+  ambiguity (cf. chainlink #114)
+- DO NOT mention model names, scoring formulas, or downstream tier thresholds —
+  the model only needs to know how to classify
+
+- [ ] **Step 1: Read the reference snapshot**
+
+Run: `cat refs/labeler_prompt.txt`
+Expected: full text. Note structure, edge cases handled, language patterns.
+
+- [ ] **Step 2: Draft `policy.txt`**
+
+Path: `gpu/cope-b-runpod/policy.txt`. This is Bryan-authored content; the plan does not pre-write it. Bryan should:
+
+1. Open a working draft in a text editor
+2. Translate the reference snapshot into CoPE-B's freeform `POLICY` style
+3. Strip any CoPE-A-specific scaffolding (INSTRUCTIONS/ANSWER markers)
+4. Add edge-case guidance for the categories above
+
+If Claude assistance is wanted: paste the reference snapshot into chat and ask
+for a structured draft, then revise. The final file is Bryan's call to make.
+
+- [ ] **Step 3: Token-count check**
+
+Run: `wc -w gpu/cope-b-runpod/policy.txt` (rough proxy; 1 word ≈ 1.3 tokens)
+Expected: 40–400 words (≈ 50–500 tokens). Outside this range, consider whether the policy is too sparse or too verbose.
+
+- [ ] **Step 4: Sanity-check (Colab preferred, local fallback)**
+
+The spec mentions Zentropi published a runnable Colab notebook for CoPE-B-A4B at
+https://colab.research.google.com/drive/1JD8OIa3yZYfVbeY81ao03lrvg0aS-6SQ.
+
+**Preferred path:** open the Colab, replace its example POLICY with the contents
+of `policy.txt`, and run ~10 hand-picked examples (5 clearly toxic, 5 clearly
+clean). Confirm classification matches your expectation.
+
+**Fallback if the Colab is unavailable** (URL 404, HF gating, runtime quota):
+defer the sanity-check to Chunk 3's local `vllm serve` smoke test (Task 3.x,
+runs locally on Bryan's M4 Pro Mac mini via GGUF quants or on whichever
+machine has a GPU). Flag the deferral in the commit message:
+
+```
+sanity-check deferred to Chunk 3 smoke test (Colab unavailable: <reason>)
+```
+
+If neither path works, the policy iterates without quantitative grounding until
+the GPU service is live in Chunk 3 — risky but not blocking, since Chunk 5's
+accuracy gate is the formal quality bar.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add gpu/cope-b-runpod/policy.txt gpu/cope-b-runpod/README.md
+git commit -m 'feat(cope-b): seed policy.txt and gpu/cope-b-runpod/ scaffold
+
+policy.txt is the Stage-2 toxicity policy in CoPE-B POLICY slot format,
+adapted from the CoPE-A reference snapshot at refs/labeler_prompt.txt.
+Removes INSTRUCTIONS/ANSWER headers (dropped by CoPE-B chat template);
+covers identity hostility, dehumanization, dogpiling, concern trolling,
+sarcasm, and news-commentary ambiguity (cf. chainlink #114).
+
+Sanity-checked via Zentropi Colab on ~10 hand-picked examples.
+
+Chainlink #<Phase 6.1 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+### Task 2.3: Author labeled fixtures
+
+**Files:**
+- Create: `tests/fixtures/cope_b/known_toxic.jsonl`
+- Create: `tests/fixtures/cope_b/known_clean.jsonl`
+- Create: `tests/fixtures/cope_b/edge_cases.jsonl`
+
+**JSONL schema (per line):**
+
+```json
+{
+  "id": "kt-001",
+  "label": "toxic",
+  "category": "identity-attack",
+  "content": "[Parent post]: I'm trans and I had a long day.\n\n[Reply]: <toxic reply here>",
+  "note": "optional one-line rationale"
+}
+```
+
+Field rules:
+- `id` — stable kebab-case identifier. `kt-` prefix for `known_toxic`, `kc-` for `known_clean`, `ec-` for `edge_cases`.
+- `label` — one of: `"toxic"`, `"clean"`, `"uncertain"` (lowercase strings). `uncertain` is only valid in `edge_cases.jsonl` and Chunk 5's accuracy gate skips those rows.
+- `category` — kebab-case category tag. **MUST be from the allowed-values set** (see below). Categories outside the set fail the verify step.
+- `content` — the post text that gets passed into the CoPE-B `CONTENT` slot. **MUST match the exact envelope format produced by `src/toxicity/mod.rs::format_parent_reply` for reply pairs:**
+
+  ```
+  [Parent post]: <parent text>\n\n[Reply]: <reply text>
+  ```
+
+  Note: literal colons after `[Parent post]` and `[Reply]`, single space, then text; **double newline** (`\n\n` — a blank line) between the parent and reply blocks. For original posts (no parent), `content` is just the post body text with no envelope. Mismatching this format means Chunk 5's gate measures an off-distribution prompt — the fixtures must look exactly like what Charcoal generates at runtime.
+- `note` — optional. One short sentence explaining why this example was chosen. Useful when Bryan re-reads the fixtures in 6 months.
+
+**Allowed-values set for `category`:**
+
+```
+identity-attack
+dehumanization
+dogpile
+concern-troll
+coded-sarcasm
+news-commentary
+support
+disagreement
+meme
+slang
+counter-speech
+reclamation
+```
+
+If a fixture needs a category outside this set, add the value to this list (in a separate commit) and document why. Don't proliferate near-duplicates (`identity-attack` vs `identity_attack` vs `identity-attacks` — all are violations of the kebab-case-lowercase rule).
+
+**Quality bars (enforced by Chunk 5's accuracy gate):**
+- `known_toxic.jsonl` ≥ 20 entries, ≥ 4 distinct categories **from the allowed set**
+- `known_clean.jsonl` ≥ 20 entries, ≥ 4 distinct categories **from the allowed set**
+- `edge_cases.jsonl` no minimum count; aim for ~10–20 thoughtful examples
+
+**Sourcing guidance for Bryan (PII checklist):**
+
+Fixtures are committed to the public repo. Before pasting any real-world quote:
+
+- [ ] Strip @handles (no `@user.bsky.social`) — replace with role labels like "<user>" if needed
+- [ ] Strip DIDs (no `did:plc:...`)
+- [ ] Strip AT-URIs (`at://did:plc:...`)
+- [ ] Strip post URLs (`https://bsky.app/profile/.../post/...`)
+- [ ] Paraphrase distinctive multi-word phrases so the original post can't be located via Bluesky search (rewriting 50%+ of unique word choices is usually enough)
+- [ ] Avoid quoting from accounts that are currently being harassed — using their words even paraphrased can amplify
+
+Sources to draw from (after applying the PII checklist):
+- `account_scores` rows tagged toxic/clean on prod
+- Past `user_labels` entries the review queue has confirmed
+- Bryan's own judgment for the edge-case set — sarcasm, reclaimed slurs in-group, counter-speech, news commentary on violence
+
+- [ ] **Step 1: Create the fixtures directory**
+
+Run: `mkdir -p tests/fixtures/cope_b`
+
+- [ ] **Step 2: Author `known_toxic.jsonl`**
+
+Bryan writes ≥ 20 entries by hand or with Claude scaffolding. Apply the PII checklist above to every example before committing. Each line is a complete JSON object (no pretty-printing).
+
+- [ ] **Step 3: Author `known_clean.jsonl`**
+
+Same shape, label `"clean"`. ≥ 20 entries, ≥ 4 distinct categories from the allowed-values set.
+
+- [ ] **Step 4: Author `edge_cases.jsonl`**
+
+Same shape, mix of labels including `"uncertain"`. Aim for cases where Charcoal's current pipeline has misclassified in the past (cf. chainlink #114 for news-commentary false positives).
+
+- [ ] **Step 5: Validate all three files**
+
+Run all three checks. Each must pass before continuing.
+
+**JSONL validity (every line parses):**
+```
+for f in tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl tests/fixtures/cope_b/edge_cases.jsonl; do
+  python3 -c "import json,sys; [json.loads(l) for l in open('$f')]" || { echo "INVALID: $f"; exit 1; }
+done
+echo "JSONL OK"
+```
+Expected: `JSONL OK`.
+
+**Counts (≥20 in toxic + clean):**
+```
+[ $(wc -l < tests/fixtures/cope_b/known_toxic.jsonl) -ge 20 ] || { echo "known_toxic <20"; exit 1; }
+[ $(wc -l < tests/fixtures/cope_b/known_clean.jsonl) -ge 20 ] || { echo "known_clean <20"; exit 1; }
+echo "Counts OK"
+```
+Expected: `Counts OK`.
+
+**Categories (≥4 distinct AND all from the allowed set):**
+```
+allowed='identity-attack dehumanization dogpile concern-troll coded-sarcasm news-commentary support disagreement meme slang counter-speech reclamation'
+for f in tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl; do
+  cats=$(jq -r '.category' "$f" | sort -u)
+  count=$(echo "$cats" | wc -l)
+  [ $count -ge 4 ] || { echo "$f <4 distinct categories"; exit 1; }
+  for c in $cats; do
+    echo " $allowed " | grep -q " $c " || { echo "$f has out-of-set category: $c"; exit 1; }
+  done
+done
+echo "Categories OK"
+```
+Expected: `Categories OK`. If any line fails, fix the offending fixture before continuing.
+
+**`uncertain` label only in `edge_cases.jsonl`:**
+```
+for f in tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl; do
+  if jq -e 'select(.label == "uncertain")' "$f" >/dev/null; then
+    echo "$f contains uncertain label (only allowed in edge_cases)"; exit 1
+  fi
+done
+echo "Labels OK"
+```
+Expected: `Labels OK`. A `kt-` or `kc-` entry labeled `uncertain` would silently distort Chunk 5's gate; this check fails fast.
+
+**Envelope format spot-check (parent/reply pairs match `format_parent_reply` exactly):**
+```
+jq -r 'select(.content | contains("[Parent post]")) | .content' tests/fixtures/cope_b/*.jsonl | head -20
+```
+Expected output: every visible `content` shows `[Parent post]: ...` then a blank line then `[Reply]: ...`. If any line uses different punctuation or spacing, fix it.
+
+- [ ] **Step 6: Smoke-classify (Colab preferred, fallback to Chunk 3)**
+
+Same Colab as Task 2.2 Step 4 (with the same fallback policy if it's unavailable). Feed each fixture line's `content` through the model with `policy.txt` as the POLICY. Eyeball the verdicts:
+- `known_toxic` should classify mostly as `1` (toxic)
+- `known_clean` should classify mostly as `0` (clean)
+- `edge_cases` — observe and note disagreements; do not fix the policy here unless something is glaringly wrong (formal calibration is Step 5 of the migration, Chunk 5). Rows with `label == "uncertain"` are intentionally unscored; Chunk 5's gate skips them.
+
+If `known_toxic` or `known_clean` accuracy looks <80% by eye, revise `policy.txt` (Task 2.2) before continuing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl tests/fixtures/cope_b/edge_cases.jsonl
+git commit -m 'test(cope-b): seed labeled fixtures for Step 4.5 accuracy gate
+
+JSONL schema: id, label (toxic|clean|uncertain), category, content, note.
+known_toxic.jsonl and known_clean.jsonl each have >=20 hand-curated
+entries spanning >=4 categories; edge_cases.jsonl captures sarcasm,
+counter-speech, news commentary on violent topics (cf. chainlink #114),
+and reclaimed slurs.
+
+content uses Charcoals "[Parent post]/[Reply]" envelope so fixtures are
+drop-in inputs for ToxicityClassifier::classify.
+
+Sanity-checked via Zentropi Colab against policy.txt; revisit threshold
+calibration in Chunk 5 (migration Step 5).
+
+Chainlink #<Phase 6.1 issue id>.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+```
+
+- [ ] **Step 8: Push**
+
+Run: `git push origin feat/cope-b-self-host`
+Expected: branch updated.
+
+- [ ] **Step 9: Close subissue and switch to Chunk 3**
+
+```
+chainlink issue close <Phase 6.1 issue id>
+chainlink session work <Phase 6.2 issue id>   # GPU service
+```
+
+---
