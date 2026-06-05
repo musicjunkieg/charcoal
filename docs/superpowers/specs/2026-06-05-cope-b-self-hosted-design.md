@@ -113,6 +113,17 @@ pub struct ClassifierVerdict {
     pub policy_version: String,
 }
 
+// Width and allocation notes:
+// - All classifier-side scalars (`confidence`, `threshold()`) use `f32`. ONNX
+//   continuous score remains `f64`. The `TwoStageVerdict.classifier_confidence`
+//   field is `Option<f32>` to match.
+// - `model_id: String` and `policy_version: String` allocate per call. Sources
+//   are `&'static str` on the trait, so a `String::from` (or `Cow<'static, str>`)
+//   widening is needed. We accept the allocation: ~2 small strings per
+//   classification × ~hundreds-of-thousands per onboarding is negligible cost
+//   compared to GPU inference, and the alternative (lifetimes on
+//   `ClassifierVerdict`) makes downstream audit & serde awkward.
+
 /// Helper used by `TwoStageToxicityScorer` — never called with an externally
 /// supplied threshold. Threshold ownership stays with the implementation.
 pub fn is_toxic(classifier: &dyn ToxicityClassifier, v: &ClassifierVerdict) -> bool {
@@ -126,11 +137,12 @@ Refactor of `TwoStageVerdict` and `VerdictSource`:
 // src/toxicity/ensemble.rs — modified
 pub struct TwoStageVerdict {
     pub is_toxic: bool,
-    pub onnx_score: f64,
+    pub onnx_score: f64,                              // unchanged width — ONNX is `f64`
     pub onnx_attributes: super::traits::ToxicityAttributes,
     pub source: VerdictSource,
-    pub classifier_confidence: Option<f64>,   // was `zentropi_confidence`
-    pub classifier_model_id: Option<String>,  // NEW: tracks which model fired
+    pub classifier_confidence: Option<f32>,           // was `zentropi_confidence: Option<f64>`
+    pub classifier_model_id: Option<String>,          // NEW: which model fired
+    pub classifier_policy_version: Option<String>,    // NEW: which policy fired
 }
 
 pub enum VerdictSource {
@@ -150,10 +162,19 @@ pub struct TwoStageToxicityScorer {
 }
 ```
 
-`zentropi_confidence: Option<f64>` field rename + `OnnxFallback` removal are
-breaking changes to call sites in `src/scoring/profile.rs` and audit logging.
-Implementation step 3 includes migrating those call sites; tests in
-`tests/unit_scoring.rs` and `tests/composition.rs` will need parallel updates.
+`zentropi_confidence: Option<f64>` field rename (now `classifier_confidence: Option<f32>`)
++ `OnnxFallback` variant removal + `classify_pair` trait method removal are
+breaking changes to call sites in `src/scoring/profile.rs`, audit logging, and
+ensemble doc comments (e.g. `src/toxicity/ensemble.rs:99` references
+`Zentropi's classify_pair`). Implementation step 3 must migrate all of:
+
+- `TwoStageVerdict` field consumers in scoring + reporting
+- `VerdictSource` match arms (replace `ZentropiToxic`/`ZentropiSafe`/`OnnxFallback`)
+- Doc comments referencing `classify_pair`
+- Tests in `tests/unit_scoring.rs` and `tests/composition.rs`
+
+Step 3 also includes a `cargo grep` pass for `classify_pair` / `ZentropiToxic`
+/ `OnnxFallback` to scrub stale identifiers.
 
 ### Backend selection and per-backend thresholds
 
@@ -386,9 +407,10 @@ that plays the role `ZENTROPI_LABELER_ID` plays invisibly on the hosted API.
 **Both steps require real human judgment from Bryan** about what counts as
 toxic in Charcoal's specific community context. Cannot be fully automated.
 
-**Step 4.5 blocks** if `known_toxic.jsonl` or `known_clean.jsonl` has fewer
-than 20 entries — the accuracy gate can't run on insufficient samples. The
-implementation should fail loudly with a clear "fixture set too small" error.
+**Step 4.5 blocks** if `known_toxic.jsonl` or `known_clean.jsonl` is missing
+OR has fewer than 20 entries — the accuracy gate can't run on insufficient
+samples. The implementation should fail loudly with a clear "fixture set
+too small or missing" error. Missing files are treated identically to empty ones.
 
 ### Step 2 — Build the RunPod GPU service
 
@@ -444,7 +466,12 @@ CoPE-B's logprobs concentrate differently than CoPE-A's. Using A/B output:
 - Pick the CoPE-B threshold that maximizes accuracy on labeled examples, or
 - Match CoPE-A on the unlabeled distribution if labels are too thin
 
-Update the per-backend threshold constant in scoring code (`RUNPOD_COPE_B_THRESHOLD`).
+Update the per-backend threshold constant in Rust source — `const COPE_B_THRESHOLD: f32`
+on `RunPodCopeBClient`. This is a **code change**, not an env var, to keep the
+calibrated value versioned in git alongside the policy text that it was tuned
+for. Threshold drift via runtime override would silently invalidate the
+labeled-fixture accuracy gate. The `ZentropiClient` similarly holds its own
+threshold constant.
 
 ### Step 6 — Zentropi-hosted CoPE-B for fallback
 
@@ -647,7 +674,12 @@ into `src/scoring/audit_log.rs` parameterized by event type (`nli`,
 
 Classifier audit event fields: timestamp, backend, model_id, **policy_version**,
 prompt_hash (content hash, not full text — privacy), verdict, confidence,
-latency_ms, fallback_invoked (bool).
+latency_ms.
+
+`backend` already captures whether a call ran on RunPod or Zentropi; no
+separate `fallback_invoked` flag is needed. The "fallback" path is just the
+operator selecting `CHARCOAL_CLASSIFIER=zentropi` at startup; per-call audit
+shows that via `backend=zentropi`.
 
 Carrying `policy_version` separately from `model_id` is critical because
 two different content surfaces drive the verdict — model weights and policy
@@ -686,8 +718,6 @@ reports latency. Run after env-var changes and as a Railway healthcheck prefligh
 | `CHARCOAL_CLASSIFIER_TIMEOUT_MS` | `60000` | Steady-state per-request timeout |
 | `CHARCOAL_CLASSIFIER_WARMUP_TIMEOUT_MS` | `180000` | First-call-after-idle timeout (cold start) |
 | `CHARCOAL_CLASSIFIER_MAX_RETRIES` | `3` | Bounded retries on 5xx |
-| `RUNPOD_COPE_B_THRESHOLD` | (set in Step 5) | Confidence threshold for RunPod CoPE-B verdicts |
-| `ZENTROPI_THRESHOLD` | (existing) | Confidence threshold for Zentropi verdicts |
 
 ## Open questions and TBDs
 
