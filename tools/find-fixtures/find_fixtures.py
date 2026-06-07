@@ -170,6 +170,46 @@ def bsky_url_to_at_uri(url_or_uri: str) -> str:
     return f"at://{did}/{collection}/{rkey}"
 
 
+# ─── List discovery ────────────────────────────────────────────────────────
+
+# Map AppView "purpose" enums to short labels for `discover` output.
+_LIST_PURPOSE_LABELS = {
+    "app.bsky.graph.defs#modlist": "modlist",
+    "app.bsky.graph.defs#curatelist": "curatelist",
+    "app.bsky.graph.defs#referencelist": "referencelist",
+}
+
+
+def get_lists_for_actor(actor: str, page_pause: float = 0.3) -> Iterable[dict]:
+    """Yield each `ListView` owned by `actor` via app.bsky.graph.getLists.
+
+    Each yield is the raw AppView ListView dict — has `.uri`, `.name`,
+    `.purpose`, `.description`, `.listItemCount` (members), etc.
+    """
+    cursor: Optional[str] = None
+    while True:
+        params: dict = {"actor": actor, "limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            resp = _fetch("/xrpc/app.bsky.graph.getLists", params)
+        except urllib.error.HTTPError as e:
+            print(f"# getLists HTTP {e.code} on {actor}", file=sys.stderr)
+            return
+        except (urllib.error.URLError, json.JSONDecodeError) as e:
+            print(f"# getLists failed: {e}", file=sys.stderr)
+            return
+        lists = resp.get("lists") or []
+        if not lists:
+            return
+        for lst in lists:
+            yield lst
+        cursor = resp.get("cursor")
+        if not cursor:
+            return
+        time.sleep(page_pause)
+
+
 # ─── Moderation list mode ──────────────────────────────────────────────────
 
 def get_list_members(list_uri: str, page_pause: float = 0.3) -> Iterable[str]:
@@ -473,6 +513,66 @@ def run_backlinks_mode(post: str, count: int, min_len: int,
     return 0
 
 
+def run_discover_mode(actors: list[str], match_re: Optional[re.Pattern],
+                      purpose_filter: Optional[str],
+                      min_members: int,
+                      out_format: str) -> int:
+    """Enumerate lists owned by each maintainer; emit a catalog the reviewer
+    can grep / sort to pick which list(s) to feed into `list` mode.
+
+    Output is TSV by default (columns: members, purpose, name, uri, owner)
+    or JSONL if `--json` is passed. TSV is grep-friendly; JSONL preserves the
+    raw description field for richer filtering later.
+    """
+    total_emitted = 0
+    if out_format == "tsv":
+        print("members\tpurpose\tname\turi\towner")
+    for actor in actors:
+        actor = normalize_actor(actor)
+        for lst in get_lists_for_actor(actor):
+            purpose_raw = lst.get("purpose") or ""
+            purpose = _LIST_PURPOSE_LABELS.get(purpose_raw, purpose_raw)
+            if purpose_filter and purpose_filter != "all" and purpose != purpose_filter:
+                continue
+            member_count = int(lst.get("listItemCount") or 0)
+            if member_count < min_members:
+                continue
+            name = (lst.get("name") or "").strip()
+            description = (lst.get("description") or "").strip()
+            uri = lst.get("uri") or ""
+            if match_re is not None and not (
+                match_re.search(name) or match_re.search(description)
+            ):
+                continue
+            owner_handle = (lst.get("creator") or {}).get("handle") or actor
+            if out_format == "json":
+                print(json.dumps({
+                    "name": name,
+                    "description": description,
+                    "purpose": purpose,
+                    "members": member_count,
+                    "uri": uri,
+                    "owner": owner_handle,
+                }, ensure_ascii=False))
+            else:
+                # TSV — flatten name to a single line so grep stays sane
+                safe_name = name.replace("\t", " ").replace("\n", " ")
+                print(f"{member_count}\t{purpose}\t{safe_name}\t{uri}\t{owner_handle}")
+            total_emitted += 1
+    print(
+        f"# discovered {total_emitted} lists across {len(actors)} maintainer(s)",
+        file=sys.stderr,
+    )
+    if total_emitted == 0:
+        print(
+            "# tip: discover only sees lists from the actors you pass — "
+            "the AppView has no global searchLists endpoint. Seed it with "
+            "handles you know maintain mod lists.",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def run_list_mode(list_url: str, total: int, per_account: int, min_len: int,
                   fetch_parent: bool, member_pause: float,
                   match_re: Optional[re.Pattern]) -> int:
@@ -559,6 +659,32 @@ def main() -> int:
                         help="also include quote-posts (in addition to replies)")
     _add_common_flags(p_back)
 
+    p_disc = sub.add_parser(
+        "discover",
+        help="Enumerate lists owned by one or more known maintainers — pick which to feed into `list` mode.",
+    )
+    p_disc.add_argument(
+        "actors", nargs="+",
+        help="One or more Bluesky handles/DIDs known to maintain mod/curation lists.",
+    )
+    p_disc.add_argument(
+        "--purpose", choices=["all", "modlist", "curatelist", "referencelist"],
+        default="modlist",
+        help="filter by list purpose (default: modlist)",
+    )
+    p_disc.add_argument(
+        "--min-members", type=int, default=1,
+        help="skip lists with fewer than N members (default 1)",
+    )
+    p_disc.add_argument(
+        "--match", type=str, default=None,
+        help="optional regex; only emit lists whose name or description matches",
+    )
+    p_disc.add_argument(
+        "--json", dest="out_format", action="store_const", const="json", default="tsv",
+        help="emit JSONL instead of TSV (preserves the full description field)",
+    )
+
     p_list = sub.add_parser(
         "list",
         help="Walk a Bluesky moderation/curation list's members and harvest their authored posts.",
@@ -598,6 +724,13 @@ def main() -> int:
             fetch_parent=not args.no_parent_fetch,
             member_pause=args.member_pause,
             match_re=match_re,
+        )
+    if args.mode == "discover":
+        return run_discover_mode(
+            args.actors, match_re=match_re,
+            purpose_filter=args.purpose,
+            min_members=args.min_members,
+            out_format=args.out_format,
         )
     return 1
 

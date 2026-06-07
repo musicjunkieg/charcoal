@@ -13,6 +13,19 @@ before committing to `tests/fixtures/cope_b/`.
 stdlib only — no `pip install`. Python 3.10+.
 
 ```bash
+# Mode 0 (discovery): enumerate lists owned by maintainers you trust, so you
+# can pick which to feed into `list` mode. The public AT Protocol API has NO
+# global searchLists endpoint, so discovery is graph-walk — seed with handles
+# you know to maintain mod/curation lists.
+python3 tools/find-fixtures/find_fixtures.py discover \
+    maintainer-a.bsky.social maintainer-b.bsky.social \
+    --purpose modlist --match "transph|TERF|antisemit"
+
+# Output (TSV; pipe to sort | column -t to read):
+#   members  purpose   name              uri                                       owner
+#   122      modlist   Transphobes       at://did:plc:.../app.bsky.graph.list/...  maintainer-a.bsky.social
+#   45       modlist   Antisemites       at://did:plc:.../app.bsky.graph.list/...  maintainer-b.bsky.social
+
 # Mode 1: walk an account's authored posts (good for known-hostile or
 # known-supportive accounts you've targeted by hand)
 python3 tools/find-fixtures/find_fixtures.py author hostile.bsky.social --count 30 > t.jsonl
@@ -32,9 +45,8 @@ python3 tools/find-fixtures/find_fixtures.py list \
     "https://bsky.app/profile/maintainer.bsky.social/lists/3xyz..." \
     --total 60 --per-account 5 > t.jsonl
 
-# Any mode + --match: filter to candidates whose content matches a regex.
-# Combined with `list` mode, this is the answer to "what words should we
-# search for" — pick the language pattern, the tool does the harvesting.
+# Any mode + --match: filter candidates by regex (in `discover`, filters list
+# names + descriptions; in author/backlinks/list, filters post content).
 python3 tools/find-fixtures/find_fixtures.py list <url> \
     --match "(tranny|groomer|woke mind virus)" --total 100 > t.jsonl
 
@@ -108,11 +120,21 @@ keyword filtering when you DO want to narrow within those targets.
 - `app.bsky.feed.getAuthorFeed` — public AT Protocol AppView, walks a user's
   authored posts (auth-free)
 - `app.bsky.graph.getList` — list metadata + paginated members (auth-free)
+- `app.bsky.graph.getLists` — enumerate lists owned by an actor (auth-free)
 - `com.atproto.identity.resolveHandle` — handle → DID (auth-free)
 - `com.atproto.repo.getRecord` — fetch a single record by AT-URI (auth-free)
 - `blue.microcosm.links.getBacklinks` — Microcosm's [Constellation](https://constellation.microcosm.blue)
   backlink index; same service Charcoal uses for amplification discovery in
   production (`src/constellation/client.rs`)
+
+## Discovery is graph-walk, not search
+
+The public API has no global "search for lists by name" endpoint
+(`getLists` is per-actor only; `searchPosts` requires auth). `discover` mode
+takes the maintainers you seed it with and reports their lists — typically
+~3–10 maintainers will surface most of what's worth curating from. Maintain
+your own short list of community-trusted mod-list maintainers; share with
+the team via the chainlink/decision graph.
 
 ## Limits and gotchas
 
