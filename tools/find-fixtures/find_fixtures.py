@@ -135,33 +135,74 @@ def _fetch(path: str, params: dict, timeout: float = 15.0, base: str = API_BASE)
 
 # ─── At-URI / bsky.app URL helpers ─────────────────────────────────────────
 
-_BSKY_POST_RE = re.compile(
-    r"^https?://bsky\.app/profile/([^/]+)/post/([a-z0-9]+)/?$"
+_BSKY_URL_RE = re.compile(
+    r"^https?://bsky\.app/profile/([^/]+)/(post|lists)/([a-zA-Z0-9]+)/?$"
 )
+
+_URL_KIND_TO_COLLECTION = {
+    "post": "app.bsky.feed.post",
+    "lists": "app.bsky.graph.list",
+}
 
 
 def bsky_url_to_at_uri(url_or_uri: str) -> str:
-    """Accept either a bsky.app post URL or an at:// URI; return the at:// URI.
+    """Accept a bsky.app post / list URL or an at:// URI; return the at:// URI.
 
-    `bsky.app/profile/<handle-or-did>/post/<rkey>` -> `at://<did>/app.bsky.feed.post/<rkey>`.
+    `bsky.app/profile/<a>/post/<rkey>`  -> `at://<did>/app.bsky.feed.post/<rkey>`
+    `bsky.app/profile/<a>/lists/<rkey>` -> `at://<did>/app.bsky.graph.list/<rkey>`
     Handles in the URL are resolved to DIDs via com.atproto.identity.resolveHandle.
     """
     s = url_or_uri.strip()
     if s.startswith("at://"):
         return s
-    m = _BSKY_POST_RE.match(s)
+    m = _BSKY_URL_RE.match(s)
     if not m:
         raise ValueError(f"not an at:// URI or recognizable bsky.app URL: {s!r}")
-    actor, rkey = m.group(1), m.group(2)
+    actor, kind, rkey = m.group(1), m.group(2), m.group(3)
+    collection = _URL_KIND_TO_COLLECTION[kind]
     if actor.startswith("did:"):
         did = actor
     else:
-        # resolveHandle returns {"did": "..."}
         resp = _fetch("/xrpc/com.atproto.identity.resolveHandle", {"handle": actor})
         did = resp.get("did")
         if not did:
             raise ValueError(f"could not resolve handle {actor!r} to a DID")
-    return f"at://{did}/app.bsky.feed.post/{rkey}"
+    return f"at://{did}/{collection}/{rkey}"
+
+
+# ─── Moderation list mode ──────────────────────────────────────────────────
+
+def get_list_members(list_uri: str, page_pause: float = 0.3) -> Iterable[str]:
+    """Yield each member DID from a Bluesky list via `app.bsky.graph.getList`.
+
+    Works on both moderation lists (purpose=modlist) and curation lists. The
+    AppView returns the list metadata + paginated items; we just want the DIDs.
+    """
+    cursor: Optional[str] = None
+    while True:
+        params: dict = {"list": list_uri, "limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            resp = _fetch("/xrpc/app.bsky.graph.getList", params)
+        except urllib.error.HTTPError as e:
+            print(f"# getList HTTP {e.code} on {list_uri}", file=sys.stderr)
+            return
+        except (urllib.error.URLError, json.JSONDecodeError) as e:
+            print(f"# getList failed: {e}", file=sys.stderr)
+            return
+        items = resp.get("items") or []
+        if not items:
+            return
+        for it in items:
+            subject = (it.get("subject") or {})
+            did = subject.get("did")
+            if did:
+                yield did
+        cursor = resp.get("cursor")
+        if not cursor:
+            return
+        time.sleep(page_pause)
 
 
 # ─── Constellation backlinks mode ──────────────────────────────────────────
@@ -365,7 +406,22 @@ def build_envelope_from_backlink(
     }
 
 
-def run_author_mode(actor: str, count: int, min_len: int, fetch_parent: bool) -> int:
+def _row_passes(row: dict, min_len: int, match_re: Optional[re.Pattern],
+                seen: set) -> bool:
+    """Common emission filter — length, dedupe, optional match regex."""
+    content = row["content"]
+    if len(content) < min_len:
+        return False
+    if content in seen:
+        return False
+    if match_re is not None and not match_re.search(content):
+        return False
+    seen.add(content)
+    return True
+
+
+def run_author_mode(actor: str, count: int, min_len: int, fetch_parent: bool,
+                    match_re: Optional[re.Pattern]) -> int:
     actor = normalize_actor(actor)
     emitted = 0
     seen = set()
@@ -375,11 +431,8 @@ def run_author_mode(actor: str, count: int, min_len: int, fetch_parent: bool) ->
         row = build_envelope(item, fetch_parent=fetch_parent)
         if row is None:
             continue
-        if len(row["content"]) < min_len:
+        if not _row_passes(row, min_len, match_re, seen):
             continue
-        if row["content"] in seen:
-            continue
-        seen.add(row["content"])
         print(json.dumps(row, ensure_ascii=False))
         emitted += 1
     print(f"# emitted {emitted} candidates from {actor}", file=sys.stderr)
@@ -387,7 +440,8 @@ def run_author_mode(actor: str, count: int, min_len: int, fetch_parent: bool) ->
 
 
 def run_backlinks_mode(post: str, count: int, min_len: int,
-                       include_quotes: bool) -> int:
+                       include_quotes: bool,
+                       match_re: Optional[re.Pattern]) -> int:
     parent_uri = bsky_url_to_at_uri(post)
     parent_record = get_record_by_uri(parent_uri)
     if not parent_record:
@@ -404,23 +458,73 @@ def run_backlinks_mode(post: str, count: int, min_len: int,
 
     emitted = 0
     seen = set()
-    # Over-fetch — failed record fetches + dupes + short bodies are skipped
     for reply_uri in constellation_backlinks(parent_uri, sources, count * 3):
         if emitted >= count:
             break
         row = build_envelope_from_backlink(reply_uri, parent_text)
         if row is None:
             continue
-        if len(row["content"]) < min_len:
+        if not _row_passes(row, min_len, match_re, seen):
             continue
-        if row["content"] in seen:
-            continue
-        seen.add(row["content"])
         print(json.dumps(row, ensure_ascii=False))
         emitted += 1
 
     print(f"# emitted {emitted} candidates backlinking to {parent_uri}", file=sys.stderr)
     return 0
+
+
+def run_list_mode(list_url: str, total: int, per_account: int, min_len: int,
+                  fetch_parent: bool, member_pause: float,
+                  match_re: Optional[re.Pattern]) -> int:
+    """Walk a moderation list, harvest each member's authored posts."""
+    list_uri = bsky_url_to_at_uri(list_url)
+    emitted = 0
+    seen = set()
+    members_seen = 0
+    for did in get_list_members(list_uri):
+        if emitted >= total:
+            break
+        members_seen += 1
+        per_account_emitted = 0
+        # Over-fetch per account so the match filter has room to discard
+        for item in get_author_feed(did, per_account * 4):
+            if emitted >= total or per_account_emitted >= per_account:
+                break
+            row = build_envelope(item, fetch_parent=fetch_parent)
+            if row is None:
+                continue
+            if not _row_passes(row, min_len, match_re, seen):
+                continue
+            # Tag the source DID in the note field so the reviewer knows where
+            # each candidate came from (this is a curation aid, NOT a leak —
+            # the DID is just the member's public identifier, not PII).
+            row["note"] = f"from-list-member:{did}"
+            print(json.dumps(row, ensure_ascii=False))
+            emitted += 1
+            per_account_emitted += 1
+        # Gentle pause between members so we don't hammer the AppView CDN
+        time.sleep(member_pause)
+    print(
+        f"# emitted {emitted} candidates from {members_seen} list members ({list_uri})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _add_common_flags(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--min-len", type=int, default=20,
+                   help="minimum content length after scrubbing (default 20)")
+    p.add_argument("--match", type=str, default=None,
+                   help="optional regex; only emit candidates whose content matches")
+
+
+def _compile_match(pattern: Optional[str]) -> Optional[re.Pattern]:
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        raise SystemExit(f"--match regex invalid: {e}")
 
 
 def main() -> int:
@@ -438,39 +542,62 @@ def main() -> int:
         "actor",
         help="Bluesky handle or DID — e.g. @hostile.bsky.social, supportive.bsky.social, did:plc:...",
     )
-    p_author.add_argument("--count", type=int, default=30)
-    p_author.add_argument("--min-len", type=int, default=20)
-    p_author.add_argument(
-        "--no-parent-fetch", action="store_true",
-        help="emit solo content even for replies (no envelope; useful for originals)",
-    )
+    p_author.add_argument("--count", type=int, default=30,
+                          help="max candidates to emit (default 30)")
+    p_author.add_argument("--no-parent-fetch", action="store_true",
+                          help="emit solo content for replies (no envelope; useful for originals)")
+    _add_common_flags(p_author)
 
     p_back = sub.add_parser(
         "backlinks",
         help="Use Constellation to find replies/quotes pointing at a specific seed post.",
     )
-    p_back.add_argument(
-        "post",
-        help="Seed post — at:// URI or bsky.app post URL.",
+    p_back.add_argument("post", help="Seed post — at:// URI or bsky.app post URL.")
+    p_back.add_argument("--count", type=int, default=30,
+                        help="max candidates to emit (default 30)")
+    p_back.add_argument("--include-quotes", action="store_true",
+                        help="also include quote-posts (in addition to replies)")
+    _add_common_flags(p_back)
+
+    p_list = sub.add_parser(
+        "list",
+        help="Walk a Bluesky moderation/curation list's members and harvest their authored posts.",
     )
-    p_back.add_argument("--count", type=int, default=30)
-    p_back.add_argument("--min-len", type=int, default=20)
-    p_back.add_argument(
-        "--include-quotes", action="store_true",
-        help="also include quote-posts (in addition to replies)",
+    p_list.add_argument(
+        "list",
+        help="List — at:// URI or bsky.app/profile/<a>/lists/<rkey> URL.",
     )
+    p_list.add_argument("--total", type=int, default=60,
+                        help="max total candidates across all members (default 60)")
+    p_list.add_argument("--per-account", type=int, default=5,
+                        help="max candidates per member (default 5)")
+    p_list.add_argument("--member-pause", type=float, default=0.5,
+                        help="seconds to sleep between members (default 0.5)")
+    p_list.add_argument("--no-parent-fetch", action="store_true",
+                        help="emit solo content for replies (no envelope)")
+    _add_common_flags(p_list)
 
     args = ap.parse_args()
+    match_re = _compile_match(args.match)
 
     if args.mode == "author":
         return run_author_mode(
             args.actor, args.count, args.min_len,
             fetch_parent=not args.no_parent_fetch,
+            match_re=match_re,
         )
     if args.mode == "backlinks":
         return run_backlinks_mode(
             args.post, args.count, args.min_len,
             include_quotes=args.include_quotes,
+            match_re=match_re,
+        )
+    if args.mode == "list":
+        return run_list_mode(
+            args.list, args.total, args.per_account, args.min_len,
+            fetch_parent=not args.no_parent_fetch,
+            member_pause=args.member_pause,
+            match_re=match_re,
         )
     return 1
 

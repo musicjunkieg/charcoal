@@ -25,11 +25,24 @@ python3 tools/find-fixtures/find_fixtures.py backlinks \
     "https://bsky.app/profile/chaosgreml.in/post/3kabc..." \
     --count 30 --include-quotes > r.jsonl
 
+# Mode 3: walk every member of a Bluesky moderation/curation list and harvest
+# their authored posts (use this when you have a community-curated list naming
+# accounts known for a specific behavior — e.g. transphobia, antisemitism)
+python3 tools/find-fixtures/find_fixtures.py list \
+    "https://bsky.app/profile/maintainer.bsky.social/lists/3xyz..." \
+    --total 60 --per-account 5 > t.jsonl
+
+# Any mode + --match: filter to candidates whose content matches a regex.
+# Combined with `list` mode, this is the answer to "what words should we
+# search for" — pick the language pattern, the tool does the harvesting.
+python3 tools/find-fixtures/find_fixtures.py list <url> \
+    --match "(tranny|groomer|woke mind virus)" --total 100 > t.jsonl
+
 python3 tools/find-fixtures/find_fixtures.py --help   # full options
 ```
 
-The script accepts both `bsky.app` post URLs and bare `at://` URIs for the
-backlinks-mode `post` argument; it auto-resolves handles to DIDs as needed.
+The script accepts both `bsky.app` URLs (post or list) and bare `at://` URIs;
+it auto-resolves handles to DIDs as needed.
 
 ## What you get
 
@@ -70,14 +83,31 @@ committing — that's Chunk 2 PII checklist item 5 and cannot be automated.
 ## Why not searchPosts?
 
 `app.bsky.feed.searchPosts` requires authentication (the public CDN returns
-403 and `bsky.social` returns 401). The author-feed + Constellation backlinks
-paths are unauthenticated and produce stronger curation signal anyway — both
-target a known account/post rather than a freeform keyword.
+403 and `bsky.social` returns 401). The author / backlinks / list paths are
+all unauthenticated and produce stronger curation signal anyway — each
+targets a known account, post, or community-curated list of accounts rather
+than a freeform keyword. The `--match` regex flag is the replacement for
+keyword filtering when you DO want to narrow within those targets.
+
+## Why list mode is usually the best path
+
+- **Pre-curated**: mod-list maintainers have already done the per-account
+  judgment about "this account engages in <behavior>" — we don't have to
+  guess at handles
+- **Themed**: lists usually come with a documented purpose (transphobia,
+  antisemitism, a specific harassment crew), so the contents share a
+  language pattern that `--match` can narrow further
+- **Block-resilient**: many hostile accounts have likely already blocked the
+  protected user(s), so they won't appear in Constellation backlinks of the
+  protected user's posts. They DO still appear on a mod-list maintainer's
+  list, and `getAuthorFeed` returns their authored posts regardless of who
+  they've blocked (we're querying as an anonymous AppView visitor)
 
 ## API surfaces used
 
 - `app.bsky.feed.getAuthorFeed` — public AT Protocol AppView, walks a user's
   authored posts (auth-free)
+- `app.bsky.graph.getList` — list metadata + paginated members (auth-free)
 - `com.atproto.identity.resolveHandle` — handle → DID (auth-free)
 - `com.atproto.repo.getRecord` — fetch a single record by AT-URI (auth-free)
 - `blue.microcosm.links.getBacklinks` — Microcosm's [Constellation](https://constellation.microcosm.blue)
@@ -97,16 +127,21 @@ target a known account/post rather than a freeform keyword.
 ## Workflow with Chunk 2
 
 ```bash
-# 1. Harvest 60 candidates from a known-hostile account
-python3 tools/find-fixtures/find_fixtures.py author hostile.bsky.social \
-    --count 60 > /tmp/t-raw.jsonl
+# 1. Find a community mod list naming accounts known for transphobic harassment.
+#    Walk every member, harvest up to 5 posts per account, filter to ones
+#    that mention typical hostile language. This is the highest-signal path.
+python3 tools/find-fixtures/find_fixtures.py list \
+    "https://bsky.app/profile/maintainer.bsky.social/lists/3abc..." \
+    --total 80 --per-account 5 \
+    --match "(tranny|groomer|woke)" > /tmp/t-raw.jsonl
 
-# 2. Harvest 60 candidates from replies to a Bryan post known to draw pile-ons
+# 2. Fill out edge cases / clean cases with backlinks of your own posts
 python3 tools/find-fixtures/find_fixtures.py backlinks \
     "https://bsky.app/profile/chaosgreml.in/post/3xyz..." \
-    --count 60 --include-quotes >> /tmp/t-raw.jsonl
+    --count 40 --include-quotes >> /tmp/edge-raw.jsonl
 
-# 3. Hand-review, label, paraphrase. Drop into the real fixtures.
+# 3. Hand-review, label (toxic / clean / uncertain), paraphrase any
+#    distinctive multi-word phrases, then drop into the real fixtures.
 $EDITOR /tmp/t-raw.jsonl
 mv /tmp/t-raw.jsonl tests/fixtures/cope_b/known_toxic.jsonl
 ```
