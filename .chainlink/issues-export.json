@@ -1,7 +1,28 @@
 {
   "version": 1,
-  "exported_at": "2026-06-07T01:41:05.786983+00:00",
+  "exported_at": "2026-06-08T23:07:47.809872+00:00",
   "issues": [
+    {
+      "id": 187,
+      "title": "Global mod-list catalog dashboard (post-Phase 6, standalone repo)",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "infrastructure"
+      ],
+      "comments": [
+        {
+          "content": "Scoped during Phase 6 fixture-curation work as a follow-up — NOT blocking Phase 6.\n\nProblem: there is no public AT Protocol endpoint that lets you search Bluesky moderation lists by name across all maintainers. `app.bsky.graph.getLists` is per-actor; `searchPosts` requires auth and only finds posts anyway; Ozone is operator-scoped (not a discovery layer); existing community tools (pdsls, atproto.tools, possibly blueskydirectory.com/lists/all) browse individual records but search semantics across them is unclear.\n\nPhase 6 workaround: `tools/find-fixtures/find_fixtures.py discover` subcommand walks `getLists` for one or more user-supplied maintainers and emits a TSV catalog. Sufficient for curating ~40-60 labeled fixtures.\n\nProposed long-term project (separate repo, not buried in Charcoal):\n\n1. Backfill via `com.atproto.sync.listReposByCollection?collection=app.bsky.graph.list` to enumerate every DID that has published a list, then `com.atproto.sync.getRepo` per DID to pull list records in one shot.\n2. Live updates via Jetstream subscription filtered to `app.bsky.graph.list` creates/updates/deletes.\n3. Index in SQLite + FTS5 over name + description + purpose (modlist / curatelist / referencelist).\n4. Web dashboard with full-text search, filter by purpose / member count / labels.\n5. Optionally also catalog labelers via `app.bsky.labeler.service`.\n\nWhy standalone repo rather than buried in Charcoal: other harassment-detection projects (Skywatch, similar community tools) would benefit. Decoupling it makes adoption easier and lets Charcoal consume it as a service or import the index as a static artifact.\n\nRealistic effort: 2-4 days for a v0 (backfill + index + minimal web UI). Live updates via Jetstream add another 1-2 days.\n\nFirst step before any code: confirm whether blueskydirectory.com/lists/all already has working search — if so, this whole project is unnecessary. Bryan to spot-check in browser.",
+          "created_at": "2026-06-07T02:21:54.956684+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-07T02:21:32.974750+00:00",
+      "updated_at": "2026-06-07T02:21:32.974750+00:00",
+      "closed_at": null
+    },
     {
       "id": 186,
       "title": "Standalone tool: find Bluesky posts for CoPE-B policy fixture curation",

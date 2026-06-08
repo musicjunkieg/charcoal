@@ -1,5 +1,29 @@
 [
   {
+    "hash": "18bd51056a284c1791ba8bd83f2800936b562128",
+    "short_hash": "18bd510",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:41:05-07:00",
+    "message": "feat(tools): add discover mode to find-fixtures\n\ndiscover mode enumerates lists owned by one or more known maintainers\nand emits a catalog (TSV by default, JSONL with --json) the reviewer\ncan grep/sort to pick which list URI to feed into list mode.\n\n--match filters list name + description; --purpose filters by\nmodlist/curatelist/referencelist/all (default modlist); --min-members\nskips empty test lists.\n\nHonest scope note in the help text and README: the public AT Protocol\nAPI has NO global searchLists endpoint, so discovery is graph-walk\n(seed with maintainers you trust). When zero lists are returned, the\ntip message points the user back at the seed-maintainer pattern rather\nthan suggesting a global search is possible.\n\nSmoke verified against pfrazee.com + why.bsky.team — returned the\nexpected 3 visible lists in TSV; --match filter correctly returned 0\nwhen nothing matched.\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "5db9d21028a34b87d6686151eb795bac5d9222d5",
+    "short_hash": "5db9d21",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:36:41-07:00",
+    "message": "feat(tools): add list mode + --match regex filter to find-fixtures\n\nlist mode walks every member of a Bluesky moderation/curation list and\nharvests their authored posts via getAuthorFeed. This is the\nhighest-signal candidate source because mod-list maintainers have\nalready done the per-account curation we would otherwise have to guess\nat, and the list usually carries a documented theme (transphobia,\nantisemitism, specific harassment crew) so members share a language\npattern.\n\n--match <regex> filter wired through all three modes (author / backlinks\n/ list). Answers the \"what words should we search for\" question by\nletting you iterate hand-tuned regexes rather than freeform searching —\nwhich the public AppView gates behind auth anyway.\n\nBlock-resilience note: many hostile accounts likely have already blocked\nthe protected user, so they wont appear in Constellation backlinks of\nthe protected users posts. They DO appear on mod lists and getAuthorFeed\nworks regardless of who they have blocked (we query as anonymous\nAppView).\n\nbsky_url_to_at_uri generalized to parse both /post/<rkey> and\n/lists/<rkey> URLs. list mode tags each row with note=from-list-member:<did>\nso the reviewer can trace candidates back to their source.\n\nVerified:\n  - author + match against chaosgreml.in returned 4 trans/queer-mentioning\n    candidates with envelope shape correct\n  - list mode plumbing tested against a real (empty) public list owned by\n    pfrazee.com; 0 emitted is the correct behavior for an empty list\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "d1dc946f34d8bfa135e8f0b52c77d631627cea2c",
+    "short_hash": "d1dc946",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:17:47-07:00",
+    "message": "feat(tools): standalone find-fixtures harness for CoPE-B candidate harvesting\n\nTwo modes; both emit JSONL in the Chunk 2 fixture schema with PII scrubbed\nand the exact [Parent post]/[Reply] envelope format_parent_reply produces:\n\n  author <handle|did>     - walk getAuthorFeed; good for known-hostile or\n                            known-supportive accounts\n  backlinks <url|at-uri>  - use Microcosm Constellation to find replies +\n                            (optionally) quotes pointing at a seed post;\n                            mirrors how Charcoals amplification pipeline\n                            discovers candidates in prod\n\nstdlib only - no pip install. Python 3.10+.\n\nPivoted off app.bsky.feed.searchPosts when smoke testing turned up CDN\n403s (it requires auth). The author + backlinks paths are unauthenticated\nAND produce stronger curation signal than freeform keyword search.\n\nConstellation call shape verified against src/constellation/client.rs:\n/xrpc/blue.microcosm.links.getBacklinks with subject + source where source\nis collection:json_path (no leading dot). Response {records:\n[{did, collection, rkey}]} reconstructed into at:// URIs.\n\nSmoke tests against chaosgreml.in (author) and grimalkina (backlinks)\nproduced clean envelope-shaped candidates with PII scrubbed.\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "52d4e721bd8487dc101c120f3fa4d3fd472e0229",
     "short_hash": "52d4e72",
     "author": "Bryan Guffey",

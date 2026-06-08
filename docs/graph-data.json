@@ -2540,6 +2540,138 @@
       "created_at": "2026-06-05T15:06:28.205879-07:00",
       "updated_at": "2026-06-05T15:06:28.205879-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":100}"
+    },
+    {
+      "id": 238,
+      "change_id": "8b1e184b-bd22-4b98-9180-19f0a45c820e",
+      "node_type": "goal",
+      "title": "Quick tool: find Bluesky posts as CoPE-B fixture candidates (curated by reviewer)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:44.578017-07:00",
+      "updated_at": "2026-06-08T16:06:44.578017-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90}"
+    },
+    {
+      "id": 239,
+      "change_id": "52c5fb76-f024-4196-ba46-fc001873d4ca",
+      "node_type": "option",
+      "title": "app.bsky.feed.searchPosts keyword search",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:44.586450-07:00",
+      "updated_at": "2026-06-08T16:06:44.586450-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":30}"
+    },
+    {
+      "id": 240,
+      "change_id": "bfe60f0d-7382-48b4-b877-8d136b66f208",
+      "node_type": "option",
+      "title": "getAuthorFeed walking + Constellation backlinks (unauthenticated)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:44.593057-07:00",
+      "updated_at": "2026-06-08T16:06:44.593057-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90}"
+    },
+    {
+      "id": 241,
+      "change_id": "25252538-05d6-4efc-a48f-942fbb8e0c92",
+      "node_type": "option",
+      "title": "Mod-list members via getList + per-member getAuthorFeed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:44.599361-07:00",
+      "updated_at": "2026-06-08T16:06:44.599361-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
+    },
+    {
+      "id": 242,
+      "change_id": "c1322b73-baf5-40ef-8ced-15a4aa14d30a",
+      "node_type": "decision",
+      "title": "Ship Python stdlib tool with 4 modes: discover / author / backlinks / list (all unauth)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:58.420699-07:00",
+      "updated_at": "2026-06-08T16:06:58.420699-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
+    },
+    {
+      "id": 243,
+      "change_id": "5c522fea-500d-4ca1-82f9-4c23171ea88f",
+      "node_type": "action",
+      "title": "Implement tools/find-fixtures/find_fixtures.py — author + backlinks modes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:58.429760-07:00",
+      "updated_at": "2026-06-08T16:06:58.429760-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"d1dc946\",\"confidence\":95,\"files\":[\"tools/find-fixtures/find_fixtures.py\"]}"
+    },
+    {
+      "id": 244,
+      "change_id": "28f5677f-8781-4bf5-b816-36df85bc8945",
+      "node_type": "action",
+      "title": "Add list mode + --match regex filter across all modes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:58.437367-07:00",
+      "updated_at": "2026-06-08T16:06:58.437367-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"5db9d21\",\"confidence\":95,\"files\":[\"tools/find-fixtures/find_fixtures.py\"]}"
+    },
+    {
+      "id": 245,
+      "change_id": "aa21abb6-f88b-4ace-b82b-6a61b4553184",
+      "node_type": "action",
+      "title": "Add discover mode (enumerate lists per maintainer via getLists)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:06:58.444019-07:00",
+      "updated_at": "2026-06-08T16:06:58.444019-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"18bd510\",\"confidence\":95,\"files\":[\"tools/find-fixtures/find_fixtures.py\"]}"
+    },
+    {
+      "id": 246,
+      "change_id": "2f2d3178-84b5-455b-804b-683ff8233ab1",
+      "node_type": "observation",
+      "title": "Public AT Protocol API has NO searchPosts / searchLists / global text search (auth-gated). All discovery is graph-walk from seed accounts. Documented in tools/find-fixtures/README.md.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:07:09.344014-07:00",
+      "updated_at": "2026-06-08T16:07:09.344014-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":100}"
+    },
+    {
+      "id": 247,
+      "change_id": "2bb64b49-87e3-45e8-a681-2e1eff3770bc",
+      "node_type": "observation",
+      "title": "Ozone is operator-scoped (back-of-house labeler dashboard), not a discovery layer. Labelers parallel mod lists but label enumeration is not a public API either.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:07:09.353374-07:00",
+      "updated_at": "2026-06-08T16:07:09.353374-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
+    },
+    {
+      "id": 248,
+      "change_id": "4a1698b3-7b93-4193-8213-d0b8d3eb35ae",
+      "node_type": "goal",
+      "title": "Global mod-list catalog dashboard (deferred — separate repo, post-Phase-6, chainlink #187)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:07:09.360750-07:00",
+      "updated_at": "2026-06-08T16:07:09.360750-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":80}"
+    },
+    {
+      "id": 249,
+      "change_id": "4de7396d-9940-4040-9908-5243d538c3b2",
+      "node_type": "outcome",
+      "title": "find-fixtures tool live with 4 modes; chainlink #186 closed; chainlink #187 opened for the global catalog follow-up",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-08T16:07:09.367448-07:00",
+      "updated_at": "2026-06-08T16:07:09.367448-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -4995,6 +5127,171 @@
       "weight": 1.0,
       "rationale": "Process observation captured retroactively",
       "created_at": "2026-06-05T15:06:28.212958-07:00"
+    },
+    {
+      "id": 230,
+      "from_node_id": 228,
+      "to_node_id": 238,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "8b1e184b-bd22-4b98-9180-19f0a45c820e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Phase 6 plan needs labeled fixtures; tool enables curation",
+      "created_at": "2026-06-08T16:07:25.617784-07:00"
+    },
+    {
+      "id": 231,
+      "from_node_id": 238,
+      "to_node_id": 239,
+      "from_change_id": "8b1e184b-bd22-4b98-9180-19f0a45c820e",
+      "to_change_id": "52c5fb76-f024-4196-ba46-fc001873d4ca",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "searchPosts considered but auth-gated (CDN 403)",
+      "created_at": "2026-06-08T16:07:25.628066-07:00"
+    },
+    {
+      "id": 232,
+      "from_node_id": 238,
+      "to_node_id": 240,
+      "from_change_id": "8b1e184b-bd22-4b98-9180-19f0a45c820e",
+      "to_change_id": "bfe60f0d-7382-48b4-b877-8d136b66f208",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "getAuthorFeed + Constellation as unauth alternative",
+      "created_at": "2026-06-08T16:07:25.635928-07:00"
+    },
+    {
+      "id": 233,
+      "from_node_id": 238,
+      "to_node_id": 241,
+      "from_change_id": "8b1e184b-bd22-4b98-9180-19f0a45c820e",
+      "to_change_id": "25252538-05d6-4efc-a48f-942fbb8e0c92",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Mod-list members give pre-curated authors with documented theme",
+      "created_at": "2026-06-08T16:07:25.642229-07:00"
+    },
+    {
+      "id": 234,
+      "from_node_id": 239,
+      "to_node_id": 242,
+      "from_change_id": "52c5fb76-f024-4196-ba46-fc001873d4ca",
+      "to_change_id": "c1322b73-baf5-40ef-8ced-15a4aa14d30a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected — searchPosts requires auth that this standalone tool would not have",
+      "created_at": "2026-06-08T16:07:25.648181-07:00"
+    },
+    {
+      "id": 235,
+      "from_node_id": 240,
+      "to_node_id": 242,
+      "from_change_id": "bfe60f0d-7382-48b4-b877-8d136b66f208",
+      "to_change_id": "c1322b73-baf5-40ef-8ced-15a4aa14d30a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Adopted as modes 2 + 3 (author + backlinks)",
+      "created_at": "2026-06-08T16:07:25.654674-07:00"
+    },
+    {
+      "id": 236,
+      "from_node_id": 241,
+      "to_node_id": 242,
+      "from_change_id": "25252538-05d6-4efc-a48f-942fbb8e0c92",
+      "to_change_id": "c1322b73-baf5-40ef-8ced-15a4aa14d30a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Adopted as mode 4 (list members)",
+      "created_at": "2026-06-08T16:07:25.659814-07:00"
+    },
+    {
+      "id": 237,
+      "from_node_id": 242,
+      "to_node_id": 243,
+      "from_change_id": "c1322b73-baf5-40ef-8ced-15a4aa14d30a",
+      "to_change_id": "5c522fea-500d-4ca1-82f9-4c23171ea88f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Initial implementation: author + backlinks",
+      "created_at": "2026-06-08T16:07:25.665316-07:00"
+    },
+    {
+      "id": 238,
+      "from_node_id": 243,
+      "to_node_id": 244,
+      "from_change_id": "5c522fea-500d-4ca1-82f9-4c23171ea88f",
+      "to_change_id": "28f5677f-8781-4bf5-b816-36df85bc8945",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Extend with list mode and --match filter (per Bryan: mod-list path is stronger)",
+      "created_at": "2026-06-08T16:07:25.670244-07:00"
+    },
+    {
+      "id": 239,
+      "from_node_id": 244,
+      "to_node_id": 245,
+      "from_change_id": "28f5677f-8781-4bf5-b816-36df85bc8945",
+      "to_change_id": "aa21abb6-f88b-4ace-b82b-6a61b4553184",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Add discover mode so reviewer can find list URIs to feed into list mode",
+      "created_at": "2026-06-08T16:07:25.675331-07:00"
+    },
+    {
+      "id": 240,
+      "from_node_id": 245,
+      "to_node_id": 246,
+      "from_change_id": "aa21abb6-f88b-4ace-b82b-6a61b4553184",
+      "to_change_id": "2f2d3178-84b5-455b-804b-683ff8233ab1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Discovery limits surfaced during research",
+      "created_at": "2026-06-08T16:07:34.464557-07:00"
+    },
+    {
+      "id": 241,
+      "from_node_id": 246,
+      "to_node_id": 247,
+      "from_change_id": "2f2d3178-84b5-455b-804b-683ff8233ab1",
+      "to_change_id": "2bb64b49-87e3-45e8-a681-2e1eff3770bc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Investigated Ozone as alternative — confirmed wrong layer",
+      "created_at": "2026-06-08T16:07:34.474167-07:00"
+    },
+    {
+      "id": 242,
+      "from_node_id": 246,
+      "to_node_id": 248,
+      "from_change_id": "2f2d3178-84b5-455b-804b-683ff8233ab1",
+      "to_change_id": "4a1698b3-7b93-4193-8213-d0b8d3eb35ae",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Discovery gap motivates the deferred catalog project",
+      "created_at": "2026-06-08T16:07:34.482978-07:00"
+    },
+    {
+      "id": 243,
+      "from_node_id": 245,
+      "to_node_id": 249,
+      "from_change_id": "aa21abb6-f88b-4ace-b82b-6a61b4553184",
+      "to_change_id": "4de7396d-9940-4040-9908-5243d538c3b2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "All four modes shipped; chunk closes",
+      "created_at": "2026-06-08T16:07:34.490402-07:00"
+    },
+    {
+      "id": 244,
+      "from_node_id": 247,
+      "to_node_id": 249,
+      "from_change_id": "2bb64b49-87e3-45e8-a681-2e1eff3770bc",
+      "to_change_id": "4de7396d-9940-4040-9908-5243d538c3b2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Ozone non-fit recorded; outcome stands",
+      "created_at": "2026-06-08T16:07:34.496701-07:00"
     }
   ],
   "documents": [
