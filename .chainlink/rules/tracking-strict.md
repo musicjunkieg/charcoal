@@ -5,7 +5,7 @@
 **YOU MUST CREATE A CHAINLINK ISSUE BEFORE WRITING ANY CODE. NO EXCEPTIONS.**
 
 Before your FIRST Write, Edit, or Bash tool call that modifies code:
-1. Run `chainlink quick "title" -p <priority> -l <label>` to create an issue AND start working on it
+1. Run `chainlink issue quick "title" -p <priority> -l <label>` to create an issue AND start working on it
 2. The PreToolUse hook WILL BLOCK your tool calls if no issue is active
 3. NEVER skip this step. NEVER proceed without an issue. NEVER treat this as optional.
 
@@ -43,31 +43,31 @@ Add labels to control CHANGELOG.md section:
 ### Task Breakdown Rules
 ```bash
 # Single task — use quick for create + label + work in one step
-chainlink quick "Fix login validation error on empty email" -p medium -l bug
+chainlink issue quick "Fix login validation error on empty email" -p medium -l bug
 
 # Or use create with flags
-chainlink create "Fix login validation error on empty email" -p medium --label bug --work
+chainlink issue create "Fix login validation error on empty email" -p medium --label bug --work
 
 # Multi-part feature → Epic with subissues
-chainlink create "Add user authentication system" -p high --label feature
-chainlink subissue 1 "Add user registration endpoint"
-chainlink subissue 1 "Add login endpoint with JWT tokens"
-chainlink subissue 1 "Add session middleware for protected routes"
+chainlink issue create "Add user authentication system" -p high --label feature
+chainlink issue subissue 1 "Add user registration endpoint"
+chainlink issue subissue 1 "Add login endpoint with JWT tokens"
+chainlink issue subissue 1 "Add session middleware for protected routes"
 
 # Mark what you're working on
 chainlink session work 1
 
 # Add context as you discover things
-chainlink comment 1 "Found existing auth helper in utils/auth.ts"
+chainlink issue comment 1 "Found existing auth helper in utils/auth.ts"
 
 # Close when done — auto-updates CHANGELOG.md
-chainlink close 1
+chainlink issue close 1
 
 # Skip changelog for internal/refactor work
-chainlink close 1 --no-changelog
+chainlink issue close 1 --no-changelog
 
 # Batch close
-chainlink close-all --no-changelog
+chainlink issue close-all --no-changelog
 
 # Quiet mode for scripting
 chainlink -q create "Fix bug" -p high  # Outputs just the ID number
@@ -85,13 +85,13 @@ Your auto-memory directory (`~/.claude/projects/.../memory/`) contains plans, ar
 
 ```bash
 # Example: translating a memory plan into tracked work
-chainlink create "Implement webhook retry system" -p high --label feature
-chainlink comment 1 "Per memory/architecture.md: retry with exponential backoff, max 5 attempts, dead-letter queue after exhaustion. See 'Webhook Reliability' section."
-chainlink subissue 1 "Add retry queue with exponential backoff (max 5 attempts)"
-chainlink comment 2 "Backoff schedule: 1s, 5s, 25s, 125s, 625s. Store attempt count in webhook_deliveries table."
-chainlink subissue 1 "Add dead-letter queue for exhausted retries"
-chainlink comment 3 "Failed webhooks go to dead_letter_webhooks table with full payload + error history for manual inspection."
-chainlink subissue 1 "Add webhook delivery dashboard endpoint"
+chainlink issue create "Implement webhook retry system" -p high --label feature
+chainlink issue comment 1 "Per memory/architecture.md: retry with exponential backoff, max 5 attempts, dead-letter queue after exhaustion. See 'Webhook Reliability' section."
+chainlink issue subissue 1 "Add retry queue with exponential backoff (max 5 attempts)"
+chainlink issue comment 2 "Backoff schedule: 1s, 5s, 25s, 125s, 625s. Store attempt count in webhook_deliveries table."
+chainlink issue subissue 1 "Add dead-letter queue for exhausted retries"
+chainlink issue comment 3 "Failed webhooks go to dead_letter_webhooks table with full payload + error history for manual inspection."
+chainlink issue subissue 1 "Add webhook delivery dashboard endpoint"
 ```
 
 ### When to Create Issues
@@ -133,16 +133,16 @@ chainlink session end --notes "..."  # REQUIRED before stopping — ALWAYS
 
 ### Dependencies
 ```bash
-chainlink block 2 1     # Issue 2 blocked by issue 1
-chainlink ready         # Show unblocked work
+chainlink issue block 2 1     # Issue 2 blocked by issue 1
+chainlink issue ready         # Show unblocked work
 ```
 
 ### Large Implementations (500+ lines)
-1. Create parent issue: `chainlink create "<feature>" -p high`
-2. Break into subissues: `chainlink subissue <id> "<component>"`
+1. Create parent issue: `chainlink issue create "<feature>" -p high`
+2. Break into subissues: `chainlink issue subissue <id> "<component>"`
 3. Work one subissue at a time, close each when done
 
 ### Context Window Management
 When conversation is long or task needs many steps:
-1. Create tracking issue: `chainlink create "Continue: <summary>" -p high`
-2. Add notes: `chainlink comment <id> "<what's done, what's next>"`
+1. Create tracking issue: `chainlink issue create "Continue: <summary>" -p high`
+2. Add notes: `chainlink issue comment <id> "<what's done, what's next>"`
