@@ -1,0 +1,12 @@
+# Source of truth for the RunPod Serverless endpoint config. Endpoint is
+# created manually in the RunPod web console (one-time); deviations from
+# this file should be reconciled.
+name: charcoal-cope-b
+gpu: NVIDIA A100 80GB PCIe
+flashboot: true
+scale_to_zero: true
+idle_timeout: 60          # seconds; tune down to 5-10 after measuring warm-restore rate
+min_workers: 0
+max_workers: 3            # absorbs concurrent onboardings; cheap thanks to scale-to-zero
+execution_timeout: 600    # 10-min hard cap per request
+region: us-west           # match Railways production region (verify via `railway status`)
