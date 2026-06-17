@@ -159,6 +159,10 @@ impl AuditWriter {
     }
 
     /// Build a writer reading the gate from the kind's env var.
+    ///
+    /// Strict by design: the writer is enabled ONLY when the env var's value is
+    /// exactly `"1"`. Any other value — `true`, `yes`, `0`, empty, unset — leaves
+    /// it disabled. This is intentional and spec-backed; do not loosen it.
     pub fn from_env(dir: &Path, kind: EventKind) -> Result<Self> {
         let enabled = std::env::var(kind.env_var()).ok().as_deref() == Some("1");
         Self::new(dir, kind, enabled)

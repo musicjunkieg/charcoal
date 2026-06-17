@@ -3,7 +3,8 @@
 //! and the env-var gate that controls whether events are written at all.
 
 use charcoal::scoring::audit_log::{
-    format_log_path, AuditEvent, AuditWriter, ClassifierFields, EventKind, NliFields,
+    format_log_path, migrate_legacy_nli_audit, AuditEvent, AuditWriter, ClassifierFields,
+    EventKind, NliFields,
 };
 use charcoal::scoring::nli::HypothesisScores;
 use chrono::TimeZone;
@@ -116,6 +117,55 @@ fn audit_writer_rotates_daily_filename() {
     assert_ne!(p1, p2);
     assert!(p1.to_string_lossy().contains("classifier-2026-06-05"));
     assert!(p2.to_string_lossy().contains("classifier-2026-06-06"));
+}
+
+#[test]
+fn migrate_legacy_nli_audit_renames_existing_file() {
+    let dir = tempdir().unwrap();
+    let legacy = dir.path().join("nli-audit.jsonl");
+    let content = "{\"kind\":\"nli\",\"hostility_score\":0.42}\n";
+    fs::write(&legacy, content).unwrap();
+
+    migrate_legacy_nli_audit(dir.path());
+
+    // Original file is gone.
+    assert!(
+        !legacy.exists(),
+        "legacy nli-audit.jsonl must be renamed away"
+    );
+
+    // A dated nli-legacy-<date>.jsonl now exists, holding the original content.
+    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let target = dir.path().join(format!("nli-legacy-{}.jsonl", date));
+    assert!(
+        target.exists(),
+        "migration must create nli-legacy-<date>.jsonl"
+    );
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        content,
+        "migrated file must preserve the original content"
+    );
+}
+
+#[test]
+fn migrate_legacy_nli_audit_is_noop_when_absent() {
+    let dir = tempdir().unwrap();
+    // No nli-audit.jsonl present. This runs on every boot, so the no-op path
+    // is the common case in production.
+    migrate_legacy_nli_audit(dir.path());
+
+    // No spurious files: the legacy file must not be conjured into existence,
+    // and the directory should hold nothing.
+    assert!(
+        !dir.path().join("nli-audit.jsonl").exists(),
+        "no-op migration must not create nli-audit.jsonl"
+    );
+    let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+    assert!(
+        entries.is_empty(),
+        "no-op migration must not create any files"
+    );
 }
 
 // NOTE: `AuditWriter::from_env` is a one-line wrapper around `std::env::var(...)`
