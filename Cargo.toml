@@ -151,3 +151,4 @@ optional = true
 tower = "0.5"
 tempfile = "3"
 serial_test = "3"
+wiremock = "0.6"

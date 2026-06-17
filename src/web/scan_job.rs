@@ -249,6 +249,9 @@ async fn run_scan(
         backend = classifier.name(),
         "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
     );
+    // Scan-start banner metric so log aggregation can attribute which backend
+    // produced this scan's verdicts.
+    crate::observability::classifier_metrics::record_backend_selected(classifier.name());
 
     let scorer: Box<dyn ToxicityScorer> = Box::new(
         crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, classifier),

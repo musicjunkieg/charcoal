@@ -243,3 +243,66 @@ mod factory {
         assert!(format!("{err}").contains("not a known backend"));
     }
 }
+
+mod retry {
+    use charcoal::toxicity::classifier::ToxicityClassifier;
+    use charcoal::toxicity::runpod_cope_b::RunPodCopeBClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn retries_on_5xx_then_succeeds() {
+        let server = MockServer::start().await;
+        // First two requests return 503; third returns 200.
+        let ok = r#"{"output":{"toxic":false,"confidence":0.1,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(ok, "application/json"))
+            .mount(&server)
+            .await;
+
+        let client = RunPodCopeBClient::new(server.uri(), "k".into()).unwrap();
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        let v = dyn_ref.classify("hello").await.unwrap();
+        assert!(!v.toxic_token);
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_on_4xx() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1) // wiremock asserts the mock fired exactly once → no retry
+            .mount(&server)
+            .await;
+
+        let client = RunPodCopeBClient::new(server.uri(), "k".into()).unwrap();
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        let err = dyn_ref.classify("hello").await.unwrap_err();
+        assert!(format!("{err}").contains("401"));
+    }
+
+    #[tokio::test]
+    async fn warm_up_helper_runs_against_endpoint() {
+        let server = MockServer::start().await;
+        let ok = r#"{"output":{"toxic":false,"confidence":0.0,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(ok, "application/json"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = RunPodCopeBClient::new(server.uri(), "k".into()).unwrap();
+        charcoal::toxicity::runpod_cope_b::warm_up(&client)
+            .await
+            .unwrap();
+    }
+}
