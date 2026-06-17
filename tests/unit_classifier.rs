@@ -104,3 +104,69 @@ async fn classifier_trait_is_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Box<dyn ToxicityClassifier>>();
 }
+
+mod runpod {
+    use charcoal::toxicity::classifier::ToxicityClassifier;
+    use charcoal::toxicity::runpod_cope_b::RunPodCopeBClient;
+
+    #[tokio::test]
+    async fn runpod_client_constructs_with_valid_env_inputs() {
+        let client = RunPodCopeBClient::new(
+            "https://api.runpod.ai/v2/endpoint-id".into(),
+            "test-api-key".into(),
+        );
+        assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn runpod_client_rejects_empty_credentials() {
+        let err1 = RunPodCopeBClient::new("".into(), "key".into()).unwrap_err();
+        assert!(format!("{err1}").contains("endpoint"));
+        let err2 =
+            RunPodCopeBClient::new("https://api.runpod.ai/v2/x".into(), "".into()).unwrap_err();
+        assert!(format!("{err2}").contains("api key"));
+    }
+
+    // Wire-shape test: build the JSON body the client sends and assert structure.
+    // Doesn't hit the network.
+    #[test]
+    fn runpod_client_request_body_shape() {
+        use serde_json::json;
+        let body = RunPodCopeBClient::build_request_body("hello world");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v, json!({"input": {"content": "hello world"}}));
+    }
+
+    // Response parse: well-formed
+    #[test]
+    fn runpod_client_parses_well_formed_response() {
+        let raw = r#"{"output":{"toxic":true,"confidence":0.92,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        let parsed = RunPodCopeBClient::parse_response(raw, 250).unwrap();
+        assert!(parsed.toxic_token);
+        assert!((parsed.confidence - 0.92).abs() < 1e-4);
+        assert_eq!(parsed.model_id, "cope-b-a4b");
+        assert_eq!(parsed.policy_version, "policy-v3");
+        assert_eq!(parsed.latency_ms, 250);
+    }
+
+    // Response parse: missing required field. The "missing field `output`"
+    // detail comes from serde and lives in the error *source chain*, not in
+    // anyhow's outermost context (which is "parse RunPod response body: ..."),
+    // so we format with {:#} to inspect the whole chain.
+    #[test]
+    fn runpod_client_response_missing_output_field_errors() {
+        let raw = r#"{"status":"COMPLETED"}"#;
+        let err = RunPodCopeBClient::parse_response(raw, 0).unwrap_err();
+        assert!(format!("{err:#}").to_lowercase().contains("output"));
+    }
+
+    // Threshold is a const baked into the impl
+    #[test]
+    fn runpod_threshold_is_const_per_spec() {
+        let client =
+            RunPodCopeBClient::new("https://api.runpod.ai/v2/x".into(), "k".into()).unwrap();
+        // Value tuned in Chunk 5 — assert it's in a reasonable range now.
+        let t = client.threshold();
+        assert!((0.0..=1.0).contains(&t), "threshold must be in [0,1]");
+    }
+}

@@ -10,6 +10,7 @@ pub mod ensemble;
 pub mod onnx;
 pub mod perspective;
 pub mod rate_limiter;
+pub mod runpod_cope_b;
 pub mod traits;
 pub mod zentropi;
 
