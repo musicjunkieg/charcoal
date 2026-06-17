@@ -1087,6 +1087,13 @@ async fn main() -> Result<()> {
 /// When DATABASE_URL is set and points to PostgreSQL, uses the Postgres backend
 /// (requires the `postgres` feature). Otherwise, falls back to SQLite.
 async fn open_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::Database>> {
+    // One-time, idempotent rename of any pre-generalization NLI audit file so it
+    // isn't orphaned by the switch to daily-by-date audit filenames. Charcoal has
+    // no `CHARCOAL_DATA_DIR` env var and `db::open` only receives a db path, so
+    // this runs here — the shared DB-open boundary every command goes through,
+    // where `config.data_dir()` (the audit log dir) is known. No-op if absent.
+    charcoal::scoring::audit_log::migrate_legacy_nli_audit(config.data_dir());
+
     if let Some(ref url) = config.database_url {
         if url.starts_with("postgres://") || url.starts_with("postgresql://") {
             #[cfg(feature = "postgres")]
