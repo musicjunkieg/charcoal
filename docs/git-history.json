@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8eba8409461222e823977de0bf857448c49f0f19",
+    "short_hash": "8eba840",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T13:15:26-07:00",
+    "message": "fix(cope-b): address code review on Chunk 3 RunPod GPU service\n\nFix 1 (Important): reorder Dockerfile layers so the ~50 GB weight-download\nRUN runs BEFORE copying app code. Its cache key now depends only on\nMODEL_REVISION, so a policy.txt-only edit rebuilds just the final tiny app\nCOPY instead of invalidating the weight layer. Fixed the false comment in\nbuild-cope-b-image.yml that described the old (broken) ordering.\n\nFix 2 (Minor): prefix-cache benchmark now builds its prompt from the\nproduction prompt.build_body() and posts it to /v1/chat/completions, so\nvLLM applies the Gemma chat template server-side. This validates the exact\nproduction prefix without needing a local tokenizer (server owns the\ntemplate). Previously it posted a hand-rolled string to /v1/completions.\n\nFix 3 (Minor): build_body now splits the static template on its sentinels\nonce at import and joins the fixed segments with the policy/content values,\nso a literal __POLICY__/__CONTENT__ inside user/policy text is never\nre-substituted. Output is byte-identical for normal inputs. Added\ntest_build_body_not_corrupted_by_literal_sentinel_in_policy.\n\nFix 4 (Nit): documented that _get_engine() check-and-set is race-safe only\nbecause _build_engine() is synchronous (no await between check and assign);\nan async _build_engine would need an asyncio.Lock.\n\nRunnable tests: 9 passed, 5 skipped (skips need transformers / live vLLM).\n\nChainlink #190 (Phase 6.2, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 7
+  },
+  {
     "hash": "9752e35b5a171f5cff270b08443e577e591c3fd8",
     "short_hash": "9752e35",
     "author": "Bryan Guffey",

@@ -2760,6 +2760,28 @@
       "created_at": "2026-06-17T12:59:16.420957-07:00",
       "updated_at": "2026-06-17T12:59:16.420957-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"9752e35\",\"confidence\":70}"
+    },
+    {
+      "id": 258,
+      "change_id": "e0a8dc00-fbfc-4f17-b4a4-2ee0f94f70db",
+      "node_type": "action",
+      "title": "Execute Chunk 3: RunPod CoPE-B GPU service (prompt.py/handler.py vLLM, Dockerfile, runpod.yml, smoke + prefix-cache scripts, GH Actions image build); TDD, lazy-engine for CPU-testability",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T13:17:06.760125-07:00",
+      "updated_at": "2026-06-17T13:17:06.760125-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"8eba840\",\"confidence\":88,\"files\":[\"gpu/cope-b-runpod/handler.py\",\"gpu/cope-b-runpod/prompt.py\",\"gpu/cope-b-runpod/Dockerfile\",\".github/workflows/build-cope-b-image.yml\"]}"
+    },
+    {
+      "id": 259,
+      "change_id": "50ff0660-65d8-433c-8db7-2b484cf8a5cc",
+      "node_type": "outcome",
+      "title": "Chunk 3 done (commits 324fb37..8eba840): spec ✅, code-quality fixed Dockerfile layer-order bug, 9 py tests pass + handler async tests verified non-vacuous. Image build + smoke deferred to GPU/CI (no local GPU)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T13:17:06.780466-07:00",
+      "updated_at": "2026-06-17T13:17:06.780466-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"8eba840\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -5479,6 +5501,28 @@
       "weight": 1.0,
       "rationale": "Result of policy draft",
       "created_at": "2026-06-17T12:59:16.428299-07:00"
+    },
+    {
+      "id": 256,
+      "from_node_id": 232,
+      "to_node_id": 258,
+      "from_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "to_change_id": "e0a8dc00-fbfc-4f17-b4a4-2ee0f94f70db",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 3 GPU service implements the RunPod migration decision",
+      "created_at": "2026-06-17T13:17:06.767452-07:00"
+    },
+    {
+      "id": 257,
+      "from_node_id": 258,
+      "to_node_id": 259,
+      "from_change_id": "e0a8dc00-fbfc-4f17-b4a4-2ee0f94f70db",
+      "to_change_id": "50ff0660-65d8-433c-8db7-2b484cf8a5cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of Chunk 3 execution",
+      "created_at": "2026-06-17T13:17:06.786722-07:00"
     }
   ],
   "documents": [
