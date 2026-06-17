@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-06-17T21:38:32.326465+00:00",
+  "exported_at": "2026-06-17T21:40:55.502823+00:00",
   "issues": [
     {
       "id": 197,
@@ -102,16 +102,22 @@
       "id": 191,
       "title": "Phase 6.3 — Rust trait + RunPodCopeBClient + ZentropiClient refactor",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": 185,
       "labels": [
         "feature"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Chunk 4 DONE (commits f084aba..d170119, pushed). Delivered: ToxicityClassifier trait + ClassifierVerdict + StubClassifier (src/toxicity/classifier.rs); RunPodCopeBClient with backon decorrelated-jitter retry, typed RunPodError (5xx retryable / 4xx not), warm_up helper, COPE_B_THRESHOLD const (src/toxicity/runpod_cope_b.rs); ZentropiClient refactored onto the trait (inherent classify renamed classify_raw); TwoStageVerdict v2 (classifier_confidence f32 + classifier_model_id + classifier_policy_version; VerdictSource ClassifierToxic/Safe; OnnxFallback REMOVED = no silent fallback, classifier errors propagate); build_from_env factory keyed on CHARCOAL_CLASSIFIER (refuses to boot if unset/empty/unknown); src/observability/classifier_metrics.rs + scan-start backend banner. Full web suite green; clippy clean across web/default/postgres. NOTES: (1) observability module didn't exist — created early (plan assumed it did). (2) Fixed 3 faulty plan tests: f32 serde exact-eq 0.73->0.5, missing-output assert on {err:#} chain, factory let-else (Ok type is non-Debug trait object). Follow-up deferred: ZentropiClient retry count surfaced as 0 to metrics (its own retry loop doesn't expose a count yet). NEXT: Chunk 5 (#192) A/B harness + shadow-agreement gate.",
+          "created_at": "2026-06-17T21:40:21.083531+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-17T19:03:38.792401+00:00",
-      "updated_at": "2026-06-17T19:03:38.792401+00:00",
-      "closed_at": null
+      "updated_at": "2026-06-17T21:40:21.089722+00:00",
+      "closed_at": "2026-06-17T21:40:21.089722+00:00"
     },
     {
       "id": 190,

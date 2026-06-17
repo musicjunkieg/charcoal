@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d170119f09e962ae6824e3fbe6794c5bd999d7e8",
+    "short_hash": "d170119",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:38:32-07:00",
+    "message": "feat(observability): scan-start backend banner + RunPod retry tests\n\nscan_job emits classifier_backend_selected_total once at scan start\n(via the classifier Arc before it is boxed into the scorer — the\nclassifier_name accessor is on the concrete TwoStageToxicityScorer, not\nthe dyn ToxicityScorer the scan path holds, so we read it from the Arc).\n\nAdds tests/unit_classifier.rs#retry covering 5xx-then-success (backon\nretries fire), 4xx (wiremock asserts exactly one request → no retry), and\nwarm_up smoke (helper hits the endpoint). Uses wiremock.\n\nThe classifier_metrics module itself (record_request/record_cold_start/\nrecord_backend_selected/estimate_cost_cents) landed earlier in this chunk\nas a drift fix; record_request is already wired into both classifier\nimpls.\n\nChainlink #191.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "7174c1f46cef63cb99271a28b3ac0699030b0188",
     "short_hash": "7174c1f",
     "author": "Bryan Guffey",

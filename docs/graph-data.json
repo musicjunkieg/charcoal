@@ -2815,6 +2815,17 @@
       "created_at": "2026-06-17T14:09:33.466286-07:00",
       "updated_at": "2026-06-17T14:09:33.466286-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"7174c1f\",\"confidence\":85}"
+    },
+    {
+      "id": 263,
+      "change_id": "03ddaabd-236a-4505-98f4-8b4182b0c735",
+      "node_type": "outcome",
+      "title": "Chunk 4 DONE (commits f084aba..d170119): ToxicityClassifier trait + ClassifierVerdict + StubClassifier; RunPodCopeBClient (backon retry, typed RunPodError, warm_up); ZentropiClient refactored onto trait (classify->classify_raw); TwoStageVerdict v2 (classifier_confidence/model_id/policy_version, ClassifierToxic/Safe, OnnxFallback removed=NO silent fallback); build_from_env factory (CHARCOAL_CLASSIFIER, refuses boot if unconfigured); observability::classifier_metrics. Full web suite green, clippy clean web/default/postgres. 3 faulty plan tests fixed (f32 serde 0.73->0.5, missing-output {err:#}, factory let-else); observability module created early (plan drift).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T14:40:10.711106-07:00",
+      "updated_at": "2026-06-17T14:40:10.711106-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"d170119\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -5589,6 +5600,17 @@
       "weight": 1.0,
       "rationale": "Chunk 4 implements the chosen RunPod-adapter-trait design",
       "created_at": "2026-06-17T14:09:33.472532-07:00"
+    },
+    {
+      "id": 261,
+      "from_node_id": 262,
+      "to_node_id": 263,
+      "from_change_id": "abfcdb85-67ab-40d8-bab2-617aeda91637",
+      "to_change_id": "03ddaabd-236a-4505-98f4-8b4182b0c735",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 4 execution outcome",
+      "created_at": "2026-06-17T14:40:10.717686-07:00"
     }
   ],
   "documents": [
