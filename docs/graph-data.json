@@ -2793,6 +2793,17 @@
       "created_at": "2026-06-17T13:54:07.970430-07:00",
       "updated_at": "2026-06-17T13:54:07.970430-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"1cff570\",\"confidence\":80}"
+    },
+    {
+      "id": 261,
+      "change_id": "d253724f-a274-48ec-8809-7685e0fde4b5",
+      "node_type": "outcome",
+      "title": "Chunk 2 harvest done: ab_sample.jsonl (100 real posts, 70 mod-list + 30 chaosgreml.in, UNLABELED, scrubbed, on-distribution envelope) + smoke.jsonl (10 synthetic obvious cases) committed (006f476). Skills tooling + gitignore committed. PII gate waived by Bryan (public firehose). NOTE: hedgehogsafety list yielded mild/political content, not extreme toxicity — gate still valid but lightly exercised in the high-toxicity region.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T14:06:34.739123-07:00",
+      "updated_at": "2026-06-17T14:06:34.739123-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"006f476\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -5545,6 +5556,17 @@
       "weight": 1.0,
       "rationale": "Chunk 2 harvest is the next executable step in Phase 6",
       "created_at": "2026-06-17T13:54:15.889296-07:00"
+    },
+    {
+      "id": 259,
+      "from_node_id": 260,
+      "to_node_id": 261,
+      "from_change_id": "ec9aa99d-d0be-44ac-8295-77472d3dd8ee",
+      "to_change_id": "d253724f-a274-48ec-8809-7685e0fde4b5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Harvest action produced the committed sample/smoke fixtures",
+      "created_at": "2026-06-17T14:06:39.907294-07:00"
     }
   ],
   "documents": [

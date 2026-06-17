@@ -1,5 +1,13 @@
 [
   {
+    "hash": "006f476ed10bd6d4e3a5eb274809366279d9bacf",
+    "short_hash": "006f476",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:06:03-07:00",
+    "message": "test(cope-b): harvest A/B sample + smoke set for shadow-agreement gate\n\nab_sample.jsonl is 100 real posts harvested via\ntools/find-fixtures/find_fixtures.py — 70 from a community mod list\n(list mode, hostile-leaning signal) plus 30 clean/edge lines from\nchaosgreml.in author feed + backlinks. UNLABELED: the Chunk 5\nshadow-agreement gate measures candidate-vs-Zentropi agreement, so no\nground-truth labels are needed. Handles/DIDs/URLs auto-scrubbed by the\ntool; junk (URL-only replies, <15-char bodies) dropped, deduped by\ncontent. 74 reply-pairs use the exact [Parent post]: .. \\n\\n[Reply]: ..\nenvelope from format_parent_reply; 26 originals carry no envelope.\n\nsmoke.jsonl is 10 hand-authored obvious toxic/clean examples (synthetic,\nno real accounts) for the Colab/local policy sanity check only — not a\nformal gate.\n\nChainlink #189.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
     "hash": "1cff570f44101bc31329b5e061fcb971110151d3",
     "short_hash": "1cff570",
     "author": "Bryan Guffey",
