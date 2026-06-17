@@ -125,7 +125,7 @@ impl TwoStageToxicityScorer {
             Some(client) => {
                 let response = match context {
                     Some(parent) => client.classify_pair(parent, text).await,
-                    None => client.classify(text).await,
+                    None => client.classify_raw(text).await,
                 };
                 match response {
                     Ok(r) => {

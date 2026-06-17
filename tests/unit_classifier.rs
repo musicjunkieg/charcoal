@@ -170,3 +170,26 @@ mod runpod {
         assert!((0.0..=1.0).contains(&t), "threshold must be in [0,1]");
     }
 }
+
+mod zentropi_trait {
+    use charcoal::toxicity::classifier::ToxicityClassifier;
+    use charcoal::toxicity::zentropi::{ZentropiClient, ZENTROPI_THRESHOLD};
+
+    #[test]
+    fn zentropi_threshold_preserves_current_behavior() {
+        // Spec: existing CoPE-A behavior is "label == 1 = toxic", regardless
+        // of confidence value. Threshold 0.0 matches that semantically since
+        // any toxic_token=true && confidence >= 0.0 is true.
+        assert_eq!(ZENTROPI_THRESHOLD, 0.0);
+    }
+
+    #[test]
+    fn zentropi_client_implements_trait_with_static_ids() {
+        // Avoid the network: build a client with placeholder creds and verify
+        // the trait's accessor methods return the documented constants.
+        let client = ZentropiClient::new("k".into(), "labeler-id".into(), None).unwrap();
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        assert_eq!(dyn_ref.name(), "zentropi-hosted");
+        assert_eq!(dyn_ref.threshold(), ZENTROPI_THRESHOLD);
+    }
+}
