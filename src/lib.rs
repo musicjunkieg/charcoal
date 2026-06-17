@@ -8,6 +8,7 @@ pub mod config;
 pub mod constellation;
 pub mod db;
 pub mod discovery;
+pub mod observability;
 pub mod output;
 pub mod pipeline;
 pub mod scoring;
