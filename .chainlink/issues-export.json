@@ -1,21 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-06-17T20:39:37.840811+00:00",
+  "exported_at": "2026-06-17T21:05:43.109290+00:00",
   "issues": [
     {
       "id": 197,
       "title": "Fix chainlink-safe-fetch MCP: python -> python3 in .mcp.json",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
         "bug"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "[auto] Session resumed after context compression.",
+          "created_at": "2026-06-17T20:49:31.638380+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-17T20:38:46.802296+00:00",
-      "updated_at": "2026-06-17T20:38:46.802296+00:00",
-      "closed_at": null
+      "updated_at": "2026-06-17T20:41:20.321527+00:00",
+      "closed_at": "2026-06-17T20:41:20.321527+00:00"
     },
     {
       "id": 196,

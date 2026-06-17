@@ -38,3 +38,13 @@ refs/zentropi_info.txt
 # never committed (the binary blobs are ~210 MB and derivable from
 # upstream Hugging Face releases)
 models/
+
+# Python bytecode + pytest cache (e.g. gpu/cope-b-runpod test runs)
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Superpowers brainstorm session scratch — ephemeral local server state
+# (.server.pid/.log, generated HTML mockups). Installed skills live under
+# .agents/skills and .claude/skills, which ARE tracked.
+.superpowers/

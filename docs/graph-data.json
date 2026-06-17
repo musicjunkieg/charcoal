@@ -2782,6 +2782,17 @@
       "created_at": "2026-06-17T13:17:06.780466-07:00",
       "updated_at": "2026-06-17T13:30:10.863193-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"8eba840\",\"confidence\":90}"
+    },
+    {
+      "id": 260,
+      "change_id": "ec9aa99d-d0be-44ac-8295-77472d3dd8ee",
+      "node_type": "action",
+      "title": "Execute Chunk 2 harvest: build ab_sample.jsonl via find-fixtures + author smoke.jsonl; commit installed skill tooling",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T13:54:07.970430-07:00",
+      "updated_at": "2026-06-17T13:54:07.970430-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"1cff570\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -5523,6 +5534,17 @@
       "weight": 1.0,
       "rationale": "Result of Chunk 3 execution",
       "created_at": "2026-06-17T13:17:06.786722-07:00"
+    },
+    {
+      "id": 258,
+      "from_node_id": 228,
+      "to_node_id": 260,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "ec9aa99d-d0be-44ac-8295-77472d3dd8ee",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 2 harvest is the next executable step in Phase 6",
+      "created_at": "2026-06-17T13:54:15.889296-07:00"
     }
   ],
   "documents": [
