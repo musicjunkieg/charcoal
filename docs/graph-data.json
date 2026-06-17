@@ -2804,6 +2804,17 @@
       "created_at": "2026-06-17T14:06:34.739123-07:00",
       "updated_at": "2026-06-17T14:06:34.739123-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"006f476\",\"confidence\":90}"
+    },
+    {
+      "id": 262,
+      "change_id": "abfcdb85-67ab-40d8-bab2-617aeda91637",
+      "node_type": "action",
+      "title": "Execute Chunk 4 (Rust adapter): ToxicityClassifier trait + RunPodCopeBClient + ZentropiClient refactor + TwoStageVerdict v2 + backon retry + observability. DRIFT: no src/observability module exists — creating it early (before 4.5) so metric calls compile.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T14:09:33.466286-07:00",
+      "updated_at": "2026-06-17T14:09:33.466286-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"7174c1f\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -5567,6 +5578,17 @@
       "weight": 1.0,
       "rationale": "Harvest action produced the committed sample/smoke fixtures",
       "created_at": "2026-06-17T14:06:39.907294-07:00"
+    },
+    {
+      "id": 260,
+      "from_node_id": 232,
+      "to_node_id": 262,
+      "from_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "to_change_id": "abfcdb85-67ab-40d8-bab2-617aeda91637",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 4 implements the chosen RunPod-adapter-trait design",
+      "created_at": "2026-06-17T14:09:33.472532-07:00"
     }
   ],
   "documents": [

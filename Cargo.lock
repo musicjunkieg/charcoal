@@ -390,6 +390,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
+dependencies = [
+ "fastrand",
+ "tokio",
+]
+
+[[package]]
 name = "base-x"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -533,6 +543,7 @@ dependencies = [
  "atproto-oauth-axum",
  "atrium-api",
  "axum",
+ "backon",
  "base64 0.22.1",
  "chrono",
  "clap",
@@ -559,6 +570,7 @@ dependencies = [
  "sqlx-postgres",
  "stop-words",
  "tempfile",
+ "thiserror 2.0.18",
  "tokenizers",
  "tokio",
  "tower",
@@ -2562,7 +2574,7 @@ dependencies = [
  "once_cell",
  "socket2 0.6.2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
