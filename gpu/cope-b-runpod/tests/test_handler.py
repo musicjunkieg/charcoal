@@ -13,14 +13,15 @@ import pytest
 # Bryan's Mac mini, and any CPU-only dev box). Since these tests verify pure
 # handler *logic* (token->bool mapping, exp(logprob) confidence, decoded-token
 # normalization, response shape, error handling) and feed a fully-mocked
-# engine whose output is independent of the prompt, the real tokenizer is
-# irrelevant here. We therefore stub `transformers` with a MagicMock so
-# prompt.build_prompt resolves to a dummy string and the handler logic runs
-# end-to-end locally with vLLM mocked — satisfying the TDD requirement that
-# these tests actually execute.
+# engine whose output is independent of the prompt, neither vLLM nor the real
+# tokenizer matters here. We stub `vllm`/`runpod` in sys.modules (those are
+# never imported by other test modules) and — crucially — patch
+# `prompt.build_prompt` directly in the fixture rather than stubbing the
+# `transformers` module globally. Stubbing sys.modules["transformers"] would
+# leak into test_prompt.py (run in the same process), defeating its
+# importorskip guard and breaking the tokenizer-dependent prompt tests.
 sys.modules.setdefault("vllm", MagicMock())
 sys.modules.setdefault("runpod", MagicMock())
-sys.modules.setdefault("transformers", MagicMock())
 
 pytestmark = pytest.mark.asyncio
 
@@ -78,6 +79,12 @@ def patched_engine(monkeypatch, tmp_path):
         import importlib
         import handler  # type: ignore
         importlib.reload(handler)
+        # build_prompt loads a real tokenizer (transformers) which we don't have
+        # on CPU and don't need — the mocked engine ignores the prompt. Patch it
+        # to a no-op string builder so the handler logic runs end-to-end. We
+        # patch the name bound into handler's namespace (it did
+        # `from prompt import build_prompt`).
+        handler.build_prompt = lambda policy, content: f"<prompt>{content}</prompt>"
         yield handler, fake_engine
 
 
@@ -126,8 +133,10 @@ async def test_handler_returns_policy_version_from_env(patched_engine, monkeypat
     monkeypatch.setenv("POLICY_VERSION", "policy-v3-2026-07-01")
     import importlib
     importlib.reload(handler)
-    # Reload reset the fake_engine reference; re-patch the new module's engine.
-    # (Simpler: assert that handler reads POLICY_VERSION at module import.)
+    # Reload reset the fake_engine reference and restored the real build_prompt;
+    # re-patch both so the module reads the new POLICY_VERSION but still runs
+    # against the mock engine and the no-op prompt builder.
+    handler.build_prompt = lambda policy, content: f"<prompt>{content}</prompt>"
     fake_engine.generate_result = _mock_engine_result(token="1")
     handler._engine = fake_engine  # type: ignore[attr-defined]
     result = await handler.handler({"id": "req-3", "input": {"content": "test"}})
