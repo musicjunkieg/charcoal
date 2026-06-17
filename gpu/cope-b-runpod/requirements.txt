@@ -1,0 +1,7 @@
+# Runtime
+vllm==0.20.2
+transformers>=4.50,<5
+runpod>=1.7,<2
+# Dev / test (installed locally for pytest runs; not in image)
+pytest>=8
+pytest-asyncio>=0.24

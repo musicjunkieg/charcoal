@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9752e35b5a171f5cff270b08443e577e591c3fd8",
+    "short_hash": "9752e35",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:58:58-07:00",
+    "message": "feat(cope-b): seed DRAFT policy.txt + gpu/cope-b-runpod scaffold\n\npolicy.txt is a STARTING DRAFT for Bryan to review/edit, not final.\nStage-2 toxicity policy in CoPE-B POLICY-slot format, adapted from the\nCoPE-A reference snapshot at refs/labeler_prompt.txt. Binary 1=toxic/\n0=clean framing, no INSTRUCTIONS/ANSWER headers. Preserves the reference\nparticipant-vs-third-party distinction (harsh commentary about\nnon-participants/public figures stays clean) and adds Charcoal-specific\ncoverage: identity-based hostility, dogpiling/incitement, bad-faith\nconcern trolling, sarcastic/coded hostility, news-commentary ambiguity\n(cf. chainlink #114).\n\n~396 words (~514 tokens) — marginally over the 50-500 token target;\ntrim on review if desired (prefix caching amortizes policy cost).\n\nSanity-check deferred to Chunk 3 smoke test (Colab not run in this\nenvironment). Bryan to validate ~10 hand-picked examples before cutover.\n\nChainlink #189 (Phase 6.1, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "0510be17bfe3cc3a5b682dbf1f27a918648d260e",
     "short_hash": "0510be1",
     "author": "Bryan Guffey",
