@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Phase 6.1 — A/B shadow-agreement sample + smoke set harvested for CoPE-B (#189)
+- Phase 6.2 — RunPod GPU service (Dockerfile + handler + smoke) (#190)
 - Integrate Zentropi CoPE as production toxicity classifier (#173)
 - Wire topic-first discovery into sweep pipeline with --sweep-mode flag (#172)
 - Wire adaptive sampling early exit into build_profile (#171)
@@ -39,6 +41,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Phase 6.0 — audit_log generalization preflight (#188)
+- Pull Zentropi call count from last full scan of grimalkina.bsky.social (#182)
+- Investigate Zentropi API call concurrency pattern (#181)
 - PR #46 CodeRabbit review: verify and fix findings (#175)
 - Branch sync: ff staging, push topic-first-discovery, prune gone branches (#174)
 - Write NLI scoring redesign implementation plan (#108)
@@ -48,6 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Multi-user schema redesign (per-user vs shared data) (#49)
 
 ### Fixed
+- Fix chainlink-safe-fetch MCP: python -> python3 in .mcp.json (#197)
 - Fix context score double-application in concern troll scoring (#163)
 - Fix invalid model ID — drop explicit model param from OpenAI Moderation requests (#153)
 - Switch OpenAI Moderation from omni-moderation to text-moderation-latest for higher rate limits (#152)
