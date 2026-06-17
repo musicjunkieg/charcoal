@@ -1,0 +1,59 @@
+name: Build CoPE-B image
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'gpu/cope-b-runpod/**'
+      - '.github/workflows/build-cope-b-image.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive policy version
+        id: policyver
+        run: |
+          short_sha=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y-%m-%d)
+          echo "value=policy-${short_sha}-${date}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./gpu/cope-b-runpod
+          file: ./gpu/cope-b-runpod/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.ref_name }}
+          build-args: |
+            MODEL_REVISION=main
+            POLICY_VERSION=${{ steps.policyver.outputs.value }}
+          # Cache the weight-download layer between runs. The huggingface-cli
+          # download layer is ~50 GB and cache hit is keyed by MODEL_REVISION,
+          # so a policy.txt-only edit reuses the cached weight layer.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "Built ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Policy version: ${{ steps.policyver.outputs.value }}" >> $GITHUB_STEP_SUMMARY
+          echo "Next: update RunPod endpoint to use this image digest." >> $GITHUB_STEP_SUMMARY
