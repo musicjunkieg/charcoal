@@ -72,6 +72,10 @@ def _sampling_params():
 
 def _get_engine():
     global _engine
+    # Race-safe ONLY because _build_engine() is synchronous: there is no
+    # `await` between the `if _engine is None` check and the assignment, so no
+    # other coroutine can interleave. If _build_engine ever becomes async, this
+    # check-and-set must be guarded by an asyncio.Lock to avoid double-build.
     if _engine is None:
         _engine = _build_engine()
     return _engine

@@ -46,9 +46,11 @@ jobs:
           build-args: |
             MODEL_REVISION=main
             POLICY_VERSION=${{ steps.policyver.outputs.value }}
-          # Cache the weight-download layer between runs. The huggingface-cli
-          # download layer is ~50 GB and cache hit is keyed by MODEL_REVISION,
-          # so a policy.txt-only edit reuses the cached weight layer.
+          # Cache layers between runs. The Dockerfile downloads the ~50 GB
+          # weight layer BEFORE copying app code, so that layer's cache key
+          # depends only on MODEL_REVISION (and the stable deps above it).
+          # A policy.txt-only edit changes only the final app-code COPY, so
+          # the cached weight layer is reused and the rebuild is tiny.
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

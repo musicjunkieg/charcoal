@@ -39,9 +39,24 @@ _BODY_TEMPLATE = (
 )
 
 
+# Pre-split the static template into its three literal segments around the
+# two sentinels. Building the body by joining these fixed parts with the
+# policy/content values means a sentinel that happens to appear *inside*
+# `policy` or `content` is never re-scanned or re-substituted — the
+# collision bug that sequential `.replace()` calls had is impossible here.
+# The template author controls the order of sentinels, so this assumes
+# `__POLICY__` precedes `__CONTENT__` (asserted at import).
+_PREFIX, _MIDDLE_AND_REST = _BODY_TEMPLATE.split("__POLICY__", 1)
+_MIDDLE, _SUFFIX = _MIDDLE_AND_REST.split("__CONTENT__", 1)
+
+
 def build_body(policy: str, content: str) -> str:
-    """Return the POLICY/CONTENT body text, before chat-template wrapping."""
-    return _BODY_TEMPLATE.replace("__POLICY__", policy).replace("__CONTENT__", content)
+    """Return the POLICY/CONTENT body text, before chat-template wrapping.
+
+    Built by joining the static template segments with the supplied values,
+    so a literal `__POLICY__`/`__CONTENT__` inside `policy` or `content` is
+    treated as plain text and never re-substituted."""
+    return _PREFIX + policy + _MIDDLE + content + _SUFFIX
 
 
 _TOKENIZER = None

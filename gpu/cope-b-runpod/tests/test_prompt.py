@@ -55,6 +55,23 @@ def test_build_body_handles_literal_braces_in_policy_and_content():
     assert "{there}" in body
 
 
+def test_build_body_not_corrupted_by_literal_sentinel_in_policy():
+    """A policy that contains the literal `__CONTENT__` (or `__POLICY__`)
+    sentinel must NOT be re-substituted. The split/join construction treats
+    such occurrences as plain text — sequential `.replace()` would have
+    corrupted them by injecting the content value into the policy."""
+    from prompt import build_body
+
+    body = build_body(
+        policy="See the __CONTENT__ section and the __POLICY__ header below.",
+        content="ACTUAL_CONTENT",
+    )
+    # The literal sentinel inside the policy survives verbatim...
+    assert "See the __CONTENT__ section and the __POLICY__ header below." in body
+    # ...and the real content appears exactly once (in its own slot).
+    assert body.count("ACTUAL_CONTENT") == 1
+
+
 # The remaining tests require the tokenizer (transformers) to wrap the body in
 # the Gemma chat template. On machines without transformers they skip
 # individually (not at module scope) so the two pure build_body tests above
