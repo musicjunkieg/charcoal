@@ -4,7 +4,7 @@
 
 **Goal:** Replace Zentropi hosted CoPE-A with self-hosted CoPE-B-A4B on RunPod Serverless A100 80GB + vLLM, behind a Rust `ToxicityClassifier` trait that makes backends swappable at startup. ONNX clean-pass filter stays at Stage 1; CoPE-B replaces only Stage 2.
 
-**Architecture:** Two-stage scoring keeps the same shape — `TwoStageToxicityScorer` composes ONNX (Stage 1) with a `dyn ToxicityClassifier` (Stage 2). New `RunPodCopeBClient` calls vLLM-on-RunPod via `/runsync` HTTP. Existing `ZentropiClient` refactored to implement the trait. Migration is 8 steps from policy authoring → staging gate → prod cutover.
+**Architecture:** Two-stage scoring keeps the same shape — `TwoStageToxicityScorer` composes ONNX (Stage 1) with a `dyn ToxicityClassifier` (Stage 2). New `RunPodCopeBClient` calls vLLM-on-RunPod via `/runsync` HTTP. Existing `ZentropiClient` refactored to implement the trait. Migration is 8 steps from policy authoring → staging gate → prod cutover. Validation is by shadow comparison against the live Zentropi backend (≥90% binary-label agreement on ~100 real posts harvested from production), not a hand-labeled accuracy gate.
 
 **Tech Stack:** Rust (`reqwest`, `async-trait`, `tokio`), Python 3.12 + vLLM 0.20.2+ for the GPU service, Docker for the container, RunPod Serverless for hosting, Railway for the Rust app (existing).
 
@@ -39,9 +39,8 @@ Files this plan creates or modifies:
 - Create: `tests/unit_classifier.rs` — trait, prompt assembly, JSON parsing, retry, threshold, `ClassifierVerdict` serde
 - Create: `tests/web_classifier.rs` (`--features web`) — end-to-end ensemble flow with `StubClassifier`; boot-fail when classifier unconfigured
 - Create: `tests/composition_classifier_v2.rs` — update existing composition flow for `ClassifierToxic`/`ClassifierSafe` variants
-- Create: `tests/fixtures/cope_b/known_toxic.jsonl` (Bryan-authored, ≥ 20 entries)
-- Create: `tests/fixtures/cope_b/known_clean.jsonl` (Bryan-authored, ≥ 20 entries)
-- Create: `tests/fixtures/cope_b/edge_cases.jsonl` (Bryan-authored)
+- Create: `tests/fixtures/cope_b/ab_sample.jsonl` — ~100 real posts harvested via `tools/find-fixtures/find_fixtures.py`, in the runtime envelope format, UNLABELED (the A/B agreement input)
+- Create: `tests/fixtures/cope_b/smoke.jsonl` — ~10 hand-picked obvious toxic/clean examples for the Colab/local sanity check only (not a formal gate)
 - Modify: `tests/unit_scoring.rs`, `tests/composition.rs` — adapt to `TwoStageVerdict` field renames + variant changes
 
 **GPU service (Python):**
@@ -52,7 +51,7 @@ Files this plan creates or modifies:
 - Create: `gpu/cope-b-runpod/runpod.yml` — endpoint config
 - Create: `gpu/cope-b-runpod/tests/test_handler.py` — pytest for handler + prompt + response shape
 - Create: `gpu/cope-b-runpod/tests/test_prefix_cache.py` — assert second-request latency materially lower
-- Create: `gpu/cope-b-runpod/tests/smoke_test.sh` — `vllm serve` + curl with the 10 fixture inputs
+- Create: `gpu/cope-b-runpod/tests/smoke_test.sh` — `vllm serve` + curl with the `smoke.jsonl` inputs
 - Create: `gpu/cope-b-runpod/README.md` — image build, deploy, redeploy, region notes
 
 **CI / infra:**
@@ -120,11 +119,11 @@ Run: `chainlink issue link 186 --parent 185`
 - [ ] **Step 4: Create remaining Phase 6 subissues**
 
 For each, run `chainlink issue quick "..." -p <priority> -l feature` then `chainlink issue link <id> --parent 185`:
-- `"Phase 6.1 — policy text + labeled fixtures (Bryan-authored)"` priority `high` label `feature`
+- `"Phase 6.1 — policy text + A/B sample harvest"` priority `high` label `feature`
 - `"Phase 6.2 — RunPod GPU service (Dockerfile + handler + smoke)"` priority `high` label `feature`
 - `"Phase 6.3 — Rust trait + RunPodCopeBClient + ZentropiClient refactor"` priority `high` label `feature`
-- `"Phase 6.4 — A/B harness + accuracy gate (Step 4.5)"` priority `high` label `feature`
-- `"Phase 6.5 — Confidence threshold calibration"` priority `high` label `feature`
+- `"Phase 6.4 — A/B harness + shadow-agreement gate"` priority `high` label `feature`
+- `"Phase 6.5 — Threshold sanity check + optional retune"` priority `high` label `feature`
 - `"Phase 6.6 — Zentropi-hosted CoPE-B (or CoPE-A fallback)"` priority `medium` label `feature`
 - `"Phase 6.7 — Staging gate (grimalkina re-scan)"` priority `high` label `feature`
 - `"Phase 6.8 — Prod cutover + monitoring"` priority `high` label `feature`
@@ -742,23 +741,26 @@ Expected: pushes branch (or updates if already pushed in design phase).
 
 - [ ] **Step 11: Close subissue and switch to Chunk 2's**
 
-Run: `chainlink issue close 186` then `chainlink session work <Chunk 2 subissue ID>` (the issue ID created for "Phase 6.1 — policy text + labeled fixtures").
+Run: `chainlink issue close 186` then `chainlink session work <Chunk 2 subissue ID>` (the issue ID created for "Phase 6.1 — policy text + A/B sample harvest").
 
 ---
 
-## Chunk 2: Policy text + labeled fixtures (Bryan-authored)
+## Chunk 2: Policy text + A/B sample harvest
 
-This chunk produces three artifacts that require Bryan's judgment about what
-counts as toxic in Charcoal's specific community context. The plan's job is to
-specify the **contract** (format, fields, quality bars) — not the content. Bryan
-fills in the content with optional Claude assistance for tedium (formatting,
-parallel construction of variants).
+This chunk produces two artifacts. The first — the policy text — requires
+Bryan's judgment about what counts as toxic in Charcoal's specific community
+context; the plan's job is to specify the **contract** (format, constraints) —
+not the content. The second — a harvested sample of ~100 real posts for A/B
+agreement — needs no hand-labeling: it is captured straight from production via
+`tools/find-fixtures/find_fixtures.py` in the runtime envelope format, and the
+shadow-agreement gate (Chunk 5) measures it against the live Zentropi backend
+rather than against ground-truth labels.
 
-**Subissue:** `Phase 6.1 — policy text + labeled fixtures (Bryan-authored)`. Confirm
+**Subissue:** `Phase 6.1 — policy text + A/B sample harvest`. Confirm
 focus with `chainlink session status`; if not active, `chainlink session work <id>`.
 
 **Spec sections to re-read first:** Step 1 (policy authoring) and Step 4.5
-(accuracy gate fixture requirements).
+(shadow-agreement gate — the A/B sample requirements).
 
 ### Task 2.1: Create the `gpu/cope-b-runpod/` directory scaffold
 
@@ -858,7 +860,7 @@ sanity-check deferred to Chunk 3 smoke test (Colab unavailable: <reason>)
 
 If neither path works, the policy iterates without quantitative grounding until
 the GPU service is live in Chunk 3 — risky but not blocking, since Chunk 5's
-accuracy gate is the formal quality bar.
+shadow-agreement gate is the formal quality bar.
 
 - [ ] **Step 5: Commit**
 
@@ -879,140 +881,119 @@ Chainlink #<Phase 6.1 issue id>.
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
 ```
 
-### Task 2.3: Author labeled fixtures
+### Task 2.3: Harvest the A/B sample input
 
 **Files:**
-- Create: `tests/fixtures/cope_b/known_toxic.jsonl`
-- Create: `tests/fixtures/cope_b/known_clean.jsonl`
-- Create: `tests/fixtures/cope_b/edge_cases.jsonl`
+- Create: `tests/fixtures/cope_b/ab_sample.jsonl` (~100 real posts, UNLABELED)
+- Create: `tests/fixtures/cope_b/smoke.jsonl` (~10 hand-picked obvious examples)
 
-**JSONL schema (per line):**
+The A/B sample is **not** hand-labeled. We harvest ~100 real posts from
+production via `tools/find-fixtures/find_fixtures.py` and let the
+shadow-agreement gate (Chunk 5) measure candidate-vs-reference agreement on
+them at gate time — so no ground-truth `label` is needed. The tool already
+emits the correct JSONL schema with the runtime envelope and PII scrubbing.
+
+**Read `tools/find-fixtures/README.md` first** for the exact invocations and
+modes (`discover` / `author` / `backlinks` / `list`). The highest-signal path
+is `list` mode against a community mod/curation list, supplemented with
+`backlinks` mode against your own posts for clean/edge coverage.
+
+**JSONL schema (per line, as emitted by the tool):**
 
 ```json
 {
-  "id": "kt-001",
-  "label": "toxic",
+  "id": "cand-bafyreid...",
+  "label": "",
   "category": "identity-attack",
-  "content": "[Parent post]: I'm trans and I had a long day.\n\n[Reply]: <toxic reply here>",
-  "note": "optional one-line rationale"
+  "content": "[Parent post]: <parent text>\n\n[Reply]: <reply text>",
+  "note": ""
 }
 ```
 
 Field rules:
-- `id` — stable kebab-case identifier. `kt-` prefix for `known_toxic`, `kc-` for `known_clean`, `ec-` for `edge_cases`.
-- `label` — one of: `"toxic"`, `"clean"`, `"uncertain"` (lowercase strings). `uncertain` is only valid in `edge_cases.jsonl` and Chunk 5's accuracy gate skips those rows.
-- `category` — kebab-case category tag. **MUST be from the allowed-values set** (see below). Categories outside the set fail the verify step.
-- `content` — the post text that gets passed into the CoPE-B `CONTENT` slot. **MUST match the exact envelope format produced by `src/toxicity/mod.rs::format_parent_reply` for reply pairs:**
+- `id` — stable identifier derived from the source record's CID/rkey (the tool fills this in).
+- `label` — left **blank** in `ab_sample.jsonl`. Agreement is measured against the live Zentropi backend at gate time, so no ground-truth label is needed. (In the optional `smoke.jsonl` set you MAY fill in `toxic` | `clean` for your own eyeballing — it is not a gate.)
+- `category` — best-effort guess from the tool; not load-bearing for the agreement gate.
+- `content` — the post text passed into the CoPE-B `CONTENT` slot. **MUST match the exact envelope format produced by `src/toxicity/mod.rs::format_parent_reply` for reply pairs:**
 
   ```
   [Parent post]: <parent text>\n\n[Reply]: <reply text>
   ```
 
-  Note: literal colons after `[Parent post]` and `[Reply]`, single space, then text; **double newline** (`\n\n` — a blank line) between the parent and reply blocks. For original posts (no parent), `content` is just the post body text with no envelope. Mismatching this format means Chunk 5's gate measures an off-distribution prompt — the fixtures must look exactly like what Charcoal generates at runtime.
-- `note` — optional. One short sentence explaining why this example was chosen. Useful when Bryan re-reads the fixtures in 6 months.
-
-**Allowed-values set for `category`:**
-
-```
-identity-attack
-dehumanization
-dogpile
-concern-troll
-coded-sarcasm
-news-commentary
-support
-disagreement
-meme
-slang
-counter-speech
-reclamation
-```
-
-If a fixture needs a category outside this set, add the value to this list (in a separate commit) and document why. Don't proliferate near-duplicates (`identity-attack` vs `identity_attack` vs `identity-attacks` — all are violations of the kebab-case-lowercase rule).
-
-**Quality bars (enforced by Chunk 5's accuracy gate):**
-- `known_toxic.jsonl` ≥ 20 entries, ≥ 4 distinct categories **from the allowed set**
-- `known_clean.jsonl` ≥ 20 entries, ≥ 4 distinct categories **from the allowed set**
-- `edge_cases.jsonl` no minimum count; aim for ~10–20 thoughtful examples
+  Note: literal colons after `[Parent post]` and `[Reply]`, single space, then text; **double newline** (`\n\n` — a blank line) between the parent and reply blocks. For original posts (no parent), `content` is just the post body text with no envelope. The harvest tool produces exactly this envelope, so the A/B inputs are on-distribution — the same shape Charcoal generates at runtime. Don't hand-edit `content` in a way that breaks this contract.
+- `note` — optional. Free-text; the tool leaves it blank.
 
 **Sourcing guidance for Bryan (PII checklist):**
 
-Fixtures are committed to the public repo. Before pasting any real-world quote:
+`ab_sample.jsonl` is committed to the public repo. The tool auto-scrubs
+@handles, DIDs, AT-URIs, and post URLs (see the README's PII table), but the
+one thing it cannot automate remains Bryan's responsibility:
 
-- [ ] Strip @handles (no `@user.bsky.social`) — replace with role labels like "<user>" if needed
-- [ ] Strip DIDs (no `did:plc:...`)
-- [ ] Strip AT-URIs (`at://did:plc:...`)
-- [ ] Strip post URLs (`https://bsky.app/profile/.../post/...`)
 - [ ] Paraphrase distinctive multi-word phrases so the original post can't be located via Bluesky search (rewriting 50%+ of unique word choices is usually enough)
 - [ ] Avoid quoting from accounts that are currently being harassed — using their words even paraphrased can amplify
-
-Sources to draw from (after applying the PII checklist):
-- `account_scores` rows tagged toxic/clean on prod
-- Past `user_labels` entries the review queue has confirmed
-- Bryan's own judgment for the edge-case set — sarcasm, reclaimed slurs in-group, counter-speech, news commentary on violence
 
 - [ ] **Step 1: Create the fixtures directory**
 
 Run: `mkdir -p tests/fixtures/cope_b`
 
-- [ ] **Step 2: Author `known_toxic.jsonl`**
+- [ ] **Step 2: Read the harvest tool's README**
 
-Bryan writes ≥ 20 entries by hand or with Claude scaffolding. Apply the PII checklist above to every example before committing. Each line is a complete JSON object (no pretty-printing).
+Run: `cat tools/find-fixtures/README.md`
+Expected: the four modes, the JSONL schema, the PII scrubbing table, and the "Workflow with Chunk 2" section. Pick the modes that fit the accounts/lists/posts you want to sample.
 
-- [ ] **Step 3: Author `known_clean.jsonl`**
+- [ ] **Step 3: Harvest ~100 real posts into `ab_sample.jsonl`**
 
-Same shape, label `"clean"`. ≥ 20 entries, ≥ 4 distinct categories from the allowed-values set.
+Use the tool to collect roughly 100 posts in the runtime envelope format. For example, combine a mod-list walk (hostile-leaning signal) with backlinks of your own posts (clean + edge coverage):
 
-- [ ] **Step 4: Author `edge_cases.jsonl`**
+```bash
+# High-signal: walk a community mod/curation list's members
+python3 tools/find-fixtures/find_fixtures.py list \
+    "https://bsky.app/profile/maintainer.bsky.social/lists/3abc..." \
+    --total 70 --per-account 5 > /tmp/ab-raw.jsonl
 
-Same shape, mix of labels including `"uncertain"`. Aim for cases where Charcoal's current pipeline has misclassified in the past (cf. chainlink #114 for news-commentary false positives).
+# Clean + edge coverage: replies/quotes pointing at your own posts
+python3 tools/find-fixtures/find_fixtures.py backlinks \
+    "https://bsky.app/profile/chaosgreml.in/post/3xyz..." \
+    --count 40 --include-quotes >> /tmp/ab-raw.jsonl
+```
 
-- [ ] **Step 5: Validate all three files**
+Hand-review the harvested lines, paraphrase any distinctive multi-word phrases (PII checklist above), drop any junk, then move ~100 lines into place:
 
-Run all three checks. Each must pass before continuing.
+```bash
+$EDITOR /tmp/ab-raw.jsonl
+mv /tmp/ab-raw.jsonl tests/fixtures/cope_b/ab_sample.jsonl
+```
+
+`ab_sample.jsonl` stays UNLABELED — leave `label` blank.
+
+- [ ] **Step 4: Author a tiny `smoke.jsonl` (~10 lines) for sanity checks only**
+
+Hand-pick ~10 obvious examples (≈5 clearly toxic, ≈5 clearly clean) for the
+Colab/local sanity check (Task 2.2 Step 4 and Chunk 3's `smoke_test.sh`). This
+set is NOT a formal gate. You MAY include an optional `label` field
+(`"toxic"` / `"clean"`) here purely for your own eyeballing. Keep `content` in
+the same `[Parent post]: ... \n\n[Reply]: ...` envelope.
+
+- [ ] **Step 5: Validate both files**
+
+Run both checks. Each must pass before continuing.
 
 **JSONL validity (every line parses):**
 ```
-for f in tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl tests/fixtures/cope_b/edge_cases.jsonl; do
+for f in tests/fixtures/cope_b/ab_sample.jsonl tests/fixtures/cope_b/smoke.jsonl; do
   python3 -c "import json,sys; [json.loads(l) for l in open('$f')]" || { echo "INVALID: $f"; exit 1; }
 done
 echo "JSONL OK"
 ```
 Expected: `JSONL OK`.
 
-**Counts (≥20 in toxic + clean):**
+**Sample size (ab_sample large enough for the gate — see Chunk 5 `MIN_SAMPLE`):**
 ```
-[ $(wc -l < tests/fixtures/cope_b/known_toxic.jsonl) -ge 20 ] || { echo "known_toxic <20"; exit 1; }
-[ $(wc -l < tests/fixtures/cope_b/known_clean.jsonl) -ge 20 ] || { echo "known_clean <20"; exit 1; }
-echo "Counts OK"
+n=$(wc -l < tests/fixtures/cope_b/ab_sample.jsonl)
+[ "$n" -ge 50 ] || { echo "ab_sample only $n lines (gate MIN_SAMPLE is 50; target ~100)"; exit 1; }
+echo "Sample size OK ($n lines)"
 ```
-Expected: `Counts OK`.
-
-**Categories (≥4 distinct AND all from the allowed set):**
-```
-allowed='identity-attack dehumanization dogpile concern-troll coded-sarcasm news-commentary support disagreement meme slang counter-speech reclamation'
-for f in tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl; do
-  cats=$(jq -r '.category' "$f" | sort -u)
-  count=$(echo "$cats" | wc -l)
-  [ $count -ge 4 ] || { echo "$f <4 distinct categories"; exit 1; }
-  for c in $cats; do
-    echo " $allowed " | grep -q " $c " || { echo "$f has out-of-set category: $c"; exit 1; }
-  done
-done
-echo "Categories OK"
-```
-Expected: `Categories OK`. If any line fails, fix the offending fixture before continuing.
-
-**`uncertain` label only in `edge_cases.jsonl`:**
-```
-for f in tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl; do
-  if jq -e 'select(.label == "uncertain")' "$f" >/dev/null; then
-    echo "$f contains uncertain label (only allowed in edge_cases)"; exit 1
-  fi
-done
-echo "Labels OK"
-```
-Expected: `Labels OK`. A `kt-` or `kc-` entry labeled `uncertain` would silently distort Chunk 5's gate; this check fails fast.
+Expected: `Sample size OK` with ~100 lines.
 
 **Envelope format spot-check (parent/reply pairs match `format_parent_reply` exactly):**
 ```
@@ -1020,36 +1001,31 @@ jq -r 'select(.content | contains("[Parent post]")) | .content' tests/fixtures/c
 ```
 Expected output: every visible `content` shows `[Parent post]: ...` then a blank line then `[Reply]: ...`. If any line uses different punctuation or spacing, fix it.
 
-- [ ] **Step 6: Smoke-classify (Colab preferred, fallback to Chunk 3)**
+- [ ] **Step 6: Smoke-classify the `smoke.jsonl` set (Colab preferred, fallback to Chunk 3)**
 
-Same Colab as Task 2.2 Step 4 (with the same fallback policy if it's unavailable). Feed each fixture line's `content` through the model with `policy.txt` as the POLICY. Eyeball the verdicts:
-- `known_toxic` should classify mostly as `1` (toxic)
-- `known_clean` should classify mostly as `0` (clean)
-- `edge_cases` — observe and note disagreements; do not fix the policy here unless something is glaringly wrong (formal calibration is Step 5 of the migration, Chunk 5). Rows with `label == "uncertain"` are intentionally unscored; Chunk 5's gate skips them.
-
-If `known_toxic` or `known_clean` accuracy looks <80% by eye, revise `policy.txt` (Task 2.2) before continuing.
+Same Colab as Task 2.2 Step 4 (with the same fallback policy if it's unavailable). Feed each `smoke.jsonl` line's `content` through the model with `policy.txt` as the POLICY and eyeball the verdicts — the obvious toxic lines should classify as `1`, the obvious clean lines as `0`. This is a quick gut-check on the policy, not a gate; the formal quality bar is Chunk 5's shadow-agreement gate against `ab_sample.jsonl`. If the obvious cases look wrong, revise `policy.txt` (Task 2.2) before continuing.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add tests/fixtures/cope_b/known_toxic.jsonl tests/fixtures/cope_b/known_clean.jsonl tests/fixtures/cope_b/edge_cases.jsonl
-git commit -m 'test(cope-b): seed labeled fixtures for Step 4.5 accuracy gate
+git add tests/fixtures/cope_b/ab_sample.jsonl tests/fixtures/cope_b/smoke.jsonl
+git commit -m 'test(cope-b): harvest A/B sample + smoke set for shadow-agreement gate
 
-JSONL schema: id, label (toxic|clean|uncertain), category, content, note.
-known_toxic.jsonl and known_clean.jsonl each have >=20 hand-curated
-entries spanning >=4 categories; edge_cases.jsonl captures sarcasm,
-counter-speech, news commentary on violent topics (cf. chainlink #114),
-and reclaimed slurs.
+ab_sample.jsonl is ~100 real posts harvested via
+tools/find-fixtures/find_fixtures.py in the runtime [Parent post]/[Reply]
+envelope, UNLABELED — agreement is measured against the live Zentropi
+backend at gate time, so no ground-truth labels are needed. PII auto-
+scrubbed by the tool; distinctive phrases paraphrased by hand.
 
-content uses Charcoals "[Parent post]/[Reply]" envelope so fixtures are
-drop-in inputs for ToxicityClassifier::classify.
+smoke.jsonl is ~10 hand-picked obvious toxic/clean examples for the
+Colab/local sanity check only (not a formal gate).
 
-Sanity-checked via Zentropi Colab against policy.txt; revisit threshold
-calibration in Chunk 5 (migration Step 5).
+content uses Charcoals "[Parent post]/[Reply]" envelope so the A/B inputs
+are on-distribution for ToxicityClassifier::classify.
 
 Chainlink #<Phase 6.1 issue id>.
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>'
 ```
 
 - [ ] **Step 8: Push**
@@ -1904,8 +1880,7 @@ walk_fixture() {
     done < "$fixture"
 }
 
-walk_fixture ../../tests/fixtures/cope_b/known_toxic.jsonl
-walk_fixture ../../tests/fixtures/cope_b/known_clean.jsonl
+walk_fixture ../../tests/fixtures/cope_b/smoke.jsonl
 
 echo "Mode: $SMOKE_MODE   Failures: $FAIL"
 exit $FAIL
@@ -2621,7 +2596,8 @@ use thiserror::Error;
 
 use super::classifier::{ClassifierVerdict, ToxicityClassifier};
 
-/// TODO(migration-step-5): recalibrate against labeled fixtures.
+/// TODO(migration-step-5): verify distribution parity vs the reference
+/// (Zentropi) backend over ab_sample.jsonl; retune only if materially shifted.
 /// See docs/superpowers/specs/2026-06-05-cope-b-self-hosted-design.md §"Step 5".
 /// 0.5 is a placeholder — a model emitting a binary token with logprob-based
 /// confidence concentrates probability sharply, so the real threshold may be
@@ -3463,18 +3439,18 @@ Expected: branch updated; GH Actions runs.
 
 ```
 chainlink issue close <Phase 6.3 issue id>
-chainlink session work <Phase 6.4 issue id>   # A/B harness + accuracy gate
+chainlink session work <Phase 6.4 issue id>   # A/B harness + shadow-agreement gate
 ```
 
 ---
 
-## Chunk 5: A/B characterization harness + Step 4.5 accuracy gate
+## Chunk 5: A/B agreement harness + shadow-agreement gate
 
-**Subissue:** `Phase 6.4 — A/B harness + accuracy gate`.
+**Subissue:** `Phase 6.4 — A/B harness + shadow-agreement gate`.
 
-**Spec sections to re-read first:** Migration Step 4 and Step 4.5.
+**Spec sections to re-read first:** Migration Step 4 and Step 4.5 (shadow-agreement gate).
 
-Chunk 5 adds two CLI subcommands. `classify-compare` runs the same JSONL input through both backends and emits a side-by-side comparison report. `classify-gate` runs only the configured backend against the labeled fixtures (`tests/fixtures/cope_b/known_toxic.jsonl` + `known_clean.jsonl`) and prints per-class accuracy; exits non-zero if the spec's 90%/90% bar isn't met or fixtures are below the minimum count. Both reuse the trait + factory from Chunk 4.
+Chunk 5 adds two CLI subcommands. `classify-compare` runs the same JSONL input through both backends and emits a side-by-side comparison report with agreement/disagreement counts (unchanged). `classify-gate` runs **both** the candidate backend and the reference (Zentropi) backend over `ab_sample.jsonl` and asserts their binary-toxic verdicts **agree on ≥ 90% of the sample** (default min sample 50, target ~100); it dumps every disagreement to a report file for Bryan to review and exits non-zero if agreement is below the bar or the sample is too small. It does **not** assert accuracy against hand labels. Both reuse the trait + factory from Chunk 4.
 
 ### Task 5.1: Failing test for the A/B comparison rendering
 
@@ -3608,11 +3584,10 @@ pub struct Summary {
 
 /// Pure summary — UI-free so unit tests can assert on numbers.
 ///
-/// Uses raw `toxic_token` from each verdict. Threshold/confidence gating is
-/// NOT applied here — for the threshold-aware accuracy gate, see
-/// `crate::cli::classify_gate::correct_fraction`. For A/B characterization at
-/// default thresholds (the typical use case for this command), the raw token
-/// is what we want to compare.
+/// Uses raw `toxic_token` from each verdict — the same binary signal the
+/// shadow-agreement gate compares (`crate::cli::classify_gate::evaluate`). For
+/// A/B characterization at default thresholds (the typical use case for this
+/// command), the raw token is what we want to compare.
 pub fn summarize(pairs: &[Pair], a_name: &str, b_name: &str) -> Summary {
     let mut s = Summary { a_name: a_name.into(), b_name: b_name.into(), ..Default::default() };
     for p in pairs {
@@ -3760,67 +3735,69 @@ Chainlink #<Phase 6.4 issue id>.
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
 ```
 
-### Task 5.3: Step 4.5 accuracy gate — `classify-gate` subcommand
+### Task 5.3: Shadow-agreement gate — `classify-gate` subcommand
 
 **Files:**
 - Create: `src/cli/classify_gate.rs`
 - Modify: `src/cli/mod.rs`
 - Modify: `src/main.rs`
 
-The gate runs the configured backend against `known_toxic.jsonl` + `known_clean.jsonl`, applies the per-backend threshold via `classifier.threshold()`, and asserts the spec's 90%/90% bar. Fails fast if either fixture is missing or has < 20 entries (Chunk 2 contract).
+The gate runs **both** the candidate backend and the reference (Zentropi) backend over `ab_sample.jsonl`, computes the fraction of posts where their binary toxic verdict agrees, and PASSES iff agreement ≥ 90% AND the sample has at least `MIN_SAMPLE` rows. It dumps every disagreeing row (id + both verdicts) to `target/classify-gate-disagreements.jsonl` so Bryan can eyeball them, and exits non-zero when agreement is below the bar or the sample is too small. No hand labels are consulted — the reference backend is the ground truth at gate time.
 
 - [ ] **Step 1: Failing test**
 
 Path: `tests/unit_classify_gate.rs`
 
 ```rust
-use charcoal::cli::classify_gate::{evaluate, GateInputs, GateOutcome, GateRow};
+use charcoal::cli::classify_gate::{evaluate, GateInputs, GateOutcome, GateRow, MIN_SAMPLE};
 use charcoal::toxicity::classifier::ClassifierVerdict;
 
-fn row(label: &str, verdict_toxic: bool, conf: f32) -> GateRow {
+fn v(toxic: bool, conf: f32) -> ClassifierVerdict {
+    ClassifierVerdict {
+        toxic_token: toxic, confidence: conf, latency_ms: 1,
+        model_id: "m".into(), policy_version: "p".into(),
+    }
+}
+
+// One row pairs a candidate verdict with the reference verdict for the same post.
+fn row(id: &str, candidate_toxic: bool, reference_toxic: bool) -> GateRow {
     GateRow {
-        id: format!("{label}-x"),
-        label: label.into(),
-        verdict: ClassifierVerdict {
-            toxic_token: verdict_toxic, confidence: conf, latency_ms: 1,
-            model_id: "m".into(), policy_version: "p".into(),
-        },
+        id: id.into(),
+        candidate: v(candidate_toxic, if candidate_toxic { 0.99 } else { 0.01 }),
+        reference: v(reference_toxic, if reference_toxic { 0.99 } else { 0.01 }),
     }
 }
 
 #[test]
-fn gate_passes_when_both_classes_clear_90pct() {
-    let toxic = (0..20).map(|_| row("toxic", true, 0.99)).collect::<Vec<_>>();
-    let clean = (0..20).map(|_| row("clean", false, 0.01)).collect::<Vec<_>>();
-    let inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic, clean_rows: clean };
-    let out = evaluate(&inputs);
-    assert!(matches!(out, GateOutcome::Pass { .. }));
+fn gate_passes_when_agreement_at_least_90pct() {
+    // 50 rows, 5 disagreements -> 45/50 = 90% agreement -> passes by the bar.
+    let mut rows: Vec<GateRow> = (0..45).map(|i| row(&format!("a{i}"), true, true)).collect();
+    rows.extend((0..5).map(|i| row(&format!("d{i}"), true, false)));
+    let inputs = GateInputs { candidate_name: "runpod".into(), reference_name: "zentropi".into(), rows };
+    assert!(matches!(evaluate(&inputs), GateOutcome::Pass { .. }));
 }
 
 #[test]
-fn gate_fails_when_toxic_recall_below_90pct() {
-    let mut toxic = vec![row("toxic", true, 0.99); 18];
-    toxic.extend(vec![row("toxic", false, 0.01); 2]);   // 18/20 = 90% — passes by the bar
-    let mut toxic_fail = vec![row("toxic", true, 0.99); 17];
-    toxic_fail.extend(vec![row("toxic", false, 0.01); 3]);   // 17/20 = 85% — fails
-    let clean = vec![row("clean", false, 0.01); 20];
-
-    let pass_inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic, clean_rows: clean.clone() };
-    let fail_inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic_fail, clean_rows: clean };
-
-    assert!(matches!(evaluate(&pass_inputs), GateOutcome::Pass { .. }));
-    assert!(matches!(evaluate(&fail_inputs), GateOutcome::Fail { .. }));
+fn gate_fails_when_agreement_below_90pct() {
+    // 50 rows, 6 disagreements -> 44/50 = 88% agreement -> fails.
+    let mut rows: Vec<GateRow> = (0..44).map(|i| row(&format!("a{i}"), true, true)).collect();
+    rows.extend((0..6).map(|i| row(&format!("d{i}"), true, false)));
+    let inputs = GateInputs { candidate_name: "runpod".into(), reference_name: "zentropi".into(), rows };
+    match evaluate(&inputs) {
+        GateOutcome::Fail { reason, .. } => assert!(reason.contains("agreement below")),
+        _ => panic!("expected Fail for sub-90% agreement"),
+    }
 }
 
 #[test]
-fn gate_fails_when_fixture_too_small() {
-    let toxic = vec![row("toxic", true, 0.99); 5];
-    let clean = vec![row("clean", false, 0.01); 20];
-    let inputs = GateInputs { backend_name: "stub".into(), threshold: 0.5, toxic_rows: toxic, clean_rows: clean };
-    let out = evaluate(&inputs);
-    match out {
-        GateOutcome::Fail { reason, .. } => assert!(reason.contains("fixture too small")),
-        _ => panic!("expected Fail for tiny fixture"),
+fn gate_fails_when_sample_below_min() {
+    // Perfect agreement, but only 5 rows -> below MIN_SAMPLE -> fails.
+    let rows: Vec<GateRow> = (0..5).map(|i| row(&format!("a{i}"), true, true)).collect();
+    assert!(rows.len() < MIN_SAMPLE);
+    let inputs = GateInputs { candidate_name: "runpod".into(), reference_name: "zentropi".into(), rows };
+    match evaluate(&inputs) {
+        GateOutcome::Fail { reason, .. } => assert!(reason.contains("sample too small")),
+        _ => panic!("expected Fail for tiny sample"),
     }
 }
 ```
@@ -3830,103 +3807,137 @@ fn gate_fails_when_fixture_too_small() {
 Path: `src/cli/classify_gate.rs`
 
 ```rust
-//! `charcoal classify-gate` — spec migration Step 4.5 accuracy gate.
+//! `charcoal classify-gate` — spec migration Step 4.5 shadow-agreement gate.
 //!
-//! Runs the configured backend against known_toxic.jsonl + known_clean.jsonl
-//! and asserts per-class accuracy >= 90% (spec floor). Exits non-zero on any
-//! failure so CI can gate prod cutover.
+//! Runs the candidate backend AND the reference (Zentropi) backend over
+//! ab_sample.jsonl and asserts they agree on the binary toxic verdict for
+//! >= 90% of the sample. Disagreements are dumped to a report file for review.
+//! Exits non-zero on any failure so CI can gate prod cutover.
 
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::toxicity::classifier::{is_toxic, ClassifierVerdict, ToxicityClassifier};
+use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
 
-pub const MIN_FIXTURE_SIZE: usize = 20;
-pub const PASS_THRESHOLD: f32 = 0.90;
+pub const MIN_SAMPLE: usize = 50;
+pub const AGREEMENT_THRESHOLD: f32 = 0.90;
 
-#[derive(Debug, Clone)]
+/// One sampled post, classified by both backends. No ground-truth label —
+/// the reference backend's verdict is the comparison target.
+#[derive(Debug, Clone, Serialize)]
 pub struct GateRow {
     pub id: String,
-    pub label: String,
-    pub verdict: ClassifierVerdict,
+    pub candidate: ClassifierVerdict,
+    pub reference: ClassifierVerdict,
 }
 
 #[derive(Debug)]
 pub struct GateInputs {
-    pub backend_name: String,
-    pub threshold: f32,
-    pub toxic_rows: Vec<GateRow>,
-    pub clean_rows: Vec<GateRow>,
+    pub candidate_name: String,
+    pub reference_name: String,
+    pub rows: Vec<GateRow>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub enum GateOutcome {
-    Pass { toxic_accuracy: f32, clean_accuracy: f32 },
-    Fail { toxic_accuracy: f32, clean_accuracy: f32, reason: String },
+    Pass { agreement: f32, sample: usize },
+    Fail { agreement: f32, sample: usize, reason: String },
 }
 
 pub fn evaluate(inputs: &GateInputs) -> GateOutcome {
-    if inputs.toxic_rows.len() < MIN_FIXTURE_SIZE || inputs.clean_rows.len() < MIN_FIXTURE_SIZE {
+    let sample = inputs.rows.len();
+    if sample < MIN_SAMPLE {
         return GateOutcome::Fail {
-            toxic_accuracy: 0.0, clean_accuracy: 0.0,
-            reason: format!(
-                "fixture too small: toxic={} clean={} (minimum {})",
-                inputs.toxic_rows.len(), inputs.clean_rows.len(), MIN_FIXTURE_SIZE
-            ),
+            agreement: 0.0,
+            sample,
+            reason: format!("sample too small: {sample} rows (minimum {MIN_SAMPLE})"),
         };
     }
 
-    let t_acc = correct_fraction(&inputs.toxic_rows, inputs.threshold, /*expect_toxic=*/ true);
-    let c_acc = correct_fraction(&inputs.clean_rows, inputs.threshold, /*expect_toxic=*/ false);
-    if t_acc >= PASS_THRESHOLD && c_acc >= PASS_THRESHOLD {
-        GateOutcome::Pass { toxic_accuracy: t_acc, clean_accuracy: c_acc }
+    let agree = inputs
+        .rows
+        .iter()
+        .filter(|r| r.candidate.toxic_token == r.reference.toxic_token)
+        .count();
+    let agreement = agree as f32 / sample as f32;
+
+    if agreement >= AGREEMENT_THRESHOLD {
+        GateOutcome::Pass { agreement, sample }
     } else {
         GateOutcome::Fail {
-            toxic_accuracy: t_acc, clean_accuracy: c_acc,
+            agreement,
+            sample,
             reason: format!(
-                "accuracy below {:.0}%: toxic={:.1}% clean={:.1}%",
-                PASS_THRESHOLD * 100.0, t_acc * 100.0, c_acc * 100.0
+                "agreement below {:.0}%: {:.1}% ({}/{} rows)",
+                AGREEMENT_THRESHOLD * 100.0,
+                agreement * 100.0,
+                agree,
+                sample
             ),
         }
     }
 }
 
-fn correct_fraction(rows: &[GateRow], threshold: f32, expect_toxic: bool) -> f32 {
-    if rows.is_empty() { return 0.0; }
-    let mut correct = 0;
-    for r in rows {
-        let toxic = r.verdict.toxic_token && r.verdict.confidence >= threshold;
-        if toxic == expect_toxic { correct += 1; }
-    }
-    correct as f32 / rows.len() as f32
+/// Rows where the two backends disagree on the binary verdict.
+pub fn disagreements(inputs: &GateInputs) -> Vec<&GateRow> {
+    inputs
+        .rows
+        .iter()
+        .filter(|r| r.candidate.toxic_token != r.reference.toxic_token)
+        .collect()
 }
 
 pub async fn run(
-    classifier: Arc<dyn ToxicityClassifier>,
-    toxic_path: &Path,
-    clean_path: &Path,
+    candidate: Arc<dyn ToxicityClassifier>,
+    reference: Arc<dyn ToxicityClassifier>,
+    sample_path: &Path,
+    disagreements_path: &Path,
 ) -> Result<GateOutcome> {
-    let toxic_rows = classify_file(&*classifier, toxic_path).await?;
-    let clean_rows = classify_file(&*classifier, clean_path).await?;
+    let rows = classify_pairs(&*candidate, &*reference, sample_path).await?;
     let inputs = GateInputs {
-        backend_name: classifier.name().into(),
-        threshold: classifier.threshold(),
-        toxic_rows, clean_rows,
+        candidate_name: candidate.name().into(),
+        reference_name: reference.name().into(),
+        rows,
     };
+
+    // Always write the disagreement report (empty file is fine) so reviewers
+    // know exactly which posts diverged.
+    let disagreeing = disagreements(&inputs);
+    if let Some(parent) = disagreements_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let body = disagreeing
+        .iter()
+        .map(|r| serde_json::to_string(r).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(disagreements_path, body)
+        .with_context(|| format!("write {disagreements_path:?}"))?;
+    println!(
+        "{} disagreement(s) written to {disagreements_path:?}",
+        disagreeing.len()
+    );
+
     Ok(evaluate(&inputs))
 }
 
-async fn classify_file(c: &dyn ToxicityClassifier, path: &Path) -> Result<Vec<GateRow>> {
+async fn classify_pairs(
+    candidate: &dyn ToxicityClassifier,
+    reference: &dyn ToxicityClassifier,
+    path: &Path,
+) -> Result<Vec<GateRow>> {
     let body = std::fs::read_to_string(path).with_context(|| format!("read {path:?}"))?;
     let mut rows = Vec::new();
     for (i, line) in body.lines().enumerate() {
         let row: super::classify_compare::FixtureRow = serde_json::from_str(line)
             .with_context(|| format!("parse line {} in {path:?}", i + 1))?;
-        let verdict = c.classify(&row.content).await
-            .with_context(|| format!("backend {} failed on {}", c.name(), row.id))?;
-        rows.push(GateRow { id: row.id, label: row.label, verdict });
+        let cand = candidate.classify(&row.content).await
+            .with_context(|| format!("candidate {} failed on {}", candidate.name(), row.id))?;
+        let refr = reference.classify(&row.content).await
+            .with_context(|| format!("reference {} failed on {}", reference.name(), row.id))?;
+        rows.push(GateRow { id: row.id, candidate: cand, reference: refr });
     }
     Ok(rows)
 }
@@ -3938,26 +3949,35 @@ In `src/main.rs`:
 
 ```rust
 ClassifyGate {
-    #[arg(long, default_value = "tests/fixtures/cope_b/known_toxic.jsonl")]
-    toxic: std::path::PathBuf,
-    #[arg(long, default_value = "tests/fixtures/cope_b/known_clean.jsonl")]
-    clean: std::path::PathBuf,
+    /// JSONL sample to run through both backends (each line: {id,content,...}).
+    #[arg(long, default_value = "tests/fixtures/cope_b/ab_sample.jsonl")]
+    sample: std::path::PathBuf,
+    /// Candidate backend — one of: runpod | zentropi
+    #[arg(long, default_value = "runpod")]
+    candidate: String,
+    /// Reference backend (comparison target) — one of: runpod | zentropi
+    #[arg(long, default_value = "zentropi")]
+    reference: String,
+    /// Where to write the disagreement report.
+    #[arg(long, default_value = "target/classify-gate-disagreements.jsonl")]
+    disagreements: std::path::PathBuf,
 },
 ```
 
-Handler — uses the existing `build_from_env` (gate runs the *configured* backend, not a named one):
+Handler — builds both backends by name (the gate compares two specific backends, not the boot-configured one):
 
 ```rust
-Commands::ClassifyGate { toxic, clean } => {
-    let backend = crate::toxicity::classifier::build_from_env()?;
-    let outcome = crate::cli::classify_gate::run(backend, &toxic, &clean).await?;
+Commands::ClassifyGate { sample, candidate, reference, disagreements } => {
+    let cand = crate::toxicity::classifier::build_backend_named(&candidate)?;
+    let refr = crate::toxicity::classifier::build_backend_named(&reference)?;
+    let outcome = crate::cli::classify_gate::run(cand, refr, &sample, &disagreements).await?;
     match outcome {
-        charcoal::cli::classify_gate::GateOutcome::Pass { toxic_accuracy, clean_accuracy } => {
-            println!("GATE PASS — toxic {:.1}%, clean {:.1}%", toxic_accuracy * 100.0, clean_accuracy * 100.0);
+        charcoal::cli::classify_gate::GateOutcome::Pass { agreement, sample } => {
+            println!("GATE PASS — {:.1}% agreement over {} posts", agreement * 100.0, sample);
             Ok(())
         }
-        charcoal::cli::classify_gate::GateOutcome::Fail { toxic_accuracy, clean_accuracy, reason } => {
-            eprintln!("GATE FAIL — {reason} (toxic {:.1}%, clean {:.1}%)", toxic_accuracy * 100.0, clean_accuracy * 100.0);
+        charcoal::cli::classify_gate::GateOutcome::Fail { agreement, sample, reason } => {
+            eprintln!("GATE FAIL — {reason} ({:.1}% agreement over {} posts)", agreement * 100.0, sample);
             std::process::exit(1);
         }
     }
@@ -3970,81 +3990,92 @@ Run: `cargo test --test unit_classify_gate && cargo clippy --features web -- -D 
 
 ```bash
 git add src/cli/classify_gate.rs src/cli/mod.rs src/main.rs tests/unit_classify_gate.rs
-git commit -m 'feat(cli): classify-gate Step 4.5 accuracy gate
+git commit -m 'feat(cli): classify-gate shadow-agreement gate (Step 4.5)
 
-Runs the configured backend against tests/fixtures/cope_b/known_toxic.jsonl
-+ known_clean.jsonl. Per-class accuracy must reach 90% with the
-backend-owned threshold; fixtures must each have >= 20 entries. Fails
-fast with a clear reason; exits non-zero on miss so CI can gate prod
-cutover.
+Runs the candidate backend AND the reference (Zentropi) backend over
+tests/fixtures/cope_b/ab_sample.jsonl and asserts they agree on the
+binary toxic verdict for >= 90% of the sample (MIN_SAMPLE=50, target
+~100). Dumps every disagreement to target/classify-gate-disagreements.jsonl
+for review; exits non-zero on a miss so CI can gate prod cutover. No
+hand labels — the reference backend is the comparison target.
 
-evaluate() is pure (in-memory inputs only) so unit tests can assert
+evaluate() is pure (in-memory paired verdicts) so unit tests can assert
 pass/fail/too-small without mocking a classifier.
 
 Chainlink #<Phase 6.4 issue id>.
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>'
 ```
 
 - [ ] **Step 5: Close subissue, switch to Chunk 6**
 
 ```
 chainlink issue close <Phase 6.4 issue id>
-chainlink session work <Phase 6.5 issue id>   # threshold calibration + Zentropi-hosted CoPE-B
+chainlink session work <Phase 6.5 issue id>   # threshold sanity check + Zentropi-hosted CoPE-B
 ```
 
 ---
 
-## Chunk 6: Threshold calibration + Zentropi-hosted CoPE-B research / CoPE-A fallback
+## Chunk 6: Threshold sanity check + Zentropi-hosted CoPE-B research / CoPE-A fallback
 
-**Subissue:** `Phase 6.5 — Confidence threshold calibration`.
+**Subissue:** `Phase 6.5 — Threshold sanity check + optional retune`.
 
-This chunk is short on code, heavy on calibration + research. Two artifacts:
-1. Concrete `COPE_B_THRESHOLD` value set in `src/toxicity/runpod_cope_b.rs` (code change, not env).
+This chunk is short on code, heavy on verification + research. Two artifacts:
+1. A verified `COPE_B_THRESHOLD` value in `src/toxicity/runpod_cope_b.rs` — keep the spec default unless the distribution check below shows it has materially shifted (code change, not env).
 2. Decision on whether `ZentropiClient` can call CoPE-B via the hosted API (versus staying on CoPE-A as fallback).
 
-### Task 6.1: Calibrate `COPE_B_THRESHOLD`
+### Task 6.1: Verify `COPE_B_THRESHOLD` distribution parity (retune only if shifted)
 
-**Prereqs:** Chunk 3 deployed image, Chunk 4 adapter merged on `feat/cope-b-self-host`, Chunk 5 `classify-gate` CLI available, Chunk 2 fixtures authored.
+**Prereqs:** Chunk 3 deployed image, Chunk 4 adapter merged on `feat/cope-b-self-host`, Chunk 5 `classify-gate` CLI available, Chunk 2 `ab_sample.jsonl` harvested.
 
-**Note on spec divergence:** spec Step 5 frames calibration as "pick the
-threshold that maximizes accuracy on labeled examples [using A/B output]."
-We use `classify-gate` sweeps rather than an A/B pipeline because the
-threshold lives on the impl, not in the `Pair` data the A/B harness collects —
-sweep-and-gate is the equivalent operation with simpler iteration.
+**Reframing from the spec:** spec Step 5 frames this as a full threshold
+calibration against labeled examples. Per decision node 251 we no longer
+hand-label, so this becomes a **distribution sanity check**: compare the
+candidate backend's score/decision distribution against the reference
+(Zentropi) backend over `ab_sample.jsonl`. The goal is parity, not a tuned
+accuracy maximum — keep the spec default `COPE_B_THRESHOLD` unless the
+distribution has materially shifted (e.g. the candidate flips far more posts
+toxic than Zentropi at the default, which would also show up as
+shadow-agreement failures in Chunk 5). Only then retune.
 
-- [ ] **Step 1: Run gate at current threshold (0.5)**
+- [ ] **Step 1: Run the shadow-agreement gate at the current threshold (0.5)**
 
 Locally (or against the staging RunPod endpoint):
 
 ```
-CHARCOAL_CLASSIFIER=runpod \
 RUNPOD_ENDPOINT_URL=<staging endpoint> \
 RUNPOD_API_KEY=<key> \
+ZENTROPI_API_KEY=<key> \
+ZENTROPI_LABELER_ID=<id> \
 cargo run --features web -- classify-gate
 ```
 
-Capture the printed `toxic` and `clean` accuracy numbers.
+Capture the printed agreement percentage and inspect
+`target/classify-gate-disagreements.jsonl`. If agreement is already ≥ 90% and
+the disagreements aren't systematically one-sided (candidate flipping toxic
+where Zentropi says clean, or vice versa), the default threshold is fine — keep
+it and skip to Step 3.
 
-- [ ] **Step 2: Sweep thresholds**
+- [ ] **Step 2: Sweep thresholds ONLY if the distribution has shifted**
 
-Manually walk thresholds in `runpod_cope_b.rs::COPE_B_THRESHOLD` across `0.3, 0.5, 0.7, 0.85, 0.9` (one branch commit per sweep value, or use a quick shell loop with sed + `cargo run`). For each, rerun the gate and record numbers. Pick the threshold that maximizes the minimum of (toxic accuracy, clean accuracy).
+If Step 1 shows a material, one-sided distribution gap, walk thresholds in `runpod_cope_b.rs::COPE_B_THRESHOLD` across `0.3, 0.5, 0.7, 0.85, 0.9` (one branch commit per sweep value, or a quick shell loop with sed + `cargo run`). For each, rerun the gate and record the agreement percentage. Pick the threshold that maximizes agreement with the reference backend. If no sweep value beats the default by a meaningful margin, keep the default.
 
-- [ ] **Step 3: Commit the chosen value**
+- [ ] **Step 3: Commit the verified value**
 
-Update `pub const COPE_B_THRESHOLD: f32 = <chosen>;` in `src/toxicity/runpod_cope_b.rs`. Replace the `TODO(migration-step-5)` doc-comment with a one-line note recording the calibration date + accuracy numbers.
+Keep (or, if retuned, update) `pub const COPE_B_THRESHOLD: f32 = <value>;` in `src/toxicity/runpod_cope_b.rs`. Replace the `TODO(migration-step-5)` doc-comment with a one-line note recording the verification date + the agreement percentage observed (and the chosen threshold if you retuned).
 
 ```bash
 git add src/toxicity/runpod_cope_b.rs
-git commit -m 'feat(toxicity): calibrate COPE_B_THRESHOLD against labeled fixtures
+git commit -m 'feat(toxicity): verify COPE_B_THRESHOLD distribution parity vs Zentropi
 
-classify-gate sweep at thresholds 0.3, 0.5, 0.7, 0.85, 0.9 against
-tests/fixtures/cope_b/{known_toxic,known_clean}.jsonl on the staging
-RunPod endpoint. Chose <X> — toxic accuracy <T%>, clean accuracy <C%>.
+classify-gate shadow-agreement run over tests/fixtures/cope_b/ab_sample.jsonl
+against the staging RunPod endpoint with Zentropi as reference. Agreement
+<A%> at threshold <X>; kept the spec default / retuned to <X> (distribution
+materially shifted: <yes/no>).
 
 Chainlink #<Phase 6.5 issue id>.
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>'
 ```
 
 ### Task 6.2: Research Zentropi-hosted CoPE-B

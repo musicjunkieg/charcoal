@@ -2672,6 +2672,39 @@
       "created_at": "2026-06-08T16:07:09.367448-07:00",
       "updated_at": "2026-06-08T16:07:09.367448-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
+    },
+    {
+      "id": 250,
+      "change_id": "f2cb3ccb-4ca8-4351-8feb-e44c85dc15e6",
+      "node_type": "option",
+      "title": "Shadow-comparison gate: diff RunPod-CoPE-B vs live Zentropi outputs on real posts; drop hand-labeled fixtures + formal 90% accuracy gate",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T11:43:46.737916-07:00",
+      "updated_at": "2026-06-17T11:43:46.737916-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":85}"
+    },
+    {
+      "id": 251,
+      "change_id": "16cbd883-488d-40e3-ae53-83df7468138e",
+      "node_type": "decision",
+      "title": "Replace formal accuracy gate with shadow-comparison agreement gate to reach RunPod cutover ASAP",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T11:43:46.750080-07:00",
+      "updated_at": "2026-06-17T11:43:46.750080-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":88,\"prompt\":\"what if we skip that part where we retrain? I want to just get moved over to runpod ASAP and based on waht we've learned, we shouldn't get weaker signal from the previous model\"}"
+    },
+    {
+      "id": 252,
+      "change_id": "f9f9d355-77e4-4462-a4dc-d9fa199113cf",
+      "node_type": "action",
+      "title": "Revise CoPE-B plan: drop hand-labeled accuracy gate, adopt shadow-agreement gate (Chunks 2/5/6 + subissue names)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T12:01:52.850315-07:00",
+      "updated_at": "2026-06-17T12:01:52.850315-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-06-05-cope-b-self-host.md\"]}"
     }
   ],
   "edges": [
@@ -5292,6 +5325,50 @@
       "weight": 1.0,
       "rationale": "Ozone non-fit recorded; outcome stands",
       "created_at": "2026-06-08T16:07:34.496701-07:00"
+    },
+    {
+      "id": 245,
+      "from_node_id": 228,
+      "to_node_id": 250,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "f2cb3ccb-4ca8-4351-8feb-e44c85dc15e6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Validation-strategy option under Phase 6 goal",
+      "created_at": "2026-06-17T11:43:46.756146-07:00"
+    },
+    {
+      "id": 248,
+      "from_node_id": 250,
+      "to_node_id": 251,
+      "from_change_id": "f2cb3ccb-4ca8-4351-8feb-e44c85dc15e6",
+      "to_change_id": "16cbd883-488d-40e3-ae53-83df7468138e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chose shadow comparison over hand-labeled gate",
+      "created_at": "2026-06-17T11:44:15.060044-07:00"
+    },
+    {
+      "id": 249,
+      "from_node_id": 232,
+      "to_node_id": 251,
+      "from_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "to_change_id": "16cbd883-488d-40e3-ae53-83df7468138e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Refines RunPod migration decision: validation strategy changed",
+      "created_at": "2026-06-17T11:44:15.066357-07:00"
+    },
+    {
+      "id": 250,
+      "from_node_id": 251,
+      "to_node_id": 252,
+      "from_change_id": "16cbd883-488d-40e3-ae53-83df7468138e",
+      "to_change_id": "f9f9d355-77e4-4462-a4dc-d9fa199113cf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements the shadow-comparison decision in the plan doc",
+      "created_at": "2026-06-17T12:01:52.858819-07:00"
     }
   ],
   "documents": [
