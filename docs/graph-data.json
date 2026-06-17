@@ -2679,9 +2679,9 @@
       "node_type": "option",
       "title": "Shadow-comparison gate: diff RunPod-CoPE-B vs live Zentropi outputs on real posts; drop hand-labeled fixtures + formal 90% accuracy gate",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T11:43:46.737916-07:00",
-      "updated_at": "2026-06-17T11:43:46.737916-07:00",
+      "updated_at": "2026-06-17T13:30:10.809397-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":85}"
     },
     {
@@ -2690,9 +2690,9 @@
       "node_type": "decision",
       "title": "Replace formal accuracy gate with shadow-comparison agreement gate to reach RunPod cutover ASAP",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T11:43:46.750080-07:00",
-      "updated_at": "2026-06-17T11:43:46.750080-07:00",
+      "updated_at": "2026-06-17T13:30:10.816526-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":88,\"prompt\":\"what if we skip that part where we retrain? I want to just get moved over to runpod ASAP and based on waht we've learned, we shouldn't get weaker signal from the previous model\"}"
     },
     {
@@ -2701,9 +2701,9 @@
       "node_type": "action",
       "title": "Revise CoPE-B plan: drop hand-labeled accuracy gate, adopt shadow-agreement gate (Chunks 2/5/6 + subissue names)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T12:01:52.850315-07:00",
-      "updated_at": "2026-06-17T12:01:52.850315-07:00",
+      "updated_at": "2026-06-17T13:30:10.823694-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-06-05-cope-b-self-host.md\"]}"
     },
     {
@@ -2712,9 +2712,9 @@
       "node_type": "outcome",
       "title": "Plan revised + committed (cb70259); no dangling fixture/accuracy refs; ready to execute Chunk 1",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T12:02:14.913974-07:00",
-      "updated_at": "2026-06-17T12:02:14.913974-07:00",
+      "updated_at": "2026-06-17T13:30:10.830140-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"cb70259\",\"confidence\":95}"
     },
     {
@@ -2723,9 +2723,9 @@
       "node_type": "action",
       "title": "Execute Chunk 1: generalize nli_audit -> audit_log AuditWriter (EventKind), migrate callers, one-time legacy migration; spec+quality reviewed",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T12:17:47.784349-07:00",
-      "updated_at": "2026-06-17T12:17:47.784349-07:00",
+      "updated_at": "2026-06-17T13:30:10.835915-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"0510be1\",\"confidence\":90,\"files\":[\"src/scoring/audit_log.rs\",\"src/scoring/profile.rs\",\"src/pipeline/amplification.rs\",\"src/main.rs\",\"tests/unit_audit_log.rs\"]}"
     },
     {
@@ -2734,9 +2734,9 @@
       "node_type": "outcome",
       "title": "Chunk 1 complete: 3 commits (67669f2/ffc9a55/0510be1), full web suite green, code-review APPROVED, migration helper tested",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T12:17:47.805052-07:00",
-      "updated_at": "2026-06-17T12:17:47.805052-07:00",
+      "updated_at": "2026-06-17T13:30:10.842081-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"0510be1\",\"confidence\":95}"
     },
     {
@@ -2745,9 +2745,9 @@
       "node_type": "action",
       "title": "Draft CoPE-B policy.txt (POLICY-slot, adapted from refs/labeler_prompt.txt) + gpu/cope-b-runpod scaffold for Bryan review",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T12:59:16.401127-07:00",
-      "updated_at": "2026-06-17T12:59:16.401127-07:00",
+      "updated_at": "2026-06-17T13:30:10.847253-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"9752e35\",\"confidence\":75,\"files\":[\"gpu/cope-b-runpod/policy.txt\",\"gpu/cope-b-runpod/README.md\"]}"
     },
     {
@@ -2756,9 +2756,9 @@
       "node_type": "outcome",
       "title": "Draft policy committed (9752e35), ~514 tokens; pending Bryan review + Colab sanity-check",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T12:59:16.420957-07:00",
-      "updated_at": "2026-06-17T12:59:16.420957-07:00",
+      "updated_at": "2026-06-17T13:30:10.852450-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"9752e35\",\"confidence\":70}"
     },
     {
@@ -2767,9 +2767,9 @@
       "node_type": "action",
       "title": "Execute Chunk 3: RunPod CoPE-B GPU service (prompt.py/handler.py vLLM, Dockerfile, runpod.yml, smoke + prefix-cache scripts, GH Actions image build); TDD, lazy-engine for CPU-testability",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T13:17:06.760125-07:00",
-      "updated_at": "2026-06-17T13:17:06.760125-07:00",
+      "updated_at": "2026-06-17T13:30:10.857495-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"8eba840\",\"confidence\":88,\"files\":[\"gpu/cope-b-runpod/handler.py\",\"gpu/cope-b-runpod/prompt.py\",\"gpu/cope-b-runpod/Dockerfile\",\".github/workflows/build-cope-b-image.yml\"]}"
     },
     {
@@ -2778,9 +2778,9 @@
       "node_type": "outcome",
       "title": "Chunk 3 done (commits 324fb37..8eba840): spec ✅, code-quality fixed Dockerfile layer-order bug, 9 py tests pass + handler async tests verified non-vacuous. Image build + smoke deferred to GPU/CI (no local GPU)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-06-17T13:17:06.780466-07:00",
-      "updated_at": "2026-06-17T13:17:06.780466-07:00",
+      "updated_at": "2026-06-17T13:30:10.863193-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"8eba840\",\"confidence\":90}"
     }
   ],
