@@ -1,13 +1,16 @@
 //! Tests for the two-stage toxicity scorer.
 //!
-//! Stage 1 = ONNX clean-pass filter (< 0.10 means cleared, no Zentropi call).
-//! Stage 2 = Zentropi binary classification for everything else.
-//! When Zentropi is unavailable, fall back to ONNX threshold (>= 0.50 → toxic).
+//! Stage 1 = ONNX clean-pass filter (< 0.10 means cleared, no Stage-2 call).
+//! Stage 2 = the required `ToxicityClassifier` (binary verdict) for everything
+//! at or above the clean threshold. There is no ONNX-only fallback: a Stage-2
+//! classifier error propagates rather than degrading to an ONNX guess.
 
 use anyhow::Result;
 use async_trait::async_trait;
+use charcoal::toxicity::classifier::{ClassifierVerdict, StubClassifier};
 use charcoal::toxicity::ensemble::{TwoStageToxicityScorer, VerdictSource};
 use charcoal::toxicity::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
+use std::sync::Arc;
 
 /// Test scorer that returns a fixed continuous toxicity score for any input.
 /// Used as the ONNX-equivalent primary scorer.
@@ -23,44 +26,81 @@ impl ToxicityScorer for FixedScorer {
     }
 }
 
-fn two_stage_no_zentropi(onnx_score: f64) -> TwoStageToxicityScorer {
-    TwoStageToxicityScorer::new(Box::new(FixedScorer(onnx_score)), None)
+/// Build a verdict for the stub script. Confidence is set above any plausible
+/// threshold so `is_toxic` tracks `toxic_token` (StubClassifier threshold is 0).
+fn verdict(toxic: bool) -> ClassifierVerdict {
+    ClassifierVerdict {
+        toxic_token: toxic,
+        confidence: 0.99,
+        latency_ms: 1,
+        model_id: "stub".into(),
+        policy_version: "stub".into(),
+    }
+}
+
+/// Two-stage scorer with a scripted Stage-2 classifier. For ONNX-cleared cases
+/// pass an empty script — the classifier is never invoked.
+fn two_stage(onnx_score: f64, script: Vec<ClassifierVerdict>) -> TwoStageToxicityScorer {
+    TwoStageToxicityScorer::new(
+        Box::new(FixedScorer(onnx_score)),
+        Arc::new(StubClassifier::with_script(script)),
+    )
 }
 
 #[tokio::test]
-async fn onnx_below_clean_threshold_skips_zentropi() {
-    // ONNX 0.05 < 0.10 clean threshold → cleared, is_toxic = false.
-    let scorer = two_stage_no_zentropi(0.05);
+async fn onnx_below_clean_threshold_skips_stage2() {
+    // ONNX 0.05 < 0.10 clean threshold → cleared, is_toxic = false. The stub
+    // script is empty: a Stage-2 call here would error (exhausted), proving the
+    // clean-pass short-circuit really skips the classifier.
+    let scorer = two_stage(0.05, vec![]);
     let v = scorer.classify_post("benign text", None).await.unwrap();
     assert!(!v.is_toxic);
     assert_eq!(v.source, VerdictSource::OnnxCleared);
-    assert!(v.zentropi_confidence.is_none());
+    assert!(v.classifier_confidence.is_none());
+    assert!(v.classifier_model_id.is_none());
     assert!((v.onnx_score - 0.05).abs() < 1e-9);
 }
 
 #[tokio::test]
-async fn onnx_above_clean_threshold_no_zentropi_uses_fallback_threshold() {
-    // ONNX 0.30, no Zentropi → falls back to 0.50 binary threshold → safe.
-    let scorer = two_stage_no_zentropi(0.30);
+async fn onnx_above_clean_threshold_classifier_safe() {
+    // ONNX 0.30 reaches Stage 2; the classifier returns not-toxic → safe.
+    let scorer = two_stage(0.30, vec![verdict(false)]);
     let v = scorer.classify_post("ambiguous text", None).await.unwrap();
     assert!(!v.is_toxic);
-    assert_eq!(v.source, VerdictSource::OnnxFallback);
+    assert_eq!(v.source, VerdictSource::ClassifierSafe);
+    assert_eq!(v.classifier_confidence, Some(0.99));
+    assert_eq!(v.classifier_model_id.as_deref(), Some("stub"));
 }
 
 #[tokio::test]
-async fn onnx_well_above_fallback_threshold_no_zentropi_is_toxic() {
-    // ONNX 0.70 > 0.50 fallback → is_toxic = true via OnnxFallback.
-    let scorer = two_stage_no_zentropi(0.70);
+async fn onnx_above_clean_threshold_classifier_toxic() {
+    // ONNX 0.70 reaches Stage 2; the classifier returns toxic → toxic.
+    let scorer = two_stage(0.70, vec![verdict(true)]);
     let v = scorer.classify_post("hostile text", None).await.unwrap();
     assert!(v.is_toxic);
-    assert_eq!(v.source, VerdictSource::OnnxFallback);
+    assert_eq!(v.source, VerdictSource::ClassifierToxic);
+    assert_eq!(v.classifier_policy_version.as_deref(), Some("stub"));
+}
+
+#[tokio::test]
+async fn classifier_error_propagates_no_silent_fallback() {
+    // ONNX 0.70 reaches Stage 2, but the stub script is empty → the classifier
+    // errors. The new design propagates that error rather than falling back to
+    // an ONNX threshold guess (spec: no silent fallback).
+    let scorer = two_stage(0.70, vec![]);
+    let err = scorer
+        .classify_post("hostile text", None)
+        .await
+        .unwrap_err();
+    assert!(format!("{err}").contains("stub script exhausted"));
 }
 
 #[tokio::test]
 async fn classify_batch_preserves_input_order() {
     // Stream concurrency reorders execution, but classify_batch must restore
     // the original index ordering for caller alignment with their text vec.
-    let scorer = two_stage_no_zentropi(0.05);
+    // All inputs are ONNX-cleared, so the empty stub script is never touched.
+    let scorer = two_stage(0.05, vec![]);
     let texts: Vec<String> = (0..16).map(|i| format!("post {}", i)).collect();
     let contexts: Vec<Option<String>> = vec![None; texts.len()];
     let verdicts = scorer.classify_batch(&texts, &contexts).await.unwrap();
@@ -74,7 +114,7 @@ async fn classify_batch_preserves_input_order() {
 
 #[tokio::test]
 async fn classify_batch_rejects_mismatched_lengths() {
-    let scorer = two_stage_no_zentropi(0.05);
+    let scorer = two_stage(0.05, vec![]);
     let texts = vec!["a".to_string(), "b".to_string()];
     let contexts = vec![None];
     let err = scorer.classify_batch(&texts, &contexts).await.unwrap_err();
@@ -85,7 +125,7 @@ async fn classify_batch_rejects_mismatched_lengths() {
 async fn score_text_returns_primary_continuous_score() {
     // ToxicityScorer::score_text on TwoStage delegates to the primary,
     // preserving the continuous score for legacy continuous-score callers.
-    let scorer = two_stage_no_zentropi(0.42);
+    let scorer = two_stage(0.42, vec![]);
     let r = scorer.score_text("anything").await.unwrap();
     assert!((r.toxicity - 0.42).abs() < 1e-9);
 }
@@ -94,7 +134,7 @@ async fn score_text_returns_primary_continuous_score() {
 async fn classify_batch_via_trait_method_works() {
     // ToxicityScorer::classify_batch_with_contexts on TwoStage uses the
     // two-stage pipeline (overrides the trait default).
-    let scorer = two_stage_no_zentropi(0.05);
+    let scorer = two_stage(0.05, vec![]);
     let texts = vec!["a".to_string(), "b".to_string()];
     let contexts: Vec<Option<String>> = vec![None, None];
     let verdicts = ToxicityScorer::classify_batch_with_contexts(&scorer, &texts, &contexts)
@@ -135,7 +175,7 @@ async fn default_trait_classify_batch_below_threshold_safe() {
 }
 
 #[tokio::test]
-async fn has_zentropi_reflects_construction() {
-    let no_z = two_stage_no_zentropi(0.05);
-    assert!(!no_z.has_zentropi());
+async fn classifier_name_reflects_construction() {
+    let scorer = two_stage(0.05, vec![]);
+    assert_eq!(scorer.classifier_name(), "stub");
 }

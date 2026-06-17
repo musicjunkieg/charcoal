@@ -1155,44 +1155,17 @@ fn create_scorer(
         }
     };
 
-    let zentropi = build_zentropi(config);
+    // Stage-2 classifier is required and selected by CHARCOAL_CLASSIFIER; the
+    // factory refuses to build (and the binary refuses to boot) if unconfigured.
+    let classifier = charcoal::toxicity::classifier::build_from_env()?;
+    info!(
+        backend = classifier.name(),
+        "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
+    );
 
     Ok(Box::new(
-        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, zentropi),
+        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, classifier),
     ))
-}
-
-/// Build a Zentropi client when both API key and labeler ID are configured.
-/// Returns `None` (with a logged warning) on misconfiguration so the pipeline
-/// degrades gracefully to ONNX-only.
-fn build_zentropi(
-    config: &config::Config,
-) -> Option<std::sync::Arc<charcoal::toxicity::zentropi::ZentropiClient>> {
-    let api_key = config.zentropi_api_key.as_ref().filter(|k| !k.is_empty())?;
-    let labeler_id = config
-        .zentropi_labeler_id
-        .as_ref()
-        .filter(|k| !k.is_empty())?;
-    let version_id = config
-        .zentropi_labeler_version_id
-        .as_ref()
-        .filter(|k| !k.is_empty())
-        .cloned();
-
-    match charcoal::toxicity::zentropi::ZentropiClient::new(
-        api_key.clone(),
-        labeler_id.clone(),
-        version_id,
-    ) {
-        Ok(c) => {
-            info!("Zentropi binary classifier loaded — two-stage scoring enabled");
-            Some(std::sync::Arc::new(c))
-        }
-        Err(e) => {
-            warn!(error = %e, "Failed to init Zentropi client, using ONNX-only fallback");
-            None
-        }
-    }
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.

@@ -193,3 +193,53 @@ mod zentropi_trait {
         assert_eq!(dyn_ref.threshold(), ZENTROPI_THRESHOLD);
     }
 }
+
+mod factory {
+    use charcoal::toxicity::classifier::build_from_env;
+    use serial_test::serial;
+
+    /// Save + restore the existing value so tests don't break a developer's
+    /// shell-exported env.
+    struct EnvGuard {
+        prior: Option<String>,
+    }
+    impl EnvGuard {
+        fn new() -> Self {
+            Self {
+                prior: std::env::var("CHARCOAL_CLASSIFIER").ok(),
+            }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prior {
+                Some(v) => std::env::set_var("CHARCOAL_CLASSIFIER", v),
+                None => std::env::remove_var("CHARCOAL_CLASSIFIER"),
+            }
+        }
+    }
+
+    #[test]
+    #[serial(charcoal_classifier_env)]
+    fn build_fails_when_classifier_unset() {
+        let _g = EnvGuard::new();
+        std::env::remove_var("CHARCOAL_CLASSIFIER");
+        // let-else (not unwrap_err): the Ok type Arc<dyn ToxicityClassifier>
+        // is a trait object and doesn't implement Debug, which unwrap_err needs.
+        let Err(err) = build_from_env() else {
+            panic!("expected build_from_env to fail when CHARCOAL_CLASSIFIER is unset");
+        };
+        assert!(format!("{err}").contains("CHARCOAL_CLASSIFIER"));
+    }
+
+    #[test]
+    #[serial(charcoal_classifier_env)]
+    fn build_fails_on_unrecognized_backend() {
+        let _g = EnvGuard::new();
+        std::env::set_var("CHARCOAL_CLASSIFIER", "not-a-backend");
+        let Err(err) = build_from_env() else {
+            panic!("expected build_from_env to reject an unrecognized backend");
+        };
+        assert!(format!("{err}").contains("not a known backend"));
+    }
+}

@@ -8,10 +8,10 @@
 //! threshold — see spec §"Backend selection and per-backend thresholds"
 //! for why threshold drift via runtime override is forbidden.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Outcome of a single classification call. Stage-2 only — the full two-stage
 /// verdict lives in `TwoStageVerdict`.
@@ -94,5 +94,45 @@ impl ToxicityClassifier for StubClassifier {
     }
     fn threshold(&self) -> f32 {
         self.threshold
+    }
+}
+
+/// Read `CHARCOAL_CLASSIFIER` and build the configured backend. Returns
+/// `Err` when the var is unset, empty, or holds an unrecognized value —
+/// the binary refuses to boot in those cases (spec §"Backend selection").
+pub fn build_from_env() -> Result<Arc<dyn ToxicityClassifier>> {
+    let kind = std::env::var("CHARCOAL_CLASSIFIER")
+        .ok()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("CHARCOAL_CLASSIFIER must be set (one of: runpod, zentropi)")
+        })?;
+
+    match kind.as_str() {
+        "runpod" => {
+            let endpoint = std::env::var("RUNPOD_ENDPOINT_URL")
+                .context("RUNPOD_ENDPOINT_URL must be set for CHARCOAL_CLASSIFIER=runpod")?;
+            let api_key = std::env::var("RUNPOD_API_KEY")
+                .context("RUNPOD_API_KEY must be set for CHARCOAL_CLASSIFIER=runpod")?;
+            let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?;
+            Ok(Arc::new(client))
+        }
+        "zentropi" => {
+            let api_key = std::env::var("ZENTROPI_API_KEY")
+                .context("ZENTROPI_API_KEY must be set for CHARCOAL_CLASSIFIER=zentropi")?;
+            let labeler_id = std::env::var("ZENTROPI_LABELER_ID")
+                .context("ZENTROPI_LABELER_ID must be set for CHARCOAL_CLASSIFIER=zentropi")?;
+            let labeler_version_id = std::env::var("ZENTROPI_LABELER_VERSION_ID").ok();
+            let client = crate::toxicity::zentropi::ZentropiClient::new(
+                api_key,
+                labeler_id,
+                labeler_version_id,
+            )?;
+            Ok(Arc::new(client))
+        }
+        other => Err(anyhow::anyhow!(
+            "CHARCOAL_CLASSIFIER={other:?} is not a known backend (runpod | zentropi)"
+        )),
     }
 }
