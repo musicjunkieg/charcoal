@@ -2716,6 +2716,28 @@
       "created_at": "2026-06-17T12:02:14.913974-07:00",
       "updated_at": "2026-06-17T12:02:14.913974-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"cb70259\",\"confidence\":95}"
+    },
+    {
+      "id": 254,
+      "change_id": "275926b9-6289-4cb0-88cd-45e3c429afeb",
+      "node_type": "action",
+      "title": "Execute Chunk 1: generalize nli_audit -> audit_log AuditWriter (EventKind), migrate callers, one-time legacy migration; spec+quality reviewed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T12:17:47.784349-07:00",
+      "updated_at": "2026-06-17T12:17:47.784349-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"0510be1\",\"confidence\":90,\"files\":[\"src/scoring/audit_log.rs\",\"src/scoring/profile.rs\",\"src/pipeline/amplification.rs\",\"src/main.rs\",\"tests/unit_audit_log.rs\"]}"
+    },
+    {
+      "id": 255,
+      "change_id": "709820f1-c83e-44e8-863a-6b7d2a88d982",
+      "node_type": "outcome",
+      "title": "Chunk 1 complete: 3 commits (67669f2/ffc9a55/0510be1), full web suite green, code-review APPROVED, migration helper tested",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-17T12:17:47.805052-07:00",
+      "updated_at": "2026-06-17T12:17:47.805052-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"0510be1\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -5391,6 +5413,28 @@
       "weight": 1.0,
       "rationale": "Result of the plan-revision action",
       "created_at": "2026-06-17T12:02:14.921351-07:00"
+    },
+    {
+      "id": 252,
+      "from_node_id": 232,
+      "to_node_id": 254,
+      "from_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "to_change_id": "275926b9-6289-4cb0-88cd-45e3c429afeb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 1 preflight implements the RunPod migration decision",
+      "created_at": "2026-06-17T12:17:47.792043-07:00"
+    },
+    {
+      "id": 253,
+      "from_node_id": 254,
+      "to_node_id": 255,
+      "from_change_id": "275926b9-6289-4cb0-88cd-45e3c429afeb",
+      "to_change_id": "709820f1-c83e-44e8-863a-6b7d2a88d982",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of Chunk 1 execution",
+      "created_at": "2026-06-17T12:17:47.811391-07:00"
     }
   ],
   "documents": [

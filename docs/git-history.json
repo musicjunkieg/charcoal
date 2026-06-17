@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0510be17bfe3cc3a5b682dbf1f27a918648d260e",
+    "short_hash": "0510be1",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:16:38-07:00",
+    "message": "test(audit): test legacy NLI migration + document from_env strictness\n\nApply two non-blocking code-review follow-ups for the Chunk 1 audit_log work:\n\n- Finding #1 (doc clarity): document that AuditWriter::from_env enables the\n  writer ONLY when the env var is exactly \"1\" — any other value (true/yes/0/\n  empty/unset) disables it. Intentional and spec-backed.\n- Finding #4 (coverage): add unit tests for migrate_legacy_nli_audit, which\n  runs on every open_database (every CLI command + web boot) but was untested.\n  Covers the rename path (original gone, dated nli-legacy file created with\n  preserved content) and the clean no-op path (no file, no spurious output).\n\nChainlink #188 (Phase 6.0 preflight, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "cb7025901d01162d0a7209c4bb1eb7bd66489e5a",
     "short_hash": "cb70259",
     "author": "Bryan Guffey",

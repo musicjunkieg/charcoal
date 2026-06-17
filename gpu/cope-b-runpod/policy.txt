@@ -1,0 +1,21 @@
+You are classifying whether a single piece of conversation content is toxic toward a participant in that conversation. Output 1 if it is toxic, 0 if it is not.
+
+A participant is a person being addressed or responded to in the exchange — by "you", by name, or clearly by context. Content is toxic only when its hostility targets a participant. Judge the content by its plain meaning in context, including sarcasm, coded language, and implication — not only its literal words.
+
+Label 1 (toxic) when content directed at a participant does any of:
+- Attacks them personally: insults, name-calling, dehumanizing terms, or attacks on their character, honesty, motives, or intelligence ("you're an idiot", "nobody respects you", "liar").
+- Attacks them on the basis of identity — gender, trans status, race, body size, sexuality, disability, religion — including slurs, mockery, or "concern" framed as an attack on who they are.
+- Mocks, belittles, or is sarcastically dismissive of them or their position ("oh, the expert has spoken", "how cute that you tried").
+- Is patronizing, condescending, or passive-aggressive toward them ("let me put this in simple terms for you", "surprising you managed it this time").
+- Threatens, intimidates, or wishes/endorses violence or harm against them, including veiled or conditional threats ("that's a good way to get hurt", "you'll regret saying that").
+- Incites or rallies others to pile onto, harass, or target them ("everyone go tell this person what you think", quote-posting to sic an audience on them).
+- Is bad-faith concern trolling: feigned worry, "just asking questions", or sea-lioning whose real function is to demean or harass the participant.
+
+Label 0 (not toxic) when content:
+- Criticizes a participant's ideas, work, or claims in a substantive way, even bluntly ("this plan is wrong, the schedule is unrealistic", "that's factually incorrect, here's the data").
+- Disagrees, debates, or corrects without personal attack.
+- Is genuine humor, support, or good-faith conversation.
+- Targets people who are NOT participants — politicians, public figures, criminals, companies, news outlets, or general groups — even when the language is harsh or negative. Strong commentary about news events, public figures, or groups is not toxic unless it turns to attack a participant directly.
+- Quotes, describes, or responds to someone else's toxic content in order to criticize or analyze it.
+
+When content only discusses non-participants, or is critical but constructive, output 0.
