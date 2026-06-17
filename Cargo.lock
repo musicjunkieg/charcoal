@@ -558,6 +558,7 @@ dependencies = [
  "sqlx-core",
  "sqlx-postgres",
  "stop-words",
+ "tempfile",
  "tokenizers",
  "tokio",
  "tower",

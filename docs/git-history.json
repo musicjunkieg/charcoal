@@ -1,5 +1,13 @@
 [
   {
+    "hash": "cb7025901d01162d0a7209c4bb1eb7bd66489e5a",
+    "short_hash": "cb70259",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:02:01-07:00",
+    "message": "docs(plan): replace accuracy gate with shadow-agreement validation\n\nCoPE-B self-host plan revised per decision to reach RunPod cutover ASAP\nwithout hand-labeling fixtures. Validation now diffs candidate (RunPod\nCoPE-B) vs reference (live Zentropi) on ~100 real posts harvested via\nfind-fixtures; gate passes at >=90% binary-label agreement, disagreements\ndumped for review.\n\n- Chunk 2: \"labeled fixtures\" -> A/B sample harvest (ab_sample.jsonl\n  unlabeled + tiny smoke.jsonl); policy.txt authoring unchanged\n- Chunk 5: classify-gate now asserts candidate-vs-reference agreement\n  (MIN_SAMPLE=50, AGREEMENT_THRESHOLD=0.90) instead of accuracy vs labels;\n  classify-compare unchanged (already computes agreement)\n- Chunk 6: threshold calibration softened to distribution sanity check\n- Renamed Phase 6.1/6.4/6.5 subissue titles accordingly\n\nDeciduous: decision 251, action 252.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "18bd51056a284c1791ba8bd83f2800936b562128",
     "short_hash": "18bd510",
     "author": "Bryan Guffey",
