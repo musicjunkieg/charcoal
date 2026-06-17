@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-06-17T20:30:20.927448+00:00",
+  "exported_at": "2026-06-17T20:39:37.840811+00:00",
   "issues": [
+    {
+      "id": 197,
+      "title": "Fix chainlink-safe-fetch MCP: python -> python3 in .mcp.json",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T20:38:46.802296+00:00",
+      "updated_at": "2026-06-17T20:38:46.802296+00:00",
+      "closed_at": null
+    },
     {
       "id": 196,
       "title": "Phase 6.8 — Prod cutover + monitoring",
