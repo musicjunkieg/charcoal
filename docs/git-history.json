@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0b90cc081d172273868f358c6c075a4dea364e3a",
+    "short_hash": "0b90cc0",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:40:55-07:00",
+    "message": "chore(deciduous): sync graph + changelog through Chunk 4\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
     "hash": "d170119f09e962ae6824e3fbe6794c5bd999d7e8",
     "short_hash": "d170119",
     "author": "Bryan Guffey",

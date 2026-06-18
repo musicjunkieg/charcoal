@@ -2826,6 +2826,17 @@
       "created_at": "2026-06-17T14:40:10.711106-07:00",
       "updated_at": "2026-06-17T14:40:10.711106-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"d170119\",\"confidence\":92}"
+    },
+    {
+      "id": 264,
+      "change_id": "2cb69d99-6534-479f-8d98-154e9ca19af0",
+      "node_type": "action",
+      "title": "Execute Chunk 5 (A/B harness + shadow-agreement gate): classify-compare + classify-gate CLI subcommands, pure summarize/evaluate, build_backend_named factory. DRIFT: no src/cli module exists — main.rs is monolithic; creating src/cli/ in lib + adapting plan's crate:: handler refs to charcoal::.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-18T10:20:26.138328-07:00",
+      "updated_at": "2026-06-18T10:20:26.138328-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"0b90cc0\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -5611,6 +5622,17 @@
       "weight": 1.0,
       "rationale": "Chunk 4 execution outcome",
       "created_at": "2026-06-17T14:40:10.717686-07:00"
+    },
+    {
+      "id": 262,
+      "from_node_id": 232,
+      "to_node_id": 264,
+      "from_change_id": "97265a97-c0c0-4093-b924-f644887367cc",
+      "to_change_id": "2cb69d99-6534-479f-8d98-154e9ca19af0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 5 builds the validation gate for the RunPod cutover decision",
+      "created_at": "2026-06-18T10:20:26.145717-07:00"
     }
   ],
   "documents": [

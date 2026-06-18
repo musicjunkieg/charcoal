@@ -136,3 +136,34 @@ pub fn build_from_env() -> Result<Arc<dyn ToxicityClassifier>> {
         )),
     }
 }
+
+/// Build one specific backend by name, reading that backend's env vars but
+/// ignoring `CHARCOAL_CLASSIFIER`. Used by the A/B compare + shadow-agreement
+/// gate tooling, which compares two named backends without changing the
+/// boot-time prod selection.
+pub fn build_backend_named(name: &str) -> Result<Arc<dyn ToxicityClassifier>> {
+    match name.trim().to_lowercase().as_str() {
+        "runpod" => {
+            let endpoint = std::env::var("RUNPOD_ENDPOINT_URL")
+                .context("RUNPOD_ENDPOINT_URL must be set for the runpod backend")?;
+            let api_key = std::env::var("RUNPOD_API_KEY")
+                .context("RUNPOD_API_KEY must be set for the runpod backend")?;
+            let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?;
+            Ok(Arc::new(client))
+        }
+        "zentropi" => {
+            let api_key = std::env::var("ZENTROPI_API_KEY")
+                .context("ZENTROPI_API_KEY must be set for the zentropi backend")?;
+            let labeler_id = std::env::var("ZENTROPI_LABELER_ID")
+                .context("ZENTROPI_LABELER_ID must be set for the zentropi backend")?;
+            let labeler_version_id = std::env::var("ZENTROPI_LABELER_VERSION_ID").ok();
+            let client = crate::toxicity::zentropi::ZentropiClient::new(
+                api_key,
+                labeler_id,
+                labeler_version_id,
+            )?;
+            Ok(Arc::new(client))
+        }
+        other => anyhow::bail!("unknown backend: {other:?} (expected runpod | zentropi)"),
+    }
+}

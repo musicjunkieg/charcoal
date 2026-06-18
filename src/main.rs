@@ -138,6 +138,19 @@ enum Commands {
     /// in production scoring.
     ZentropiCheck,
 
+    /// A/B characterize two classifier backends against a JSONL input set.
+    ClassifyCompare {
+        /// JSONL file path (each line: {id,label,category,content,note}).
+        #[arg(long)]
+        input: std::path::PathBuf,
+        /// Backend A — one of: runpod | zentropi
+        #[arg(long, default_value = "zentropi")]
+        a: String,
+        /// Backend B — one of: runpod | zentropi
+        #[arg(long, default_value = "runpod")]
+        b: String,
+    },
+
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
     Migrate {
@@ -979,6 +992,12 @@ async fn main() -> Result<()> {
                     reasons.join(", "),
                 );
             }
+        }
+
+        Commands::ClassifyCompare { input, a, b } => {
+            let backend_a = charcoal::toxicity::classifier::build_backend_named(&a)?;
+            let backend_b = charcoal::toxicity::classifier::build_backend_named(&b)?;
+            charcoal::cli::classify_compare::run(backend_a, backend_b, &input).await?;
         }
 
         #[cfg(feature = "postgres")]

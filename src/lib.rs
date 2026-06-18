@@ -4,6 +4,7 @@
 // of the threat detection pipeline.
 
 pub mod bluesky;
+pub mod cli;
 pub mod config;
 pub mod constellation;
 pub mod db;
