@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>What it feels like to be protected by Charcoal</title>
+<style>
+  :root{
+    --bg:#101218; --ink:#edeff3; --muted:#9aa1ad; --ember:#ff7a45; --ember2:#ffb088;
+    --red:#e4564d; --grey:#5b616e; --teal:#3fcf9b; --soft:#2a2f3a; --card:#1b1f27; --line:#2c313c;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+  /* progress dots */
+  .nav{position:fixed;right:18px;top:50%;transform:translateY(-50%);z-index:50;display:flex;flex-direction:column;gap:10px}
+  .nav a{width:9px;height:9px;border-radius:50%;background:#3a3f4b;transition:.3s;display:block}
+  .nav a.on{background:var(--ember);transform:scale(1.35)}
+  @media(max-width:680px){.nav{display:none}}
+
+  .scene{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;
+    text-align:center;padding:80px 22px;position:relative;max-width:760px;margin:0 auto}
+  .scene .eyebrow{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--ember);
+    font-weight:700;margin-bottom:14px;opacity:0;transform:translateY(14px);transition:.7s}
+  .scene h2{font-size:clamp(26px,5vw,42px);line-height:1.15;margin:0 0 16px;font-weight:800;
+    opacity:0;transform:translateY(18px);transition:.7s .05s}
+  .scene p{font-size:clamp(16px,2.4vw,20px);color:var(--muted);max-width:600px;margin:0 auto;
+    opacity:0;transform:translateY(18px);transition:.7s .12s}
+  .scene p .hi{color:var(--ink);font-weight:600}
+  .scene p .ember{color:var(--ember2);font-weight:600}
+  .scene.visible .eyebrow,.scene.visible h2,.scene.visible p{opacity:1;transform:none}
+  .stage{position:relative;width:100%;max-width:560px;height:340px;margin:26px auto 0}
+
+  /* the "you" avatar */
+  .you{position:absolute;left:50%;top:50%;width:84px;height:84px;margin:-42px 0 0 -42px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#3a4150,#222732);display:flex;align-items:center;justify-content:center;
+    font-size:38px;z-index:5;transition:.6s;box-shadow:0 0 0 0 rgba(255,122,69,0)}
+  .you.dim{filter:grayscale(.4) brightness(.7) saturate(.6)}
+  .you.glow{box-shadow:0 0 0 6px rgba(255,122,69,.18),0 0 60px 8px rgba(255,122,69,.25)}
+  .you.safe{box-shadow:0 0 0 6px rgba(63,207,155,.18),0 0 50px 6px rgba(63,207,155,.22)}
+
+  /* topic chips that gather around you */
+  .chip{position:absolute;left:50%;top:50%;background:var(--card);border:1px solid var(--line);
+    color:var(--ink);font-size:13px;padding:5px 11px;border-radius:20px;white-space:nowrap;
+    transform:translate(-50%,-50%) translate(var(--cx,0),var(--cy,0)) scale(.4);opacity:0;
+    transition:.7s cubic-bezier(.2,.8,.2,1);z-index:6}
+  .stage.go .chip{opacity:1;transform:translate(-50%,-50%) translate(var(--cx,0),var(--cy,0)) scale(1)}
+
+  /* swarm dots */
+  .dot{position:absolute;left:50%;top:50%;width:14px;height:14px;border-radius:50%;
+    margin:-7px 0 0 -7px;background:var(--red);opacity:0;
+    transform:translate(var(--sx),var(--sy)) scale(.6);z-index:3}
+  .stage.go .dot{opacity:.92;transform:translate(var(--tx),var(--ty)) scale(1);
+    transition:transform 1.1s cubic-bezier(.3,.7,.3,1),opacity .5s,background .6s}
+  .dot.muted{background:var(--grey);opacity:.32}
+  .dot.ally{background:var(--teal)}
+
+  /* shield ring */
+  .shield{position:absolute;left:50%;top:50%;width:230px;height:230px;margin:-115px 0 0 -115px;border-radius:50%;
+    border:2px dashed rgba(255,122,69,.55);opacity:0;transform:scale(.7);transition:.7s .2s;z-index:4}
+  .stage.go .shield{opacity:1;transform:scale(1)}
+  .shield::after{content:"";position:absolute;inset:-2px;border-radius:50%;
+    box-shadow:0 0 40px 4px rgba(255,122,69,.18) inset}
+
+  /* counter */
+  .counter{position:absolute;left:50%;top:calc(50% + 122px);transform:translateX(-50%);
+    font-size:13px;color:var(--red);font-weight:700;opacity:0;transition:.4s;z-index:7}
+  .stage.go .counter{opacity:1}
+
+  /* phone notification flood */
+  .phone{width:260px;margin:24px auto 0;background:#05070b;border:8px solid #20242e;border-radius:30px;
+    padding:16px 12px;height:300px;overflow:hidden;position:relative}
+  .notif{background:#191d25;border-radius:12px;padding:9px 11px;margin-bottom:8px;text-align:left;
+    font-size:12.5px;color:#cfd3da;transform:translateX(120%);opacity:0}
+  .notif .n-h{color:#fff;font-weight:600}
+  .scene.visible .phone .notif{animation:slidein .5s forwards}
+  @keyframes slidein{to{transform:none;opacity:1}}
+  .flood-tag{position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:12px;color:var(--red);font-weight:700}
+
+  /* sign-in card */
+  .signin{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;max-width:380px;
+    margin:26px auto 0;text-align:left;opacity:0;transform:translateY(18px);transition:.7s}
+  .scene.visible .signin{opacity:1;transform:none}
+  .signin .btn{background:#1185fe;color:#fff;border-radius:10px;padding:12px;text-align:center;font-weight:700;margin:6px 0 12px}
+  .signin small{color:var(--muted);display:block;font-size:12.5px;line-height:1.6}
+
+  /* calm digest card */
+  .digest{background:linear-gradient(180deg,#15211c,#141a18);border:1px solid #25463a;border-radius:18px;
+    padding:24px;max-width:430px;margin:26px auto 0;text-align:left;opacity:0;transform:translateY(20px) scale(.98);transition:.8s}
+  .scene.visible .digest{opacity:1;transform:none}
+  .digest .d-top{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;margin-bottom:12px}
+  .digest .d-top .badge{background:var(--teal);color:#06120d;border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:18px}
+  .digest .row{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:15px}
+  .digest .row .ic{font-size:18px;line-height:1.3}
+  .digest .muted{color:var(--muted);font-size:13.5px;margin-top:14px}
+
+  .hero h1{font-size:clamp(34px,7vw,64px);line-height:1.05;font-weight:900;margin:0 0 18px;
+    background:linear-gradient(180deg,#fff,#ffd9c4);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .scrollcue{margin-top:40px;color:var(--muted);font-size:13px;animation:bob 1.8s infinite}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(7px)}}
+
+  .closing{background:radial-gradient(circle at 50% 0%,rgba(255,122,69,.12),transparent 60%)}
+  .footnote{max-width:620px;margin:30px auto 0;padding:16px 18px;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;color:var(--muted);font-size:13px;line-height:1.65;text-align:left;opacity:0;transition:.7s}
+  .scene.visible .footnote{opacity:1}
+  .footnote b{color:var(--ink)}
+
+  @media(prefers-reduced-motion:reduce){
+    .scene .eyebrow,.scene h2,.scene p,.stage .chip,.stage .dot,.signin,.digest,.footnote{transition:none!important;opacity:1!important;transform:none!important}
+    .notif{animation:none!important;opacity:1!important;transform:none!important}
+  }
+</style>
+</head>
+<body>
+<nav class="nav" id="nav"></nav>
+
+<!-- 0 HERO -->
+<section class="scene hero visible" id="s0">
+  <div class="eyebrow">Charcoal</div>
+  <h1>What if you never had to brace for the pile-on again?</h1>
+  <p>You share your life online. Sometimes that invites a crowd you never asked for. Here's how it feels to have something quietly watching your back. <span class="hi">Scroll slowly.</span></p>
+  <div class="scrollcue">↓ scroll</div>
+</section>
+
+<!-- 1 THIS IS YOU -->
+<section class="scene" id="s1">
+  <div class="eyebrow">This is you</div>
+  <h2>You, being yourself online</h2>
+  <p>You post about the things you actually care about — your communities, your work, the causes close to your heart.</p>
+  <div class="stage" data-anim="chips">
+    <div class="you">🙂</div>
+    <div class="chip" style="--cx:-150px;--cy:-90px">your community</div>
+    <div class="chip" style="--cx:160px;--cy:-70px">the causes you love</div>
+    <div class="chip" style="--cx:-140px;--cy:80px">your work</div>
+    <div class="chip" style="--cx:150px;--cy:95px">your people</div>
+  </div>
+</section>
+
+<!-- 2 RISK -->
+<section class="scene" id="s2">
+  <div class="eyebrow">But it can feel risky</div>
+  <h2>Speaking up shouldn't feel like stepping into the open</h2>
+  <p>You know that one honest post — about who you are or what you believe — can catch the wrong person's eye. So sometimes you hesitate before hitting "post."</p>
+</section>
+
+<!-- 3 THE FEAR / PILE-ON -->
+<section class="scene" id="s3">
+  <div class="eyebrow" style="color:var(--red)">Here's what you fear</div>
+  <h2>One hostile account broadcasts your post… and the crowd arrives</h2>
+  <p>A stranger with a big, angry audience reposts your words to mock them. Now hundreds of people you've never met are pouring into your replies. <span class="hi">This is a pile-on.</span></p>
+  <div class="stage" data-anim="attack">
+    <div class="you" id="you3">🙂</div>
+    <div class="counter" id="counter3">0 hostile replies</div>
+  </div>
+</section>
+
+<!-- 4 THE SURPRISE -->
+<section class="scene" id="s4">
+  <div class="eyebrow" style="color:var(--red)">And the cruelest part</div>
+  <h2>You never saw it coming</h2>
+  <p>Your phone won't stop buzzing. You were just living your day. Now you're flooded, exposed, and wondering if it's safer to just… go quiet.</p>
+  <div class="phone">
+    <div class="notif" style="animation-delay:.1s"><span class="n-h">@stranger</span> replied: "imagine thinking that"</div>
+    <div class="notif" style="animation-delay:.35s"><span class="n-h">@nobody_you_know</span> quoted your post</div>
+    <div class="notif" style="animation-delay:.6s"><span class="n-h">@throwaway</span> replied: "🤡🤡🤡"</div>
+    <div class="notif" style="animation-delay:.85s"><span class="n-h">@another_one</span> replied: "ratio"</div>
+    <div class="notif" style="animation-delay:1.1s"><span class="n-h">@and_more</span> and 137 others…</div>
+    <div class="flood-tag">…this is the moment Charcoal is built to prevent.</div>
+  </div>
+</section>
+
+<!-- 5 MEET CHARCOAL -->
+<section class="scene" id="s5">
+  <div class="eyebrow">Now, the same day — with Charcoal</div>
+  <h2>Meet the quiet guardian</h2>
+  <p>Charcoal doesn't change who you are. It changes <span class="ember">the order of events</span> — so trouble meets a wall <em>before</em> it reaches you, not after.</p>
+  <div class="stage" data-anim="meet">
+    <div class="you glow" id="you5">🙂</div>
+    <div class="shield"></div>
+  </div>
+</section>
+
+<!-- 6 SIGN UP -->
+<section class="scene" id="s6">
+  <div class="eyebrow">Getting started</div>
+  <h2>Signing up is one tap — no new password</h2>
+  <p>You sign in with your existing Bluesky account, the same way you'd "sign in with Google." Charcoal never sees a password, only reads what's <span class="hi">already public</span>, and you can switch it off whenever you like.</p>
+  <div class="signin">
+    <div class="btn">Sign in with Bluesky</div>
+    <small>🔒 No password stored by Charcoal.<br>👁️ Reads only public posts — the same things anyone can already see.<br>⏏️ Revoke access anytime, in one click.</small>
+  </div>
+</section>
+
+<!-- 7 LEARNS YOU -->
+<section class="scene" id="s7">
+  <div class="eyebrow">First, it gets to know you</div>
+  <h2>It quietly learns what matters to you</h2>
+  <p>There's no form to fill out. Charcoal reads <span class="hi">your own posts</span> and learns the world you live in — the topics, the communities, the conversations that are <em>yours</em>.</p>
+  <div class="stage" data-anim="chips">
+    <div class="you glow">🙂</div>
+    <div class="chip" style="--cx:-160px;--cy:-80px">what you love</div>
+    <div class="chip" style="--cx:155px;--cy:-95px">who you stand with</div>
+    <div class="chip" style="--cx:-150px;--cy:90px">your causes</div>
+    <div class="chip" style="--cx:165px;--cy:75px">your corner of the internet</div>
+  </div>
+</section>
+
+<!-- 8 WATCHES NEIGHBORHOOD -->
+<section class="scene" id="s8">
+  <div class="eyebrow">Then, while everything's calm</div>
+  <h2>It studies the neighborhood before anything happens</h2>
+  <p>Charcoal looks for a rare, specific combination: people active in <em>your</em> world who <em>also</em> have a habit of cruelty. <span class="hi">Not people who disagree. Not people who share your interests.</span> Only the overlap of both — the ones likely to come for you.</p>
+  <div class="stage" data-anim="scan">
+    <div class="you glow">🙂</div>
+    <div class="counter" id="counter8" style="color:var(--teal)">mapping who's safe… and who isn't</div>
+  </div>
+</section>
+
+<!-- 9 THE DUNK, BLOCKED -->
+<section class="scene" id="s9">
+  <div class="eyebrow" style="color:var(--ember)">So when the dunk comes again…</div>
+  <h2>The wave hits the wall — not you</h2>
+  <p>The same hostile crowd rushes in. But Charcoal already knew most of them. They're <span class="hi">held back and quieted</span> (with your okay) before they ever fill your replies. The handful of genuine voices still get through.</p>
+  <div class="stage" data-anim="shield">
+    <div class="you safe" id="you9">🙂</div>
+    <div class="shield"></div>
+  </div>
+</section>
+
+<!-- 10 WHAT YOU SEE -->
+<section class="scene" id="s10">
+  <div class="eyebrow" style="color:var(--teal)">What you actually see</div>
+  <h2>A calm note — instead of a flood</h2>
+  <p>No avalanche of buzzes. Just one quiet summary, on your terms.</p>
+  <div class="digest">
+    <div class="d-top"><span class="badge">✓</span> Charcoal kept watch today</div>
+    <div class="row"><span class="ic">🛡️</span><div>A pile-on started forming after your post. <b>It was caught early.</b></div></div>
+    <div class="row"><span class="ic">🔇</span><div><b>47 accounts</b> likely there to harass were quieted before they reached you.</div></div>
+    <div class="row"><span class="ic">💬</span><div><b>2 genuine replies</b> are waiting whenever you want them.</div></div>
+    <div class="muted">You don't need to do anything. You were never ambushed.</div>
+  </div>
+</section>
+
+<!-- 11 HOW YOU FEEL -->
+<section class="scene" id="s11">
+  <div class="eyebrow" style="color:var(--teal)">How it feels</div>
+  <h2>You find out from a summary — not a swarm</h2>
+  <p>You're not blindsided. You're not alone with it. You don't have to decide between staying safe and staying yourself. <span class="ember">You just keep being you</span> — and something has your back.</p>
+  <div class="stage" data-anim="meet">
+    <div class="you safe">😌</div>
+    <div class="shield" style="border-color:rgba(63,207,155,.5)"></div>
+  </div>
+</section>
+
+<!-- 12 CLOSING -->
+<section class="scene closing" id="s12">
+  <div class="eyebrow">That's Charcoal</div>
+  <h2>Protection that arrives before the harm does</h2>
+  <p>Not a filter you fight with. A guardian that learns your world, watches the horizon, and meets the crowd at the wall — so the internet stays a place you can be honest in.</p>
+  <div class="footnote" id="foot">
+    <b>An honest note on where things stand.</b> Today, Charcoal is the early-warning brain: it learns your topics and quietly builds a ranked, evidence-backed picture of who is most likely to harass you — so a pile-on is something you're warned about, not blindsided by. The one-tap "quiet them automatically, with your review" shielding shown here is the direction we're building toward. The feeling — <b>not being caught off guard, not facing it alone</b> — is the point, and it's what the system is designed around.
+  </div>
+</section>
+
+<script>
+const scenes=[...document.querySelectorAll('.scene')];
+const nav=document.getElementById('nav');
+scenes.forEach((s,i)=>{const a=document.createElement('a');a.href='#'+s.id;nav.appendChild(a);});
+const navDots=[...nav.children];
+
+// reveal + trigger per-scene animation
+const seen=new Set();
+const io=new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{
+    const i=scenes.indexOf(e.target);
+    if(e.isIntersecting){
+      e.target.classList.add('visible');
+      navDots.forEach((d,j)=>d.classList.toggle('on',j===i));
+      if(!seen.has(i)){seen.add(i);runAnim(e.target);}
+    }
+  });
+},{threshold:.55});
+scenes.forEach(s=>io.observe(s));
+
+function runAnim(scene){
+  const stage=scene.querySelector('.stage');
+  if(!stage)return;
+  const mode=stage.dataset.anim;
+  const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+  if(mode==='attack'||mode==='shield'||mode==='scan'){
+    buildSwarm(stage,mode,reduce);
+  }
+  // chips & meet just need the .go class to fire CSS transitions
+  setTimeout(()=>stage.classList.add('go'), reduce?0:120);
+
+  if(mode==='attack'){
+    const c=scene.querySelector('#counter3'); const you=scene.querySelector('#you3');
+    if(reduce){c.textContent='140+ hostile replies';you.classList.add('dim');return;}
+    let n=0; const target=143;
+    const t=setInterval(()=>{n+=Math.ceil((target-n)/8)+1; if(n>=target){n=target;clearInterval(t);}
+      c.textContent=n+' hostile replies';}, 70);
+    setTimeout(()=>you.classList.add('dim'),700);
+  }
+  if(mode==='scan'){
+    const c=scene.querySelector('#counter8');
+    setTimeout(()=>{if(!reduce)c.textContent='✓ the rare hostile few, spotted in advance';},1700);
+  }
+}
+
+function buildSwarm(stage,mode,reduce){
+  const N=mode==='scan'?40:46;
+  for(let i=0;i<N;i++){
+    const d=document.createElement('div'); d.className='dot';
+    // random start at the edges
+    const ang=Math.random()*Math.PI*2, R=300+Math.random()*120;
+    d.style.setProperty('--sx',Math.cos(ang)*R+'px');
+    d.style.setProperty('--sy',Math.sin(ang)*R+'px');
+
+    let tx,ty;
+    if(mode==='attack'){
+      // crowd densely AROUND the avatar (visible ring-cloud, not hidden under it)
+      const a=Math.random()*Math.PI*2, rr=52+Math.random()*86;
+      tx=Math.cos(a)*rr; ty=Math.sin(a)*rr;
+    }else if(mode==='shield'){
+      // most stop at the shield ring and get muted; a few allies pass through
+      const ally=i%23===0; // ~2 allies
+      if(ally){tx=(Math.random()-.5)*30;ty=(Math.random()-.5)*30;d.classList.add('ally');}
+      else{const a=Math.random()*Math.PI*2,rr=118+Math.random()*10;
+        tx=Math.cos(a)*rr;ty=Math.sin(a)*rr;d.classList.add('muted');}
+    }else{ // scan: dots settle into a calm ring, mostly neutral, a few red
+      const a=(i/N)*Math.PI*2, rr=120;
+      tx=Math.cos(a)*rr; ty=Math.sin(a)*rr;
+      if(i%13===0) d.style.background='var(--red)'; else d.classList.add('muted');
+    }
+    d.style.setProperty('--tx',tx+'px'); d.style.setProperty('--ty',ty+'px');
+    // stagger
+    d.style.transitionDelay=(reduce?0:(i*22))+'ms';
+    stage.appendChild(d);
+  }
+}
+</script>
+</body>
+</html>
