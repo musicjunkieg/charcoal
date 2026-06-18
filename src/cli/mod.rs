@@ -3,3 +3,4 @@
 //! over these). See `src/main.rs` for command registration and argument wiring.
 
 pub mod classify_compare;
+pub mod classify_gate;

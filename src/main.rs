@@ -151,6 +151,24 @@ enum Commands {
         b: String,
     },
 
+    /// Shadow-agreement gate: assert a candidate backend agrees with the
+    /// reference (Zentropi) backend on >= 90% of a JSONL sample. Exits non-zero
+    /// on a miss so CI can gate the prod cutover.
+    ClassifyGate {
+        /// JSONL sample to run through both backends (each line: {id,content,...}).
+        #[arg(long, default_value = "tests/fixtures/cope_b/ab_sample.jsonl")]
+        sample: std::path::PathBuf,
+        /// Candidate backend — one of: runpod | zentropi
+        #[arg(long, default_value = "runpod")]
+        candidate: String,
+        /// Reference backend (comparison target) — one of: runpod | zentropi
+        #[arg(long, default_value = "zentropi")]
+        reference: String,
+        /// Where to write the disagreement report.
+        #[arg(long, default_value = "target/classify-gate-disagreements.jsonl")]
+        disagreements: std::path::PathBuf,
+    },
+
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
     Migrate {
@@ -998,6 +1016,39 @@ async fn main() -> Result<()> {
             let backend_a = charcoal::toxicity::classifier::build_backend_named(&a)?;
             let backend_b = charcoal::toxicity::classifier::build_backend_named(&b)?;
             charcoal::cli::classify_compare::run(backend_a, backend_b, &input).await?;
+        }
+
+        Commands::ClassifyGate {
+            sample,
+            candidate,
+            reference,
+            disagreements,
+        } => {
+            let cand = charcoal::toxicity::classifier::build_backend_named(&candidate)?;
+            let refr = charcoal::toxicity::classifier::build_backend_named(&reference)?;
+            let outcome =
+                charcoal::cli::classify_gate::run(cand, refr, &sample, &disagreements).await?;
+            match outcome {
+                charcoal::cli::classify_gate::GateOutcome::Pass { agreement, sample } => {
+                    println!(
+                        "GATE PASS — {:.1}% agreement over {} posts",
+                        agreement * 100.0,
+                        sample
+                    );
+                }
+                charcoal::cli::classify_gate::GateOutcome::Fail {
+                    agreement,
+                    sample,
+                    reason,
+                } => {
+                    eprintln!(
+                        "GATE FAIL — {reason} ({:.1}% agreement over {} posts)",
+                        agreement * 100.0,
+                        sample
+                    );
+                    std::process::exit(1);
+                }
+            }
         }
 
         #[cfg(feature = "postgres")]
