@@ -2837,6 +2837,17 @@
       "created_at": "2026-06-18T10:20:26.138328-07:00",
       "updated_at": "2026-06-18T10:20:26.138328-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"0b90cc0\",\"confidence\":85}"
+    },
+    {
+      "id": 265,
+      "change_id": "c35bf73b-8721-450b-88d5-7a0cdb2f9e25",
+      "node_type": "outcome",
+      "title": "Chunk 5 DONE (commits ed?..81b1085): classify-compare (pure summarize, per-pair JSONL + summary, build_backend_named bypasses CHARCOAL_CLASSIFIER) + classify-gate (shadow-agreement: candidate vs reference over ab_sample.jsonl, PASS iff agreement>=90% AND sample>=MIN_SAMPLE=50, dumps disagreements, exits 1 on miss; pure evaluate()). DRIFT: created src/cli module (lib) — main.rs was monolithic; handlers use charcoal:: not crate::. 6 new unit tests, full web suite green, clippy clean matrix.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-18T10:26:05.604536-07:00",
+      "updated_at": "2026-06-18T10:26:05.604536-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"81b1085\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -5633,6 +5644,17 @@
       "weight": 1.0,
       "rationale": "Chunk 5 builds the validation gate for the RunPod cutover decision",
       "created_at": "2026-06-18T10:20:26.145717-07:00"
+    },
+    {
+      "id": 263,
+      "from_node_id": 264,
+      "to_node_id": 265,
+      "from_change_id": "2cb69d99-6534-479f-8d98-154e9ca19af0",
+      "to_change_id": "c35bf73b-8721-450b-88d5-7a0cdb2f9e25",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 5 execution outcome",
+      "created_at": "2026-06-18T10:26:05.614146-07:00"
     }
   ],
   "documents": [

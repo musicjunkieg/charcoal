@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Phase 6.4 — A/B harness + shadow-agreement gate (#192)
 - Phase 6.3 — Rust trait + RunPodCopeBClient + ZentropiClient refactor (#191)
 - Phase 6.1 — A/B shadow-agreement sample + smoke set harvested for CoPE-B (#189)
 - Phase 6.2 — RunPod GPU service (Dockerfile + handler + smoke) (#190)

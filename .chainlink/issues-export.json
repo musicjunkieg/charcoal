@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-06-18T17:24:49.360350+00:00",
+  "exported_at": "2026-06-18T17:26:46.349477+00:00",
   "issues": [
     {
       "id": 197,
@@ -87,16 +87,22 @@
       "id": 192,
       "title": "Phase 6.4 — A/B harness + shadow-agreement gate",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": 185,
       "labels": [
         "feature"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Chunk 5 DONE (commits 81b1085 + parent, pushed). Two CLI subcommands: (1) classify-compare --input <jsonl> --a <backend> --b <backend>: runs both named backends over a fixture set, writes <input>.compare.jsonl per-pair + prints agreement/disagreement + per-class accuracy summary; pure summarize() unit-tested. (2) classify-gate --sample <jsonl> --candidate <backend> --reference <backend> --disagreements <path>: shadow-agreement gate — PASS iff binary-verdict agreement >= AGREEMENT_THRESHOLD (0.90) AND sample >= MIN_SAMPLE (50); dumps every disagreement to the report path; exits non-zero on miss so CI can gate cutover; pure evaluate() unit-tested (pass / sub-90 fail / too-small fail). build_backend_named() added to classifier.rs (builds one named backend, bypasses CHARCOAL_CLASSIFIER so the prod boot selection is untouched). DRIFT: no src/cli module existed (main.rs monolithic) — created src/cli/ in the lib crate (pub mod cli) so logic is unit-testable; main.rs handlers use charcoal:: paths (plan snippets said crate::, which is the binary). 6 new unit tests; full web suite green; clippy clean web/default/postgres. To RUN the gate once the RunPod image is live: set RUNPOD_ENDPOINT_URL+RUNPOD_API_KEY+ZENTROPI_* and run 'charcoal classify-gate' (defaults candidate=runpod reference=zentropi sample=tests/fixtures/cope_b/ab_sample.jsonl). NEXT: Chunk 6 (#193) threshold sanity check + optional retune of COPE_B_THRESHOLD.",
+          "created_at": "2026-06-18T17:26:18.560633+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-17T19:03:38.797208+00:00",
-      "updated_at": "2026-06-17T19:03:38.797208+00:00",
-      "closed_at": null
+      "updated_at": "2026-06-18T17:26:18.566502+00:00",
+      "closed_at": "2026-06-18T17:26:18.566502+00:00"
     },
     {
       "id": 191,

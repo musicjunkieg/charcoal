@@ -1,5 +1,13 @@
 [
   {
+    "hash": "81b10853f0d62e7ec99cf6bac77cf7f7ce458ac5",
+    "short_hash": "81b1085",
+    "author": "Bryan Guffey",
+    "date": "2026-06-18T10:24:49-07:00",
+    "message": "feat(cli): classify-gate shadow-agreement gate (Step 4.5)\n\nRuns the candidate backend AND the reference (Zentropi) backend over\ntests/fixtures/cope_b/ab_sample.jsonl and asserts they agree on the\nbinary toxic verdict for at least 90% of the sample (MIN_SAMPLE=50,\ntarget ~100). Dumps every disagreement to\ntarget/classify-gate-disagreements.jsonl for review; exits non-zero on a\nmiss so CI can gate prod cutover. No hand labels — the reference backend\nis the comparison target.\n\nevaluate() is pure (in-memory paired verdicts) so unit tests can assert\npass/fail/too-small without mocking a classifier.\n\nChainlink #192.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "0b90cc081d172273868f358c6c075a4dea364e3a",
     "short_hash": "0b90cc0",
     "author": "Bryan Guffey",
