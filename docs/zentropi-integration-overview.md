@@ -243,3 +243,110 @@ flowchart TD
 Stage 1 triage in 6.1. Multiply (accounts reaching Stage 2) × (posts per
 account clearing the 0.10 filter) to get total calls per scan — on the order of
 1,500–2,500 for one active protected account.
+
+## 7. Scoring modifiers in detail
+
+The `FORM` box in 6.2 (`toxicity × 70 × (1 + overlap × 1.5) × behavioral · ally
+gate · NLI context · graph distance`) hides four distinct modifiers. They are
+applied **in a fixed order**, each multiplying (or capping) the running score.
+Order matters — see the two deliberate choices at the end of this section.
+
+```mermaid
+flowchart LR
+    BASE["Base score<br/>toxicity × 70 × (1 + overlap × 1.5)<br/>(gated to ≤ 25 if overlap < 0.15)"]
+    BASE --> BEH{"Behaviorally<br/>benign?"}
+    BEH -->|"Yes — ally gate"| CAP["Cap at 12.0<br/>(Watch ceiling)"]
+    BEH -->|"No"| BOOST["× hostile boost<br/>1.0–1.5"]
+    CAP --> CTX["× context multiplier<br/>1.0 + NLI×0.5  (1.0–1.5)<br/>(skipped if gate bypassed by context)"]
+    BOOST --> CTX
+    CTX --> GRAPH["× graph distance<br/>Stranger 1.2 · Inbound 0.8 · Outbound 0.9 · Mutual 0.6"]
+    GRAPH --> FINAL["Final 0–100<br/>Low / Watch / Elevated / High"]
+```
+
+*(Pre-rendered: `docs/diagrams/scoring-composition.png`. A layperson-friendly,
+click-through animation of this whole flow lives at
+`docs/scoring-walkthrough.html` — open it in any browser.)*
+
+### 7.1 Behavioral signals + the ally gate (`src/scoring/behavioral.rs`)
+
+From the account's recent posts we derive `quote_ratio`, `reply_ratio`,
+`avg_engagement` (likes+reposts received per post), and `pile_on`. These drive a
+**branching** modifier — an account takes one path, not both:
+
+- **Ally gate (benign path).** If **all** of `quote_ratio < 0.15`,
+  `reply_ratio < 0.30`, `not pile_on`, and `avg_engagement > median_engagement`
+  hold, the score is **capped at 12.0** (Watch ceiling). The engagement clause
+  requires the account to be a *net creator*, not a serial reactor — this is
+  what keeps a supportive ally who shares the protected user's topics and uses
+  identity language from ever reaching High.
+- **Hostile multiplier (non-benign path).** Otherwise multiply by
+  `1.0 + quote_ratio×0.20 + reply_ratio×0.15 + (pile_on ? 0.15 : 0)` → a
+  **1.0–1.5×** boost.
+
+**Pile-on detection** groups amplification events by the targeted post and
+slides a **24-hour window**; if **5+ distinct accounts** hit the same post
+within any 24h span, all are flagged `pile_on`. Coordinated dogpiles surface
+even when each individual account looks mild.
+
+### 7.2 NLI context score (`src/scoring/nli.rs`)
+
+A separate local model (DeBERTa-v3-xsmall cross-encoder, ~87MB) answers a
+*different* question than Zentropi: not "is this post toxic?" but "what is the
+relationship between *these two specific texts*?" For a pair (protected user's
+post → other account's response) it scores five hypotheses and combines them:
+
+```
+hostile_signal    = max(attack, contempt, misrepresent)
+supportive_signal = max(good_faith × 0.5, support × 0.8)
+context_score     = clamp(hostile_signal − supportive_signal, 0.0, 1.0)
+```
+
+Genuine support (×0.8) and respectful disagreement (×0.5) *cancel* apparent
+hostility. The result feeds the pipeline twice: as the **gate-bypass trigger**
+(≥ 0.5 → skip the ally gate, catching concern trolls) and as a **context
+multiplier** `1.0 + context_score×0.5` (**1.0–1.5×**). Pairs are the real event
+texts for amplifiers, or embedding-matched *inferred* pairs for not-yet-collided
+followers (the predictive path). Because it's multiplicative, context can only
+amplify existing toxicity — zero toxicity stays zero.
+
+### 7.3 Graph distance (`src/bluesky/relationships.rs`)
+
+One `app.bsky.graph.getRelationships` call (batched 30 DIDs at a time) buckets
+the account's tie to the protected user, each with a final-score weight:
+
+| Relationship | Weight | Why |
+|---|---|---|
+| Stranger (no follow either way) | **1.2×** | no relationship → likeliest harasser |
+| Follows you (inbound) | **0.8×** | opted into the content |
+| You follow (outbound) | **0.9×** | protected user chose them |
+| Mutual follow | **0.6×** | existing relationship → likely non-hostile |
+
+### 7.4 Order of application (and two deliberate choices)
+
+```
+1. base      = toxicity × 70 × (1 + overlap × 1.5)        // overlap-gated if < 0.15
+2. behavioral = ally-gate cap(≤12)  OR  base × boost(1.0–1.5)
+3. context    = behavioral × (1.0 + context_score×0.5)     // 1.0–1.5×
+4. final      = (context × graph_weight 0.6–1.2).clamp(0,100)
+```
+
+- **Graph distance is applied last, after the ally gate**, so it can never
+  rescue or sink an ally — a capped mutual-follow ally just gets dampened
+  further; the 1.2× stranger amplification only bites accounts already deemed
+  non-benign.
+- **The context multiplier is suppressed when the gate was bypassed by
+  context** (so a concern troll isn't hit by context twice — once to break the
+  gate, once as a multiplier). Preventing that double-count is the entire reason
+  `apply_behavioral_modifier_contextual` returns a third "gate was bypassed"
+  flag.
+
+**Worked contrast (same topic overlap, opposite outcomes):**
+
+| | Hostile stranger | Supportive mutual-follow |
+|---|---|---|
+| toxicity / overlap | 0.30 / 0.45 | 0.05 / 0.80 |
+| base | ≈ 35 | ≈ 8 |
+| behavioral | ×1.16 → 41 | ally gate → ≤ 12 |
+| context | ×1.23 → 50 | ~no boost → 8 |
+| graph | Stranger ×1.2 → **60** | Mutual ×0.6 → **5** |
+| tier | **High** | **Low** |
