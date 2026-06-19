@@ -2,7 +2,12 @@ name: Build CoPE-B image
 
 on:
   push:
-    branches: [main, staging]
+    # feat/cope-b-self-host is included temporarily so the image can be built
+    # from the feature branch before the work merges to staging/main (a push
+    # trigger runs the workflow version on the pushed branch; workflow_dispatch
+    # would require the file to already be on the default branch). Drop the
+    # feat/* entry once this lands on staging.
+    branches: [main, staging, feat/cope-b-self-host]
     paths:
       - 'gpu/cope-b-runpod/**'
       - '.github/workflows/build-cope-b-image.yml'
