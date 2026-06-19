@@ -22,6 +22,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The CoPE-B-A4B weights are ~50 GB (Gemma-4 26B-A4B, 25B params), and the
+      # Dockerfile bakes them into the image. A stock ubuntu-latest runner only
+      # has ~45-50 GB free, so the build runs out of disk and the runner dies
+      # mid-build. Reclaim the preinstalled toolchains we don't need (~25-30 GB)
+      # before building.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: true
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -59,13 +75,12 @@ jobs:
           build-args: |
             MODEL_REVISION=main
             POLICY_VERSION=${{ steps.policyver.outputs.value }}
-          # Cache layers between runs. The Dockerfile downloads the ~50 GB
-          # weight layer BEFORE copying app code, so that layer's cache key
-          # depends only on MODEL_REVISION (and the stable deps above it).
-          # A policy.txt-only edit changes only the final app-code COPY, so
-          # the cached weight layer is reused and the rebuild is tiny.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No GHA layer cache: the ~50 GB weight layer exceeds GitHub's 10 GB
+          # cache-entry limit (it can never be stored), and exporting layers
+          # locally before upload adds disk pressure on an already-tight runner.
+          # Skipping the cache keeps the build within the runner's disk budget.
+          # (If rebuilds become frequent, move to a self-hosted/large runner with
+          # a persistent BuildKit cache rather than type=gha.)
 
       - name: Summary
         run: |
