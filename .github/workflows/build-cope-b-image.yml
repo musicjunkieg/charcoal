@@ -39,6 +39,14 @@ jobs:
           date=$(date -u +%Y-%m-%d)
           echo "value=policy-${short_sha}-${date}" >> "$GITHUB_OUTPUT"
 
+      - name: Derive image ref tag
+        id: reftag
+        # Docker tags can't contain '/', so slugify the branch name (e.g.
+        # feat/cope-b-self-host -> feat-cope-b-self-host). GITHUB_REF_NAME is a
+        # built-in env var; read it from env (not ${{ }} interpolation) so the
+        # branch name can never be injected into the shell.
+        run: echo "value=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -47,7 +55,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ steps.reftag.outputs.value }}
           build-args: |
             MODEL_REVISION=main
             POLICY_VERSION=${{ steps.policyver.outputs.value }}
