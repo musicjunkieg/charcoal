@@ -2925,6 +2925,17 @@
       "created_at": "2026-06-19T22:09:52.020682-07:00",
       "updated_at": "2026-06-19T22:09:52.020682-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"5b6c74d\",\"confidence\":88}"
+    },
+    {
+      "id": 273,
+      "change_id": "091a1336-38f6-44ae-b2c7-43e2d9e9e9c3",
+      "node_type": "outcome",
+      "title": "🎉 RunPod CoPE-B DEPLOYED + GATE RAN END-TO-END. Endpoint f39lf61pc762a8 (H100 80GB, US-GA-2, volume b8rmatu3si). classify-gate: 88% agreement (88/100) vs Zentropi — GATE FAIL (bar 90%), 12 disagreements. Direction: 9 CoPE-B-toxic/Zentropi-clean (CoPE-B stricter), 3 reverse. ANALYSIS: ~6 of the 9 are CoPE-B FALSE POSITIVES on benign snark/friendly banter + THIRD-PARTY political commentary (#10 Stephen Miller insult) — the participant-vs-third-party distinction the DRAFT policy.txt hasn't encoded yet; 2-3 are genuine CoPE-B wins (slur 'trannies', anti-pride that Zentropi MISSES). Zentropi-stricter 3 = venting/profanity. CONCLUSION: 88% gap is mostly draft-policy over-breadth, NOT infra — deployment is a full success. NEXT: Bryan tunes policy.txt (3rd-party + benign snark), optionally raise COPE_B_THRESHOLD (Chunk 6), re-run gate. Cost paused (workersMax=0). 5 deploy bugs fixed live: stale workers, ENTRYPOINT, transformers<5, double-output, /runsync-IN_PROGRESS poll. chainlink #200.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-19T22:53:19.141548-07:00",
+      "updated_at": "2026-06-19T22:53:19.141548-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"5720d2c\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -5754,6 +5765,17 @@
       "weight": 1.0,
       "rationale": "Review triage is the gate before deploy",
       "created_at": "2026-06-19T21:00:12.233418-07:00"
+    },
+    {
+      "id": 266,
+      "from_node_id": 264,
+      "to_node_id": 273,
+      "from_change_id": "2cb69d99-6534-479f-8d98-154e9ca19af0",
+      "to_change_id": "091a1336-38f6-44ae-b2c7-43e2d9e9e9c3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Gate execution = the validation milestone",
+      "created_at": "2026-06-19T22:53:19.147407-07:00"
     }
   ],
   "documents": [

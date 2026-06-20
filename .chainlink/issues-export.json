@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-06-20T05:46:17.253065+00:00",
+  "exported_at": "2026-06-20T05:58:52.085681+00:00",
   "issues": [
     {
       "id": 200,
@@ -12,7 +12,13 @@
       "labels": [
         "deploy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "DEPLOY COMPLETE + GATE RAN. Endpoint f39lf61pc762a8 live (H100 80GB/US-GA-2/volume b8rmatu3si). classify-gate = 88% agreement (88/100) vs Zentropi, just under the 90% bar. 12 disagreements: 9 CoPE-B-stricter (mostly false-positives on benign snark + third-party political commentary the draft policy.txt hasn't encoded; a couple genuine wins Zentropi misses), 3 Zentropi-stricter (venting/profanity). Gap is draft-policy over-breadth, not infra. 5 live deploy bugs fixed: stale-workers-no-volume, base-image ENTRYPOINT, transformers<5 vs gemma4, handler double-output, /runsync IN_PROGRESS polling. Cost paused (workersMax=0). NEXT (Bryan): tune policy.txt (3rd-party/benign), maybe retune COPE_B_THRESHOLD, re-run gate.",
+          "created_at": "2026-06-20T05:53:19.151880+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-20T04:05:45.459216+00:00",
       "updated_at": "2026-06-20T04:05:45.459216+00:00",
       "closed_at": null

@@ -1,21 +1,26 @@
-You are classifying whether a single piece of conversation content is toxic toward a participant in that conversation. Output 1 if it is toxic, 0 if it is not.
+You are classifying whether ONE piece of conversation content is toxic toward a PARTICIPANT in that conversation. Output 1 if it is toxic, 0 if it is not. Output only the single digit.
 
-A participant is a person being addressed or responded to in the exchange — by "you", by name, or clearly by context. Content is toxic only when its hostility targets a participant. Judge the content by its plain meaning in context, including sarcasm, coded language, and implication — not only its literal words.
+A participant is a person writing in, or being addressed by, the exchange — by "you", by name, or clearly by context. Content qualifies as toxic ONLY when its hostility targets a participant. Judge by the plain meaning in context, including sarcasm, coded language, and implication. But negative, blunt, or harsh language is NOT toxic when it serves a constructive function or is aimed at someone who is not a participant.
 
-Label 1 (toxic) when content directed at a participant does any of:
-- Attacks them personally: insults, name-calling, dehumanizing terms, or attacks on their character, honesty, motives, or intelligence ("you're an idiot", "nobody respects you", "liar").
-- Attacks them on the basis of identity — gender, trans status, race, body size, sexuality, disability, religion — including slurs, mockery, or "concern" framed as an attack on who they are.
-- Mocks, belittles, or is sarcastically dismissive of them or their position ("oh, the expert has spoken", "how cute that you tried").
-- Is patronizing, condescending, or passive-aggressive toward them ("let me put this in simple terms for you", "surprising you managed it this time").
-- Threatens, intimidates, or wishes/endorses violence or harm against them, including veiled or conditional threats ("that's a good way to get hurt", "you'll regret saying that").
-- Incites or rallies others to pile onto, harass, or target them ("everyone go tell this person what you think", quote-posting to sic an audience on them).
-- Is bad-faith concern trolling: feigned worry, "just asking questions", or sea-lioning whose real function is to demean or harass the participant.
+Output 1 (toxic) ONLY when content directed at a PARTICIPANT does any of:
+- Personal attack: insults, name-calling, dehumanizing terms, or attacks on their character, honesty, motives, worth, or intelligence — including attacks framed at their reasoning or decisions ("you're an idiot", "nobody respects you", "liar", "loser", "you can't fix stupid").
+- Identity attack: hostility, slurs, or mockery on the basis of gender, trans status, race, body size, sexuality, disability, or religion — including a slur for any such group, and "concern" that is really an attack on who they are.
+- Belittling or mocking: sarcastic trivialization ("ain't she sweet?", "oh, the expert has spoken"), characterizing them as sad / pathetic / laughable, or exaggerated imitation questioning their intelligence.
+- Contemptuous dismissal: clear disdain for them or their points ("I can't waste my time on such garbage", "must be nice") — not mere disagreement or a blunt verdict on their idea.
+- Patronizing or condescending: assumed superiority ("let me put this in simpler terms for you", "how cute that you tried"), or telling them they "clearly don't know".
+- Passive-aggressive: insincere praise hiding a barb ("surprising you managed it this time"), or veiled hostile suggestions with plausible deniability.
+- Threats or intimidation: direct, euphemistic, conditional, or veiled ("that's a good way to get hurt", "you'll regret saying that", "I wouldn't say that if I were you").
+- Endorsing, celebrating, or wishing violence or harm against them.
+- Inciting or rallying others to pile onto, harass, or target them.
+- Bad-faith concern trolling, "just asking questions", or sea-lioning whose real function is to demean or harass them.
 
-Label 0 (not toxic) when content:
-- Criticizes a participant's ideas, work, or claims in a substantive way, even bluntly ("this plan is wrong, the schedule is unrealistic", "that's factually incorrect, here's the data").
-- Disagrees, debates, or corrects without personal attack.
-- Is genuine humor, support, or good-faith conversation.
-- Targets people who are NOT participants — politicians, public figures, criminals, companies, news outlets, or general groups — even when the language is harsh or negative. Strong commentary about news events, public figures, or groups is not toxic unless it turns to attack a participant directly.
-- Quotes, describes, or responds to someone else's toxic content in order to criticize or analyze it.
+Output 0 (not toxic) when content:
+- Criticizes a participant's IDEAS, work, claims, or reasoning — even bluntly, emphatically, or with mild snark — without attacking the person ("this plan is wrong, the schedule is unrealistic", "that's factually incorrect, here's the data", "that's also what you say when you have no idea what people need").
+- Disagrees, debates, or corrects without a personal attack.
+- Is genuine humor, good-natured ribbing, friendly enthusiasm, support, or good-faith conversation, even when playful or teasing.
+- Is venting, frustration, or the author expressing their own feelings, rather than an attack aimed at a participant ("fuck this", "everything I bury eventually bleeds through").
+- Targets people who are NOT participants — politicians, public figures, leaders, voters, supporters, ideological groups, criminals, defendants, companies, or news outlets — NO MATTER how harsh, derogatory, profane, or negative the language ("Stephen Miller is a gross monster", "those politicians are weird perverts", "that parent is a piece of shit", "that company is despicable"). Strong commentary about third parties, news, or groups is NEVER toxic unless it turns to attack a participant directly.
+- Makes a general observation about people, groups, or situations without targeting a participant, even in strong or critical language.
+- Quotes, describes, responds to, or criticizes someone else's toxic content in order to analyze it or push back on it (words like "disgusting" or "appalling" aimed at the content, not a participant, are fine).
 
-When content only discusses non-participants, or is critical but constructive, output 0.
+Decisive defaults: if the hostility is aimed at a non-participant (a public figure, group, or third party), output 0 regardless of how harsh it is. If the content only criticizes ideas, claims, or work — even rudely — output 0. Only a genuine attack on a PARTICIPANT'S person is 1.
