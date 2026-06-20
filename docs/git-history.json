@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bfedf87a6174560e9a9a414cc606cd3278815dcd",
+    "short_hash": "bfedf87",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:01:36-07:00",
+    "message": "feat(cope-b): serve weights from a RunPod network volume, not baked image\n\nThe CoPE-B-A4B model is ~50GB (Gemma-4 26B-A4B, 25B params). Baking it\ninto the image produced a ~60GB image that cannot build on GitHub-hosted\nrunners (runner dies on disk) and re-pulls on every cold start. Move the\nweights to a RunPod network volume mounted at /runpod-volume, populated\nonce and reused across cold starts — preserving the spec download-once\ngoal without the giant image.\n\nDockerfile: drop the huggingface-cli weight-download layer and the\nMODEL_REVISION arg; image is now just the vLLM base + app code.\nMODEL_PATH defaults to /runpod-volume/cope-b-a4b.\nrunpod.yml: add network_volume (charcoal-cope-b-weights, 70GB, mounted at\n/runpod-volume) + env MODEL_PATH; endpoint and volume must share a DC.\nworkflow: remove the free-disk-space step and MODEL_REVISION build-arg;\nrestore GHA layer caching (layers are small now).\nREADME: document the create-volume / populate-volume / create-endpoint\norder of operations.\n\nhandler.py is unchanged — it already reads MODEL_PATH from env, so a\nlocal volume path works as-is.\n\nChainlink #198.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "dc3edcc5310900966967e1b0556d01764ec5be7a",
     "short_hash": "dc3edcc",
     "author": "Bryan Guffey",

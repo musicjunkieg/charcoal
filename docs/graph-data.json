@@ -2859,6 +2859,17 @@
       "created_at": "2026-06-19T10:43:09.882742-07:00",
       "updated_at": "2026-06-19T10:43:09.882742-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"dc3edcc\",\"confidence\":90}"
+    },
+    {
+      "id": 267,
+      "change_id": "ab81fb88-79c3-4008-9512-65afc3cb8b68",
+      "node_type": "outcome",
+      "title": "Build #4 GREEN (run 27858213590): small network-volume image published to ghcr.io/musicjunkieg/charcoal-cope-b:bfedf87 + :feat-cope-b-self-host. PR #54 flipped draft->ready; CodeRabbit auto-triggered (status comment updated 03:18:34Z, 'review in progress') within ~45s of flip — no manual ping needed. Awaiting CodeRabbit walkthrough + findings before creating RunPod volume/endpoint. RUNPOD_API_KEY + PACKAGES_PAT + ZENTROPI_* confirmed in .env (names only).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-19T20:19:36.013791-07:00",
+      "updated_at": "2026-06-19T20:19:36.013791-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"bfedf87\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -5666,6 +5677,17 @@
       "weight": 1.0,
       "rationale": "Chunk 5 execution outcome",
       "created_at": "2026-06-18T10:26:05.614146-07:00"
+    },
+    {
+      "id": 264,
+      "from_node_id": 264,
+      "to_node_id": 267,
+      "from_change_id": "2cb69d99-6534-479f-8d98-154e9ca19af0",
+      "to_change_id": "ab81fb88-79c3-4008-9512-65afc3cb8b68",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Build success + review gate is the precondition for deploy",
+      "created_at": "2026-06-19T20:19:36.020212-07:00"
     }
   ],
   "documents": [
