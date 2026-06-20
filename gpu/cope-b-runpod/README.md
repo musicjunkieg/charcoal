@@ -2,9 +2,18 @@
 
 vLLM-on-RunPod-Serverless harness for Charcoal's Stage-2 toxicity classifier.
 
+## Weights live on a network volume (not in the image)
+
+The CoPE-B-A4B model is ~50 GB (Gemma-4 26B-A4B, 25B params). It is **not**
+baked into the image — that produced a ~60 GB image that won't build on
+standard CI runners and re-pulls on every cold start. Instead the weights live
+on a **RunPod network volume** mounted at `/runpod-volume`, populated once and
+reused across cold starts. `MODEL_PATH=/runpod-volume/cope-b-a4b` points vLLM at
+them; the image stays small (just vLLM + app code).
+
 ## Files
 
-- `Dockerfile` — image build. Bakes the model weights and `policy.txt` into the image.
+- `Dockerfile` — image build (vLLM base + app code only; weights are volume-mounted).
 - `handler.py` — RunPod Serverless worker entrypoint. Wraps vLLM's AsyncLLMEngine.
 - `prompt.py` — Gemma chat template + POLICY/CONTENT body assembly.
 - `policy.txt` — toxicity policy (versioned in git; see `docs/superpowers/specs/...` for authoring guidance).
@@ -31,21 +40,48 @@ transformers and skip locally (they run in CI inside the vLLM image).
 
 ## Deploying
 
-Images are built and published by `.github/workflows/build-cope-b-image.yml`
-on pushes to `staging` and `main` when files under `gpu/cope-b-runpod/**`
-change. The workflow publishes to `ghcr.io/musicjunkieg/charcoal-cope-b:<sha>`
-with a manifest digest pinned in the resulting GitHub Actions summary.
+Order of operations (one-time):
 
-RunPod endpoint is configured per `runpod.yml`. Updates to that file
-require manual reconciliation in the RunPod web console (no IaC yet).
+1. **Build + publish the image.** `.github/workflows/build-cope-b-image.yml`
+   builds on pushes to `staging`/`main` (and, temporarily, the feature branch)
+   touching `gpu/cope-b-runpod/**`, publishing
+   `ghcr.io/musicjunkieg/charcoal-cope-b:<sha>` (and a slugified branch tag).
+   The image is small now (no weights), so it builds on a stock runner.
+
+2. **Create the network volume** in a data center that has A100 80GB stock,
+   e.g. via the RunPod MCP `create-network-volume` (name
+   `charcoal-cope-b-weights`, ~70 GB) or the console. Note its data center —
+   the endpoint must run in the same one.
+
+3. **Populate the volume** with the weights (once). Attach the volume to a
+   cheap temporary pod (CPU or small GPU) and download into it:
+
+   ```bash
+   # inside a pod with the volume mounted at /runpod-volume:
+   pip install -U "huggingface_hub[cli]"
+   huggingface-cli download zentropi-ai/cope-b-a4b \
+       --local-dir /runpod-volume/cope-b-a4b
+   ```
+
+   Then terminate the pod. The weights persist on the volume.
+
+4. **Create the serverless endpoint** per `runpod.yml`: the GHCR image, the
+   network volume mounted at `/runpod-volume`, `MODEL_PATH=/runpod-volume/cope-b-a4b`,
+   A100 80GB, FlashBoot, scale-to-zero. Register GHCR pull credentials first
+   (`create-container-registry-auth`) since the package is private.
+
+Updating `runpod.yml` requires reconciling the live endpoint (no IaC yet).
 
 ## Policy changes
 
-Editing `policy.txt` requires an image rebuild. CI bumps `POLICY_VERSION`
-to `policy-<short-sha>-<date>` automatically. Audit log captures
+Editing `policy.txt` requires an image rebuild (weights are untouched — only
+the tiny app layer rebuilds). CI bumps `POLICY_VERSION` to
+`policy-<short-sha>-<date>` automatically. The audit log captures
 `policy_version` per classification so a change can be located post-hoc.
 
 ## Region
 
-Endpoint runs in `us-west` to minimize round-trip from Railway production.
-Verify before creating: `railway status` should show a us-west default region.
+Endpoint and its network volume must be in the **same** data center. Prefer a
+`us-west` DC to minimize round-trip from Railway production (verify Railway's
+region with `railway status`), but the binding constraint is A100 80GB
+availability + the volume's DC.

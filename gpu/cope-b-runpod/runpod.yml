@@ -1,6 +1,6 @@
 # Source of truth for the RunPod Serverless endpoint config. Endpoint is
-# created manually in the RunPod web console (one-time); deviations from
-# this file should be reconciled.
+# created (via the RunPod MCP / console) once; deviations from this file
+# should be reconciled.
 name: charcoal-cope-b
 gpu: NVIDIA A100 80GB PCIe
 flashboot: true
@@ -9,4 +9,19 @@ idle_timeout: 60          # seconds; tune down to 5-10 after measuring warm-rest
 min_workers: 0
 max_workers: 3            # absorbs concurrent onboardings; cheap thanks to scale-to-zero
 execution_timeout: 600    # 10-min hard cap per request
-region: us-west           # match Railways production region (verify via `railway status`)
+
+# Network volume holding the ~50 GB CoPE-B-A4B weights. Mounted at
+# /runpod-volume on every worker; populated once (see README "Populate the
+# network volume"). The endpoint and the volume MUST be in the same data
+# center / region, so pick a region that has both the volume and A100 80GB
+# stock. region below is indicative — reconcile with the actual volume's DC.
+network_volume:
+  name: charcoal-cope-b-weights
+  size_gb: 70             # ~50 GB weights + headroom
+  mount_path: /runpod-volume
+region: us-west           # must match the network volume's data center
+
+# Runtime env on the endpoint. MODEL_PATH points at the weights on the mounted
+# volume; the image default matches but is set here explicitly for clarity.
+env:
+  MODEL_PATH: /runpod-volume/cope-b-a4b

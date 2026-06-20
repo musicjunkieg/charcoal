@@ -5,10 +5,16 @@ FROM vllm/vllm-openai:v0.20.2
 
 WORKDIR /app
 
-# Layer ordering matters: Docker cache keys are cumulative, so the stable,
-# expensive layers must come FIRST and the frequently-edited app code LAST.
-# Editing policy.txt then only rebuilds the tiny final COPY — the ~50 GB
-# weight-download layer stays cached because nothing before it changed.
+# Weights are NOT baked into the image. The CoPE-B-A4B model is ~50 GB
+# (Gemma-4 26B-A4B, 25B params) — too large to build into an image on
+# standard CI runners, and re-pulling a 60 GB image on every cold start is
+# wasteful. Instead the weights live on a RunPod **network volume** mounted at
+# /runpod-volume at runtime; MODEL_PATH points there. The volume is populated
+# once (see gpu/cope-b-runpod/README) and persists across cold starts, so the
+# spec's "download the weights only once" goal is preserved without baking.
+#
+# Layer ordering still matters: stable deps FIRST, frequently-edited app code
+# (esp. policy.txt) LAST, so a policy edit rebuilds only the tiny final COPY.
 
 # 1. Stable deps. vllm is already in the base image; we add runpod and
 #    transformers explicitly so handler+prompt imports don't depend on
@@ -19,19 +25,14 @@ RUN python3 -m pip install --no-cache-dir \
         'transformers>=4.50,<5' \
         huggingface-hub
 
-# 2. Bake weights into the image. This layer is keyed only by MODEL_REVISION
-#    (the only input above it that varies), so a policy.txt-only edit never
-#    invalidates it. Build-arg lets CI override the revision for pinned builds.
-ARG MODEL_REVISION=main
-ENV MODEL_PATH=/weights \
+# 2. Runtime config. MODEL_PATH defaults to the network-volume mount; the
+#    endpoint can override it. vLLM loads the model directly from this local
+#    directory (no download at boot because the volume is pre-populated).
+ENV MODEL_PATH=/runpod-volume/cope-b-a4b \
     POLICY_PATH=/app/policy.txt
-RUN huggingface-cli download zentropi-ai/cope-b-a4b \
-        --local-dir /weights \
-        --revision ${MODEL_REVISION}
 
-# 3. App code LAST — this is the most frequently changed input (especially
-#    policy.txt), so keeping it here means a policy edit rebuilds only this
-#    tiny layer, not the weight download above.
+# 3. App code LAST — most frequently changed input (especially policy.txt),
+#    so keeping it here means a policy edit rebuilds only this tiny layer.
 COPY handler.py prompt.py policy.txt /app/
 
 # POLICY_VERSION is injected at build time by CI from the git short SHA + date.
