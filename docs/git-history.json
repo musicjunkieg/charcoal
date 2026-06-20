@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e57db89348b8cd3ea16a546be7e6bae9d7163fe8",
+    "short_hash": "e57db89",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:41:11-07:00",
+    "message": "fix(cope-b): address CodeRabbit review on PR #54\n\nResolves the actionable CodeRabbit findings:\n\n- vllm 0.20.2 -> 0.23.0 (Dockerfile base image + requirements): patches\n  GHSA-q8gq-377p-jq3r (assert-bypass RCE) + GHSA-5jv2-g5wq-cmr4 (GGUF int\n  truncation). AsyncLLMEngine API compat to be revalidated at GPU smoke.\n- runpod_cope_b parse_response: reject non-finite / out-of-[0,1] confidence\n  (external boundary) instead of letting bad data skew is_toxic.\n- classify_compare FixtureRow.label now serde(default) so the gate accepts\n  label-less {id,content} lines per its contract.\n- classify_compare + classify_gate: propagate serde_json::to_string errors\n  with context instead of .unwrap() panics.\n- zentropi trait classify(): populate verdict.policy_version from the\n  configured ZENTROPI_LABELER_VERSION_ID (falls back to the static banner).\n- audit_log AuditWriter::new: skip create_dir_all when disabled.\n- unit_audit_log migration test: scan for nli-legacy-*.jsonl by pattern\n  instead of recomputing the date with Utc::now() (midnight-rollover flake).\n- smoke_test.sh: fail fast if vLLM never becomes ready; build the\n  POLICY/CONTENT body via prompt.build_body to avoid shell drift.\n\nDeclined (replied in-thread): non-root USER (isolated single-tenant RunPod\nworker; non-root vLLM perms unvalidatable without the GPU) and MD040 on the\nvendored runpod/skills SKILL.md.\n\nChainlink #199.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
     "hash": "bfedf87a6174560e9a9a414cc606cd3278815dcd",
     "short_hash": "bfedf87",
     "author": "Bryan Guffey",

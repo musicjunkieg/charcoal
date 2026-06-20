@@ -2870,6 +2870,17 @@
       "created_at": "2026-06-19T20:19:36.013791-07:00",
       "updated_at": "2026-06-19T20:19:36.013791-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"bfedf87\",\"confidence\":92}"
+    },
+    {
+      "id": 268,
+      "change_id": "31034423-bec5-443b-a63c-47cd2189f55c",
+      "node_type": "outcome",
+      "title": "CodeRabbit triage round 1 complete (commit e57db89): 10/12 findings FIXED (vllm 0.23.0 CVE bump, confidence bounds validation, FixtureRow label optional, 2x unwrap->propagate, zentropi policy_version from labeler version, audit create_dir_all gated on enabled, test midnight-flake fix, smoke fail-fast + prompt.build_body reuse). 2 DECLINED in-thread: non-root USER (isolated single-tenant worker, unvalidatable perms) + MD040 on vendored runpod/skills SKILL.md. Full suite green, clippy clean web/default/postgres. Bryan decisions: bump to 0.23.0, decline non-root. Push triggers re-review + new image build (0.23.0 base).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-19T20:42:41.186266-07:00",
+      "updated_at": "2026-06-19T20:42:41.186266-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"e57db89\",\"confidence\":90}"
     }
   ],
   "edges": [

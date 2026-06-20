@@ -3,8 +3,19 @@
 //! row + aggregate counts; UI rendering is separated from data so we can
 //! assert numbers without parsing terminal output.
 
-use charcoal::cli::classify_compare::{summarize, Pair, Summary};
+use charcoal::cli::classify_compare::{summarize, FixtureRow, Pair, Summary};
 use charcoal::toxicity::classifier::ClassifierVerdict;
+
+#[test]
+fn fixture_row_parses_without_label() {
+    // The shadow-agreement gate (classify-gate) reuses FixtureRow and its
+    // contract accepts label-less {id,content,...} lines. Guard against a
+    // regression that re-requires `label` and breaks gate runs on valid input.
+    let row: FixtureRow = serde_json::from_str(r#"{"id":"x","content":"hello"}"#).unwrap();
+    assert_eq!(row.id, "x");
+    assert_eq!(row.content, "hello");
+    assert_eq!(row.label, "");
+}
 
 fn v(t: bool, c: f32) -> ClassifierVerdict {
     ClassifierVerdict {
