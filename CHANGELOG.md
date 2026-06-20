@@ -43,6 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Triage CodeRabbit review on PR #54 (Phase 6 self-host) (#199)
 - Phase 6.0 — audit_log generalization preflight (#188)
 - Pull Zentropi call count from last full scan of grimalkina.bsky.social (#182)
 - Investigate Zentropi API call concurrency pattern (#181)

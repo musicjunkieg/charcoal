@@ -1,21 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-06-20T03:55:25.905869+00:00",
+  "exported_at": "2026-06-20T04:01:30.599173+00:00",
   "issues": [
     {
       "id": 199,
       "title": "Triage CodeRabbit review on PR #54 (Phase 6 self-host)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": null,
       "labels": [
         "review"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "DONE: all 12 CodeRabbit threads resolved (0 unresolved after deda582 re-review). 11 fixed in code, 2 declined+accepted by CodeRabbit. vLLM 0.23.0 image build green. PR #54 mergeable.",
+          "created_at": "2026-06-20T04:00:12.238139+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-20T03:36:01.228284+00:00",
-      "updated_at": "2026-06-20T03:36:01.228284+00:00",
-      "closed_at": null
+      "updated_at": "2026-06-20T04:00:12.242671+00:00",
+      "closed_at": "2026-06-20T04:00:12.242671+00:00"
     },
     {
       "id": 198,

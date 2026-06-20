@@ -1,5 +1,13 @@
 [
   {
+    "hash": "deda58272a71c01e56a9421a7db078c1468bc4c2",
+    "short_hash": "deda582",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:55:25-07:00",
+    "message": "test(cli): guard FixtureRow parses label-less gate input\n\nLocks the contract behind CodeRabbit finding on classify_gate.rs:137 —\nthe shadow-agreement gate reuses classify_compare::FixtureRow, whose\nlabel field is now #[serde(default)], so {id,content} lines parse. This\ntest prevents a regression that re-requires label and breaks gate runs.\n\nResolved via the shared FixtureRow rather than a separate GateFixtureRow\n(single source of truth, no duplicate type).\n\nChainlink #199.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
     "hash": "e57db89348b8cd3ea16a546be7e6bae9d7163fe8",
     "short_hash": "e57db89",
     "author": "Bryan Guffey",
