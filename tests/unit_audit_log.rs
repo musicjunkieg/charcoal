@@ -135,14 +135,26 @@ fn migrate_legacy_nli_audit_renames_existing_file() {
     );
 
     // A dated nli-legacy-<date>.jsonl now exists, holding the original content.
-    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let target = dir.path().join(format!("nli-legacy-{}.jsonl", date));
-    assert!(
-        target.exists(),
-        "migration must create nli-legacy-<date>.jsonl"
+    // Scan for the file by pattern rather than recomputing the date with
+    // Utc::now() — recomputing can disagree with the date used inside the
+    // migration if the clock rolls past midnight between the two calls.
+    let migrated: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("nli-legacy-") && n.ends_with(".jsonl"))
+        })
+        .collect();
+    assert_eq!(
+        migrated.len(),
+        1,
+        "migration must create exactly one nli-legacy-<date>.jsonl"
     );
     assert_eq!(
-        fs::read_to_string(&target).unwrap(),
+        fs::read_to_string(&migrated[0]).unwrap(),
         content,
         "migrated file must preserve the original content"
     );

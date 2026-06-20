@@ -1,7 +1,11 @@
 # Pinned vLLM image; matches the version pinned in requirements.txt. The
 # container digest is captured in CI when the image is published — see
 # .github/workflows/build-cope-b-image.yml for the digest pin used at deploy.
-FROM vllm/vllm-openai:v0.20.2
+# v0.23.0 patches the v0.20.2 CVEs GHSA-q8gq-377p-jq3r (assert-bypass RCE) and
+# GHSA-5jv2-g5wq-cmr4 (GGUF int-truncation), both fixed in 0.22.0+. The
+# AsyncLLMEngine API used by handler.py must be revalidated at the GPU smoke
+# test, since it can shift across vLLM minor versions.
+FROM vllm/vllm-openai:v0.23.0
 
 WORKDIR /app
 

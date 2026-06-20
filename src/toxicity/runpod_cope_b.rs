@@ -146,9 +146,18 @@ impl RunPodCopeBClient {
     pub fn parse_response(raw: &str, latency_ms: u32) -> Result<ClassifierVerdict> {
         let parsed: RawResponseBody = serde_json::from_str(raw)
             .with_context(|| format!("parse RunPod response body: {raw}"))?;
+        // `confidence` crosses an external boundary. A NaN or out-of-[0,1] value
+        // would silently skew `is_toxic` threshold comparisons, so reject it
+        // loudly here (no silent fallback) rather than propagate bad data.
+        let confidence = parsed.output.confidence;
+        if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+            bail!(
+                "RunPod confidence out of contract (expected finite value in [0,1]): {confidence}"
+            );
+        }
         Ok(ClassifierVerdict {
             toxic_token: parsed.output.toxic,
-            confidence: parsed.output.confidence,
+            confidence,
             latency_ms,
             model_id: parsed.output.model,
             policy_version: parsed.output.policy_version,

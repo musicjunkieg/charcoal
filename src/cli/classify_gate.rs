@@ -108,8 +108,9 @@ pub async fn run(
     }
     let body = disagreeing
         .iter()
-        .map(|r| serde_json::to_string(r).unwrap())
-        .collect::<Vec<_>>()
+        .map(serde_json::to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("serialize disagreement rows for {disagreements_path:?}"))?
         .join("\n");
     std::fs::write(disagreements_path, body)
         .with_context(|| format!("write {disagreements_path:?}"))?;

@@ -40,23 +40,34 @@ trap "kill $VLLM_PID 2>/dev/null || true" EXIT
 
 # Wait up to 5 min for the OpenAI-compatible endpoint to come up.
 echo "Waiting for vLLM to start..."
+READY=0
 for _ in $(seq 1 60); do
     if curl -sf http://localhost:8000/v1/models >/dev/null; then
+        READY=1
         break
     fi
     sleep 5
 done
+if [[ "$READY" != "1" ]]; then
+    echo "ERROR: vLLM did not become ready on http://localhost:8000 within 5 minutes." >&2
+    echo "       Check the vLLM server logs above for load/OOM errors." >&2
+    exit 1
+fi
 
 POLICY=$(cat "$POLICY_PATH")
 FAIL=0
 
-# Build the POLICY/CONTENT body the same way prompt.build_body does so the
-# raw-completions and chat-completions modes share a body. The chat path then
-# wraps the body in the Gemma role markers via the server's chat template;
-# the completions path sends the body as a plain prompt.
+# Build the POLICY/CONTENT body by calling the SAME builder production uses
+# (prompt.build_body), rather than re-templating it in shell where it could
+# silently drift from prompt.py and invalidate the production-parity guarantee.
+# POLICY/CONTENT are passed via env to avoid shell-quoting a multi-line policy.
 build_body() {
     local content="$1"
-    printf 'Examine the given POLICY and determine if the given CONTENT meets the criteria for ANY of the LABELS. Answer "1" if yes, and "0" if no.\n\n\nPOLICY\n======\n\n%s\n\n\nCONTENT\n=======\n\n%s' "$POLICY" "$content"
+    SMOKE_POLICY="$POLICY" SMOKE_CONTENT="$content" python3 -c '
+import os, sys
+import prompt
+sys.stdout.write(prompt.build_body(os.environ["SMOKE_POLICY"], os.environ["SMOKE_CONTENT"]))
+'
 }
 
 classify() {

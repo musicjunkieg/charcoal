@@ -376,7 +376,13 @@ impl ToxicityClassifier for ZentropiClient {
             confidence: resp.confidence as f32,
             latency_ms,
             model_id: self.model_id().to_string(),
-            policy_version: self.policy_version().to_string(),
+            // Prefer the concrete hosted labeler version (ZENTROPI_LABELER_VERSION_ID)
+            // so audit/classifier records identify the exact policy that produced
+            // the verdict; fall back to the static banner only when unset.
+            policy_version: self
+                .labeler_version_id
+                .clone()
+                .unwrap_or_else(|| self.policy_version().to_string()),
         };
         crate::observability::classifier_metrics::record_request(
             self.name(),

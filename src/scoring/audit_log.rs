@@ -149,8 +149,13 @@ pub struct AuditWriter {
 
 impl AuditWriter {
     /// Build a writer with the gate set explicitly. Use in tests.
+    ///
+    /// When disabled, no filesystem work is done — `record()` is a no-op, so
+    /// creating the log directory (and risking an init error) is pointless.
     pub fn new(dir: &Path, kind: EventKind, enabled: bool) -> Result<Self> {
-        std::fs::create_dir_all(dir).context("create audit log dir")?;
+        if enabled {
+            std::fs::create_dir_all(dir).context("create audit log dir")?;
+        }
         Ok(Self {
             dir: dir.to_path_buf(),
             kind,

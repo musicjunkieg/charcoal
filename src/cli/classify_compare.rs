@@ -14,6 +14,10 @@ use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
 #[derive(Debug, Clone, Deserialize)]
 pub struct FixtureRow {
     pub id: String,
+    /// Optional. classify-compare uses it for per-class accuracy breakdown, but
+    /// the shadow-agreement gate's contract accepts label-less `{id,content,...}`
+    /// lines, so default to empty rather than failing deserialization.
+    #[serde(default)]
     pub label: String,
     #[serde(default)]
     pub category: String,
@@ -127,15 +131,13 @@ pub async fn run(
     }
     let summary = summarize(&pairs, a.name(), b.name());
     let report_path = input.with_extension("compare.jsonl");
-    std::fs::write(
-        &report_path,
-        pairs
-            .iter()
-            .map(|p| serde_json::to_string(p).unwrap())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
-    .with_context(|| format!("write {report_path:?}"))?;
+    let report_body = pairs
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("serialize comparison rows for {report_path:?}"))?
+        .join("\n");
+    std::fs::write(&report_path, report_body).with_context(|| format!("write {report_path:?}"))?;
     print_summary(&summary);
     Ok(summary)
 }
