@@ -1,5 +1,13 @@
 [
   {
+    "hash": "dc3edcc5310900966967e1b0556d01764ec5be7a",
+    "short_hash": "dc3edcc",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T10:36:54-07:00",
+    "message": "ci(cope-b): pin free-disk-space action to commit SHA (v1.3.1)\n\nReplaces the @main mutable branch ref with the full commit SHA\n54081f1 (v1.3.1, verified via the GitHub tags API). A third-party\naction on a moving branch is a supply-chain risk — pin it.\n\nHeld back from triggering an immediate rebuild: committed locally and\npushed alongside the next build iteration so it does not spawn a\nredundant concurrent ~50GB build while one is already running.\n\nChainlink #193.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
     "hash": "81b10853f0d62e7ec99cf6bac77cf7f7ce458ac5",
     "short_hash": "81b1085",
     "author": "Bryan Guffey",

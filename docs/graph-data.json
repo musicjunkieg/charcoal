@@ -2848,6 +2848,17 @@
       "created_at": "2026-06-18T10:26:05.604536-07:00",
       "updated_at": "2026-06-18T10:26:05.604536-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"81b1085\",\"confidence\":92}"
+    },
+    {
+      "id": 266,
+      "change_id": "67d2de11-bb77-4fc8-b5c5-f9f1603623ec",
+      "node_type": "observation",
+      "title": "BLOCKER: CoPE-B image (~60GB: 50GB Gemma-4 26B-A4B weights baked + ~10GB vLLM base) cannot build on GitHub-hosted ubuntu-latest. Build #2 died silently (runner OOM-disk, empty conclusion); build #3 with jlumbroso/free-disk-space (~25-30GB reclaimed) still crashed the runner agent 3.5min into Build-and-push. GH-hosted is out. Fork: (A) RunPod network volume = small image, weights staged on volume [idiomatic, preserves spec's no-repeat-download goal]; (B) larger/self-hosted runner [keeps baked image]; (C) local Mac amd64 emulated build + 60GB GHCR push [slow].",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-19T10:43:09.882742-07:00",
+      "updated_at": "2026-06-19T10:43:09.882742-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"dc3edcc\",\"confidence\":90}"
     }
   ],
   "edges": [
