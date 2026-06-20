@@ -305,4 +305,33 @@ mod retry {
             .await
             .unwrap();
     }
+
+    #[tokio::test]
+    async fn runsync_pending_then_polls_status_to_completion() {
+        // /runsync returns ~90s before a cold-start job finishes, yielding a
+        // non-terminal envelope with NO output. The client must then poll
+        // /status/{id} until the verdict lands. (Regression: the first live
+        // gate run failed parsing the IN_PROGRESS runsync body.)
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                r#"{"id":"job-xyz","status":"IN_PROGRESS"}"#,
+                "application/json",
+            ))
+            .mount(&server)
+            .await;
+        let done = r#"{"id":"job-xyz","status":"COMPLETED","output":{"toxic":true,"confidence":0.95,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        Mock::given(method("GET"))
+            .and(path("/status/job-xyz"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(done, "application/json"))
+            .mount(&server)
+            .await;
+
+        let client = RunPodCopeBClient::new(server.uri(), "k".into()).unwrap();
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        let v = dyn_ref.classify("hello").await.unwrap();
+        assert!(v.toxic_token);
+        assert!((v.confidence - 0.95).abs() < 1e-4);
+    }
 }

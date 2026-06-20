@@ -40,9 +40,28 @@ pub struct RunPodCopeBClient {
     max_retries: u32,
 }
 
+/// RunPod job envelope returned by `/runsync` and `/status/{id}`. `/runsync`
+/// waits up to ~90s and, if the job hasn't finished, returns a non-terminal
+/// status (`IN_QUEUE`/`IN_PROGRESS`) with NO `output` — the caller must then
+/// poll `/status/{id}`. Cold starts (model load) routinely exceed the runsync
+/// window, so this is the normal path, not an error.
 #[derive(Debug, Deserialize)]
-struct RawResponseBody {
-    output: RawOutput,
+struct JobEnvelope {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    output: Option<RawOutput>,
+    #[serde(default)]
+    error: Option<serde_json::Value>,
+}
+
+/// Result of interpreting a single job-envelope response.
+enum JobOutcome {
+    Completed(ClassifierVerdict),
+    /// Job accepted but not finished yet; carries the id to poll `/status` with.
+    Pending(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,25 +162,102 @@ impl RunPodCopeBClient {
         serde_json::json!({ "input": { "content": content } }).to_string()
     }
 
-    pub fn parse_response(raw: &str, latency_ms: u32) -> Result<ClassifierVerdict> {
-        let parsed: RawResponseBody = serde_json::from_str(raw)
+    /// Interpret one job-envelope response into a terminal verdict, a pending
+    /// signal (poll `/status`), or an error.
+    fn parse_job(raw: &str, latency_ms: u32) -> Result<JobOutcome> {
+        let env: JobEnvelope = serde_json::from_str(raw)
             .with_context(|| format!("parse RunPod response body: {raw}"))?;
-        // `confidence` crosses an external boundary. A NaN or out-of-[0,1] value
-        // would silently skew `is_toxic` threshold comparisons, so reject it
-        // loudly here (no silent fallback) rather than propagate bad data.
-        let confidence = parsed.output.confidence;
-        if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
-            bail!(
-                "RunPod confidence out of contract (expected finite value in [0,1]): {confidence}"
-            );
+        let status = env.status.as_deref().unwrap_or("").to_ascii_uppercase();
+
+        if matches!(status.as_str(), "FAILED" | "CANCELLED" | "TIMED_OUT") {
+            let detail = env
+                .error
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| raw.to_string());
+            bail!("RunPod job {status}: {detail}");
         }
-        Ok(ClassifierVerdict {
-            toxic_token: parsed.output.toxic,
-            confidence,
-            latency_ms,
-            model_id: parsed.output.model,
-            policy_version: parsed.output.policy_version,
-        })
+
+        if let Some(out) = env.output {
+            // `confidence` crosses an external boundary. A NaN or out-of-[0,1]
+            // value would silently skew `is_toxic` threshold comparisons, so
+            // reject it loudly (no silent fallback) rather than propagate it.
+            let confidence = out.confidence;
+            if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+                bail!("RunPod confidence out of contract (expected finite value in [0,1]): {confidence}");
+            }
+            return Ok(JobOutcome::Completed(ClassifierVerdict {
+                toxic_token: out.toxic,
+                confidence,
+                latency_ms,
+                model_id: out.model,
+                policy_version: out.policy_version,
+            }));
+        }
+
+        // No output. If the job is still running, return its id to poll on;
+        // otherwise the response is malformed (e.g. COMPLETED but no output).
+        if matches!(status.as_str(), "IN_QUEUE" | "IN_PROGRESS") {
+            let id = env
+                .id
+                .ok_or_else(|| anyhow::anyhow!("RunPod {status} response missing job id: {raw}"))?;
+            return Ok(JobOutcome::Pending(id));
+        }
+        bail!("RunPod job {status:?} returned no output: {raw}");
+    }
+
+    pub fn parse_response(raw: &str, latency_ms: u32) -> Result<ClassifierVerdict> {
+        match Self::parse_job(raw, latency_ms)? {
+            JobOutcome::Completed(v) => Ok(v),
+            JobOutcome::Pending(id) => {
+                bail!("RunPod job {id} not terminal in the /runsync response (still pending)")
+            }
+        }
+    }
+
+    /// Poll `/status/{id}` until the job reaches a terminal state or `timeout`
+    /// (measured from `start`) elapses. Used when `/runsync` returns before the
+    /// job finishes (the cold-start path).
+    async fn poll_status(
+        &self,
+        job_id: &str,
+        start: Instant,
+        timeout: Duration,
+    ) -> Result<ClassifierVerdict> {
+        let url = format!(
+            "{}/status/{}",
+            self.endpoint_url.trim_end_matches('/'),
+            job_id
+        );
+        let poll_interval = Duration::from_millis(2_000);
+        loop {
+            if start.elapsed() >= timeout {
+                bail!("RunPod job {job_id} did not complete within {timeout:?}");
+            }
+            tokio::time::sleep(poll_interval).await;
+            let resp = self
+                .client
+                .get(&url)
+                .bearer_auth(&self.api_key)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+                .with_context(|| format!("poll RunPod status for {job_id}"))?;
+            let http = resp.status();
+            // 5xx while polling is transient — keep waiting. 4xx is a real
+            // contract/config error.
+            if http.is_server_error() {
+                continue;
+            }
+            if !http.is_success() {
+                bail!("RunPod /status HTTP {http} for {job_id}");
+            }
+            let body = resp.text().await?;
+            let latency_ms: u32 = start.elapsed().as_millis().try_into().unwrap_or(u32::MAX);
+            match Self::parse_job(&body, latency_ms)? {
+                JobOutcome::Completed(v) => return Ok(v),
+                JobOutcome::Pending(_) => continue,
+            }
+        }
     }
 
     /// Single attempt — issued from inside the retry loop in classify_with_timeout.
@@ -240,7 +336,13 @@ impl RunPodCopeBClient {
         // exhaust the budget triggers exactly one retry; the final successful
         // attempt does NOT bump. So `get()` already equals retries-issued.
         let observed = retries.get();
-        Ok((Self::parse_response(&response, latency_ms)?, observed))
+        // /runsync may return before the job finishes (cold starts exceed its
+        // ~90s wait) — in that case poll /status until terminal.
+        let verdict = match Self::parse_job(&response, latency_ms)? {
+            JobOutcome::Completed(v) => v,
+            JobOutcome::Pending(id) => self.poll_status(&id, start, timeout).await?,
+        };
+        Ok((verdict, observed))
     }
 }
 
