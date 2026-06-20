@@ -20,13 +20,17 @@ WORKDIR /app
 # Layer ordering still matters: stable deps FIRST, frequently-edited app code
 # (esp. policy.txt) LAST, so a policy edit rebuilds only the tiny final COPY.
 
-# 1. Stable deps. vllm is already in the base image; we add runpod and
-#    transformers explicitly so handler+prompt imports don't depend on
-#    whatever transformers version the base image happens to ship (or lack).
+# 1. Stable deps. vllm is already in the base image; we add runpod and pin
+#    transformers explicitly. CoPE-B-A4B (gemma4_text / Gemma4ForCausalLM) was
+#    saved with transformers 5.8.1 and its tokenizer uses the 5.x-only format
+#    (extra_special_tokens as a list + model_specific_special_tokens) — a 4.x
+#    transformers crashes loading it ("'list' object has no attribute 'keys'").
+#    Use >=5.8 (no upper cap) so we keep vLLM 0.23.0's already-bundled 5.x and
+#    never downgrade it.
 COPY requirements.txt /app/requirements.txt
 RUN python3 -m pip install --no-cache-dir \
         'runpod>=1.7,<2' \
-        'transformers>=4.50,<5' \
+        'transformers>=5.8' \
         huggingface-hub
 
 # 2. Runtime config. MODEL_PATH defaults to the network-volume mount; the

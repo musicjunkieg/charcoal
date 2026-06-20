@@ -2,7 +2,10 @@
 # 0.23.0 patches GHSA-q8gq-377p-jq3r + GHSA-5jv2-g5wq-cmr4 (present in 0.20.2);
 # must match the vllm/vllm-openai base-image tag in the Dockerfile.
 vllm==0.23.0
-transformers>=4.50,<5
+# CoPE-B-A4B (gemma4_text) was saved with transformers 5.8.1 and needs the 5.x
+# tokenizer format; a 4.x build crashes on its tokenizer. >=5.8 keeps vLLM's
+# bundled 5.x without downgrading.
+transformers>=5.8
 runpod>=1.7,<2
 # Dev / test (installed locally for pytest runs; not in image)
 pytest>=8

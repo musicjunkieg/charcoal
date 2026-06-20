@@ -2914,6 +2914,17 @@
       "created_at": "2026-06-19T21:30:59.781072-07:00",
       "updated_at": "2026-06-19T21:30:59.781072-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"9ade956\",\"confidence\":92}"
+    },
+    {
+      "id": 272,
+      "change_id": "724cc2aa-9eb9-433f-8ae3-2373df59cd42",
+      "node_type": "observation",
+      "title": "DEPLOY BUG found + fixed (commit 5b6c74d): endpoint workers cycled start->exit and jobs sat IN_QUEUE forever because the Dockerfile only set CMD, inheriting vllm/vllm-openai base ENTRYPOINT (vLLM OpenAI server). handler.py never ran -> runpod.serverless.start never registered a job-taker. Fix: ENTRYPOINT [] before CMD. Also fixed earlier: stale slsVersion-1 workers w/o networkVolumeId (drained via workersMax 0->3). Endpoint f39lf61pc762a8 currently workersMax=0 (cost paused). NEXT: rebuild green -> may need to bump endpoint image to new sha tag (mutable :feat-cope-b-self-host re-pull may be cached) -> workersMax=3 -> warm-up -> classify-gate. chainlink #200.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-19T22:09:52.020682-07:00",
+      "updated_at": "2026-06-19T22:09:52.020682-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"5b6c74d\",\"confidence\":88}"
     }
   ],
   "edges": [

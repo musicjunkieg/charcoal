@@ -1,5 +1,13 @@
 [
   {
+    "hash": "5b6c74d6410c682aee49a99c85f37c5a6e848607",
+    "short_hash": "5b6c74d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T22:09:06-07:00",
+    "message": "fix(cope-b): reset base ENTRYPOINT so the RunPod handler actually runs\n\nThe vllm/vllm-openai base image sets its own ENTRYPOINT (the vLLM OpenAI\nAPI server). Our Dockerfile only set CMD, so at runtime the container ran\nthe vLLM server with \"python3 -u handler.py\" appended as args — handler.py\nnever executed, runpod.serverless.start never registered a job-taker, and\nevery request sat IN_QUEUE while workers idled/cycled and exited.\n\nAdd `ENTRYPOINT []` to clear the inherited entrypoint so our CMD runs the\nhandler as the container main process. (Caught at first live deploy; this\nis the failure the deferred GPU smoke test would have surfaced.)\n\nChainlink #200.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
     "hash": "9ade956c6c930a34d4b5b75810b01ea395a9b1c7",
     "short_hash": "9ade956",
     "author": "Bryan Guffey",
