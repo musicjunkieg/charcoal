@@ -43,4 +43,10 @@ COPY handler.py prompt.py policy.txt /app/
 ARG POLICY_VERSION=policy-unversioned
 ENV POLICY_VERSION=${POLICY_VERSION}
 
+# The vllm/vllm-openai base image ships its own ENTRYPOINT (the vLLM OpenAI API
+# server). Without resetting it, our CMD is appended as *args* to that server and
+# handler.py never runs — so runpod.serverless.start never registers a job-taker
+# and every request sits IN_QUEUE forever while workers idle/cycle. Reset the
+# entrypoint and run our handler as the container's main process.
+ENTRYPOINT []
 CMD ["python3", "-u", "handler.py"]
