@@ -119,8 +119,12 @@ def decode_verdict(text: str, logprob_map) -> tuple[bool, float]:
 async def handler(event):
     """Classify a single content string. event = {"id": ..., "input": {"content": ...}}.
 
-    Returns {"output": {"toxic": bool, "confidence": float, "model": str,
-                        "policy_version": str}}.
+    Returns the bare verdict dict {"toxic": bool, "confidence": float,
+    "model": str, "policy_version": str}. RunPod Serverless wraps this return
+    value in its own top-level "output" field, so the on-the-wire response is
+    {"output": {"toxic": ...}} — which is exactly what RunPodCopeBClient expects.
+    Returning {"output": {...}} here would double-nest it to
+    {"output": {"output": {...}}} and break the Rust parser.
 
     Raises:
         KeyError: input missing "content"
@@ -147,12 +151,10 @@ async def handler(event):
     toxic, confidence = decode_verdict(out.text, out.logprobs[0])
 
     return {
-        "output": {
-            "toxic": toxic,
-            "confidence": confidence,
-            "model": "cope-b-a4b",
-            "policy_version": POLICY_VERSION,
-        }
+        "toxic": toxic,
+        "confidence": confidence,
+        "model": "cope-b-a4b",
+        "policy_version": POLICY_VERSION,
     }
 
 

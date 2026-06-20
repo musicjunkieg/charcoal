@@ -92,7 +92,7 @@ async def test_handler_returns_toxic_true_when_model_emits_1(patched_engine):
     handler, fake_engine = patched_engine
     fake_engine.generate_result = _mock_engine_result(token="1", logprob=-0.05)
     result = await handler.handler({"id": "req-1", "input": {"content": "test"}})
-    out = result["output"]
+    out = result  # handler returns the bare verdict; RunPod adds the "output" wrapper
     assert out["toxic"] is True
     assert out["model"] == "cope-b-a4b"
     # Confidence is exp(logprob), so exp(-0.05) ≈ 0.95
@@ -103,7 +103,7 @@ async def test_handler_returns_toxic_false_when_model_emits_0(patched_engine):
     handler, fake_engine = patched_engine
     fake_engine.generate_result = _mock_engine_result(token="0", logprob=-0.2)
     result = await handler.handler({"id": "req-2", "input": {"content": "test"}})
-    out = result["output"]
+    out = result  # handler returns the bare verdict; RunPod adds the "output" wrapper
     assert out["toxic"] is False
     assert 0.7 < out["confidence"] < 0.9   # exp(-0.2) ≈ 0.819
 
@@ -118,14 +118,14 @@ async def test_handler_normalizes_decoded_token_with_sentinel_prefix(patched_eng
         token="1", logprob=-0.05, decoded_prefix="▁"
     )
     result = await handler.handler({"id": "req-norm-1", "input": {"content": "test"}})
-    assert result["output"]["toxic"] is True
-    assert 0.9 < result["output"]["confidence"] < 1.0
+    assert result["toxic"] is True
+    assert 0.9 < result["confidence"] < 1.0
 
     fake_engine.generate_result = _mock_engine_result(
         token="0", logprob=-0.1, decoded_prefix=" "
     )
     result = await handler.handler({"id": "req-norm-2", "input": {"content": "test"}})
-    assert result["output"]["toxic"] is False
+    assert result["toxic"] is False
 
 
 async def test_handler_returns_policy_version_from_env(patched_engine, monkeypatch):
@@ -140,7 +140,7 @@ async def test_handler_returns_policy_version_from_env(patched_engine, monkeypat
     fake_engine.generate_result = _mock_engine_result(token="1")
     handler._engine = fake_engine  # type: ignore[attr-defined]
     result = await handler.handler({"id": "req-3", "input": {"content": "test"}})
-    assert result["output"]["policy_version"] == "policy-v3-2026-07-01"
+    assert result["policy_version"] == "policy-v3-2026-07-01"
 
 
 async def test_handler_raises_on_missing_input(patched_engine):
