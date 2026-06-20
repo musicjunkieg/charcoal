@@ -54,6 +54,12 @@ def _build_engine():
             max_model_len=4096,          # 256K default is wasteful for ~300-tok inputs
             max_num_seqs=32,             # tune empirically post-deploy
             enable_prefix_caching=True,  # critical — policy text is identical per call
+            # The RunPod network volume mounts as FUSE, which vLLM does not
+            # recognize as a network FS, so it disables auto-prefetch and loads
+            # the 11 weight shards serially (~25-29s each → ~208s on a true cold
+            # start). Forcing prefetch overlaps the shard reads. (vLLM logs this
+            # exact suggestion on cold start.)
+            safetensors_load_strategy="prefetch",
         )
     )
 

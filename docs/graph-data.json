@@ -2936,6 +2936,17 @@
       "created_at": "2026-06-19T22:53:19.141548-07:00",
       "updated_at": "2026-06-19T22:53:19.141548-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"5720d2c\",\"confidence\":95}"
+    },
+    {
+      "id": 274,
+      "change_id": "4ede576f-ade7-4d3f-aa3e-5714e8264308",
+      "node_type": "outcome",
+      "title": "Gate iteration DONE (Bryan: stop after this). Policy efacac6 (third-party forceful) → 88%, fixed political-3rd-party FP but broke identity-slur (groomers→clean FN). Policy 93eb92a (identity-hate-overrides-3rd-party exception) → 89% (89/100), groomers FN fixed. Remaining 11 disagreements (8 CoPE-B-stricter, 3 Zentropi-stricter) are NOT bugs: ~2-3 genuine CoPE-B WINS (catches slur 'trannies' Zentropi misses), several borderline judgment calls (mild snark, trans-debate, racial-grievance, anti-pride), 3 where CoPE-B is arguably MORE correct (clears venting/3rd-party-profanity Zentropi flags). CONCLUSION: ~89% is the realistic agreement CEILING between two DIFFERENT toxicity models; the 90% bar may be too strict since CoPE-B is sometimes BETTER. Recommend: accept ~89%, treat gate as informational / lower bar, don't keep tuning. policy.txt now ~1040 tokens. NEXT: cold-start log review (Bryan's ask). chainlink #189.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-19T23:40:36.645982-07:00",
+      "updated_at": "2026-06-19T23:40:36.645982-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"commit\":\"93eb92a\",\"confidence\":92}"
     }
   ],
   "edges": [

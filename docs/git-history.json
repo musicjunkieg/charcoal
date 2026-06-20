@@ -1,5 +1,13 @@
 [
   {
+    "hash": "93eb92af847ef538726cbb24e656d3ef756d2d0c",
+    "short_hash": "93eb92a",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T23:27:41-07:00",
+    "message": "feat(cope-b): identity hate overrides the third-party pass in policy\n\nThe prior revision made the third-party exclusion so forceful that CoPE-B\nstarted clearing identity slurs framed as group statements — \"all trannies\nare groomers and pedos\" flipped to a false negative (Zentropi correctly\nflags it). Carve identity-based hate out of the third-party rule:\n\n- Identity-attack rule now explicitly covers slurs / dehumanizing /\n  criminalizing claims against a protected class even when aimed at the\n  whole group rather than a named participant.\n- Third-party pass gets an EXCEPTION: it does not cover identity hate.\n- Decisive-defaults closing line excepts identity hate from the\n  \"third-party -> 0\" route.\n\nTargeted follow-up to the 88% gate run (which fixed political third-party\nFPs but introduced this identity FN). Bryan-gated: re-gate once after this.\n\nChainlink #189.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
     "hash": "5720d2cb27604edd6f38b6dfd4e39568dbe18379",
     "short_hash": "5720d2c",
     "author": "Bryan Guffey",

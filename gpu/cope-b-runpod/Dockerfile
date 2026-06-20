@@ -36,8 +36,17 @@ RUN python3 -m pip install --no-cache-dir \
 # 2. Runtime config. MODEL_PATH defaults to the network-volume mount; the
 #    endpoint can override it. vLLM loads the model directly from this local
 #    directory (no download at boot because the volume is pre-populated).
+#
+#    VLLM_CACHE_ROOT points torch.compile's cache at the persistent network
+#    volume instead of the ephemeral container, so the ~30s compile (+ the
+#    AOT-compiled function) survives across cold starts and is skipped on later
+#    ones. RUNPOD_INIT_TIMEOUT raises RunPod's worker-init health cutoff above
+#    the default (the rare full cold start loads 47GB of weights and can take
+#    ~5min; the default 7-min cutoff is close, so give margin).
 ENV MODEL_PATH=/runpod-volume/cope-b-a4b \
-    POLICY_PATH=/app/policy.txt
+    POLICY_PATH=/app/policy.txt \
+    VLLM_CACHE_ROOT=/runpod-volume/vllm-cache \
+    RUNPOD_INIT_TIMEOUT=800
 
 # 3. App code LAST — most frequently changed input (especially policy.txt),
 #    so keeping it here means a policy edit rebuilds only this tiny layer.
