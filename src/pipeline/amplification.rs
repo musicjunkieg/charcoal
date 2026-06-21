@@ -123,9 +123,8 @@ pub async fn run(
                             "NLI scored event pair"
                         );
                         if let Some(dir) = data_dir {
-                            crate::scoring::nli_audit::log_nli_audit(
-                                &crate::scoring::nli_audit::NliAuditEntry {
-                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                            let audit_event = crate::scoring::audit_log::AuditEvent::nli(
+                                crate::scoring::audit_log::NliFields {
                                     target_did: event.amplifier_did.clone(),
                                     target_handle: event.amplifier_handle.clone(),
                                     pair_type: "direct".to_string(),
@@ -135,8 +134,20 @@ pub async fn run(
                                     hostility_score: score,
                                     similarity: None,
                                 },
-                                Some(dir),
                             );
+                            match crate::scoring::audit_log::AuditWriter::from_env(
+                                dir,
+                                crate::scoring::audit_log::EventKind::Nli,
+                            ) {
+                                Ok(writer) => {
+                                    if let Err(e) = writer.record(audit_event) {
+                                        warn!(error = %e, "Failed to write NLI audit JSONL");
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to init NLI audit writer");
+                                }
+                            }
                         }
                         Some(score)
                     }

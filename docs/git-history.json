@@ -1,5 +1,197 @@
 [
   {
+    "hash": "d8cc63de6f7ac1289595b0ec80f47376a34bbc43",
+    "short_hash": "d8cc63d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T00:04:47-07:00",
+    "message": "perf(cope-b): cut full-cold-start time (prefetch weights, persist compile cache)\n\nCold-start log review (chainlink #201). FlashBoot already keeps the\nsteady-state cold start at ~14s (P70-P98); these target the rare full\ncold start (~285s): 208s weight load, 30.6s torch.compile, ~21s\ncudagraph/KV/warmup, ~25s container.\n\n- safetensors_load_strategy=\"prefetch\": the RunPod network volume mounts\n  as FUSE, which vLLM does not treat as a network FS, so it disables\n  auto-prefetch and reads the 11 shards serially (~25-29s each). Prefetch\n  overlaps the shard reads.\n- VLLM_CACHE_ROOT=/runpod-volume/vllm-cache: persist torch.compiles cache\n  on the volume so later cold starts skip the ~30s recompile.\n- RUNPOD_INIT_TIMEOUT=800: raise the worker-init health cutoff above the\n  default 7-min mark for margin.\n\nConfig/engine-arg only; handler tests mock the engine. Validated at the\nnext GPU cold start.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "93eb92af847ef538726cbb24e656d3ef756d2d0c",
+    "short_hash": "93eb92a",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T23:27:41-07:00",
+    "message": "feat(cope-b): identity hate overrides the third-party pass in policy\n\nThe prior revision made the third-party exclusion so forceful that CoPE-B\nstarted clearing identity slurs framed as group statements — \"all trannies\nare groomers and pedos\" flipped to a false negative (Zentropi correctly\nflags it). Carve identity-based hate out of the third-party rule:\n\n- Identity-attack rule now explicitly covers slurs / dehumanizing /\n  criminalizing claims against a protected class even when aimed at the\n  whole group rather than a named participant.\n- Third-party pass gets an EXCEPTION: it does not cover identity hate.\n- Decisive-defaults closing line excepts identity hate from the\n  \"third-party -> 0\" route.\n\nTargeted follow-up to the 88% gate run (which fixed political third-party\nFPs but introduced this identity FN). Bryan-gated: re-gate once after this.\n\nChainlink #189.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "5720d2cb27604edd6f38b6dfd4e39568dbe18379",
+    "short_hash": "5720d2c",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T22:46:17-07:00",
+    "message": "fix(cope-b): poll /status when /runsync returns before completion\n\nRunPods /runsync waits ~90s then returns the current job envelope; for a\njob that has not finished (cold starts routinely exceed that), the body is\n{\"id\",\"status\":\"IN_PROGRESS\"} with NO output. RunPodCopeBClient assumed\nthe verdict was always present, so the first live gate call failed with\n\"missing field output\" — and every production cold start would too.\n\nParse the full job envelope (status + optional output) via parse_job ->\nJobOutcome::{Completed,Pending}. On Pending, poll /status/{id} every 2s\nuntil terminal or the classifier timeout elapses. 5xx while polling is\ntreated as transient; FAILED/CANCELLED/TIMED_OUT surface the error.\n\nAdds a wiremock regression test: /runsync IN_PROGRESS -> /status COMPLETED.\n\nChainlink #200.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "5b6c74d6410c682aee49a99c85f37c5a6e848607",
+    "short_hash": "5b6c74d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T22:09:06-07:00",
+    "message": "fix(cope-b): reset base ENTRYPOINT so the RunPod handler actually runs\n\nThe vllm/vllm-openai base image sets its own ENTRYPOINT (the vLLM OpenAI\nAPI server). Our Dockerfile only set CMD, so at runtime the container ran\nthe vLLM server with \"python3 -u handler.py\" appended as args — handler.py\nnever executed, runpod.serverless.start never registered a job-taker, and\nevery request sat IN_QUEUE while workers idled/cycled and exited.\n\nAdd `ENTRYPOINT []` to clear the inherited entrypoint so our CMD runs the\nhandler as the container main process. (Caught at first live deploy; this\nis the failure the deferred GPU smoke test would have surfaced.)\n\nChainlink #200.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "9ade956c6c930a34d4b5b75810b01ea395a9b1c7",
+    "short_hash": "9ade956",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T21:01:30-07:00",
+    "message": "chore(deciduous): sync graph + changelog through CodeRabbit triage\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "deda58272a71c01e56a9421a7db078c1468bc4c2",
+    "short_hash": "deda582",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:55:25-07:00",
+    "message": "test(cli): guard FixtureRow parses label-less gate input\n\nLocks the contract behind CodeRabbit finding on classify_gate.rs:137 —\nthe shadow-agreement gate reuses classify_compare::FixtureRow, whose\nlabel field is now #[serde(default)], so {id,content} lines parse. This\ntest prevents a regression that re-requires label and breaks gate runs.\n\nResolved via the shared FixtureRow rather than a separate GateFixtureRow\n(single source of truth, no duplicate type).\n\nChainlink #199.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "e57db89348b8cd3ea16a546be7e6bae9d7163fe8",
+    "short_hash": "e57db89",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:41:11-07:00",
+    "message": "fix(cope-b): address CodeRabbit review on PR #54\n\nResolves the actionable CodeRabbit findings:\n\n- vllm 0.20.2 -> 0.23.0 (Dockerfile base image + requirements): patches\n  GHSA-q8gq-377p-jq3r (assert-bypass RCE) + GHSA-5jv2-g5wq-cmr4 (GGUF int\n  truncation). AsyncLLMEngine API compat to be revalidated at GPU smoke.\n- runpod_cope_b parse_response: reject non-finite / out-of-[0,1] confidence\n  (external boundary) instead of letting bad data skew is_toxic.\n- classify_compare FixtureRow.label now serde(default) so the gate accepts\n  label-less {id,content} lines per its contract.\n- classify_compare + classify_gate: propagate serde_json::to_string errors\n  with context instead of .unwrap() panics.\n- zentropi trait classify(): populate verdict.policy_version from the\n  configured ZENTROPI_LABELER_VERSION_ID (falls back to the static banner).\n- audit_log AuditWriter::new: skip create_dir_all when disabled.\n- unit_audit_log migration test: scan for nli-legacy-*.jsonl by pattern\n  instead of recomputing the date with Utc::now() (midnight-rollover flake).\n- smoke_test.sh: fail fast if vLLM never becomes ready; build the\n  POLICY/CONTENT body via prompt.build_body to avoid shell drift.\n\nDeclined (replied in-thread): non-root USER (isolated single-tenant RunPod\nworker; non-root vLLM perms unvalidatable without the GPU) and MD040 on the\nvendored runpod/skills SKILL.md.\n\nChainlink #199.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "bfedf87a6174560e9a9a414cc606cd3278815dcd",
+    "short_hash": "bfedf87",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:01:36-07:00",
+    "message": "feat(cope-b): serve weights from a RunPod network volume, not baked image\n\nThe CoPE-B-A4B model is ~50GB (Gemma-4 26B-A4B, 25B params). Baking it\ninto the image produced a ~60GB image that cannot build on GitHub-hosted\nrunners (runner dies on disk) and re-pulls on every cold start. Move the\nweights to a RunPod network volume mounted at /runpod-volume, populated\nonce and reused across cold starts — preserving the spec download-once\ngoal without the giant image.\n\nDockerfile: drop the huggingface-cli weight-download layer and the\nMODEL_REVISION arg; image is now just the vLLM base + app code.\nMODEL_PATH defaults to /runpod-volume/cope-b-a4b.\nrunpod.yml: add network_volume (charcoal-cope-b-weights, 70GB, mounted at\n/runpod-volume) + env MODEL_PATH; endpoint and volume must share a DC.\nworkflow: remove the free-disk-space step and MODEL_REVISION build-arg;\nrestore GHA layer caching (layers are small now).\nREADME: document the create-volume / populate-volume / create-endpoint\norder of operations.\n\nhandler.py is unchanged — it already reads MODEL_PATH from env, so a\nlocal volume path works as-is.\n\nChainlink #198.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "dc3edcc5310900966967e1b0556d01764ec5be7a",
+    "short_hash": "dc3edcc",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T10:36:54-07:00",
+    "message": "ci(cope-b): pin free-disk-space action to commit SHA (v1.3.1)\n\nReplaces the @main mutable branch ref with the full commit SHA\n54081f1 (v1.3.1, verified via the GitHub tags API). A third-party\naction on a moving branch is a supply-chain risk — pin it.\n\nHeld back from triggering an immediate rebuild: committed locally and\npushed alongside the next build iteration so it does not spawn a\nredundant concurrent ~50GB build while one is already running.\n\nChainlink #193.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "81b10853f0d62e7ec99cf6bac77cf7f7ce458ac5",
+    "short_hash": "81b1085",
+    "author": "Bryan Guffey",
+    "date": "2026-06-18T10:24:49-07:00",
+    "message": "feat(cli): classify-gate shadow-agreement gate (Step 4.5)\n\nRuns the candidate backend AND the reference (Zentropi) backend over\ntests/fixtures/cope_b/ab_sample.jsonl and asserts they agree on the\nbinary toxic verdict for at least 90% of the sample (MIN_SAMPLE=50,\ntarget ~100). Dumps every disagreement to\ntarget/classify-gate-disagreements.jsonl for review; exits non-zero on a\nmiss so CI can gate prod cutover. No hand labels — the reference backend\nis the comparison target.\n\nevaluate() is pure (in-memory paired verdicts) so unit tests can assert\npass/fail/too-small without mocking a classifier.\n\nChainlink #192.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "0b90cc081d172273868f358c6c075a4dea364e3a",
+    "short_hash": "0b90cc0",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:40:55-07:00",
+    "message": "chore(deciduous): sync graph + changelog through Chunk 4\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "d170119f09e962ae6824e3fbe6794c5bd999d7e8",
+    "short_hash": "d170119",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:38:32-07:00",
+    "message": "feat(observability): scan-start backend banner + RunPod retry tests\n\nscan_job emits classifier_backend_selected_total once at scan start\n(via the classifier Arc before it is boxed into the scorer — the\nclassifier_name accessor is on the concrete TwoStageToxicityScorer, not\nthe dyn ToxicityScorer the scan path holds, so we read it from the Arc).\n\nAdds tests/unit_classifier.rs#retry covering 5xx-then-success (backon\nretries fire), 4xx (wiremock asserts exactly one request → no retry), and\nwarm_up smoke (helper hits the endpoint). Uses wiremock.\n\nThe classifier_metrics module itself (record_request/record_cold_start/\nrecord_backend_selected/estimate_cost_cents) landed earlier in this chunk\nas a drift fix; record_request is already wired into both classifier\nimpls.\n\nChainlink #191.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "7174c1f46cef63cb99271a28b3ac0699030b0188",
+    "short_hash": "7174c1f",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:07:24-07:00",
+    "message": "chore(deciduous): sync graph export through Chunk 2 harvest\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "006f476ed10bd6d4e3a5eb274809366279d9bacf",
+    "short_hash": "006f476",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:06:03-07:00",
+    "message": "test(cope-b): harvest A/B sample + smoke set for shadow-agreement gate\n\nab_sample.jsonl is 100 real posts harvested via\ntools/find-fixtures/find_fixtures.py — 70 from a community mod list\n(list mode, hostile-leaning signal) plus 30 clean/edge lines from\nchaosgreml.in author feed + backlinks. UNLABELED: the Chunk 5\nshadow-agreement gate measures candidate-vs-Zentropi agreement, so no\nground-truth labels are needed. Handles/DIDs/URLs auto-scrubbed by the\ntool; junk (URL-only replies, <15-char bodies) dropped, deduped by\ncontent. 74 reply-pairs use the exact [Parent post]: .. \\n\\n[Reply]: ..\nenvelope from format_parent_reply; 26 originals carry no envelope.\n\nsmoke.jsonl is 10 hand-authored obvious toxic/clean examples (synthetic,\nno real accounts) for the Colab/local policy sanity check only — not a\nformal gate.\n\nChainlink #189.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "1cff570f44101bc31329b5e061fcb971110151d3",
+    "short_hash": "1cff570",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T13:39:37-07:00",
+    "message": "fix(mcp): use python3 for chainlink-safe-fetch server\n\n  This Mac has only python3 on PATH, not python, so the MCP server\n  failed to start. The target script is a python3 script anyway.\n\n  Closes #197\n\n  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "8eba8409461222e823977de0bf857448c49f0f19",
+    "short_hash": "8eba840",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T13:15:26-07:00",
+    "message": "fix(cope-b): address code review on Chunk 3 RunPod GPU service\n\nFix 1 (Important): reorder Dockerfile layers so the ~50 GB weight-download\nRUN runs BEFORE copying app code. Its cache key now depends only on\nMODEL_REVISION, so a policy.txt-only edit rebuilds just the final tiny app\nCOPY instead of invalidating the weight layer. Fixed the false comment in\nbuild-cope-b-image.yml that described the old (broken) ordering.\n\nFix 2 (Minor): prefix-cache benchmark now builds its prompt from the\nproduction prompt.build_body() and posts it to /v1/chat/completions, so\nvLLM applies the Gemma chat template server-side. This validates the exact\nproduction prefix without needing a local tokenizer (server owns the\ntemplate). Previously it posted a hand-rolled string to /v1/completions.\n\nFix 3 (Minor): build_body now splits the static template on its sentinels\nonce at import and joins the fixed segments with the policy/content values,\nso a literal __POLICY__/__CONTENT__ inside user/policy text is never\nre-substituted. Output is byte-identical for normal inputs. Added\ntest_build_body_not_corrupted_by_literal_sentinel_in_policy.\n\nFix 4 (Nit): documented that _get_engine() check-and-set is race-safe only\nbecause _build_engine() is synchronous (no await between check and assign);\nan async _build_engine would need an asyncio.Lock.\n\nRunnable tests: 9 passed, 5 skipped (skips need transformers / live vLLM).\n\nChainlink #190 (Phase 6.2, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 7
+  },
+  {
+    "hash": "9752e35b5a171f5cff270b08443e577e591c3fd8",
+    "short_hash": "9752e35",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:58:58-07:00",
+    "message": "feat(cope-b): seed DRAFT policy.txt + gpu/cope-b-runpod scaffold\n\npolicy.txt is a STARTING DRAFT for Bryan to review/edit, not final.\nStage-2 toxicity policy in CoPE-B POLICY-slot format, adapted from the\nCoPE-A reference snapshot at refs/labeler_prompt.txt. Binary 1=toxic/\n0=clean framing, no INSTRUCTIONS/ANSWER headers. Preserves the reference\nparticipant-vs-third-party distinction (harsh commentary about\nnon-participants/public figures stays clean) and adds Charcoal-specific\ncoverage: identity-based hostility, dogpiling/incitement, bad-faith\nconcern trolling, sarcastic/coded hostility, news-commentary ambiguity\n(cf. chainlink #114).\n\n~396 words (~514 tokens) — marginally over the 50-500 token target;\ntrim on review if desired (prefix caching amortizes policy cost).\n\nSanity-check deferred to Chunk 3 smoke test (Colab not run in this\nenvironment). Bryan to validate ~10 hand-picked examples before cutover.\n\nChainlink #189 (Phase 6.1, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "0510be17bfe3cc3a5b682dbf1f27a918648d260e",
+    "short_hash": "0510be1",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:16:38-07:00",
+    "message": "test(audit): test legacy NLI migration + document from_env strictness\n\nApply two non-blocking code-review follow-ups for the Chunk 1 audit_log work:\n\n- Finding #1 (doc clarity): document that AuditWriter::from_env enables the\n  writer ONLY when the env var is exactly \"1\" — any other value (true/yes/0/\n  empty/unset) disables it. Intentional and spec-backed.\n- Finding #4 (coverage): add unit tests for migrate_legacy_nli_audit, which\n  runs on every open_database (every CLI command + web boot) but was untested.\n  Covers the rename path (original gone, dated nli-legacy file created with\n  preserved content) and the clean no-op path (no file, no spurious output).\n\nChainlink #188 (Phase 6.0 preflight, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "cb7025901d01162d0a7209c4bb1eb7bd66489e5a",
+    "short_hash": "cb70259",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:02:01-07:00",
+    "message": "docs(plan): replace accuracy gate with shadow-agreement validation\n\nCoPE-B self-host plan revised per decision to reach RunPod cutover ASAP\nwithout hand-labeling fixtures. Validation now diffs candidate (RunPod\nCoPE-B) vs reference (live Zentropi) on ~100 real posts harvested via\nfind-fixtures; gate passes at >=90% binary-label agreement, disagreements\ndumped for review.\n\n- Chunk 2: \"labeled fixtures\" -> A/B sample harvest (ab_sample.jsonl\n  unlabeled + tiny smoke.jsonl); policy.txt authoring unchanged\n- Chunk 5: classify-gate now asserts candidate-vs-reference agreement\n  (MIN_SAMPLE=50, AGREEMENT_THRESHOLD=0.90) instead of accuracy vs labels;\n  classify-compare unchanged (already computes agreement)\n- Chunk 6: threshold calibration softened to distribution sanity check\n- Renamed Phase 6.1/6.4/6.5 subissue titles accordingly\n\nDeciduous: decision 251, action 252.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "18bd51056a284c1791ba8bd83f2800936b562128",
+    "short_hash": "18bd510",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:41:05-07:00",
+    "message": "feat(tools): add discover mode to find-fixtures\n\ndiscover mode enumerates lists owned by one or more known maintainers\nand emits a catalog (TSV by default, JSONL with --json) the reviewer\ncan grep/sort to pick which list URI to feed into list mode.\n\n--match filters list name + description; --purpose filters by\nmodlist/curatelist/referencelist/all (default modlist); --min-members\nskips empty test lists.\n\nHonest scope note in the help text and README: the public AT Protocol\nAPI has NO global searchLists endpoint, so discovery is graph-walk\n(seed with maintainers you trust). When zero lists are returned, the\ntip message points the user back at the seed-maintainer pattern rather\nthan suggesting a global search is possible.\n\nSmoke verified against pfrazee.com + why.bsky.team — returned the\nexpected 3 visible lists in TSV; --match filter correctly returned 0\nwhen nothing matched.\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "5db9d21028a34b87d6686151eb795bac5d9222d5",
+    "short_hash": "5db9d21",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:36:41-07:00",
+    "message": "feat(tools): add list mode + --match regex filter to find-fixtures\n\nlist mode walks every member of a Bluesky moderation/curation list and\nharvests their authored posts via getAuthorFeed. This is the\nhighest-signal candidate source because mod-list maintainers have\nalready done the per-account curation we would otherwise have to guess\nat, and the list usually carries a documented theme (transphobia,\nantisemitism, specific harassment crew) so members share a language\npattern.\n\n--match <regex> filter wired through all three modes (author / backlinks\n/ list). Answers the \"what words should we search for\" question by\nletting you iterate hand-tuned regexes rather than freeform searching —\nwhich the public AppView gates behind auth anyway.\n\nBlock-resilience note: many hostile accounts likely have already blocked\nthe protected user, so they wont appear in Constellation backlinks of\nthe protected users posts. They DO appear on mod lists and getAuthorFeed\nworks regardless of who they have blocked (we query as anonymous\nAppView).\n\nbsky_url_to_at_uri generalized to parse both /post/<rkey> and\n/lists/<rkey> URLs. list mode tags each row with note=from-list-member:<did>\nso the reviewer can trace candidates back to their source.\n\nVerified:\n  - author + match against chaosgreml.in returned 4 trans/queer-mentioning\n    candidates with envelope shape correct\n  - list mode plumbing tested against a real (empty) public list owned by\n    pfrazee.com; 0 emitted is the correct behavior for an empty list\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "d1dc946f34d8bfa135e8f0b52c77d631627cea2c",
+    "short_hash": "d1dc946",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:17:47-07:00",
+    "message": "feat(tools): standalone find-fixtures harness for CoPE-B candidate harvesting\n\nTwo modes; both emit JSONL in the Chunk 2 fixture schema with PII scrubbed\nand the exact [Parent post]/[Reply] envelope format_parent_reply produces:\n\n  author <handle|did>     - walk getAuthorFeed; good for known-hostile or\n                            known-supportive accounts\n  backlinks <url|at-uri>  - use Microcosm Constellation to find replies +\n                            (optionally) quotes pointing at a seed post;\n                            mirrors how Charcoals amplification pipeline\n                            discovers candidates in prod\n\nstdlib only - no pip install. Python 3.10+.\n\nPivoted off app.bsky.feed.searchPosts when smoke testing turned up CDN\n403s (it requires auth). The author + backlinks paths are unauthenticated\nAND produce stronger curation signal than freeform keyword search.\n\nConstellation call shape verified against src/constellation/client.rs:\n/xrpc/blue.microcosm.links.getBacklinks with subject + source where source\nis collection:json_path (no leading dot). Response {records:\n[{did, collection, rkey}]} reconstructed into at:// URIs.\n\nSmoke tests against chaosgreml.in (author) and grimalkina (backlinks)\nproduced clean envelope-shaped candidates with PII scrubbed.\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "52d4e721bd8487dc101c120f3fa4d3fd472e0229",
+    "short_hash": "52d4e72",
+    "author": "Bryan Guffey",
+    "date": "2026-06-05T14:54:45-07:00",
+    "message": "docs(plan): CoPE-B impl plan Chunks 5-8 — A/B harness, gate, calibration, staging, cutover\n\nChunk 5: classify-compare (informational A/B per spec Step 4) +\n  classify-gate (Step 4.5 hard accuracy gate, 90%/90% bar, fixture\n  minimum 20 entries). Pure summarize() / evaluate() helpers separated\n  from UI so unit tests assert numbers.\n\nChunk 6: COPE_B_THRESHOLD calibration via classify-gate sweeps (note on\n  divergence from spec wording: gate-driven equivalent to spec A/B-driven,\n  simpler iteration). Zentropi-hosted CoPE-B research path with explicit\n  branch for \"available\" vs \"fall back to CoPE-A under existing threshold.\"\n\nChunk 7: feat -> staging PR, env-var setup including\n  CHARCOAL_SCAN_COST_CEILING_CENTS=200 safety net on staging (the\n  cheapest blast radius window for billing surprises), grimalkina re-scan\n  + metrics capture vs the chainlink #182 baseline.\n\nChunk 8: staging -> main PR via project staging promotion workflow,\n  prod env-var flip, smoke test, 24h monitoring with corrected metric\n  names (backend_selected_total{backend=zentropi} for fallback detection),\n  rollback plan with explicit data-state note (CoPE-B verdicts persist on\n  rollback; audit log carries per-call backend provenance).\n\nSingle end-to-end reviewer pass on these chunks caught:\n- Stale classifier_fallback_to_zentropi_count name (was renamed in Chunk 4)\n- Missing CHARCOAL_SCAN_COST_CEILING_CENTS on staging\n- Calibration mechanism divergence not explained\n- summarize() vs evaluate() threshold-handling difference unmarked\n\nChainlink #185.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "6ed45bf854401cd1ff2a5e1795aa448232066123",
+    "short_hash": "6ed45bf",
+    "author": "Bryan Guffey",
+    "date": "2026-06-05T12:47:30-07:00",
+    "message": "docs(spec): retry policy uses exponential backoff + decorrelated jitter\n\nPer Bryan note on iteration-5 spec. Plain exponential backoff causes\nthundering-herd against the upstream when many concurrent classifications\nhit the same transient failure window — jitter spreads retries across the\nbackoff window. Updated all four retry references (Failure modes, unit\ntest list, retry-amplification cost note, env var table) plus added a\ngolden-file test on jitter window bounds so future tuning does not\nsilently widen the spread.\n\nChainlink #185.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
     "hash": "e4e77c0aad1ad1cbfa96b451436ce25c3a9cfb79",
     "short_hash": "e4e77c0",
     "author": "Bryan Guffey",

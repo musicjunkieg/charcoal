@@ -138,6 +138,37 @@ enum Commands {
     /// in production scoring.
     ZentropiCheck,
 
+    /// A/B characterize two classifier backends against a JSONL input set.
+    ClassifyCompare {
+        /// JSONL file path (each line: {id,label,category,content,note}).
+        #[arg(long)]
+        input: std::path::PathBuf,
+        /// Backend A — one of: runpod | zentropi
+        #[arg(long, default_value = "zentropi")]
+        a: String,
+        /// Backend B — one of: runpod | zentropi
+        #[arg(long, default_value = "runpod")]
+        b: String,
+    },
+
+    /// Shadow-agreement gate: assert a candidate backend agrees with the
+    /// reference (Zentropi) backend on >= 90% of a JSONL sample. Exits non-zero
+    /// on a miss so CI can gate the prod cutover.
+    ClassifyGate {
+        /// JSONL sample to run through both backends (each line: {id,content,...}).
+        #[arg(long, default_value = "tests/fixtures/cope_b/ab_sample.jsonl")]
+        sample: std::path::PathBuf,
+        /// Candidate backend — one of: runpod | zentropi
+        #[arg(long, default_value = "runpod")]
+        candidate: String,
+        /// Reference backend (comparison target) — one of: runpod | zentropi
+        #[arg(long, default_value = "zentropi")]
+        reference: String,
+        /// Where to write the disagreement report.
+        #[arg(long, default_value = "target/classify-gate-disagreements.jsonl")]
+        disagreements: std::path::PathBuf,
+    },
+
     /// Migrate data from SQLite to PostgreSQL
     #[cfg(feature = "postgres")]
     Migrate {
@@ -981,6 +1012,45 @@ async fn main() -> Result<()> {
             }
         }
 
+        Commands::ClassifyCompare { input, a, b } => {
+            let backend_a = charcoal::toxicity::classifier::build_backend_named(&a)?;
+            let backend_b = charcoal::toxicity::classifier::build_backend_named(&b)?;
+            charcoal::cli::classify_compare::run(backend_a, backend_b, &input).await?;
+        }
+
+        Commands::ClassifyGate {
+            sample,
+            candidate,
+            reference,
+            disagreements,
+        } => {
+            let cand = charcoal::toxicity::classifier::build_backend_named(&candidate)?;
+            let refr = charcoal::toxicity::classifier::build_backend_named(&reference)?;
+            let outcome =
+                charcoal::cli::classify_gate::run(cand, refr, &sample, &disagreements).await?;
+            match outcome {
+                charcoal::cli::classify_gate::GateOutcome::Pass { agreement, sample } => {
+                    println!(
+                        "GATE PASS — {:.1}% agreement over {} posts",
+                        agreement * 100.0,
+                        sample
+                    );
+                }
+                charcoal::cli::classify_gate::GateOutcome::Fail {
+                    agreement,
+                    sample,
+                    reason,
+                } => {
+                    eprintln!(
+                        "GATE FAIL — {reason} ({:.1}% agreement over {} posts)",
+                        agreement * 100.0,
+                        sample
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+
         #[cfg(feature = "postgres")]
         Commands::Migrate { database_url } => {
             let config = config::Config::load()?;
@@ -1087,6 +1157,13 @@ async fn main() -> Result<()> {
 /// When DATABASE_URL is set and points to PostgreSQL, uses the Postgres backend
 /// (requires the `postgres` feature). Otherwise, falls back to SQLite.
 async fn open_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::Database>> {
+    // One-time, idempotent rename of any pre-generalization NLI audit file so it
+    // isn't orphaned by the switch to daily-by-date audit filenames. Charcoal has
+    // no `CHARCOAL_DATA_DIR` env var and `db::open` only receives a db path, so
+    // this runs here — the shared DB-open boundary every command goes through,
+    // where `config.data_dir()` (the audit log dir) is known. No-op if absent.
+    charcoal::scoring::audit_log::migrate_legacy_nli_audit(config.data_dir());
+
     if let Some(ref url) = config.database_url {
         if url.starts_with("postgres://") || url.starts_with("postgresql://") {
             #[cfg(feature = "postgres")]
@@ -1148,44 +1225,17 @@ fn create_scorer(
         }
     };
 
-    let zentropi = build_zentropi(config);
+    // Stage-2 classifier is required and selected by CHARCOAL_CLASSIFIER; the
+    // factory refuses to build (and the binary refuses to boot) if unconfigured.
+    let classifier = charcoal::toxicity::classifier::build_from_env()?;
+    info!(
+        backend = classifier.name(),
+        "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
+    );
 
     Ok(Box::new(
-        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, zentropi),
+        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, classifier),
     ))
-}
-
-/// Build a Zentropi client when both API key and labeler ID are configured.
-/// Returns `None` (with a logged warning) on misconfiguration so the pipeline
-/// degrades gracefully to ONNX-only.
-fn build_zentropi(
-    config: &config::Config,
-) -> Option<std::sync::Arc<charcoal::toxicity::zentropi::ZentropiClient>> {
-    let api_key = config.zentropi_api_key.as_ref().filter(|k| !k.is_empty())?;
-    let labeler_id = config
-        .zentropi_labeler_id
-        .as_ref()
-        .filter(|k| !k.is_empty())?;
-    let version_id = config
-        .zentropi_labeler_version_id
-        .as_ref()
-        .filter(|k| !k.is_empty())
-        .cloned();
-
-    match charcoal::toxicity::zentropi::ZentropiClient::new(
-        api_key.clone(),
-        labeler_id.clone(),
-        version_id,
-    ) {
-        Ok(c) => {
-            info!("Zentropi binary classifier loaded — two-stage scoring enabled");
-            Some(std::sync::Arc::new(c))
-        }
-        Err(e) => {
-            warn!(error = %e, "Failed to init Zentropi client, using ONNX-only fallback");
-            None
-        }
-    }
 }
 
 /// Load the protected user's fingerprint from the database, or bail with a helpful message.

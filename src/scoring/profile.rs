@@ -345,10 +345,16 @@ pub async fn build_profile(
                     match nli.score_pair(original, response).await {
                         Ok((score, hypothesis_scores)) => {
                             pair_scores.push(score);
+                            info!(
+                                target_did = target_did,
+                                target_handle = target_handle,
+                                pair_type = "direct",
+                                hostility_score = format!("{:.3}", score),
+                                "NLI audit"
+                            );
                             if let Some(dir) = data_dir {
-                                crate::scoring::nli_audit::log_nli_audit(
-                                    &crate::scoring::nli_audit::NliAuditEntry {
-                                        timestamp: chrono::Utc::now().to_rfc3339(),
+                                let event = crate::scoring::audit_log::AuditEvent::nli(
+                                    crate::scoring::audit_log::NliFields {
                                         target_did: target_did.to_string(),
                                         target_handle: target_handle.to_string(),
                                         pair_type: "direct".to_string(),
@@ -358,8 +364,20 @@ pub async fn build_profile(
                                         hostility_score: score,
                                         similarity: None,
                                     },
-                                    Some(dir),
                                 );
+                                match crate::scoring::audit_log::AuditWriter::from_env(
+                                    dir,
+                                    crate::scoring::audit_log::EventKind::Nli,
+                                ) {
+                                    Ok(writer) => {
+                                        if let Err(e) = writer.record(event) {
+                                            warn!(error = %e, "Failed to write NLI audit JSONL");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to init NLI audit writer");
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -421,10 +439,16 @@ pub async fn build_profile(
                             match nli.score_pair(original, target_text).await {
                                 Ok((score, hypothesis_scores)) => {
                                     pair_scores.push(score);
+                                    info!(
+                                        target_did = target_did,
+                                        target_handle = target_handle,
+                                        pair_type = "inferred",
+                                        hostility_score = format!("{:.3}", score),
+                                        "NLI audit"
+                                    );
                                     if let Some(dir) = data_dir {
-                                        crate::scoring::nli_audit::log_nli_audit(
-                                            &crate::scoring::nli_audit::NliAuditEntry {
-                                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                        let event = crate::scoring::audit_log::AuditEvent::nli(
+                                            crate::scoring::audit_log::NliFields {
                                                 target_did: target_did.to_string(),
                                                 target_handle: target_handle.to_string(),
                                                 pair_type: "inferred".to_string(),
@@ -434,8 +458,20 @@ pub async fn build_profile(
                                                 hostility_score: score,
                                                 similarity: Some(*similarity),
                                             },
-                                            Some(dir),
                                         );
+                                        match crate::scoring::audit_log::AuditWriter::from_env(
+                                            dir,
+                                            crate::scoring::audit_log::EventKind::Nli,
+                                        ) {
+                                            Ok(writer) => {
+                                                if let Err(e) = writer.record(event) {
+                                                    warn!(error = %e, "Failed to write NLI audit JSONL");
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!(error = %e, "Failed to init NLI audit writer");
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {

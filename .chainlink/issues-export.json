@@ -1,7 +1,502 @@
 {
   "version": 1,
-  "exported_at": "2026-05-17T23:58:41.298574+00:00",
+  "exported_at": "2026-06-21T05:24:45.327324+00:00",
   "issues": [
+    {
+      "id": 201,
+      "title": "Phase 6 cold-start opts: safetensors prefetch + persist compile cache + init timeout",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "perf"
+      ],
+      "comments": [
+        {
+          "content": "Implemented in d8cc63d (build 27863725433): handler safetensors_load_strategy=prefetch + Dockerfile ENV VLLM_CACHE_ROOT=/runpod-volume/vllm-cache + RUNPOD_INIT_TIMEOUT=800. Config/engine-arg only; validated at next GPU cold start. NOTE: steady-state cold start is already ~14s via FlashBoot (P70-P98); these target the rare full-cold (~285s, dominated by 208s FUSE-serial weight load).",
+          "created_at": "2026-06-20T07:05:42.647609+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-20T06:52:46.632542+00:00",
+      "updated_at": "2026-06-20T07:05:42.653272+00:00",
+      "closed_at": "2026-06-20T07:05:42.653272+00:00"
+    },
+    {
+      "id": 200,
+      "title": "Phase 6: Deploy CoPE-B to RunPod (registry auth + volume + populate + endpoint)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "deploy"
+      ],
+      "comments": [
+        {
+          "content": "DEPLOY COMPLETE + GATE RAN. Endpoint f39lf61pc762a8 live (H100 80GB/US-GA-2/volume b8rmatu3si). classify-gate = 88% agreement (88/100) vs Zentropi, just under the 90% bar. 12 disagreements: 9 CoPE-B-stricter (mostly false-positives on benign snark + third-party political commentary the draft policy.txt hasn't encoded; a couple genuine wins Zentropi misses), 3 Zentropi-stricter (venting/profanity). Gap is draft-policy over-breadth, not infra. 5 live deploy bugs fixed: stale-workers-no-volume, base-image ENTRYPOINT, transformers<5 vs gemma4, handler double-output, /runsync IN_PROGRESS polling. Cost paused (workersMax=0). NEXT (Bryan): tune policy.txt (3rd-party/benign), maybe retune COPE_B_THRESHOLD, re-run gate.",
+          "created_at": "2026-06-20T05:53:19.151880+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-20T04:05:45.459216+00:00",
+      "updated_at": "2026-06-20T04:05:45.459216+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 199,
+      "title": "Triage CodeRabbit review on PR #54 (Phase 6 self-host)",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "review"
+      ],
+      "comments": [
+        {
+          "content": "DONE: all 12 CodeRabbit threads resolved (0 unresolved after deda582 re-review). 11 fixed in code, 2 declined+accepted by CodeRabbit. vLLM 0.23.0 image build green. PR #54 mergeable.",
+          "created_at": "2026-06-20T04:00:12.238139+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-20T03:36:01.228284+00:00",
+      "updated_at": "2026-06-20T04:00:12.242671+00:00",
+      "closed_at": "2026-06-20T04:00:12.242671+00:00"
+    },
+    {
+      "id": 198,
+      "title": "Phase 6: CoPE-B GPU service — RunPod network volume instead of baked weights",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-06-19T22:34:17.250976+00:00",
+      "updated_at": "2026-06-19T22:34:17.250976+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 197,
+      "title": "Fix chainlink-safe-fetch MCP: python -> python3 in .mcp.json",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "[auto] Session resumed after context compression.",
+          "created_at": "2026-06-17T20:49:31.638380+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-17T20:38:46.802296+00:00",
+      "updated_at": "2026-06-17T20:41:20.321527+00:00",
+      "closed_at": "2026-06-17T20:41:20.321527+00:00"
+    },
+    {
+      "id": 196,
+      "title": "Phase 6.8 — Prod cutover + monitoring",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T19:03:38.814672+00:00",
+      "updated_at": "2026-06-17T19:03:38.814672+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 195,
+      "title": "Phase 6.7 — Staging gate (grimalkina re-scan)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T19:03:38.810281+00:00",
+      "updated_at": "2026-06-17T19:03:38.810281+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 194,
+      "title": "Phase 6.6 — Zentropi-hosted CoPE-B (or CoPE-A fallback)",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T19:03:38.805836+00:00",
+      "updated_at": "2026-06-17T19:03:38.805836+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 193,
+      "title": "Phase 6.5 — Threshold sanity check + optional retune",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T19:03:38.801588+00:00",
+      "updated_at": "2026-06-17T19:03:38.801588+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 192,
+      "title": "Phase 6.4 — A/B harness + shadow-agreement gate",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Chunk 5 DONE (commits 81b1085 + parent, pushed). Two CLI subcommands: (1) classify-compare --input <jsonl> --a <backend> --b <backend>: runs both named backends over a fixture set, writes <input>.compare.jsonl per-pair + prints agreement/disagreement + per-class accuracy summary; pure summarize() unit-tested. (2) classify-gate --sample <jsonl> --candidate <backend> --reference <backend> --disagreements <path>: shadow-agreement gate — PASS iff binary-verdict agreement >= AGREEMENT_THRESHOLD (0.90) AND sample >= MIN_SAMPLE (50); dumps every disagreement to the report path; exits non-zero on miss so CI can gate cutover; pure evaluate() unit-tested (pass / sub-90 fail / too-small fail). build_backend_named() added to classifier.rs (builds one named backend, bypasses CHARCOAL_CLASSIFIER so the prod boot selection is untouched). DRIFT: no src/cli module existed (main.rs monolithic) — created src/cli/ in the lib crate (pub mod cli) so logic is unit-testable; main.rs handlers use charcoal:: paths (plan snippets said crate::, which is the binary). 6 new unit tests; full web suite green; clippy clean web/default/postgres. To RUN the gate once the RunPod image is live: set RUNPOD_ENDPOINT_URL+RUNPOD_API_KEY+ZENTROPI_* and run 'charcoal classify-gate' (defaults candidate=runpod reference=zentropi sample=tests/fixtures/cope_b/ab_sample.jsonl). NEXT: Chunk 6 (#193) threshold sanity check + optional retune of COPE_B_THRESHOLD.",
+          "created_at": "2026-06-18T17:26:18.560633+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-17T19:03:38.797208+00:00",
+      "updated_at": "2026-06-18T17:26:18.566502+00:00",
+      "closed_at": "2026-06-18T17:26:18.566502+00:00"
+    },
+    {
+      "id": 191,
+      "title": "Phase 6.3 — Rust trait + RunPodCopeBClient + ZentropiClient refactor",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Chunk 4 DONE (commits f084aba..d170119, pushed). Delivered: ToxicityClassifier trait + ClassifierVerdict + StubClassifier (src/toxicity/classifier.rs); RunPodCopeBClient with backon decorrelated-jitter retry, typed RunPodError (5xx retryable / 4xx not), warm_up helper, COPE_B_THRESHOLD const (src/toxicity/runpod_cope_b.rs); ZentropiClient refactored onto the trait (inherent classify renamed classify_raw); TwoStageVerdict v2 (classifier_confidence f32 + classifier_model_id + classifier_policy_version; VerdictSource ClassifierToxic/Safe; OnnxFallback REMOVED = no silent fallback, classifier errors propagate); build_from_env factory keyed on CHARCOAL_CLASSIFIER (refuses to boot if unset/empty/unknown); src/observability/classifier_metrics.rs + scan-start backend banner. Full web suite green; clippy clean across web/default/postgres. NOTES: (1) observability module didn't exist — created early (plan assumed it did). (2) Fixed 3 faulty plan tests: f32 serde exact-eq 0.73->0.5, missing-output assert on {err:#} chain, factory let-else (Ok type is non-Debug trait object). Follow-up deferred: ZentropiClient retry count surfaced as 0 to metrics (its own retry loop doesn't expose a count yet). NEXT: Chunk 5 (#192) A/B harness + shadow-agreement gate.",
+          "created_at": "2026-06-17T21:40:21.083531+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-17T19:03:38.792401+00:00",
+      "updated_at": "2026-06-17T21:40:21.089722+00:00",
+      "closed_at": "2026-06-17T21:40:21.089722+00:00"
+    },
+    {
+      "id": 190,
+      "title": "Phase 6.2 — RunPod GPU service (Dockerfile + handler + smoke)",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T19:03:38.787802+00:00",
+      "updated_at": "2026-06-17T20:17:19.301313+00:00",
+      "closed_at": "2026-06-17T20:17:19.301313+00:00"
+    },
+    {
+      "id": 189,
+      "title": "Phase 6.1 — policy text + A/B sample harvest",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": 185,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "A/B sample harvest DONE (commit 006f476): tests/fixtures/cope_b/ab_sample.jsonl = 100 real posts (70 from hedgehogsafety mod list via list mode + 30 clean/edge from chaosgreml.in author feed + backlinks), UNLABELED, handles/DIDs/URLs scrubbed, junk dropped, deduped; 74 reply-pairs in format_parent_reply envelope + 26 originals. smoke.jsonl = 10 hand-authored obvious cases. PII gate waived by Bryan (public firehose data). REMAINING (Bryan-owned): (1) review/edit gpu/cope-b-runpod/policy.txt; (2) Colab or Chunk-3 local smoke sanity-check of policy vs smoke.jsonl. NOTE: hedgehogsafety list skewed mild/political, not extreme toxicity — agreement gate is valid but lightly exercises the high-toxicity disagreement region; consider a more pointed list before prod cutover if disagreement coverage looks thin.",
+          "created_at": "2026-06-17T21:06:39.912390+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Chunk 2 A/B sample (100 posts) + smoke set harvested & committed (006f476); skills tooling committed; #189 pending policy review",
+          "created_at": "2026-06-17T21:07:16.195516+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-17T19:03:38.783535+00:00",
+      "updated_at": "2026-06-17T19:03:38.783535+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 188,
+      "title": "Phase 6.0 — audit_log generalization preflight",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": 185,
+      "labels": [
+        "refactor"
+      ],
+      "comments": [],
+      "created_at": "2026-06-17T19:03:38.778608+00:00",
+      "updated_at": "2026-06-17T19:18:02.398161+00:00",
+      "closed_at": "2026-06-17T19:18:02.398161+00:00"
+    },
+    {
+      "id": 187,
+      "title": "Global mod-list catalog dashboard (post-Phase 6, standalone repo)",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "infrastructure"
+      ],
+      "comments": [
+        {
+          "content": "Scoped during Phase 6 fixture-curation work as a follow-up — NOT blocking Phase 6.\n\nProblem: there is no public AT Protocol endpoint that lets you search Bluesky moderation lists by name across all maintainers. `app.bsky.graph.getLists` is per-actor; `searchPosts` requires auth and only finds posts anyway; Ozone is operator-scoped (not a discovery layer); existing community tools (pdsls, atproto.tools, possibly blueskydirectory.com/lists/all) browse individual records but search semantics across them is unclear.\n\nPhase 6 workaround: `tools/find-fixtures/find_fixtures.py discover` subcommand walks `getLists` for one or more user-supplied maintainers and emits a TSV catalog. Sufficient for curating ~40-60 labeled fixtures.\n\nProposed long-term project (separate repo, not buried in Charcoal):\n\n1. Backfill via `com.atproto.sync.listReposByCollection?collection=app.bsky.graph.list` to enumerate every DID that has published a list, then `com.atproto.sync.getRepo` per DID to pull list records in one shot.\n2. Live updates via Jetstream subscription filtered to `app.bsky.graph.list` creates/updates/deletes.\n3. Index in SQLite + FTS5 over name + description + purpose (modlist / curatelist / referencelist).\n4. Web dashboard with full-text search, filter by purpose / member count / labels.\n5. Optionally also catalog labelers via `app.bsky.labeler.service`.\n\nWhy standalone repo rather than buried in Charcoal: other harassment-detection projects (Skywatch, similar community tools) would benefit. Decoupling it makes adoption easier and lets Charcoal consume it as a service or import the index as a static artifact.\n\nRealistic effort: 2-4 days for a v0 (backfill + index + minimal web UI). Live updates via Jetstream add another 1-2 days.\n\nFirst step before any code: confirm whether blueskydirectory.com/lists/all already has working search — if so, this whole project is unnecessary. Bryan to spot-check in browser.",
+          "created_at": "2026-06-07T02:21:54.956684+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-07T02:21:32.974750+00:00",
+      "updated_at": "2026-06-07T02:21:32.974750+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 186,
+      "title": "Standalone tool: find Bluesky posts for CoPE-B policy fixture curation",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "tooling"
+      ],
+      "comments": [],
+      "created_at": "2026-06-07T01:08:31.664295+00:00",
+      "updated_at": "2026-06-07T01:08:31.664295+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 185,
+      "title": "Phase 6: Self-host CoPE-b-a4b on GPU (Modal or RunPod), replace Zentropi",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "feature"
+      ],
+      "comments": [
+        {
+          "content": "Goal: replace Zentropi hosted API (CoPE-a) with self-hosted CoPE-b-a4b on GPU infrastructure.\n\nConfirmed scope (from brainstorming with Bryan, 2026-06-05):\n- ONNX clean-pass filter STAYS (<0.10) — CoPE-b replaces only the Zentropi stage\n- 5000 classifications in <10 min per user (latency target for solid onboarding UX)\n- Must absorb concurrent onboardings gracefully (queue-and-degrade acceptable; single-user latency is the hard constraint)\n- Cost ceiling: <$1 per onboarding scan\n- Hardware: A100 80GB on RunPod OR H100 on Modal\n- Scale-to-zero with minimal cold-start\n- Build an adapter so backend is swappable (Zentropi-hosted ↔ self-hosted CoPE-b ↔ future)\n- Prompt structure for CoPE-b differs from CoPE-a — research from HF model card\n\nPhase plan (TBD pending design):\n- Phase 6.1: Provider research + spec\n- Phase 6.2: GPU deployment (Modal or RunPod) with CoPE-b\n- Phase 6.3: Charcoal adapter (trait + implementations)\n- Phase 6.4: Integration + staging rollout\n- Phase 6.5: Prod cutover + Zentropi deprecation\n\nTracking: this is the Phase 6 epic. Subissues will be opened as design solidifies.",
+          "created_at": "2026-06-05T16:55:00.998725+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T16:54:50.182807+00:00",
+      "updated_at": "2026-06-05T16:54:50.182807+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 184,
+      "title": "Investigate ONNX inference failures during long-running scans",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Observed during the 2026-06-05 grimalkina.bsky.social scan (#182):\n\n- 12 ONNX inference failures over a 2h 34min scan\n- Source: src/pipeline/amplification.rs WARN \"Failed to score follower, skipping\" with error=\"ONNX inference failed\"\n- Pattern: sparse, scattered throughout the scan (not clustered)\n- Effect: affected followers skipped entirely — counted in completion `accounts=` total but no score row written\n- Benign on a small scale (12 / ~3300 = 0.4%), but worth investigating if rate scales with scan length\n\nPossible causes:\n1. Memory pressure under long-running scan — ort session may degrade after many calls\n2. Specific post content triggers tokenizer/model edge case (UTF-8, length, repeated chars)\n3. ort 2.0.0-rc.11 session pool exhaustion / locking issue\n4. Tokenizers crate bug on certain inputs\n\nInvestigation plan:\n1. Add post-content snapshot logging when ONNX fails — capture text length, presence of non-BMP unicode, language markers\n2. Track memory usage on Railway during scan (current Phase 5 scans are RAM-heavy due to Zentropi + NLI + ONNX in parallel)\n3. Confirm 12 failures are random vs. correlated (same follower? same post pattern?)\n4. Consider rebuilding ort session periodically (every N inferences) as defensive measure\n\nLow priority unless ONNX failure rate grows with scan size.",
+          "created_at": "2026-06-05T15:58:26.381165+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T15:58:16.103721+00:00",
+      "updated_at": "2026-06-05T15:58:16.103721+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 183,
+      "title": "Investigate sporadic Zentropi 403 Forbidden errors during long scans",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Observed during the 2026-06-05 grimalkina.bsky.social scan (#182):\n\n- 45 Zentropi failures over a 2h 34min scan, all HTTP 403 Forbidden\n- Response body is HTML (`<!doctype html>...<title>403</title>403 Forbidden`), NOT a JSON error body — suggests block at CDN/proxy layer (Cloudflare/CloudFront/WAF) rather than Zentropi service itself\n- First 403 hit at 06:09:54Z, 2h 19min into the scan — late-onset, not present at scan start\n- Sporadic after that (45 over remaining ~15 min)\n- Code path: src/toxicity/ensemble.rs WARN \"Zentropi failed, falling back to ONNX threshold\" — fallback works, no scoring impact, but bypasses Zentropi for affected posts\n\nContrast with chaosgreml.in 2026-05-17 scan: hundreds-to-thousands of 429s, no 403s.\n\nHypotheses to investigate:\n1. Zentropi auth token (API key) has a TTL or rotation — may invalidate mid-scan\n2. Upstream CDN (Cloudflare?) blocks long-lived connections or specific IP patterns after sustained usage\n3. Zentropi changed billing/auth — sporadic 403 may indicate quota/credit exhaustion partway through\n4. Specific labeler version (ZENTROPI_LABELER_VERSION_ID) deprecated mid-scan\n\nNext steps:\n1. Run `charcoal zentropi-check` to confirm current auth health\n2. Add 403-specific logging: capture response headers (especially `cf-ray`, `x-amz-cf-id`, `server`, `www-authenticate`) to identify whether the block is at CDN or origin\n3. Implement bounded retry with backoff on 403 (currently we just fall back to ONNX)\n4. Consider env-var rotation strategy if auth has a TTL\n\nRelated: #181 (Zentropi concurrency) — original 429-rate-limit concern not reproducing at 5x the load; this 403 pattern is the new failure mode worth tracking.",
+          "created_at": "2026-06-05T15:58:12.979998+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T15:57:58.472580+00:00",
+      "updated_at": "2026-06-05T15:57:58.472580+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 182,
+      "title": "Pull Zentropi call count from last full scan of grimalkina.bsky.social",
+      "description": null,
+      "status": "closed",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [
+        {
+          "content": "Goal: quantify Zentropi API usage on a real scan to inform whether per-key rate limiting / concurrency caps are needed.\n\nTarget: most recent full scan for protected user grimalkina.bsky.social (DID resolution needed).\n\nSources to check:\n- NLI/Zentropi audit JSONL logs (Phase 1.75 added per-pair JSONL audit). Check Railway production logs / volume for path.\n- amplification_events / account_scores rows from the last scan window — count of scored accounts × post-sample size gives an upper bound.\n- scan_state table for last scan start/end timestamps to scope the window.\n\nWanted output:\n- Total Zentropi requests during the window\n- Breakdown by call type (classify vs classify_pair)\n- Peak in-flight concurrency observed (if surfaced in logs)\n- Any 429 / rate-limit responses\n\nUse this to decide whether to add a semaphore around ZentropiClient (follow-up to #181).",
+          "created_at": "2026-06-05T03:26:06.677544+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Findings — grimalkina has NO scan history in Railway logs (90-day retention) for either prod or staging.\n\nSearched:\n- production env (charcoal-web): 90d logs filtered for \"grimalkina\" → zero hits\n- staging env (charcoal-web): 90d logs filtered for \"grimalkina\" → zero hits\n- production env: only ONE full scan in 90 days, target was chaosgreml.in (Bryan), started 2026-05-17T23:21:14Z, completed 2026-05-18T00:08:16Z (~47 min), 704 amplifier accounts, 447 events\n- staging env: no scan_job activity in 90 days\n\nINCIDENTAL FINDING from the chaosgreml.in scan: Zentropi was getting HAMMERED with 429s. Sample raw count from logs (single grep, sequential timestamps clustered within seconds):\n\n- Pulled ~100 lines around 23:27-23:28 → seen at least 30+ \"Zentropi API error 429 Too Many Requests\" lines\n- Pattern: bursts of 4-8 simultaneous 429s, then a few seconds quiet, then another burst\n- Code falls back to ONNX threshold on 429 (src/toxicity/ensemble.rs WARN), so scoring keeps working — but Zentropi binary classification was effectively bypassed for a large fraction of posts on this scan\n- This validates the #181 concern: ~32 concurrent peak (8 accounts × 4 in-flight) is over the Zentropi rate limit\n\nSo the rate-limit/semaphore work proposed as a follow-up to #181 is NOT hypothetical — it actively degraded the 2026-05-17 chaosgreml.in scan.\n\nNext steps for this issue:\n1. Confirm with Bryan whether they meant the chaosgreml.in scan, or want a fresh grimalkina scan triggered\n2. If grimalkina scan is wanted, trigger via /api/scan after OAuth login as grimalkina, then re-pull logs filtered to that scan window\n3. Quantify the chaosgreml.in scan more precisely: count total Zentropi 429s vs total successful Zentropi calls (needs full-window log dump)",
+          "created_at": "2026-06-05T03:29:02.476468+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Staging confirmed: NO grimalkina scan, AND no scans at all in 90 days.\n\nFull staging log dump for last 90d returned just 5 lines — a single container boot on 2026-05-18T01:41:32Z (post-PR-#47 staging→main promotion deploy), then idle. No scan_job lines, no \"Collected posts for analysis\", no did:plc references.\n\nDefinitive: grimalkina.bsky.social has never been scanned in either Railway environment within Railway log retention (90 days).\n\nPossible explanations:\n1. Confusion with chaosgreml.in scan (only real prod scan in the window)\n2. Local-only scan (not on Railway) — would need to query local Postgres or SQLite\n3. Memory of a scan from before 2026-02-04 (outside Railway retention)\n\nReady for direction.",
+          "created_at": "2026-06-05T03:30:54.843231+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "CORRECTION: I was wrong about admin-triggered scan being unbuilt. Phase 1.5 shipped via PR #35 on 2026-03-27 (#103 epic + #104-107 subissues all closed). Memory updated.\n\nConfirmed working endpoints on prod:\n- POST /api/admin/users — pre-seed by handle (resolves to DID, kicks off fingerprint build)\n- POST /api/admin/users/{did}/scan — trigger scan for a pre-seeded DID\n- GET /api/admin/users — list pre-seeded users\n- Admin route in SvelteKit at /admin\n\nProd admin allowlist: CHARCOAL_ADMIN_DIDS=did:plc:h3wpawnrlptr4534chevddo6 (Bryan)\n\nPath forward to capture grimalkina Zentropi metrics:\n1. Bryan signs in at https://charcoal.watch as @chaosgreml.in\n2. Goes to /admin → pre-seeds grimalkina.bsky.social (or hits POST /api/admin/users with {\"handle\":\"grimalkina.bsky.social\"})\n3. Waits for fingerprint build to complete (watch logs for \"Fingerprint build complete\")\n4. Triggers scan via /admin UI or POST /api/admin/users/{grimalkina_did}/scan\n5. I tail prod logs filtered for grimalkina-related lines and count Zentropi 200 vs 429 responses\n\nWill await Bryans go-ahead to start tailing.",
+          "created_at": "2026-06-05T03:41:48.484640+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "COMPLETE — grimalkina.bsky.social scan finished.\n\nScan window: 2026-06-05T03:50:30Z → 2026-06-05T06:24:26Z (2h 33min 56s)\nTarget: did:plc:yjvayj5thzisljwor7yykhlx\nConstellation source: 1703 likes, 1024 amplifiers classified\n\nCompletion line: events=1994 accounts=3671\n\nAccount processing breakdown (from logs, may differ slightly from completion accounts= due to filtering):\n- 2414 fully Scored\n- 895 Stage 1 early-exits (clean + irrelevant)\n- 12 ONNX inference failures (followers skipped)\n- 3321 total touched (matches completion 3671 within ~10% — diff likely failed/skipped or counted differently)\n\nZentropi API call profile:\n- Total posts sampled across Scored accounts: 112,587 (avg 46.6 posts/account)\n- Plus Stage 1 early-exits at 25 posts each: ~22,375 posts seen but skipped Zentropi\n- Stage 2 Zentropi-eligible posts: ~112,587 (assumes all Scored hit Stage 2)\n- Zentropi failures: 45 (0.04% of Stage 2 eligible posts)\n- **All 45 failures are HTTP 403 Forbidden** (HTML body, looks like upstream CDN/proxy block, not rate-limit)\n- **Zero HTTP 429 Too Many Requests**\n\nThis is materially different from the 2026-05-17 chaosgreml.in scan:\n- chaosgreml.in: hundreds-to-thousands of 429s, sustained rate-limit storm\n- grimalkina: 0 429s, 45 sporadic 403s starting at 06:09Z (2h19m into scan), HTML body suggests Cloudflare/CloudFront/WAF-level block, not Zentropi service throttling\n\nPossible explanations for the change:\n1. Zentropi raised rate limits or added concurrency capacity since May 17\n2. Zentropi changed billing/auth model — 403s may indicate a sporadic auth issue (key rotation? token TTL?)\n3. Upstream CDN at Zentropi is blocking long-lived clients (rare but plausible — would explain late-onset)\n\nCross-reference to #181 (Zentropi concurrency follow-up):\n- The original concern (32 concurrent peak hammering 429s) is NOT reproducing on grimalkina with ~5x more amplifiers\n- Lower priority than I previously suggested — still worth a semaphore as defense-in-depth, but no longer \"actively degrading prod scans\"\n- The 403 pattern is the more interesting puzzle now and probably deserves its own investigation (transient Zentropi auth or CDN-level block?)\n\n12 ONNX inference failures over 2h34m is benign but worth noting — could indicate memory pressure or model-state issues under long-running scan.\n\nClosing this issue. Recommend a fresh issue to investigate the 403 pattern (separate from the 429 work in #181).",
+          "created_at": "2026-06-05T06:57:51.768821+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-05T03:25:57.676242+00:00",
+      "updated_at": "2026-06-05T06:57:56.186347+00:00",
+      "closed_at": "2026-06-05T06:57:56.186347+00:00"
+    },
+    {
+      "id": 181,
+      "title": "Investigate Zentropi API call concurrency pattern",
+      "description": null,
+      "status": "closed",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [
+        {
+          "content": "Findings:\n\nZentropi calls are parallel on both axes.\n\nClient: src/toxicity/zentropi.rs\n- ZentropiClient::classify(text) — single post\n- ZentropiClient::classify_pair(parent, reply) — reply-in-context\n\nBatch fan-out: src/toxicity/ensemble.rs:177-215\n- classify_batch_with_contexts() uses stream::iter(...).buffer_unordered(ZENTROPI_CONCURRENCY)\n- ZENTROPI_CONCURRENCY = 4 — up to 4 in-flight Zentropi calls per account\n\nAccount fan-out: src/pipeline/sweep.rs:134-159\n- Sweep stream uses buffer_unordered(concurrency), default 8 from CLI\n\nPeak: ~8 accounts × 4 posts = ~32 concurrent Zentropi requests.\n\nNo rate-limit handling visible in zentropi.rs — worth a follow-up if Zentropi has per-key concurrency caps. Closing as informational.",
+          "created_at": "2026-06-04T23:19:39.854669+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-04T23:19:32.351591+00:00",
+      "updated_at": "2026-06-04T23:19:44.986185+00:00",
+      "closed_at": "2026-06-04T23:19:44.986185+00:00"
+    },
+    {
+      "id": 180,
+      "title": "Address deferred CodeRabbit findings from PR #47 (non-blocking)",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "tech-debt"
+      ],
+      "comments": [
+        {
+          "content": "CodeRabbit reviewed PR #47 (staging->main promotion) on 2026-05-17. The critical findings were fixed in a follow-up PR. These are real but non-blocking; address as a tech-debt sweep when capacity allows.\n\n**Robustness / correctness:**\n- `src/scoring/nli.rs` — `softmax_entailment` panics if logits.len() < 2; return Result or Option instead\n- `src/scoring/threat.rs` — clamp `context_score` to [0.0, 1.0] before computing `context_multiplier` to prevent under/over-amplification\n- `src/scoring/nli_audit.rs` — `append_jsonl` has an unsynchronized read/rotate/open/write race under concurrent NLI scoring; wrap with file lock\n- `src/scoring/nli_audit.rs` — add `user_did` field to `NliAuditEntry` for multi-user audit attribution\n- `src/main.rs` ~line 1164 — `?` on `config.zentropi_api_key` short-circuits the partial-config warning; read into Options and check together\n- `src/main.rs` ~line 318 — `fetch_recent_posts` errors silently swallowed by `unwrap_or_default`; log before fallback\n- `src/pipeline/amplification.rs` ~line 89 — `amplifier_text` only fetched when `analyze_followers` is true; in Phase B that path is missed\n- `src/pipeline/amplification.rs` ~line 278 — duplicate amplifier DIDs cause duplicate follower fetches; dedupe via HashSet\n- `src/bluesky/posts.rs` ~line 267 — `reply_ratio`/`quote_ratio` computed against `total_collected` (post-filter); introduce `total_authored` (pre-filter) for unbiased ratios\n- `src/bluesky/relationships.rs` ~line 131 — parse failure skips inserting entries for target_dids, leaving missing entries downstream; insert a sane default\n- `src/bluesky/replies.rs` ~line 49 — thread extraction pushes entries with empty URI; add `uri.is_empty()` check\n- `src/constellation/client.rs` ~line 170 — `find_likers` fetches only first page; loop with cursor until exhausted\n- `src/discovery/topic_search.rs` ~line 56 — `search_posts_for_authors` counts already_scored DIDs against `max_results` budget; filter before counting\n\n**Data integrity:**\n- `src/db/queries.rs` ~line 723 — `insert_inferred_pair` uses `last_insert_rowid()` after `ON CONFLICT DO UPDATE`, returning wrong id on conflict; use RETURNING id (SQLite path, dev-only)\n- `src/db/traits.rs` ~line 187 — `list_users` and `update_last_login` lack `user_did: &str` first parameter required by multi-user trait convention\n- `src/db/schema.rs` ~line 217 — SQLite migrations run DDL and schema_version updates non-atomically across v5-v8 closures; wrap in SAVEPOINT or make idempotent\n\n**Documentation:**\n- `README.md` ~line 171 — describes OpenAI ensemble; replace with Zentropi binary classifier (TwoStageToxicityScorer behavior, fallback semantics, env vars)\n\n**Migration policy:**\n- `migrations/postgres/0005_contextual_scoring.sql` ~line 16 — `user_labels.label` accepts arbitrary text; add ENUM or CHECK constraint for the documented label set\n\n**Tooling / dev scripts:**\n- `.gitignore` line 31 — `.chainlink/issues-export.json` is ignored AND tracked; reconcile (untrack via `git rm --cached` OR remove from .gitignore)\n- `scripts/check-updates.sh` ~line 29 — `crate_latest()` and `tool_installed_version()` grep pipelines need `|| true` to survive `set -euo pipefail` on no-match\n- `scripts/check-updates.sh` ~line 205 — `pinned_rev`/`short_rev` are hardcoded; parse from Cargo.toml\n\n**Tests:**\n- `src/output/markdown.rs` ~line 245 — test fixtures use `graph_distance: None`; flip one to `Some(...)` and assert the \"Distance\" column renders\n\nSource: CodeRabbit review on PR #47, 2026-05-17. Critical findings (migration version recording for 0006/0008, postgres.rs read paths dropping graph_distance) are fixed in a separate PR.",
+          "created_at": "2026-05-17T22:33:01.133160+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-05-17T22:32:38.085657+00:00",
+      "updated_at": "2026-05-17T22:32:38.085657+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 179,
+      "title": "Triage CodeRabbit review on PR #47 (staging→main promotion)",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "review"
+      ],
+      "comments": [],
+      "created_at": "2026-05-17T22:28:08.994836+00:00",
+      "updated_at": "2026-05-17T22:28:08.994836+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 178,
+      "title": "Audit pre-commit/pre-push hook: fmt+clippy drift slipped through to CI twice on PR #47",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [
+        {
+          "content": "Two distinct gaps surfaced during the PR #47 (staging->main) promotion on 2026-05-17:\n\n**1. Local toolchain drift**: local cargo is on Rust 1.94, CI is on Rust 1.95. Two new clippy lints (useless_conversion, unnecessary_sort_by) fire under 1.95 but not 1.94 — pre-commit/pre-push gates passed locally, CI failed. Rustfmt opinion also drifted between versions, causing a separate CI fmt failure even after the clippy fix landed.\n\n**2. Pre-push \"no Rust changes\" false negative**: the push of fix/rustfmt-after-clippy produced this output before the gate-skip:\n```\nfatal: ambiguous argument origin/fix/rustfmt-after-clippy..HEAD: unknown revision or path not in the working tree.\nPre-push: no Rust changes, skipping quality gate.\n```\nThe hook diffed against an upstream tracking branch that did not yet exist (new branch first push). It errored, swallowed the error, and defaulted to \"no Rust changes\" — which was wrong; this push contained a Rust file change. The skip path needs to detect the \"no upstream yet\" case and fall back to diffing against the merge-base of staging/main instead.\n\n**Suggested fixes**:\n- Pin local toolchain: add `rust-toolchain.toml` at repo root with `channel = \"stable\"` AND run `rustup update stable` regularly, OR pin to a specific version that matches CI\n- Fix pre-push: when no upstream exists, diff against `git merge-base HEAD origin/staging` (or origin/main) to detect changes being pushed for the first time\n- Consider running fmt/clippy in pre-push unconditionally on any Rust-touching commit reachable from HEAD but not from origin/staging\n\n**Impact**: cost two extra CI cycles and two extra fix PRs (#48 clippy, #49 fmt) to land the staging->main promotion.",
+          "created_at": "2026-05-17T22:15:58.397764+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Additional observation from 2026-05-17 session: the bug appears to trigger only on **truly-new-everywhere** branches. When pushing local `staging` (which had a stale tracking ref to a now-deleted `origin/staging`), the pre-push hook **did** run the quality gate normally — clippy + 419 tests, all passed — even though the push created a brand new `staging` ref on the remote.\n\nHypothesis: the failing path is `git rev-list origin/<branch>..HEAD` when `origin/<branch>` does not exist as a ref. The staging push worked because the local-tracking ref `refs/remotes/origin/staging` still existed from before deletion (git keeps local tracking refs until next `git fetch --prune`), so the rev-list succeeded against the stale-but-present ref.\n\nThis narrows the repro: the bug needs a branch whose remote tracking ref has **never existed locally**, which matches every first-push of a freshly-created `fix/*` branch. Suggests the fix is to detect that case specifically and fall back to `git merge-base HEAD origin/main` (or origin/staging) as the diff base.\n\nEncountered 4 times today (PR #48, #49, #50, #51 first-pushes) and zero times on the staging push.",
+          "created_at": "2026-05-17T23:31:06.341160+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-05-17T22:15:45.372081+00:00",
+      "updated_at": "2026-05-17T22:15:45.372081+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 177,
+      "title": "PR #47 CI: fix clippy errors blocking staging→main promotion",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug"
+      ],
+      "comments": [],
+      "created_at": "2026-05-17T21:51:45.382020+00:00",
+      "updated_at": "2026-05-17T21:51:45.382020+00:00",
+      "closed_at": null
+    },
     {
       "id": 176,
       "title": "Update Zentropi labeler policy: taxonomy + target-clarity fixes",
