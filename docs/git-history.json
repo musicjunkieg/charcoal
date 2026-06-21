@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ab3f4af1d3127aa609bdb42e7cd1feebe9094ca4",
+    "short_hash": "ab3f4af",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T22:24:45-07:00",
+    "message": "chore(deciduous): sync graph after Phase 6 node cleanup\n\nMark the Phase 6 design + execution run (chunks 2-5, deploy, gate,\ncold-start opts) completed, reject unchosen options (Modal/hybrid/\nsearchPosts), and chain the previously-orphaned deploy-phase nodes\n(264..275). No code change — decision-graph hygiene only.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
     "hash": "d8cc63de6f7ac1289595b0ec80f47376a34bbc43",
     "short_hash": "d8cc63d",
     "author": "Bryan Guffey",
