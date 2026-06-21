@@ -2980,6 +2980,127 @@
       "created_at": "2026-06-20T22:31:32.890979-07:00",
       "updated_at": "2026-06-20T22:31:32.890979-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-self-host\",\"confidence\":95}"
+    },
+    {
+      "id": 278,
+      "change_id": "340eeaee-1f97-412e-ab56-3558e49060e2",
+      "node_type": "decision",
+      "title": "Accept ~89% gate ceiling: lower classify-gate AGREEMENT_THRESHOLD 0.90->0.85",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T22:47:49.986125-07:00",
+      "updated_at": "2026-06-20T22:47:49.986125-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"commit\":\"34bb90b\",\"confidence\":90}"
+    },
+    {
+      "id": 279,
+      "change_id": "7cdf8810-fcb2-40b4-ad3b-297b55874ba1",
+      "node_type": "action",
+      "title": "Lower threshold const + rationale comment + rewrite boundary tests for 85% bar (branch off staging, feat branch was merged+deleted)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T22:47:49.998886-07:00",
+      "updated_at": "2026-06-20T22:47:49.998886-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"commit\":\"34bb90b\",\"confidence\":90}"
+    },
+    {
+      "id": 280,
+      "change_id": "c009845c-bee6-43f6-b3b0-81e2656b6931",
+      "node_type": "outcome",
+      "title": "Committed 34bb90b on fix/classify-gate-threshold-85; 3/3 gate tests + clippy + default suite green; PR #57 opened to staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T22:47:50.007090-07:00",
+      "updated_at": "2026-06-20T22:47:50.007090-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":95}"
+    },
+    {
+      "id": 281,
+      "change_id": "a94f48e3-f236-42be-9fa0-14634cfd11de",
+      "node_type": "action",
+      "title": "Merge PR #57 to staging (db7d9f0) + bump RunPod endpoint f39lf61pc762a8 workersMax 0->3 via MCP",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T22:50:18.694184-07:00",
+      "updated_at": "2026-06-20T22:50:18.694184-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"commit\":\"34bb90b\",\"confidence\":95}"
+    },
+    {
+      "id": 282,
+      "change_id": "946ae47a-167d-414d-9f07-e94660f91d51",
+      "node_type": "outcome",
+      "title": "Staging now has AGREEMENT_THRESHOLD=0.85; RunPod endpoint live (workersMax=3, workersMin=0 scale-to-zero preserved). Ready for #195 staging gate re-run.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T22:50:18.703633-07:00",
+      "updated_at": "2026-06-20T22:50:18.703633-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":95}"
+    },
+    {
+      "id": 283,
+      "change_id": "5a3e5347-4e4f-471a-a7eb-c4d123819350",
+      "node_type": "observation",
+      "title": "PROD CAPACITY RISK: US-GA-2 RunPod serverless is H100-only + very low capacity (Bryan, 2026-06-21). Single-region/single-arch dependency for prod cutover. RTX PRO 6000 spike parked. Escape hatch live: CHARCOAL_CLASSIFIER=zentropi. Tracked chainlink #205, blocks #196.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T22:56:08.442674-07:00",
+      "updated_at": "2026-06-20T22:56:08.442674-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":90}"
+    },
+    {
+      "id": 284,
+      "change_id": "cd704d96-d393-4769-8992-01ab7ae5c8fd",
+      "node_type": "action",
+      "title": "Prep Phase 6.7 staging gate: set audit+cost-ceiling vars, verify staging redeploy boots clean on runpod, confirm public 200",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T23:03:24.279956-07:00",
+      "updated_at": "2026-06-20T23:03:24.279956-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"commit\":\"34bb90b\",\"confidence\":95}"
+    },
+    {
+      "id": 285,
+      "change_id": "235e4af9-dd02-4616-aa5f-57d99b630593",
+      "node_type": "outcome",
+      "title": "Phase 6.7 grimalkina scan STARTED clean on staging: backend=runpod-cope-b, two-stage enabled, no errors. Multi-hour scan in progress; metrics+baseline comparison pending completion.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T23:07:39.285212-07:00",
+      "updated_at": "2026-06-20T23:07:39.285212-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":95}"
+    },
+    {
+      "id": 286,
+      "change_id": "845fa0d3-89e2-4a07-8c3b-dba0ebc68b20",
+      "node_type": "observation",
+      "title": "Phase 6.7 cold-start VALIDATED: first RunPod CoPE-B calls ~06:26 already warm (211ms) — FlashBoot standby (workersStandby=3) absorbed cold start, no 285s/14s penalty. Warm ~170ms-1.1s, 0 retries/errors. Tier shift to review: flocktoblue=Elevated (baseline had 0 Elevated).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-20T23:28:48.982360-07:00",
+      "updated_at": "2026-06-20T23:28:48.982360-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":90}"
+    },
+    {
+      "id": 287,
+      "change_id": "db1f6e80-b6f7-4553-aaef-46fbe7048bd7",
+      "node_type": "observation",
+      "title": "Phase 6.7 MID-SCAN RunPod HTTP 402 (credits exhausted) ~10:47/4h40m: follower scoring skipping (graceful), scan degraded. CRITICAL: app $2 cost ceiling never fired while real RunPod balance depleted — per-classification estimate undercounts worker wall-clock cost on long scans. Prod #196 must fix cost guard.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-21T03:48:19.487459-07:00",
+      "updated_at": "2026-06-21T03:48:19.487459-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":90}"
+    },
+    {
+      "id": 288,
+      "change_id": "53542055-6e34-4484-b113-873bd453f501",
+      "node_type": "outcome",
+      "title": "Phase 6.7 staging gate COMPLETE 12:02:05 — PASS-with-caveats. events=2036/accounts=5295, duration ~5h56m (2.3x baseline). VALIDATED: backend=runpod-cope-b, cold start invisible (FlashBoot standby), e2e scoring (4 escalations CoPE-B caught vs baseline 0: flocktoblue=Elev, thegreybox=High, torinoentertainer=Elev, rogerdoggie=Watch), graceful 402 handling. CAVEATS for #196: degraded tail (402 credits exhausted ~10:47, no top-up), COST-GUARD GAP ($2 ceiling never fired vs real worker-wallclock cost), p95 ~10s latency (rec workersMin=1). Failures are billing+tuning, not code.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-21T05:30:58.288889-07:00",
+      "updated_at": "2026-06-21T05:30:58.288889-07:00",
+      "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -5952,6 +6073,127 @@
       "weight": 1.0,
       "rationale": "Result of setting staging env vars",
       "created_at": "2026-06-20T22:31:38.272278-07:00"
+    },
+    {
+      "id": 279,
+      "from_node_id": 274,
+      "to_node_id": 278,
+      "from_change_id": "4ede576f-ade7-4d3f-aa3e-5714e8264308",
+      "to_change_id": "340eeaee-1f97-412e-ab56-3558e49060e2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Gate-iteration recommendation (accept ~89%) -> Bryan's accept decision",
+      "created_at": "2026-06-20T22:47:56.450618-07:00"
+    },
+    {
+      "id": 280,
+      "from_node_id": 278,
+      "to_node_id": 279,
+      "from_change_id": "340eeaee-1f97-412e-ab56-3558e49060e2",
+      "to_change_id": "7cdf8810-fcb2-40b4-ad3b-297b55874ba1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision to lower bar -> implementation",
+      "created_at": "2026-06-20T22:47:56.456870-07:00"
+    },
+    {
+      "id": 281,
+      "from_node_id": 279,
+      "to_node_id": 280,
+      "from_change_id": "7cdf8810-fcb2-40b4-ad3b-297b55874ba1",
+      "to_change_id": "c009845c-bee6-43f6-b3b0-81e2656b6931",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation result",
+      "created_at": "2026-06-20T22:47:56.463682-07:00"
+    },
+    {
+      "id": 282,
+      "from_node_id": 280,
+      "to_node_id": 281,
+      "from_change_id": "c009845c-bee6-43f6-b3b0-81e2656b6931",
+      "to_change_id": "a94f48e3-f236-42be-9fa0-14634cfd11de",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR open -> merged + endpoint un-paused",
+      "created_at": "2026-06-20T22:50:23.371908-07:00"
+    },
+    {
+      "id": 283,
+      "from_node_id": 281,
+      "to_node_id": 282,
+      "from_change_id": "a94f48e3-f236-42be-9fa0-14634cfd11de",
+      "to_change_id": "946ae47a-167d-414d-9f07-e94660f91d51",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of merge + bump",
+      "created_at": "2026-06-20T22:50:23.378365-07:00"
+    },
+    {
+      "id": 284,
+      "from_node_id": 228,
+      "to_node_id": 283,
+      "from_change_id": "f5e1110b-6143-4599-9715-012aecbf22b2",
+      "to_change_id": "5a3e5347-4e4f-471a-a7eb-c4d123819350",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Prod capacity risk observed under Phase 6 epic",
+      "created_at": "2026-06-20T22:56:20.923542-07:00"
+    },
+    {
+      "id": 285,
+      "from_node_id": 282,
+      "to_node_id": 284,
+      "from_change_id": "946ae47a-167d-414d-9f07-e94660f91d51",
+      "to_change_id": "cd704d96-d393-4769-8992-01ab7ae5c8fd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Endpoint live -> staging gate prep",
+      "created_at": "2026-06-20T23:04:12.962212-07:00"
+    },
+    {
+      "id": 286,
+      "from_node_id": 284,
+      "to_node_id": 285,
+      "from_change_id": "cd704d96-d393-4769-8992-01ab7ae5c8fd",
+      "to_change_id": "235e4af9-dd02-4616-aa5f-57d99b630593",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Gate prep -> scan kicked off clean",
+      "created_at": "2026-06-20T23:08:06.721321-07:00"
+    },
+    {
+      "id": 287,
+      "from_node_id": 285,
+      "to_node_id": 286,
+      "from_change_id": "235e4af9-dd02-4616-aa5f-57d99b630593",
+      "to_change_id": "845fa0d3-89e2-4a07-8c3b-dba0ebc68b20",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Scan started -> cold start validated healthy",
+      "created_at": "2026-06-20T23:29:11.121027-07:00"
+    },
+    {
+      "id": 288,
+      "from_node_id": 286,
+      "to_node_id": 287,
+      "from_change_id": "845fa0d3-89e2-4a07-8c3b-dba0ebc68b20",
+      "to_change_id": "db1f6e80-b6f7-4553-aaef-46fbe7048bd7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Cold-start healthy -> later mid-scan 402 credits exhausted",
+      "created_at": "2026-06-21T03:48:39.552724-07:00"
+    },
+    {
+      "id": 289,
+      "from_node_id": 287,
+      "to_node_id": 288,
+      "from_change_id": "db1f6e80-b6f7-4553-aaef-46fbe7048bd7",
+      "to_change_id": "53542055-6e34-4484-b113-873bd453f501",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "402 mid-scan -> degraded completion + gate verdict",
+      "created_at": "2026-06-21T05:31:03.641802-07:00"
     }
   ],
   "documents": [

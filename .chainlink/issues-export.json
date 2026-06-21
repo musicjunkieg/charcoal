@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "exported_at": "2026-06-21T05:47:12.985091+00:00",
+  "exported_at": "2026-06-21T14:58:40.364333+00:00",
   "issues": [
     {
-      "id": 203,
-      "title": "Lower classify-gate AGREEMENT_THRESHOLD 0.90->0.85 (accept ~89% model-agreement ceiling)",
+      "id": 206,
+      "title": "Cost-guard fix + onboarding cost reduction (real worker-wallclock accounting + decouple classification burst) — blocks #196",
       "description": null,
       "status": "open",
       "priority": "high",
@@ -13,9 +13,77 @@
         "cope-b"
       ],
       "comments": [],
-      "created_at": "2026-06-21T05:44:10.547654+00:00",
-      "updated_at": "2026-06-21T05:44:10.547654+00:00",
+      "created_at": "2026-06-21T14:41:23.088726+00:00",
+      "updated_at": "2026-06-21T14:41:23.088726+00:00",
       "closed_at": null
+    },
+    {
+      "id": 205,
+      "title": "Production GPU capacity risk: US-GA-2 serverless is H100-only and very low capacity",
+      "description": null,
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "cope-b"
+      ],
+      "comments": [
+        {
+          "content": "Clarification (Bryan): RunPod capacity is DYNAMIC — it is NOT always H100-only; available GPU types in US-GA fluctuate constantly. So this is a MONITORING concern, not a fixed-state blocker. Standing action: check live availability via RunPod MCP list-gpu-types (filter region/availability) periodically and right before prod cutover; confirm >=1 viable arch in-region, ideally with a validated fallback already in gpuTypeIds. Keep open as a watch item through #196.",
+          "created_at": "2026-06-21T05:57:45.093822+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "PREFERRED FALLBACK ARCH = H200 (supersedes RTX PRO 6000 Blackwell for mitigation #1). H200 is Hopper sm_90 = SAME compute capability as our H100, so the pinned vLLM 0.23.0 image runs UNCHANGED (no sm_120 validation needed). 141GB HBM3e @ ~4.8TB/s = faster + more VRAM than H100 80GB. Add as SECONDARY priority in gpuTypeIds so the +34% $/s (0.00155 vs 0.00116) is only paid when H100 is starved. Caveats: (1) confirm H200 is in US-GA-2 (volume region-locked there; MCP shows only global 'High' stock, not per-DC); (2) gpuTypeIds is NOT settable via RunPod MCP update-endpoint -> console-only edit (Endpoint edit -> GPU selection -> add H200 SXM below H100). One-time: H200 fallback worker takes a full cold start (SKU-specific FlashBoot snapshot) + ~30s torch.compile recompile. Blackwell spike stays parked.",
+          "created_at": "2026-06-21T06:05:09.657887+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-21T05:55:33.902831+00:00",
+      "updated_at": "2026-06-21T05:56:20.915377+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 204,
+      "title": "Merge PR #57 to staging + bump RunPod endpoint workersMax 0->3",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "infra"
+      ],
+      "comments": [
+        {
+          "content": "PR #57 merged to staging (db7d9f0); staging now has AGREEMENT_THRESHOLD=0.85. RunPod endpoint f39lf61pc762a8 workersMax bumped 0->3 via MCP (workersMin=0 scale-to-zero preserved). Ready for #195 staging gate.",
+          "created_at": "2026-06-21T05:50:23.384628+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-21T05:48:42.730866+00:00",
+      "updated_at": "2026-06-21T05:50:23.389316+00:00",
+      "closed_at": "2026-06-21T05:50:23.389316+00:00"
+    },
+    {
+      "id": 203,
+      "title": "Lower classify-gate AGREEMENT_THRESHOLD 0.90->0.85 (accept ~89% model-agreement ceiling)",
+      "description": null,
+      "status": "closed",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "cope-b"
+      ],
+      "comments": [
+        {
+          "content": "Done. AGREEMENT_THRESHOLD 0.90->0.85 with rationale comment; boundary tests rewritten (43/50=86% pass, 42/50=84% fail). Branched off staging (feat/cope-b-self-host was merged via #54 + deleted). Commit 34bb90b, PR #57 -> staging. Tests + clippy green.",
+          "created_at": "2026-06-21T05:47:56.469609+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-21T05:44:10.547654+00:00",
+      "updated_at": "2026-06-21T05:47:56.474194+00:00",
+      "closed_at": "2026-06-21T05:47:56.474194+00:00"
     },
     {
       "id": 202,
@@ -147,7 +215,13 @@
       "labels": [
         "feature"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "BLOCKER-CLASS RISK for prod cutover: US-GA-2 RunPod serverless currently has ONLY H100 80GB available (very low capacity); A100/others unavailable. Single-region + single-arch dependency. Mitigation menu before prod: (1) validate RTX PRO 6000 Blackwell 96GB ('High' stock) as a fallback arch on a pinned test endpoint; (2) multi-region — replicate the 49GB model volume to a 2nd DC + add an H100 endpoint there (volumes are region-locked); (3) ESCAPE HATCH ALREADY LIVE — CHARCOAL_CLASSIFIER=zentropi flips to hosted Zentropi with one env var if RunPod is starved. See new capacity-risk issue + memory runpod-capacity-risk.",
+          "created_at": "2026-06-21T05:55:33.908916+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-17T19:03:38.814672+00:00",
       "updated_at": "2026-06-17T19:03:38.814672+00:00",
       "closed_at": null
@@ -156,16 +230,127 @@
       "id": 195,
       "title": "Phase 6.7 — Staging gate (grimalkina re-scan)",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "high",
       "parent_id": 185,
       "labels": [
         "feature"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "STAGING GATE READY (Task 7.1+7.2 done, agent side): staging redeployed + booted clean 06:02 (HTTP 200 public). Env vars set: CHARCOAL_CLASSIFIER=runpod, RUNPOD_ENDPOINT_URL, RUNPOD_API_KEY, CHARCOAL_AUDIT_CLASSIFIER=1, CHARCOAL_SCAN_COST_CEILING_CENTS=200 (+ Zentropi trio for fallback). RunPod endpoint f39lf61pc762a8 workersMax=3 (live, scale-to-zero). Staging also carries the 0.85 gate bar. PENDING Task 7.3 (Bryan-only, needs OAuth session): log into charcoal-web-staging.up.railway.app/admin, ensure grimalkina pre-seeded, click Scan. Baseline to beat (#182 prod CoPE-A): 1994 events / 3671 accounts / 2h34min / 45 Zentropi 403s / ~112k classifications (most filtered by ONNX before hitting RunPod). Agent will tail classifier metrics + compare on completion.",
+          "created_at": "2026-06-21T06:03:24.265545+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "SCAN STARTED CLEAN 06:06:36. backend=runpod-cope-b confirmed (Stage-2 classifier loaded, two-stage enabled, classifier_backend_selected_total=runpod-cope-b). Target grimalkina did:plc:yjvayj5thzisljwor7yykhlx. Embedding+NLI loaded, collecting posts. No errors. This is also the FIRST full cold start since d8cc63d cold-start opts (safetensors prefetch + VLLM_CACHE_ROOT) — validating now.",
+          "created_at": "2026-06-21T06:07:39.274701+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 scan monitor: still in amplification-event collection (likes/reposts), no RunPod CoPE-B calls yet, no errors. Cold-start ping pending.",
+          "created_at": "2026-06-21T06:17:40.110145+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor wake 3: scan in per-account analysis (post partitioning, TF-IDF); still NO RunPod CoPE-B call (ONNX clean-pass filtering most posts). No errors. Cold-start ping still pending.",
+          "created_at": "2026-06-21T06:22:52.228537+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "COLD START VALIDATED (wake 4, ~06:26 UTC). RunPod CoPE-B calls flowing. Cold start was EFFECTIVELY INVISIBLE: earliest observed call 211ms (already warm) — FlashBoot standby workers (workersStandby=3) absorbed it; no ~285s full-cold or 14s penalty in the classification path. Warm latency ~170ms-1.1s/call (matches/beats the ~670-760ms estimate). ~186 classifications so far, ZERO retries/errors/429s, cost well under $2 ceiling. HEADS-UP TIER SHIFT to review at completion: flocktoblue.bsky.social scored tier=Elevated (toxicity 0.15, threat 25.7) — baseline #182 had 0 High/Elevated, so CoPE-B is catching something CoPE-A didn't (genuine catch vs FP TBD).",
+          "created_at": "2026-06-21T06:28:48.971968+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor (post-remote-control wake): scan still running, no completion/errors/retries/cost-abort, no Watch+ tiers in current buffer. Remote Control now active so completion ping reaches mobile. NOTE: grep -c on railway rolling buffer is NOT cumulative — get true classification total from completion summary.",
+          "created_at": "2026-06-21T06:55:46.641165+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~07:22 (~1h16m in, ~halfway vs 2h34m baseline): still running, no completion/errors/retries/abort, no Watch+ in buffer. Latency drifted sub-second -> ~2s/call (still fine for batch; standby workers may be cycling). flocktoblue=Elevated remains the only flagged tier shift so far.",
+          "created_at": "2026-06-21T07:22:36.767845+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~07:48 (~1h42m in, ~50min to baseline): running clean, no completion/errors. Latency recovered to 171ms-1.1s (earlier 2s drift transient). Occasional toxic=true classifications but no new Watch+ accounts yet; flocktoblue=Elevated still the only flagged shift.",
+          "created_at": "2026-06-21T07:48:23.953564+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~08:13 (~2h7m in): NOT complete, now in follower-analysis phase. TWO Watch+ escalations vs baseline's 0 -> ACCUMULATED LIST: flocktoblue=Elevated (tox0.15/threat25.7), thegreybox.bsky.social=High (tox0.53/threat67.2). Latency SPIKED to 4-10s (9457/9708/4239ms) — likely worker re-warm or H200 fallback spin-up; no errors/retries. Keep this escalation list for the completion summary (lines scroll out of buffer).",
+          "created_at": "2026-06-21T08:14:44.449170+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~08:36 (~2h30m in, AT baseline duration): NOT complete — in 2nd-degree follower sweep (extra work beyond baseline first-degree scope). No errors/retries. Escalations unchanged: flocktoblue=Elevated, thegreybox=High. Latency now persistently BIMODAL: 188ms warm vs 4-9.5s slow (9503/9529/4292ms) — back-half follower-sweep load cycling workers / H200 fallback; p95 will be high (~9-10s). Real perf note for report. Not yet at 1.5x baseline (3h51m).",
+          "created_at": "2026-06-21T08:36:33.923680+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~08:57 (~2h51m in): NOT complete — 2nd-degree sweep grinding through accounts, most 'Stage 1 early exit: clean/irrelevant' (adaptive sampling skipping RunPod = efficient). No errors. Escalations unchanged: flocktoblue=Elevated, thegreybox=High. Past baseline 2h34m but under 1.5x (3h51m). Fewer RunPod calls now (early-exits).",
+          "created_at": "2026-06-21T08:57:29.857824+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~09:18 (~3h12m in): NOT complete, still in follower sweep. NEW 3rd escalation -> UPDATED LIST: flocktoblue=Elevated(threat25.7), thegreybox=High(threat67.2), torinoentertainer.bsky.social=Elevated(tox0.25/threat29.3, follower-above-Watch+NLI). Latency persistent bimodal 7-10s slow calls (8429/7429/10068ms), p95 ~10s. No errors. Approaching 1.5x flag 3h51m (~09:57).",
+          "created_at": "2026-06-21T09:18:27.861806+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~09:39 (~3h33m in): NOT complete, still follower sweep. No errors, no new escalations (hold at 3: flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated). Latency now consistently slow 5.5-9.4s in sweep (p95 ~9-10s). About to cross 1.5x duration flag (3h51m ~09:57) — expected due to 2nd-degree scope, will report not fail.",
+          "created_at": "2026-06-21T09:39:33.930247+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~10:00 (~3h54m in): NOT complete, PAST 1.5x duration flag (3h51m) — CONFIRMED finding. Still follower sweep, no errors, escalations hold at 3 (flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated). LATENCY DIAGNOSIS: sweep calls sparse/bursty (most accounts ONNX Stage-1 early-exit), so with idleTimeout=60s workers keep scaling down -> each non-clean post hits a re-warming worker -> persistent 5-9s. PROD-TUNING finding: workersMin=1 or higher idleTimeout during active scans. Report at completion.",
+          "created_at": "2026-06-21T10:00:33.400132+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~10:21 (~4h15m in, ~1.65x baseline): NOT complete — sweep STILL EXPANDING (fetching followers of new accounts, large 2nd-degree network). No errors. NEW 4th escalation -> LIST: flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated, rogerdoggie.bsky.social=Watch(threat10.5). Duration past 1.5x flag (confirmed). Latency slow-regime persists. Awaiting completion.",
+          "created_at": "2026-06-21T10:21:31.417049+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "MID-SCAN FAILURE ~10:47 (~4h40m in): RunPod HTTP 402 Payment Required (non-retryable) — RunPod ACCOUNT CREDITS EXHAUSTED. Code handles gracefully ('Failed to score follower, skipping') so scan keeps running but follower scoring from here is SKIPPED = degraded coverage on the sweep tail. CRITICAL COST-MODEL GAP: the app CHARCOAL_SCAN_COST_CEILING_CENTS=200 guard NEVER fired, yet real RunPod spend exhausted the account balance. Root cause hypothesis: the per-classification cost ESTIMATE undercounts real billing on a long scan — actual cost is worker wall-clock uptime + repeated re-warms over 4h40m, not per-call. The  ceiling sums estimated per-call cost and stays low while real $ runs much higher. ACTION for Bryan: top up RunPod credits to finish scoring, or accept partial. ACTION for #196 prod: cost guard must track real elapsed/worker cost, not per-call estimate. Escalations validated before the 402: flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated, rogerdoggie=Watch.",
+          "created_at": "2026-06-21T10:48:19.446418+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 ~10:47: RunPod 402 credits-exhausted, pinged Bryan (mobile). Scan continues degraded (skipping follower scoring). Watching for completion; 402-skips may accelerate sweep tail. Escalations pre-402: flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated, rogerdoggie=Watch.",
+          "created_at": "2026-06-21T10:48:39.558635+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~11:05 (~4h59m in): 402s PERSIST (no top-up detected) — all follower scoring skipped, no successful RunPod calls. Scan still running (collecting+partitioning, skipping scoring), no completion. No new escalations since 402 (can't score). List frozen at: flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated, rogerdoggie=Watch. Degraded run continuing to completion.",
+          "created_at": "2026-06-21T11:05:36.514908+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~11:21 (~5h15m in): 402s still persist (no top-up), scan still churning follower sweep with all scoring skipped, no completion, no new escalations (frozen at 4: flocktoblue=Elevated, thegreybox=High, torinoentertainer=Elevated, rogerdoggie=Watch). Degraded-but-running; only completion or a credit top-up would change state.",
+          "created_at": "2026-06-21T11:21:39.553213+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~11:42 (~5h36m in): 402s now rapid-fire (instant-skipping every follower scoring) — scan racing through sweep tail with no RunPod wait, completion likely soon. No top-up, no completion yet. Escalations frozen at 4. Tightening interval to catch the imminent finish.",
+          "created_at": "2026-06-21T11:43:33.078502+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "[action] Phase 6.7 monitor ~11:59 (~5h53m in): 402s persist, sweep STILL EXPANDING (fetching new followers — Bluesky collection API is the bottleneck now, not scoring). Completion not imminent; could run hours more. No top-up. Escalations frozen at 4. Widening interval to ~30min (degraded state stable/uninformative; only completion or top-up changes it).",
+          "created_at": "2026-06-21T11:59:35.047917+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "PHASE 6.7 STAGING GATE — COMPLETE (12:02:05 UTC). VERDICT: PASS-with-caveats.\n\nFINAL TOTALS vs baseline #182:\n- events 2036 (baseline 1994) — comparable\n- accounts 5295 (baseline 3671) — +44%, larger 2nd-degree sweep\n- duration ~5h56m (baseline 2h34m) = ~2.3x, well over 1.5x flag\n- classifications: not summarized in a single log line (audit JSONL on volume / DB has exact count); qualitatively healthy pre-402\n\nWHAT THE GATE VALIDATED (core question answered):\n1. Backend selection: backend=runpod-cope-b, two-stage enabled, no boot/scan refusal.\n2. Cold start: effectively invisible — FlashBoot standby (workersStandby=3) absorbed it; first calls already warm (211ms). d8cc63d opts not even exercised.\n3. End-to-end scoring works: CoPE-B flagged 4 accounts that baseline #182 rated ZERO of — flocktoblue=Elevated(threat25.7), thegreybox=High(threat67.2), torinoentertainer=Elevated(threat29.3), rogerdoggie=Watch(threat10.5). \"CoPE-B catches more\" — needs Bryan judgment: genuine catches vs false positives.\n4. Graceful failure: RunPod 402 handled cleanly (skip follower, non-retryable, no crash), scan ran to completion.\n\nCAVEATS / FINDINGS for prod (#196):\nA. DEGRADED TAIL: RunPod credits exhausted ~10:47 (4h40m in) -> HTTP 402 -> all follower scoring from there SKIPPED through completion. No top-up. Billing issue, not a code defect.\nB. COST-MODEL GAP (important): app CHARCOAL_SCAN_COST_CEILING_CENTS=200 NEVER fired while real RunPod balance depleted. Per-classification cost estimate undercounts the real driver = worker wall-clock uptime + repeated re-warms over a long scan. Cost guard must track real elapsed/worker cost.\nC. LATENCY/DURATION: p95 ~10s in the sweep. Root cause = sparse/bursty RunPod calls (most accounts ONNX Stage-1 early-exit) + idleTimeout=60s -> workers scale down between calls -> each non-clean post pays a re-warm (5-9s). Rec: workersMin=1 (or higher idleTimeout) during active scans. This + the larger sweep drove the 2.3x duration.\n\nRECOMMENDATION: accept gate as PASS-with-caveats (the failures are billing + tuning, not code). Before prod cutover (#196): (1) fix cost guard to track worker wall-clock; (2) set workersMin=1 during scans; (3) ensure RunPod auto-recharge/sufficient balance; (4) review the 4 escalations to calibrate trust in CoPE-B stricter scoring. Holding #195 open for Bryean close decision.",
+          "created_at": "2026-06-21T12:30:58.279087+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-17T19:03:38.810281+00:00",
-      "updated_at": "2026-06-17T19:03:38.810281+00:00",
-      "closed_at": null
+      "updated_at": "2026-06-21T14:41:23.083652+00:00",
+      "closed_at": "2026-06-21T14:41:23.083652+00:00"
     },
     {
       "id": 194,
