@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d8cc63de6f7ac1289595b0ec80f47376a34bbc43",
+    "short_hash": "d8cc63d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T00:04:47-07:00",
+    "message": "perf(cope-b): cut full-cold-start time (prefetch weights, persist compile cache)\n\nCold-start log review (chainlink #201). FlashBoot already keeps the\nsteady-state cold start at ~14s (P70-P98); these target the rare full\ncold start (~285s): 208s weight load, 30.6s torch.compile, ~21s\ncudagraph/KV/warmup, ~25s container.\n\n- safetensors_load_strategy=\"prefetch\": the RunPod network volume mounts\n  as FUSE, which vLLM does not treat as a network FS, so it disables\n  auto-prefetch and reads the 11 shards serially (~25-29s each). Prefetch\n  overlaps the shard reads.\n- VLLM_CACHE_ROOT=/runpod-volume/vllm-cache: persist torch.compiles cache\n  on the volume so later cold starts skip the ~30s recompile.\n- RUNPOD_INIT_TIMEOUT=800: raise the worker-init health cutoff above the\n  default 7-min mark for margin.\n\nConfig/engine-arg only; handler tests mock the engine. Validated at the\nnext GPU cold start.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "93eb92af847ef538726cbb24e656d3ef756d2d0c",
     "short_hash": "93eb92a",
     "author": "Bryan Guffey",

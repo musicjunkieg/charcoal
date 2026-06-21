@@ -1,21 +1,27 @@
 {
   "version": 1,
-  "exported_at": "2026-06-20T07:04:47.054391+00:00",
+  "exported_at": "2026-06-21T05:24:45.327324+00:00",
   "issues": [
     {
       "id": 201,
       "title": "Phase 6 cold-start opts: safetensors prefetch + persist compile cache + init timeout",
       "description": null,
-      "status": "open",
+      "status": "closed",
       "priority": "medium",
       "parent_id": null,
       "labels": [
         "perf"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "content": "Implemented in d8cc63d (build 27863725433): handler safetensors_load_strategy=prefetch + Dockerfile ENV VLLM_CACHE_ROOT=/runpod-volume/vllm-cache + RUNPOD_INIT_TIMEOUT=800. Config/engine-arg only; validated at next GPU cold start. NOTE: steady-state cold start is already ~14s via FlashBoot (P70-P98); these target the rare full-cold (~285s, dominated by 208s FUSE-serial weight load).",
+          "created_at": "2026-06-20T07:05:42.647609+00:00",
+          "kind": "note"
+        }
+      ],
       "created_at": "2026-06-20T06:52:46.632542+00:00",
-      "updated_at": "2026-06-20T06:52:46.632542+00:00",
-      "closed_at": null
+      "updated_at": "2026-06-20T07:05:42.653272+00:00",
+      "closed_at": "2026-06-20T07:05:42.653272+00:00"
     },
     {
       "id": 200,
