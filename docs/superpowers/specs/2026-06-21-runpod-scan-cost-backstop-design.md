@@ -120,6 +120,10 @@ over" *before* calling this predicate (§2 disabled fast-path). This avoids the
 trap that `0 >= 0` would otherwise trip immediately. The meter feeds it
 `elapsed_secs` from the monotonic clock.
 
+The **trip decision is made solely by this `f64` predicate**. The meter's
+`estimated_cents_at -> u32` result is for display/logging only and never gates
+the trip, so its integer truncation can never disagree with the boundary.
+
 ### 4. Enforcement — at the per-call boundary (the hard guarantee)
 
 Enforcement lives **inside the RunPod client, immediately before issuing each
@@ -149,13 +153,22 @@ makes it *also* stop wasting collection time is the deferred optimization).
 
 ### 5. Configuration
 
-- `CHARCOAL_SCAN_COST_CEILING_CENTS` — backstop ceiling, default **500** ($5).
-  `0` or unset → backstop disabled (meter still records for observability).
+- `CHARCOAL_SCAN_COST_CEILING_CENTS` — backstop ceiling in cents. The backstop
+  is **on by default**. Resolution is explicit:
+  - **unset** → default **500** ($5, enabled).
+  - **malformed / non-numeric** → default **500** + a `WARN` (never fail the scan
+    over a typo'd cost knob).
+  - explicit **`0`** → backstop **disabled** (the only way to turn it off; the
+    meter still records for observability).
+  - any other positive integer → that exact ceiling.
 - `CHARCOAL_GPU_COST_CENTS_PER_HOUR` — GPU rate, default **329** (observed H100
   $3.29/hr; conservatively covers the H200 fallback, which is in the same range).
+  Unset or malformed → default 329 + `WARN`.
 
-Both parsed once at scan start. Invalid / non-numeric values fall back to the
-default with a warning (do not fail the scan over a malformed cost knob).
+Note the two distinct paths: *unset* and *malformed* both resolve to the
+enabled default (500), whereas only an *explicit `0`* disables — so a
+mis-typed value fails safe (backstop stays on), and disabling is always
+deliberate. Both vars are parsed once at scan start.
 
 ### 6. Observability
 
