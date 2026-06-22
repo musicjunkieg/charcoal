@@ -327,10 +327,13 @@ git commit -m 'feat(cost-guard): ScanCostMeter (OnceLock arming, disabled+warn-o
 - Modify: `src/toxicity/runpod_cope_b.rs`
 - Test: the RunPod client wiremock test module (located in Step 1)
 
-- [ ] **Step 1: Locate the existing RunPod client tests**
+- [ ] **Step 1: Confirm the RunPod client test location**
 
-Run: `grep -rln "wiremock\|MockServer" tests/ src/toxicity/runpod_cope_b.rs`
-Add the new test to that file (the regression test for the `/runsync` poll lives there). If the client has an inline `#[cfg(test)] mod tests`, add there; otherwise the integration test file that exercises the client. Use whichever the repo already uses for `RunPodCopeBClient`.
+The existing wiremock/`MockServer` tests for `RunPodCopeBClient` (including the
+`/runsync` poll regression test) live in **`tests/unit_classifier.rs`**. Add the
+new test there. Verify with: `grep -rln "wiremock\|MockServer" tests/`.
+Note: Task 4's factory test also lands in `tests/unit_classifier.rs` — both
+tasks append to the same existing file; do not create a new test file.
 
 - [ ] **Step 2: Write the failing test — over-ceiling short-circuits the HTTP call**
 
@@ -340,6 +343,7 @@ Add (adapting `MockServer` setup to match the file's existing helpers):
 async fn classify_short_circuits_when_over_ceiling() {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
+    use charcoal::toxicity::classifier::ToxicityClassifier; // brings the `.classify` trait method into scope
     use charcoal::toxicity::cost_meter::ScanCostMeter;
 
     let server = wiremock::MockServer::start().await;
@@ -355,7 +359,7 @@ async fn classify_short_circuits_when_over_ceiling() {
     meter.force_started_at(Instant::now() - Duration::from_secs(6000));
 
     let client = charcoal::toxicity::runpod_cope_b::RunPodCopeBClient::new(
-        format!("{}", server.uri()),
+        server.uri(), // already a String; do not wrap in format!() (clippy::useless_format under -D warnings)
         "test-key".into(),
     )
     .unwrap()
@@ -384,7 +388,7 @@ impl ScanCostMeter {
 
 - [ ] **Step 3: Run, verify it fails to compile**
 
-Run: `cargo test --features web --test <the_test_file> classify_short_circuits_when_over_ceiling` (or the inline module path)
+Run: `cargo test --features web --test unit_classifier classify_short_circuits_when_over_ceiling` (or the inline module path)
 Expected: FAIL — `with_meter` / `force_started_at` unresolved.
 
 - [ ] **Step 4: Add the meter field, builder, and pre-call check**
@@ -451,18 +455,18 @@ In the trait `classify`, check the meter BEFORE issuing the request:
 
 - [ ] **Step 5: Run, verify pass**
 
-Run: `cargo test --features web --test <the_test_file> classify_short_circuits_when_over_ceiling`
+Run: `cargo test --features web --test unit_classifier classify_short_circuits_when_over_ceiling`
 Expected: PASS (no HTTP request issued; `CostCeilingExceeded` returned).
 
 - [ ] **Step 6: Run the full RunPod client test module to confirm no regression**
 
-Run: `cargo test --features web --test <the_test_file>`
+Run: `cargo test --features web --test unit_classifier`
 Expected: PASS — existing client tests still green (they use the disabled default meter).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/toxicity/runpod_cope_b.rs src/toxicity/cost_meter.rs tests/<the_test_file>.rs
+git add src/toxicity/runpod_cope_b.rs src/toxicity/cost_meter.rs tests/unit_classifier.rs
 git commit -m 'feat(cost-guard): enforce backstop at the per-RunPod-call boundary (#206)'
 ```
 
@@ -502,7 +506,7 @@ In `tests/unit_classifier.rs` (set the env so `build_backend_named("runpod")` su
 ```rust
 #[test]
 #[serial_test::serial]
-fn build_backend_named_runpod_has_disabled_backstop() {
+fn build_backend_named_runpod_constructs() {
     std::env::set_var("RUNPOD_ENDPOINT_URL", "https://example.invalid/v2/x");
     std::env::set_var("RUNPOD_API_KEY", "k");
     let c = charcoal::toxicity::classifier::build_backend_named("runpod");
@@ -618,9 +622,13 @@ Expected: clean (no warnings). Fix any (e.g. needless `Arc` clone, float-cmp lin
 - [ ] **Step 3: Format**
 
 Run: `cargo fmt --all && git diff --stat`
-Commit any formatting:
+Commit any formatting, staging the touched files **explicitly by name** (project
+rule: never `git add -A`/`-u`/`.`):
 ```bash
-git add -u && git commit -m 'style(cost-guard): cargo fmt (#206)'
+git add src/toxicity/cost_meter.rs src/toxicity/runpod_cope_b.rs \
+        src/toxicity/classifier.rs src/observability/classifier_metrics.rs \
+        tests/unit_cost_meter.rs tests/unit_classifier.rs
+git commit -m 'style(cost-guard): cargo fmt (#206)'
 ```
 
 - [ ] **Step 4: Sanity-check the spec's defining numbers**
