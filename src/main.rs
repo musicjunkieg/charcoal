@@ -314,7 +314,7 @@ async fn main() -> Result<()> {
             // Create the toxicity scorer if we'll be analyzing
             let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
                 config.require_scorer()?;
-                create_scorer(&config)?
+                Box::new(create_scorer(&config)?)
             } else {
                 Box::new(charcoal::toxicity::traits::NoopScorer)
             };
@@ -424,7 +424,7 @@ async fn main() -> Result<()> {
                     println!("Running topic-first discovery sweep...");
                     let (discovered, scored) = charcoal::pipeline::sweep::run_topic_first(
                         &client,
-                        scorer.as_ref(),
+                        &scorer,
                         &db,
                         &did,
                         &protected_fingerprint,
@@ -448,7 +448,7 @@ async fn main() -> Result<()> {
                     println!("Running graph-based network sweep...");
                     let (pool_size, scored) = charcoal::pipeline::sweep::run(
                         &client,
-                        scorer.as_ref(),
+                        &scorer,
                         &db,
                         &did,
                         &config.bluesky_handle,
@@ -473,7 +473,7 @@ async fn main() -> Result<()> {
                     println!("Running topic-first discovery...");
                     let (discovered, topic_scored) = charcoal::pipeline::sweep::run_topic_first(
                         &client,
-                        scorer.as_ref(),
+                        &scorer,
                         &db,
                         &did,
                         &protected_fingerprint,
@@ -493,7 +493,7 @@ async fn main() -> Result<()> {
                     println!("Running graph-based sweep...");
                     let (pool_size, graph_scored) = charcoal::pipeline::sweep::run(
                         &client,
-                        scorer.as_ref(),
+                        &scorer,
                         &db,
                         &did,
                         &config.bluesky_handle,
@@ -552,7 +552,7 @@ async fn main() -> Result<()> {
 
             let score = charcoal::scoring::profile::build_profile(
                 &client,
-                scorer.as_ref(),
+                &scorer,
                 handle,
                 handle, // Use handle as DID placeholder — real DID comes from profile lookup
                 &protected_fingerprint,
@@ -719,7 +719,7 @@ async fn main() -> Result<()> {
 
                 match charcoal::scoring::profile::build_profile(
                     &client,
-                    scorer.as_ref(),
+                    &scorer,
                     &handle,
                     &block.subject,
                     &protected_fingerprint,
@@ -1209,7 +1209,7 @@ async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
 /// for the binary verdict that drives the threat formula's toxicity rate.
 fn create_scorer(
     config: &config::Config,
-) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
+) -> anyhow::Result<charcoal::toxicity::ensemble::TwoStageToxicityScorer> {
     let primary: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = match config.scorer_backend {
         config::ScorerBackend::Onnx => {
             info!("Using local ONNX toxicity scorer");
@@ -1233,8 +1233,8 @@ fn create_scorer(
         "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
     );
 
-    Ok(Box::new(
-        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, classifier),
+    Ok(charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(
+        primary, classifier,
     ))
 }
 

@@ -90,6 +90,14 @@ impl TwoStageToxicityScorer {
         self.classifier.name()
     }
 
+    /// Clone the inner Stage-2 classifier handle. The phased scan pipeline
+    /// (#208) needs the classifier separately from the ONNX scorer + clean-pass,
+    /// all three of which live inside this one scorer. Cloning the `Arc` is
+    /// cheap (a refcount bump) and shares the same underlying client.
+    pub fn classifier(&self) -> Arc<dyn ToxicityClassifier> {
+        Arc::clone(&self.classifier)
+    }
+
     /// Classify a single post. `context` is the parent post text for replies; pass
     /// `None` for originals. The pair-aware classification only runs when Zentropi
     /// is available — the labeler policy is conversation-scoped.
