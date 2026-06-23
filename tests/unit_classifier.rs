@@ -334,4 +334,38 @@ mod retry {
         assert!(v.toxic_token);
         assert!((v.confidence - 0.95).abs() < 1e-4);
     }
+
+    #[tokio::test]
+    async fn classify_short_circuits_when_over_ceiling() {
+        use charcoal::toxicity::cost_meter::ScanCostMeter;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        let server = MockServer::start().await;
+        // Any hit on /runsync would fail the test: expect ZERO requests.
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let meter = Arc::new(ScanCostMeter::new(500, 329));
+        // Pre-arm the meter to a time well past the ceiling (no sleeping).
+        meter.force_started_at(Instant::now() - Duration::from_secs(6000));
+
+        let client = RunPodCopeBClient::new(server.uri(), "test-key".into())
+            .unwrap()
+            .with_meter(meter);
+
+        let err = client
+            .classify("[Parent post]: x\n\n[Reply]: y")
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<charcoal::toxicity::cost_meter::CostCeilingExceeded>()
+                .is_some(),
+            "expected CostCeilingExceeded, got: {err:#}"
+        );
+        // .expect(0) on drop verifies no HTTP request was issued.
+    }
 }

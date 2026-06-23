@@ -139,4 +139,10 @@ impl ScanCostMeter {
         let t0 = *self.started_at.get_or_init(Instant::now);
         self.check_with_elapsed(t0.elapsed().as_secs_f64())
     }
+
+    /// Test/seam only: force the armed clock to a specific instant so trips are
+    /// deterministic without sleeping. No-op if already armed.
+    pub fn force_started_at(&self, t: Instant) {
+        let _ = self.started_at.set(t);
+    }
 }

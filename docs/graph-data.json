@@ -3112,6 +3112,17 @@
       "created_at": "2026-06-22T21:41:17.826091-07:00",
       "updated_at": "2026-06-22T21:41:17.826091-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":90,\"prompt\":\"User: start executing #206\"}"
+    },
+    {
+      "id": 290,
+      "change_id": "e6dc93da-53b2-4423-9620-e1e86fc1241d",
+      "node_type": "outcome",
+      "title": "Tasks 1-2 done (a486a1f, f324c24): cost_meter.rs = pure over_ceiling + CostCeilingExceeded + ScanCostMeter (OnceLock arm, ceiling=0 disabled, warn-once, from_env). Plan fix: has_warned can't be #[cfg(test)] — integration tests link lib in non-test config; made it plain pub. 10 unit tests green.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-22T21:44:42.098037-07:00",
+      "updated_at": "2026-06-22T21:44:42.098037-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6205,6 +6216,17 @@
       "weight": 1.0,
       "rationale": "402 mid-scan -> degraded completion + gate verdict",
       "created_at": "2026-06-21T05:31:03.641802-07:00"
+    },
+    {
+      "id": 290,
+      "from_node_id": 289,
+      "to_node_id": 290,
+      "from_change_id": "93fa035f-5780-4eaa-a05a-57893ab5b1ee",
+      "to_change_id": "e6dc93da-53b2-4423-9620-e1e86fc1241d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of cost-guard core",
+      "created_at": "2026-06-22T21:44:42.103879-07:00"
     }
   ],
   "documents": [
