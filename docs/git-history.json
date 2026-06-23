@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7a5cf875d1a82959b1321d887cb8703d6885c4bf",
+    "short_hash": "7a5cf87",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:13:18-07:00",
+    "message": "fix(decouple): harden gather onnx_scores/rows length check to runtime ensure! (#208)",
+    "files_changed": 3
+  },
+  {
     "hash": "006d265fa441d8ff0287369c60d90479079d89f3",
     "short_hash": "006d265",
     "author": "Bryan Guffey",

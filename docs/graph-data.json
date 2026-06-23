@@ -3222,6 +3222,17 @@
       "created_at": "2026-06-23T15:00:19.864930-07:00",
       "updated_at": "2026-06-23T15:00:19.864930-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"006d265\",\"confidence\":95}"
+    },
+    {
+      "id": 300,
+      "change_id": "146dd6b9-6fdb-4e2d-b20d-c69bfa7b86ba",
+      "node_type": "outcome",
+      "title": "Chunk 3 (#208) COMPLETE: Phase A gather_account (commits 138cfb6..7a5cf87). Fetch 25->stage1_outcome->terminal upsert OR proceed: fetch 50, envelope-aware ONNX clean/survivor split via onnx_clean_pass, enqueue QueueRows (raw text+context_text) + stash AccountInput blob. PostFetcher+CleanPassScorer seams. 21/21 tests, clippy clean, reviewer-approved.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T15:14:05.921604-07:00",
+      "updated_at": "2026-06-23T15:14:05.921604-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"7a5cf87\",\"confidence\":95}"
     }
   ],
   "edges": [

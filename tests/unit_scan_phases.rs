@@ -984,3 +984,351 @@ mod gather_tests {
         );
     }
 }
+
+// ── Phase B: run_burst tests ──────────────────────────────────────────────────
+
+mod burst_tests {
+    use super::*;
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+
+    use charcoal::pipeline::scan_phases::burst::{
+        burst_batch, burst_concurrency, run_burst, BurstOutcome,
+    };
+    use charcoal::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+    use charcoal::toxicity::cost_meter::CostCeilingExceeded;
+
+    const BURST_USER: &str = "did:plc:burstuser0000000000000";
+
+    async fn open_burst_db() -> Arc<dyn Database> {
+        let db = setup_db().await;
+        db.upsert_user(BURST_USER, "burstuser.bsky.social")
+            .await
+            .unwrap();
+        Arc::new(db)
+    }
+
+    /// Build a pending QueueRow with the given account_did + post_uri suffix.
+    fn pending_row(account_did: &str, uri_suffix: &str) -> QueueRow {
+        QueueRow {
+            account_did: account_did.to_string(),
+            post_uri: format!("at://{account_did}/app.bsky.feed.post/{uri_suffix}"),
+            text: format!("post {uri_suffix}"),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: 0.3,
+            status: "pending".to_string(),
+            toxic_token: None,
+            confidence: None,
+            model_id: None,
+            policy_version: None,
+        }
+    }
+
+    /// Build a pending reply QueueRow with a parent context.
+    fn pending_reply_row(account_did: &str, uri_suffix: &str, ctx: &str) -> QueueRow {
+        QueueRow {
+            account_did: account_did.to_string(),
+            post_uri: format!("at://{account_did}/app.bsky.feed.post/{uri_suffix}"),
+            text: "agreed".to_string(),
+            context_text: Some(ctx.to_string()),
+            post_kind: "reply".to_string(),
+            onnx_score: 0.3,
+            status: "pending".to_string(),
+            toxic_token: None,
+            confidence: None,
+            model_id: None,
+            policy_version: None,
+        }
+    }
+
+    fn ok_verdict() -> ClassifierVerdict {
+        ClassifierVerdict {
+            toxic_token: false,
+            confidence: 0.1,
+            latency_ms: 10,
+            model_id: "stub".to_string(),
+            policy_version: "stub".to_string(),
+        }
+    }
+
+    // ── always-ok double that accepts N calls ──────────────────────────────
+
+    struct AlwaysOkClassifier {
+        verdict: ClassifierVerdict,
+        threshold: f32,
+    }
+
+    impl AlwaysOkClassifier {
+        fn new(verdict: ClassifierVerdict) -> Self {
+            Self {
+                verdict,
+                threshold: 0.0,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for AlwaysOkClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            Ok(self.verdict.clone())
+        }
+        fn name(&self) -> &'static str {
+            "always-ok"
+        }
+        fn model_id(&self) -> &'static str {
+            "always-ok"
+        }
+        fn policy_version(&self) -> &'static str {
+            "always-ok"
+        }
+        fn threshold(&self) -> f32 {
+            self.threshold
+        }
+    }
+
+    // ── cost-cap double: Ok for first K calls, then CostCeilingExceeded ───
+
+    struct CostCapClassifier {
+        verdict: ClassifierVerdict,
+        calls_before_cap: usize,
+        call_count: Mutex<usize>,
+    }
+
+    impl CostCapClassifier {
+        fn new(verdict: ClassifierVerdict, calls_before_cap: usize) -> Self {
+            Self {
+                verdict,
+                calls_before_cap,
+                call_count: Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for CostCapClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            if *count > self.calls_before_cap {
+                Err(CostCeilingExceeded {
+                    est_cents: 600,
+                    ceiling_cents: 500,
+                }
+                .into())
+            } else {
+                Ok(self.verdict.clone())
+            }
+        }
+        fn name(&self) -> &'static str {
+            "cost-cap"
+        }
+        fn model_id(&self) -> &'static str {
+            "cost-cap"
+        }
+        fn policy_version(&self) -> &'static str {
+            "cost-cap"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // ── recording double: captures the `content` it was called with ────────
+
+    struct RecordingClassifier {
+        verdict: ClassifierVerdict,
+        calls: Mutex<Vec<String>>,
+    }
+
+    impl RecordingClassifier {
+        fn new(verdict: ClassifierVerdict) -> Self {
+            Self {
+                verdict,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn recorded_calls(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for RecordingClassifier {
+        async fn classify(&self, content: &str) -> Result<ClassifierVerdict> {
+            self.calls.lock().unwrap().push(content.to_string());
+            Ok(self.verdict.clone())
+        }
+        fn name(&self) -> &'static str {
+            "recording"
+        }
+        fn model_id(&self) -> &'static str {
+            "recording"
+        }
+        fn policy_version(&self) -> &'static str {
+            "recording"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // ── Test: drain — all rows go done, returns Complete, count = 0 ────────
+
+    #[tokio::test]
+    async fn burst_drain_completes_and_flips_all_to_done() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst001";
+
+        let rows: Vec<QueueRow> = (0..5).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let classifier: Arc<dyn ToxicityClassifier> =
+            Arc::new(AlwaysOkClassifier::new(ok_verdict()));
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 4, 100)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, BurstOutcome::Complete));
+
+        let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
+        assert_eq!(pending, 0, "all rows should be done after burst");
+
+        let verdicts = db.fetch_account_verdicts(BURST_USER, acct).await.unwrap();
+        assert_eq!(verdicts.len(), 5);
+        for v in &verdicts {
+            assert_eq!(v.status, "done");
+            assert!(v.toxic_token.is_some());
+            assert!(v.confidence.is_some());
+            assert!(v.model_id.is_some());
+        }
+    }
+
+    // ── Test: batching — loop runs multiple iterations until empty ─────────
+
+    #[tokio::test]
+    async fn burst_batching_loops_until_all_done() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst002";
+
+        // 5 rows, batch size 2 → needs at least 3 iterations
+        let rows: Vec<QueueRow> = (0..5).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let classifier: Arc<dyn ToxicityClassifier> =
+            Arc::new(AlwaysOkClassifier::new(ok_verdict()));
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 4, 2).await.unwrap();
+        assert!(matches!(outcome, BurstOutcome::Complete));
+
+        let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
+        assert_eq!(pending, 0, "all rows done after multi-iteration burst");
+
+        let verdicts = db.fetch_account_verdicts(BURST_USER, acct).await.unwrap();
+        assert_eq!(verdicts.len(), 5, "all 5 verdicts recorded");
+        for v in &verdicts {
+            assert_eq!(v.status, "done");
+        }
+    }
+
+    // ── Test: cost-cap — classified rows are done, unclassified stay pending
+
+    #[tokio::test]
+    async fn burst_cost_cap_stops_and_partial_records_persist() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst003";
+
+        // Enqueue 6 rows total; classifier caps after 3 successes
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        // Cap fires after 3 Ok calls (call 4 returns Err)
+        let classifier: Arc<dyn ToxicityClassifier> =
+            Arc::new(CostCapClassifier::new(ok_verdict(), 3));
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, BurstOutcome::CostCapped),
+            "expected CostCapped but got {:?}",
+            outcome
+        );
+
+        // At least the 3 classified rows must be done; the rest stay pending.
+        let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
+        assert!(
+            pending > 0,
+            "some rows must still be pending after cost-cap"
+        );
+
+        let all_verdicts = db.fetch_account_verdicts(BURST_USER, acct).await.unwrap();
+        let done_count = all_verdicts.iter().filter(|r| r.status == "done").count();
+        assert_eq!(
+            done_count, 3,
+            "exactly the 3 successful rows should be done"
+        );
+    }
+
+    // ── Test: envelope — reply row uses format_parent_reply envelope ───────
+
+    #[tokio::test]
+    async fn burst_envelope_reconstruction_for_reply_rows() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst004";
+
+        let ctx = "this is the parent post";
+        let reply_text = "agreed";
+        let row = pending_reply_row(acct, "r1", ctx);
+        db.enqueue_classifications(BURST_USER, &[row])
+            .await
+            .unwrap();
+
+        let classifier = Arc::new(RecordingClassifier::new(ok_verdict()));
+        let classifier_trait: Arc<dyn ToxicityClassifier> = classifier.clone();
+
+        run_burst(&db, BURST_USER, &classifier_trait, 1, 100)
+            .await
+            .unwrap();
+
+        let calls = classifier.recorded_calls();
+        assert_eq!(calls.len(), 1, "one classify call for one row");
+
+        let expected = charcoal::toxicity::format_parent_reply(ctx, reply_text);
+        assert_eq!(
+            calls[0], expected,
+            "classifier must receive the format_parent_reply envelope for reply rows"
+        );
+    }
+
+    // ── Test: env helpers clamps and defaults ─────────────────────────────
+    //
+    // Env-var clamp tests are combined into a single test that runs all
+    // assertions sequentially. Rust tests are parallel by default and env vars
+    // are process-global, so splitting into separate tests causes races.
+    // One test body = no inter-test interference for these vars.
+    #[test]
+    fn burst_env_helpers_clamps() {
+        // --- concurrency clamps ---
+        std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "0");
+        assert_eq!(burst_concurrency(), 1, "0 → clamp to min=1");
+        std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "9999");
+        assert_eq!(burst_concurrency(), 64, "9999 → clamp to max=64");
+        std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "8");
+        assert_eq!(burst_concurrency(), 8, "8 → in-range, unchanged");
+        std::env::remove_var("CHARCOAL_BURST_CONCURRENCY");
+        assert_eq!(burst_concurrency(), 16, "unset → default 16");
+
+        // --- batch clamps ---
+        std::env::set_var("CHARCOAL_BURST_BATCH", "0");
+        assert_eq!(burst_batch(), 1, "0 → clamp to min=1");
+        std::env::set_var("CHARCOAL_BURST_BATCH", "99999");
+        assert_eq!(burst_batch(), 10_000, "99999 → clamp to max=10_000");
+        std::env::set_var("CHARCOAL_BURST_BATCH", "250");
+        assert_eq!(burst_batch(), 250, "250 → in-range, unchanged");
+        std::env::remove_var("CHARCOAL_BURST_BATCH");
+        assert_eq!(burst_batch(), 500, "unset → default 500");
+    }
+}
