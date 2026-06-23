@@ -1,6 +1,278 @@
+use charcoal::db::sqlite::SqliteDatabase;
+use charcoal::db::Database;
 use charcoal::pipeline::scan_phases::staging::{
-    AccountInput, ScanPhase, ACCOUNT_INPUT_SCHEMA_VERSION,
+    AccountInput, QueueRow, ScanPhase, VerdictRow, ACCOUNT_INPUT_SCHEMA_VERSION,
 };
+use rusqlite::Connection;
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+const TEST_USER: &str = "did:plc:testuser000000000000";
+
+async fn setup_db() -> SqliteDatabase {
+    let conn = Connection::open_in_memory().unwrap();
+    charcoal::db::schema::create_tables(&conn).unwrap();
+    SqliteDatabase::new(conn)
+}
+
+fn make_queue_row(account_did: &str, post_uri: &str, status: &str) -> QueueRow {
+    QueueRow {
+        account_did: account_did.to_string(),
+        post_uri: post_uri.to_string(),
+        text: "hello world".to_string(),
+        context_text: None,
+        post_kind: "original".to_string(),
+        onnx_score: 0.05,
+        status: status.to_string(),
+        toxic_token: None,
+        confidence: None,
+        model_id: None,
+        policy_version: None,
+    }
+}
+
+// ── Database trait staging tests ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn staging_enqueue_then_fetch_pending_honors_status() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    let pending = make_queue_row("did:plc:acct1", "at://did:plc:acct1/post/1", "pending");
+    let done = make_queue_row("did:plc:acct1", "at://did:plc:acct1/post/2", "done");
+
+    db.enqueue_classifications(TEST_USER, &[pending.clone(), done.clone()])
+        .await
+        .unwrap();
+
+    let fetched = db
+        .fetch_pending_classifications(TEST_USER, 100)
+        .await
+        .unwrap();
+    assert_eq!(fetched.len(), 1, "only pending rows should be returned");
+    assert_eq!(fetched[0].post_uri, "at://did:plc:acct1/post/1");
+    assert_eq!(fetched[0].status, "pending");
+}
+
+#[tokio::test]
+async fn staging_record_verdicts_flips_pending_to_done() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    let row = make_queue_row("did:plc:acct2", "at://did:plc:acct2/post/1", "pending");
+    db.enqueue_classifications(TEST_USER, &[row]).await.unwrap();
+
+    let verdict = VerdictRow {
+        account_did: "did:plc:acct2".to_string(),
+        post_uri: "at://did:plc:acct2/post/1".to_string(),
+        toxic_token: true,
+        confidence: 0.87,
+        model_id: "cope-b-v1".to_string(),
+        policy_version: "p1".to_string(),
+    };
+    db.record_classification_verdicts(TEST_USER, &[verdict])
+        .await
+        .unwrap();
+
+    // Should no longer be pending
+    let pending = db
+        .fetch_pending_classifications(TEST_USER, 100)
+        .await
+        .unwrap();
+    assert!(pending.is_empty(), "row should be flipped to done");
+
+    // Verify via fetch_account_verdicts
+    let all = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:acct2")
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].status, "done");
+    assert_eq!(all[0].toxic_token, Some(true));
+    assert!((all[0].confidence.unwrap() - 0.87).abs() < 1e-5);
+    assert_eq!(all[0].model_id.as_deref(), Some("cope-b-v1"));
+    assert_eq!(all[0].policy_version.as_deref(), Some("p1"));
+}
+
+#[tokio::test]
+async fn staging_enqueue_upsert_same_pk_yields_one_row() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    let row = make_queue_row("did:plc:acct3", "at://did:plc:acct3/post/1", "pending");
+    // Enqueue the same PK twice
+    db.enqueue_classifications(TEST_USER, &[row.clone()])
+        .await
+        .unwrap();
+    db.enqueue_classifications(TEST_USER, &[row]).await.unwrap();
+
+    let all = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:acct3")
+        .await
+        .unwrap();
+    assert_eq!(
+        all.len(),
+        1,
+        "UPSERT: same PK twice must yield exactly one row"
+    );
+}
+
+#[tokio::test]
+async fn staging_stash_and_fetch_account_input_roundtrip() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    // Nothing stashed yet
+    let missing = db
+        .fetch_account_input(TEST_USER, "did:plc:acct4")
+        .await
+        .unwrap();
+    assert!(missing.is_none());
+
+    let payload = r#"{"schema_version":1,"fingerprint_quality":"normal"}"#;
+    db.stash_account_input(TEST_USER, "did:plc:acct4", payload)
+        .await
+        .unwrap();
+
+    let fetched = db
+        .fetch_account_input(TEST_USER, "did:plc:acct4")
+        .await
+        .unwrap();
+    assert_eq!(fetched.as_deref(), Some(payload));
+
+    // Re-stash replaces the blob
+    let payload2 = r#"{"schema_version":1,"fingerprint_quality":"degraded"}"#;
+    db.stash_account_input(TEST_USER, "did:plc:acct4", payload2)
+        .await
+        .unwrap();
+    let fetched2 = db
+        .fetch_account_input(TEST_USER, "did:plc:acct4")
+        .await
+        .unwrap();
+    assert_eq!(fetched2.as_deref(), Some(payload2));
+}
+
+#[tokio::test]
+async fn staging_count_pending_classifications() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.count_pending_classifications(TEST_USER).await.unwrap(),
+        0
+    );
+
+    let rows = vec![
+        make_queue_row("did:plc:acct5", "at://did:plc:acct5/post/1", "pending"),
+        make_queue_row("did:plc:acct5", "at://did:plc:acct5/post/2", "pending"),
+        make_queue_row("did:plc:acct5", "at://did:plc:acct5/post/3", "done"),
+    ];
+    db.enqueue_classifications(TEST_USER, &rows).await.unwrap();
+
+    assert_eq!(
+        db.count_pending_classifications(TEST_USER).await.unwrap(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn staging_clear_scan_staging_empties_both_tables() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    let row = make_queue_row("did:plc:acct6", "at://did:plc:acct6/post/1", "pending");
+    db.enqueue_classifications(TEST_USER, &[row]).await.unwrap();
+    db.stash_account_input(TEST_USER, "did:plc:acct6", r#"{"schema_version":1}"#)
+        .await
+        .unwrap();
+
+    db.clear_scan_staging(TEST_USER).await.unwrap();
+
+    // Both tables should be empty for this user
+    assert_eq!(
+        db.count_pending_classifications(TEST_USER).await.unwrap(),
+        0
+    );
+    let all = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:acct6")
+        .await
+        .unwrap();
+    assert!(all.is_empty(), "classification_queue should be empty");
+
+    let input = db
+        .fetch_account_input(TEST_USER, "did:plc:acct6")
+        .await
+        .unwrap();
+    assert!(input.is_none(), "scan_account_input should be empty");
+}
+
+#[tokio::test]
+async fn staging_list_scan_accounts_returns_distinct_dids() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    let rows = vec![
+        make_queue_row("did:plc:acct7", "at://did:plc:acct7/post/1", "pending"),
+        make_queue_row("did:plc:acct7", "at://did:plc:acct7/post/2", "pending"),
+        make_queue_row("did:plc:acct8", "at://did:plc:acct8/post/1", "pending"),
+    ];
+    db.enqueue_classifications(TEST_USER, &rows).await.unwrap();
+
+    let mut accounts = db.list_scan_accounts(TEST_USER).await.unwrap();
+    accounts.sort();
+    assert_eq!(
+        accounts,
+        vec!["did:plc:acct7".to_string(), "did:plc:acct8".to_string()],
+        "list_scan_accounts must return distinct account_dids"
+    );
+}
+
+#[tokio::test]
+async fn staging_phase_marker_via_existing_scan_state_api() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    // Initially absent
+    assert!(db
+        .get_scan_state(TEST_USER, "scan_phase")
+        .await
+        .unwrap()
+        .is_none());
+
+    // Set via existing API
+    db.set_scan_state(TEST_USER, "scan_phase", "burst")
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_scan_state(TEST_USER, "scan_phase").await.unwrap(),
+        Some("burst".to_string())
+    );
+
+    // Advance phase
+    db.set_scan_state(TEST_USER, "scan_phase", "finalize")
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_scan_state(TEST_USER, "scan_phase").await.unwrap(),
+        Some("finalize".to_string())
+    );
+}
 
 // --- Schema v9 migration tests ---
 

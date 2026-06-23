@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
 };
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 #[async_trait]
 pub trait Database: Send + Sync {
@@ -201,4 +202,65 @@ pub trait Database: Send + Sync {
 
     /// Get all DIDs that have been scored for a user (for deduplication during discovery).
     async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
+
+    // --- Classification staging (#208) ---
+
+    /// Enqueue a batch of classifier work-queue rows for a user.
+    ///
+    /// Uses UPSERT on `(user_did, account_did, post_uri)` so Phase A is fully
+    /// idempotent — enqueuing the same post twice results in one row.
+    async fn enqueue_classifications(&self, user_did: &str, rows: &[QueueRow]) -> Result<()>;
+
+    /// Stash a serialised `AccountInput` blob for an account.
+    ///
+    /// Uses UPSERT on `(user_did, account_did)` — re-stashing replaces the blob.
+    async fn stash_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        payload_json: &str,
+    ) -> Result<()>;
+
+    /// Fetch up to `limit` pending (status='pending') queue rows for a user.
+    async fn fetch_pending_classifications(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<QueueRow>>;
+
+    /// Record a batch of completed classifier verdicts.
+    ///
+    /// Updates each matching row to `status='done'` and fills in the verdict
+    /// fields. Rows are matched by `(user_did, account_did, post_uri)`.
+    async fn record_classification_verdicts(
+        &self,
+        user_did: &str,
+        verdicts: &[VerdictRow],
+    ) -> Result<()>;
+
+    /// List the distinct `account_did` values present in the classification
+    /// queue for a user.
+    async fn list_scan_accounts(&self, user_did: &str) -> Result<Vec<String>>;
+
+    /// Fetch all queue rows (any status) for a specific account.
+    async fn fetch_account_verdicts(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Vec<QueueRow>>;
+
+    /// Retrieve the stashed `AccountInput` JSON blob for an account, if any.
+    async fn fetch_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Option<String>>;
+
+    /// Count rows with `status='pending'` in the classification queue for a user.
+    async fn count_pending_classifications(&self, user_did: &str) -> Result<i64>;
+
+    /// Delete all staging data for a user from both `classification_queue` and
+    /// `scan_account_input`.  Does NOT touch the `scan_phase` key in
+    /// `scan_state` — that is the orchestrator's responsibility.
+    async fn clear_scan_staging(&self, user_did: &str) -> Result<()>;
 }
