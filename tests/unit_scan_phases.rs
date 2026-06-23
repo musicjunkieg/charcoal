@@ -1200,7 +1200,11 @@ mod burst_tests {
         assert_eq!(verdicts.len(), 5);
         for v in &verdicts {
             assert_eq!(v.status, "done");
-            assert!(v.toxic_token.is_some());
+            assert_eq!(
+                v.toxic_token,
+                Some(false),
+                "AlwaysOkClassifier produces toxic_token: false"
+            );
             assert!(v.confidence.is_some());
             assert!(v.model_id.is_some());
         }
@@ -1248,6 +1252,7 @@ mod burst_tests {
         let classifier: Arc<dyn ToxicityClassifier> =
             Arc::new(CostCapClassifier::new(ok_verdict(), 3));
 
+        // concurrency=1 ensures exactly 3 Ok calls land before the cap fires, making done_count/pending deterministic
         let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
             .await
             .unwrap();
@@ -1259,9 +1264,9 @@ mod burst_tests {
 
         // At least the 3 classified rows must be done; the rest stay pending.
         let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
-        assert!(
-            pending > 0,
-            "some rows must still be pending after cost-cap"
+        assert_eq!(
+            pending, 3,
+            "exactly 3 rows must remain pending after cost-cap (calls 4-6 never ran)"
         );
 
         let all_verdicts = db.fetch_account_verdicts(BURST_USER, acct).await.unwrap();

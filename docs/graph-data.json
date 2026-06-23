@@ -3233,6 +3233,28 @@
       "created_at": "2026-06-23T15:14:05.921604-07:00",
       "updated_at": "2026-06-23T15:14:05.921604-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"7a5cf87\",\"confidence\":95}"
+    },
+    {
+      "id": 301,
+      "change_id": "48f6cff1-3bc2-4841-b6a3-5bc441f740ca",
+      "node_type": "action",
+      "title": "Implemented run_burst Phase B: contiguous classifier loop with cost-cap resume, BurstOutcome enum, env helpers burst_concurrency/burst_batch, and TDD tests in unit_scan_phases.rs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T15:21:06.076083-07:00",
+      "updated_at": "2026-06-23T15:21:06.076083-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"8d158a6\",\"files\":[\"src/pipeline/scan_phases/burst.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 302,
+      "change_id": "2d9be10c-d53b-40de-a7e0-a0e03538e43e",
+      "node_type": "outcome",
+      "title": "run_burst green: 26/26 unit_scan_phases tests pass, full web suite clean, clippy -D warnings clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T15:21:09.208389-07:00",
+      "updated_at": "2026-06-23T15:21:09.208389-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"8d158a6\"}"
     }
   ],
   "edges": [
@@ -6403,6 +6425,17 @@
       "weight": 1.0,
       "rationale": "Chunk 2 complete outcome",
       "created_at": "2026-06-23T15:00:19.872890-07:00"
+    },
+    {
+      "id": 297,
+      "from_node_id": 301,
+      "to_node_id": 302,
+      "from_change_id": "48f6cff1-3bc2-4841-b6a3-5bc441f740ca",
+      "to_change_id": "2d9be10c-d53b-40de-a7e0-a0e03538e43e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation produced passing tests",
+      "created_at": "2026-06-23T15:21:11.951676-07:00"
     }
   ],
   "documents": [

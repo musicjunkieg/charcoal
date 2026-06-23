@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8d158a63576ac553bf3a583901427c2eefa0bcb7",
+    "short_hash": "8d158a6",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:20:57-07:00",
+    "message": "feat(decouple): Phase B run_burst — contiguous loop, cost-capped resume (#208)",
+    "files_changed": 6
+  },
+  {
     "hash": "7a5cf875d1a82959b1321d887cb8703d6885c4bf",
     "short_hash": "7a5cf87",
     "author": "Bryan Guffey",
