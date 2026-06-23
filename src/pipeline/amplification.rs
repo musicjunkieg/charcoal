@@ -9,14 +9,10 @@
 // 5. Stores the results for the threat report
 
 use anyhow::Result;
-use futures::stream::{self, StreamExt};
-use futures::FutureExt;
-use indicatif::{ProgressBar, ProgressStyle};
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::bluesky::amplification::AmplificationNotification;
 use crate::bluesky::client::PublicAtpClient;
@@ -24,11 +20,18 @@ use crate::bluesky::followers;
 use crate::bluesky::posts;
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
+use crate::pipeline::scan_phases::burst;
+// `TwoStageToxicityScorer` impls both `ToxicityScorer` and `CleanPassScorer`
+// (the gather seam). The phased pipeline needs both views plus the classifier,
+// so amplification takes the concrete scorer and coerces it into the two `&dyn`
+// views — same pattern as the sweep rewire (Task 6.2).
+use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
+use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
 use crate::scoring::nli::NliScorer;
-use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
+use crate::toxicity::ensemble::TwoStageToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
 
 /// Run the amplification detection pipeline.
@@ -39,7 +42,10 @@ use crate::toxicity::traits::ToxicityScorer;
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
-    scorer: &dyn ToxicityScorer,
+    // `None` when scanning without `--analyze`: the old NoopScorer always errored
+    // on every call, so no accounts were scored. We preserve that by skipping the
+    // phased scoring path entirely when there is no real scorer.
+    scorer: Option<&TwoStageToxicityScorer>,
     db: &Arc<dyn Database>,
     user_did: &str,
     protected_fingerprint: &TopicFingerprint,
@@ -86,28 +92,33 @@ pub async fn run(
             .and_then(|uri| original_text_cache.get(uri))
             .map(|s| s.as_str());
 
-        // For quote and reply events, fetch the amplifier's text and score it
-        if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
-            match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
-                Ok(Some(text)) => {
-                    match scorer.score_with_context(&text, original_post_text).await {
-                        Ok(result) => {
-                            quote_toxicity = Some(result.toxicity);
+        // For quote and reply events, fetch the amplifier's text and score it.
+        // `analyze_followers` implies a real scorer is present (the CLI/web only
+        // pass `Some` when `--analyze` is set), so the event loop's ONNX/NLI
+        // scoring runs exactly as before.
+        if let Some(scorer) = scorer {
+            if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
+                match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
+                    Ok(Some(text)) => {
+                        match scorer.score_with_context(&text, original_post_text).await {
+                            Ok(result) => {
+                                quote_toxicity = Some(result.toxicity);
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to score amplifier text");
+                            }
                         }
-                        Err(e) => {
-                            warn!(error = %e, "Failed to score amplifier text");
-                        }
+                        amplifier_text = Some(text);
                     }
-                    amplifier_text = Some(text);
-                }
-                Ok(None) => {
-                    info!(
-                        uri = event.amplifier_post_uri,
-                        "Amplifier post text not found"
-                    );
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to fetch amplifier post text");
+                    Ok(None) => {
+                        info!(
+                            uri = event.amplifier_post_uri,
+                            "Amplifier post text not found"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to fetch amplifier post text");
+                    }
                 }
             }
         }
@@ -193,94 +204,78 @@ pub async fn run(
         }
     }
 
-    // Phase B: Score amplifiers via build_profile() with direct NLI pairs.
+    // Phase B: Score amplifiers and (optionally) their followers via the
+    // three-phase `run_phased_scan` orchestrator (#208).
     //
-    // Collect unique amplifier DIDs and their text pairs from stored events,
-    // then run full profile builds. This gives each amplifier a threat tier
-    // informed by their actual interactions with the protected user.
-    let mut accounts_scored = 0;
-    {
-        let mut amplifier_handles: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+    // Both the old amplifier-scoring loop and the old per-follower two-pass
+    // `build_profile` loop are replaced by a single candidate set fed through
+    // one combined phased scan — one burst window, one `scan_phase` marker, one
+    // clean resume point. The two-pass NLI gate the followers used to run
+    // inline (raw>=8.0 → re-score with NLI) now lives in `finalize_account`,
+    // selected per candidate by `direct_pairs`: amplifiers carry
+    // `direct_pairs=Some(...)` (always NLI), followers carry `direct_pairs=None`
+    // (NLI gated at raw>=8.0). The event-recording loop above is unchanged —
+    // it is the Phase-A-time ONNX/NLI step and does not involve the classifier.
+    //
+    // Dedup precedence: an account that is both an amplifier and a follower is
+    // scored ONCE as an amplifier (matching the old order, where amplifiers
+    // were scored first and the follower `is_score_stale` check then skipped the
+    // re-score). We key the candidate set on DID and never overwrite an
+    // amplifier entry with a follower one.
+    let mut candidates: Vec<CandidateInput> = Vec::new();
+    let mut seen_dids: HashSet<String> = HashSet::new();
 
-        for event in &events {
-            amplifier_handles
-                .entry(event.amplifier_did.clone())
-                .or_insert_with(|| event.amplifier_handle.clone());
-        }
+    // ── Amplifier candidates ──
+    let mut amplifier_handles: HashMap<String, String> = HashMap::new();
+    for event in &events {
+        amplifier_handles
+            .entry(event.amplifier_did.clone())
+            .or_insert_with(|| event.amplifier_handle.clone());
+    }
 
-        let amplifier_count = amplifier_handles.len();
-        if amplifier_count > 0 {
-            println!("\nScoring {} amplifiers…", amplifier_count);
+    let amplifier_count = amplifier_handles.len();
+    if amplifier_count > 0 {
+        println!("\nScoring {} amplifiers…", amplifier_count);
 
-            for (did, handle) in &amplifier_handles {
-                if handle == protected_handle {
-                    continue;
-                }
-                if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
-                    continue;
-                }
+        for (did, handle) in &amplifier_handles {
+            if handle == protected_handle {
+                continue;
+            }
+            if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
+                continue;
+            }
 
-                // Gather direct text pairs from stored events, deduplicating
-                // across scans (the same event can be recorded multiple times)
-                let mut seen_pairs: std::collections::HashSet<(String, String)> =
-                    std::collections::HashSet::new();
-                let mut pairs: Vec<(String, String)> = Vec::new();
-                if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
-                    for ev in db_events {
-                        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
+            // Gather direct text pairs from stored events, deduplicating
+            // across scans (the same event can be recorded multiple times)
+            let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
+                for ev in db_events {
+                    if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text) {
+                        if !orig.is_empty()
+                            && !amp.is_empty()
+                            && seen_pairs.insert((orig.clone(), amp.clone()))
                         {
-                            if !orig.is_empty()
-                                && !amp.is_empty()
-                                && seen_pairs.insert((orig.clone(), amp.clone()))
-                            {
-                                pairs.push((orig, amp));
-                            }
+                            pairs.push((orig, amp));
                         }
                     }
                 }
+            }
 
-                match profile::build_profile(
-                    client,
-                    scorer,
-                    handle,
-                    did,
-                    protected_fingerprint,
-                    weights,
-                    embedder,
-                    protected_embedding,
-                    median_engagement,
-                    pile_on_dids,
-                    nli_scorer,
-                    None, // No inferred pairs — using direct pairs
-                    Some(&pairs),
-                    data_dir,
-                    graph_distances.get(did).copied(),
-                )
-                .await
-                {
-                    Ok(score) => {
-                        db.upsert_account_score(user_did, &score).await?;
-                        accounts_scored += 1;
-                        println!(
-                            "  @{}: {} (context: {})",
-                            handle,
-                            score.threat_tier.as_deref().unwrap_or("?"),
-                            score
-                                .context_score
-                                .map(|s| format!("{:.2}", s))
-                                .unwrap_or_else(|| "n/a".to_string())
-                        );
-                    }
-                    Err(e) => {
-                        warn!(handle = handle.as_str(), error = %e, "Failed to score amplifier");
-                    }
-                }
+            if seen_dids.insert(did.clone()) {
+                candidates.push(CandidateInput {
+                    account_did: did.clone(),
+                    account_handle: handle.clone(),
+                    is_pile_on: pile_on_dids.contains(did),
+                    direct_pairs: Some(pairs),
+                    graph_distance: graph_distances.get(did).copied(),
+                });
             }
         }
     }
 
-    // If --analyze flag is set, score the followers of each quote/reply amplifier.
+    // ── Follower candidates (only when --analyze is set) ──
+    //
     // Quotes and replies are direct hostile engagement vectors that warrant
     // follower analysis. Reposts and likes are recorded but don't trigger
     // follower analysis — reposts are usually supportive sharing, and likes
@@ -318,127 +313,35 @@ pub async fn run(
             .await
             {
                 Ok(follower_list) => {
-                    // Phase 1: Filter — find followers with stale scores (DB reads on main task)
-                    // Also exclude the protected user from their own threat report
-                    let mut stale_followers = Vec::new();
+                    // Filter — find followers with stale scores. Exclude the
+                    // protected user from their own threat report, and skip any
+                    // DID already queued (amplifier entries take precedence).
+                    let mut added = 0usize;
                     for f in follower_list
                         .iter()
                         .filter(|f| f.handle != protected_handle)
                     {
-                        if db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
-                            // Clone to produce an owned Vec<Follower> — required for
-                            // the async move closure in the scoring stream to be
-                            // 'static-compatible when called from tokio::spawn.
-                            stale_followers.push(f.clone());
+                        if !db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
+                            continue;
+                        }
+                        if seen_dids.insert(f.did.clone()) {
+                            candidates.push(CandidateInput {
+                                account_did: f.did.clone(),
+                                account_handle: f.handle.clone(),
+                                is_pile_on: pile_on_dids.contains(&f.did),
+                                direct_pairs: None,
+                                graph_distance: None,
+                            });
+                            added += 1;
                         }
                     }
 
                     println!(
                         "  Found {} followers, {} need scoring ({} concurrent)...",
                         follower_list.len(),
-                        stale_followers.len(),
+                        added,
                         concurrency,
                     );
-
-                    if stale_followers.is_empty() {
-                        continue;
-                    }
-
-                    let pb = ProgressBar::new(stale_followers.len() as u64);
-                    pb.set_style(
-                        ProgressStyle::default_bar()
-                            .template("  Scoring [{bar:30}] {pos}/{len} ({eta})")
-                            .unwrap(),
-                    );
-
-                    // Phase 2: Two-pass scoring in parallel
-                    // Pass 1: score without NLI (fast). If raw_score >= 8.0 (Watch threshold),
-                    // pass 2 re-scores with NLI inferred pairs. Falls back to pass 1 on panic.
-                    let nli_ref = nli_scorer;
-                    let ppwe_ref = protected_posts_with_embeddings;
-
-                    let mut stream = stream::iter(stale_followers.into_iter().map(|follower| {
-                        let handle_for_panic = follower.handle.clone();
-                        async move {
-                            // Pass 1: score without NLI (fast)
-                            let result = AssertUnwindSafe(profile::build_profile(
-                                client,
-                                scorer,
-                                &follower.handle,
-                                &follower.did,
-                                protected_fingerprint,
-                                weights,
-                                embedder,
-                                protected_embedding,
-                                median_engagement,
-                                pile_on_dids,
-                                None, // No NLI in pass 1
-                                None, // No protected post embeddings
-                                None, // No direct pairs
-                                None, // No audit logging in pass 1
-                                None, // No graph distance for followers
-                            ))
-                            .catch_unwind()
-                            .await
-                            .unwrap_or_else(|_| {
-                                Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
-                            });
-
-                            match result {
-                                Ok(ref score)
-                                    if score.threat_score.unwrap_or(0.0) >= 8.0
-                                        && nli_ref.is_some()
-                                        && ppwe_ref.is_some() =>
-                                {
-                                    // Pass 2: above Watch threshold — re-score with NLI
-                                    info!(
-                                        handle = follower.handle.as_str(),
-                                        raw_score =
-                                            format!("{:.1}", score.threat_score.unwrap_or(0.0)),
-                                        "Follower above Watch threshold, running NLI"
-                                    );
-                                    AssertUnwindSafe(profile::build_profile(
-                                        client,
-                                        scorer,
-                                        &follower.handle,
-                                        &follower.did,
-                                        protected_fingerprint,
-                                        weights,
-                                        embedder,
-                                        protected_embedding,
-                                        median_engagement,
-                                        pile_on_dids,
-                                        nli_ref,  // NLI enabled
-                                        ppwe_ref, // Inferred pairs
-                                        None,     // No direct pairs
-                                        data_dir, // Audit logging
-                                        None,     // No graph distance for followers
-                                    ))
-                                    .catch_unwind()
-                                    .await
-                                    .unwrap_or(result) // Fall back to pass 1 on panic
-                                }
-                                other => other,
-                            }
-                        }
-                    }))
-                    .buffer_unordered(concurrency);
-
-                    // Phase 3: Write results to DB incrementally as they arrive
-                    while let Some(result) = stream.next().await {
-                        match result {
-                            Ok(score) => {
-                                db.upsert_account_score(user_did, &score).await?;
-                                accounts_scored += 1;
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "Failed to score follower, skipping");
-                            }
-                        }
-                        pb.inc(1);
-                    }
-
-                    pb.finish_and_clear();
                 }
                 Err(e) => {
                     warn!(
@@ -450,6 +353,50 @@ pub async fn run(
             }
         }
     }
+
+    // ── Run the combined phased scan over amplifier + follower candidates ──
+    //
+    // Resilience note: the old per-account scoring wrapped each `build_profile`
+    // in `catch_unwind` to isolate a per-account panic. The phased pipeline's
+    // model is different (and stronger): a crash or cost-cap mid-run is
+    // recoverable by re-running, which resumes from the DB-staged `scan_phase`
+    // marker rather than re-scoring everything — the intended #208 architecture.
+    let accounts_scored = match scorer {
+        // No real scorer (scan without `--analyze`): the old NoopScorer errored
+        // on every `build_profile`, so no accounts were ever scored. Preserve
+        // that by skipping the phased scan entirely.
+        None => 0,
+        Some(_) if candidates.is_empty() => 0,
+        Some(scorer) => {
+            let fetcher = AtpPostFetcher { client };
+            let classifier = scorer.classifier();
+
+            let deps = PhasedScanDeps {
+                fetcher: &fetcher,
+                scorer: scorer as &dyn ToxicityScorer,
+                clean_pass: scorer as &dyn CleanPassScorer,
+                classifier: &classifier,
+                protected_fingerprint,
+                weights,
+                embedder,
+                protected_embedding,
+                // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
+                // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
+                // the NLI scorer and protected-post embeddings are threaded through
+                // for the follower path.
+                nli_scorer,
+                protected_posts_with_embeddings,
+                data_dir,
+                median_engagement,
+                gather_concurrency: concurrency,
+                burst_concurrency: burst::burst_concurrency(),
+                burst_batch: burst::burst_batch(),
+            };
+
+            let summary = run_phased_scan(db, user_did, &candidates, &deps).await?;
+            summary.accounts_scored
+        }
+    };
 
     Ok((events.len(), accounts_scored))
 }

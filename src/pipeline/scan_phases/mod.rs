@@ -207,21 +207,13 @@ async fn run_gather(
     candidates: &[CandidateInput],
     deps: &PhasedScanDeps<'_>,
 ) -> Result<()> {
-    let results: Vec<Result<()>> = futures::stream::iter(candidates)
-        .map(|candidate| {
-            let inputs = gather_inputs(candidate, deps);
-            async move {
-                gather_account(
-                    db,
-                    user_did,
-                    deps.fetcher,
-                    deps.scorer,
-                    deps.clean_pass,
-                    &inputs,
-                )
-                .await
-            }
-        })
+    // Map over owned indices (not `&CandidateInput` iterator items) and re-index
+    // inside the `async move`. Mapping the borrowing items directly trips the
+    // compiler's `FnOnce is not general enough` HRTB inference when this future
+    // is held across the web background-scan's `tokio::spawn` boundary; indexing
+    // by `usize` keeps the closure free of a higher-ranked borrow.
+    let results: Vec<Result<()>> = futures::stream::iter(0..candidates.len())
+        .map(|i| gather_one(db, user_did, &candidates[i], deps))
         .buffer_unordered(deps.gather_concurrency.max(1))
         .collect()
         .await;
@@ -231,6 +223,30 @@ async fn run_gather(
         result?;
     }
     Ok(())
+}
+
+/// Gather a single candidate. Extracted into a named async fn (rather than an
+/// inline closure) so the future produced by `buffer_unordered` has a clean
+/// higher-ranked lifetime signature — an inline `|candidate| async move {…}`
+/// borrowing closure trips the compiler's `FnOnce is not general enough`
+/// inference when the whole scan future is held across a `tokio::spawn`
+/// boundary (the web background-scan path).
+async fn gather_one(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    candidate: &CandidateInput,
+    deps: &PhasedScanDeps<'_>,
+) -> Result<()> {
+    let inputs = gather_inputs(candidate, deps);
+    gather_account(
+        db,
+        user_did,
+        deps.fetcher,
+        deps.scorer,
+        deps.clean_pass,
+        &inputs,
+    )
+    .await
 }
 
 /// Phase C: finalize every staged account, handling `NeedsRegather` with a

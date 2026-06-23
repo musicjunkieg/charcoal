@@ -311,12 +311,15 @@ async fn main() -> Result<()> {
             // Load the protected user's fingerprint (needed for scoring)
             let protected_fingerprint = load_fingerprint(&db, &did).await?;
 
-            // Create the toxicity scorer if we'll be analyzing
-            let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
+            // Create the toxicity scorer only if we'll be analyzing. Without
+            // `--analyze` the old code used a NoopScorer that errored on every
+            // call, so no accounts were scored; `None` preserves that (the
+            // phased pipeline needs the concrete two-stage scorer).
+            let scorer: Option<charcoal::toxicity::ensemble::TwoStageToxicityScorer> = if analyze {
                 config.require_scorer()?;
-                Box::new(create_scorer(&config)?)
+                Some(create_scorer(&config)?)
             } else {
-                Box::new(charcoal::toxicity::traits::NoopScorer)
+                None
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
