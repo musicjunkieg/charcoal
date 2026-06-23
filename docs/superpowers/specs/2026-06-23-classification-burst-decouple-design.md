@@ -169,11 +169,14 @@ handled explicitly so the burst window stays the sole RunPod window:
 
 ## Data model (schema v9)
 
-The v8→v9 migration adds **three schema objects**: two new tables
-(`classification_queue`, `scan_account_input`) and one new column
-(`scan_state.phase`). Behind the `Database` trait (SQLite via
-`src/db/schema.rs`, Postgres via a new numbered file in `migrations/postgres/` —
-current max is `0008_fingerprint_scoring.sql`, so `0009_*`).
+The v8→v9 migration adds **two new tables** (`classification_queue`,
+`scan_account_input`). The phase marker is **not** a new column — it reuses the
+existing **key/value `scan_state` table** (`(user_did, key, value)`, PK
+`(user_did, key)`) under `key='scan_phase'`, via the existing
+`set_scan_state`/`get_scan_state` trait methods. Behind the `Database` trait
+(SQLite via `src/db/schema.rs`, Postgres via a new numbered file in
+`migrations/postgres/` — current max is `0008_fingerprint_scoring.sql`, so
+`0009_*`).
 
 ### `classification_queue` — flat, per-post (drives the burst)
 
@@ -218,10 +221,13 @@ account). Re-gather is the safe fallback — correctness over the saved I/O for
 the rare straddling-deploy case. A bumped `schema_version` is therefore part of
 any change to the blob's shape (called out in the plan's checklist).
 
-### `scan_state.phase` (new column)
+### Phase marker (existing `scan_state` key/value, not a new column)
 
-`gather` / `burst` / `finalize` / `done` marker so resume can skip
-already-finished phases instead of re-walking.
+A `scan_state` row `key='scan_phase'`, value one of `gather` / `burst` /
+`finalize` / `done`, so resume can skip already-finished phases instead of
+re-walking. `scan_state` is a key/value table, so this needs **no schema change**
+and **no new trait methods** — `set_scan_state(user_did, "scan_phase", v)` /
+`get_scan_state(user_did, "scan_phase")` already exist.
 
 ### Lifecycle (resume without a scan_id)
 
@@ -259,7 +265,7 @@ any test double.
 **Phase A:**
 - `enqueue_classifications(user_did, &[QueueRow])` — batch upsert per-post rows.
 - `stash_account_input(user_did, account_did, &AccountInput)` — upsert blob.
-- `set_scan_phase(user_did, phase)` — advance the `scan_state.phase` marker.
+- (phase marker uses the existing `set_scan_state(user_did, "scan_phase", …)`)
 
 **Phase B:**
 - `fetch_pending_classifications(user_did, limit)` — pull a `pending` batch.
@@ -271,7 +277,7 @@ any test double.
 - `fetch_account_input(user_did, account_did)` — the stashed blob.
 
 **Lifecycle / observability:**
-- `get_scan_phase(user_did)` — resume entry point.
+- (resume entry point reads the existing `get_scan_state(user_did, "scan_phase")`)
 - `count_pending_classifications(user_did)` — burst progress.
 - `clear_scan_staging(user_did)` — delete both tables' rows (clean finish / fresh start).
 
