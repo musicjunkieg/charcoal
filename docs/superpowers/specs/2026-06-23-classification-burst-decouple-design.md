@@ -46,10 +46,20 @@ work is crash-resilient.
 Classification funnels through a single chokepoint today: both scan paths — the
 **sweep** (`src/pipeline/sweep.rs`, followers + second-degree) and
 **amplification** (`src/pipeline/amplification.rs`, quote/repost amplifiers) —
-score accounts via `src/scoring/profile.rs::score_account`, the only function
-that calls the classifier (`classify_batch_with_contexts`, profile.rs:247). The
-restructure splits `score_account` along the classification seam into three
-phases:
+score accounts via `src/scoring/profile.rs::build_profile` (profile.rs:38), the
+only function that reaches the RunPod classifier (via
+`classify_batch_with_contexts`, profile.rs:247 →
+`classify_batch`→`classify_post`→`self.classifier.classify`). The restructure
+splits `build_profile` along the classification seam into three phases.
+
+Two pre-existing structures in the amplification path are *not* RunPod calls and
+must be placed deliberately (see "Amplification path specifics" below): the
+event-recording loop (`amplification.rs` ~77–194: `scorer.score_with_context`,
+which is **ONNX-only** — verified at ensemble.rs:216 it delegates to
+`self.primary`, never the RunPod classifier — plus `nli.score_pair` and
+`insert_amplification_event`), and the adaptive **two-pass `build_profile`**
+(amplification.rs:355+: pass 1 without NLI, pass 2 with NLI only if pass-1
+`raw_score >= 8.0`).
 
 ```
 ┌─ PHASE A · GATHER (I/O-bound, NO RunPod) ──────────────────┐
@@ -89,14 +99,47 @@ phases:
 - **Crash-resilient** — the queue is the durable checkpoint.
 - **#207-ready** — Phase A is a clean, self-contained I/O pass.
 
-**Main cost:** `score_account` splits into a gather half and a finalize half,
+**Main cost:** `build_profile` splits into a gather half and a finalize half,
 and both call sites (sweep + amplification) restructure from "stream-and-score"
 into "gather-all → burst → finalize-all."
 
+### Amplification path specifics
+
+The amplification path has two structures the sweep path does not; both are
+handled explicitly so the burst window stays the sole RunPod window:
+
+1. **Event-recording loop (Phase A).** `amplification.rs` ~77–194 records each
+   amplification event: `scorer.score_with_context` (ONNX-only — does *not* hit
+   RunPod), `nli.score_pair` (local ONNX), and `insert_amplification_event`.
+   This is pre-classification, I/O- and local-compute-only, so it folds into
+   **Phase A** unchanged — it neither calls RunPod nor breaks the contiguous
+   burst. (The per-event `score_with_context` / `insert_amplification_event`
+   work is orthogonal to the per-account `build_profile` classification that
+   defers to the burst.)
+
+2. **Adaptive two-pass `build_profile` collapses into Phase C.** Today
+   (amplification.rs:355+) the follower path runs `build_profile` *twice*: pass 1
+   without NLI, then pass 2 *with* NLI only if pass-1 `raw_score >= 8.0`. That
+   structure exists because the toxicity score must be known before deciding
+   whether the (more expensive, **local**) NLI pass is worth running. In the
+   phased model the score is not known until verdicts land — so the gate cannot
+   fire in Phase A. Resolution: **the two-pass logic moves wholesale into Phase
+   C**, where verdicts exist. Phase C aggregates the toxicity rate → computes
+   `raw_score` → if `>= 8.0`, runs the local NLI pass → final tier. NLI is local
+   ONNX (no RunPod cost), so running it in Phase C is free of the burst concern.
+   Net effect: classification happens **once** (in the burst) instead of twice,
+   and the `>= 8.0` NLI gate is preserved exactly. The golden test (see Testing)
+   guards that final scores are unchanged. Phase A must stash whatever the NLI
+   pass needs (the inferred pairs / parent texts) in `scan_account_input` so
+   Phase C runs NLI without re-fetching.
+
 ## Data model (schema v9)
 
-Two new tables, behind the `Database` trait (SQLite via `src/db/schema.rs`,
-Postgres via a new numbered file in `migrations/postgres/`).
+The v8→v9 migration adds **three schema objects**: two new tables
+(`classification_queue`, `scan_account_input`) and one new column
+(`scan_state.phase`). Behind the `Database` trait (SQLite via
+`src/db/schema.rs`, Postgres via a new numbered file in `migrations/postgres/` —
+current max is `0008_fingerprint_scoring.sql`, so `0009_*`).
 
 ### `classification_queue` — flat, per-post (drives the burst)
 
@@ -127,6 +170,16 @@ on SQLite. **Stash, not re-fetch** — re-fetching reintroduces the Bluesky I/O
 cost (#207) and makes Phase C non-deterministic (the feed changes between A and
 C).
 
+**Forward-compat (deploy-mid-scan safety).** The blob carries a
+`schema_version` tag. Because the whole point is crash/deploy resilience, a
+deploy can land between Phase A (write) and Phase C (read) with a changed
+payload shape. Policy: **on deserialize failure or a version mismatch, discard
+the stale staging rows for that account and re-gather it** (drop its
+`scan_account_input` + `classification_queue` rows, re-run Phase A for that
+account). Re-gather is the safe fallback — correctness over the saved I/O for
+the rare straddling-deploy case. A bumped `schema_version` is therefore part of
+any change to the blob's shape (called out in the plan's checklist).
+
 ### `scan_state.phase` (new column)
 
 `gather` / `burst` / `finalize` / `done` marker so resume can skip
@@ -138,6 +191,20 @@ already-finished phases instead of re-walking.
 - **Resume after crash/402:** rows exist → idempotent re-entry; the `phase`
   marker skips finished phases.
 - **Clean finish:** delete the user's rows in both staging tables.
+
+**Required invariant: at most one in-flight scan per `user_did`.** The "resume
+without a scan_id" design depends on this — the staging tables are keyed by
+`user_did` with no run identifier, so two concurrent scans for the same user
+would corrupt each other's queue / blob / phase marker. This invariant is
+**already enforced** by `ScanJobManager` (`src/web/scan_job.rs:52`,
+`is_scan_running_for` → HTTP 409 on the web path; admin trigger checks the same
+at handlers/admin.rs:275). The CLI is single-operator and inherits it by usage.
+Note this means a *single* scan, even one that internally runs both Mode 1
+(amplification) and Mode 2 (sweep), shares one staging set for the user — which
+is correct (they're one logical onboarding). The spec assumes Mode 1 and Mode 2
+run **sequentially within one scan**, not as two concurrently-launched scans;
+the plan must preserve that. As a defensive backstop, a fresh scan that finds a
+stale phase marker but is *not* resuming calls `clear_scan_staging` first.
 
 ## `Database` trait surface
 
@@ -169,12 +236,20 @@ stay backend-agnostic.
 
 ## Execution mechanics
 
-**Phase A entry gate (re-scan win):** `is_score_stale(user_did, did,
-RESCAN_WINDOW_DAYS)` *before* fetching — fresh accounts are skipped entirely (no
-fetch, no enqueue). Reuses the existing `account_scores.scored_at` +
-`idx_scores_age` index; no new schema. (Today's sweep already gates scoring on a
-7-day staleness window at `sweep.rs:110`; this moves the gate ahead of the
-fetch.)
+**Phase A entry gate (re-scan win):** skip fresh accounts *before* fetching (no
+fetch, no enqueue), reusing the existing `account_scores.scored_at` +
+`idx_scores_age` index; no new schema. The exact skip predicate differs by
+entry point, matching each path's existing dedup:
+
+- **`sweep::run`** (graph-walk) already gates scoring on `is_score_stale(user_did,
+  did, 7)` at `sweep.rs:110` — move that gate ahead of the fetch.
+- **`sweep::run_topic_first`** dedups via `get_all_scored_dids` (`sweep.rs:204`),
+  not `is_score_stale`. The entry gate there reuses that same dedup set (a freshly
+  scored DID is skipped before fetch). The plan must apply the gate to **both**
+  sweep variants, not just `run`.
+
+Either way the principle is identical: an account already scored within the
+window is skipped before any Bluesky I/O.
 
 **Phase B burst loop** (see Architecture). `BURST_CONCURRENCY` is a new knob,
 higher for the dedicated burst than today's interleaved `ZENTROPI_CONCURRENCY=4`
@@ -182,12 +257,22 @@ higher for the dedicated burst than today's interleaved `ZENTROPI_CONCURRENCY=4`
 once → the #206 `ScanCostMeter` rides along **unchanged** and now meters an
 honest, contiguous window.
 
+*Verified against the meter's arming semantics:* `ScanCostMeter::arm_and_check`
+arms `started_at` (a `OnceLock`) on the first classification call and meters
+elapsed from there (cost_meter.rs). Concentrating all RunPod calls into Phase B
+makes `started_at` fire at burst start, so the metered wall-clock equals the
+burst window — no meter-code change required, only the call-site restructure.
+
 ## Error handling — graceful + resumable (reuses #206's path)
 
-- `CostCeilingExceeded` (or a live RunPod 402) is non-retryable → the in-flight
-  row stays `pending`, the burst stops, `scan_state.phase` stays `burst`, the
-  scan is marked *degraded*. A later run resumes from the leftover `pending`
-  rows. The cost ceiling thus doubles as a clean resume boundary.
+- `CostCeilingExceeded` (or a live RunPod 402) is non-retryable → the burst
+  stops accepting new work. Because Phase B classifies a batch via
+  `buffer_unordered(BURST_CONCURRENCY)`, up to `BURST_CONCURRENCY` calls may be
+  in flight when the ceiling trips; any row whose verdict was not recorded stays
+  `pending` (verdicts are written only on success). `scan_state.phase` stays
+  `burst` and the scan is marked *degraded*. A later run resumes from the
+  leftover `pending` rows. The cost ceiling thus doubles as a clean resume
+  boundary.
 - A per-row classify error leaves that row `pending` (not fatal to the scan).
 - **Phase C finalizes only accounts whose rows are all `done`;** accounts with
   leftover `pending` rows are skipped this run and completed on resume.
@@ -200,8 +285,9 @@ honest, contiguous window.
   (double-gather → no dups), staleness skip, burst resume (`pending`
   re-select), ceiling-trip leaves rows `pending`, Phase C aggregation.
 - **Golden / behavior-preserving:** Phase C output must match today's
-  `score_account` result for the same inputs (the restructure must not change
-  scores).
+  `build_profile` result for the same inputs (the restructure must not change
+  scores) — including the amplification two-pass NLI gate (`raw_score >= 8.0`)
+  now evaluated in Phase C.
 - **End-to-end:** one small scan across all three phases with the stub.
 - **Postgres:** the new trait methods covered in the `--features postgres` suite.
 - Full suite green under `cargo test --features web`; clippy clean across
