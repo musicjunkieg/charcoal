@@ -3178,6 +3178,17 @@
       "created_at": "2026-06-23T08:45:42.452774-07:00",
       "updated_at": "2026-06-23T08:45:42.452774-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
+    },
+    {
+      "id": 296,
+      "change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "node_type": "goal",
+      "title": "Execute #208 decouple plan: collect->burst->score phased scan (schema v9 + 2 new tables + phase marker), golden-test-first, 7 chunks",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T13:40:08.799160-07:00",
+      "updated_at": "2026-06-23T13:40:08.799160-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"07a67ab\",\"confidence\":90,\"prompt\":\"User: hold until the implementation work joins it, which you can begin now. plan is approved.\"}"
     }
   ],
   "edges": [

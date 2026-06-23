@@ -1,5 +1,13 @@
 [
   {
+    "hash": "07a67ab8ee78631f9e1b8d5db7a096ce30eeb4e2",
+    "short_hash": "07a67ab",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T13:21:26-07:00",
+    "message": "docs(decouple): advisory — validate Postgres locally before Chunk 7, not only at it (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
     "hash": "34bb90b4b685e6e780b87665c68006e8debb0742",
     "short_hash": "34bb90b",
     "author": "Bryan Guffey",
