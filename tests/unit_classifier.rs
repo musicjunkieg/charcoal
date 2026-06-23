@@ -242,6 +242,21 @@ mod factory {
         };
         assert!(format!("{err}").contains("not a known backend"));
     }
+
+    #[test]
+    #[serial(charcoal_classifier_env)]
+    fn build_backend_named_runpod_constructs() {
+        std::env::set_var("RUNPOD_ENDPOINT_URL", "https://example.invalid/v2/x");
+        std::env::set_var("RUNPOD_API_KEY", "k");
+        let c = charcoal::toxicity::classifier::build_backend_named("runpod");
+        assert!(
+            c.is_ok(),
+            "named runpod backend should build: {:?}",
+            c.err()
+        );
+        std::env::remove_var("RUNPOD_ENDPOINT_URL");
+        std::env::remove_var("RUNPOD_API_KEY");
+    }
 }
 
 mod retry {
