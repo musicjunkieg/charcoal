@@ -3156,6 +3156,17 @@
       "created_at": "2026-06-22T22:46:38.972780-07:00",
       "updated_at": "2026-06-22T22:46:38.972780-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
+    },
+    {
+      "id": 294,
+      "change_id": "e2aee9cf-6cb3-4f73-8d24-4cd7515367ff",
+      "node_type": "outcome",
+      "title": "Decouple spec (#208) APPROVED at round 3 of spec-review loop (commits 8e24310,f84b59b,6b44f4c + advisory). 3 rounds: R1 8 issues, R2 1 HIGH (two-stage adaptive sampler missed) +3, R3 clean. All code citations verified. Ready for user sign-off then writing-plans on feat/cope-b-cost-guard (same branch as #206/PR#58).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T06:00:04.913803-07:00",
+      "updated_at": "2026-06-23T06:00:04.913803-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
     }
   ],
   "edges": [
