@@ -127,6 +127,10 @@ impl PgDatabase {
                     8,
                     include_str!("../../migrations/postgres/0008_fingerprint_scoring.sql"),
                 ),
+                (
+                    9,
+                    include_str!("../../migrations/postgres/0009_classification_staging.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
