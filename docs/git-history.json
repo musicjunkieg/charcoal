@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7f9903aac3bc85a528be8a52a28f1158a4e1c739",
+    "short_hash": "7f9903a",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:00:21-07:00",
+    "message": "feat(decouple): rewire sweep through run_phased_scan (#208)\n\nBoth sweep::run and sweep::run_topic_first now build a Vec<CandidateInput>\nand drive the three-phase run_phased_scan orchestrator instead of the old\nbuffer_unordered(build_profile) loops. Behavior-preserving: the scoring cores\n(stage1_outcome / score_from_sample) are unchanged, golden test stays green.\n\n- TwoStageToxicityScorer::classifier() accessor clones the inner Arc so the\n  phased pipeline can pull the Stage-2 classifier out alongside the ONNX\n  scorer + clean-pass (all three live in the one scorer).\n- create_scorer returns the concrete TwoStageToxicityScorer; sweep takes it by\n  &concrete and coerces into the two &dyn views + the classifier handle.\n- Candidate filters preserved exactly (run: is_score_stale 7d + early return;\n  run_topic_first: get_all_scored_dids dedup). NLI/direct_pairs/graph_distance\n  all None, matching the old build_profile call.\n- catch_unwind dropped in favor of the phased pipeline scan_phase resume model.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
     "hash": "2a99fb794091d2af6d955d1d96300834e8ffb3ba",
     "short_hash": "2a99fb7",
     "author": "Bryan Guffey",

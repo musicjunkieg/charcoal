@@ -6,9 +6,10 @@
 //   2. Re-aligns the arbitrary-order verdict rows back to the blob's sample
 //      ordering (originals ++ replies ++ quotes), the order
 //      `score_from_sample` slices by.
-//   3. Scores the account via `score_from_sample` (which carries the NLI
-//      two-pass context gate from Chunk 2), then writes the final
-//      `AccountScore`.
+//   3. Scores the account via `score_from_sample`, applying the adaptive
+//      two-pass NLI context gate (Step 4 below) so amplifier/follower/sweep
+//      sources keep their pre-decouple NLI behavior exactly, then writes the
+//      final `AccountScore`.
 //
 // Two failure modes return `FinalizeOutcome::NeedsRegather` instead of
 // scoring:
@@ -147,33 +148,87 @@ pub async fn finalize_account(
         contexts.push(None);
     }
 
-    // ── Step 4: score ──
+    // ── Step 4: score (carrying the adaptive two-pass NLI gate) ──
+    //
+    // The pre-decouple amplification/sweep code chose whether to run the
+    // (local ONNX) NLI context pass differently per source. `score_from_sample`
+    // runs NLI whenever `nli_scorer` is `Some` — it has NO raw>=8.0 gate of its
+    // own (that gate lived in amplification's manual two-pass). So we reproduce
+    // the original gate HERE, calling `score_from_sample` as the pure scoring
+    // core. It does not fetch or classify, so a discarded extra pass is cheap.
+    //
+    // Three cases (matching the old amplification.rs structure exactly):
+    //   - Sweep (`nli_scorer = None`): never runs NLI. Single pass.
+    //   - Amplifier (`direct_pairs = Some`): ALWAYS runs NLI on its direct
+    //     interaction pairs — no >=8.0 gate. Single pass with the scorer.
+    //   - Follower (`direct_pairs = None`, scorer present): TWO-PASS. Pass 1
+    //     without NLI; only if pass-1 `threat_score >= 8.0` (the Watch-tier
+    //     boundary) AND inferred pairs (`protected_posts_with_embeddings`) are
+    //     present do we run pass 2 WITH NLI. Otherwise keep pass 1.
     let graph_distance = blob
         .graph_distance
         .as_deref()
         .and_then(GraphDistance::from_str);
 
-    let score = score_from_sample(
-        sample,
-        &all_post_texts,
-        &contexts,
-        &verdicts,
-        protected_fingerprint,
-        weights,
-        embedder,
-        protected_embedding,
-        blob.median_engagement,
-        blob.is_pile_on,
-        nli_scorer,
-        protected_posts_with_embeddings,
-        blob.direct_pairs.as_deref(),
-        data_dir,
-        graph_distance,
-        &blob.account_handle,
-        account_did,
-        None, // stage1_overlap: ignored by score_from_sample (carried only for parity)
-    )
-    .await?;
+    // Watch-tier boundary, the raw-score gate above which the follower NLI pass
+    // is worth running. Mirrors `TIER_BOUNDARIES[0]` in `scoring/profile.rs`
+    // (private there) and the spec's "if >= 8.0, runs the local NLI pass"
+    // (docs/superpowers/specs/2026-06-23-classification-burst-decouple-design.md
+    // lines 151-168). Match the old code's `score.threat_score.unwrap_or(0.0)
+    // >= 8.0` comparison exactly.
+    const WATCH_THRESHOLD: f64 = 8.0;
+
+    // All NON-NLI args are identical across passes — ONLY the four NLI-related
+    // args vary (`nli_scorer`, `protected_posts_with_embeddings`, `direct_pairs`,
+    // `data_dir`). A local macro keeps the long arg list in one place without a
+    // closure (a closure returning a borrowing future trips the borrow checker).
+    macro_rules! run_pass {
+        ($nli:expr, $ppwe:expr, $pairs:expr, $ddir:expr) => {
+            score_from_sample(
+                sample,
+                &all_post_texts,
+                &contexts,
+                &verdicts,
+                protected_fingerprint,
+                weights,
+                embedder,
+                protected_embedding,
+                blob.median_engagement,
+                blob.is_pile_on,
+                $nli,
+                $ppwe,
+                $pairs,
+                $ddir,
+                graph_distance,
+                &blob.account_handle,
+                account_did,
+                None, // stage1_overlap: ignored by score_from_sample (parity only)
+            )
+            .await?
+        };
+    }
+
+    let score = if nli_scorer.is_none() {
+        // Sweep: no NLI at all.
+        run_pass!(None, None, None, None)
+    } else if blob.direct_pairs.is_some() {
+        // Amplifier: always NLI on the direct pairs (Mode A). `score_from_sample`
+        // uses `direct_pairs` and ignores `protected_posts_with_embeddings` in
+        // that mode, so pass `None` for ppwe. NO >=8.0 gate.
+        run_pass!(nli_scorer, None, blob.direct_pairs.as_deref(), data_dir)
+    } else {
+        // Follower: two-pass adaptive gate.
+        // Pass 1 — no NLI, no audit logging (data_dir = None).
+        let pass1 = run_pass!(None, None, None, None);
+        if pass1.threat_score.unwrap_or(0.0) >= WATCH_THRESHOLD
+            && protected_posts_with_embeddings.is_some()
+        {
+            // Pass 2 — NLI over inferred pairs, WITH audit logging (data_dir).
+            run_pass!(nli_scorer, protected_posts_with_embeddings, None, data_dir)
+        } else {
+            pass1
+        }
+    };
 
     // ── Step 5: persist + done ──
     db.upsert_account_score(user_did, &score).await?;

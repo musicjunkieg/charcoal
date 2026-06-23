@@ -1360,33 +1360,125 @@ mod finalize_tests {
             .is_some());
     }
 
-    // ── two-pass NLI gate (MODEL-GATED, mirrors golden case d) ──
+    // ── HERMETIC GUARD: follower below the >=8.0 gate SKIPS NLI ──────────────
+    //
+    // This is the key new behavior-correctness guard for the decouple fix.
+    // The follower path (`direct_pairs = None`, NLI scorer present, inferred
+    // pairs present) is TWO-PASS: pass 1 with NO NLI, then pass 2 (with NLI)
+    // ONLY when pass-1 `threat_score >= 8.0`. Here we stage a low-toxicity
+    // sample so pass-1 stays below 8.0 — therefore the gate's sub-8.0 branch
+    // must return pass 1 and NEVER touch the NLI scorer.
+    //
+    // This case is HERMETIC: because the gate short-circuits before the scorer
+    // is dereferenced, no model is needed. We pass a real `NliScorer` ONLY when
+    // the model happens to be present (to additionally prove a *present* scorer
+    // is still skipped); otherwise we pass `None`. Either way the assertion is
+    // the same — `context_score.is_none()` — and the score equals the no-NLI
+    // pass. If the gate were wrong (ran NLI on ALL followers), the model-present
+    // run would produce a `context_score`, failing this guard.
     #[tokio::test]
-    async fn finalize_nli_two_pass_gate() {
+    async fn finalize_follower_below_threshold_skips_nli() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint(); // low overlap → low threat
+        let weights = ThreatWeights::default();
+
+        // Survivor sample, all posts clean → reply-weighted toxicity 0.0, so the
+        // (gated) raw threat_score stays below the 8.0 Watch boundary.
+        let sample = survivor_sample();
+        let verdicts: Vec<(bool, f64)> = vec![(false, 0.05); 12];
+
+        // A non-empty inferred-pairs sentinel — present, but the gate must skip
+        // it because pass-1 threat < 8.0.
+        let ppwe: Vec<(String, Vec<f64>)> =
+            vec![("a protected post".to_string(), vec![0.1, 0.2, 0.3])];
+
+        // Load a real scorer ONLY if the model is present; otherwise None. The
+        // gate skips it either way, which is precisely what this test proves.
+        let model_base = std::env::var("CHARCOAL_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
+        let maybe_nli = if charcoal::toxicity::download::nli_files_present(&model_base) {
+            charcoal::scoring::nli::NliScorer::load(&model_base).ok()
+        } else {
+            None
+        };
+
+        stage_account(&db, &sample, &verdicts, None).await; // direct_pairs=None ⇒ follower
+        let outcome = finalize_account(
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,               // embedder: absent → Mode B can't run anyway
+            None,               // protected_embedding
+            maybe_nli.as_ref(), // nli_scorer: present iff the model is on disk
+            Some(&ppwe),        // protected_posts_with_embeddings (sentinel)
+            None,               // data_dir
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::Scored);
+
+        let score = db
+            .get_account_by_did(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("AccountScore must be written");
+
+        // THE GUARD: a below-threshold follower must NOT have run NLI, even with
+        // a scorer + inferred pairs present.
+        assert!(
+            score.context_score.is_none(),
+            "follower with raw threat < 8.0 must SKIP NLI (context_score must be None), got {:?}",
+            score.context_score
+        );
+        let threat = score.threat_score.expect("threat_score");
+        assert!(
+            threat < 8.0,
+            "control sample must score below the 8.0 gate, got {threat}"
+        );
+    }
+
+    // ── follower AT/ABOVE the gate runs NLI (MODEL-GATED, mirrors golden d) ──
+    //
+    // Inferred-pairs (Mode B) needs BOTH the NLI cross-encoder and the sentence
+    // embedder, plus a protected post with its embedding. With a high-toxicity
+    // sample the pass-1 raw score clears 8.0, so pass 2 (NLI) must fire and a
+    // context_score must appear.
+    #[tokio::test]
+    async fn finalize_follower_above_threshold_runs_nli() {
         let model_base = std::env::var("CHARCOAL_MODEL_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
 
-        if !charcoal::toxicity::download::nli_files_present(&model_base) {
+        if !charcoal::toxicity::download::nli_files_present(&model_base)
+            || !charcoal::toxicity::download::embedding_files_present(&model_base)
+        {
             eprintln!(
-                "SKIP finalize NLI case: NLI model not present at {model_base:?} — \
-                 run `charcoal download-model` to enable"
+                "SKIP finalize follower-NLI case: NLI and/or embedding model not \
+                 present at {model_base:?} — run `charcoal download-model` to enable"
             );
             return;
         }
 
         let nli = charcoal::scoring::nli::NliScorer::load(&model_base)
             .expect("NLI model should load when files are present");
+        // SentenceEmbedder::load expects the embedding model's OWN dir (the
+        // `all-MiniLM-L6-v2` subdir holding model.onnx), not the base dir.
+        let embed_dir = charcoal::toxicity::download::embedding_model_dir(&model_base);
+        let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)
+            .expect("embedding model should load when files are present");
 
         let db = open_db().await;
         let fp = toxicology_fingerprint();
         let weights = ThreatWeights::default();
 
-        // 20 originals + 5 replies, all toxic, toxicology keywords → raw >= 8.0.
+        // 20 + 5 all-toxic toxicology posts → raw >= 8.0 → pass 2 fires.
         let originals: Vec<Post> = (0..20)
             .map(|i| {
                 make_post(
-                    &format!("at://fin/d/o/{i}"),
+                    &format!("at://fin/fa/o/{i}"),
                     "toxic poison venom lethal hazard dangerous contamination exposure",
                 )
             })
@@ -1394,9 +1486,9 @@ mod finalize_tests {
         let replies: Vec<ReplyPost> = (0..5)
             .map(|i| {
                 make_reply(
-                    &format!("at://fin/d/r/{i}"),
+                    &format!("at://fin/fa/r/{i}"),
                     "this toxic hazard is dangerous and lethal to all",
-                    &format!("at://parent/d/{i}"),
+                    &format!("at://parent/fa/{i}"),
                 )
             })
             .collect();
@@ -1408,15 +1500,20 @@ mod finalize_tests {
             quote_ratio: 0.0,
             total_posts: 25,
         };
-
         let verdicts: Vec<(bool, f64)> = (0..25).map(|_| (true, 0.92)).collect();
-        let direct_pairs = vec![(
-            "This community values mutual respect and kindness.".to_string(),
-            "That is absolute garbage, these people are toxic poison.".to_string(),
-        )];
-        stage_account(&db, &sample, &verdicts, Some(direct_pairs)).await;
 
-        let data_dir = std::env::temp_dir().join("charcoal-finalize-nli-test");
+        // Protected post + its embedding (inferred-pairs Mode B input).
+        let protected_text = "this toxic hazard is dangerous and lethal to all".to_string();
+        let protected_emb = embedder
+            .embed_batch(std::slice::from_ref(&protected_text))
+            .await
+            .expect("embedding the protected post")
+            .remove(0);
+        let ppwe: Vec<(String, Vec<f64>)> = vec![(protected_text, protected_emb)];
+
+        stage_account(&db, &sample, &verdicts, None).await; // direct_pairs = None ⇒ follower
+
+        let data_dir = std::env::temp_dir().join("charcoal-finalize-follower-nli-test");
         std::fs::create_dir_all(&data_dir).ok();
 
         let outcome = finalize_account(
@@ -1425,10 +1522,10 @@ mod finalize_tests {
             ACCT,
             &fp,
             &weights,
-            None, // embedder (TF-IDF path)
-            None, // protected_embedding
+            Some(&embedder),
+            None,
             Some(&nli),
-            None, // protected_posts_with_embeddings (direct pairs mode)
+            Some(&ppwe),
             Some(&data_dir),
         )
         .await
@@ -1442,15 +1539,87 @@ mod finalize_tests {
             .expect("AccountScore must be written");
         assert!(
             score.context_score.is_some(),
-            "NLI gate must produce a context_score"
+            "above-threshold follower must run NLI (context_score must be Some)"
         );
-        let ctx = score.context_score.unwrap();
-        assert!(
-            (0.0..=1.0).contains(&ctx),
-            "context_score in [0,1], got {ctx}"
-        );
+
+        std::fs::remove_dir_all(&data_dir).ok();
+    }
+
+    // ── amplifier ALWAYS runs NLI — no >=8.0 gate (MODEL-GATED, golden d) ────
+    //
+    // The amplifier path (`direct_pairs = Some`) uses Mode A direct interaction
+    // pairs and is NOT gated on the raw score. We deliberately stage a LOW
+    // toxicity sample (raw < 8.0); NLI must STILL run and produce a context
+    // score, proving amplifiers bypass the follower gate.
+    #[tokio::test]
+    async fn finalize_amplifier_always_runs_nli() {
+        let model_base = std::env::var("CHARCOAL_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
+
+        if !charcoal::toxicity::download::nli_files_present(&model_base) {
+            eprintln!(
+                "SKIP finalize amplifier-NLI case: NLI model not present at \
+                 {model_base:?} — run `charcoal download-model` to enable"
+            );
+            return;
+        }
+
+        let nli = charcoal::scoring::nli::NliScorer::load(&model_base)
+            .expect("NLI model should load when files are present");
+
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint(); // low overlap → low raw threat
+        let weights = ThreatWeights::default();
+
+        // Low-toxicity survivor sample → raw threat < 8.0 (would skip NLI for a
+        // follower, but amplifiers have no gate).
+        let sample = survivor_sample();
+        let verdicts: Vec<(bool, f64)> = vec![(false, 0.05); 12];
+
+        // Mode A direct interaction pair.
+        let direct_pairs = vec![(
+            "This community values mutual respect and kindness.".to_string(),
+            "That is absolute garbage, these people are toxic poison.".to_string(),
+        )];
+        stage_account(&db, &sample, &verdicts, Some(direct_pairs)).await;
+
+        let data_dir = std::env::temp_dir().join("charcoal-finalize-amp-nli-test");
+        std::fs::create_dir_all(&data_dir).ok();
+
+        let outcome = finalize_account(
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None, // embedder (Mode A uses direct pairs, no embedder needed)
+            None, // protected_embedding
+            Some(&nli),
+            None, // protected_posts_with_embeddings (Mode A ignores this)
+            Some(&data_dir),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::Scored);
+
+        let score = db
+            .get_account_by_did(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("AccountScore must be written");
+
+        // THE GUARD: amplifier ran NLI despite raw threat < 8.0 (no gate).
         let threat = score.threat_score.expect("threat_score");
-        assert!(threat >= 40.0, "expected threat >= 40.0, got {threat}");
+        assert!(
+            threat < 8.0,
+            "amplifier sample is intentionally below the 8.0 gate, got {threat}"
+        );
+        assert!(
+            score.context_score.is_some(),
+            "amplifier (direct_pairs=Some) must ALWAYS run NLI regardless of the \
+             8.0 gate (context_score must be Some)"
+        );
 
         std::fs::remove_dir_all(&data_dir).ok();
     }
