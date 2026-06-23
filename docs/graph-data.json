@@ -3145,6 +3145,17 @@
       "created_at": "2026-06-22T22:04:21.791041-07:00",
       "updated_at": "2026-06-22T22:04:21.791041-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
+    },
+    {
+      "id": 293,
+      "change_id": "0537bcc8-466b-4b68-9045-4a1fbd58c2c5",
+      "node_type": "outcome",
+      "title": "CodeRabbit PR #58 triage complete (commit f677b2c): 3 findings, all addressed. MAJOR (warm_up bypassed backstop) → moved arm_and_check into classify_with_timeout single chokepoint + regression test. MINOR (env leak on panic) → RunPodEnvGuard RAII. NIT (misleading test name) → renamed. 461 tests green, clippy clean web/default/postgres. Both review threads auto-resolved.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-22T22:46:38.972780-07:00",
+      "updated_at": "2026-06-22T22:46:38.972780-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6271,6 +6282,17 @@
       "weight": 1.0,
       "rationale": "Branch finished via PR",
       "created_at": "2026-06-22T22:04:21.797306-07:00"
+    },
+    {
+      "id": 293,
+      "from_node_id": 292,
+      "to_node_id": 293,
+      "from_change_id": "5a6bc26d-bfe4-4c59-bcde-7a58e285eb37",
+      "to_change_id": "0537bcc8-466b-4b68-9045-4a1fbd58c2c5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit triage on the cost-guard PR",
+      "created_at": "2026-06-22T22:50:51.365738-07:00"
     }
   ],
   "documents": [
