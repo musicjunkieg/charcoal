@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3637617022d7840541efaae6671747a5d011336e",
+    "short_hash": "3637617",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T13:47:30-07:00",
+    "message": "feat(decouple): staging value types — QueueRow/VerdictRow/AccountInput(versioned)/ScanPhase (#208)",
+    "files_changed": 8
+  },
+  {
     "hash": "07a67ab8ee78631f9e1b8d5db7a096ce30eeb4e2",
     "short_hash": "07a67ab",
     "author": "Bryan Guffey",
