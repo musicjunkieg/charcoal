@@ -60,6 +60,63 @@ fn schema_v9_classification_queue_has_expected_columns() {
 }
 
 #[test]
+fn schema_v9_classification_queue_verdict_columns_roundtrip() {
+    let conn = setup_v9_db();
+    // Insert a row with nullable verdict columns left NULL
+    conn.execute(
+        "INSERT INTO classification_queue \
+         (user_did, account_did, post_uri, text, context_text, post_kind, onnx_score, status) \
+         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7)",
+        rusqlite::params![
+            "did:plc:user2",
+            "did:plc:acct2",
+            "at://did:plc:acct2/app.bsky.feed.post/def",
+            "test post",
+            "original",
+            0.10_f64,
+            "pending",
+        ],
+    )
+    .unwrap();
+
+    // Update the row with verdict values
+    conn.execute(
+        "UPDATE classification_queue SET toxic_token=?1, confidence=?2, \
+         model_id=?3, policy_version=?4 \
+         WHERE user_did=?5 AND account_did=?6 AND post_uri=?7",
+        rusqlite::params![
+            1i64,     // toxic_token
+            0.87_f64, // confidence
+            "m1",     // model_id
+            "p1",     // policy_version
+            "did:plc:user2",
+            "did:plc:acct2",
+            "at://did:plc:acct2/app.bsky.feed.post/def",
+        ],
+    )
+    .unwrap();
+
+    // Select those four columns back and verify round-trip
+    let (toxic_token, confidence, model_id, policy_version): (i64, f64, String, String) = conn
+        .query_row(
+            "SELECT toxic_token, confidence, model_id, policy_version FROM classification_queue \
+             WHERE user_did=?1 AND account_did=?2 AND post_uri=?3",
+            rusqlite::params![
+                "did:plc:user2",
+                "did:plc:acct2",
+                "at://did:plc:acct2/app.bsky.feed.post/def",
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+
+    assert_eq!(toxic_token, 1);
+    assert!((confidence - 0.87_f64).abs() < 1e-6); // Float comparison with epsilon
+    assert_eq!(model_id, "m1");
+    assert_eq!(policy_version, "p1");
+}
+
+#[test]
 fn schema_v9_scan_account_input_has_payload_json() {
     let conn = setup_v9_db();
     conn.execute(

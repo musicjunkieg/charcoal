@@ -305,7 +305,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
                 user_did        TEXT    NOT NULL,
                 account_did     TEXT    NOT NULL,
                 post_uri        TEXT    NOT NULL,
-                text            TEXT    NOT NULL,
+                text            TEXT    NOT NULL,  -- 'text' is intentionally a column name here, not the TEXT type keyword
                 context_text    TEXT,
                 post_kind       TEXT    NOT NULL,
                 onnx_score      REAL    NOT NULL,
