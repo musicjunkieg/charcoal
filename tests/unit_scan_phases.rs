@@ -198,6 +198,11 @@ async fn staging_clear_scan_staging_empties_both_tables() {
         .await
         .unwrap();
 
+    // Set a scan_state marker that clear must NOT touch
+    db.set_scan_state(TEST_USER, "scan_phase", "burst")
+        .await
+        .unwrap();
+
     db.clear_scan_staging(TEST_USER).await.unwrap();
 
     // Both tables should be empty for this user
@@ -216,6 +221,13 @@ async fn staging_clear_scan_staging_empties_both_tables() {
         .await
         .unwrap();
     assert!(input.is_none(), "scan_account_input should be empty");
+
+    // scan_state must survive clear_scan_staging
+    assert_eq!(
+        db.get_scan_state(TEST_USER, "scan_phase").await.unwrap(),
+        Some("burst".to_string()),
+        "clear_scan_staging must not touch scan_state"
+    );
 }
 
 #[tokio::test]
@@ -271,6 +283,69 @@ async fn staging_phase_marker_via_existing_scan_state_api() {
     assert_eq!(
         db.get_scan_state(TEST_USER, "scan_phase").await.unwrap(),
         Some("finalize".to_string())
+    );
+}
+
+#[tokio::test]
+async fn staging_reenqueue_does_not_clobber_done_row() {
+    let db = setup_db().await;
+    db.upsert_user(TEST_USER, "testuser.bsky.social")
+        .await
+        .unwrap();
+
+    // Phase A: enqueue a pending row
+    let pending = make_queue_row("did:plc:acctX", "at://did:plc:acctX/post/1", "pending");
+    db.enqueue_classifications(TEST_USER, &[pending])
+        .await
+        .unwrap();
+
+    // Phase B: record a verdict — flips the row to done with a real verdict
+    let verdict = VerdictRow {
+        account_did: "did:plc:acctX".to_string(),
+        post_uri: "at://did:plc:acctX/post/1".to_string(),
+        toxic_token: true,
+        confidence: 0.9,
+        model_id: "m".to_string(),
+        policy_version: "p".to_string(),
+    };
+    db.record_classification_verdicts(TEST_USER, &[verdict])
+        .await
+        .unwrap();
+
+    // Phase A re-runs (e.g. after a crash/retry): enqueue the same post_uri as fresh pending
+    let re_enqueue = make_queue_row("did:plc:acctX", "at://did:plc:acctX/post/1", "pending");
+    db.enqueue_classifications(TEST_USER, &[re_enqueue])
+        .await
+        .unwrap();
+
+    // The row must still be done with the original verdict intact
+    let all = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:acctX")
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 1, "re-enqueue must not create a duplicate row");
+    assert_eq!(
+        all[0].status, "done",
+        "re-enqueue must not reset status to pending"
+    );
+    assert_eq!(
+        all[0].toxic_token,
+        Some(true),
+        "re-enqueue must not clear toxic_token"
+    );
+    assert!(
+        (all[0].confidence.unwrap() - 0.9).abs() < 1e-5,
+        "re-enqueue must not clear confidence"
+    );
+    assert_eq!(
+        all[0].model_id.as_deref(),
+        Some("m"),
+        "re-enqueue must not clear model_id"
+    );
+    assert_eq!(
+        all[0].policy_version.as_deref(),
+        Some("p"),
+        "re-enqueue must not clear policy_version"
     );
 }
 

@@ -8,7 +8,7 @@
 // data is isolated.
 
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
@@ -888,11 +888,21 @@ pub fn enqueue_classifications(conn: &Connection, user_did: &str, rows: &[QueueR
                  context_text   = excluded.context_text,
                  post_kind      = excluded.post_kind,
                  onnx_score     = excluded.onnx_score,
-                 status         = excluded.status,
-                 toxic_token    = excluded.toxic_token,
-                 confidence     = excluded.confidence,
-                 model_id       = excluded.model_id,
-                 policy_version = excluded.policy_version",
+                 status         = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.status
+                                       ELSE excluded.status END,
+                 toxic_token    = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.toxic_token
+                                       ELSE excluded.toxic_token END,
+                 confidence     = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.confidence
+                                       ELSE excluded.confidence END,
+                 model_id       = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.model_id
+                                       ELSE excluded.model_id END,
+                 policy_version = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.policy_version
+                                       ELSE excluded.policy_version END",
         )?;
         for row in rows {
             let toxic_token_int: Option<i64> = row.toxic_token.map(|b| if b { 1 } else { 0 });
@@ -1081,9 +1091,6 @@ fn map_queue_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRow> {
         policy_version: row.get(10)?,
     })
 }
-
-// rusqlite's optional() helper — converts "no rows" into None
-use rusqlite::OptionalExtension;
 
 #[cfg(test)]
 mod tests {
