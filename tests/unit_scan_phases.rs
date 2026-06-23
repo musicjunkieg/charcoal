@@ -605,6 +605,10 @@ mod gather_tests {
     #[async_trait]
     impl PostFetcher for CannedFetcher {
         async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+            // Returns the same canned sample regardless of `limit`. The Stage-1
+            // (25-post) vs Stage-2 (50-post) sample-size distinction is
+            // intentionally not exercised by these unit tests; the PostFetcher
+            // seam exists to inject deterministic canned data.
             Ok(self.sample.clone())
         }
         async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {

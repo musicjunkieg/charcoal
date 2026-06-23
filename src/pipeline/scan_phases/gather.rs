@@ -212,7 +212,12 @@ pub async fn gather_account(
     // Run the ONNX clean-pass over the envelope texts and split each post into
     // clean (done) vs survivor (pending) based on the envelope-based score.
     let onnx_scores = clean_pass.onnx_clean_pass(&envelope_texts).await?;
-    debug_assert_eq!(onnx_scores.len(), rows.len());
+    anyhow::ensure!(
+        onnx_scores.len() == rows.len(),
+        "onnx_clean_pass returned {} scores for {} posts",
+        onnx_scores.len(),
+        rows.len()
+    );
     for (row, onnx_score) in rows.iter_mut().zip(onnx_scores.iter()) {
         row.onnx_score = *onnx_score;
         if *onnx_score < ONNX_CLEAN_THRESHOLD {
