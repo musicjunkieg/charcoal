@@ -79,3 +79,17 @@ fn from_env_unset_defaults_enabled() {
         "default ceiling is enabled"
     );
 }
+
+use charcoal::observability::classifier_metrics::estimate_cost_cents;
+
+#[test]
+fn estimate_cost_uses_shared_default_rate() {
+    // 1 hour of busy ms at the default rate == the default hourly cents.
+    let one_hour_ms = 3_600_000u32;
+    assert_eq!(
+        estimate_cost_cents("runpod-cope-b", one_hour_ms),
+        DEFAULT_RATE_CENTS_PER_HOUR
+    );
+    // Non-runpod backends remain 0.
+    assert_eq!(estimate_cost_cents("zentropi", one_hour_ms), 0);
+}
