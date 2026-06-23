@@ -160,6 +160,20 @@ impl TwoStageToxicityScorer {
         })
     }
 
+    /// Run only the ONNX primary scorer over a batch of texts. Returns each
+    /// text's raw `toxicity` score as `Vec<f64>` in input order. The Stage-2
+    /// classifier is **never** invoked — this is the gather-phase seam that
+    /// splits posts into clean (score < `ONNX_CLEAN_THRESHOLD`) vs survivor
+    /// (≥ threshold) without incurring any RunPod/Zentropi cost.
+    ///
+    /// The returned scores are unfiltered: callers do the clean/survivor split
+    /// themselves using `ONNX_CLEAN_THRESHOLD`. This method owns only the
+    /// *data* path, not the split decision.
+    pub async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+        let results = self.primary.score_batch(texts).await?;
+        Ok(results.into_iter().map(|r| r.toxicity).collect())
+    }
+
     /// Classify a batch of posts in parallel, with per-post context. Caller supplies
     /// `contexts.len() == texts.len()`; entries are parent texts for replies, `None`
     /// for originals. Concurrency is bounded by `ZENTROPI_CONCURRENCY` to stay under

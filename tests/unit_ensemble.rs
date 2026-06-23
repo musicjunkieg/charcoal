@@ -179,3 +179,120 @@ async fn classifier_name_reflects_construction() {
     let scorer = two_stage(0.05, vec![]);
     assert_eq!(scorer.classifier_name(), "stub");
 }
+
+// ---------------------------------------------------------------------------
+// onnx_clean_pass tests (Task 2.1)
+// ---------------------------------------------------------------------------
+
+/// A scorer that maps each text to a score by index position.
+/// Texts are matched to scores in the order they arrive, cycling if needed.
+/// This lets us straddle ONNX_CLEAN_THRESHOLD (0.10) in a single batch.
+struct IndexedScorer(Vec<f64>);
+
+#[async_trait]
+impl ToxicityScorer for IndexedScorer {
+    async fn score_text(&self, _text: &str) -> Result<ToxicityResult> {
+        // Single-text calls return the first score (used by classify_post).
+        Ok(ToxicityResult {
+            toxicity: *self.0.first().unwrap_or(&0.0),
+            attributes: ToxicityAttributes::default(),
+        })
+    }
+
+    async fn score_batch(&self, texts: &[String]) -> Result<Vec<ToxicityResult>> {
+        Ok(texts
+            .iter()
+            .enumerate()
+            .map(|(i, _)| ToxicityResult {
+                toxicity: self.0[i % self.0.len()],
+                attributes: ToxicityAttributes::default(),
+            })
+            .collect())
+    }
+}
+
+/// Classifier double that panics immediately if `classify` is ever invoked.
+/// Using this in the scorer proves `onnx_clean_pass` never touches Stage 2.
+struct PanicClassifier;
+
+#[async_trait]
+impl charcoal::toxicity::classifier::ToxicityClassifier for PanicClassifier {
+    async fn classify(
+        &self,
+        _content: &str,
+    ) -> Result<charcoal::toxicity::classifier::ClassifierVerdict> {
+        panic!("PanicClassifier::classify was invoked — onnx_clean_pass must NOT touch Stage 2");
+    }
+    fn name(&self) -> &'static str {
+        "panic"
+    }
+    fn model_id(&self) -> &'static str {
+        "panic"
+    }
+    fn policy_version(&self) -> &'static str {
+        "panic"
+    }
+    fn threshold(&self) -> f32 {
+        0.5
+    }
+}
+
+#[tokio::test]
+async fn onnx_clean_pass_returns_primary_scores_in_order() {
+    // Scores straddle ONNX_CLEAN_THRESHOLD (0.10): some below, some at/above.
+    // onnx_clean_pass must return the raw f64 scores in input order without
+    // filtering — the caller decides what to do with them.
+    let scores = vec![0.05, 0.15, 0.03, 0.90, 0.08];
+    let scorer = TwoStageToxicityScorer::new(
+        Box::new(IndexedScorer(scores.clone())),
+        Arc::new(PanicClassifier),
+    );
+
+    let texts: Vec<String> = scores
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("post {}", i))
+        .collect();
+
+    let result = scorer.onnx_clean_pass(&texts).await.unwrap();
+
+    assert_eq!(result.len(), scores.len(), "must return one score per text");
+    for (i, (&expected, actual)) in scores.iter().zip(result.iter()).enumerate() {
+        assert!(
+            (expected - actual).abs() < 1e-9,
+            "score[{}]: expected {expected}, got {actual}",
+            i
+        );
+    }
+}
+
+#[tokio::test]
+async fn onnx_clean_pass_never_invokes_classifier() {
+    // PanicClassifier panics if called. The test passes only if the classifier
+    // is truly never invoked — even for scores at/above ONNX_CLEAN_THRESHOLD.
+    let scores = vec![0.50, 0.80, 0.99]; // all above threshold
+    let scorer = TwoStageToxicityScorer::new(
+        Box::new(IndexedScorer(scores.clone())),
+        Arc::new(PanicClassifier),
+    );
+
+    let texts: Vec<String> = scores
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("text {}", i))
+        .collect();
+
+    // Must NOT panic (PanicClassifier was never called).
+    let result = scorer.onnx_clean_pass(&texts).await.unwrap();
+    assert_eq!(result.len(), 3);
+}
+
+#[tokio::test]
+async fn onnx_clean_pass_empty_input_returns_empty() {
+    let scorer = TwoStageToxicityScorer::new(
+        Box::new(IndexedScorer(vec![0.50])),
+        Arc::new(PanicClassifier),
+    );
+    let result = scorer.onnx_clean_pass(&[]).await.unwrap();
+    assert!(result.is_empty());
+}

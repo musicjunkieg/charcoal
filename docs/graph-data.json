@@ -3200,6 +3200,17 @@
       "created_at": "2026-06-23T13:55:18.357807-07:00",
       "updated_at": "2026-06-23T13:55:18.357807-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"3637617\",\"confidence\":95}"
+    },
+    {
+      "id": 298,
+      "change_id": "731000af-7f73-437e-b384-f4339f64f6a5",
+      "node_type": "outcome",
+      "title": "Chunk 1 (#208) COMPLETE: schema v9 + 9 Database staging methods, both backends. Tasks 1.1-1.5 all reviewer-approved. Gate green: full web suite 0 failures, clippy clean web/default/postgres. Live pg validated (9/9). Commits 3637617..5451153.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T14:28:22.157354-07:00",
+      "updated_at": "2026-06-23T14:28:22.157354-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"5451153\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6348,6 +6359,17 @@
       "weight": 1.0,
       "rationale": "Task 1.1 outcome of #208 execution goal",
       "created_at": "2026-06-23T13:55:34.608312-07:00"
+    },
+    {
+      "id": 295,
+      "from_node_id": 296,
+      "to_node_id": 298,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "731000af-7f73-437e-b384-f4339f64f6a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 1 complete outcome",
+      "created_at": "2026-06-23T14:28:22.171428-07:00"
     }
   ],
   "documents": [
