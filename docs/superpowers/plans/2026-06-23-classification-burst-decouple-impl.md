@@ -135,6 +135,21 @@ async fn clear_scan_staging(&self, user_did: &str) -> Result<()>;
 - [ ] **Step 3:** `cargo build --features postgres` + clippy clean. (Live run Chunk 7.)
 - [ ] **Step 4: Commit.** `git add src/db/postgres.rs tests/db_postgres.rs` → `git commit -m 'feat(decouple): Postgres impl of staging methods (#208)'`.
 
+> **Advisory — validate Postgres before Chunk 7, not only at it.** The
+> `SqliteDatabase` and `PgDatabase` impls are hand-written with separate SQL
+> dialects, and the Postgres round-trip tests are gated on `--features postgres`
+> + a live `DATABASE_URL`. As written, the *only* live Postgres run is Chunk 7,
+> so a `0009_*.sql` migration error or a sqlx-query bug (JSONB binding,
+> `ON CONFLICT`, type coercion) stays invisible while every SQLite-side test
+> passes — and would otherwise first surface on a feat→staging deploy (which
+> also requires `CHARCOAL_CLASSIFIER` to even boot). Mitigation: run the live
+> Postgres tests **locally** against the existing dev instance right after this
+> task — `DATABASE_URL=postgres://bryan.guffey@localhost/charcoal cargo test
+> --features postgres --test db_postgres`. This is a cheap, seconds-long
+> correctness gate on the `PgDatabase` impl; it does **not** replace the Chunk 7
+> Railway-staging integration run, which validates the deployed environment
+> end-to-end. Run both — local Postgres shifts SQL-dialect failures left.
+
 ### Chunk 1 review gate. `cargo test --features web` + clippy matrix green.
 
 ---

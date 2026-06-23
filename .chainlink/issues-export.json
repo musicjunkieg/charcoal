@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-06-23T19:55:58.758639+00:00",
+  "exported_at": "2026-06-23T20:21:26.341158+00:00",
   "issues": [
+    {
+      "id": 210,
+      "title": "Add Postgres-validation advisory to #208 decouple plan",
+      "description": null,
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-06-23T20:21:04.356195+00:00",
+      "updated_at": "2026-06-23T20:21:04.356195+00:00",
+      "closed_at": null
+    },
     {
       "id": 209,
       "title": "Add Response Style, Workflow, Decision Graph, and Environment guidance to CLAUDE.md",
