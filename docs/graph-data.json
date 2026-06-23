@@ -3167,6 +3167,17 @@
       "created_at": "2026-06-23T06:00:04.913803-07:00",
       "updated_at": "2026-06-23T06:00:04.913803-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
+    },
+    {
+      "id": 295,
+      "change_id": "a9e17fc3-d337-47d8-8bb5-194e76050d8c",
+      "node_type": "outcome",
+      "title": "Impl plan (#208) APPROVED at plan-review round 2 (commits 1ff68a8,05b49a0 + advisory 4d). R1 found 5 issues incl scan_state-is-kv + ONNX-clean-pass-fused + build_profile-fetches-internally; R2 clean. Plan = 7 chunks, golden-test-first against extracted stage1_outcome/score_from_sample cores, envelope-aware gather split. Ready to execute via subagent-driven-development on feat/cope-b-cost-guard.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T08:45:42.452774-07:00",
+      "updated_at": "2026-06-23T08:45:42.452774-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":95}"
     }
   ],
   "edges": [

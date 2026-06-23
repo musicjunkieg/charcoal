@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-06-23T15:45:33.872327+00:00",
+  "exported_at": "2026-06-23T19:55:58.758639+00:00",
   "issues": [
+    {
+      "id": 209,
+      "title": "Add Response Style, Workflow, Decision Graph, and Environment guidance to CLAUDE.md",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "docs"
+      ],
+      "comments": [],
+      "created_at": "2026-06-23T19:54:07.725362+00:00",
+      "updated_at": "2026-06-23T19:54:07.725362+00:00",
+      "closed_at": null
+    },
     {
       "id": 208,
       "title": "Decouple classification into collect->burst->score phases (DB-staged queue, cost-meter honest, crash-resilient)",
