@@ -70,9 +70,11 @@ fn estimate_is_zero_before_arming() {
 }
 
 #[test]
-fn from_env_unset_defaults_enabled() {
-    // No env vars set in this test process path -> defaults.
-    // (Run-order independent: construct directly with the documented defaults.)
+fn defaults_result_in_enabled_meter() {
+    // Constructing with the documented defaults (what `from_env` falls back to
+    // when CHARCOAL_SCAN_COST_CEILING_CENTS is unset) yields an enabled meter.
+    // Construct directly rather than via `from_env` to stay independent of the
+    // test process's ambient env / run order.
     let m = ScanCostMeter::new(DEFAULT_CEILING_CENTS, DEFAULT_RATE_CENTS_PER_HOUR);
     assert!(
         m.check_with_elapsed(6000.0).is_err(),

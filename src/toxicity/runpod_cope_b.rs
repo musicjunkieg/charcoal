@@ -309,6 +309,14 @@ impl RunPodCopeBClient {
         content: &str,
         timeout: Duration,
     ) -> Result<(ClassifierVerdict, u32)> {
+        // Cost backstop: arm-then-check before issuing ANY RunPod request. This
+        // is the single chokepoint every request path flows through (classify
+        // and warm_up), so the meter cannot be bypassed. Over the ceiling this
+        // returns a non-retryable error — it sits OUTSIDE the backon retry loop
+        // below, so it is inherently non-retryable — that rides the same skip
+        // path the live HTTP 402 already exercised.
+        self.meter.arm_and_check()?;
+
         let body = Self::build_request_body(content);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));
         let start = Instant::now();
@@ -366,11 +374,8 @@ impl RunPodCopeBClient {
 #[async_trait]
 impl ToxicityClassifier for RunPodCopeBClient {
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict> {
-        // Cost backstop: arm-then-check before every RunPod request. Over the
-        // ceiling this returns a non-retryable error that rides the same skip
-        // path the live HTTP 402 already exercised — no new caller handling.
-        self.meter.arm_and_check()?;
-
+        // Cost backstop is enforced inside classify_with_timeout (the single
+        // RunPod request chokepoint), so both classify and warm_up are gated.
         let (verdict, retries) = self
             .classify_with_timeout(content, self.steady_timeout)
             .await?;

@@ -243,9 +243,38 @@ mod factory {
         assert!(format!("{err}").contains("not a known backend"));
     }
 
+    /// RAII save+restore for the RunPod env vars, matching the `EnvGuard`
+    /// pattern above. Ensures cleanup runs even if an assertion panics, so the
+    /// vars don't leak into later (serial) tests.
+    struct RunPodEnvGuard {
+        prior_url: Option<String>,
+        prior_key: Option<String>,
+    }
+    impl RunPodEnvGuard {
+        fn new() -> Self {
+            Self {
+                prior_url: std::env::var("RUNPOD_ENDPOINT_URL").ok(),
+                prior_key: std::env::var("RUNPOD_API_KEY").ok(),
+            }
+        }
+    }
+    impl Drop for RunPodEnvGuard {
+        fn drop(&mut self) {
+            match &self.prior_url {
+                Some(v) => std::env::set_var("RUNPOD_ENDPOINT_URL", v),
+                None => std::env::remove_var("RUNPOD_ENDPOINT_URL"),
+            }
+            match &self.prior_key {
+                Some(v) => std::env::set_var("RUNPOD_API_KEY", v),
+                None => std::env::remove_var("RUNPOD_API_KEY"),
+            }
+        }
+    }
+
     #[test]
     #[serial(charcoal_classifier_env)]
     fn build_backend_named_runpod_constructs() {
+        let _g = RunPodEnvGuard::new();
         std::env::set_var("RUNPOD_ENDPOINT_URL", "https://example.invalid/v2/x");
         std::env::set_var("RUNPOD_API_KEY", "k");
         let c = charcoal::toxicity::classifier::build_backend_named("runpod");
@@ -254,8 +283,6 @@ mod factory {
             "named runpod backend should build: {:?}",
             c.err()
         );
-        std::env::remove_var("RUNPOD_ENDPOINT_URL");
-        std::env::remove_var("RUNPOD_API_KEY");
     }
 }
 
@@ -380,6 +407,41 @@ mod retry {
             err.downcast_ref::<charcoal::toxicity::cost_meter::CostCeilingExceeded>()
                 .is_some(),
             "expected CostCeilingExceeded, got: {err:#}"
+        );
+        // .expect(0) on drop verifies no HTTP request was issued.
+    }
+
+    #[tokio::test]
+    async fn warm_up_short_circuits_when_over_ceiling() {
+        // Regression: the cost backstop must gate the warm-up request path too,
+        // not just classify(). warm_up() goes through classify_with_timeout, so
+        // the meter check must live there (the single RunPod request chokepoint).
+        use charcoal::toxicity::cost_meter::ScanCostMeter;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        let server = MockServer::start().await;
+        // Any hit on /runsync would fail the test: expect ZERO requests.
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let meter = Arc::new(ScanCostMeter::new(500, 329));
+        meter.force_started_at(Instant::now() - Duration::from_secs(6000));
+
+        let client = RunPodCopeBClient::new(server.uri(), "test-key".into())
+            .unwrap()
+            .with_meter(meter);
+
+        let err = charcoal::toxicity::runpod_cope_b::warm_up(&client)
+            .await
+            .unwrap_err();
+        assert!(
+            err.downcast_ref::<charcoal::toxicity::cost_meter::CostCeilingExceeded>()
+                .is_some(),
+            "expected CostCeilingExceeded from warm_up, got: {err:#}"
         );
         // .expect(0) on drop verifies no HTTP request was issued.
     }
