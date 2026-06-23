@@ -22,6 +22,7 @@ use super::models::{
     UserLabel, UserRow,
 };
 use super::traits::Database;
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
 pub type PgPool = Pool<Postgres>;
@@ -1064,5 +1065,222 @@ impl Database for PgDatabase {
             .await?;
         let dids = rows.iter().map(|row| row.get::<String, _>("did")).collect();
         Ok(dids)
+    }
+
+    // --- Classification staging (#208) ---
+
+    async fn enqueue_classifications(&self, user_did: &str, rows: &[QueueRow]) -> Result<()> {
+        // Batch all inserts inside a single transaction to avoid per-row
+        // connection churn and ensure atomicity across the whole batch.
+        let mut tx = self.pool.begin().await?;
+        for row in rows {
+            sqlx_core::query::query(
+                "INSERT INTO classification_queue
+                     (user_did, account_did, post_uri, text, context_text,
+                      post_kind, onnx_score, status,
+                      toxic_token, confidence, model_id, policy_version)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 ON CONFLICT (user_did, account_did, post_uri) DO UPDATE SET
+                     text           = EXCLUDED.text,
+                     context_text   = EXCLUDED.context_text,
+                     post_kind      = EXCLUDED.post_kind,
+                     onnx_score     = EXCLUDED.onnx_score,
+                     status         = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.status
+                                           ELSE EXCLUDED.status END,
+                     toxic_token    = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.toxic_token
+                                           ELSE EXCLUDED.toxic_token END,
+                     confidence     = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.confidence
+                                           ELSE EXCLUDED.confidence END,
+                     model_id       = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.model_id
+                                           ELSE EXCLUDED.model_id END,
+                     policy_version = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.policy_version
+                                           ELSE EXCLUDED.policy_version END",
+            )
+            .bind(user_did)
+            .bind(&row.account_did)
+            .bind(&row.post_uri)
+            .bind(&row.text)
+            .bind(&row.context_text)
+            .bind(&row.post_kind)
+            .bind(row.onnx_score)
+            .bind(&row.status)
+            .bind(row.toxic_token)
+            .bind(row.confidence)
+            .bind(&row.model_id)
+            .bind(&row.policy_version)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn stash_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        payload_json: &str,
+    ) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO scan_account_input (user_did, account_did, payload_json)
+             VALUES ($1, $2, $3::jsonb)
+             ON CONFLICT (user_did, account_did) DO UPDATE SET payload_json = EXCLUDED.payload_json",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn fetch_pending_classifications(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<QueueRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT account_did, post_uri, text, context_text, post_kind,
+                    onnx_score, status, toxic_token, confidence, model_id, policy_version
+             FROM classification_queue
+             WHERE user_did = $1 AND status = 'pending'
+             LIMIT $2",
+        )
+        .bind(user_did)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(pg_map_queue_row).collect())
+    }
+
+    async fn record_classification_verdicts(
+        &self,
+        user_did: &str,
+        verdicts: &[VerdictRow],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for v in verdicts {
+            sqlx_core::query::query(
+                "UPDATE classification_queue
+                 SET status = 'done',
+                     toxic_token    = $1,
+                     confidence     = $2,
+                     model_id       = $3,
+                     policy_version = $4
+                 WHERE user_did = $5 AND account_did = $6 AND post_uri = $7",
+            )
+            .bind(v.toxic_token)
+            .bind(v.confidence)
+            .bind(&v.model_id)
+            .bind(&v.policy_version)
+            .bind(user_did)
+            .bind(&v.account_did)
+            .bind(&v.post_uri)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn list_scan_accounts(&self, user_did: &str) -> Result<Vec<String>> {
+        let rows = sqlx_core::query::query(
+            "SELECT DISTINCT account_did FROM classification_queue WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get::<String, _>(0)).collect())
+    }
+
+    async fn fetch_account_verdicts(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Vec<QueueRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT account_did, post_uri, text, context_text, post_kind,
+                    onnx_score, status, toxic_token, confidence, model_id, policy_version
+             FROM classification_queue
+             WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(pg_map_queue_row).collect())
+    }
+
+    async fn fetch_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx_core::query::query(
+            "SELECT payload_json::text FROM scan_account_input
+             WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.get::<String, _>(0)))
+    }
+
+    async fn count_pending_classifications(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*)::bigint FROM classification_queue
+             WHERE user_did = $1 AND status = 'pending'",
+        )
+        .bind(user_did)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn clear_scan_staging(&self, user_did: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM scan_account_input WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+// ── shared row-mapper ─────────────────────────────────────────────────────────
+
+/// Map a `classification_queue` SELECT row into a `QueueRow` for the Postgres backend.
+///
+/// Expected column order (0-indexed):
+///   0  account_did, 1  post_uri,    2  text,          3  context_text,
+///   4  post_kind,   5  onnx_score,  6  status,
+///   7  toxic_token (BOOLEAN nullable), 8  confidence (REAL nullable),
+///   9  model_id,    10 policy_version
+fn pg_map_queue_row(row: &sqlx_postgres::PgRow) -> QueueRow {
+    QueueRow {
+        account_did: row.get(0),
+        post_uri: row.get(1),
+        text: row.get(2),
+        context_text: row.get(3),
+        post_kind: row.get(4),
+        onnx_score: row.get(5),
+        status: row.get(6),
+        toxic_token: row.get::<Option<bool>, _>(7),
+        confidence: row.get::<Option<f32>, _>(8),
+        model_id: row.get(9),
+        policy_version: row.get(10),
     }
 }

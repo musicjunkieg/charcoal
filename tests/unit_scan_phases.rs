@@ -107,7 +107,7 @@ async fn staging_enqueue_upsert_same_pk_yields_one_row() {
 
     let row = make_queue_row("did:plc:acct3", "at://did:plc:acct3/post/1", "pending");
     // Enqueue the same PK twice
-    db.enqueue_classifications(TEST_USER, &[row.clone()])
+    db.enqueue_classifications(TEST_USER, std::slice::from_ref(&row))
         .await
         .unwrap();
     db.enqueue_classifications(TEST_USER, &[row]).await.unwrap();
