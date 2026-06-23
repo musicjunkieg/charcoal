@@ -3255,6 +3255,17 @@
       "created_at": "2026-06-23T15:21:09.208389-07:00",
       "updated_at": "2026-06-23T15:21:09.208389-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"8d158a6\"}"
+    },
+    {
+      "id": 303,
+      "change_id": "b9d54be2-d1a8-447f-8173-926bbffcacff",
+      "node_type": "outcome",
+      "title": "Chunk 4 (#208) COMPLETE: Phase B run_burst (commits 8d158a6..6acd158). Contiguous loop drains pending queue via buffer_unordered, rebuilds envelope (format_parent_reply) per row, records VerdictRows batched; CostCeilingExceeded->CostCapped (records successes, leaves rest pending, resumable). Env: CHARCOAL_BURST_CONCURRENCY(16)/BURST_BATCH(500). 26/26 tests, clippy clean, reviewer-approved. This is the single RunPod window that makes #206 meter honest.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T15:25:53.994197-07:00",
+      "updated_at": "2026-06-23T15:25:53.994197-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"6acd158\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6436,6 +6447,17 @@
       "weight": 1.0,
       "rationale": "implementation produced passing tests",
       "created_at": "2026-06-23T15:21:11.951676-07:00"
+    },
+    {
+      "id": 298,
+      "from_node_id": 296,
+      "to_node_id": 301,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "48f6cff1-3bc2-4841-b6a3-5bc441f740ca",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 4 complete",
+      "created_at": "2026-06-23T15:25:54.000825-07:00"
     }
   ],
   "documents": [

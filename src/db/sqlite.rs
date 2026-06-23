@@ -356,6 +356,11 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::clear_scan_staging(&conn, user_did)
     }
+
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_account_staging(&conn, user_did, account_did)
+    }
 }
 
 #[cfg(test)]

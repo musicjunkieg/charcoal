@@ -132,6 +132,11 @@ pub struct AccountInput {
     /// to process this blob.
     pub schema_version: u32,
 
+    /// Handle of the account being scored. Phase C needs this for the
+    /// `AccountScore.handle` field — the orchestrator only has the DID
+    /// (`list_scan_accounts` is DID-only), so the handle is stashed here.
+    pub account_handle: String,
+
     /// The 50-post sample fetched in Stage 2, partitioned into originals,
     /// replies, and quotes.  Carries reply_ratio, quote_ratio, total_posts.
     pub sample: PostSample,
@@ -177,6 +182,7 @@ impl AccountInput {
         use crate::bluesky::posts::PostSample;
         AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            account_handle: "test.handle".to_string(),
             sample: PostSample {
                 originals: vec![],
                 replies: vec![],

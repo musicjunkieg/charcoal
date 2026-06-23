@@ -1258,6 +1258,26 @@ impl Database for PgDatabase {
         tx.commit().await?;
         Ok(())
     }
+
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx_core::query::query(
+            "DELETE FROM classification_queue WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .execute(&mut *tx)
+        .await?;
+        sqlx_core::query::query(
+            "DELETE FROM scan_account_input WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 // ── shared row-mapper ─────────────────────────────────────────────────────────

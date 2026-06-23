@@ -1065,6 +1065,20 @@ pub fn clear_scan_staging(conn: &Connection, user_did: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete the staging data for a single account from `classification_queue` and
+/// `scan_account_input`.  Does NOT touch `scan_state`.
+pub fn clear_account_staging(conn: &Connection, user_did: &str, account_did: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1 AND account_did = ?2",
+        params![user_did, account_did],
+    )?;
+    conn.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1 AND account_did = ?2",
+        params![user_did, account_did],
+    )?;
+    Ok(())
+}
+
 // ── shared row-mapper ─────────────────────────────────────────────────────────
 
 /// Map a `classification_queue` SELECT row into a `QueueRow`.

@@ -263,4 +263,10 @@ pub trait Database: Send + Sync {
     /// `scan_account_input`.  Does NOT touch the `scan_phase` key in
     /// `scan_state` — that is the orchestrator's responsibility.
     async fn clear_scan_staging(&self, user_did: &str) -> Result<()>;
+
+    /// Delete the staging data for a single account from both
+    /// `classification_queue` and `scan_account_input`.  Used by Phase C to
+    /// discard an account whose stashed blob is unreadable or version-stale
+    /// (the deploy-straddle re-gather path) without disturbing other accounts.
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()>;
 }

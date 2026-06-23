@@ -985,6 +985,477 @@ mod gather_tests {
     }
 }
 
+// ── Phase C: finalize_account tests ─────────────────────────────────────────
+
+mod finalize_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use charcoal::bluesky::posts::{Post, PostSample, ReplyPost};
+    use charcoal::pipeline::scan_phases::finalize::{finalize_account, FinalizeOutcome};
+    use charcoal::scoring::threat::ThreatWeights;
+    use charcoal::topics::fingerprint::{TopicCluster, TopicFingerprint};
+
+    const FIN_USER: &str = "did:plc:finuser00000000000000";
+    const ACCT: &str = "did:plc:finacct0000000000000";
+
+    async fn open_db() -> Arc<dyn Database> {
+        let db = setup_db().await;
+        db.upsert_user(FIN_USER, "finuser.bsky.social")
+            .await
+            .unwrap();
+        Arc::new(db)
+    }
+
+    fn make_post(uri: &str, text: &str) -> Post {
+        Post {
+            uri: uri.to_string(),
+            text: text.to_string(),
+            created_at: None,
+            like_count: 0,
+            repost_count: 0,
+            quote_count: 0,
+            is_quote: false,
+        }
+    }
+
+    fn make_reply(uri: &str, text: &str, parent_uri: &str) -> ReplyPost {
+        ReplyPost {
+            post: make_post(uri, text),
+            parent_uri: parent_uri.to_string(),
+        }
+    }
+
+    /// Astrophysics fingerprint — unrelated to the food-topic posts in the
+    /// survivor sample, so TF-IDF overlap stays below the 0.15 gate. Mirrors the
+    /// golden case (c) setup so we can reuse its expected scores.
+    fn astrophysics_fingerprint() -> TopicFingerprint {
+        TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "astrophysics".to_string(),
+                keywords: vec![
+                    "quasar".to_string(),
+                    "nebula".to_string(),
+                    "redshift".to_string(),
+                    "telescope".to_string(),
+                    "pulsar".to_string(),
+                    "photon".to_string(),
+                    "galaxy".to_string(),
+                    "cosmology".to_string(),
+                ],
+                weight: 1.0,
+            }],
+            post_count: 200,
+        }
+    }
+
+    /// Toxicology fingerprint — shares keywords with the case (d) posts so
+    /// TF-IDF overlap is >= 0.15 and the full multiplicative formula runs.
+    fn toxicology_fingerprint() -> TopicFingerprint {
+        TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "toxicology".to_string(),
+                keywords: vec![
+                    "toxic".to_string(),
+                    "poison".to_string(),
+                    "venom".to_string(),
+                    "lethal".to_string(),
+                    "hazard".to_string(),
+                    "dangerous".to_string(),
+                    "contamination".to_string(),
+                    "exposure".to_string(),
+                ],
+                weight: 1.0,
+            }],
+            post_count: 200,
+        }
+    }
+
+    /// Build the golden-(c) survivor sample: 6 food-topic originals + 6 replies
+    /// (first 3 hostile-worded, last 3 mild), 0 quotes. reply_ratio 0.5.
+    fn survivor_sample() -> PostSample {
+        let originals: Vec<Post> = (0..6)
+            .map(|i| {
+                make_post(
+                    &format!("at://fin/c/o/{i}"),
+                    "baking bread and drinking coffee",
+                )
+            })
+            .collect();
+        let replies: Vec<ReplyPost> = (0..6)
+            .map(|i| {
+                make_reply(
+                    &format!("at://fin/c/r/{i}"),
+                    "you are completely wrong about this",
+                    &format!("at://parent/c/{i}"),
+                )
+            })
+            .collect();
+        PostSample {
+            originals,
+            replies,
+            quotes: vec![],
+            reply_ratio: 0.5,
+            quote_ratio: 0.0,
+            total_posts: 12,
+        }
+    }
+
+    /// Construct an `AccountInput` blob for a sample, JSON-stash it, then enqueue
+    /// one DONE QueueRow per post with the supplied (is_toxic, onnx) verdict.
+    /// Verdicts are keyed positionally over originals ++ replies ++ quotes.
+    async fn stage_account(
+        db: &Arc<dyn Database>,
+        sample: &PostSample,
+        verdicts: &[(bool, f64)],
+        direct_pairs: Option<Vec<(String, String)>>,
+    ) {
+        let blob = AccountInput {
+            schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            account_handle: "finacct.bsky.social".to_string(),
+            sample: sample.clone(),
+            parent_texts: HashMap::new(),
+            median_engagement: 0.0,
+            is_pile_on: false,
+            direct_pairs,
+            graph_distance: None,
+            fingerprint_quality: "unreliable".to_string(),
+        };
+        let payload = serde_json::to_string(&blob).unwrap();
+        db.stash_account_input(FIN_USER, ACCT, &payload)
+            .await
+            .unwrap();
+
+        // Flatten posts in scoring order: originals ++ replies ++ quotes.
+        let uris: Vec<(String, String)> = sample
+            .originals
+            .iter()
+            .map(|p| (p.uri.clone(), "original".to_string()))
+            .chain(
+                sample
+                    .replies
+                    .iter()
+                    .map(|r| (r.post.uri.clone(), "reply".to_string())),
+            )
+            .chain(
+                sample
+                    .quotes
+                    .iter()
+                    .map(|p| (p.uri.clone(), "quote".to_string())),
+            )
+            .collect();
+        assert_eq!(uris.len(), verdicts.len(), "one verdict per post");
+
+        let rows: Vec<QueueRow> = uris
+            .iter()
+            .zip(verdicts.iter())
+            .map(|((uri, kind), (is_toxic, onnx))| QueueRow {
+                account_did: ACCT.to_string(),
+                post_uri: uri.clone(),
+                text: "x".to_string(),
+                context_text: None,
+                post_kind: kind.clone(),
+                onnx_score: *onnx,
+                status: "done".to_string(),
+                toxic_token: Some(*is_toxic),
+                confidence: Some(0.5),
+                model_id: Some("test".to_string()),
+                policy_version: Some("p".to_string()),
+            })
+            .collect();
+        db.enqueue_classifications(FIN_USER, &rows).await.unwrap();
+    }
+
+    // ── survivor scored: matches golden case (c) ──
+    #[tokio::test]
+    async fn finalize_survivor_scores_matching_golden() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let sample = survivor_sample();
+        // 6 originals clean; replies 0-2 toxic (onnx 0.85), replies 3-5 clean.
+        let mut verdicts: Vec<(bool, f64)> = vec![(false, 0.05); 6];
+        for i in 0..6 {
+            verdicts.push(if i < 3 { (true, 0.85) } else { (false, 0.08) });
+        }
+        stage_account(&db, &sample, &verdicts, None).await;
+
+        let outcome = finalize_account(
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::Scored);
+
+        let score = db
+            .get_account_by_did(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("AccountScore must be written");
+
+        assert_eq!(score.did, ACCT);
+        assert_eq!(score.handle, "finacct.bsky.social");
+        assert_eq!(score.posts_analyzed, 12);
+
+        // Reply-weighted toxicity = 0.5*0.7 + 0.0*0.3 = 0.35 (golden c).
+        let tox = score.toxicity_score.expect("toxicity_score");
+        assert!(
+            (tox - 0.35).abs() < 1e-9,
+            "expected toxicity 0.35, got {tox}"
+        );
+        // Threat = 9.40625 (golden c, gated formula + behavioral boost 1.075).
+        let threat = score.threat_score.expect("threat_score");
+        assert!(
+            (threat - 9.40625).abs() < 1e-6,
+            "expected threat 9.40625, got {threat}"
+        );
+        assert_eq!(score.threat_tier.as_deref(), Some("Watch"));
+        assert!(score.context_score.is_none(), "no NLI scorer → no context");
+        assert_eq!(score.top_toxic_posts.len(), 3);
+    }
+
+    // ── version mismatch → NeedsRegather + staging cleared ──
+    #[tokio::test]
+    async fn finalize_version_mismatch_regathers_and_clears() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // Stash a blob with a bogus schema_version, plus a queue row.
+        let bad_payload = r#"{"schema_version":999,"account_handle":"x","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
+        db.stash_account_input(FIN_USER, ACCT, bad_payload)
+            .await
+            .unwrap();
+        let row = make_queue_row(ACCT, "at://fin/v/1", "pending");
+        db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
+
+        let outcome = finalize_account(
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::NeedsRegather);
+
+        // Staging for this account must be gone.
+        assert!(db
+            .fetch_account_input(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db
+            .fetch_account_verdicts(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            db.count_pending_classifications(FIN_USER).await.unwrap(),
+            0,
+            "version-stale account's pending rows must be cleared"
+        );
+    }
+
+    // ── malformed blob → NeedsRegather + staging cleared ──
+    #[tokio::test]
+    async fn finalize_malformed_blob_regathers_and_clears() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        db.stash_account_input(FIN_USER, ACCT, "{ not valid json ]")
+            .await
+            .unwrap();
+        let row = make_queue_row(ACCT, "at://fin/m/1", "pending");
+        db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
+
+        let outcome = finalize_account(
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::NeedsRegather);
+        assert!(db
+            .fetch_account_input(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db
+            .fetch_account_verdicts(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    // ── nothing staged → NeedsRegather (no clear needed) ──
+    #[tokio::test]
+    async fn finalize_nothing_staged_regathers() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let outcome = finalize_account(
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::NeedsRegather);
+    }
+
+    // ── a sample post with a missing/pending verdict → NeedsRegather ──
+    //
+    // We stage a full set of done rows, then re-stash a blob whose sample
+    // references an extra post URI that has no matching row. An incomplete
+    // account must never be scored — finalize returns NeedsRegather and leaves
+    // staging in place (the burst may simply be mid-flight).
+    #[tokio::test]
+    async fn finalize_pending_verdict_regathers() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let sample = survivor_sample();
+        let mut verdicts: Vec<(bool, f64)> = vec![(false, 0.05); 6];
+        for _ in 0..6 {
+            verdicts.push((false, 0.08));
+        }
+        stage_account(&db, &sample, &verdicts, None).await;
+
+        // Re-stash a blob whose sample references a post URI that has no row.
+        let mut sample2 = sample.clone();
+        sample2
+            .originals
+            .push(make_post("at://fin/c/o/missing", "no row for this one"));
+        sample2.total_posts += 1;
+        let blob = AccountInput {
+            schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            account_handle: "finacct.bsky.social".to_string(),
+            sample: sample2,
+            parent_texts: HashMap::new(),
+            median_engagement: 0.0,
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+            fingerprint_quality: "unreliable".to_string(),
+        };
+        db.stash_account_input(FIN_USER, ACCT, &serde_json::to_string(&blob).unwrap())
+            .await
+            .unwrap();
+
+        let outcome = finalize_account(
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            outcome,
+            FinalizeOutcome::NeedsRegather,
+            "a sample post with no matching verdict row must not be scored"
+        );
+        // We did NOT clear staging on the incomplete path.
+        assert!(db
+            .fetch_account_input(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    // ── two-pass NLI gate (MODEL-GATED, mirrors golden case d) ──
+    #[tokio::test]
+    async fn finalize_nli_two_pass_gate() {
+        let model_base = std::env::var("CHARCOAL_MODEL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| charcoal::toxicity::download::default_model_dir());
+
+        if !charcoal::toxicity::download::nli_files_present(&model_base) {
+            eprintln!(
+                "SKIP finalize NLI case: NLI model not present at {model_base:?} — \
+                 run `charcoal download-model` to enable"
+            );
+            return;
+        }
+
+        let nli = charcoal::scoring::nli::NliScorer::load(&model_base)
+            .expect("NLI model should load when files are present");
+
+        let db = open_db().await;
+        let fp = toxicology_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // 20 originals + 5 replies, all toxic, toxicology keywords → raw >= 8.0.
+        let originals: Vec<Post> = (0..20)
+            .map(|i| {
+                make_post(
+                    &format!("at://fin/d/o/{i}"),
+                    "toxic poison venom lethal hazard dangerous contamination exposure",
+                )
+            })
+            .collect();
+        let replies: Vec<ReplyPost> = (0..5)
+            .map(|i| {
+                make_reply(
+                    &format!("at://fin/d/r/{i}"),
+                    "this toxic hazard is dangerous and lethal to all",
+                    &format!("at://parent/d/{i}"),
+                )
+            })
+            .collect();
+        let sample = PostSample {
+            originals,
+            replies,
+            quotes: vec![],
+            reply_ratio: 5.0 / 25.0,
+            quote_ratio: 0.0,
+            total_posts: 25,
+        };
+
+        let verdicts: Vec<(bool, f64)> = (0..25).map(|_| (true, 0.92)).collect();
+        let direct_pairs = vec![(
+            "This community values mutual respect and kindness.".to_string(),
+            "That is absolute garbage, these people are toxic poison.".to_string(),
+        )];
+        stage_account(&db, &sample, &verdicts, Some(direct_pairs)).await;
+
+        let data_dir = std::env::temp_dir().join("charcoal-finalize-nli-test");
+        std::fs::create_dir_all(&data_dir).ok();
+
+        let outcome = finalize_account(
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None, // embedder (TF-IDF path)
+            None, // protected_embedding
+            Some(&nli),
+            None, // protected_posts_with_embeddings (direct pairs mode)
+            Some(&data_dir),
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome, FinalizeOutcome::Scored);
+
+        let score = db
+            .get_account_by_did(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("AccountScore must be written");
+        assert!(
+            score.context_score.is_some(),
+            "NLI gate must produce a context_score"
+        );
+        let ctx = score.context_score.unwrap();
+        assert!(
+            (0.0..=1.0).contains(&ctx),
+            "context_score in [0,1], got {ctx}"
+        );
+        let threat = score.threat_score.expect("threat_score");
+        assert!(threat >= 40.0, "expected threat >= 40.0, got {threat}");
+
+        std::fs::remove_dir_all(&data_dir).ok();
+    }
+}
+
 // ── Phase B: run_burst tests ──────────────────────────────────────────────────
 
 mod burst_tests {

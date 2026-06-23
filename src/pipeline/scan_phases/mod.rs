@@ -5,5 +5,6 @@
 // Phase C (Score): read back staged data and compute final AccountScore.
 
 pub mod burst;
+pub mod finalize;
 pub mod gather;
 pub mod staging;

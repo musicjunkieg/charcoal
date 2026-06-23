@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6acd158f20ba3da419c4a180de2e90bff7405ce8",
+    "short_hash": "6acd158",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:24:31-07:00",
+    "message": "test(decouple): tighten burst cost-cap + drain assertions (#208)",
+    "files_changed": 4
+  },
+  {
     "hash": "8d158a63576ac553bf3a583901427c2eefa0bcb7",
     "short_hash": "8d158a6",
     "author": "Bryan Guffey",

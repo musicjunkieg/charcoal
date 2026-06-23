@@ -231,6 +231,7 @@ pub async fn gather_account(
 
     let blob = AccountInput {
         schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+        account_handle: inputs.account_handle.to_string(),
         sample,
         parent_texts,
         median_engagement: inputs.median_engagement,
