@@ -500,7 +500,7 @@ async fn golden_c_stage2_survivor_no_nli() {
         None,  // graph_distance
         "golden-c.bsky.social",
         "did:plc:golden-c",
-        None, // stage1_overlap (unused by math)
+        None, // stage1_overlap: ignored by score_from_sample; carried only for staged-scan blob parity
     )
     .await
     .expect("score_from_sample should not error on case (c)");
@@ -707,6 +707,20 @@ async fn golden_c_benign_gate_fires() {
         (threat - 12.0).abs() < 1e-9,
         "golden(c2) benign gate: expected threat_score=12.0, got {threat}"
     );
+
+    // Fix 3: assert exact toxicity_score (deterministic from canned verdicts).
+    // Reply-weighted formula: 5 replies all toxic, 20 originals all clean.
+    //   total_replies=5 >= MIN_REPLIES_FOR_WEIGHTING(5) → weighted path
+    //   reply_tox_rate  = 5/5  = 1.0
+    //   original_tox_rate = 0/20 = 0.0
+    //   avg_toxicity = 1.0 * 0.7 + 0.0 * 0.3 = 0.7
+    let tox = score
+        .toxicity_score
+        .expect("golden(c2) toxicity_score must be Some");
+    assert_eq!(
+        tox, 0.7,
+        "golden(c2) toxicity_score: expected exactly 0.7 from reply-weighted formula, got {tox}"
+    );
     assert_eq!(
         score.threat_tier.as_deref(),
         Some("Watch"),
@@ -867,11 +881,29 @@ async fn golden_d_nli_two_pass_gate() {
         "golden(d) context_score must be in [0,1], got {ctx}"
     );
 
-    // With all-toxic verdicts + overlapping fingerprint, threat_score must be high.
+    // Fix 1: assert the overlap gate is NOT firing — overlap must be >= 0.15 so the
+    // FULL multiplicative formula path runs (tox * 70 * (1 + overlap*1.5)), not the
+    // gated fallback path (tox * 25). Without this, a TF-IDF change that drops overlap
+    // below 0.15 would silently switch formulas and the golden wouldn't notice.
+    // The toxicology_fingerprint shares exact keywords with the post text, so
+    // overlap should be very high (observed ~1.0 on this machine).
+    let overlap = score
+        .topic_overlap
+        .expect("golden(d) must have Some topic_overlap");
+    assert!(
+        overlap >= 0.15,
+        "golden(d) topic_overlap must be >= 0.15 so the FULL multiplicative formula path runs, \
+         not the gated path; got {overlap}"
+    );
+
+    // Fix 2: with all-toxic verdicts + full multiplicative overlap formula, threat_score
+    // is much higher than 8.0. Observed value on this machine: 100.0 (clamped max).
+    // Assert >= 40.0 — meaningful enough to catch any regression that halves the score,
+    // with safe margin against formula/quantization variation across machines.
     let threat = score.threat_score.expect("threat_score must be Some");
     assert!(
-        threat >= 8.0,
-        "golden(d) threat_score must be ≥ 8.0 (raw_score already exceeds this), got {threat}"
+        threat >= 40.0,
+        "golden(d) threat_score must be >= 40.0 (observed ~100.0 on reference machine); got {threat}"
     );
 
     // The tier must be one of the valid tiers.
