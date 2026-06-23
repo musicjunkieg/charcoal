@@ -1,5 +1,13 @@
 [
   {
+    "hash": "62c9d8dcd184857afd052514e9fa91fb172d64be",
+    "short_hash": "62c9d8d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:33:56-07:00",
+    "message": "feat(decouple): rewire amplification through run_phased_scan (#208)\n\namplification::run now collects a single Vec<CandidateInput> (amplifiers +\nfollowers, deduped by DID with amplifier precedence) and drives one combined\nrun_phased_scan instead of the old amplifier build_profile loop + per-follower\ntwo-pass build_profile loop. One burst window, one scan_phase marker, one clean\nresume. Behavior-preserving: the event-recording loop (ONNX score_with_context +\nNLI score_pair + insert_amplification_event) is untouched.\n\n- Amplifier candidates carry direct_pairs=Some(deduped event pairs), pile-on flag,\n  and graph_distance; followers carry direct_pairs=None. The raw>=8.0 follower NLI\n  gate now lives in finalize_account (#211), selected per candidate by direct_pairs.\n- Deps thread nli_scorer / protected_posts_with_embeddings / data_dir all through\n  (Some = the params); fetcher = AtpPostFetcher, classifier via scorer.classifier().\n- scorer param: &dyn ToxicityScorer -> Option<&TwoStageToxicityScorer> (concrete for\n  .classifier()/CleanPassScorer). None preserves the old NoopScorer-errors-on-every-\n  call !analyze path (zero accounts scored). main.rs Scan arm + web scan_job updated.\n- catch_unwind dropped in favor of the phased scan_phase crash/cost-cap resume model.\n- run_gather: map over owned indices + named gather_one async fn to avoid a\n  higher-ranked FnOnce inference failure when the scan future crosses the web\n  background-scan tokio::spawn boundary (sweep unaffected, golden + suite green).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
     "hash": "7f9903aac3bc85a528be8a52a28f1158a4e1c739",
     "short_hash": "7f9903a",
     "author": "Bryan Guffey",

@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::StreamExt;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
@@ -156,6 +156,11 @@ pub async fn run_phased_scan(
     // A fresh run (None or Done) wipes any stale staging from a prior run as a
     // backstop, then gathers. Resume entries (Burst/Finalize) skip gather.
     if phase.is_none() || phase == Some(ScanPhase::Done) || phase == Some(ScanPhase::Gather) {
+        info!(
+            phase = "gather",
+            candidates = candidates.len(),
+            "entering gather phase"
+        );
         db.clear_scan_staging(user_did).await?;
         run_gather(db, user_did, candidates, deps).await?;
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Burst.as_str())
@@ -167,6 +172,11 @@ pub async fn run_phased_scan(
         phase,
         None | Some(ScanPhase::Done) | Some(ScanPhase::Gather) | Some(ScanPhase::Burst)
     ) {
+        if phase == Some(ScanPhase::Burst) {
+            info!(resumed_phase = "burst", "resuming interrupted burst phase");
+        }
+        let pending = db.count_pending_classifications(user_did).await?;
+        info!(phase = "burst", pending = pending, "entering burst phase");
         match run_burst(
             db,
             user_did,
@@ -179,10 +189,20 @@ pub async fn run_phased_scan(
             BurstOutcome::CostCapped => {
                 // Resumable: leave phase == "burst", report degraded, stop here.
                 // A later call re-enters Burst and drains the remaining pending.
+                info!(
+                    phase = "burst",
+                    outcome = "cost_capped",
+                    "burst cost-capped — scan resumable"
+                );
                 summary.degraded = true;
                 return Ok(summary);
             }
             BurstOutcome::Complete => {
+                info!(
+                    phase = "burst",
+                    outcome = "complete",
+                    "burst phase complete"
+                );
                 db.set_scan_state(user_did, "scan_phase", ScanPhase::Finalize.as_str())
                     .await?;
             }
@@ -190,12 +210,31 @@ pub async fn run_phased_scan(
     }
 
     // ── Phase: Finalize (also the resume entry for phase == "finalize") ──
+    if phase == Some(ScanPhase::Finalize) {
+        info!(
+            resumed_phase = "finalize",
+            "resuming interrupted finalize phase"
+        );
+    }
+    let finalize_account_count = db.list_scan_accounts(user_did).await?.len();
+    info!(
+        phase = "finalize",
+        accounts = finalize_account_count,
+        "entering finalize phase"
+    );
     run_finalize(db, user_did, candidates, deps, &mut summary).await?;
     db.set_scan_state(user_did, "scan_phase", ScanPhase::Done.as_str())
         .await?;
 
     // ── Phase: Done — clear both staging tables (leaves scan_phase intact) ──
     db.clear_scan_staging(user_did).await?;
+
+    info!(
+        phase = "done",
+        accounts_scored = summary.accounts_scored,
+        degraded = summary.degraded,
+        "phased scan complete"
+    );
 
     Ok(summary)
 }

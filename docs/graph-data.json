@@ -3288,6 +3288,17 @@
       "created_at": "2026-06-23T16:04:01.959722-07:00",
       "updated_at": "2026-06-23T16:04:01.959722-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"7f9903a\",\"confidence\":95}"
+    },
+    {
+      "id": 306,
+      "change_id": "7de87515-1b97-49e7-8966-915f27edb9bd",
+      "node_type": "outcome",
+      "title": "Task 6.3 (#208): rewired amplification through single combined run_phased_scan (commit 62c9d8d). Kept event-recording loop; collapsed amplifier-scoring + explicit follower pass-1/pass-2 into one phased scan (amplifiers direct_pairs=Some, followers None, deduped amplifier-precedence); deps nli/ppwe/data_dir=Some so finalize gate (#211 fix) reproduces amplifier-always-NLI + follower-gated. Golden+full suite green, opus-reviewed. ALL 3 call-site rewires (sweep+amplification) done.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T16:37:36.370369-07:00",
+      "updated_at": "2026-06-23T16:37:36.370369-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"62c9d8d\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6491,6 +6502,17 @@
       "weight": 1.0,
       "rationale": "Chunk 5 complete",
       "created_at": "2026-06-23T15:38:44.497742-07:00"
+    },
+    {
+      "id": 300,
+      "from_node_id": 296,
+      "to_node_id": 305,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "ca5f763f-86d5-44e6-8e47-ccdc01d9c432",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6.3 amplification rewire",
+      "created_at": "2026-06-23T16:37:36.377675-07:00"
     }
   ],
   "documents": [
