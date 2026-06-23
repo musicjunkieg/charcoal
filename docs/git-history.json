@@ -1,5 +1,13 @@
 [
   {
+    "hash": "006d265fa441d8ff0287369c60d90479079d89f3",
+    "short_hash": "006d265",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T14:59:53-07:00",
+    "message": "test(decouple): clippy — use RangeInclusive::contains in golden case-d (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
     "hash": "5451153ec06e96aeafa6b82e63c087e9e0cadc19",
     "short_hash": "5451153",
     "author": "Bryan Guffey",

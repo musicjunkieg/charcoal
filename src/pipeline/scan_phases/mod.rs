@@ -4,4 +4,5 @@
 // Phase B (Burst): classifier verdict for each queued post.
 // Phase C (Score): read back staged data and compute final AccountScore.
 
+pub mod gather;
 pub mod staging;

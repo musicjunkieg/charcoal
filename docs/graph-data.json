@@ -3211,6 +3211,17 @@
       "created_at": "2026-06-23T14:28:22.157354-07:00",
       "updated_at": "2026-06-23T14:28:22.157354-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"5451153\",\"confidence\":95}"
+    },
+    {
+      "id": 299,
+      "change_id": "07e9d083-e955-41ce-a42b-a4aeb388e360",
+      "node_type": "outcome",
+      "title": "Chunk 2 (#208) COMPLETE: ONNX-clean-pass seam + behavior-identical extraction of stage1_outcome/score_from_sample + golden test (4 cases incl live NLI two-pass gate). Gate green: full suite 0 failures, clippy web/default/postgres clean, golden 6/6 (case d ran w/ NLI model). The golden now LOCKS scoring behavior for Chunks 3-6. Commits 774419e..006d265.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T15:00:19.864930-07:00",
+      "updated_at": "2026-06-23T15:00:19.864930-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"006d265\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6370,6 +6381,17 @@
       "weight": 1.0,
       "rationale": "Chunk 1 complete outcome",
       "created_at": "2026-06-23T14:28:22.171428-07:00"
+    },
+    {
+      "id": 296,
+      "from_node_id": 296,
+      "to_node_id": 299,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "07e9d083-e955-41ce-a42b-a4aeb388e360",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 2 complete outcome",
+      "created_at": "2026-06-23T15:00:19.872890-07:00"
     }
   ],
   "documents": [

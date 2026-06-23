@@ -526,3 +526,457 @@ fn account_input_is_versioned_and_roundtrips() {
     assert_eq!(back.schema_version, ACCOUNT_INPUT_SCHEMA_VERSION);
     assert_eq!(back, blob);
 }
+
+// ── Phase A: gather_account tests ───────────────────────────────────────────
+
+mod gather_tests {
+    use super::*;
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use charcoal::bluesky::posts::{Post, PostSample, ReplyPost};
+    use charcoal::pipeline::scan_phases::gather::{
+        gather_account, CleanPassScorer, GatherInputs, PostFetcher,
+    };
+    use charcoal::scoring::threat::ThreatWeights;
+    use charcoal::topics::fingerprint::{TopicCluster, TopicFingerprint};
+    use charcoal::toxicity::traits::{ToxicityResult, ToxicityScorer};
+
+    const ACCT: &str = "did:plc:gatheracct00000000000";
+
+    // Scorer returning a fixed continuous toxicity for every text. Used both as
+    // the Stage-1 ONNX scorer and (via FixedCleanPass) the clean-pass.
+    struct FixedScorer(f64);
+
+    #[async_trait]
+    impl ToxicityScorer for FixedScorer {
+        async fn score_text(&self, _text: &str) -> Result<ToxicityResult> {
+            Ok(ToxicityResult {
+                toxicity: self.0,
+                attributes: Default::default(),
+            })
+        }
+    }
+
+    // Clean-pass that returns the same fixed ONNX score for every envelope.
+    struct FixedCleanPass(f64);
+
+    #[async_trait]
+    impl CleanPassScorer for FixedCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            Ok(vec![self.0; texts.len()])
+        }
+    }
+
+    // Clean-pass keyed on substring: any envelope containing `hostile_marker`
+    // scores high (survivor); everything else scores clean. Proves the split
+    // ran on the ENVELOPE text, not the raw reply text.
+    struct MarkerCleanPass {
+        hostile_marker: String,
+        high: f64,
+        low: f64,
+    }
+
+    #[async_trait]
+    impl CleanPassScorer for MarkerCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    if t.contains(&self.hostile_marker) {
+                        self.high
+                    } else {
+                        self.low
+                    }
+                })
+                .collect())
+        }
+    }
+
+    // Canned fetcher: returns the same sample for the 25 and 50-post calls,
+    // plus a fixed parent-text map.
+    struct CannedFetcher {
+        sample: PostSample,
+        parents: HashMap<String, String>,
+    }
+
+    #[async_trait]
+    impl PostFetcher for CannedFetcher {
+        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+            Ok(self.sample.clone())
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(self.parents.clone())
+        }
+    }
+
+    fn make_post(uri: &str, text: &str) -> Post {
+        Post {
+            uri: uri.to_string(),
+            text: text.to_string(),
+            created_at: None,
+            like_count: 0,
+            repost_count: 0,
+            quote_count: 0,
+            is_quote: false,
+        }
+    }
+
+    fn make_reply(uri: &str, text: &str, parent_uri: &str) -> ReplyPost {
+        ReplyPost {
+            post: make_post(uri, text),
+            parent_uri: parent_uri.to_string(),
+        }
+    }
+
+    // Fingerprint about astrophysics — unrelated to everyday-topic posts, so
+    // TF-IDF overlap stays below the 0.15 gate (drives the early-exit path).
+    fn astrophysics_fingerprint() -> TopicFingerprint {
+        TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "astrophysics".to_string(),
+                keywords: vec![
+                    "quasar".to_string(),
+                    "nebula".to_string(),
+                    "redshift".to_string(),
+                    "telescope".to_string(),
+                    "pulsar".to_string(),
+                    "photon".to_string(),
+                    "galaxy".to_string(),
+                    "cosmology".to_string(),
+                ],
+                weight: 1.0,
+            }],
+            post_count: 200,
+        }
+    }
+
+    fn inputs<'a>(fp: &'a TopicFingerprint, weights: &'a ThreatWeights) -> GatherInputs<'a> {
+        GatherInputs {
+            account_did: ACCT,
+            account_handle: "gather.bsky.social",
+            protected_fingerprint: fp,
+            weights,
+            median_engagement: 1.0,
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+        }
+    }
+
+    async fn open_db() -> Arc<dyn Database> {
+        let db = setup_db().await;
+        db.upsert_user(TEST_USER, "testuser.bsky.social")
+            .await
+            .unwrap();
+        Arc::new(db)
+    }
+
+    // ── < 5 posts → Insufficient Data, no enqueue/stash ──
+    #[tokio::test]
+    async fn gather_insufficient_data_finalizes_and_stages_nothing() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let sample = PostSample {
+            originals: vec![make_post("at://a/1", "hi"), make_post("at://a/2", "yo")],
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: 2,
+        };
+        let fetcher = CannedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = FixedCleanPass(0.0);
+
+        gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        // The terminal "Insufficient Data" score is written. (The read path
+        // recomputes threat_tier from threat_score, which is None here, so we
+        // assert on the durable signals instead: the row exists, no score, and
+        // the analysed-post count matches the < 5 sample.)
+        let score = db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            score.threat_score, None,
+            "insufficient data → no threat score"
+        );
+        assert_eq!(score.posts_analyzed, 2);
+        assert!(db
+            .fetch_account_verdicts(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(db
+            .fetch_account_input(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    // ── Early-exit (clean + topically irrelevant, >=5 first-person) → Low ──
+    #[tokio::test]
+    async fn gather_early_exit_finalizes_low_and_stages_nothing() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let originals: Vec<Post> = (0..6)
+            .map(|i| make_post(&format!("at://e/{i}"), "sandwiches and gardens and weather"))
+            .collect();
+        let sample = PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: 6,
+        };
+        let fetcher = CannedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0); // ONNX clean
+        let clean = FixedCleanPass(0.0);
+
+        gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        let score = db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(score.threat_tier.as_deref(), Some("Low"));
+        assert_eq!(score.scoring_confidence.as_deref(), Some("low"));
+        assert!(db
+            .fetch_account_verdicts(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(db
+            .fetch_account_input(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    // Build a survivor sample: enough first-person posts AND high topic overlap
+    // so Stage 1 proceeds to Stage 2.
+    fn survivor_sample() -> PostSample {
+        // 6 originals with astrophysics keywords → high overlap, so NOT
+        // early-exited even though ONNX is clean.
+        let originals: Vec<Post> = (0..6)
+            .map(|i| {
+                make_post(
+                    &format!("at://s/orig/{i}"),
+                    "quasar nebula redshift telescope galaxy cosmology pulsar photon",
+                )
+            })
+            .collect();
+        PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: 6,
+        }
+    }
+
+    // ── Survivor → per-post rows + one stash, no AccountScore ──
+    #[tokio::test]
+    async fn gather_survivor_enqueues_rows_and_stashes_blob() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let mut sample = survivor_sample();
+        // Add one extra original that the clean-pass marks as a survivor.
+        sample.originals.push(make_post(
+            "at://s/orig/hostile",
+            "quasar HOSTILE_TOKEN nebula",
+        ));
+        sample.total_posts = sample.originals.len();
+
+        let fetcher = CannedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0); // Stage-1 ONNX clean (won't early-exit: overlap high)
+        let clean = MarkerCleanPass {
+            hostile_marker: "HOSTILE_TOKEN".to_string(),
+            high: 0.9,
+            low: 0.0,
+        };
+
+        gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        // No AccountScore — Phase C scores survivors.
+        assert!(db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+
+        let rows = db.fetch_account_verdicts(TEST_USER, ACCT).await.unwrap();
+        assert_eq!(rows.len(), 7, "one row per post (6 clean + 1 survivor)");
+
+        let hostile = rows
+            .iter()
+            .find(|r| r.post_uri == "at://s/orig/hostile")
+            .unwrap();
+        assert_eq!(hostile.status, "pending");
+        assert_eq!(hostile.toxic_token, None);
+
+        let clean_row = rows.iter().find(|r| r.post_uri == "at://s/orig/0").unwrap();
+        assert_eq!(clean_row.status, "done");
+        assert_eq!(clean_row.toxic_token, Some(false));
+        assert_eq!(clean_row.confidence, None);
+        assert_eq!(clean_row.model_id, None);
+
+        // Blob stashed once and round-trips with schema_version set.
+        let payload = db
+            .fetch_account_input(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .unwrap();
+        let blob: AccountInput = serde_json::from_str(&payload).unwrap();
+        assert_eq!(blob.schema_version, ACCOUNT_INPUT_SCHEMA_VERSION);
+        assert_eq!(blob.sample.total_posts, 7);
+    }
+
+    // ── Envelope-aware split: reply clean in isolation, hostile in context ──
+    #[tokio::test]
+    async fn gather_envelope_aware_split_uses_parent_context() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // Survivor sample (6 high-overlap originals to clear Stage 1) plus one
+        // reply that is innocuous on its own ("agreed") but whose PARENT text
+        // carries the hostile marker. The clean-pass keys on the marker, so it
+        // only fires when scoring the [Parent]/[Reply] envelope.
+        let mut sample = survivor_sample();
+        sample
+            .replies
+            .push(make_reply("at://s/reply/1", "agreed", "at://parent/1"));
+        sample.total_posts = sample.originals.len() + sample.replies.len();
+
+        let mut parents = HashMap::new();
+        parents.insert(
+            "at://parent/1".to_string(),
+            "this is HOSTILE_TOKEN garbage".to_string(),
+        );
+
+        let fetcher = CannedFetcher { sample, parents };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass {
+            hostile_marker: "HOSTILE_TOKEN".to_string(),
+            high: 0.9,
+            low: 0.0,
+        };
+
+        gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        let rows = db.fetch_account_verdicts(TEST_USER, ACCT).await.unwrap();
+        let reply_row = rows
+            .iter()
+            .find(|r| r.post_uri == "at://s/reply/1")
+            .unwrap();
+        // The reply text alone ("agreed") has no marker, but the envelope
+        // (which includes the parent) does — so it must survive to Phase B.
+        assert_eq!(
+            reply_row.status, "pending",
+            "reply hostile-in-context must enqueue pending, not done"
+        );
+        assert_eq!(reply_row.text, "agreed", "raw reply text, not the envelope");
+        assert_eq!(
+            reply_row.context_text.as_deref(),
+            Some("this is HOSTILE_TOKEN garbage"),
+            "context_text carries the parent text"
+        );
+        assert!(reply_row.onnx_score >= 0.9 - 1e-6);
+    }
+
+    // ── Idempotency: gather twice → one row per post ──
+    #[tokio::test]
+    async fn gather_twice_is_idempotent() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let sample = survivor_sample();
+        let fetcher = CannedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = FixedCleanPass(0.0);
+
+        for _ in 0..2 {
+            gather_account(
+                &db,
+                TEST_USER,
+                &fetcher,
+                &scorer,
+                &clean,
+                &inputs(&fp, &weights),
+            )
+            .await
+            .unwrap();
+        }
+
+        let rows = db.fetch_account_verdicts(TEST_USER, ACCT).await.unwrap();
+        assert_eq!(
+            rows.len(),
+            6,
+            "UPSERT: gather twice yields one row per post"
+        );
+    }
+}
