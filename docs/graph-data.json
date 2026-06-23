@@ -3101,6 +3101,17 @@
       "created_at": "2026-06-21T05:30:58.288889-07:00",
       "updated_at": "2026-06-21T05:30:58.288889-07:00",
       "metadata_json": "{\"branch\":\"fix/classify-gate-threshold-85\",\"confidence\":95}"
+    },
+    {
+      "id": 289,
+      "change_id": "93fa035f-5780-4eaa-a05a-57893ab5b1ee",
+      "node_type": "goal",
+      "title": "Execute #206 cost-guard plan: per-scan ScanCostMeter backstop enforced at the per-RunPod-call boundary",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-22T21:41:17.826091-07:00",
+      "updated_at": "2026-06-22T21:41:17.826091-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"confidence\":90,\"prompt\":\"User: start executing #206\"}"
     }
   ],
   "edges": [
