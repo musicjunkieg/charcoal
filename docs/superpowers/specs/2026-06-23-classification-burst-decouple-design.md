@@ -238,10 +238,11 @@ would corrupt each other's queue / blob / phase marker. This invariant is
 `try_start_scan` (`src/web/scan_job.rs:50`) trips on a **global** `any_running`
 flag, allowing **one scan at a time across all users** (not just per-user), and
 returns an error the web/admin scan-launch handlers surface as HTTP 409.
-(`is_scan_running_for` at scan_job.rs:87 is `#[allow(dead_code)]`; the
-admin.rs:275 check only blocks *user deletion* during a scan, not scan launch —
-so it is not the launch gate.) The CLI is single-operator and inherits the
-invariant by usage.
+(`is_scan_running_for` at scan_job.rs:87 carries a now-stale `#[allow(dead_code)]`
+— it is actually called at `src/web/handlers/admin.rs:275`, which only blocks
+*user deletion* during a scan, not scan launch — so it is not the launch gate;
+if the plan touches that fn it should drop the stale attribute.) The CLI is
+single-operator and inherits the invariant by usage.
 Note this means a *single* scan, even one that internally runs both Mode 1
 (amplification) and Mode 2 (sweep), shares one staging set for the user — which
 is correct (they're one logical onboarding). The spec assumes Mode 1 and Mode 2
