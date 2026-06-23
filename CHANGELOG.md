@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Per-scan RunPod cost backstop (`ScanCostMeter`) enforced at the per-call boundary — `elapsed × rate` metering hard-stops a runaway scan before disaster spend; on by default ($5 ceiling), only `CHARCOAL_SCAN_COST_CEILING_CENTS=0` disables (#206)
+- Phase 6.7 — Staging gate (grimalkina re-scan) (#195)
 - Phase 6.4 — A/B harness + shadow-agreement gate (#192)
 - Phase 6.3 — Rust trait + RunPodCopeBClient + ZentropiClient refactor (#191)
 - Phase 6.1 — A/B shadow-agreement sample + smoke set harvested for CoPE-B (#189)
@@ -43,6 +45,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Production GPU capacity risk: US-GA-2 serverless is H100-only and very low capacity (#205)
+- Merge PR #57 to staging + bump RunPod endpoint workersMax 0->3 (#204)
+- Lower classify-gate AGREEMENT_THRESHOLD 0.90->0.85 (accept ~89% model-agreement ceiling) (#203)
+- Set RunPod+Zentropi env vars on Railway staging before #54 merge (#202)
+- Phase 6 cold-start opts: safetensors prefetch + persist compile cache + init timeout (#201)
 - Triage CodeRabbit review on PR #54 (Phase 6 self-host) (#199)
 - Phase 6.0 — audit_log generalization preflight (#188)
 - Pull Zentropi call count from last full scan of grimalkina.bsky.social (#182)
