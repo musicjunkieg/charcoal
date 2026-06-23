@@ -3266,6 +3266,17 @@
       "created_at": "2026-06-23T15:25:53.994197-07:00",
       "updated_at": "2026-06-23T15:25:53.994197-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"6acd158\",\"confidence\":95}"
+    },
+    {
+      "id": 304,
+      "change_id": "5eab5ce5-6b83-41ef-84b2-fbc82a839174",
+      "node_type": "outcome",
+      "title": "Chunk 5 (#208) COMPLETE: Phase C finalize_account (commit 2a99fb7). Reads blob+verdicts, realigns verdicts by post_uri to sample order, score_from_sample (NLI two-pass gate), upsert. NeedsRegather on None/malformed/version-mismatch(+clear)/incomplete. Added AccountInput.account_handle + clear_account_staging (trait+sqlite+pg). 32/32 unit, golden 6/6, live-pg 9/9, clippy+build web/pg clean, opus-reviewed.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T15:38:44.490367-07:00",
+      "updated_at": "2026-06-23T15:38:44.490367-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"2a99fb7\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6458,6 +6469,17 @@
       "weight": 1.0,
       "rationale": "Chunk 4 complete",
       "created_at": "2026-06-23T15:25:54.000825-07:00"
+    },
+    {
+      "id": 299,
+      "from_node_id": 296,
+      "to_node_id": 303,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "b9d54be2-d1a8-447f-8173-926bbffcacff",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunk 5 complete",
+      "created_at": "2026-06-23T15:38:44.497742-07:00"
     }
   ],
   "documents": [

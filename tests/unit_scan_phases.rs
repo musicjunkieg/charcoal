@@ -1808,3 +1808,630 @@ mod burst_tests {
         assert_eq!(burst_batch(), 500, "unset → default 500");
     }
 }
+
+// ── run_phased_scan: orchestration state machine tests ──────────────────────────
+
+mod orchestration_tests {
+    use super::*;
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use charcoal::bluesky::posts::{Post, PostSample};
+    use charcoal::pipeline::scan_phases::gather::{CleanPassScorer, PostFetcher};
+    use charcoal::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
+    use charcoal::scoring::threat::ThreatWeights;
+    use charcoal::topics::fingerprint::{TopicCluster, TopicFingerprint};
+    use charcoal::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+    use charcoal::toxicity::cost_meter::CostCeilingExceeded;
+    use charcoal::toxicity::traits::{ToxicityResult, ToxicityScorer};
+
+    const ORCH_USER: &str = "did:plc:orchuser0000000000000";
+
+    async fn open_db() -> Arc<dyn Database> {
+        let db = setup_db().await;
+        db.upsert_user(ORCH_USER, "orchuser.bsky.social")
+            .await
+            .unwrap();
+        Arc::new(db)
+    }
+
+    // Fingerprint about astrophysics — the survivor sample's posts share these
+    // keywords so Stage-1 overlap clears the gate and gather proceeds to Stage 2.
+    fn astrophysics_fingerprint() -> TopicFingerprint {
+        TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "astrophysics".to_string(),
+                keywords: vec![
+                    "quasar".to_string(),
+                    "nebula".to_string(),
+                    "redshift".to_string(),
+                    "telescope".to_string(),
+                    "pulsar".to_string(),
+                    "photon".to_string(),
+                    "galaxy".to_string(),
+                    "cosmology".to_string(),
+                ],
+                weight: 1.0,
+            }],
+            post_count: 200,
+        }
+    }
+
+    fn make_post(uri: &str, text: &str) -> Post {
+        Post {
+            uri: uri.to_string(),
+            text: text.to_string(),
+            created_at: None,
+            like_count: 0,
+            repost_count: 0,
+            quote_count: 0,
+            is_quote: false,
+        }
+    }
+
+    // A survivor sample for one account: 6 high-overlap originals (clears Stage 1)
+    // plus one "survivor" original the clean-pass keeps pending for the burst.
+    fn survivor_sample(prefix: &str) -> PostSample {
+        let mut originals: Vec<Post> = (0..6)
+            .map(|i| {
+                make_post(
+                    &format!("at://{prefix}/o/{i}"),
+                    "quasar nebula redshift telescope galaxy cosmology pulsar photon",
+                )
+            })
+            .collect();
+        // One survivor post the MarkerCleanPass keeps pending.
+        originals.push(make_post(
+            &format!("at://{prefix}/o/survivor"),
+            "quasar SURVIVOR nebula",
+        ));
+        PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: 7,
+        }
+    }
+
+    // ── doubles ──────────────────────────────────────────────────────────────
+
+    // Fetcher returning a per-handle canned sample.
+    struct MapFetcher {
+        by_handle: HashMap<String, PostSample>,
+    }
+
+    #[async_trait]
+    impl PostFetcher for MapFetcher {
+        async fn fetch_sample(&self, handle: &str, _limit: usize) -> Result<PostSample> {
+            Ok(self
+                .by_handle
+                .get(handle)
+                .cloned()
+                .unwrap_or_else(|| PostSample {
+                    originals: vec![],
+                    replies: vec![],
+                    quotes: vec![],
+                    reply_ratio: 0.0,
+                    quote_ratio: 0.0,
+                    total_posts: 0,
+                }))
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    // Fetcher that PANICS if fetch_sample is called — proves gather was skipped.
+    struct PanicFetcher;
+
+    #[async_trait]
+    impl PostFetcher for PanicFetcher {
+        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+            panic!("fetch_sample called — gather must be skipped on resume");
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    struct FixedScorer(f64);
+
+    #[async_trait]
+    impl ToxicityScorer for FixedScorer {
+        async fn score_text(&self, _text: &str) -> Result<ToxicityResult> {
+            Ok(ToxicityResult {
+                toxicity: self.0,
+                attributes: Default::default(),
+            })
+        }
+    }
+
+    // Clean-pass: any envelope containing "SURVIVOR" stays pending (survivor);
+    // everything else is clean.
+    struct MarkerCleanPass;
+
+    #[async_trait]
+    impl CleanPassScorer for MarkerCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            Ok(texts
+                .iter()
+                .map(|t| if t.contains("SURVIVOR") { 0.9 } else { 0.0 })
+                .collect())
+        }
+    }
+
+    fn ok_verdict() -> ClassifierVerdict {
+        ClassifierVerdict {
+            toxic_token: false,
+            confidence: 0.1,
+            latency_ms: 10,
+            model_id: "stub".to_string(),
+            policy_version: "stub".to_string(),
+        }
+    }
+
+    struct AlwaysOkClassifier;
+
+    #[async_trait]
+    impl ToxicityClassifier for AlwaysOkClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            Ok(ok_verdict())
+        }
+        fn name(&self) -> &'static str {
+            "always-ok"
+        }
+        fn model_id(&self) -> &'static str {
+            "always-ok"
+        }
+        fn policy_version(&self) -> &'static str {
+            "always-ok"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // Cost-cap classifier: Ok for the first K calls, then CostCeilingExceeded.
+    struct CostCapClassifier {
+        calls_before_cap: usize,
+        call_count: Mutex<usize>,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for CostCapClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            if *count > self.calls_before_cap {
+                Err(CostCeilingExceeded {
+                    est_cents: 600,
+                    ceiling_cents: 500,
+                }
+                .into())
+            } else {
+                Ok(ok_verdict())
+            }
+        }
+        fn name(&self) -> &'static str {
+            "cost-cap"
+        }
+        fn model_id(&self) -> &'static str {
+            "cost-cap"
+        }
+        fn policy_version(&self) -> &'static str {
+            "cost-cap"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // Build deps from borrowed parts. Concurrency 1 keeps cost-cap deterministic.
+    #[allow(clippy::too_many_arguments)]
+    fn deps<'a>(
+        fetcher: &'a dyn PostFetcher,
+        scorer: &'a dyn ToxicityScorer,
+        clean_pass: &'a dyn CleanPassScorer,
+        classifier: &'a Arc<dyn ToxicityClassifier>,
+        fp: &'a TopicFingerprint,
+        weights: &'a ThreatWeights,
+    ) -> PhasedScanDeps<'a> {
+        PhasedScanDeps {
+            fetcher,
+            scorer,
+            clean_pass,
+            classifier,
+            protected_fingerprint: fp,
+            weights,
+            embedder: None,
+            protected_embedding: None,
+            nli_scorer: None,
+            protected_posts_with_embeddings: None,
+            data_dir: None,
+            median_engagement: 1.0,
+            gather_concurrency: 1,
+            burst_concurrency: 1,
+            burst_batch: 100,
+        }
+    }
+
+    fn candidate(did: &str, handle: &str) -> CandidateInput {
+        CandidateInput {
+            account_did: did.to_string(),
+            account_handle: handle.to_string(),
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+        }
+    }
+
+    // ── Test 1: fresh scan Gather → Burst → Finalize → Done ──
+    #[tokio::test]
+    async fn fresh_scan_walks_all_phases_to_done() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let acct_a = "did:plc:orcha0000000000000000";
+        let acct_b = "did:plc:orchb0000000000000000";
+
+        let mut by_handle = HashMap::new();
+        by_handle.insert("a.bsky.social".to_string(), survivor_sample("a"));
+        by_handle.insert("b.bsky.social".to_string(), survivor_sample("b"));
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let candidates = vec![
+            candidate(acct_a, "a.bsky.social"),
+            candidate(acct_b, "b.bsky.social"),
+        ];
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.accounts_scored, 2, "both accounts scored");
+        assert!(!summary.degraded);
+
+        // Final phase marker is "done".
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
+            Some("done".to_string())
+        );
+        // Staging is cleared (Done step).
+        assert_eq!(
+            db.count_pending_classifications(ORCH_USER).await.unwrap(),
+            0
+        );
+        assert!(db.list_scan_accounts(ORCH_USER).await.unwrap().is_empty());
+
+        // Both AccountScores were upserted.
+        assert!(db
+            .get_account_by_did(ORCH_USER, acct_a)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(db
+            .get_account_by_did(ORCH_USER, acct_b)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    // ── Test 2: resume at burst skips gather ──
+    #[tokio::test]
+    async fn resume_at_burst_skips_gather() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchres000000000000000";
+
+        // Pre-seed staging: a multi-post sample (rich enough for TF-IDF) +
+        // matching pending rows, so finalize can score the account WITHOUT a
+        // gather. The burst drains the pending rows; finalize then scores.
+        let sample = survivor_sample("res");
+        let blob = AccountInput {
+            schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            account_handle: "res.bsky.social".to_string(),
+            sample: sample.clone(),
+            parent_texts: HashMap::new(),
+            median_engagement: 0.0,
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+            fingerprint_quality: "unreliable".to_string(),
+        };
+        db.stash_account_input(ORCH_USER, acct, &serde_json::to_string(&blob).unwrap())
+            .await
+            .unwrap();
+        // One pending QueueRow per sampled original — the burst must classify
+        // them all before finalize can score the account.
+        let rows: Vec<QueueRow> = sample
+            .originals
+            .iter()
+            .map(|p| QueueRow {
+                account_did: acct.to_string(),
+                post_uri: p.uri.clone(),
+                text: p.text.clone(),
+                context_text: None,
+                post_kind: "original".to_string(),
+                onnx_score: 0.3,
+                status: "pending".to_string(),
+                toxic_token: None,
+                confidence: None,
+                model_id: None,
+                policy_version: None,
+            })
+            .collect();
+        db.enqueue_classifications(ORCH_USER, &rows).await.unwrap();
+        db.set_scan_state(ORCH_USER, "scan_phase", "burst")
+            .await
+            .unwrap();
+
+        // PanicFetcher proves gather is never called on resume.
+        let fetcher = PanicFetcher;
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let candidates = vec![candidate(acct, "res.bsky.social")];
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.accounts_scored, 1, "resumed account scored");
+        assert!(!summary.degraded);
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
+            Some("done".to_string())
+        );
+        assert!(db
+            .get_account_by_did(ORCH_USER, acct)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    // ── Test 3: CostCapped → degraded, phase stays "burst", nothing finalized ──
+    #[tokio::test]
+    async fn cost_capped_returns_degraded_and_stays_in_burst() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchcap000000000000000";
+
+        let mut by_handle = HashMap::new();
+        // Sample with multiple survivors so the burst has >0 pending and the cap
+        // can fire mid-drain.
+        let mut sample = survivor_sample("cap");
+        sample
+            .originals
+            .push(make_post("at://cap/o/survivor2", "quasar SURVIVOR two"));
+        sample
+            .originals
+            .push(make_post("at://cap/o/survivor3", "quasar SURVIVOR three"));
+        sample.total_posts = sample.originals.len();
+        by_handle.insert("cap.bsky.social".to_string(), sample);
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        // Cap after 1 successful call: 3 survivors enqueued, call 2 caps.
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(CostCapClassifier {
+            calls_before_cap: 1,
+            call_count: Mutex::new(0),
+        });
+
+        let candidates = vec![candidate(acct, "cap.bsky.social")];
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert!(summary.degraded, "cost cap must mark the scan degraded");
+        assert_eq!(
+            summary.accounts_scored, 0,
+            "no account finalized in a cost-capped call"
+        );
+        // Phase stays at "burst" so a later call can resume the burst.
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
+            Some("burst".to_string())
+        );
+        // Some rows remain pending (the cap stopped the drain).
+        assert!(
+            db.count_pending_classifications(ORCH_USER).await.unwrap() > 0,
+            "cost cap leaves pending rows for resume"
+        );
+        // No AccountScore written (finalize never ran).
+        assert!(db
+            .get_account_by_did(ORCH_USER, acct)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    // ── Test 4: NeedsRegather → re-gather + re-burst + re-finalize → Scored ──
+    #[tokio::test]
+    async fn needs_regather_re_gathers_then_scores() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchrg0000000000000000";
+
+        // Pre-seed a STALE blob (wrong schema_version) so the first finalize
+        // returns NeedsRegather + clears the account's staging. Also enqueue a
+        // row so list_scan_accounts surfaces the account.
+        let bad_payload = r#"{"schema_version":999,"account_handle":"rg.bsky.social","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
+        db.stash_account_input(ORCH_USER, acct, bad_payload)
+            .await
+            .unwrap();
+        let stale_row = QueueRow {
+            account_did: acct.to_string(),
+            post_uri: format!("at://{acct}/o/stale"),
+            text: "stale".to_string(),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: 0.3,
+            status: "pending".to_string(),
+            toxic_token: None,
+            confidence: None,
+            model_id: None,
+            policy_version: None,
+        };
+        db.enqueue_classifications(ORCH_USER, &[stale_row])
+            .await
+            .unwrap();
+        // Enter the state machine directly at finalize — gather + burst already
+        // "happened" (we hand-staged stale data).
+        db.set_scan_state(ORCH_USER, "scan_phase", "finalize")
+            .await
+            .unwrap();
+
+        // The fetcher returns a FRESH good sample so the re-gather produces a
+        // scorable account.
+        let mut by_handle = HashMap::new();
+        by_handle.insert("rg.bsky.social".to_string(), survivor_sample("rg"));
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let candidates = vec![candidate(acct, "rg.bsky.social")];
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.accounts_scored, 1, "account scored after re-gather");
+        assert_eq!(summary.regathered, 1, "one account was re-gathered");
+        assert!(!summary.degraded);
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
+            Some("done".to_string())
+        );
+        assert!(
+            db.get_account_by_did(ORCH_USER, acct)
+                .await
+                .unwrap()
+                .is_some(),
+            "re-gathered account must end up Scored"
+        );
+    }
+
+    // ── Test 5: clean Done clears staging ──
+    #[tokio::test]
+    async fn clean_done_clears_staging() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchdone00000000000000";
+
+        let mut by_handle = HashMap::new();
+        by_handle.insert("done.bsky.social".to_string(), survivor_sample("done"));
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let candidates = vec![candidate(acct, "done.bsky.social")];
+
+        run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            db.count_pending_classifications(ORCH_USER).await.unwrap(),
+            0,
+            "clear_scan_staging empties the queue"
+        );
+        assert!(
+            db.list_scan_accounts(ORCH_USER).await.unwrap().is_empty(),
+            "clear_scan_staging empties scan_account_input"
+        );
+    }
+
+    // ── Test: fresh-start wipe runs when phase is None or Done ──
+    #[tokio::test]
+    async fn fresh_start_wipes_stale_staging() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchstale0000000000000";
+
+        // Leftover stale staging from a "prior run" with NO phase marker set.
+        let stale = QueueRow {
+            account_did: acct.to_string(),
+            post_uri: format!("at://{acct}/stale"),
+            text: "stale".to_string(),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: 0.3,
+            status: "pending".to_string(),
+            toxic_token: None,
+            confidence: None,
+            model_id: None,
+            policy_version: None,
+        };
+        db.enqueue_classifications(ORCH_USER, &[stale])
+            .await
+            .unwrap();
+        // No scan_phase set → fresh start path must clear that stale row.
+
+        // Empty candidate list: gather does nothing, burst drains nothing,
+        // finalize finds no accounts (because the stale row was wiped).
+        let fetcher = MapFetcher {
+            by_handle: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &[],
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(summary.accounts_scored, 0);
+        assert_eq!(
+            db.count_pending_classifications(ORCH_USER).await.unwrap(),
+            0,
+            "fresh start must wipe the stale leftover row"
+        );
+    }
+}

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2a99fb794091d2af6d955d1d96300834e8ffb3ba",
+    "short_hash": "2a99fb7",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:34:37-07:00",
+    "message": "feat(decouple): Phase C finalize_account — score_from_sample + NLI gate + re-gather on version mismatch (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 13
+  },
+  {
     "hash": "6acd158f20ba3da419c4a180de2e90bff7405ce8",
     "short_hash": "6acd158",
     "author": "Bryan Guffey",
