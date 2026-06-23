@@ -23,7 +23,32 @@ use crate::topics::fingerprint::TopicFingerprint;
 use crate::topics::overlap;
 use crate::topics::tfidf::TfIdfExtractor;
 use crate::topics::traits::TopicExtractor;
-use crate::toxicity::traits::ToxicityScorer;
+use crate::toxicity::traits::{BinaryVerdict, ToxicityScorer};
+
+/// Result of the Stage 1 quick check.
+///
+/// Stage 1 fetches a small (25-post) sample and decides whether the account is
+/// obviously a non-threat (too few posts to score, or clean-and-irrelevant). In
+/// those cases it produces a terminal [`AccountScore`] and the full pipeline is
+/// skipped. Otherwise it signals `Proceed`, carrying any Stage-1-computed value
+/// the caller may want for logging.
+///
+/// Note: the only Stage-1 value carried forward is `stage1_overlap` (the cheap
+/// TF-IDF overlap against the 25-post sample). The Stage 2 path deliberately
+/// recomputes overlap and fingerprint quality from the larger 50-post sample —
+/// it does **not** reuse Stage 1's values for the scoring math — so `Proceed`
+/// only needs to surface `stage1_overlap` for diagnostics, not for correctness.
+pub enum Stage1Outcome {
+    /// Account fully scored at Stage 1 — return this score, skip Stage 2.
+    /// Boxed because `AccountScore` is large relative to the `Proceed` variant.
+    Terminal(Box<AccountScore>),
+    /// Account survived the early-exit gate — run the full Stage 2 pipeline.
+    Proceed {
+        /// Cheap TF-IDF overlap from the 25-post sample (`None` if extraction
+        /// failed). Carried for diagnostics; Stage 2 recomputes its own overlap.
+        stage1_overlap: Option<f64>,
+    },
+}
 
 /// Build a complete threat profile for a single account.
 ///
@@ -58,13 +83,112 @@ pub async fn build_profile(
     // This catches ~50-60% of sweep accounts with minimal cost.
     let stage1_sample = posts::fetch_posts_with_replies(client, target_handle, 25).await?;
 
+    let stage1_overlap = match stage1_outcome(
+        &stage1_sample,
+        scorer,
+        target_handle,
+        target_did,
+        protected_fingerprint,
+        weights,
+        graph_distance,
+    )
+    .await?
+    {
+        Stage1Outcome::Terminal(score) => return Ok(*score),
+        Stage1Outcome::Proceed { stage1_overlap } => stage1_overlap,
+    };
+
+    // ── Stage 2: Full pipeline with 50 posts ──
+    // Account wasn't clean enough for early exit — run the full analysis.
+    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
+
+    // All posts go to toxicity scoring, with per-post context for replies.
+    // Originals and quotes are scored solo; replies are scored as a parent/reply
+    // pair so the conversation-scoped Zentropi labeler can correctly evaluate
+    // whether the reply is hostile toward the parent's author.
+    let all_post_texts: Vec<String> = sample
+        .originals
+        .iter()
+        .map(|p| p.text.clone())
+        .chain(sample.replies.iter().map(|r| r.post.text.clone()))
+        .chain(sample.quotes.iter().map(|p| p.text.clone()))
+        .collect();
+
+    let parent_uris: Vec<String> = sample
+        .replies
+        .iter()
+        .map(|r| r.parent_uri.clone())
+        .collect();
+    let parent_texts = posts::fetch_parent_posts(client, &parent_uris).await?;
+
+    // contexts[i] aligns with all_post_texts[i]: parent text for replies, None otherwise.
+    let mut contexts: Vec<Option<String>> = Vec::with_capacity(all_post_texts.len());
+    contexts.extend(std::iter::repeat_n(None, sample.originals.len()));
+    for r in &sample.replies {
+        contexts.push(parent_texts.get(&r.parent_uri).cloned());
+    }
+    contexts.extend(std::iter::repeat_n(None, sample.quotes.len()));
+
+    // Step 3: Two-stage classification — ONNX clean-pass + Zentropi binary verdict.
+    // Each verdict carries the binary `is_toxic` flag plus the underlying ONNX
+    // score (for evidence sorting and audit).
+    let verdicts = scorer
+        .classify_batch_with_contexts(&all_post_texts, &contexts)
+        .await?;
+
+    // Precompute the pile-on flag from the caller-supplied set, matching the
+    // `AccountInput` blob design — `score_from_sample` takes the bare bool.
+    let pile_on = pile_on_dids.contains(target_did);
+
+    score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        median_engagement,
+        pile_on,
+        nli_scorer,
+        protected_posts_with_embeddings,
+        direct_pairs,
+        data_dir,
+        graph_distance,
+        target_handle,
+        target_did,
+        stage1_overlap,
+    )
+    .await
+}
+
+/// Stage 1 quick check — decide whether to early-exit or proceed to Stage 2.
+///
+/// Operates on an already-fetched 25-post sample (it does **not** fetch). Runs
+/// the ONNX clean-pass filter over first-person posts plus a cheap TF-IDF
+/// overlap, then applies [`should_early_exit_stage1`]. Returns
+/// [`Stage1Outcome::Terminal`] with a fully-built terminal `AccountScore` for
+/// the two non-threat cases (`< 5` posts → "Insufficient Data"; clean and
+/// topically irrelevant → early-exit "Low"), or [`Stage1Outcome::Proceed`] when
+/// the account warrants the full pipeline.
+#[allow(clippy::too_many_arguments)]
+pub async fn stage1_outcome(
+    stage1_sample: &posts::PostSample,
+    scorer: &dyn ToxicityScorer,
+    target_handle: &str,
+    target_did: &str,
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    graph_distance: Option<GraphDistance>,
+) -> Result<Stage1Outcome> {
     if stage1_sample.total_posts < 5 {
         info!(
             handle = target_handle,
             post_count = stage1_sample.total_posts,
             "Insufficient posts for reliable scoring"
         );
-        return Ok(AccountScore {
+        return Ok(Stage1Outcome::Terminal(Box::new(AccountScore {
             did: target_did.to_string(),
             handle: target_handle.to_string(),
             toxicity_score: None,
@@ -82,7 +206,7 @@ pub async fn build_profile(
             graph_distance: graph_distance.map(|d| d.as_str().to_string()),
             fingerprint_quality: None,
             scoring_confidence: None,
-        });
+        })));
     }
 
     // Quick ONNX scores for clean-pass check.
@@ -162,7 +286,7 @@ pub async fn build_profile(
             stage1_sample.replies.len() + stage1_sample.quotes.len(),
         );
 
-        return Ok(AccountScore {
+        return Ok(Stage1Outcome::Terminal(Box::new(AccountScore {
             did: target_did.to_string(),
             handle: target_handle.to_string(),
             toxicity_score: Some(0.0),
@@ -179,12 +303,50 @@ pub async fn build_profile(
             graph_distance: graph_distance.map(|d| d.as_str().to_string()),
             fingerprint_quality: Some(fp_quality.as_str().to_string()),
             scoring_confidence: Some("low".to_string()),
-        });
+        })));
     }
 
-    // ── Stage 2: Full pipeline with 50 posts ──
-    // Account wasn't clean enough for early exit — run the full analysis.
-    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
+    Ok(Stage1Outcome::Proceed { stage1_overlap })
+}
+
+/// Score an account from an already-fetched Stage 2 sample and its classifier
+/// verdicts — the full pipeline *after* `classify_batch_with_contexts`.
+///
+/// This function does **not** fetch and does **not** call the classifier. It
+/// takes the 50-post `stage2_sample`, the flattened `all_post_texts` (originals
+/// ++ reply texts ++ quotes, in that order), the per-post `contexts` (parent
+/// text for replies, `None` otherwise), and the aligned `verdicts`, then runs:
+/// reply-weighted toxicity → topic overlap → behavioral signals → context/NLI
+/// two-pass gate → graph distance → tier → final `AccountScore`.
+///
+/// `pile_on` is the precomputed `pile_on_dids.contains(target_did)` bool (the
+/// caller owns the set). `stage1_overlap` is accepted for parity with the
+/// staged-scan blob design but is not used by the scoring math — overlap and
+/// fingerprint quality are recomputed here from the 50-post sample, identically
+/// to the original monolithic `build_profile`.
+#[allow(clippy::too_many_arguments)]
+pub async fn score_from_sample(
+    stage2_sample: &posts::PostSample,
+    all_post_texts: &[String],
+    contexts: &[Option<String>],
+    verdicts: &[BinaryVerdict],
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
+    median_engagement: f64,
+    pile_on: bool,
+    nli_scorer: Option<&NliScorer>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    direct_pairs: Option<&[(String, String)]>,
+    data_dir: Option<&std::path::Path>,
+    graph_distance: Option<GraphDistance>,
+    target_handle: &str,
+    target_did: &str,
+    _stage1_overlap: Option<f64>,
+) -> Result<AccountScore> {
+    let sample = stage2_sample;
+    let _ = contexts; // contexts were consumed by the (already-run) classifier.
 
     // Step 2: Determine fingerprint quality and select posts for fingerprinting
     let fp_quality = FingerprintQuality::from_counts(
@@ -206,46 +368,12 @@ pub async fn build_profile(
             .collect()
     };
 
-    // All posts go to toxicity scoring, with per-post context for replies.
-    // Originals and quotes are scored solo; replies are scored as a parent/reply
-    // pair so the conversation-scoped Zentropi labeler can correctly evaluate
-    // whether the reply is hostile toward the parent's author.
-    let all_post_texts: Vec<String> = sample
-        .originals
-        .iter()
-        .map(|p| p.text.clone())
-        .chain(sample.replies.iter().map(|r| r.post.text.clone()))
-        .chain(sample.quotes.iter().map(|p| p.text.clone()))
-        .collect();
-
     let all_posts_flat: Vec<&Post> = sample
         .originals
         .iter()
         .chain(sample.replies.iter().map(|r| &r.post))
         .chain(sample.quotes.iter())
         .collect();
-
-    let parent_uris: Vec<String> = sample
-        .replies
-        .iter()
-        .map(|r| r.parent_uri.clone())
-        .collect();
-    let parent_texts = posts::fetch_parent_posts(client, &parent_uris).await?;
-
-    // contexts[i] aligns with all_post_texts[i]: parent text for replies, None otherwise.
-    let mut contexts: Vec<Option<String>> = Vec::with_capacity(all_post_texts.len());
-    contexts.extend(std::iter::repeat_n(None, sample.originals.len()));
-    for r in &sample.replies {
-        contexts.push(parent_texts.get(&r.parent_uri).cloned());
-    }
-    contexts.extend(std::iter::repeat_n(None, sample.quotes.len()));
-
-    // Step 3: Two-stage classification — ONNX clean-pass + Zentropi binary verdict.
-    // Each verdict carries the binary `is_toxic` flag plus the underlying ONNX
-    // score (for evidence sorting and audit).
-    let verdicts = scorer
-        .classify_batch_with_contexts(&all_post_texts, &contexts)
-        .await?;
 
     // Reply-weighted binary toxicity rate. Replies count 70% (where harassment
     // manifests), originals 30% (where stated views show). Quotes are bucketed
@@ -327,7 +455,8 @@ pub async fn build_profile(
     let reply_ratio = sample.reply_ratio;
 
     let avg_engagement = behavioral::compute_avg_engagement_refs(&all_posts_flat);
-    let pile_on = pile_on_dids.contains(target_did);
+    // `pile_on` is supplied precomputed by the caller (the pile-on DID set is
+    // owned upstream, matching the staged-scan blob design).
 
     // Step 5: Compute context score via NLI
     //
@@ -392,7 +521,7 @@ pub async fn build_profile(
             if user_posts.is_empty() {
                 None
             } else {
-                match emb.embed_batch(&all_post_texts).await {
+                match emb.embed_batch(all_post_texts).await {
                     Ok(target_embeddings) => {
                         let target_with_emb: Vec<(String, Vec<f64>)> = all_post_texts
                             .iter()
