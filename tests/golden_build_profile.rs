@@ -877,7 +877,7 @@ async fn golden_d_nli_two_pass_gate() {
     );
     let ctx = score.context_score.unwrap();
     assert!(
-        ctx >= 0.0 && ctx <= 1.0,
+        (0.0..=1.0).contains(&ctx),
         "golden(d) context_score must be in [0,1], got {ctx}"
     );
 
