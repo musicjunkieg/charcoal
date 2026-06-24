@@ -39,7 +39,8 @@ use crate::toxicity::traits::ToxicityScorer;
 /// Processes pre-fetched amplification events (from Constellation backlinks),
 /// fetches amplifier followers, and scores them. Returns
 /// `(events_processed, accounts_scored, degraded)` — `degraded` is true when the
-/// scan was cost-capped and left resumable.
+/// scan is incomplete: either the cost ceiling was hit, or one or more accounts
+/// were skipped due to fetch/score errors. Re-run to resume.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
@@ -335,7 +336,10 @@ pub async fn run(
                     let mut added = 0usize;
                     for f in follower_list
                         .iter()
-                        .filter(|f| f.handle != protected_handle)
+                        // Exclude the protected user by both handle and DID —
+                        // handles can change, so the DID is the stable identity
+                        // check (mirrors the amplifier-path exclusion above).
+                        .filter(|f| f.handle != protected_handle && f.did != user_did)
                     {
                         if !db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
                             continue;

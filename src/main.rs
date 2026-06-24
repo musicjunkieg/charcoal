@@ -393,7 +393,8 @@ async fn main() -> Result<()> {
             if degraded {
                 println!(
                     "{}",
-                    "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                    "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume"
+                        .yellow()
                 );
             }
         }
@@ -456,7 +457,7 @@ async fn main() -> Result<()> {
                     if degraded {
                         println!(
                             "{}",
-                            "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                            "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume".yellow()
                         );
                     }
                 }
@@ -487,7 +488,7 @@ async fn main() -> Result<()> {
                     if degraded {
                         println!(
                             "{}",
-                            "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                            "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume".yellow()
                         );
                     }
                 }
@@ -525,8 +526,8 @@ async fn main() -> Result<()> {
                         println!("  Topic: discovered {discovered}, scored {topic_scored}");
                         println!(
                             "{}",
-                            "⚠️  topic sweep cost-capped and incomplete — skipping graph leg; \
-                             re-run to resume"
+                            "⚠️  topic sweep incomplete (cost-capped or accounts skipped) — \
+                             skipping graph leg; re-run to resume"
                                 .yellow()
                         );
                     } else {
@@ -558,7 +559,7 @@ async fn main() -> Result<()> {
                         if graph_degraded {
                             println!(
                                 "{}",
-                                "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                                "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume".yellow()
                             );
                         }
                     }

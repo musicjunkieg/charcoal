@@ -569,8 +569,8 @@ async fn run_scan(
                 s.last_error = None;
                 s.progress_message = if degraded {
                     format!(
-                        "Completed (incomplete — cost-capped, re-run to resume): \
-                         {events} events, {accounts} accounts scored"
+                        "Completed (incomplete — cost-capped or accounts skipped, \
+                         re-run to resume): {events} events, {accounts} accounts scored"
                     )
                 } else {
                     format!("Completed: {events} events, {accounts} accounts scored")

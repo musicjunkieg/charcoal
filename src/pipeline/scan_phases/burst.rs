@@ -77,8 +77,14 @@ pub async fn run_burst(
             return Ok(BurstOutcome::Complete);
         }
 
-        // Classify the batch concurrently, collecting (account_did, post_uri, Result<verdict>).
-        let results = futures::stream::iter(pending)
+        // Classify the batch concurrently. Drive the stream with a manual
+        // next() loop so we can stop accumulating verdicts the moment a
+        // CostCeilingExceeded arrives — any already-dispatched concurrent
+        // calls are drained to completion (buffer_unordered guarantees they
+        // finish before next() returns None) but their results are discarded
+        // after the cap fires, avoiding spurious billable calls in the NEXT
+        // batch while bounding over-run to the current in-flight window.
+        let mut stream = futures::stream::iter(pending)
             .map(|row| {
                 let classifier = classifier.clone();
                 async move {
@@ -93,17 +99,18 @@ pub async fn run_burst(
                     (row.account_did, row.post_uri, result)
                 }
             })
-            .buffer_unordered(burst_concurrency)
-            .collect::<Vec<_>>()
-            .await;
+            .buffer_unordered(burst_concurrency);
 
-        // Partition results: collect successful VerdictRows; detect cost-cap or
-        // other errors.
-        let mut verdicts: Vec<VerdictRow> = Vec::with_capacity(results.len());
+        let mut verdicts: Vec<VerdictRow> = Vec::new();
         let mut cost_capped = false;
         let mut other_error: Option<anyhow::Error> = None;
 
-        for (account_did, post_uri, outcome) in results {
+        while let Some((account_did, post_uri, outcome)) = stream.next().await {
+            if cost_capped {
+                // Cap already fired — drain remaining in-flight calls without
+                // accumulating verdicts so the next batch never starts.
+                continue;
+            }
             match outcome {
                 Ok(verdict) => {
                     verdicts.push(VerdictRow {
@@ -117,9 +124,8 @@ pub async fn run_burst(
                 }
                 Err(err) => {
                     if err.downcast_ref::<CostCeilingExceeded>().is_some() {
-                        // Cost ceiling fired. Mark cap and stop accumulating —
-                        // we may receive more cap errors from the remaining
-                        // concurrent calls; they are all the same signal.
+                        // Cost ceiling fired. Stop accumulating new verdicts;
+                        // drain the rest of the in-flight batch harmlessly.
                         cost_capped = true;
                     } else if other_error.is_none() {
                         // Capture the first non-ceiling error; remaining

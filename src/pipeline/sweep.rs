@@ -41,7 +41,9 @@ use crate::toxicity::traits::ToxicityScorer;
 ///
 /// Scans followers-of-followers of the protected user, filtered by topic
 /// overlap. Returns `(second_degree_pool_size, accounts_scored, degraded)` —
-/// `degraded` is true when the scan was cost-capped and left resumable.
+/// `degraded` is true when the scan is incomplete: either the cost ceiling was
+/// hit, or one or more accounts were skipped due to fetch/score errors. Re-run
+/// to resume.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,

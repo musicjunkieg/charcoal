@@ -290,7 +290,7 @@ async fn run_gather(
             let did = candidates[i].account_did.clone();
             async move { (did, gather_one(db, user_did, &candidates[i], deps).await) }
         })
-        .buffer_unordered(deps.gather_concurrency.max(1))
+        .buffer_unordered(deps.gather_concurrency.clamp(1, 64))
         .collect()
         .await;
 
