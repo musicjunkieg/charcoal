@@ -253,9 +253,10 @@ async fn run_scan(
     // produced this scan's verdicts.
     crate::observability::classifier_metrics::record_backend_selected(classifier.name());
 
-    let scorer: Box<dyn ToxicityScorer> = Box::new(
-        crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, classifier),
-    );
+    // Concrete scorer (not boxed as `dyn`): the phased scan pipeline (#208)
+    // needs the `TwoStageToxicityScorer`'s inherent `classifier()` accessor and
+    // its `CleanPassScorer` impl, both of which a `dyn ToxicityScorer` erases.
+    let scorer = crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, classifier);
 
     // Phase 2: load embedding model (optional — falls back to TF-IDF)
     //
@@ -536,7 +537,7 @@ async fn run_scan(
     let weights = ThreatWeights::default();
     let result = crate::pipeline::amplification::run(
         &client,
-        scorer.as_ref(),
+        Some(&scorer),
         &db,
         user_did,
         &fingerprint,
@@ -562,12 +563,18 @@ async fn run_scan(
     mgr.finish_scan(user_did);
 
     match result {
-        Ok((events, accounts)) => {
-            info!(events, accounts, "Background scan completed");
+        Ok((events, accounts, degraded)) => {
+            info!(events, accounts, degraded, "Background scan completed");
             if let Some(s) = mgr.get_status_mut(user_did) {
                 s.last_error = None;
-                s.progress_message =
-                    format!("Completed: {events} events, {accounts} accounts scored");
+                s.progress_message = if degraded {
+                    format!(
+                        "Completed (incomplete — cost-capped or accounts skipped, \
+                         re-run to resume): {events} events, {accounts} accounts scored"
+                    )
+                } else {
+                    format!("Completed: {events} events, {accounts} accounts scored")
+                };
             }
         }
         Err(e) => {

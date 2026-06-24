@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use super::client::PublicAtpClient;
 
 /// A simplified post — just the fields Charcoal needs for analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Post {
     pub uri: String,
     pub text: String,
@@ -26,7 +26,7 @@ pub struct Post {
 }
 
 /// A reply post with its parent URI for context pair formation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReplyPost {
     pub post: Post,
     /// AT URI of the post being replied to (for fetching parent text)
@@ -40,7 +40,7 @@ pub struct ReplyPost {
 /// - Topic fingerprinting: originals (chosen topics, not inherited from arguments)
 /// - Toxicity scoring: all posts, with replies weighted 70%
 /// - Context pairs: replies with parent URIs for NLI/Zentropi pair scoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostSample {
     /// Original posts (not replies, not quotes)
     pub originals: Vec<Post>,

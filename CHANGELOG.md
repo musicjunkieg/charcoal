@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Classification burst decouple — scans now run **collect → burst → score**: Phase A gathers posts and runs the ONNX clean-pass (no classifier), Phase B drains a DB-staged queue through the classifier in **one contiguous burst window** (making the `ScanCostMeter` measure real burst cost, not wall-clock), Phase C scores from stored verdicts. Backed by schema v9 (`classification_queue` + `scan_account_input`) and a `scan_phase` marker for crash-/402-resumability. The adaptive two-pass NLI gate (`raw_score >= 8.0`) moves into Phase C; behavior is locked by a golden test. Env: `CHARCOAL_BURST_CONCURRENCY` (16), `CHARCOAL_BURST_BATCH` (500) (#208)
+- Per-scan RunPod cost backstop (`ScanCostMeter`) enforced at the per-call boundary — `elapsed × rate` metering hard-stops a runaway scan before disaster spend; on by default ($5 ceiling), only `CHARCOAL_SCAN_COST_CEILING_CENTS=0` disables (#206)
+- Phase 6.7 — Staging gate (grimalkina re-scan) (#195)
 - Phase 6.4 — A/B harness + shadow-agreement gate (#192)
 - Phase 6.3 — Rust trait + RunPodCopeBClient + ZentropiClient refactor (#191)
 - Phase 6.1 — A/B shadow-agreement sample + smoke set harvested for CoPE-B (#189)
@@ -43,6 +46,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Production GPU capacity risk: US-GA-2 serverless is H100-only and very low capacity (#205)
+- Merge PR #57 to staging + bump RunPod endpoint workersMax 0->3 (#204)
+- Lower classify-gate AGREEMENT_THRESHOLD 0.90->0.85 (accept ~89% model-agreement ceiling) (#203)
+- Set RunPod+Zentropi env vars on Railway staging before #54 merge (#202)
+- Phase 6 cold-start opts: safetensors prefetch + persist compile cache + init timeout (#201)
 - Triage CodeRabbit review on PR #54 (Phase 6 self-host) (#199)
 - Phase 6.0 — audit_log generalization preflight (#188)
 - Pull Zentropi call count from last full scan of grimalkina.bsky.social (#182)
@@ -56,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Multi-user schema redesign (per-user vs shared data) (#49)
 
 ### Fixed
+- Phase C finalize missing raw>=8.0 follower NLI gate (spec gap from Task 5.1, blocks 6.3 behavior-preservation) (#211)
 - Fix chainlink-safe-fetch MCP: python -> python3 in .mcp.json (#197)
 - Fix context score double-application in concern troll scoring (#163)
 - Fix invalid model ID — drop explicit model param from OpenAI Moderation requests (#153)

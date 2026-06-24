@@ -17,6 +17,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
 };
 use super::traits::Database;
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
     conn: Mutex<Connection>,
@@ -287,6 +288,79 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::get_all_scored_dids(&conn, user_did)
     }
+
+    // --- Classification staging (#208) ---
+
+    async fn enqueue_classifications(&self, user_did: &str, rows: &[QueueRow]) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::enqueue_classifications(&conn, user_did, rows)
+    }
+
+    async fn stash_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        payload_json: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::stash_account_input(&conn, user_did, account_did, payload_json)
+    }
+
+    async fn fetch_pending_classifications(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<QueueRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::fetch_pending_classifications(&conn, user_did, limit)
+    }
+
+    async fn record_classification_verdicts(
+        &self,
+        user_did: &str,
+        verdicts: &[VerdictRow],
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::record_classification_verdicts(&conn, user_did, verdicts)
+    }
+
+    async fn list_scan_accounts(&self, user_did: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_scan_accounts(&conn, user_did)
+    }
+
+    async fn fetch_account_verdicts(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Vec<QueueRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::fetch_account_verdicts(&conn, user_did, account_did)
+    }
+
+    async fn fetch_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::fetch_account_input(&conn, user_did, account_did)
+    }
+
+    async fn count_pending_classifications(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_pending_classifications(&conn, user_did)
+    }
+
+    async fn clear_scan_staging(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_scan_staging(&conn, user_did)
+    }
+
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_account_staging(&conn, user_did, account_did)
+    }
 }
 
 #[cfg(test)]
@@ -394,7 +468,10 @@ mod tests {
     async fn test_trait_table_count() {
         let db = test_db().await;
         let count = db.table_count().await.unwrap();
-        assert_eq!(count, 8);
+        // schema_version, topic_fingerprint, account_scores, amplification_events,
+        // scan_state, users, user_labels, inferred_pairs,
+        // classification_queue, scan_account_input = 10 tables (v9)
+        assert_eq!(count, 10);
     }
 
     #[tokio::test]

@@ -44,11 +44,15 @@ pub fn record_backend_selected(backend: &str) {
 }
 
 pub fn estimate_cost_cents(backend: &str, elapsed_ms: u32) -> u32 {
-    // Per spec: RunPod A100 80GB = $2.72/hr ~= 0.0756 cents/sec ~= 7.56e-5 cents/ms.
-    // Zentropi: hosted, billed per-call — return 0 here; per-call billing tracking
-    // happens at a different layer.
+    // RunPod: busy-time informational estimate at the backstop's default rate
+    // (cost_meter::DEFAULT_RATE_CENTS_PER_HOUR). NOTE: this is busy-latency, not
+    // worker-uptime — the real guard lives in ScanCostMeter. Non-runpod = 0.
     match backend {
-        "runpod-cope-b" => ((elapsed_ms as f64) * 7.56e-5).round() as u32,
+        "runpod-cope-b" => {
+            let per_ms =
+                crate::toxicity::cost_meter::DEFAULT_RATE_CENTS_PER_HOUR as f64 / 3_600_000.0;
+            (elapsed_ms as f64 * per_ms).round() as u32
+        }
         _ => 0,
     }
 }

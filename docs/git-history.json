@@ -1,5 +1,101 @@
 [
   {
+    "hash": "25191d23e063a1685fb66b641bd2cb482e8e6722",
+    "short_hash": "25191d2",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:44:24-07:00",
+    "message": "docs(decouple): CHANGELOG entry for classification burst decouple (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "62c9d8dcd184857afd052514e9fa91fb172d64be",
+    "short_hash": "62c9d8d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:33:56-07:00",
+    "message": "feat(decouple): rewire amplification through run_phased_scan (#208)\n\namplification::run now collects a single Vec<CandidateInput> (amplifiers +\nfollowers, deduped by DID with amplifier precedence) and drives one combined\nrun_phased_scan instead of the old amplifier build_profile loop + per-follower\ntwo-pass build_profile loop. One burst window, one scan_phase marker, one clean\nresume. Behavior-preserving: the event-recording loop (ONNX score_with_context +\nNLI score_pair + insert_amplification_event) is untouched.\n\n- Amplifier candidates carry direct_pairs=Some(deduped event pairs), pile-on flag,\n  and graph_distance; followers carry direct_pairs=None. The raw>=8.0 follower NLI\n  gate now lives in finalize_account (#211), selected per candidate by direct_pairs.\n- Deps thread nli_scorer / protected_posts_with_embeddings / data_dir all through\n  (Some = the params); fetcher = AtpPostFetcher, classifier via scorer.classifier().\n- scorer param: &dyn ToxicityScorer -> Option<&TwoStageToxicityScorer> (concrete for\n  .classifier()/CleanPassScorer). None preserves the old NoopScorer-errors-on-every-\n  call !analyze path (zero accounts scored). main.rs Scan arm + web scan_job updated.\n- catch_unwind dropped in favor of the phased scan_phase crash/cost-cap resume model.\n- run_gather: map over owned indices + named gather_one async fn to avoid a\n  higher-ranked FnOnce inference failure when the scan future crosses the web\n  background-scan tokio::spawn boundary (sweep unaffected, golden + suite green).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "7f9903aac3bc85a528be8a52a28f1158a4e1c739",
+    "short_hash": "7f9903a",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:00:21-07:00",
+    "message": "feat(decouple): rewire sweep through run_phased_scan (#208)\n\nBoth sweep::run and sweep::run_topic_first now build a Vec<CandidateInput>\nand drive the three-phase run_phased_scan orchestrator instead of the old\nbuffer_unordered(build_profile) loops. Behavior-preserving: the scoring cores\n(stage1_outcome / score_from_sample) are unchanged, golden test stays green.\n\n- TwoStageToxicityScorer::classifier() accessor clones the inner Arc so the\n  phased pipeline can pull the Stage-2 classifier out alongside the ONNX\n  scorer + clean-pass (all three live in the one scorer).\n- create_scorer returns the concrete TwoStageToxicityScorer; sweep takes it by\n  &concrete and coerces into the two &dyn views + the classifier handle.\n- Candidate filters preserved exactly (run: is_score_stale 7d + early return;\n  run_topic_first: get_all_scored_dids dedup). NLI/direct_pairs/graph_distance\n  all None, matching the old build_profile call.\n- catch_unwind dropped in favor of the phased pipeline scan_phase resume model.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
+    "hash": "2a99fb794091d2af6d955d1d96300834e8ffb3ba",
+    "short_hash": "2a99fb7",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:34:37-07:00",
+    "message": "feat(decouple): Phase C finalize_account — score_from_sample + NLI gate + re-gather on version mismatch (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 13
+  },
+  {
+    "hash": "6acd158f20ba3da419c4a180de2e90bff7405ce8",
+    "short_hash": "6acd158",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:24:31-07:00",
+    "message": "test(decouple): tighten burst cost-cap + drain assertions (#208)",
+    "files_changed": 4
+  },
+  {
+    "hash": "8d158a63576ac553bf3a583901427c2eefa0bcb7",
+    "short_hash": "8d158a6",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:20:57-07:00",
+    "message": "feat(decouple): Phase B run_burst — contiguous loop, cost-capped resume (#208)",
+    "files_changed": 6
+  },
+  {
+    "hash": "7a5cf875d1a82959b1321d887cb8703d6885c4bf",
+    "short_hash": "7a5cf87",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:13:18-07:00",
+    "message": "fix(decouple): harden gather onnx_scores/rows length check to runtime ensure! (#208)",
+    "files_changed": 3
+  },
+  {
+    "hash": "006d265fa441d8ff0287369c60d90479079d89f3",
+    "short_hash": "006d265",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T14:59:53-07:00",
+    "message": "test(decouple): clippy — use RangeInclusive::contains in golden case-d (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "5451153ec06e96aeafa6b82e63c087e9e0cadc19",
+    "short_hash": "5451153",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T14:22:58-07:00",
+    "message": "feat(decouple): Postgres impl of staging methods (#208)",
+    "files_changed": 4
+  },
+  {
+    "hash": "3637617022d7840541efaae6671747a5d011336e",
+    "short_hash": "3637617",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T13:47:30-07:00",
+    "message": "feat(decouple): staging value types — QueueRow/VerdictRow/AccountInput(versioned)/ScanPhase (#208)",
+    "files_changed": 8
+  },
+  {
+    "hash": "07a67ab8ee78631f9e1b8d5db7a096ce30eeb4e2",
+    "short_hash": "07a67ab",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T13:21:26-07:00",
+    "message": "docs(decouple): advisory — validate Postgres locally before Chunk 7, not only at it (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "34bb90b4b685e6e780b87665c68006e8debb0742",
+    "short_hash": "34bb90b",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T22:47:12-07:00",
+    "message": "fix(cope-b): lower classify-gate agreement bar 0.90->0.85\n\nThe live RunPod CoPE-B gate plateaued at ~89% agreement against Zentropi.\nThe residual disagreements are judgment calls between two different\ntoxicity models (CoPE-B is sometimes the more correct one — e.g. catches\na slur Zentropi misses), so ~89% is the realistic agreement ceiling, not\na defect. Lower AGREEMENT_THRESHOLD to 0.85 so the gate reflects that\naccepted floor while still failing on a genuine regression. Boundary\ntests rewritten for the 85% bar.\n\nAccepts the gate disposition per deciduous 274; chainlink #203.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
     "hash": "ab3f4af1d3127aa609bdb42e7cd1feebe9094ca4",
     "short_hash": "ab3f4af",
     "author": "Bryan Guffey",

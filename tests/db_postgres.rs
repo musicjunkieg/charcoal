@@ -10,6 +10,7 @@
 
 use anyhow::Result;
 use charcoal::db::models::AccountScore;
+use charcoal::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 const TEST_USER: &str = "did:plc:pgtest_user000000000000";
 
@@ -225,4 +226,214 @@ async fn test_pg_median_engagement_empty() {
     // Should return 0.0 when no behavioral data exists
     let median = db.get_median_engagement(TEST_USER).await.unwrap();
     assert!(median >= 0.0);
+}
+
+// ── Classification staging tests (#208) ──────────────────────────────────────
+
+/// Delete staging rows written by the staging test so it's idempotent.
+async fn cleanup_staging_data(url: &str) -> Result<()> {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url)
+        .await
+        .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
+
+    sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
+        .bind(TEST_USER)
+        .execute(&pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("cleanup: classification_queue delete failed: {e}"))?;
+
+    sqlx_core::query::query("DELETE FROM scan_account_input WHERE user_did = $1")
+        .bind(TEST_USER)
+        .execute(&pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("cleanup: scan_account_input delete failed: {e}"))?;
+
+    Ok(())
+}
+
+fn make_pg_queue_row(account_did: &str, post_uri: &str, status: &str) -> QueueRow {
+    QueueRow {
+        account_did: account_did.to_string(),
+        post_uri: post_uri.to_string(),
+        text: format!("test post text for {post_uri}"),
+        context_text: None,
+        post_kind: "original".to_string(),
+        onnx_score: 0.05,
+        status: status.to_string(),
+        toxic_token: None,
+        confidence: None,
+        model_id: None,
+        policy_version: None,
+    }
+}
+
+#[tokio::test]
+async fn test_pg_staging_round_trip() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    // Connect first so migrations run — on a fresh DB the staging tables don't
+    // exist yet, so cleanup must come AFTER connect creates them.
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    cleanup_staging_data(&url).await.unwrap();
+    cleanup_test_data(&url).await.unwrap();
+
+    // Ensure user exists (FK constraint)
+    db.upsert_user(TEST_USER, "pgtest.bsky.social")
+        .await
+        .unwrap();
+
+    // --- enqueue → fetch_pending honors status and limit ---
+    let row_a = make_pg_queue_row("did:plc:pga", "at://did:plc:pga/post/1", "pending");
+    let row_b = make_pg_queue_row("did:plc:pgb", "at://did:plc:pgb/post/1", "pending");
+    let row_done = QueueRow {
+        status: "done".to_string(),
+        toxic_token: Some(true),
+        confidence: Some(0.9),
+        model_id: Some("test-model".to_string()),
+        policy_version: Some("v1".to_string()),
+        ..make_pg_queue_row("did:plc:pgc", "at://did:plc:pgc/post/1", "done")
+    };
+
+    db.enqueue_classifications(TEST_USER, &[row_a.clone(), row_b.clone(), row_done.clone()])
+        .await
+        .unwrap();
+
+    // fetch_pending should return only the 2 pending rows, capped by limit
+    let pending = db
+        .fetch_pending_classifications(TEST_USER, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "limit=1 must return exactly 1 pending row"
+    );
+
+    let all_pending = db
+        .fetch_pending_classifications(TEST_USER, 100)
+        .await
+        .unwrap();
+    assert_eq!(
+        all_pending.len(),
+        2,
+        "should have 2 pending rows, done row excluded"
+    );
+
+    // --- count_pending ---
+    let count = db.count_pending_classifications(TEST_USER).await.unwrap();
+    assert_eq!(count, 2, "count_pending must match pending row count");
+
+    // --- record_verdicts flips pending→done; read back via fetch_account_verdicts ---
+    let verdict = VerdictRow {
+        account_did: "did:plc:pga".to_string(),
+        post_uri: "at://did:plc:pga/post/1".to_string(),
+        toxic_token: false,
+        confidence: 0.7,
+        model_id: "cope-b-v1".to_string(),
+        policy_version: "p1".to_string(),
+    };
+    db.record_classification_verdicts(TEST_USER, &[verdict])
+        .await
+        .unwrap();
+
+    let verdicts_a = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:pga")
+        .await
+        .unwrap();
+    assert_eq!(verdicts_a.len(), 1);
+    assert_eq!(verdicts_a[0].status, "done");
+    assert_eq!(verdicts_a[0].toxic_token, Some(false));
+    assert!((verdicts_a[0].confidence.unwrap() - 0.7).abs() < 0.001);
+    assert_eq!(verdicts_a[0].model_id.as_deref(), Some("cope-b-v1"));
+    assert_eq!(verdicts_a[0].policy_version.as_deref(), Some("p1"));
+
+    // --- enqueue UPSERT: same PK → one row ---
+    db.enqueue_classifications(TEST_USER, std::slice::from_ref(&row_b))
+        .await
+        .unwrap();
+    let rows_b = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:pgb")
+        .await
+        .unwrap();
+    assert_eq!(
+        rows_b.len(),
+        1,
+        "UPSERT: re-enqueue same PK must yield one row"
+    );
+
+    // --- done-preservation: re-enqueueing a done row must not clear its verdict ---
+    let re_enqueue_done = make_pg_queue_row("did:plc:pgc", "at://did:plc:pgc/post/1", "pending");
+    db.enqueue_classifications(TEST_USER, std::slice::from_ref(&re_enqueue_done))
+        .await
+        .unwrap();
+    let rows_c = db
+        .fetch_account_verdicts(TEST_USER, "did:plc:pgc")
+        .await
+        .unwrap();
+    assert_eq!(rows_c.len(), 1);
+    assert_eq!(
+        rows_c[0].status, "done",
+        "done-preservation: status must stay 'done' after re-enqueue"
+    );
+    assert_eq!(
+        rows_c[0].toxic_token,
+        Some(true),
+        "done-preservation: toxic_token must be preserved"
+    );
+
+    // --- stash/fetch_account_input round-trip (compare parsed JSON) ---
+    let payload = r#"{"schema_version":1,"foo":"bar","nums":[1,2,3]}"#;
+    db.stash_account_input(TEST_USER, "did:plc:pga", payload)
+        .await
+        .unwrap();
+    let fetched = db
+        .fetch_account_input(TEST_USER, "did:plc:pga")
+        .await
+        .unwrap()
+        .expect("stashed payload must be retrievable");
+    // JSONB does not preserve byte-exact strings; compare parsed values
+    let expected: serde_json::Value = serde_json::from_str(payload).unwrap();
+    let actual: serde_json::Value = serde_json::from_str(&fetched).unwrap();
+    assert_eq!(
+        actual, expected,
+        "stash/fetch round-trip must preserve JSON semantics"
+    );
+
+    // --- list_scan_accounts returns distinct DIDs ---
+    let accounts = db.list_scan_accounts(TEST_USER).await.unwrap();
+    assert!(
+        accounts.contains(&"did:plc:pga".to_string()),
+        "list_scan_accounts must include enqueued DID"
+    );
+    assert!(
+        accounts.contains(&"did:plc:pgb".to_string()),
+        "list_scan_accounts must include enqueued DID"
+    );
+    // Distinct: each DID appears exactly once regardless of row count
+    let pga_count = accounts
+        .iter()
+        .filter(|d| d.as_str() == "did:plc:pga")
+        .count();
+    assert_eq!(pga_count, 1, "list_scan_accounts must return distinct DIDs");
+
+    // --- clear_scan_staging empties both tables ---
+    db.clear_scan_staging(TEST_USER).await.unwrap();
+    let after_clear = db.count_pending_classifications(TEST_USER).await.unwrap();
+    assert_eq!(
+        after_clear, 0,
+        "clear_scan_staging must empty classification_queue"
+    );
+    let input_after = db
+        .fetch_account_input(TEST_USER, "did:plc:pga")
+        .await
+        .unwrap();
+    assert!(
+        input_after.is_none(),
+        "clear_scan_staging must empty scan_account_input"
+    );
 }

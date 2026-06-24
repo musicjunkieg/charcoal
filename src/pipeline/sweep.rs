@@ -8,33 +8,46 @@
 // followers, deduplicate, filter by topic overlap, and score survivors
 // for toxicity. This is expensive, so we cap at each level and skip
 // accounts already scored recently.
+//
+// Both entry points (`run` and `run_topic_first`) build a candidate set and
+// hand it to the three-phase `run_phased_scan` orchestrator (#208), which
+// drives the same `stage1_outcome` / `score_from_sample` cores the old
+// `build_profile` call did — only now staged through Gather → Burst →
+// Finalize. The candidate filters (staleness for `run`, scored-DID dedup for
+// `run_topic_first`) are preserved exactly, so the produced `AccountScore`s
+// are identical to the pre-rewire behaviour.
 
 use anyhow::Result;
-use futures::stream::{self, StreamExt};
-use futures::FutureExt;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashSet;
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::followers;
 use crate::db::Database;
-use crate::scoring::profile;
+use crate::pipeline::scan_phases::burst;
+// `TwoStageToxicityScorer` impls both `ToxicityScorer` and `CleanPassScorer`
+// (the gather seam). The phased pipeline needs both views plus the classifier,
+// so sweep takes the concrete scorer and coerces it into the two `&dyn` views.
+use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
+use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
+use crate::toxicity::ensemble::TwoStageToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
 
 /// Run the background sweep pipeline.
 ///
 /// Scans followers-of-followers of the protected user, filtered by topic
-/// overlap. Returns the number of second-degree accounts found and scored.
+/// overlap. Returns `(second_degree_pool_size, accounts_scored, degraded)` —
+/// `degraded` is true when the scan is incomplete: either the cost ceiling was
+/// hit, or one or more accounts were skipped due to fetch/score errors. Re-run
+/// to resume.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
-    scorer: &dyn ToxicityScorer,
+    scorer: &TwoStageToxicityScorer,
     db: &Arc<dyn Database>,
     user_did: &str,
     protected_handle: &str,
@@ -48,7 +61,7 @@ pub async fn run(
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
     data_dir: Option<&std::path::Path>,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, bool)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
     let first_degree =
@@ -71,13 +84,6 @@ pub async fn run(
 
     let mut second_degree_pool = Vec::new();
 
-    let pb = ProgressBar::new(first_degree.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("  Network [{bar:30}] {pos}/{len} ({eta})")
-            .unwrap(),
-    );
-
     for follower in &first_degree {
         match followers::fetch_followers(client, &follower.handle, max_second_degree_per).await {
             Ok(their_followers) => {
@@ -95,16 +101,15 @@ pub async fn run(
                 );
             }
         }
-        pb.inc(1);
     }
-    pb.finish_and_clear();
 
     println!(
         "  Found {} unique second-degree accounts",
         second_degree_pool.len(),
     );
 
-    // Step 3: Filter to accounts with stale or missing scores
+    // Step 3: Filter to accounts with stale or missing scores (candidate set).
+    // Same staleness gate as before the phased-pipeline rewire.
     let mut stale = Vec::new();
     for f in &second_degree_pool {
         if db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
@@ -114,7 +119,7 @@ pub async fn run(
 
     if stale.is_empty() {
         println!("  All second-degree accounts have recent scores.");
-        return Ok((second_degree_pool.len(), 0));
+        return Ok((second_degree_pool.len(), 0, false));
     }
 
     println!(
@@ -123,70 +128,51 @@ pub async fn run(
         concurrency,
     );
 
-    // Step 4: Score in parallel (same pattern as amplification pipeline)
-    let pb = ProgressBar::new(stale.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("  Scoring [{bar:30}] {pos}/{len} ({eta})")
-            .unwrap(),
-    );
+    // Build the candidate set. Sweep accounts carry no NLI/amplifier pairs and
+    // no graph distance — exactly the `None` arguments the old `build_profile`
+    // call passed for direct_pairs / nli / graph_distance.
+    let candidates: Vec<CandidateInput> = stale
+        .iter()
+        .map(|f| CandidateInput {
+            account_did: f.did.clone(),
+            account_handle: f.handle.clone(),
+            is_pile_on: pile_on_dids.contains(&f.did),
+            direct_pairs: None,
+            graph_distance: None,
+        })
+        .collect();
 
-    let mut stream = stream::iter(stale.into_iter().map(|follower| {
-        let handle_for_panic = follower.handle.clone();
-        async move {
-            AssertUnwindSafe(profile::build_profile(
-                client,
-                scorer,
-                &follower.handle,
-                &follower.did,
-                protected_fingerprint,
-                weights,
-                embedder,
-                protected_embedding,
-                median_engagement,
-                pile_on_dids,
-                None, // NLI scorer not used for sweep scoring
-                None, // No protected post embeddings for sweep
-                None, // No direct pairs for sweep
-                data_dir,
-                None, // No graph distance for sweep
-            ))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic)))
-        }
-    }))
-    .buffer_unordered(concurrency);
+    let summary = run_sweep_phased(
+        client,
+        scorer,
+        db,
+        user_did,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        median_engagement,
+        data_dir,
+        concurrency,
+        &candidates,
+    )
+    .await?;
 
-    // Step 5: Write results to DB incrementally — each score is persisted
-    // as it arrives so a crash doesn't lose everything scored so far
-    let mut accounts_scored = 0;
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(score) => {
-                db.upsert_account_score(user_did, &score).await?;
-                accounts_scored += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to score account, skipping");
-            }
-        }
-        pb.inc(1);
-    }
-    pb.finish_and_clear();
-
-    Ok((second_degree_pool.len(), accounts_scored))
+    let (scored, degraded) = summary;
+    Ok((second_degree_pool.len(), scored, degraded))
 }
 
 /// Run topic-first discovery sweep.
 ///
 /// Instead of walking the follower graph, searches for posts matching the
 /// protected user's topic fingerprint via searchPosts. Deduplicates against
-/// already-scored accounts and scores new discoveries.
+/// already-scored accounts and scores new discoveries. Returns
+/// `(discovered, accounts_scored, degraded)` — `degraded` is true when the scan
+/// was cost-capped and left resumable.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_topic_first(
     client: &PublicAtpClient,
-    scorer: &dyn ToxicityScorer,
+    scorer: &TwoStageToxicityScorer,
     db: &Arc<dyn Database>,
     user_did: &str,
     protected_fingerprint: &TopicFingerprint,
@@ -199,8 +185,8 @@ pub async fn run_topic_first(
     data_dir: Option<&std::path::Path>,
     keywords_per_cycle: usize,
     results_per_keyword: usize,
-) -> Result<(usize, usize)> {
-    // Step 1: Get already-scored DIDs for deduplication
+) -> Result<(usize, usize, bool)> {
+    // Step 1: Get already-scored DIDs for deduplication (candidate filter).
     let scored_dids: HashSet<String> = db
         .get_all_scored_dids(user_did)
         .await?
@@ -225,7 +211,7 @@ pub async fn run_topic_first(
     println!("  Found {} new accounts to score", new_dids.len());
 
     if new_dids.is_empty() {
-        return Ok((0, 0));
+        return Ok((0, 0, false));
     }
 
     // Step 3: Resolve DIDs to handles via getProfiles (batch, 25 per call)
@@ -241,60 +227,96 @@ pub async fn run_topic_first(
     );
 
     if did_handle_pairs.is_empty() {
-        return Ok((new_dids.len(), 0));
+        return Ok((new_dids.len(), 0, false));
     }
-
-    // Step 4: Score accounts in parallel (same pattern as existing sweep)
-    let pb = ProgressBar::new(did_handle_pairs.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("  Scoring [{bar:30}] {pos}/{len} ({eta})")
-            .unwrap(),
-    );
 
     let discovered = did_handle_pairs.len();
 
-    let mut stream = stream::iter(did_handle_pairs.into_iter().map(|(did, handle)| {
-        let handle_for_panic = handle.clone();
-        async move {
-            AssertUnwindSafe(profile::build_profile(
-                client,
-                scorer,
-                &handle,
-                &did,
-                protected_fingerprint,
-                weights,
-                embedder,
-                protected_embedding,
-                median_engagement,
-                pile_on_dids,
-                None, // No NLI for discovery sweep
-                None, // No protected post embeddings
-                None, // No direct pairs
-                data_dir,
-                None, // No graph distance for discovery
-            ))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic)))
-        }
-    }))
-    .buffer_unordered(concurrency);
+    // Build the candidate set. As with `run`, discovery sweep accounts have no
+    // NLI pairs and no graph distance — match the old `build_profile` `None`s.
+    let candidates: Vec<CandidateInput> = did_handle_pairs
+        .into_iter()
+        .map(|(did, handle)| CandidateInput {
+            is_pile_on: pile_on_dids.contains(&did),
+            account_did: did,
+            account_handle: handle,
+            direct_pairs: None,
+            graph_distance: None,
+        })
+        .collect();
 
-    let mut accounts_scored = 0;
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(score) => {
-                db.upsert_account_score(user_did, &score).await?;
-                accounts_scored += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to score discovered account, skipping");
-            }
-        }
-        pb.inc(1);
-    }
-    pb.finish_and_clear();
+    let summary = run_sweep_phased(
+        client,
+        scorer,
+        db,
+        user_did,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        median_engagement,
+        data_dir,
+        concurrency,
+        &candidates,
+    )
+    .await?;
 
-    Ok((discovered, accounts_scored))
+    let (scored, degraded) = summary;
+    Ok((discovered, scored, degraded))
+}
+
+/// Shared driver: build `PhasedScanDeps` from the sweep's shared refs and run
+/// the three-phase scan over `candidates`. Returns `(accounts_scored, degraded)`
+/// — the number of accounts that reached a finalized `AccountScore`, and whether
+/// the scan was cost-capped and left resumable.
+///
+/// Incremental persistence is preserved by construction: terminal accounts
+/// (insufficient data / clean early-exit) are written inside Phase A gather,
+/// and survivors are written inside Phase C finalize — the same incremental DB
+/// writes as the old per-item stream, just staged through the work queue.
+///
+/// Resilience note: the old sweep wrapped each `build_profile` in
+/// `catch_unwind` to isolate a per-account panic. The phased pipeline's model
+/// is different (and stronger): a crash or cost-cap mid-run is recoverable by
+/// re-running, which resumes from the DB-staged `scan_phase` marker rather than
+/// re-scoring everything. A gather panic now aborts the process, but a re-run
+/// picks up where it left off — the intended #208 architecture.
+#[allow(clippy::too_many_arguments)]
+async fn run_sweep_phased(
+    client: &PublicAtpClient,
+    scorer: &TwoStageToxicityScorer,
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
+    median_engagement: f64,
+    data_dir: Option<&std::path::Path>,
+    concurrency: usize,
+    candidates: &[CandidateInput],
+) -> Result<(usize, bool)> {
+    let fetcher = AtpPostFetcher { client };
+    let classifier = scorer.classifier();
+
+    let deps = PhasedScanDeps {
+        fetcher: &fetcher,
+        scorer: scorer as &dyn ToxicityScorer,
+        clean_pass: scorer as &dyn CleanPassScorer,
+        classifier: &classifier,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        nli_scorer: None, // sweep does not run NLI context scoring
+        protected_posts_with_embeddings: None,
+        data_dir,
+        median_engagement,
+        gather_concurrency: concurrency,
+        burst_concurrency: burst::burst_concurrency(),
+        burst_batch: burst::burst_batch(),
+    };
+
+    let summary = run_phased_scan(db, user_did, candidates, &deps).await?;
+    Ok((summary.accounts_scored, summary.degraded))
 }

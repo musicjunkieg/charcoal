@@ -17,7 +17,10 @@ use serde::Deserialize;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
+use std::sync::Arc;
+
 use super::classifier::{ClassifierVerdict, ToxicityClassifier};
+use super::cost_meter::ScanCostMeter;
 
 /// Calibration note (Chunk 5 / Step 5): verify distribution parity vs the
 /// reference (Zentropi) backend over ab_sample.jsonl; retune only if materially
@@ -38,6 +41,9 @@ pub struct RunPodCopeBClient {
     steady_timeout: Duration,
     warmup_timeout: Duration,
     max_retries: u32,
+    /// Per-scan cost backstop. Default (from `new`) is disabled; `build_from_env`
+    /// attaches an env-configured meter per scan.
+    meter: Arc<ScanCostMeter>,
 }
 
 /// RunPod job envelope returned by `/runsync` and `/status/{id}`. `/runsync`
@@ -155,7 +161,18 @@ impl RunPodCopeBClient {
             steady_timeout: Duration::from_millis(steady_ms),
             warmup_timeout: Duration::from_millis(warmup_ms),
             max_retries,
+            meter: Arc::new(ScanCostMeter::new(
+                0,
+                super::cost_meter::DEFAULT_RATE_CENTS_PER_HOUR,
+            )),
         })
+    }
+
+    /// Attach a per-scan cost meter. Builder so `new`'s signature (and its
+    /// existing callers/tests) stay unchanged.
+    pub fn with_meter(mut self, meter: Arc<ScanCostMeter>) -> Self {
+        self.meter = meter;
+        self
     }
 
     pub fn build_request_body(content: &str) -> String {
@@ -292,6 +309,14 @@ impl RunPodCopeBClient {
         content: &str,
         timeout: Duration,
     ) -> Result<(ClassifierVerdict, u32)> {
+        // Cost backstop: arm-then-check before issuing ANY RunPod request. This
+        // is the single chokepoint every request path flows through (classify
+        // and warm_up), so the meter cannot be bypassed. Over the ceiling this
+        // returns a non-retryable error — it sits OUTSIDE the backon retry loop
+        // below, so it is inherently non-retryable — that rides the same skip
+        // path the live HTTP 402 already exercised.
+        self.meter.arm_and_check()?;
+
         let body = Self::build_request_body(content);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));
         let start = Instant::now();
@@ -349,6 +374,8 @@ impl RunPodCopeBClient {
 #[async_trait]
 impl ToxicityClassifier for RunPodCopeBClient {
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict> {
+        // Cost backstop is enforced inside classify_with_timeout (the single
+        // RunPod request chokepoint), so both classify and warm_up are gated.
         let (verdict, retries) = self
             .classify_with_timeout(content, self.steady_timeout)
             .await?;

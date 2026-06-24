@@ -286,6 +286,50 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // Migration v9: decoupled pipeline staging tables.
+    //
+    // classification_queue — one row per post awaiting or done with GPU
+    //   classification. The composite PK (user_did, account_did, post_uri)
+    //   makes enqueue an UPSERT so Phase A is fully idempotent.
+    //   idx_clsq_pending speeds the burst's pending-row scan.
+    //
+    // scan_account_input — one row per account containing the serialised
+    //   AccountInput blob produced by Phase A and consumed by Phase B.
+    //   The phase marker (gather/burst/finalize/done) continues to live in
+    //   scan_state as a key='scan_phase' row — this migration does NOT alter
+    //   scan_state.
+    run_migration(conn, 9, |c| {
+        c.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS classification_queue (
+                user_did        TEXT    NOT NULL,
+                account_did     TEXT    NOT NULL,
+                post_uri        TEXT    NOT NULL,
+                text            TEXT    NOT NULL,  -- 'text' is intentionally a column name here, not the TEXT type keyword
+                context_text    TEXT,
+                post_kind       TEXT    NOT NULL,
+                onnx_score      REAL    NOT NULL,
+                status          TEXT    NOT NULL CHECK (status IN ('pending', 'done')),
+                toxic_token     INTEGER,
+                confidence      REAL,
+                model_id        TEXT,
+                policy_version  TEXT,
+                PRIMARY KEY (user_did, account_did, post_uri)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_clsq_pending
+                ON classification_queue (user_did, status);
+
+            CREATE TABLE IF NOT EXISTS scan_account_input (
+                user_did        TEXT    NOT NULL,
+                account_did     TEXT    NOT NULL,
+                payload_json    TEXT    NOT NULL,
+                PRIMARY KEY (user_did, account_did)
+            );
+            ",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -341,8 +385,8 @@ mod tests {
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
-        // inferred_pairs = 8 tables
-        assert_eq!(count, 8i64);
+        // inferred_pairs, classification_queue, scan_account_input = 10 tables
+        assert_eq!(count, 10i64);
     }
 
     #[test]
@@ -406,7 +450,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has both v1 and v2
+        // Verify schema_version has all versions through v9
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -414,7 +458,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     #[test]
@@ -515,10 +559,10 @@ mod tests {
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
-        // inferred_pairs = 8 tables
-        assert_eq!(count, 8i64);
+        // inferred_pairs, classification_queue, scan_account_input = 10 tables
+        assert_eq!(count, 10i64);
 
-        // Verify schema_version includes v4
+        // Verify schema_version includes v4 through v9
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -526,6 +570,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 }

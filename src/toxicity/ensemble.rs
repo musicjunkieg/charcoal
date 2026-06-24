@@ -90,6 +90,14 @@ impl TwoStageToxicityScorer {
         self.classifier.name()
     }
 
+    /// Clone the inner Stage-2 classifier handle. The phased scan pipeline
+    /// (#208) needs the classifier separately from the ONNX scorer + clean-pass,
+    /// all three of which live inside this one scorer. Cloning the `Arc` is
+    /// cheap (a refcount bump) and shares the same underlying client.
+    pub fn classifier(&self) -> Arc<dyn ToxicityClassifier> {
+        Arc::clone(&self.classifier)
+    }
+
     /// Classify a single post. `context` is the parent post text for replies; pass
     /// `None` for originals. The pair-aware classification only runs when Zentropi
     /// is available — the labeler policy is conversation-scoped.
@@ -158,6 +166,20 @@ impl TwoStageToxicityScorer {
             classifier_model_id: Some(verdict.model_id),
             classifier_policy_version: Some(verdict.policy_version),
         })
+    }
+
+    /// Run only the ONNX primary scorer over a batch of texts. Returns each
+    /// text's raw `toxicity` score as `Vec<f64>` in input order. The Stage-2
+    /// classifier is **never** invoked — this is the gather-phase seam that
+    /// splits posts into clean (score < `ONNX_CLEAN_THRESHOLD`) vs survivor
+    /// (≥ threshold) without incurring any RunPod/Zentropi cost.
+    ///
+    /// The returned scores are unfiltered: callers do the clean/survivor split
+    /// themselves using `ONNX_CLEAN_THRESHOLD`. This method owns only the
+    /// *data* path, not the split decision.
+    pub async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+        let results = self.primary.score_batch(texts).await?;
+        Ok(results.into_iter().map(|r| r.toxicity).collect())
     }
 
     /// Classify a batch of posts in parallel, with per-post context. Caller supplies

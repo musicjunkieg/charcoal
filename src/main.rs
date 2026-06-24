@@ -311,12 +311,15 @@ async fn main() -> Result<()> {
             // Load the protected user's fingerprint (needed for scoring)
             let protected_fingerprint = load_fingerprint(&db, &did).await?;
 
-            // Create the toxicity scorer if we'll be analyzing
-            let scorer: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = if analyze {
+            // Create the toxicity scorer only if we'll be analyzing. Without
+            // `--analyze` the old code used a NoopScorer that errored on every
+            // call, so no accounts were scored; `None` preserves that (the
+            // phased pipeline needs the concrete two-stage scorer).
+            let scorer: Option<charcoal::toxicity::ensemble::TwoStageToxicityScorer> = if analyze {
                 config.require_scorer()?;
-                create_scorer(&config)?
+                Some(create_scorer(&config)?)
             } else {
-                Box::new(charcoal::toxicity::traits::NoopScorer)
+                None
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
@@ -358,7 +361,7 @@ async fn main() -> Result<()> {
                 posts.into_iter().map(|p| (p.uri, p.text)).collect()
             };
 
-            let (event_count, scored) = charcoal::pipeline::amplification::run(
+            let (event_count, scored, degraded) = charcoal::pipeline::amplification::run(
                 &client,
                 scorer.as_ref(),
                 &db,
@@ -386,6 +389,13 @@ async fn main() -> Result<()> {
             println!("  Events detected: {event_count}");
             if analyze {
                 println!("  Accounts scored: {scored}");
+            }
+            if degraded {
+                println!(
+                    "{}",
+                    "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume"
+                        .yellow()
+                );
             }
         }
 
@@ -422,33 +432,40 @@ async fn main() -> Result<()> {
             match sweep_mode {
                 SweepMode::Topic => {
                     println!("Running topic-first discovery sweep...");
-                    let (discovered, scored) = charcoal::pipeline::sweep::run_topic_first(
-                        &client,
-                        scorer.as_ref(),
-                        &db,
-                        &did,
-                        &protected_fingerprint,
-                        &weights,
-                        concurrency as usize,
-                        embedder.as_ref(),
-                        protected_embedding.as_deref(),
-                        median_engagement,
-                        &pile_on_dids,
-                        Some(config.data_dir()),
-                        keywords as usize,
-                        results_per_keyword as usize,
-                    )
-                    .await?;
+                    let (discovered, scored, degraded) =
+                        charcoal::pipeline::sweep::run_topic_first(
+                            &client,
+                            &scorer,
+                            &db,
+                            &did,
+                            &protected_fingerprint,
+                            &weights,
+                            concurrency as usize,
+                            embedder.as_ref(),
+                            protected_embedding.as_deref(),
+                            median_engagement,
+                            &pile_on_dids,
+                            Some(config.data_dir()),
+                            keywords as usize,
+                            results_per_keyword as usize,
+                        )
+                        .await?;
 
                     println!("\n{}", "Topic sweep complete.".bold());
                     println!("  Accounts discovered: {discovered}");
                     println!("  Accounts scored: {scored}");
+                    if degraded {
+                        println!(
+                            "{}",
+                            "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume".yellow()
+                        );
+                    }
                 }
                 SweepMode::Graph => {
                     println!("Running graph-based network sweep...");
-                    let (pool_size, scored) = charcoal::pipeline::sweep::run(
+                    let (pool_size, scored, degraded) = charcoal::pipeline::sweep::run(
                         &client,
-                        scorer.as_ref(),
+                        &scorer,
                         &db,
                         &did,
                         &config.bluesky_handle,
@@ -468,52 +485,84 @@ async fn main() -> Result<()> {
                     println!("\n{}", "Graph sweep complete.".bold());
                     println!("  Second-degree pool: {pool_size}");
                     println!("  Accounts scored: {scored}");
+                    if degraded {
+                        println!(
+                            "{}",
+                            "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume".yellow()
+                        );
+                    }
                 }
                 SweepMode::Both => {
                     println!("Running topic-first discovery...");
-                    let (discovered, topic_scored) = charcoal::pipeline::sweep::run_topic_first(
-                        &client,
-                        scorer.as_ref(),
-                        &db,
-                        &did,
-                        &protected_fingerprint,
-                        &weights,
-                        concurrency as usize,
-                        embedder.as_ref(),
-                        protected_embedding.as_deref(),
-                        median_engagement,
-                        &pile_on_dids,
-                        Some(config.data_dir()),
-                        keywords as usize,
-                        results_per_keyword as usize,
-                    )
-                    .await?;
+                    let (discovered, topic_scored, topic_degraded) =
+                        charcoal::pipeline::sweep::run_topic_first(
+                            &client,
+                            &scorer,
+                            &db,
+                            &did,
+                            &protected_fingerprint,
+                            &weights,
+                            concurrency as usize,
+                            embedder.as_ref(),
+                            protected_embedding.as_deref(),
+                            median_engagement,
+                            &pile_on_dids,
+                            Some(config.data_dir()),
+                            keywords as usize,
+                            results_per_keyword as usize,
+                        )
+                        .await?;
                     println!("  Topic: discovered {discovered}, scored {topic_scored}");
 
-                    println!("Running graph-based sweep...");
-                    let (pool_size, graph_scored) = charcoal::pipeline::sweep::run(
-                        &client,
-                        scorer.as_ref(),
-                        &db,
-                        &did,
-                        &config.bluesky_handle,
-                        &protected_fingerprint,
-                        &weights,
-                        max_followers as usize,
-                        depth as usize,
-                        concurrency as usize,
-                        embedder.as_ref(),
-                        protected_embedding.as_deref(),
-                        median_engagement,
-                        &pile_on_dids,
-                        Some(config.data_dir()),
-                    )
-                    .await?;
+                    // If the topic leg cost-capped, it left the scan mid-burst
+                    // (scan_phase = "burst") with pending rows. Starting the
+                    // graph sweep now would re-enter `run_phased_scan`, which
+                    // resumes that burst and folds the graph candidates into the
+                    // topic leg's unfinished phase — a cross-leg scan_phase
+                    // conflict. Stop here; re-running resumes the topic burst
+                    // cleanly, and the graph leg runs once the topic leg drains.
+                    if topic_degraded {
+                        println!("\n{}", "Combined sweep stopped early.".bold());
+                        println!("  Topic: discovered {discovered}, scored {topic_scored}");
+                        println!(
+                            "{}",
+                            "⚠️  topic sweep incomplete (cost-capped or accounts skipped) — \
+                             skipping graph leg; re-run to resume"
+                                .yellow()
+                        );
+                    } else {
+                        println!("Running graph-based sweep...");
+                        let (pool_size, graph_scored, graph_degraded) =
+                            charcoal::pipeline::sweep::run(
+                                &client,
+                                &scorer,
+                                &db,
+                                &did,
+                                &config.bluesky_handle,
+                                &protected_fingerprint,
+                                &weights,
+                                max_followers as usize,
+                                depth as usize,
+                                concurrency as usize,
+                                embedder.as_ref(),
+                                protected_embedding.as_deref(),
+                                median_engagement,
+                                &pile_on_dids,
+                                Some(config.data_dir()),
+                            )
+                            .await?;
 
-                    println!("\n{}", "Combined sweep complete.".bold());
-                    println!("  Topic: discovered {discovered}, scored {topic_scored}");
-                    println!("  Graph: pool {pool_size}, scored {graph_scored}");
-                    println!("  Total scored: {}", topic_scored + graph_scored);
+                        println!("\n{}", "Combined sweep complete.".bold());
+                        println!("  Topic: discovered {discovered}, scored {topic_scored}");
+                        println!("  Graph: pool {pool_size}, scored {graph_scored}");
+                        println!("  Total scored: {}", topic_scored + graph_scored);
+                        if graph_degraded {
+                            println!(
+                                "{}",
+                                "⚠️  scan incomplete (cost-capped or accounts skipped) — re-run to resume".yellow()
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -552,7 +601,7 @@ async fn main() -> Result<()> {
 
             let score = charcoal::scoring::profile::build_profile(
                 &client,
-                scorer.as_ref(),
+                &scorer,
                 handle,
                 handle, // Use handle as DID placeholder — real DID comes from profile lookup
                 &protected_fingerprint,
@@ -719,7 +768,7 @@ async fn main() -> Result<()> {
 
                 match charcoal::scoring::profile::build_profile(
                     &client,
-                    scorer.as_ref(),
+                    &scorer,
                     &handle,
                     &block.subject,
                     &protected_fingerprint,
@@ -1209,7 +1258,7 @@ async fn init_database(config: &config::Config) -> Result<Arc<dyn charcoal::db::
 /// for the binary verdict that drives the threat formula's toxicity rate.
 fn create_scorer(
     config: &config::Config,
-) -> anyhow::Result<Box<dyn charcoal::toxicity::traits::ToxicityScorer>> {
+) -> anyhow::Result<charcoal::toxicity::ensemble::TwoStageToxicityScorer> {
     let primary: Box<dyn charcoal::toxicity::traits::ToxicityScorer> = match config.scorer_backend {
         config::ScorerBackend::Onnx => {
             info!("Using local ONNX toxicity scorer");
@@ -1233,8 +1282,8 @@ fn create_scorer(
         "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
     );
 
-    Ok(Box::new(
-        charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(primary, classifier),
+    Ok(charcoal::toxicity::ensemble::TwoStageToxicityScorer::new(
+        primary, classifier,
     ))
 }
 

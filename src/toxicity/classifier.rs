@@ -115,7 +115,9 @@ pub fn build_from_env() -> Result<Arc<dyn ToxicityClassifier>> {
                 .context("RUNPOD_ENDPOINT_URL must be set for CHARCOAL_CLASSIFIER=runpod")?;
             let api_key = std::env::var("RUNPOD_API_KEY")
                 .context("RUNPOD_API_KEY must be set for CHARCOAL_CLASSIFIER=runpod")?;
-            let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?;
+            let meter = std::sync::Arc::new(crate::toxicity::cost_meter::ScanCostMeter::from_env());
+            let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?
+                .with_meter(meter);
             Ok(Arc::new(client))
         }
         "zentropi" => {
@@ -148,6 +150,7 @@ pub fn build_backend_named(name: &str) -> Result<Arc<dyn ToxicityClassifier>> {
                 .context("RUNPOD_ENDPOINT_URL must be set for the runpod backend")?;
             let api_key = std::env::var("RUNPOD_API_KEY")
                 .context("RUNPOD_API_KEY must be set for the runpod backend")?;
+            // one-off compare/gate CLI: no per-scan cost backstop (disabled meter from new()).
             let client = crate::toxicity::runpod_cope_b::RunPodCopeBClient::new(endpoint, api_key)?;
             Ok(Arc::new(client))
         }

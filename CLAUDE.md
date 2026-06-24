@@ -7,6 +7,11 @@ accounts likely to engage with a protected user's content in a toxic or
 bad-faith manner, before that engagement happens. See SPEC.md for full
 requirements and README.md for usage instructions.
 
+## Response Style
+
+Keep responses concise; avoid large single outputs. Break long explanations or
+file dumps into smaller chunks to stay well under output token limits.
+
 ## Current status
 
 The MVP is functional. All 7 implementation phases are complete:
@@ -125,6 +130,10 @@ for issue tracking, session management, and coding guardrails. At the start
 of each work session, run `chainlink session start` to load previous context.
 At the end, run `chainlink session end --notes "..."` to preserve state for
 next time. Break large tasks into Chainlink issues with subissues.
+
+**TDD workflow.** Write/finalize the spec, produce a test-driven implementation
+plan, then implement. Always leave a handoff note at the end of planning
+sessions.
 
 **CRITICAL: Deciduous decision logging is mandatory — not aspirational.**
 Use Deciduous (https://crates.io/crates/deciduous) to log every meaningful
@@ -326,6 +335,11 @@ paint us into a corner that makes the future version harder to build.
 - Migrations in `migrations/postgres/` (3 files, embedded via `include_str!`)
 - `charcoal migrate --database-url <url>` transfers SQLite data to Postgres
 
+## Environment / Tooling
+
+Use `python3` (not `python`) for all Python invocations and in MCP/`.mcp.json`
+configs in this environment.
+
 ## Git Staging Rules - CRITICAL
 
 **NEVER use broad git add commands that stage everything:**
@@ -358,6 +372,10 @@ so work is never sitting only locally.
 ## Decision Graph Workflow
 
 **THIS IS MANDATORY. Log decisions IN REAL-TIME, not retroactively.**
+
+**Verify node IDs before wiring edges.** When editing decision/memory graph
+edges, verify the target node ID against the spec before wiring — confirm the
+node number explicitly.
 
 ### Available Slash Commands
 
