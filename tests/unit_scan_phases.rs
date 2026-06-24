@@ -2753,6 +2753,119 @@ mod orchestration_tests {
         );
     }
 
+    // ── Test: a gather panic is caught, panicking account is skipped, scan
+    //         completes for the other account and is marked degraded ──
+    //
+    // This is the regression guard for the `catch_unwind` fix (chainlink #177).
+    // Before the fix, a panic inside `gather_one` (e.g. atrium-api `unwrap()`
+    // on a truncated API response) would unwind `buffer_unordered` and kill the
+    // entire scan. After the fix, the panic is caught, turned into a warn+skip,
+    // the healthy account still gets gathered → burst → finalized, and the
+    // summary reports `degraded = true` to signal the scan is incomplete.
+    //
+    // Without the fix this test itself would propagate the panic and fail.
+    struct PartialPanicFetcher {
+        /// Handle for the account that should panic.
+        panicking_handle: String,
+    }
+
+    #[async_trait]
+    impl PostFetcher for PartialPanicFetcher {
+        async fn fetch_sample(&self, handle: &str, _limit: usize) -> Result<PostSample> {
+            if handle == self.panicking_handle {
+                panic!("simulated atrium-api unwrap panic: premature end of input");
+            }
+            // Return a normal survivor sample for every other handle.
+            Ok(PostSample {
+                originals: (0..6)
+                    .map(|i| {
+                        make_post(
+                            &format!("at://{handle}/o/{i}"),
+                            "quasar nebula redshift telescope galaxy cosmology pulsar photon",
+                        )
+                    })
+                    .chain(std::iter::once(make_post(
+                        &format!("at://{handle}/o/survivor"),
+                        "quasar SURVIVOR nebula",
+                    )))
+                    .collect(),
+                replies: vec![],
+                quotes: vec![],
+                reply_ratio: 0.0,
+                quote_ratio: 0.0,
+                total_posts: 7,
+            })
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_panic_is_isolated_and_healthy_account_still_scores() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let panicking_acct = "did:plc:orchpanic0000000000000";
+        let healthy_acct = "did:plc:orchhealthy000000000";
+
+        let fetcher = PartialPanicFetcher {
+            panicking_handle: "panicking.bsky.social".to_string(),
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let candidates = vec![
+            candidate(panicking_acct, "panicking.bsky.social"),
+            candidate(healthy_acct, "healthy.bsky.social"),
+        ];
+
+        // This call must RETURN Ok(…) — the panic must not propagate.
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        // The panicking account is skipped → scan is degraded.
+        assert!(
+            summary.degraded,
+            "a gather panic must mark the scan degraded"
+        );
+        // The healthy account was still gathered, burst, and finalized.
+        assert!(
+            summary.accounts_scored >= 1,
+            "the healthy account must still be scored despite the panic on its sibling"
+        );
+        // Panicking account has no score (it was skipped).
+        assert!(
+            db.get_account_by_did(ORCH_USER, panicking_acct)
+                .await
+                .unwrap()
+                .is_none(),
+            "panicking account must have no score (it was skipped)"
+        );
+        // Healthy account was scored.
+        assert!(
+            db.get_account_by_did(ORCH_USER, healthy_acct)
+                .await
+                .unwrap()
+                .is_some(),
+            "healthy account must have been scored"
+        );
+        // Scan still reaches Done (the skip is tolerated, not fatal).
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
+            Some("done".to_string()),
+            "scan must reach Done despite the gather panic"
+        );
+    }
+
     // ── Test: a per-account gather failure marks the scan degraded ──
     // The resilient-gather path skips a failing account and continues; the
     // skipped account was never enqueued, so the scan is incomplete and the
