@@ -309,7 +309,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
                 context_text    TEXT,
                 post_kind       TEXT    NOT NULL,
                 onnx_score      REAL    NOT NULL,
-                status          TEXT    NOT NULL,
+                status          TEXT    NOT NULL CHECK (status IN ('pending', 'done')),
                 toxic_token     INTEGER,
                 confidence      REAL,
                 model_id        TEXT,

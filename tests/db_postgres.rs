@@ -275,10 +275,12 @@ async fn test_pg_staging_round_trip() {
     let Some(url) = database_url() else {
         return;
     };
+    // Connect first so migrations run — on a fresh DB the staging tables don't
+    // exist yet, so cleanup must come AFTER connect creates them.
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
     cleanup_staging_data(&url).await.unwrap();
     cleanup_test_data(&url).await.unwrap();
-
-    let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     // Ensure user exists (FK constraint)
     db.upsert_user(TEST_USER, "pgtest.bsky.social")

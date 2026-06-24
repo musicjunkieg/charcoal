@@ -1,5 +1,13 @@
 [
   {
+    "hash": "25191d23e063a1685fb66b641bd2cb482e8e6722",
+    "short_hash": "25191d2",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:44:24-07:00",
+    "message": "docs(decouple): CHANGELOG entry for classification burst decouple (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
     "hash": "62c9d8dcd184857afd052514e9fa91fb172d64be",
     "short_hash": "62c9d8d",
     "author": "Bryan Guffey",

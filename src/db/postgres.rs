@@ -1018,6 +1018,16 @@ impl Database for PgDatabase {
         // can't leave the user's data half-deleted. Delete in dependency
         // order to avoid FK issues if constraints are added later.
         let mut tx = self.pool.begin().await?;
+        // Staging tables first (#208) — a user's queued classification work
+        // must not outlive the account itself.
+        sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM scan_account_input WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         sqlx_core::query::query("DELETE FROM inferred_pairs WHERE user_did = $1")
             .bind(user_did)
             .execute(&mut *tx)

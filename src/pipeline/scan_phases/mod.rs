@@ -251,15 +251,27 @@ async fn run_gather(
     // compiler's `FnOnce is not general enough` HRTB inference when this future
     // is held across the web background-scan's `tokio::spawn` boundary; indexing
     // by `usize` keeps the closure free of a higher-ranked borrow.
-    let results: Vec<Result<()>> = futures::stream::iter(0..candidates.len())
-        .map(|i| gather_one(db, user_did, &candidates[i], deps))
+    let results: Vec<(String, Result<()>)> = futures::stream::iter(0..candidates.len())
+        .map(|i| {
+            let did = candidates[i].account_did.clone();
+            async move { (did, gather_one(db, user_did, &candidates[i], deps).await) }
+        })
         .buffer_unordered(deps.gather_concurrency.max(1))
         .collect()
         .await;
 
-    // Propagate the first gather error, if any.
-    for result in results {
-        result?;
+    // Resilient gather: a single account's failure (e.g. a transient Bluesky
+    // fetch error) must NOT abort the whole scan — and on resume must not
+    // re-fail the batch (livelock risk). Log per-account failures and continue
+    // with the accounts that gathered successfully.
+    for (account_did, result) in results {
+        if let Err(e) = result {
+            warn!(
+                account_did,
+                error = %e,
+                "gather failed for account — skipping it and continuing the scan"
+            );
+        }
     }
     Ok(())
 }
@@ -343,6 +355,9 @@ async fn run_finalize(
                         account_did,
                         "re-burst hit the cost ceiling during re-gather — skipping account"
                     );
+                    // The scan is now incomplete (this account was not scored
+                    // because of the cost cap) — flag it so the caller knows.
+                    summary.degraded = true;
                     continue;
                 }
 

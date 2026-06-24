@@ -1956,6 +1956,11 @@ mod burst_tests {
     // One test body = no inter-test interference for these vars.
     #[test]
     fn burst_env_helpers_clamps() {
+        // Save the originals so this test stays hermetic — restore (or remove
+        // if originally unset) after the assertions.
+        let orig_concurrency = std::env::var("CHARCOAL_BURST_CONCURRENCY").ok();
+        let orig_batch = std::env::var("CHARCOAL_BURST_BATCH").ok();
+
         // --- concurrency clamps ---
         std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "0");
         assert_eq!(burst_concurrency(), 1, "0 → clamp to min=1");
@@ -1975,6 +1980,16 @@ mod burst_tests {
         assert_eq!(burst_batch(), 250, "250 → in-range, unchanged");
         std::env::remove_var("CHARCOAL_BURST_BATCH");
         assert_eq!(burst_batch(), 500, "unset → default 500");
+
+        // Restore the original environment.
+        match orig_concurrency {
+            Some(v) => std::env::set_var("CHARCOAL_BURST_CONCURRENCY", v),
+            None => std::env::remove_var("CHARCOAL_BURST_CONCURRENCY"),
+        }
+        match orig_batch {
+            Some(v) => std::env::set_var("CHARCOAL_BURST_BATCH", v),
+            None => std::env::remove_var("CHARCOAL_BURST_BATCH"),
+        }
     }
 }
 

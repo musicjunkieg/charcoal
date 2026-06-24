@@ -92,14 +92,15 @@ pub async fn run(
             .and_then(|uri| original_text_cache.get(uri))
             .map(|s| s.as_str());
 
-        // For quote and reply events, fetch the amplifier's text and score it.
-        // `analyze_followers` implies a real scorer is present (the CLI/web only
-        // pass `Some` when `--analyze` is set), so the event loop's ONNX/NLI
-        // scoring runs exactly as before.
-        if let Some(scorer) = scorer {
-            if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
-                match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
-                    Ok(Some(text)) => {
+        // For quote and reply events, fetch the amplifier's text UNCONDITIONALLY
+        // so it is persisted as event evidence (`insert_amplification_event`)
+        // even on a non-`--analyze` scan. Only the SCORING of that text is
+        // gated on a real scorer being present.
+        if event.event_type == "quote" || event.event_type == "reply" {
+            match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
+                Ok(Some(text)) => {
+                    // Score only when a real scorer is present (i.e. `--analyze`).
+                    if let Some(scorer) = scorer {
                         match scorer.score_with_context(&text, original_post_text).await {
                             Ok(result) => {
                                 quote_toxicity = Some(result.toxicity);
@@ -108,17 +109,17 @@ pub async fn run(
                                 warn!(error = %e, "Failed to score amplifier text");
                             }
                         }
-                        amplifier_text = Some(text);
                     }
-                    Ok(None) => {
-                        info!(
-                            uri = event.amplifier_post_uri,
-                            "Amplifier post text not found"
-                        );
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to fetch amplifier post text");
-                    }
+                    amplifier_text = Some(text);
+                }
+                Ok(None) => {
+                    info!(
+                        uri = event.amplifier_post_uri,
+                        "Amplifier post text not found"
+                    );
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to fetch amplifier post text");
                 }
             }
         }
@@ -238,7 +239,9 @@ pub async fn run(
         println!("\nScoring {} amplifiers…", amplifier_count);
 
         for (did, handle) in &amplifier_handles {
-            if handle == protected_handle {
+            // Skip the protected user themselves. Match on BOTH handle and DID:
+            // handles can change, so the DID is the stable identity check.
+            if handle == protected_handle || did == user_did {
                 continue;
             }
             if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
@@ -249,16 +252,28 @@ pub async fn run(
             // across scans (the same event can be recorded multiple times)
             let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
             let mut pairs: Vec<(String, String)> = Vec::new();
-            if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
-                for ev in db_events {
-                    if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text) {
-                        if !orig.is_empty()
-                            && !amp.is_empty()
-                            && seen_pairs.insert((orig.clone(), amp.clone()))
+            match db.get_events_by_amplifier(user_did, did).await {
+                Ok(db_events) => {
+                    for ev in db_events {
+                        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
                         {
-                            pairs.push((orig, amp));
+                            if !orig.is_empty()
+                                && !amp.is_empty()
+                                && seen_pairs.insert((orig.clone(), amp.clone()))
+                            {
+                                pairs.push((orig, amp));
+                            }
                         }
                     }
+                }
+                // Continue on error (matching prior behaviour) but make the
+                // dropped pairs visible instead of swallowing the failure.
+                Err(e) => {
+                    warn!(
+                        amplifier_did = %did,
+                        error = %e,
+                        "Failed to load stored events for amplifier; direct NLI pairs dropped"
+                    );
                 }
             }
 

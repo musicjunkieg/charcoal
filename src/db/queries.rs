@@ -817,6 +817,17 @@ pub fn has_fingerprint(conn: &Connection, user_did: &str) -> Result<bool> {
 
 /// Delete all data for a user (cascade across all user-scoped tables).
 pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
+    // Staging tables first (#208) — they have no FK to the data tables, but
+    // clearing them up front keeps the delete in dependency order and ensures
+    // a user's queued classification work doesn't outlive the account itself.
+    conn.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1",
+        params![user_did],
+    )?;
     conn.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],
@@ -1054,28 +1065,36 @@ pub fn count_pending_classifications(conn: &Connection, user_did: &str) -> Resul
 /// Delete all staging data for a user from `classification_queue` and
 /// `scan_account_input`.  Does NOT touch `scan_state`.
 pub fn clear_scan_staging(conn: &Connection, user_did: &str) -> Result<()> {
-    conn.execute(
+    // Both deletes in one transaction so a crash can't leave half-cleared
+    // staging (mirrors the batched-write pattern used elsewhere in this file).
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "DELETE FROM classification_queue WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_account_input WHERE user_did = ?1",
         params![user_did],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
 /// Delete the staging data for a single account from `classification_queue` and
 /// `scan_account_input`.  Does NOT touch `scan_state`.
 pub fn clear_account_staging(conn: &Connection, user_did: &str, account_did: &str) -> Result<()> {
-    conn.execute(
+    // Both deletes in one transaction so a crash can't leave half-cleared
+    // staging (mirrors the batched-write pattern used elsewhere in this file).
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "DELETE FROM classification_queue WHERE user_did = ?1 AND account_did = ?2",
         params![user_did, account_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_account_input WHERE user_did = ?1 AND account_did = ?2",
         params![user_did, account_did],
     )?;
+    tx.commit()?;
     Ok(())
 }
 

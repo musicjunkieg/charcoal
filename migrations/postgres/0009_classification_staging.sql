@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS classification_queue (
     context_text TEXT,
     post_kind TEXT NOT NULL,
     onnx_score DOUBLE PRECISION NOT NULL,
-    status TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'done')),
     toxic_token BOOLEAN,
     confidence REAL,
     model_id TEXT,

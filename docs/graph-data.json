@@ -3299,6 +3299,39 @@
       "created_at": "2026-06-23T16:37:36.370369-07:00",
       "updated_at": "2026-06-23T16:37:36.370369-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"62c9d8d\",\"confidence\":95}"
+    },
+    {
+      "id": 307,
+      "change_id": "d70d24a3-235b-4ad9-bc40-146d9a0de85d",
+      "node_type": "outcome",
+      "title": "Chunks 6+7 (#208) COMPLETE: orchestrator run_phased_scan (6.1) + sweep rewire (6.2) + amplification rewire (6.3) + observability banners (6.4) + full verification (7). Plus corrective finalize NLI gate fix (#211, spec gap from 5.1). Gate green: 514 tests pass, clippy web/default/postgres clean, live pg 9/9, golden 6/6. Manual scan smoke deferred to Bryan. Commits 7f9903a..25191d2.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T16:45:06.856285-07:00",
+      "updated_at": "2026-06-23T16:45:06.856285-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"25191d2\",\"confidence\":95}"
+    },
+    {
+      "id": 308,
+      "change_id": "754eff7d-8551-483e-80c0-c1ed585dcfe1",
+      "node_type": "outcome",
+      "title": "#208 FINAL REVIEW (controller, opus subagent hit spend-limit): READY TO MERGE. Verified cross-cutting: metered classifier ONLY in burst (cost-meter one-window delivered), no leftover build_profile in sweep/amplification, shared scan_phase marker safe/self-healing in cost-cap path, both backends live-validated, NLI gate correct. 514 tests, clippy clean, live pg 9/9. Branch feat/cope-b-cost-guard @ 25191d2 (extends PR #58). Manual scan smoke + finishing-branch = Bryan's call.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T17:18:23.584137-07:00",
+      "updated_at": "2026-06-23T17:18:23.584137-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"25191d2\",\"confidence\":90}"
+    },
+    {
+      "id": 309,
+      "change_id": "a9c39600-f503-4fd1-abbd-c9f00fe05cd4",
+      "node_type": "outcome",
+      "title": "#208 MANUAL SMOKE PASSED (zentropi, local SQLite, graph sweep 23 candidates): phase banners logged IN ORDER gather(23)->burst(pending=21)->finalize(16)->done(scored=16,degraded=false). CRITICAL: 0 classifier calls before burst; all 21 zentropi calls in one contiguous ~5s burst window AFTER ~80s classifier-free gather. Empirically confirms collect->burst->score + cost-meter-one-window goal. Plan Step 5 complete.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-23T17:25:11.461958-07:00",
+      "updated_at": "2026-06-23T17:25:11.461958-07:00",
+      "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"25191d2\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -6513,6 +6546,28 @@
       "weight": 1.0,
       "rationale": "Task 6.3 amplification rewire",
       "created_at": "2026-06-23T16:37:36.377675-07:00"
+    },
+    {
+      "id": 301,
+      "from_node_id": 296,
+      "to_node_id": 306,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "7de87515-1b97-49e7-8966-915f27edb9bd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chunks 6+7 complete",
+      "created_at": "2026-06-23T16:45:06.863627-07:00"
+    },
+    {
+      "id": 302,
+      "from_node_id": 296,
+      "to_node_id": 308,
+      "from_change_id": "ba9f4d5f-463e-41ed-bc4a-4e64679639c6",
+      "to_change_id": "754eff7d-8551-483e-80c0-c1ed585dcfe1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "manual smoke verifies the goal",
+      "created_at": "2026-06-23T17:25:11.469360-07:00"
     }
   ],
   "documents": [

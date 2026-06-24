@@ -382,6 +382,26 @@ pub async fn score_from_sample(
     let replies_len = sample.replies.len();
     let quotes_len = sample.quotes.len();
 
+    // Fail loud on misalignment instead of panicking on an out-of-bounds slice
+    // (or silently mis-scoring). The verdicts and post texts must be 1:1 with
+    // the originals+replies+quotes the sample contains, in that order.
+    let expected_len = originals_len + replies_len + quotes_len;
+    anyhow::ensure!(
+        verdicts.len() == all_post_texts.len(),
+        "Stage-2 misalignment: {} verdicts vs {} post texts",
+        verdicts.len(),
+        all_post_texts.len(),
+    );
+    anyhow::ensure!(
+        verdicts.len() == expected_len,
+        "Stage-2 misalignment: {} verdicts vs {} expected (originals {} + replies {} + quotes {})",
+        verdicts.len(),
+        expected_len,
+        originals_len,
+        replies_len,
+        quotes_len,
+    );
+
     let originals_verdicts = &verdicts[..originals_len];
     let replies_verdicts = &verdicts[originals_len..originals_len + replies_len];
     let quotes_verdicts = &verdicts[originals_len + replies_len..];
