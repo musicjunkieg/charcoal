@@ -2618,4 +2618,58 @@ mod orchestration_tests {
             "fresh start must wipe the stale leftover row"
         );
     }
+
+    // ── Test: unknown scan_phase marker fails closed (does NOT wipe staging) ──
+    #[tokio::test]
+    async fn unknown_scan_phase_fails_closed() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchunkn0000000000000";
+
+        // Stage a resumable pending row, then write a corrupt/unknown phase
+        // marker. A fresh-start path would wipe this row — fail-closed must not.
+        let row = QueueRow {
+            account_did: acct.to_string(),
+            post_uri: format!("at://{acct}/keep"),
+            text: "keep me".to_string(),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: 0.3,
+            status: "pending".to_string(),
+            toxic_token: None,
+            confidence: None,
+            model_id: None,
+            policy_version: None,
+        };
+        db.enqueue_classifications(ORCH_USER, &[row]).await.unwrap();
+        db.set_scan_state(ORCH_USER, "scan_phase", "frobnicate")
+            .await
+            .unwrap();
+
+        let fetcher = MapFetcher {
+            by_handle: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let result = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &[],
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "an unknown scan_phase marker must error, not fresh-start"
+        );
+        assert_eq!(
+            db.count_pending_classifications(ORCH_USER).await.unwrap(),
+            1,
+            "fail-closed must NOT wipe the resumable staging row"
+        );
+    }
 }

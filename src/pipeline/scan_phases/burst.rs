@@ -60,6 +60,13 @@ pub async fn run_burst(
     burst_concurrency: usize,
     burst_batch: i64,
 ) -> Result<BurstOutcome> {
+    // Clamp defensively, mirroring the `burst_concurrency()` / `burst_batch()`
+    // env helpers below. A direct caller passing 0 (a zero-width
+    // `buffer_unordered` deadlocks; a zero `LIMIT` fetches nothing → infinite
+    // loop) or a huge value can't break the loop.
+    let burst_concurrency = burst_concurrency.clamp(1, 64);
+    let burst_batch = burst_batch.clamp(1, 10_000);
+
     loop {
         // Fetch the next batch of pending rows.
         let pending = db

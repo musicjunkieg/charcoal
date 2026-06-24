@@ -40,7 +40,8 @@ use crate::toxicity::traits::ToxicityScorer;
 /// Run the background sweep pipeline.
 ///
 /// Scans followers-of-followers of the protected user, filtered by topic
-/// overlap. Returns the number of second-degree accounts found and scored.
+/// overlap. Returns `(second_degree_pool_size, accounts_scored, degraded)` —
+/// `degraded` is true when the scan was cost-capped and left resumable.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
@@ -58,7 +59,7 @@ pub async fn run(
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
     data_dir: Option<&std::path::Path>,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, bool)> {
     // Step 1: Fetch the protected user's followers
     println!("Fetching your followers (up to {max_first_degree})...");
     let first_degree =
@@ -116,7 +117,7 @@ pub async fn run(
 
     if stale.is_empty() {
         println!("  All second-degree accounts have recent scores.");
-        return Ok((second_degree_pool.len(), 0));
+        return Ok((second_degree_pool.len(), 0, false));
     }
 
     println!(
@@ -155,14 +156,17 @@ pub async fn run(
     )
     .await?;
 
-    Ok((second_degree_pool.len(), summary))
+    let (scored, degraded) = summary;
+    Ok((second_degree_pool.len(), scored, degraded))
 }
 
 /// Run topic-first discovery sweep.
 ///
 /// Instead of walking the follower graph, searches for posts matching the
 /// protected user's topic fingerprint via searchPosts. Deduplicates against
-/// already-scored accounts and scores new discoveries.
+/// already-scored accounts and scores new discoveries. Returns
+/// `(discovered, accounts_scored, degraded)` — `degraded` is true when the scan
+/// was cost-capped and left resumable.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_topic_first(
     client: &PublicAtpClient,
@@ -179,7 +183,7 @@ pub async fn run_topic_first(
     data_dir: Option<&std::path::Path>,
     keywords_per_cycle: usize,
     results_per_keyword: usize,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, bool)> {
     // Step 1: Get already-scored DIDs for deduplication (candidate filter).
     let scored_dids: HashSet<String> = db
         .get_all_scored_dids(user_did)
@@ -205,7 +209,7 @@ pub async fn run_topic_first(
     println!("  Found {} new accounts to score", new_dids.len());
 
     if new_dids.is_empty() {
-        return Ok((0, 0));
+        return Ok((0, 0, false));
     }
 
     // Step 3: Resolve DIDs to handles via getProfiles (batch, 25 per call)
@@ -221,7 +225,7 @@ pub async fn run_topic_first(
     );
 
     if did_handle_pairs.is_empty() {
-        return Ok((new_dids.len(), 0));
+        return Ok((new_dids.len(), 0, false));
     }
 
     let discovered = did_handle_pairs.len();
@@ -255,12 +259,14 @@ pub async fn run_topic_first(
     )
     .await?;
 
-    Ok((discovered, summary))
+    let (scored, degraded) = summary;
+    Ok((discovered, scored, degraded))
 }
 
 /// Shared driver: build `PhasedScanDeps` from the sweep's shared refs and run
-/// the three-phase scan over `candidates`. Returns the number of accounts that
-/// reached a finalized `AccountScore`.
+/// the three-phase scan over `candidates`. Returns `(accounts_scored, degraded)`
+/// — the number of accounts that reached a finalized `AccountScore`, and whether
+/// the scan was cost-capped and left resumable.
 ///
 /// Incremental persistence is preserved by construction: terminal accounts
 /// (insufficient data / clean early-exit) are written inside Phase A gather,
@@ -287,7 +293,7 @@ async fn run_sweep_phased(
     data_dir: Option<&std::path::Path>,
     concurrency: usize,
     candidates: &[CandidateInput],
-) -> Result<usize> {
+) -> Result<(usize, bool)> {
     let fetcher = AtpPostFetcher { client };
     let classifier = scorer.classifier();
 
@@ -310,5 +316,5 @@ async fn run_sweep_phased(
     };
 
     let summary = run_phased_scan(db, user_did, candidates, &deps).await?;
-    Ok(summary.accounts_scored)
+    Ok((summary.accounts_scored, summary.degraded))
 }

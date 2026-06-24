@@ -563,12 +563,18 @@ async fn run_scan(
     mgr.finish_scan(user_did);
 
     match result {
-        Ok((events, accounts)) => {
-            info!(events, accounts, "Background scan completed");
+        Ok((events, accounts, degraded)) => {
+            info!(events, accounts, degraded, "Background scan completed");
             if let Some(s) = mgr.get_status_mut(user_did) {
                 s.last_error = None;
-                s.progress_message =
-                    format!("Completed: {events} events, {accounts} accounts scored");
+                s.progress_message = if degraded {
+                    format!(
+                        "Completed (incomplete — cost-capped, re-run to resume): \
+                         {events} events, {accounts} accounts scored"
+                    )
+                } else {
+                    format!("Completed: {events} events, {accounts} accounts scored")
+                };
             }
         }
         Err(e) => {

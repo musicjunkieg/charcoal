@@ -36,6 +36,22 @@ use crate::toxicity::traits::ToxicityScorer;
 
 use super::staging::{AccountInput, QueueRow, ACCOUNT_INPUT_SCHEMA_VERSION};
 
+/// What `gather_account` did for one account.
+///
+/// The orchestrator needs to know whether Phase A already wrote a terminal
+/// `AccountScore` so it can count those accounts toward `accounts_scored`
+/// (early-exit / insufficient-data accounts never reach Phase C finalize, so
+/// finalize alone undercounts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatherOutcome {
+    /// Stage 1 was terminal: an `AccountScore` was upserted here. Nothing was
+    /// enqueued or stashed — this account will NOT appear in Phase C.
+    Terminal,
+    /// Stage 1 said `Proceed`: queue rows were enqueued and a blob stashed.
+    /// Phase C will finalize this account.
+    Enqueued,
+}
+
 /// Minimal post-fetch seam so Phase A's I/O can be exercised with canned data.
 ///
 /// `posts::fetch_posts_with_replies` / `fetch_parent_posts` take a concrete
@@ -117,10 +133,11 @@ pub struct GatherInputs<'a> {
 /// Gather Phase A work for a single account.
 ///
 /// On a terminal Stage-1 outcome, writes the terminal `AccountScore` and
-/// returns — nothing is enqueued or stashed. On `Proceed`, enqueues one
-/// `QueueRow` per Stage-2 post (clean rows pre-finalised as `done`/non-toxic,
-/// survivors left `pending`) and stashes one `AccountInput` blob; it does NOT
-/// write an `AccountScore` (Phase C scores survivors).
+/// returns [`GatherOutcome::Terminal`] — nothing is enqueued or stashed. On
+/// `Proceed`, enqueues one `QueueRow` per Stage-2 post (clean rows pre-finalised
+/// as `done`/non-toxic, survivors left `pending`) and stashes one `AccountInput`
+/// blob, returning [`GatherOutcome::Enqueued`]; it does NOT write an
+/// `AccountScore` (Phase C scores survivors).
 pub async fn gather_account(
     db: &Arc<dyn Database>,
     user_did: &str,
@@ -128,7 +145,7 @@ pub async fn gather_account(
     scorer: &dyn ToxicityScorer,
     clean_pass: &dyn CleanPassScorer,
     inputs: &GatherInputs<'_>,
-) -> Result<()> {
+) -> Result<GatherOutcome> {
     // ── Stage 1: quick check with 25 posts ──
     let stage1_sample = fetcher.fetch_sample(inputs.account_handle, 25).await?;
 
@@ -144,9 +161,10 @@ pub async fn gather_account(
     .await?
     {
         Stage1Outcome::Terminal(score) => {
-            // Non-threat: finalise directly, enqueue/stash nothing.
+            // Non-threat: finalise directly, enqueue/stash nothing. The score
+            // WAS written here, so report Terminal so the orchestrator counts it.
             db.upsert_account_score(user_did, &score).await?;
-            return Ok(());
+            return Ok(GatherOutcome::Terminal);
         }
         Stage1Outcome::Proceed { .. } => {}
     }
@@ -244,7 +262,7 @@ pub async fn gather_account(
     db.stash_account_input(user_did, inputs.account_did, &payload)
         .await?;
 
-    Ok(())
+    Ok(GatherOutcome::Enqueued)
 }
 
 /// Build a survivor (`pending`) `QueueRow` with verdict fields unset.

@@ -37,8 +37,9 @@ use crate::toxicity::traits::ToxicityScorer;
 /// Run the amplification detection pipeline.
 ///
 /// Processes pre-fetched amplification events (from Constellation backlinks),
-/// fetches amplifier followers, and scores them. Returns the number of events
-/// processed and accounts scored.
+/// fetches amplifier followers, and scores them. Returns
+/// `(events_processed, accounts_scored, degraded)` — `degraded` is true when the
+/// scan was cost-capped and left resumable.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
@@ -64,7 +65,7 @@ pub async fn run(
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     data_dir: Option<&std::path::Path>,
     graph_distances: &HashMap<String, GraphDistance>,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, bool)> {
     info!(
         total_events = events.len(),
         "Processing amplification events"
@@ -376,12 +377,12 @@ pub async fn run(
     // model is different (and stronger): a crash or cost-cap mid-run is
     // recoverable by re-running, which resumes from the DB-staged `scan_phase`
     // marker rather than re-scoring everything — the intended #208 architecture.
-    let accounts_scored = match scorer {
+    let (accounts_scored, degraded) = match scorer {
         // No real scorer (scan without `--analyze`): the old NoopScorer errored
         // on every `build_profile`, so no accounts were ever scored. Preserve
         // that by skipping the phased scan entirely.
-        None => 0,
-        Some(_) if candidates.is_empty() => 0,
+        None => (0, false),
+        Some(_) if candidates.is_empty() => (0, false),
         Some(scorer) => {
             let fetcher = AtpPostFetcher { client };
             let classifier = scorer.classifier();
@@ -409,9 +410,9 @@ pub async fn run(
             };
 
             let summary = run_phased_scan(db, user_did, &candidates, &deps).await?;
-            summary.accounts_scored
+            (summary.accounts_scored, summary.degraded)
         }
     };
 
-    Ok((events.len(), accounts_scored))
+    Ok((events.len(), accounts_scored, degraded))
 }

@@ -25,7 +25,7 @@ pub mod staging;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use futures::StreamExt;
 use tracing::{info, warn};
 
@@ -40,7 +40,7 @@ use crate::toxicity::traits::ToxicityScorer;
 
 use burst::{run_burst, BurstOutcome};
 use finalize::{finalize_account, FinalizeOutcome};
-use gather::{gather_account, CleanPassScorer, GatherInputs, PostFetcher};
+use gather::{gather_account, CleanPassScorer, GatherInputs, GatherOutcome, PostFetcher};
 use staging::ScanPhase;
 
 /// One candidate account to scan, with the per-account inputs the orchestrator
@@ -143,12 +143,25 @@ pub async fn run_phased_scan(
     candidates: &[CandidateInput],
     deps: &PhasedScanDeps<'_>,
 ) -> Result<ScanSummary> {
-    // Read the resume point. None or Done ⇒ fresh start.
-    let phase = db
-        .get_scan_state(user_did, "scan_phase")
-        .await?
-        .as_deref()
-        .and_then(ScanPhase::from_value);
+    // Read the resume point. Distinguish three cases:
+    //   - missing marker (`None`)            ⇒ fresh start (Gather).
+    //   - recognised value (`Some(phase)`)   ⇒ resume at that phase.
+    //   - UNRECOGNISED value                 ⇒ fail closed (do NOT wipe staging).
+    //
+    // A typo/corruption/future-schema value must NOT be silently treated like a
+    // missing marker: that path runs `clear_scan_staging`, which would destroy
+    // resumable work. Bail instead so a human can investigate.
+    let raw_phase = db.get_scan_state(user_did, "scan_phase").await?;
+    let phase = match &raw_phase {
+        None => None,
+        Some(value) => match ScanPhase::from_value(value) {
+            Some(p) => Some(p),
+            None => bail!(
+                "unknown scan_phase marker {value:?} for user {user_did} — refusing to \
+                 fresh-start (would wipe resumable staging); investigate and reset the marker"
+            ),
+        },
+    };
 
     let mut summary = ScanSummary::default();
 
@@ -162,7 +175,9 @@ pub async fn run_phased_scan(
             "entering gather phase"
         );
         db.clear_scan_staging(user_did).await?;
-        run_gather(db, user_did, candidates, deps).await?;
+        // Terminal (early-exit / insufficient-data) accounts are scored inside
+        // gather and never reach Phase C, so count them here.
+        summary.accounts_scored += run_gather(db, user_did, candidates, deps).await?;
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Burst.as_str())
             .await?;
     }
@@ -240,18 +255,22 @@ pub async fn run_phased_scan(
 }
 
 /// Phase A: gather every candidate concurrently (`buffer_unordered`).
+///
+/// Returns the number of accounts that Stage 1 scored terminally (early-exit /
+/// insufficient-data). Those accounts never reach Phase C, so the orchestrator
+/// folds this count into `accounts_scored`.
 async fn run_gather(
     db: &Arc<dyn Database>,
     user_did: &str,
     candidates: &[CandidateInput],
     deps: &PhasedScanDeps<'_>,
-) -> Result<()> {
+) -> Result<usize> {
     // Map over owned indices (not `&CandidateInput` iterator items) and re-index
     // inside the `async move`. Mapping the borrowing items directly trips the
     // compiler's `FnOnce is not general enough` HRTB inference when this future
     // is held across the web background-scan's `tokio::spawn` boundary; indexing
     // by `usize` keeps the closure free of a higher-ranked borrow.
-    let results: Vec<(String, Result<()>)> = futures::stream::iter(0..candidates.len())
+    let results: Vec<(String, Result<GatherOutcome>)> = futures::stream::iter(0..candidates.len())
         .map(|i| {
             let did = candidates[i].account_did.clone();
             async move { (did, gather_one(db, user_did, &candidates[i], deps).await) }
@@ -264,16 +283,21 @@ async fn run_gather(
     // fetch error) must NOT abort the whole scan — and on resume must not
     // re-fail the batch (livelock risk). Log per-account failures and continue
     // with the accounts that gathered successfully.
+    let mut terminal_scored = 0;
     for (account_did, result) in results {
-        if let Err(e) = result {
-            warn!(
-                account_did,
-                error = %e,
-                "gather failed for account — skipping it and continuing the scan"
-            );
+        match result {
+            Ok(GatherOutcome::Terminal) => terminal_scored += 1,
+            Ok(GatherOutcome::Enqueued) => {}
+            Err(e) => {
+                warn!(
+                    account_did,
+                    error = %e,
+                    "gather failed for account — skipping it and continuing the scan"
+                );
+            }
         }
     }
-    Ok(())
+    Ok(terminal_scored)
 }
 
 /// Gather a single candidate. Extracted into a named async fn (rather than an
@@ -287,7 +311,7 @@ async fn gather_one(
     user_did: &str,
     candidate: &CandidateInput,
     deps: &PhasedScanDeps<'_>,
-) -> Result<()> {
+) -> Result<GatherOutcome> {
     let inputs = gather_inputs(candidate, deps);
     gather_account(
         db,
@@ -327,16 +351,35 @@ async fn run_finalize(
                     continue;
                 };
 
+                // Clear any stale staging from the prior attempt before
+                // re-gathering. finalize's incomplete-verdict path intentionally
+                // leaves staging in place, so the prior queue rows / blob still
+                // exist; if we re-gather without clearing, those stale `pending`
+                // rows would be burst-classified and the stale blob could be read
+                // by the follow-up finalize. Clear first so the re-gather starts
+                // from a clean per-account slate.
+                db.clear_account_staging(user_did, &account_did).await?;
+
                 let inputs = gather_inputs(candidate, deps);
-                gather_account(
-                    db,
-                    user_did,
-                    deps.fetcher,
-                    deps.scorer,
-                    deps.clean_pass,
-                    &inputs,
-                )
-                .await?;
+                if matches!(
+                    gather_account(
+                        db,
+                        user_did,
+                        deps.fetcher,
+                        deps.scorer,
+                        deps.clean_pass,
+                        &inputs,
+                    )
+                    .await?,
+                    GatherOutcome::Terminal
+                ) {
+                    // Re-gather hit a terminal Stage-1 outcome: the score was
+                    // written by gather itself, nothing was enqueued. Count it
+                    // and move on — no re-burst / re-finalize needed.
+                    summary.accounts_scored += 1;
+                    summary.regathered += 1;
+                    continue;
+                }
 
                 // Drain the account's freshly-enqueued pending rows. A cost-cap
                 // here just means the retry could not complete — skip it.

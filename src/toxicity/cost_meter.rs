@@ -142,6 +142,12 @@ impl ScanCostMeter {
 
     /// Test/seam only: force the armed clock to a specific instant so trips are
     /// deterministic without sleeping. No-op if already armed.
+    ///
+    /// Kept `pub` (not `#[cfg(test)]`) because integration tests in `tests/`
+    /// link the lib *without* `cfg(test)` and exercise this seam
+    /// (`tests/unit_classifier.rs`); gating it on `cfg(test)` would make it
+    /// invisible to them. `#[doc(hidden)]` keeps it out of the public docs.
+    #[doc(hidden)]
     pub fn force_started_at(&self, t: Instant) {
         let _ = self.started_at.set(t);
     }

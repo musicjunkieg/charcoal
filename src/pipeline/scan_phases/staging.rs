@@ -83,7 +83,8 @@ pub struct QueueRow {
     pub post_kind: String,
     /// Raw ONNX toxicity score (clean-pass filter output).
     pub onnx_score: f64,
-    /// Work-queue status: `"pending"`, `"done"`, or `"skipped"`.
+    /// Work-queue status: `"pending"` or `"done"` (the v9 schema CHECK
+    /// constraint allows only these two values).
     pub status: String,
     // ── filled in by Phase B ──
     /// Binary toxicity verdict from the classifier (`None` while pending).

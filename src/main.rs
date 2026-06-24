@@ -361,7 +361,7 @@ async fn main() -> Result<()> {
                 posts.into_iter().map(|p| (p.uri, p.text)).collect()
             };
 
-            let (event_count, scored) = charcoal::pipeline::amplification::run(
+            let (event_count, scored, degraded) = charcoal::pipeline::amplification::run(
                 &client,
                 scorer.as_ref(),
                 &db,
@@ -389,6 +389,12 @@ async fn main() -> Result<()> {
             println!("  Events detected: {event_count}");
             if analyze {
                 println!("  Accounts scored: {scored}");
+            }
+            if degraded {
+                println!(
+                    "{}",
+                    "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                );
             }
         }
 
@@ -425,31 +431,38 @@ async fn main() -> Result<()> {
             match sweep_mode {
                 SweepMode::Topic => {
                     println!("Running topic-first discovery sweep...");
-                    let (discovered, scored) = charcoal::pipeline::sweep::run_topic_first(
-                        &client,
-                        &scorer,
-                        &db,
-                        &did,
-                        &protected_fingerprint,
-                        &weights,
-                        concurrency as usize,
-                        embedder.as_ref(),
-                        protected_embedding.as_deref(),
-                        median_engagement,
-                        &pile_on_dids,
-                        Some(config.data_dir()),
-                        keywords as usize,
-                        results_per_keyword as usize,
-                    )
-                    .await?;
+                    let (discovered, scored, degraded) =
+                        charcoal::pipeline::sweep::run_topic_first(
+                            &client,
+                            &scorer,
+                            &db,
+                            &did,
+                            &protected_fingerprint,
+                            &weights,
+                            concurrency as usize,
+                            embedder.as_ref(),
+                            protected_embedding.as_deref(),
+                            median_engagement,
+                            &pile_on_dids,
+                            Some(config.data_dir()),
+                            keywords as usize,
+                            results_per_keyword as usize,
+                        )
+                        .await?;
 
                     println!("\n{}", "Topic sweep complete.".bold());
                     println!("  Accounts discovered: {discovered}");
                     println!("  Accounts scored: {scored}");
+                    if degraded {
+                        println!(
+                            "{}",
+                            "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                        );
+                    }
                 }
                 SweepMode::Graph => {
                     println!("Running graph-based network sweep...");
-                    let (pool_size, scored) = charcoal::pipeline::sweep::run(
+                    let (pool_size, scored, degraded) = charcoal::pipeline::sweep::run(
                         &client,
                         &scorer,
                         &db,
@@ -471,30 +484,37 @@ async fn main() -> Result<()> {
                     println!("\n{}", "Graph sweep complete.".bold());
                     println!("  Second-degree pool: {pool_size}");
                     println!("  Accounts scored: {scored}");
+                    if degraded {
+                        println!(
+                            "{}",
+                            "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                        );
+                    }
                 }
                 SweepMode::Both => {
                     println!("Running topic-first discovery...");
-                    let (discovered, topic_scored) = charcoal::pipeline::sweep::run_topic_first(
-                        &client,
-                        &scorer,
-                        &db,
-                        &did,
-                        &protected_fingerprint,
-                        &weights,
-                        concurrency as usize,
-                        embedder.as_ref(),
-                        protected_embedding.as_deref(),
-                        median_engagement,
-                        &pile_on_dids,
-                        Some(config.data_dir()),
-                        keywords as usize,
-                        results_per_keyword as usize,
-                    )
-                    .await?;
+                    let (discovered, topic_scored, topic_degraded) =
+                        charcoal::pipeline::sweep::run_topic_first(
+                            &client,
+                            &scorer,
+                            &db,
+                            &did,
+                            &protected_fingerprint,
+                            &weights,
+                            concurrency as usize,
+                            embedder.as_ref(),
+                            protected_embedding.as_deref(),
+                            median_engagement,
+                            &pile_on_dids,
+                            Some(config.data_dir()),
+                            keywords as usize,
+                            results_per_keyword as usize,
+                        )
+                        .await?;
                     println!("  Topic: discovered {discovered}, scored {topic_scored}");
 
                     println!("Running graph-based sweep...");
-                    let (pool_size, graph_scored) = charcoal::pipeline::sweep::run(
+                    let (pool_size, graph_scored, graph_degraded) = charcoal::pipeline::sweep::run(
                         &client,
                         &scorer,
                         &db,
@@ -517,6 +537,12 @@ async fn main() -> Result<()> {
                     println!("  Topic: discovered {discovered}, scored {topic_scored}");
                     println!("  Graph: pool {pool_size}, scored {graph_scored}");
                     println!("  Total scored: {}", topic_scored + graph_scored);
+                    if topic_degraded || graph_degraded {
+                        println!(
+                            "{}",
+                            "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                        );
+                    }
                 }
             }
         }
