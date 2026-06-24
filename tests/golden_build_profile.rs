@@ -839,9 +839,11 @@ async fn golden_d_nli_two_pass_gate() {
         "That is absolute garbage, these people are toxic poison.".to_string(),
     )];
 
-    // Use a temp dir for data_dir (audit log writes are silently skipped on error).
-    let data_dir = std::env::temp_dir().join("charcoal-golden-d-test");
-    std::fs::create_dir_all(&data_dir).ok();
+    // Use a unique temp dir for data_dir (audit log writes are silently skipped
+    // on error). `tempfile::tempdir()` gives a per-test directory so parallel
+    // test runs don't clobber each other's dirs; it auto-cleans on drop.
+    let data_dir_guard = tempfile::tempdir().expect("create temp data dir");
+    let data_dir = data_dir_guard.path().to_path_buf();
 
     let fp = toxicology_fingerprint(); // overlapping keywords → overlap ≥ 0.15
     let weights = ThreatWeights::default();
@@ -943,6 +945,6 @@ async fn golden_d_nli_two_pass_gate() {
         "golden(d) scoring_confidence"
     );
 
-    // Cleanup temp dir.
-    std::fs::remove_dir_all(&data_dir).ok();
+    // `data_dir_guard` auto-removes the temp dir on drop — no manual cleanup.
+    drop(data_dir_guard);
 }

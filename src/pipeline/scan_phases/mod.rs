@@ -177,7 +177,11 @@ pub async fn run_phased_scan(
         db.clear_scan_staging(user_did).await?;
         // Terminal (early-exit / insufficient-data) accounts are scored inside
         // gather and never reach Phase C, so count them here.
-        summary.accounts_scored += run_gather(db, user_did, candidates, deps).await?;
+        let gathered = run_gather(db, user_did, candidates, deps).await?;
+        summary.accounts_scored += gathered.terminal_scored;
+        // A skipped gather (per-account failure) means the scan is incomplete —
+        // those accounts were never enqueued and will never be scored.
+        summary.degraded |= gathered.skipped;
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Burst.as_str())
             .await?;
     }
@@ -254,17 +258,28 @@ pub async fn run_phased_scan(
     Ok(summary)
 }
 
+/// Result of the Phase A gather sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct GatherSweep {
+    /// Accounts that Stage 1 scored terminally (early-exit / insufficient-data).
+    /// They never reach Phase C, so the orchestrator folds this into
+    /// `accounts_scored`.
+    terminal_scored: usize,
+    /// True if at least one account's gather failed and was skipped — the scan
+    /// is then incomplete and the caller should mark the summary `degraded`.
+    skipped: bool,
+}
+
 /// Phase A: gather every candidate concurrently (`buffer_unordered`).
 ///
-/// Returns the number of accounts that Stage 1 scored terminally (early-exit /
-/// insufficient-data). Those accounts never reach Phase C, so the orchestrator
-/// folds this count into `accounts_scored`.
+/// Returns a [`GatherSweep`] with the terminal-scored count and whether any
+/// account was skipped due to a gather failure.
 async fn run_gather(
     db: &Arc<dyn Database>,
     user_did: &str,
     candidates: &[CandidateInput],
     deps: &PhasedScanDeps<'_>,
-) -> Result<usize> {
+) -> Result<GatherSweep> {
     // Map over owned indices (not `&CandidateInput` iterator items) and re-index
     // inside the `async move`. Mapping the borrowing items directly trips the
     // compiler's `FnOnce is not general enough` HRTB inference when this future
@@ -283,12 +298,13 @@ async fn run_gather(
     // fetch error) must NOT abort the whole scan — and on resume must not
     // re-fail the batch (livelock risk). Log per-account failures and continue
     // with the accounts that gathered successfully.
-    let mut terminal_scored = 0;
+    let mut sweep = GatherSweep::default();
     for (account_did, result) in results {
         match result {
-            Ok(GatherOutcome::Terminal) => terminal_scored += 1,
+            Ok(GatherOutcome::Terminal) => sweep.terminal_scored += 1,
             Ok(GatherOutcome::Enqueued) => {}
             Err(e) => {
+                sweep.skipped = true;
                 warn!(
                     account_did,
                     error = %e,
@@ -297,7 +313,7 @@ async fn run_gather(
             }
         }
     }
-    Ok(terminal_scored)
+    Ok(sweep)
 }
 
 /// Gather a single candidate. Extracted into a named async fn (rather than an
@@ -339,89 +355,143 @@ async fn run_finalize(
                 summary.accounts_scored += 1;
             }
             FinalizeOutcome::NeedsRegather => {
-                // Recover this account once: re-gather (fresh blob + rows),
-                // re-burst (drain its freshly-enqueued pending), re-finalize.
-                // Bounded to a single retry — never loop.
-                let Some(candidate) = candidates.iter().find(|c| c.account_did == account_did)
-                else {
-                    warn!(
-                        account_did,
-                        "finalize needs re-gather but no matching candidate — skipping"
-                    );
-                    continue;
-                };
-
-                // Clear any stale staging from the prior attempt before
-                // re-gathering. finalize's incomplete-verdict path intentionally
-                // leaves staging in place, so the prior queue rows / blob still
-                // exist; if we re-gather without clearing, those stale `pending`
-                // rows would be burst-classified and the stale blob could be read
-                // by the follow-up finalize. Clear first so the re-gather starts
-                // from a clean per-account slate.
-                db.clear_account_staging(user_did, &account_did).await?;
-
-                let inputs = gather_inputs(candidate, deps);
-                if matches!(
-                    gather_account(
-                        db,
-                        user_did,
-                        deps.fetcher,
-                        deps.scorer,
-                        deps.clean_pass,
-                        &inputs,
-                    )
-                    .await?,
-                    GatherOutcome::Terminal
-                ) {
-                    // Re-gather hit a terminal Stage-1 outcome: the score was
-                    // written by gather itself, nothing was enqueued. Count it
-                    // and move on — no re-burst / re-finalize needed.
-                    summary.accounts_scored += 1;
-                    summary.regathered += 1;
-                    continue;
-                }
-
-                // Drain the account's freshly-enqueued pending rows. A cost-cap
-                // here just means the retry could not complete — skip it.
-                if matches!(
-                    run_burst(
-                        db,
-                        user_did,
-                        deps.classifier,
-                        deps.burst_concurrency,
-                        deps.burst_batch,
-                    )
-                    .await?,
-                    BurstOutcome::CostCapped
-                ) {
-                    warn!(
-                        account_did,
-                        "re-burst hit the cost ceiling during re-gather — skipping account"
-                    );
-                    // The scan is now incomplete (this account was not scored
-                    // because of the cost cap) — flag it so the caller knows.
+                // Recovery runs in its own fallible helper so a single
+                // deleted/suspended account's re-gather/re-burst/re-finalize
+                // error is isolated: it `warn!`-logs + marks the scan degraded
+                // and the loop continues, instead of `?`-aborting every
+                // remaining account's finalize.
+                if !recover_account(db, user_did, &account_did, candidates, deps, summary).await {
+                    // Account was not recovered (skipped, errored, or still
+                    // incomplete) — the scan is incomplete.
                     summary.degraded = true;
-                    continue;
-                }
-
-                match finalize_one(db, user_did, &account_did, deps).await? {
-                    FinalizeOutcome::Scored => {
-                        summary.accounts_scored += 1;
-                        summary.regathered += 1;
-                    }
-                    FinalizeOutcome::NeedsRegather => {
-                        // Still incomplete after one recovery pass — give up on
-                        // this account (bounded) rather than loop forever.
-                        warn!(
-                            account_did,
-                            "account still needs re-gather after one recovery pass — skipping"
-                        );
-                    }
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Attempt to recover one `NeedsRegather` account with a single bounded
+/// re-gather + re-burst + re-finalize pass.
+///
+/// Returns `true` only when the account was successfully scored (terminal
+/// re-gather or a re-finalize that reached `Scored`). Any other path — a
+/// missing candidate, a re-gather/re-burst/re-finalize *error*, a cost-cap, or
+/// a still-incomplete re-finalize — returns `false` so the caller marks the
+/// scan degraded. Errors are caught here (not propagated) so one bad account
+/// never aborts the whole finalize loop.
+async fn recover_account(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    account_did: &str,
+    candidates: &[CandidateInput],
+    deps: &PhasedScanDeps<'_>,
+    summary: &mut ScanSummary,
+) -> bool {
+    let Some(candidate) = candidates.iter().find(|c| c.account_did == account_did) else {
+        warn!(
+            account_did,
+            "finalize needs re-gather but no matching candidate — skipping"
+        );
+        return false;
+    };
+
+    // Wrap the fallible recovery steps so a per-account error (deleted/suspended
+    // account, transient fetch failure) is contained rather than aborting the
+    // whole finalize loop via `?`.
+    match recover_account_inner(db, user_did, account_did, candidate, deps).await {
+        Ok(true) => {
+            summary.accounts_scored += 1;
+            summary.regathered += 1;
+            true
+        }
+        Ok(false) => {
+            // Recovery completed without error but did not score the account
+            // (cost-cap, or still incomplete after one pass). Already warned
+            // inside the helper.
+            false
+        }
+        Err(e) => {
+            warn!(
+                account_did,
+                error = %e,
+                "re-gather recovery failed for account — skipping it and continuing the scan"
+            );
+            false
+        }
+    }
+}
+
+/// The fallible body of [`recover_account`]: clear stale staging, re-gather,
+/// re-burst, re-finalize. Returns `Ok(true)` when the account was scored,
+/// `Ok(false)` when a cost-cap or still-incomplete verdict stops recovery, and
+/// `Err` on any DB/fetch failure (caught by the caller, never propagated to the
+/// finalize loop).
+async fn recover_account_inner(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    account_did: &str,
+    candidate: &CandidateInput,
+    deps: &PhasedScanDeps<'_>,
+) -> Result<bool> {
+    // Clear any stale staging from the prior attempt before re-gathering.
+    // finalize's incomplete-verdict path intentionally leaves staging in place,
+    // so the prior queue rows / blob still exist; if we re-gather without
+    // clearing, those stale `pending` rows would be burst-classified and the
+    // stale blob could be read by the follow-up finalize. Clear first so the
+    // re-gather starts from a clean per-account slate.
+    db.clear_account_staging(user_did, account_did).await?;
+
+    let inputs = gather_inputs(candidate, deps);
+    if matches!(
+        gather_account(
+            db,
+            user_did,
+            deps.fetcher,
+            deps.scorer,
+            deps.clean_pass,
+            &inputs,
+        )
+        .await?,
+        GatherOutcome::Terminal
+    ) {
+        // Re-gather hit a terminal Stage-1 outcome: the score was written by
+        // gather itself, nothing was enqueued. Done — no re-burst / re-finalize.
+        return Ok(true);
+    }
+
+    // Drain the account's freshly-enqueued pending rows. A cost-cap here just
+    // means the retry could not complete — stop and report not-scored.
+    if matches!(
+        run_burst(
+            db,
+            user_did,
+            deps.classifier,
+            deps.burst_concurrency,
+            deps.burst_batch,
+        )
+        .await?,
+        BurstOutcome::CostCapped
+    ) {
+        warn!(
+            account_did,
+            "re-burst hit the cost ceiling during re-gather — skipping account"
+        );
+        return Ok(false);
+    }
+
+    match finalize_one(db, user_did, account_did, deps).await? {
+        FinalizeOutcome::Scored => Ok(true),
+        FinalizeOutcome::NeedsRegather => {
+            // Still incomplete after one recovery pass — give up on this account
+            // (bounded) rather than loop forever.
+            warn!(
+                account_did,
+                "account still needs re-gather after one recovery pass — skipping"
+            );
+            Ok(false)
+        }
+    }
 }
 
 /// Thin wrapper that forwards the shared Phase C deps to `finalize_account`.

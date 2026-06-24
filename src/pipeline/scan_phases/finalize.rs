@@ -237,16 +237,24 @@ pub async fn finalize_account(
 
 /// Look up a post's verdict row by URI and convert it to a `BinaryVerdict`.
 ///
-/// Returns `None` when the post has no matching row OR the row is still
-/// `pending` (`toxic_token` is `None`). `score_from_sample` only reads
-/// `is_toxic` + `onnx_score`; `onnx_attributes` is unused, so `default()` is
-/// correct.
+/// Returns `None` when the post has no matching row OR the row is not yet
+/// complete. The queue `status` is the source of truth: a row whose
+/// `status != "done"` is treated as incomplete (fail closed), regardless of
+/// whether `toxic_token` happens to be populated. Only after the status gate
+/// passes do we read the verdict (a `done` row without a `toxic_token` is also
+/// inconsistent and yields `None`). `score_from_sample` only reads `is_toxic` +
+/// `onnx_score`; `onnx_attributes` is unused, so `default()` is correct.
 fn verdict_for(
     row_by_uri: &HashMap<&str, &super::staging::QueueRow>,
     post_uri: &str,
 ) -> Option<BinaryVerdict> {
     let row = row_by_uri.get(post_uri)?;
-    let is_toxic = row.toxic_token?; // None ⇒ still pending ⇒ inconsistent
+    // Status is authoritative: a still-`pending` row is incomplete even if a
+    // verdict token somehow leaked onto it. Fail closed → NeedsRegather.
+    if row.status != "done" {
+        return None;
+    }
+    let is_toxic = row.toxic_token?; // None on a done row ⇒ inconsistent
     Some(BinaryVerdict {
         is_toxic,
         onnx_score: row.onnx_score,

@@ -1360,6 +1360,72 @@ mod finalize_tests {
             .is_some());
     }
 
+    // ── status is authoritative: a `pending` row carrying a token is incomplete ──
+    // A row whose status is still "pending" must be treated as incomplete even
+    // if a `toxic_token` somehow leaked onto it. The queue status is the source
+    // of truth → finalize must return NeedsRegather (fail closed), never score.
+    #[tokio::test]
+    async fn finalize_pending_status_with_token_regathers() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // Stage a valid blob with a single original post.
+        let mut sample = survivor_sample();
+        sample.originals.truncate(1);
+        sample.replies.clear();
+        sample.quotes.clear();
+        sample.total_posts = 1;
+        let blob = AccountInput {
+            schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            account_handle: "finacct.bsky.social".to_string(),
+            sample: sample.clone(),
+            parent_texts: HashMap::new(),
+            median_engagement: 0.0,
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+            fingerprint_quality: "unreliable".to_string(),
+        };
+        db.stash_account_input(FIN_USER, ACCT, &serde_json::to_string(&blob).unwrap())
+            .await
+            .unwrap();
+
+        // Enqueue the matching row as STILL pending but with a verdict token
+        // populated — the inconsistent state the status guard fails closed on.
+        let row = QueueRow {
+            account_did: ACCT.to_string(),
+            post_uri: sample.originals[0].uri.clone(),
+            text: "x".to_string(),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: 0.5,
+            status: "pending".to_string(),
+            toxic_token: Some(true),
+            confidence: Some(0.9),
+            model_id: Some("test".to_string()),
+            policy_version: Some("p".to_string()),
+        };
+        db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
+
+        let outcome = finalize_account(
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            outcome,
+            FinalizeOutcome::NeedsRegather,
+            "a pending-status row must be treated as incomplete despite its token"
+        );
+        // Incomplete path leaves staging intact (no clear).
+        assert!(db
+            .fetch_account_input(FIN_USER, ACCT)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
     // ── HERMETIC GUARD: follower below the >=8.0 gate SKIPS NLI ──────────────
     //
     // This is the key new behavior-correctness guard for the decouple fix.
@@ -2109,6 +2175,20 @@ mod orchestration_tests {
         }
     }
 
+    // Fetcher whose fetch_sample always errors — drives the resilient-gather
+    // skip path (a per-account gather failure must mark the scan degraded).
+    struct FailingFetcher;
+
+    #[async_trait]
+    impl PostFetcher for FailingFetcher {
+        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+            anyhow::bail!("simulated fetch failure")
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(HashMap::new())
+        }
+    }
+
     // Fetcher that PANICS if fetch_sample is called — proves gather was skipped.
     struct PanicFetcher;
 
@@ -2671,5 +2751,54 @@ mod orchestration_tests {
             1,
             "fail-closed must NOT wipe the resumable staging row"
         );
+    }
+
+    // ── Test: a per-account gather failure marks the scan degraded ──
+    // The resilient-gather path skips a failing account and continues; the
+    // skipped account was never enqueued, so the scan is incomplete and the
+    // summary must report `degraded = true` (the scan reaches Done either way).
+    #[tokio::test]
+    async fn gather_failure_marks_scan_degraded() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchgfail0000000000000";
+
+        // FailingFetcher → gather_account errors → account skipped.
+        let fetcher = FailingFetcher;
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let candidates = vec![candidate(acct, "gfail.bsky.social")];
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            summary.degraded,
+            "a skipped (failed) gather must mark the scan degraded"
+        );
+        assert_eq!(
+            summary.accounts_scored, 0,
+            "the failing account was never scored"
+        );
+        // The scan still completes to Done (the skip is tolerated, not fatal).
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
+            Some("done".to_string())
+        );
+        // No score was written for the skipped account.
+        assert!(db
+            .get_account_by_did(ORCH_USER, acct)
+            .await
+            .unwrap()
+            .is_none());
     }
 }

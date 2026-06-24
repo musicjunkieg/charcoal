@@ -513,35 +513,54 @@ async fn main() -> Result<()> {
                         .await?;
                     println!("  Topic: discovered {discovered}, scored {topic_scored}");
 
-                    println!("Running graph-based sweep...");
-                    let (pool_size, graph_scored, graph_degraded) = charcoal::pipeline::sweep::run(
-                        &client,
-                        &scorer,
-                        &db,
-                        &did,
-                        &config.bluesky_handle,
-                        &protected_fingerprint,
-                        &weights,
-                        max_followers as usize,
-                        depth as usize,
-                        concurrency as usize,
-                        embedder.as_ref(),
-                        protected_embedding.as_deref(),
-                        median_engagement,
-                        &pile_on_dids,
-                        Some(config.data_dir()),
-                    )
-                    .await?;
-
-                    println!("\n{}", "Combined sweep complete.".bold());
-                    println!("  Topic: discovered {discovered}, scored {topic_scored}");
-                    println!("  Graph: pool {pool_size}, scored {graph_scored}");
-                    println!("  Total scored: {}", topic_scored + graph_scored);
-                    if topic_degraded || graph_degraded {
+                    // If the topic leg cost-capped, it left the scan mid-burst
+                    // (scan_phase = "burst") with pending rows. Starting the
+                    // graph sweep now would re-enter `run_phased_scan`, which
+                    // resumes that burst and folds the graph candidates into the
+                    // topic leg's unfinished phase — a cross-leg scan_phase
+                    // conflict. Stop here; re-running resumes the topic burst
+                    // cleanly, and the graph leg runs once the topic leg drains.
+                    if topic_degraded {
+                        println!("\n{}", "Combined sweep stopped early.".bold());
+                        println!("  Topic: discovered {discovered}, scored {topic_scored}");
                         println!(
                             "{}",
-                            "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                            "⚠️  topic sweep cost-capped and incomplete — skipping graph leg; \
+                             re-run to resume"
+                                .yellow()
                         );
+                    } else {
+                        println!("Running graph-based sweep...");
+                        let (pool_size, graph_scored, graph_degraded) =
+                            charcoal::pipeline::sweep::run(
+                                &client,
+                                &scorer,
+                                &db,
+                                &did,
+                                &config.bluesky_handle,
+                                &protected_fingerprint,
+                                &weights,
+                                max_followers as usize,
+                                depth as usize,
+                                concurrency as usize,
+                                embedder.as_ref(),
+                                protected_embedding.as_deref(),
+                                median_engagement,
+                                &pile_on_dids,
+                                Some(config.data_dir()),
+                            )
+                            .await?;
+
+                        println!("\n{}", "Combined sweep complete.".bold());
+                        println!("  Topic: discovered {discovered}, scored {topic_scored}");
+                        println!("  Graph: pool {pool_size}, scored {graph_scored}");
+                        println!("  Total scored: {}", topic_scored + graph_scored);
+                        if graph_degraded {
+                            println!(
+                                "{}",
+                                "⚠️  scan cost-capped and incomplete — re-run to resume".yellow()
+                            );
+                        }
                     }
                 }
             }

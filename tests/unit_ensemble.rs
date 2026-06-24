@@ -204,7 +204,9 @@ impl ToxicityScorer for IndexedScorer {
             .iter()
             .enumerate()
             .map(|(i, _)| ToxicityResult {
-                toxicity: self.0[i % self.0.len()],
+                // Guard against an empty score Vec (modulo-by-zero panic): fall
+                // back to 0.0 when no scores were configured.
+                toxicity: self.0.get(i % self.0.len().max(1)).copied().unwrap_or(0.0),
                 attributes: ToxicityAttributes::default(),
             })
             .collect())

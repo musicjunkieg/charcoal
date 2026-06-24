@@ -244,9 +244,11 @@ pub async fn gather_account(
         // else: leave as a pending survivor (verdict fields stay None).
     }
 
-    // Batch the writes: one enqueue, one stash.
-    db.enqueue_classifications(user_did, &rows).await?;
-
+    // Batch the writes: one stash, one enqueue. Stash the AccountInput blob
+    // BEFORE enqueuing the queue rows. If the stash fails we return early and
+    // no `pending` queue rows exist — so Phase B can never classify orphaned
+    // rows that have no Phase C blob to score against. (The reverse order would
+    // leave orphaned pending rows on a stash failure.)
     let blob = AccountInput {
         schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
         account_handle: inputs.account_handle.to_string(),
@@ -261,6 +263,8 @@ pub async fn gather_account(
     let payload = serde_json::to_string(&blob)?;
     db.stash_account_input(user_did, inputs.account_did, &payload)
         .await?;
+
+    db.enqueue_classifications(user_did, &rows).await?;
 
     Ok(GatherOutcome::Enqueued)
 }
