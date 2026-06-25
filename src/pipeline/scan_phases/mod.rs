@@ -26,6 +26,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Result};
+use futures::FutureExt as _;
 use futures::StreamExt;
 use tracing::{info, warn};
 
@@ -270,6 +271,21 @@ struct GatherSweep {
     skipped: bool,
 }
 
+/// Extract a human-readable message from a panic payload.
+///
+/// Rust panics carry a `Box<dyn Any + Send>`; the most common payloads are
+/// `&'static str` (e.g. `unwrap()`) and `String` (e.g. `panic!("{}", …)`).
+/// Any other payload type is reported as `"<non-string panic>"`.
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "<non-string panic>".to_string()
+    }
+}
+
 /// Phase A: gather every candidate concurrently (`buffer_unordered`).
 ///
 /// Returns a [`GatherSweep`] with the terminal-scored count and whether any
@@ -288,7 +304,35 @@ async fn run_gather(
     let results: Vec<(String, Result<GatherOutcome>)> = futures::stream::iter(0..candidates.len())
         .map(|i| {
             let did = candidates[i].account_did.clone();
-            async move { (did, gather_one(db, user_did, &candidates[i], deps).await) }
+            let did_for_panic = did.clone();
+            async move {
+                // Wrap in `catch_unwind` so a panic inside `gather_one` (e.g.
+                // an `unwrap()` in atrium-api on a malformed API response) is
+                // caught and turned into an `Err`, treated just like a transient
+                // fetch error: logged, skipped, scan marked degraded. Without
+                // this, a single bad response unwinds `buffer_unordered` and
+                // kills the entire scan for ~1 200 candidates.
+                //
+                // `AssertUnwindSafe` is required because the future borrows
+                // `db`, `candidates[i]`, and `deps` (none are `UnwindSafe`).
+                // This is sound: we're only catching to log-and-skip, not
+                // resuming or re-using any potentially-poisoned state.
+                let outcome =
+                    std::panic::AssertUnwindSafe(gather_one(db, user_did, &candidates[i], deps))
+                        .catch_unwind()
+                        .await;
+
+                let result = match outcome {
+                    Ok(inner) => inner,
+                    Err(payload) => {
+                        let msg = panic_message(&payload);
+                        Err(anyhow::anyhow!(
+                            "gather panicked for account {did_for_panic}: {msg}"
+                        ))
+                    }
+                };
+                (did, result)
+            }
         })
         .buffer_unordered(deps.gather_concurrency.clamp(1, 64))
         .collect()
