@@ -61,6 +61,14 @@ struct JobEnvelope {
     output: Option<RawOutput>,
     #[serde(default)]
     error: Option<serde_json::Value>,
+    /// RunPod-reported queue wait time in milliseconds. Present on terminal
+    /// responses; absent while the job is still IN_QUEUE/IN_PROGRESS.
+    #[serde(rename = "delayTime", default)]
+    delay_time_ms: Option<u32>,
+    /// RunPod-reported inference (execution) time in milliseconds. Present on
+    /// terminal responses; absent while the job is still running.
+    #[serde(rename = "executionTime", default)]
+    execution_time_ms: Option<u32>,
 }
 
 /// Result of interpreting a single job-envelope response.
@@ -194,6 +202,10 @@ impl RunPodCopeBClient {
             bail!("RunPod job {status}: {detail}");
         }
 
+        // Capture timing fields before the partial move of `env.output`.
+        let delay_time_ms = env.delay_time_ms;
+        let execution_time_ms = env.execution_time_ms;
+
         if let Some(out) = env.output {
             // `confidence` crosses an external boundary. A NaN or out-of-[0,1]
             // value would silently skew `is_toxic` threshold comparisons, so
@@ -202,6 +214,11 @@ impl RunPodCopeBClient {
             if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
                 bail!("RunPod confidence out of contract (expected finite value in [0,1]): {confidence}");
             }
+            crate::observability::classifier_metrics::record_runpod_timing(
+                delay_time_ms,
+                execution_time_ms,
+                latency_ms,
+            );
             return Ok(JobOutcome::Completed(ClassifierVerdict {
                 toxic_token: out.toxic,
                 confidence,
@@ -416,4 +433,87 @@ pub async fn warm_up(client: &RunPodCopeBClient) -> Result<()> {
         )
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A minimal valid COMPLETED envelope WITH delayTime/executionTime.
+    fn completed_json_with_timing() -> &'static str {
+        r#"{
+            "id": "abc-123",
+            "status": "COMPLETED",
+            "delayTime": 4800,
+            "executionTime": 700,
+            "output": {
+                "toxic": false,
+                "confidence": 0.1,
+                "model": "cope-b-a4b",
+                "policy_version": "policy-v1"
+            }
+        }"#
+    }
+
+    /// A minimal valid COMPLETED envelope WITHOUT delayTime/executionTime
+    /// (backward-compat: older handler responses, test stubs).
+    fn completed_json_without_timing() -> &'static str {
+        r#"{
+            "id": "def-456",
+            "status": "COMPLETED",
+            "output": {
+                "toxic": true,
+                "confidence": 0.9,
+                "model": "cope-b-a4b",
+                "policy_version": "policy-v1"
+            }
+        }"#
+    }
+
+    #[test]
+    fn test_runpod_timing_fields_parse_from_completed_envelope() {
+        let env: JobEnvelope =
+            serde_json::from_str(completed_json_with_timing()).expect("should deserialize");
+        assert_eq!(
+            env.delay_time_ms,
+            Some(4800),
+            "delayTime should deserialize to Some(4800)"
+        );
+        assert_eq!(
+            env.execution_time_ms,
+            Some(700),
+            "executionTime should deserialize to Some(700)"
+        );
+    }
+
+    #[test]
+    fn test_parse_response_succeeds_with_timing_fields() {
+        // parse_response is the public entry point; it should still return a
+        // valid verdict even when delayTime/executionTime are present.
+        let verdict = RunPodCopeBClient::parse_response(completed_json_with_timing(), 5500)
+            .expect("should parse successfully");
+        assert!(!verdict.toxic_token);
+        assert!((verdict.confidence - 0.1).abs() < f32::EPSILON);
+        assert_eq!(verdict.latency_ms, 5500);
+    }
+
+    #[test]
+    fn test_timing_fields_absent_deserialize_to_none() {
+        let env: JobEnvelope =
+            serde_json::from_str(completed_json_without_timing()).expect("should deserialize");
+        assert_eq!(env.delay_time_ms, None, "missing delayTime should be None");
+        assert_eq!(
+            env.execution_time_ms, None,
+            "missing executionTime should be None"
+        );
+    }
+
+    #[test]
+    fn test_parse_response_backward_compat_without_timing() {
+        // Older responses that omit timing fields should still parse correctly.
+        let verdict = RunPodCopeBClient::parse_response(completed_json_without_timing(), 1000)
+            .expect("should parse successfully without timing fields");
+        assert!(verdict.toxic_token);
+        assert!((verdict.confidence - 0.9).abs() < f32::EPSILON);
+    }
 }

@@ -28,6 +28,25 @@ pub fn record_request(backend: &str, latency_ms: u32, toxic: bool, retries: u32)
     }
 }
 
+/// RunPod's own queue/inference split from the job envelope (`delayTime` /
+/// `executionTime`), alongside the client-measured wall clock. Distinguishes
+/// "too few workers" (high delay) from "slow inference" (high execution).
+/// Emitted exactly once per terminal completion, from `parse_job`. Fields are
+/// `None` when RunPod omits them (e.g. on some non-terminal or legacy responses).
+pub fn record_runpod_timing(
+    delay_time_ms: Option<u32>,
+    execution_time_ms: Option<u32>,
+    wall_clock_ms: u32,
+) {
+    info!(
+        metric = "classifier_runpod_timing",
+        backend = "runpod-cope-b",
+        delay_time_ms = ?delay_time_ms,
+        execution_time_ms = ?execution_time_ms,
+        wall_clock_ms = wall_clock_ms,
+    );
+}
+
 pub fn record_cold_start(backend: &str, latency_ms: u32) {
     info!(
         metric = "classifier_cold_start_detected",
