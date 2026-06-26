@@ -365,16 +365,15 @@ impl RunPodCopeBClient {
         content: &str,
         timeout: Duration,
     ) -> Result<(ClassifierVerdict, u32)> {
-        // Cost backstop: arm-then-check before issuing ANY RunPod request. This
-        // is the single chokepoint every request path flows through (classify
-        // and warm_up), so the meter cannot be bypassed. Over the ceiling this
-        // returns a non-retryable error — it sits OUTSIDE the backon retry loop
-        // below, so it is inherently non-retryable — that rides the same skip
-        // path the live HTTP 402 already exercised.
-        // The cost backstop is checked per-attempt INSIDE the retry closure
-        // below (so a mid-burst budget blow stops further retries too), and the
-        // in-flight worker time is billed by a guard scoped to each real request
-        // — never across the retry backoff gaps, which have no active GPU.
+        // Cost backstop: the ceiling is checked per-attempt INSIDE the retry
+        // closure below (before each request), so even a mid-burst budget blow
+        // stops further retries — a trip becomes a non-retryable
+        // `RunPodError::CostCapped` that backon returns at once, riding the same
+        // skip path the live HTTP 402 already exercised. classify_with_timeout is
+        // the single chokepoint every request path flows through (classify and
+        // warm_up), so the meter cannot be bypassed. The in-flight worker time is
+        // billed by a guard scoped to each real request — never across the retry
+        // backoff gaps, which have no active GPU.
         let body = Self::build_request_body(content);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));
         let start = Instant::now();
