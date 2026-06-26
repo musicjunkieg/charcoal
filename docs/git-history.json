@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4c0ed7b1f2f3a3060a9ea4b8cc8aa9f44d62e116",
+    "short_hash": "4c0ed7b",
+    "author": "Bryan Guffey",
+    "date": "2026-06-26T08:52:23-07:00",
+    "message": "fix(burst): survive transient classifier failures, widen RunPod retries (#183)\n\nThe #178 staging scan aborted in the burst phase on a single RunPod\ntransport error: one ~few-second serverless blip outran the retry budget\n(3 retries / ~3.5s window), and run_burst then propagated the error,\nkilling a 4905-item burst before finalize.\n\nTwo changes:\n\n1. Typed transient errors + graceful burst stop. The RunPod client now\n   maps a retry-exhausted *transient* error (transport / 5xx) to a typed\n   ClassifierTransientError; a *permanent* error (4xx) passes through.\n   run_burst downcasts to it (like CostCeilingExceeded) and returns the\n   new BurstOutcome::Interrupted: successes are recorded, the rest stay\n   pending, and run_phased_scan finishes degraded-but-resumable instead\n   of hard-aborting. A resume retries the pending rows once the backend\n   recovers. Permanent errors STILL abort — leaving such a row pending\n   would livelock every resume.\n\n2. Wider retry budget. Default max_retries 3->6 with an 8s max-delay cap\n   (~20s window), so a typical RunPod scale-up / blip is absorbed by\n   retries before it ever reaches the burst stop path.\n\nTDD: 5 new tests (transient->Interrupted+resumable, permanent->abort,\nerror mapping for 5xx/4xx, widened default). Full --features web suite\n(31 binaries) green; clippy clean web/default/postgres.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 8
+  },
+  {
     "hash": "cd6ae9c742ea359978a6be26f9315dcdf92dab4e",
     "short_hash": "cd6ae9c",
     "author": "Bryan Guffey",

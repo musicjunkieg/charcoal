@@ -362,7 +362,9 @@ impl RunPodCopeBClient {
         // returns a non-retryable error — it sits OUTSIDE the backon retry loop
         // below, so it is inherently non-retryable — that rides the same skip
         // path the live HTTP 402 already exercised.
-        self.meter.arm_and_check()?;
+        // Hold the in-flight guard for the whole RunPod call (incl. retries): on
+        // drop it leaves the cost meter's in-flight set, billing its worker time.
+        let _in_flight = self.meter.arm_and_check()?;
 
         let body = Self::build_request_body(content);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));

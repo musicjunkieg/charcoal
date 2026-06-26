@@ -3508,6 +3508,61 @@
       "created_at": "2026-06-26T08:52:06.844898-07:00",
       "updated_at": "2026-06-26T08:52:06.844898-07:00",
       "metadata_json": "{\"branch\":\"feat/runpod-transient-retry\",\"confidence\":95,\"files\":[\"src/toxicity/classifier.rs\",\"src/toxicity/runpod_cope_b.rs\",\"src/pipeline/scan_phases/burst.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 326,
+      "change_id": "678fe288-13ac-44dd-a83f-2878e2bcad60",
+      "node_type": "outcome",
+      "title": "#183 SHIPPED to review: PR #64 (feat/runpod-transient-retry -> staging, commit 4c0ed7b). Burst now survives transient RunPod failures (ClassifierTransientError -> BurstOutcome::Interrupted, degraded+resumable) while permanent 4xx still abort; retries widened 3->6+8s cap. 5 TDD tests, 31 binaries + clippy web/default/pg clean. Joins #63 Phase 6 batch once merged (auto-tracks staging HEAD). Awaiting CodeRabbit.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T08:53:57.926883-07:00",
+      "updated_at": "2026-06-26T08:53:57.926883-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-transient-retry\",\"commit\":\"4c0ed7b\",\"confidence\":95}"
+    },
+    {
+      "id": 327,
+      "change_id": "0e4c3ec8-6b05-4ebb-8228-c7b34073c3a9",
+      "node_type": "outcome",
+      "title": "PR #64 (#183) CodeRabbit APPROVED first-pass @ 4c0ed7b, 0 findings, mergeable=CLEAN — ready to merge to staging. Re-run diagnosis: RunPod endpoint f39lf61pc762a8 HEALTHY (5 ready workers, 0 queued, 32518 done/2 failed) — idle because re-run (started 15:42 UTC, events=2951) is still in amplification, NOT a RunPod problem. #208 resume only skips gather, not amplification (~65min re-run every scan); RunPod activity expected ~16:45 when run_phased_scan reached. WATCHING: resume marker ('resuming interrupted burst phase' = true resume of 4905 queue) vs fresh 'entering gather phase' (=marker reset, re-gather). Re-run is on OLD deploy 26025c28 WITHOUT #64 resilience.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T09:00:46.037144-07:00",
+      "updated_at": "2026-06-26T09:00:46.037144-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-transient-retry\",\"confidence\":95}"
+    },
+    {
+      "id": 328,
+      "change_id": "bcf9a466-0494-4282-8daa-6a8497fd95c1",
+      "node_type": "outcome",
+      "title": "RESUME VALIDATED on staging re-run: 16:45:59 'resuming interrupted burst phase' — gather SKIPPED (only old 06:43 entry), 'entering burst phase pending=4421' (was 4905 at abort → ~484 prior classifications persisted, #208 phased resumability works). RunPod healthy + classifying: delay~3.3-4s/exec~52-90ms/wall~3.5-4s (faster than run1's 5.5s, workers warm), queue-bound, 0 429s, no abort. Expect  cost-cap ~17:20-25 → degraded+resumable. Confirms #208 resume + RunPod path both work.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T10:00:40.215997-07:00",
+      "updated_at": "2026-06-26T10:00:40.215997-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-transient-retry\",\"confidence\":96}"
+    },
+    {
+      "id": 329,
+      "change_id": "6cfe2730-e126-4b65-908b-46743719b258",
+      "node_type": "outcome",
+      "title": "Burst COMPLETED (not cost-capped) on resumed run: 17:22:29 'entering finalize phase accounts=2900' reached → burst returned Complete, drained all 4421 pending (+ ~484 prior = full queue). 0 429s, no abort, RunPod healthy ~3.3-4s/call whole way. First time the classifier phase ran to completion (orig run errored). Now finalizing 2900 accounts (~1.7s each, ~80min → complete ~18:40). Degraded only from earlier gather skips, not classifier. Validates resume + RunPod + full burst drain end-to-end.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T10:25:03.652188-07:00",
+      "updated_at": "2026-06-26T10:25:03.652188-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-transient-retry\",\"confidence\":96}"
+    },
+    {
+      "id": 330,
+      "change_id": "387e99c4-f200-449e-89ca-3f622212a989",
+      "node_type": "action",
+      "title": "Implement #185 real-time real-cost accounting (TDD): worker-seconds integral Acc (capped at workersMax) + RAII InFlightGuard arm/leave per RunPod call + estimated_cents/arm_and_check fed worker-seconds (same over_ceiling predicate) + CHARCOAL_RUNPOD_WORKERS_MAX env. 12 tests (4 Acc + 4 meter + migrated 2 short-circuit + 11 predicate). 31 binaries + clippy web/default/pg clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T11:10:38.210647-07:00",
+      "updated_at": "2026-06-26T11:10:38.210647-07:00",
+      "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"confidence\":95,\"files\":[\"src/toxicity/cost_meter.rs\",\"src/toxicity/runpod_cope_b.rs\",\"tests/unit_classifier.rs\",\"CHANGELOG.md\"]}"
     }
   ],
   "edges": [
@@ -6909,6 +6964,61 @@
       "weight": 1.0,
       "rationale": "Fix for the RunPod transport abort found in the #178 scan",
       "created_at": "2026-06-26T08:52:06.852131-07:00"
+    },
+    {
+      "id": 318,
+      "from_node_id": 325,
+      "to_node_id": 326,
+      "from_change_id": "51bd20c1-409e-45a6-97a7-9232c13942f0",
+      "to_change_id": "678fe288-13ac-44dd-a83f-2878e2bcad60",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Shipped via PR #64",
+      "created_at": "2026-06-26T08:53:57.934405-07:00"
+    },
+    {
+      "id": 319,
+      "from_node_id": 326,
+      "to_node_id": 327,
+      "from_change_id": "678fe288-13ac-44dd-a83f-2878e2bcad60",
+      "to_change_id": "0e4c3ec8-6b05-4ebb-8228-c7b34073c3a9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR #64 approved + re-run diagnosis",
+      "created_at": "2026-06-26T09:00:46.044614-07:00"
+    },
+    {
+      "id": 320,
+      "from_node_id": 327,
+      "to_node_id": 328,
+      "from_change_id": "0e4c3ec8-6b05-4ebb-8228-c7b34073c3a9",
+      "to_change_id": "bcf9a466-0494-4282-8daa-6a8497fd95c1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Resume verdict: true resume + RunPod healthy",
+      "created_at": "2026-06-26T10:00:40.223461-07:00"
+    },
+    {
+      "id": 321,
+      "from_node_id": 328,
+      "to_node_id": 329,
+      "from_change_id": "bcf9a466-0494-4282-8daa-6a8497fd95c1",
+      "to_change_id": "6cfe2730-e126-4b65-908b-46743719b258",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Burst completed full drain on resume",
+      "created_at": "2026-06-26T10:25:03.659628-07:00"
+    },
+    {
+      "id": 322,
+      "from_node_id": 328,
+      "to_node_id": 330,
+      "from_change_id": "bcf9a466-0494-4282-8daa-6a8497fd95c1",
+      "to_change_id": "387e99c4-f200-449e-89ca-3f622212a989",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Real-cost fix following the cost-gap finding",
+      "created_at": "2026-06-26T11:10:38.217688-07:00"
     }
   ],
   "documents": [
