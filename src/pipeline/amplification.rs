@@ -320,19 +320,34 @@ pub async fn run(
             info!("No quote/reply events to analyze");
         }
 
-        // Fetch every scorable amplifier's followers concurrently, then process
-        // the results sequentially. Same #207 rationale as the sweep
-        // (`sweep.rs`): the serial network awaits were the dominant cost. The
-        // per-follower staleness check is a fast local DB query and the seen-DID
-        // dedup mutates shared state, so the processing loop stays sequential —
-        // only the network fan-out is parallelized. Index by `usize` (not
-        // `&scorable_events` items) so the mapped future carries no higher-ranked
-        // borrow; this future is held across the web background-scan's
-        // `tokio::spawn` boundary, the same reason `run_gather` indexes by usize.
-        let fetch_results: Vec<(String, Result<Vec<followers::Follower>>)> =
-            futures::stream::iter(0..scorable_events.len())
+        // Deduplicate amplifiers by handle first: multiple quote/reply events can
+        // share one amplifier, and we only need that amplifier's follower list
+        // once. Deduping cuts redundant concurrent fetches — and the rate-limit
+        // risk that comes with firing the same request many times at once.
+        // First-occurrence (event) order is preserved.
+        let mut unique_amplifiers: Vec<String> = Vec::new();
+        let mut seen_amplifiers: HashSet<String> = HashSet::new();
+        for event in &scorable_events {
+            if seen_amplifiers.insert(event.amplifier_handle.clone()) {
+                unique_amplifiers.push(event.amplifier_handle.clone());
+            }
+        }
+
+        // Fetch each unique amplifier's followers concurrently, then process the
+        // results sequentially. Same #207 rationale as the sweep (`sweep.rs`): the
+        // serial network awaits were the dominant cost. The per-follower staleness
+        // check is a fast local DB query and the seen-DID dedup mutates shared
+        // state, so the processing loop stays sequential — only the network
+        // fan-out is parallelized. Carry the original index and sort the results
+        // back into it: `buffer_unordered` yields in completion (network-timing)
+        // order, so sorting restores deterministic, event-order candidate building
+        // and stable logs. Index by `usize` (not `&unique_amplifiers` items) so
+        // the mapped future carries no higher-ranked borrow — the same reason
+        // `run_gather` indexes by usize across the web `tokio::spawn` boundary.
+        let mut fetch_results: Vec<(usize, String, Result<Vec<followers::Follower>>)> =
+            futures::stream::iter(0..unique_amplifiers.len())
                 .map(|i| {
-                    let handle = scorable_events[i].amplifier_handle.clone();
+                    let handle = unique_amplifiers[i].clone();
                     async move {
                         let result = followers::fetch_followers(
                             client,
@@ -340,14 +355,15 @@ pub async fn run(
                             max_followers_per_amplifier,
                         )
                         .await;
-                        (handle, result)
+                        (i, handle, result)
                     }
                 })
                 .buffer_unordered(concurrency.clamp(1, 64))
                 .collect()
                 .await;
+        fetch_results.sort_by_key(|(i, _, _)| *i);
 
-        for (amplifier_handle, result) in fetch_results {
+        for (_, amplifier_handle, result) in fetch_results {
             match result {
                 Ok(follower_list) => {
                     // Filter — find followers with stale scores. Exclude the

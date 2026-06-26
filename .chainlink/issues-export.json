@@ -1,7 +1,23 @@
 {
   "version": 1,
-  "exported_at": "2026-06-26T04:59:16.713450+00:00",
+  "exported_at": "2026-06-26T05:11:55.283239+00:00",
   "issues": [
+    {
+      "id": 182,
+      "title": "Add 429/backoff retry to PublicAtpClient (Bluesky read client)",
+      "description": "Current state: \n\nDesired state: \n\nReason: \n\nPublicAtpClient::xrpc_get (src/bluesky/client.rs:65) bails on any non-2xx — including HTTP 429 rate-limit — with no retry or backoff. Surfaced by #178, which parallelized the second-degree sweep and amplification follower fetches (serial -> buffer_unordered, prod concurrency=8). Total request volume is unchanged vs serial, but the request RATE rises ~8x during the follower-crawl window, raising the chance of tripping Bluesky public appview rate limits.\n\nCurrent failure mode is graceful (a 429 -> fetch_followers Err -> follower warn-logged and skipped -> scan finishes degraded, re-runnable), so this is hardening, not a blocker. But dropped coverage on rate-limited fetches degrades scan completeness.\n\nScope: wrap xrpc_get (and likely resolve_pds_url) request execution in exponential backoff that retries on 429 + 5xx + transient network errors, honoring Retry-After when present; leave 4xx (except 429) as hard failures. Mirror the existing backon-based pattern in src/toxicity/runpod_cope_b.rs:367 (ExponentialBuilder + Retryable + .when() filter) rather than zentropi.rs hand-rolled sleep loop. backon = \"1\" is already a dependency.\n\nTrigger to prioritize: if the #178 staging validation scan shows 429s in logs, do this before staging->main promotion. If the scan is clean at concurrency=8, lower urgency.\n\nAcceptance: 429/5xx/network errors retried with capped exponential backoff; non-retryable 4xx still fail fast; unit test for the retry-classification predicate.",
+      "status": "open",
+      "priority": "low",
+      "parent_id": null,
+      "labels": [
+        "hardening",
+        "refactor"
+      ],
+      "comments": [],
+      "created_at": "2026-06-26T05:01:38.615802+00:00",
+      "updated_at": "2026-06-26T05:01:38.615802+00:00",
+      "closed_at": null
+    },
     {
       "id": 181,
       "title": "Pre-commit hook re-adds gitignored .chainlink/issues-export.json (forces --no-verify) — update hook to skip the untracked export.",

@@ -92,21 +92,32 @@ pub async fn run(
     // `&first_degree` items) so the mapped future carries no higher-ranked
     // borrow; this future is held across the web background-scan's
     // `tokio::spawn` boundary, the same reason `run_gather` indexes by usize.
-    let fetch_results: Vec<(String, Result<Vec<followers::Follower>>)> =
+    let mut fetch_results: Vec<(usize, String, Result<Vec<followers::Follower>>)> =
         futures::stream::iter(0..first_degree.len())
             .map(|i| {
                 let handle = first_degree[i].handle.clone();
                 async move {
                     let result =
                         followers::fetch_followers(client, &handle, max_second_degree_per).await;
-                    (handle, result)
+                    (i, handle, result)
                 }
             })
             .buffer_unordered(concurrency.clamp(1, 64))
             .collect()
             .await;
 
-    let second_degree_pool = dedup_second_degree(&mut seen, fetch_results);
+    // `buffer_unordered` yields in completion (network-timing) order. Sort back
+    // to first-degree order before the fold so the deduped pool — and the
+    // downstream `stale` / `candidates` vecs it feeds — is deterministic and
+    // byte-identical to the old serial loop's output. (Dedup correctness doesn't
+    // need this; reproducibility does.)
+    fetch_results.sort_by_key(|(i, _, _)| *i);
+    let ordered: Vec<(String, Result<Vec<followers::Follower>>)> = fetch_results
+        .into_iter()
+        .map(|(_, handle, result)| (handle, result))
+        .collect();
+
+    let second_degree_pool = dedup_second_degree(&mut seen, ordered);
 
     println!(
         "  Found {} unique second-degree accounts",
@@ -449,5 +460,18 @@ mod tests {
         // The failed batch is skipped (warn-logged); the successful one still counts.
         let expected: BTreeSet<String> = ["did:a", "did:b"].iter().map(|s| s.to_string()).collect();
         assert_eq!(dids(&pool), expected);
+    }
+
+    #[test]
+    fn dedup_preserves_input_order() {
+        // The fold is a stable, input-order-preserving pass: new DIDs appear in
+        // the order their batches are supplied. `run` sorts the concurrent fetch
+        // results back into first-degree order before calling this, so the final
+        // pool is deterministic. Forward batches -> [a, c] from batch 1, then [b]
+        // from batch 2 (c is a dup, fd1/self are pre-seeded out).
+        let mut seen = preseed();
+        let pool = dedup_second_degree(&mut seen, batches());
+        let order: Vec<&str> = pool.iter().map(|f| f.did.as_str()).collect();
+        assert_eq!(order, vec!["did:a", "did:c", "did:b"]);
     }
 }
