@@ -9,6 +9,7 @@
 // 5. Stores the results for the threat report
 
 use anyhow::Result;
+use futures::StreamExt;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -319,20 +320,42 @@ pub async fn run(
             info!("No quote/reply events to analyze");
         }
 
-        for event in &scorable_events {
-            println!("\nFetching followers of @{}...", event.amplifier_handle);
+        // Fetch every scorable amplifier's followers concurrently, then process
+        // the results sequentially. Same #207 rationale as the sweep
+        // (`sweep.rs`): the serial network awaits were the dominant cost. The
+        // per-follower staleness check is a fast local DB query and the seen-DID
+        // dedup mutates shared state, so the processing loop stays sequential —
+        // only the network fan-out is parallelized. Index by `usize` (not
+        // `&scorable_events` items) so the mapped future carries no higher-ranked
+        // borrow; this future is held across the web background-scan's
+        // `tokio::spawn` boundary, the same reason `run_gather` indexes by usize.
+        let fetch_results: Vec<(String, Result<Vec<followers::Follower>>)> =
+            futures::stream::iter(0..scorable_events.len())
+                .map(|i| {
+                    let handle = scorable_events[i].amplifier_handle.clone();
+                    async move {
+                        let result = followers::fetch_followers(
+                            client,
+                            &handle,
+                            max_followers_per_amplifier,
+                        )
+                        .await;
+                        (handle, result)
+                    }
+                })
+                .buffer_unordered(concurrency.clamp(1, 64))
+                .collect()
+                .await;
 
-            match followers::fetch_followers(
-                client,
-                &event.amplifier_handle,
-                max_followers_per_amplifier,
-            )
-            .await
-            {
+        for (amplifier_handle, result) in fetch_results {
+            match result {
                 Ok(follower_list) => {
                     // Filter — find followers with stale scores. Exclude the
                     // protected user from their own threat report, and skip any
                     // DID already queued (amplifier entries take precedence).
+                    // Dedup runs here, after all fetches complete, so the shared
+                    // `seen_dids`/`candidates` have a single sequential mutator —
+                    // the result is the same set regardless of fetch arrival order.
                     let mut added = 0usize;
                     for f in follower_list
                         .iter()
@@ -357,7 +380,7 @@ pub async fn run(
                     }
 
                     println!(
-                        "  Found {} followers, {} need scoring ({} concurrent)...",
+                        "  @{amplifier_handle}: {} followers, {} need scoring ({} concurrent)...",
                         follower_list.len(),
                         added,
                         concurrency,
@@ -365,7 +388,7 @@ pub async fn run(
                 }
                 Err(e) => {
                     warn!(
-                        handle = event.amplifier_handle,
+                        handle = amplifier_handle,
                         error = %e,
                         "Failed to fetch followers, skipping"
                     );

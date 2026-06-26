@@ -3398,6 +3398,39 @@
       "created_at": "2026-06-25T21:28:14.958442-07:00",
       "updated_at": "2026-06-25T21:28:14.958442-07:00",
       "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95,\"files\":[\"src/pipeline/sweep.rs\"]}"
+    },
+    {
+      "id": 316,
+      "change_id": "a1af5e99-2201-4546-8d08-1b85cbb68970",
+      "node_type": "outcome",
+      "title": "PR #62 opened (feat/parallelize-follower-sweep -> staging): sweep second-degree fetch parallelization. Commit cd6ae9c. Awaiting CodeRabbit + staging deploy. #178 amplification.rs analog deferred to follow-up.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:29:25.960016-07:00",
+      "updated_at": "2026-06-25T21:29:25.960016-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"commit\":\"cd6ae9c\",\"confidence\":95}"
+    },
+    {
+      "id": 317,
+      "change_id": "8ede9f38-95d4-4845-86e8-6f7de84f02f8",
+      "node_type": "action",
+      "title": "Parallelize amplification.rs follower fetch (#178 second half): same buffer_unordered fan-out + sequential staleness/dedup fold as sweep, on branch feat/parallelize-follower-sweep",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:56:49.769231-07:00",
+      "updated_at": "2026-06-25T21:56:49.769231-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":90,\"files\":[\"src/pipeline/amplification.rs\"]}"
+    },
+    {
+      "id": 318,
+      "change_id": "ed75ffd7-5650-471c-b512-13f165973f97",
+      "node_type": "outcome",
+      "title": "amplification.rs follower fetch parallelized (#178 second half): serial per-event loop -> buffer_unordered(concurrency.clamp(1,64)) fan-out + sequential staleness/dedup fold. No new pure logic (dedup property same as sweep, already unit-tested); composition suite guards e2e path. Full web suite 31/31 binaries pass; clippy+fmt clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:58:59.980809-07:00",
+      "updated_at": "2026-06-25T21:58:59.980809-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":95,\"files\":[\"src/pipeline/amplification.rs\"]}"
     }
   ],
   "edges": [
@@ -6689,6 +6722,39 @@
       "weight": 1.0,
       "rationale": "Outcome of parallelization action",
       "created_at": "2026-06-25T21:28:20.544298-07:00"
+    },
+    {
+      "id": 308,
+      "from_node_id": 315,
+      "to_node_id": 316,
+      "from_change_id": "2698fc56-5c80-4cb2-a7c7-85ac49281b0f",
+      "to_change_id": "a1af5e99-2201-4546-8d08-1b85cbb68970",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Shipped via PR #62",
+      "created_at": "2026-06-25T21:29:25.967437-07:00"
+    },
+    {
+      "id": 309,
+      "from_node_id": 313,
+      "to_node_id": 317,
+      "from_change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "to_change_id": "8ede9f38-95d4-4845-86e8-6f7de84f02f8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second half of the #178 parallelization lever",
+      "created_at": "2026-06-25T21:56:49.776432-07:00"
+    },
+    {
+      "id": 310,
+      "from_node_id": 317,
+      "to_node_id": 318,
+      "from_change_id": "8ede9f38-95d4-4845-86e8-6f7de84f02f8",
+      "to_change_id": "ed75ffd7-5650-471c-b512-13f165973f97",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of amplification parallelization",
+      "created_at": "2026-06-25T21:58:59.988194-07:00"
     }
   ],
   "documents": [

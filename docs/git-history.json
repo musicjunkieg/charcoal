@@ -1,5 +1,13 @@
 [
   {
+    "hash": "cd6ae9c742ea359978a6be26f9315dcdf92dab4e",
+    "short_hash": "cd6ae9c",
+    "author": "Bryan Guffey",
+    "date": "2026-06-25T21:28:39-07:00",
+    "message": "perf(sweep): parallelize second-degree follower fetch (#178)\n\nThe second-degree sweep awaited fetch_followers one first-degree\nfollower at a time. On a big-account onboarding this serial network\nchain is the dominant cost — the measured #207 baseline was ~2h08m\npre-burst, ~100% Bluesky I/O — even though the classifier burst is\nalready solved.\n\nReplace the serial for-loop with a buffer_unordered fan-out (capped at\nconcurrency.clamp(1,64), matching run_gather), then fold the results\nsequentially. Dedup must stay sequential (a HashSet cannot be shared\nacross the in-flight futures) but it is cheap; all the wall-clock was in\nthe awaits. The fold is extracted into a pure dedup_second_degree helper\nso its order-independence — the one real risk of going concurrent, since\nbuffer_unordered delivers batches in arbitrary order — is unit-tested.\n\nThe produced second-degree pool is the same set as before: a follower's\nprofile fields are its own, so which first-degree follower we discover\nthem through is immaterial.\n\nTests: 2 new unit tests (order-independence + error-skip); full web\nsuite (31 binaries) green; clippy clean.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 3
+  },
+  {
     "hash": "25191d23e063a1685fb66b641bd2cb482e8e6722",
     "short_hash": "25191d2",
     "author": "Bryan Guffey",
