@@ -1,7 +1,23 @@
 {
   "version": 1,
-  "exported_at": "2026-06-26T05:11:55.283239+00:00",
+  "exported_at": "2026-06-26T15:52:23.396043+00:00",
   "issues": [
+    {
+      "id": 183,
+      "title": "Retry RunPod transport/connect errors in burst (backon predicate gap)",
+      "description": "Steps to reproduce:\n1. \n\nExpected: \nActual: \n\nLive staging scan (2026-06-26, #178 validation) ABORTED in burst at 08:07:02 on a single: ERROR charcoal::web::scan_job: Pipeline error error=RunPod transport: error sending request for url (https://api.runpod.ai/v2/f39lf61pc762a8/runsync). One transient connect/transport blip killed a 4905-item burst. RunPodCopeBClient has backon retry (runpod_cope_b.rs ~367) but its .when() predicate / RetryClass likely does NOT classify a reqwest transport \"error sending request\" (connect/send failure, no HTTP status) as retryable, so it propagated as non-retryable → run_phased_scan Err → scan aborted. #208 makes it resumable, but a transient network blip should be retried, not abort. Part of the Phase 6 ship (#63 batch). Fix: classify reqwest transport/connect/timeout errors (is_connect/is_timeout/is_request, no status) as RETRYABLE with capped exponential backoff, alongside existing 5xx/429; keep genuine 4xx (non-429) + cost-cap non-retryable. TDD: unit test the retry-classification predicate for a transport error. Acceptance: a simulated transport error is retried (not aborted); 4xx still fails fast; cost-cap still non-retryable.",
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "bug",
+        "hardening"
+      ],
+      "comments": [],
+      "created_at": "2026-06-26T15:26:53.467874+00:00",
+      "updated_at": "2026-06-26T15:26:53.467874+00:00",
+      "closed_at": null
+    },
     {
       "id": 182,
       "title": "Add 429/backoff retry to PublicAtpClient (Bluesky read client)",

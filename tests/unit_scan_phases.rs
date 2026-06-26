@@ -1702,7 +1702,9 @@ mod burst_tests {
     use charcoal::pipeline::scan_phases::burst::{
         burst_batch, burst_concurrency, run_burst, BurstOutcome,
     };
-    use charcoal::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+    use charcoal::toxicity::classifier::{
+        ClassifierTransientError, ClassifierVerdict, ToxicityClassifier,
+    };
     use charcoal::toxicity::cost_meter::CostCeilingExceeded;
 
     const BURST_USER: &str = "did:plc:burstuser0000000000000";
@@ -1981,6 +1983,168 @@ mod burst_tests {
             done_count, 3,
             "exactly the 3 successful rows should be done"
         );
+    }
+
+    // ── transient-fail double: Ok for K calls, then a transient classifier error
+    // (the RunPod-blip-after-retries-exhausted case the burst must survive).
+    struct TransientFailClassifier {
+        verdict: ClassifierVerdict,
+        calls_before_fail: usize,
+        call_count: Mutex<usize>,
+    }
+
+    impl TransientFailClassifier {
+        fn new(verdict: ClassifierVerdict, calls_before_fail: usize) -> Self {
+            Self {
+                verdict,
+                calls_before_fail,
+                call_count: Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for TransientFailClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            if *count > self.calls_before_fail {
+                Err(
+                    ClassifierTransientError::new("runpod transport blip (retries exhausted)")
+                        .into(),
+                )
+            } else {
+                Ok(self.verdict.clone())
+            }
+        }
+        fn name(&self) -> &'static str {
+            "transient-fail"
+        }
+        fn model_id(&self) -> &'static str {
+            "transient-fail"
+        }
+        fn policy_version(&self) -> &'static str {
+            "transient-fail"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // ── permanent-fail double: Ok for K calls, then a non-transient/non-cost error
+    // (e.g. an HTTP 400 / parse failure that would recur on every resume).
+    struct PermanentFailClassifier {
+        verdict: ClassifierVerdict,
+        calls_before_fail: usize,
+        call_count: Mutex<usize>,
+    }
+
+    impl PermanentFailClassifier {
+        fn new(verdict: ClassifierVerdict, calls_before_fail: usize) -> Self {
+            Self {
+                verdict,
+                calls_before_fail,
+                call_count: Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for PermanentFailClassifier {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            let mut count = self.call_count.lock().unwrap();
+            *count += 1;
+            if *count > self.calls_before_fail {
+                Err(anyhow::anyhow!(
+                    "permanent classifier failure (e.g. HTTP 400)"
+                ))
+            } else {
+                Ok(self.verdict.clone())
+            }
+        }
+        fn name(&self) -> &'static str {
+            "permanent-fail"
+        }
+        fn model_id(&self) -> &'static str {
+            "permanent-fail"
+        }
+        fn policy_version(&self) -> &'static str {
+            "permanent-fail"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    // ── Test: a transient classifier error stops the burst GRACEFULLY (resumable)
+    // — successes persist, the rest stay pending, no hard abort. This is the
+    // RunPod-blip case that previously aborted the whole scan.
+    #[tokio::test]
+    async fn burst_transient_error_interrupts_resumably() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst005";
+
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        // 3 Ok calls, then a transient error. concurrency=1 makes the 3 successes
+        // land deterministically before the failure.
+        let classifier: Arc<dyn ToxicityClassifier> =
+            Arc::new(TransientFailClassifier::new(ok_verdict(), 3));
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 1, 100)
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, BurstOutcome::Interrupted),
+            "transient classifier error should interrupt resumably, got {:?}",
+            outcome
+        );
+
+        // The 3 classified rows are done; the rest stay pending for a resume.
+        let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
+        assert_eq!(
+            pending, 3,
+            "unclassified rows stay pending after a transient interrupt"
+        );
+        let done = db
+            .fetch_account_verdicts(BURST_USER, acct)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.status == "done")
+            .count();
+        assert_eq!(done, 3, "the 3 successful rows persist as done");
+    }
+
+    // ── Test: a permanent (non-transient, non-cost) error still ABORTS the burst.
+    // Leaving such a row pending would livelock every resume, so abort loudly —
+    // but successes recorded before it must still persist.
+    #[tokio::test]
+    async fn burst_permanent_error_still_aborts() {
+        let db = open_burst_db().await;
+        let acct = "did:plc:burst006";
+
+        let rows: Vec<QueueRow> = (0..6).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let classifier: Arc<dyn ToxicityClassifier> =
+            Arc::new(PermanentFailClassifier::new(ok_verdict(), 3));
+
+        let result = run_burst(&db, BURST_USER, &classifier, 1, 100).await;
+        assert!(
+            result.is_err(),
+            "a permanent classifier error must still abort the burst (avoids cross-resume livelock)"
+        );
+
+        let done = db
+            .fetch_account_verdicts(BURST_USER, acct)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.status == "done")
+            .count();
+        assert_eq!(done, 3, "successes before the abort still persist");
     }
 
     // ── Test: envelope — reply row uses format_parent_reply envelope ───────
