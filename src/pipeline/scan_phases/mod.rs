@@ -217,6 +217,21 @@ pub async fn run_phased_scan(
                 summary.degraded = true;
                 return Ok(summary);
             }
+            BurstOutcome::Interrupted => {
+                // A transient classifier failure (e.g. a RunPod blip with the
+                // retry budget exhausted) stopped the burst. Same handling as a
+                // cost cap: leave phase == "burst", report degraded, stop here.
+                // A later resume re-enters Burst and retries the pending rows
+                // once the backend recovers — far better than aborting the whole
+                // scan (and losing finalize) over one transient network error.
+                info!(
+                    phase = "burst",
+                    outcome = "interrupted",
+                    "burst interrupted by transient classifier failure — scan resumable"
+                );
+                summary.degraded = true;
+                return Ok(summary);
+            }
             BurstOutcome::Complete => {
                 info!(
                     phase = "burst",

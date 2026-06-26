@@ -64,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Multi-user schema redesign (per-user vs shared data) (#49)
 
 ### Fixed
+- Burst resilience to transient classifier failures: a RunPod serverless blip (transport/5xx, retry budget exhausted) no longer hard-aborts the whole scan before finalize. The client surfaces a typed `ClassifierTransientError`; `run_burst` treats it like the cost cap — records successes, leaves the rest pending, returns `BurstOutcome::Interrupted` (degraded + resumable). Permanent errors (4xx/parse) still abort to avoid cross-resume livelock. Per-call retry budget widened (default 3→6, +8s max-delay cap, ~20s window). Surfaced by the #178 staging scan, which aborted in burst on one transport error (#183)
 - Phase C finalize missing raw>=8.0 follower NLI gate (spec gap from Task 5.1, blocks 6.3 behavior-preservation) (#211)
 - Fix chainlink-safe-fetch MCP: python -> python3 in .mcp.json (#197)
 - Fix context score double-application in concern troll scoring (#163)

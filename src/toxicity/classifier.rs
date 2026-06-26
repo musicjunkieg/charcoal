@@ -44,6 +44,28 @@ pub trait ToxicityClassifier: Send + Sync {
     fn threshold(&self) -> f32;
 }
 
+/// A *transient* classifier failure: the backend was briefly unreachable and the
+/// client exhausted its retry budget (e.g. a RunPod serverless blip — a
+/// transport/connect error or a 5xx). It is deliberately distinct from a
+/// *permanent* failure (HTTP 4xx, parse error) because retrying later — on a
+/// resume — is expected to succeed once the backend recovers.
+///
+/// The burst phase (`run_burst`) downcasts to this (just as it does for
+/// `CostCeilingExceeded`) so it can stop the burst *gracefully and resumably*
+/// instead of hard-aborting the whole scan. Leaving the unscored rows pending is
+/// safe precisely because the failure is transient. A permanent error, by
+/// contrast, must still abort — leaving its row pending would livelock every
+/// resume.
+#[derive(Debug, thiserror::Error)]
+#[error("classifier transient failure (retries exhausted): {0}")]
+pub struct ClassifierTransientError(pub String);
+
+impl ClassifierTransientError {
+    pub fn new(detail: impl Into<String>) -> Self {
+        Self(detail.into())
+    }
+}
+
 /// Apply the implementation's threshold. Free function rather than a default
 /// trait method so callers must pass a concrete `&dyn ToxicityClassifier` and
 /// can't accidentally bypass the impl's threshold.

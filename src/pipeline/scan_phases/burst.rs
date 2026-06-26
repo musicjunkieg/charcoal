@@ -21,10 +21,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use futures::StreamExt;
+use tracing::warn;
 
 use crate::db::Database;
 use crate::pipeline::scan_phases::staging::VerdictRow;
-use crate::toxicity::classifier::{is_toxic, ToxicityClassifier};
+use crate::toxicity::classifier::{is_toxic, ClassifierTransientError, ToxicityClassifier};
 use crate::toxicity::cost_meter::CostCeilingExceeded;
 
 // ── BurstOutcome ──────────────────────────────────────────────────────────────
@@ -37,6 +38,12 @@ pub enum BurstOutcome {
     /// The #206 scan cost ceiling fired mid-run. Rows classified before the cap
     /// are recorded as `done`; remaining `pending` rows can be resumed later.
     CostCapped,
+    /// A *transient* classifier failure (e.g. a RunPod serverless blip with the
+    /// retry budget exhausted) stopped the burst. Like `CostCapped`: successes
+    /// are recorded `done`, the rest stay `pending` for a resume. Distinct from
+    /// `Err` — a transient failure is expected to clear on retry, so the scan
+    /// finishes degraded-but-resumable instead of hard-aborting before finalize.
+    Interrupted,
 }
 
 // ── run_burst ─────────────────────────────────────────────────────────────────
@@ -103,33 +110,48 @@ pub async fn run_burst(
 
         let mut verdicts: Vec<VerdictRow> = Vec::new();
         let mut cost_capped = false;
+        let mut interrupted = false;
         let mut other_error: Option<anyhow::Error> = None;
 
         while let Some((account_did, post_uri, outcome)) = stream.next().await {
-            if cost_capped {
-                // Cap already fired — drain remaining in-flight calls without
-                // accumulating verdicts so the next batch never starts.
-                continue;
-            }
             match outcome {
                 Ok(verdict) => {
-                    verdicts.push(VerdictRow {
-                        account_did,
-                        post_uri,
-                        toxic_token: is_toxic(classifier.as_ref(), &verdict),
-                        confidence: verdict.confidence,
-                        model_id: verdict.model_id,
-                        policy_version: verdict.policy_version,
-                    });
+                    // Once a stop condition has fired (cost cap or a transient
+                    // interrupt), drain the remaining in-flight calls without
+                    // accumulating their verdicts so the next batch never starts.
+                    if !cost_capped && !interrupted {
+                        verdicts.push(VerdictRow {
+                            account_did,
+                            post_uri,
+                            toxic_token: is_toxic(classifier.as_ref(), &verdict),
+                            confidence: verdict.confidence,
+                            model_id: verdict.model_id,
+                            policy_version: verdict.policy_version,
+                        });
+                    }
                 }
                 Err(err) => {
                     if err.downcast_ref::<CostCeilingExceeded>().is_some() {
                         // Cost ceiling fired. Stop accumulating new verdicts;
                         // drain the rest of the in-flight batch harmlessly.
                         cost_capped = true;
+                    } else if err.downcast_ref::<ClassifierTransientError>().is_some() {
+                        // Transient backend failure (e.g. a RunPod blip with the
+                        // retry budget exhausted). Stop gracefully like the cost
+                        // cap — record what succeeded, leave the rest pending —
+                        // so a resume can retry once the backend recovers, rather
+                        // than hard-aborting the whole scan before finalize.
+                        warn!(
+                            account_did = %account_did,
+                            error = %err,
+                            "classifier transient failure — interrupting burst, scan resumable"
+                        );
+                        interrupted = true;
                     } else if other_error.is_none() {
-                        // Capture the first non-ceiling error; remaining
-                        // successes still persist before we propagate.
+                        // A permanent error (4xx / parse). Capture the first one;
+                        // remaining successes still persist before we propagate.
+                        // It must abort (not interrupt): leaving its row pending
+                        // would livelock every resume.
                         other_error = Some(err);
                     }
                 }
@@ -143,12 +165,17 @@ pub async fn run_burst(
                 .await?;
         }
 
-        // After persisting, handle the error cases.
+        // After persisting, handle the stop/error cases in precedence order:
+        // cost cap (billing backstop) first; then a permanent error (must abort
+        // to avoid cross-resume livelock); then a transient interrupt (resumable).
         if cost_capped {
             return Ok(BurstOutcome::CostCapped);
         }
         if let Some(err) = other_error {
             return Err(err);
+        }
+        if interrupted {
+            return Ok(BurstOutcome::Interrupted);
         }
 
         // All rows in this batch succeeded — continue to the next batch.

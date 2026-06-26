@@ -3464,6 +3464,50 @@
       "created_at": "2026-06-25T22:11:45.512683-07:00",
       "updated_at": "2026-06-25T22:11:45.512683-07:00",
       "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":95,\"files\":[\"src/pipeline/amplification.rs\",\"src/pipeline/sweep.rs\"]}"
+    },
+    {
+      "id": 322,
+      "change_id": "6f2e9ddd-3349-4070-a86d-924b15da7982",
+      "node_type": "outcome",
+      "title": "CodeRabbit APPROVED PR #62 at commit dd07ad5 (08:13Z) after the 3-finding fix. Prior CHANGES_REQUESTED + inline comments were against superseded 1d367e1. CI all green (rust/js/python/CodeQL pass), mergeable=CLEAN, reviewDecision=APPROVED. Ready to merge -> staging (human-reserved). Polling stopped.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T22:17:32.974614-07:00",
+      "updated_at": "2026-06-25T22:17:32.974614-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":97}"
+    },
+    {
+      "id": 323,
+      "change_id": "ea3faefd-43cc-4d0b-a69b-2c3043449b5b",
+      "node_type": "outcome",
+      "title": "Staging-scan analysis kit prepped: scan_analysis.py (stdlib parser: segments timeline by phase banners, isolates the #178 sweep-fetch window + speedup, counts 429s, RunPod queue-vs-infer split, outcome) + STAGING-SCAN-ANALYSIS.md playbook. Railway log-pull verified (svc charcoal-web/staging). MEMORY.md Next-Session block updated w/ markers+plan, compacted 20.2KB->17KB.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T22:35:32.958477-07:00",
+      "updated_at": "2026-06-25T22:35:32.958477-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":95}"
+    },
+    {
+      "id": 324,
+      "change_id": "dc6049ff-d4dc-463b-b1da-890af2982b85",
+      "node_type": "outcome",
+      "title": "#178 VALIDATED on staging scan (account eugenevinitsky-ish, AI-heavy): 429 GATE PASSED — 0 real 429s across entire fetch phase (amplifier fetch + ~64min gather at concurrency 8). Timeline: 05:39 amplification → gather → 07:55 entering burst pending=4905 → burst classifying 07:55-08:05 (RunPod queue-bound: delay ~5.2-5.8s vs exec ~115-156ms) → 08:07:02 ABORTED on 'Pipeline error: RunPod transport: error sending request for runsync' (NOT #178, NOT 429 — RunPod endpoint connectivity, echoes runpod-capacity-risk). Gather caught a real unwrap panic (PR #59 isolation working) + ONNX/feed skips. Scan resumable via re-run (#208 phased) or flip CHARCOAL_CLASSIFIER=zentropi. Possible hardening: RunPod backon predicate may not retry transport 'error sending request'.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T01:28:59.181161-07:00",
+      "updated_at": "2026-06-26T01:28:59.181161-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":96}"
+    },
+    {
+      "id": 325,
+      "change_id": "51bd20c1-409e-45a6-97a7-9232c13942f0",
+      "node_type": "action",
+      "title": "Implement #183 burst resilience (TDD): typed ClassifierTransientError + RunPod maps exhausted-transient->transient/permanent->passthrough + widen retries (3->6,+8s cap) + run_burst BurstOutcome::Interrupted graceful-stop (transient resumable, permanent still aborts) + mod.rs degraded handling. 5 new tests RED->GREEN, full web suite 31 binaries + clippy web/default/pg clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T08:52:06.844898-07:00",
+      "updated_at": "2026-06-26T08:52:06.844898-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-transient-retry\",\"confidence\":95,\"files\":[\"src/toxicity/classifier.rs\",\"src/toxicity/runpod_cope_b.rs\",\"src/pipeline/scan_phases/burst.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/unit_scan_phases.rs\"]}"
     }
   ],
   "edges": [
@@ -6821,6 +6865,50 @@
       "weight": 1.0,
       "rationale": "Outcome of CodeRabbit triage",
       "created_at": "2026-06-25T22:11:45.519620-07:00"
+    },
+    {
+      "id": 314,
+      "from_node_id": 321,
+      "to_node_id": 322,
+      "from_change_id": "b96f3904-e9e8-4546-9a6e-2af8d78017d6",
+      "to_change_id": "6f2e9ddd-3349-4070-a86d-924b15da7982",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit approval after fixes",
+      "created_at": "2026-06-25T22:17:32.982381-07:00"
+    },
+    {
+      "id": 315,
+      "from_node_id": 322,
+      "to_node_id": 323,
+      "from_change_id": "6f2e9ddd-3349-4070-a86d-924b15da7982",
+      "to_change_id": "ea3faefd-43cc-4d0b-a69b-2c3043449b5b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Prep for validating #178 on staging",
+      "created_at": "2026-06-25T22:35:32.965849-07:00"
+    },
+    {
+      "id": 316,
+      "from_node_id": 322,
+      "to_node_id": 324,
+      "from_change_id": "6f2e9ddd-3349-4070-a86d-924b15da7982",
+      "to_change_id": "dc6049ff-d4dc-463b-b1da-890af2982b85",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Live staging validation of #178 + RunPod-side abort",
+      "created_at": "2026-06-26T01:28:59.187723-07:00"
+    },
+    {
+      "id": 317,
+      "from_node_id": 324,
+      "to_node_id": 325,
+      "from_change_id": "dc6049ff-d4dc-463b-b1da-890af2982b85",
+      "to_change_id": "51bd20c1-409e-45a6-97a7-9232c13942f0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix for the RunPod transport abort found in the #178 scan",
+      "created_at": "2026-06-26T08:52:06.852131-07:00"
     }
   ],
   "documents": [

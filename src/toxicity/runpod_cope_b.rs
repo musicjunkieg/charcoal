@@ -19,7 +19,7 @@ use thiserror::Error;
 
 use std::sync::Arc;
 
-use super::classifier::{ClassifierVerdict, ToxicityClassifier};
+use super::classifier::{ClassifierTransientError, ClassifierVerdict, ToxicityClassifier};
 use super::cost_meter::ScanCostMeter;
 
 /// Calibration note (Chunk 5 / Step 5): verify distribution parity vs the
@@ -32,6 +32,35 @@ use super::cost_meter::ScanCostMeter;
 pub const COPE_B_THRESHOLD: f32 = 0.5;
 
 const INITIAL_BACKOFF_MS: u64 = 500;
+/// Cap on a single backoff sleep so the exponential schedule doesn't balloon.
+/// With base 500ms and 6 retries the window spans ~20s+ (0.5,1,2,4,8,8) —
+/// enough to bridge a typical RunPod serverless scale-up / transient blip.
+const MAX_BACKOFF_MS: u64 = 8_000;
+/// Default per-call retry budget. Widened from 3 after a single transport blip
+/// (a ~few-second RunPod outage outran the old ~3.5s/3-retry window) aborted a
+/// 4905-item burst (#183).
+const DEFAULT_MAX_RETRIES: u32 = 6;
+
+/// Resolve the per-call retry budget from the (already-read) env value.
+/// Pure for testability: garbage / missing falls back to [`DEFAULT_MAX_RETRIES`].
+fn classifier_max_retries(raw: Option<&str>) -> u32 {
+    raw.and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(DEFAULT_MAX_RETRIES)
+}
+
+/// Map a final (post-retry) [`RunPodError`] into the error the classifier
+/// surfaces to callers. A *retryable* error reaching here means the retry budget
+/// was exhausted on a transient failure (transport / 5xx) → a typed
+/// [`ClassifierTransientError`] so the burst can stop gracefully and resumably.
+/// A non-retryable error (4xx) is permanent and is propagated as-is so the burst
+/// aborts (leaving its row pending would livelock every resume).
+fn classifier_error_from_exhausted(e: RunPodError) -> anyhow::Error {
+    if e.is_retryable() {
+        ClassifierTransientError::new(e.to_string()).into()
+    } else {
+        e.into()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RunPodCopeBClient {
@@ -153,10 +182,11 @@ impl RunPodCopeBClient {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(180_000);
-        let max_retries = std::env::var("CHARCOAL_CLASSIFIER_MAX_RETRIES")
-            .ok()
-            .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(3);
+        let max_retries = classifier_max_retries(
+            std::env::var("CHARCOAL_CLASSIFIER_MAX_RETRIES")
+                .ok()
+                .as_deref(),
+        );
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_millis(steady_ms))
@@ -363,15 +393,23 @@ impl RunPodCopeBClient {
             }
         };
 
-        let response = attempt
+        let response = match attempt
             .retry(
                 ExponentialBuilder::default()
                     .with_min_delay(Duration::from_millis(INITIAL_BACKOFF_MS))
+                    .with_max_delay(Duration::from_millis(MAX_BACKOFF_MS))
                     .with_max_times(self.max_retries as usize)
                     .with_jitter(),
             )
             .when(|e: &RunPodError| e.is_retryable())
-            .await?;
+            .await
+        {
+            Ok(r) => r,
+            // Retries exhausted (or a non-retryable error). Map to the typed error
+            // the burst phase keys on: transient (transport/5xx) → graceful resume;
+            // permanent (4xx) → abort. See `classifier_error_from_exhausted`.
+            Err(e) => return Err(classifier_error_from_exhausted(e)),
+        };
 
         let latency_ms: u32 = start.elapsed().as_millis().try_into().unwrap_or(u32::MAX);
         // RetryCounter bumps on every failed attempt. Each failure that doesn't
@@ -438,6 +476,54 @@ pub async fn warm_up(client: &RunPodCopeBClient) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exhausted_server_error_maps_to_transient() {
+        // A retryable error reaching the post-retry mapping means the budget was
+        // exhausted on a transient failure (here a 5xx) → typed transient error
+        // so the burst stops gracefully + resumably.
+        let e = classifier_error_from_exhausted(RunPodError::ServerError(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+        assert!(
+            e.downcast_ref::<crate::toxicity::classifier::ClassifierTransientError>()
+                .is_some(),
+            "exhausted 5xx should surface as a transient classifier error"
+        );
+    }
+
+    #[test]
+    fn exhausted_client_error_stays_permanent() {
+        // A 4xx is non-retryable → permanent → must NOT be transient (the burst
+        // must abort, not interrupt-and-livelock on resume).
+        let e = classifier_error_from_exhausted(RunPodError::ClientError(
+            reqwest::StatusCode::BAD_REQUEST,
+        ));
+        assert!(
+            e.downcast_ref::<crate::toxicity::classifier::ClassifierTransientError>()
+                .is_none(),
+            "a permanent 4xx must not be classified transient"
+        );
+    }
+
+    #[test]
+    fn classifier_max_retries_default_is_widened() {
+        // Default retry budget must be wide enough to bridge a RunPod blip.
+        assert!(
+            classifier_max_retries(None) >= 6,
+            "default retry budget should be widened to >= 6"
+        );
+        assert_eq!(
+            classifier_max_retries(Some("2")),
+            2,
+            "valid env override honored"
+        );
+        assert_eq!(
+            classifier_max_retries(Some("garbage")),
+            classifier_max_retries(None),
+            "garbage env falls back to default"
+        );
+    }
 
     /// A minimal valid COMPLETED envelope WITH delayTime/executionTime.
     fn completed_json_with_timing() -> &'static str {
