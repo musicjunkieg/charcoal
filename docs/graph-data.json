@@ -3332,6 +3332,72 @@
       "created_at": "2026-06-23T17:25:11.461958-07:00",
       "updated_at": "2026-06-23T17:25:11.461958-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"25191d2\",\"confidence\":95}"
+    },
+    {
+      "id": 310,
+      "change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "node_type": "goal",
+      "title": "Onboarding speed + reliability (#207): make big-account scans survive, measure where the 2h+ goes, fix what's cheap",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.085107-07:00",
+      "updated_at": "2026-06-25T21:04:20.085107-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":90,\"prompt\":\"Watching staging scans + 'we still have the general issue of the api speed being the real gate... are we at max speed now?'\"}"
+    },
+    {
+      "id": 311,
+      "change_id": "07dbd4d8-e531-4e94-903d-fb0d158c5166",
+      "node_type": "outcome",
+      "title": "Shipped to staging: PR #58 (#208 classification decouple), #59 (gather panic isolation — survived live 2h45m scan that killed old code at 10min), #60 (untrack chainlink state), #61 (RunPod delayTime/executionTime split logging). #207 baseline = ~2h08m pre-burst, 100% Bluesky I/O",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.096468-07:00",
+      "updated_at": "2026-06-25T21:04:20.096468-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95}"
+    },
+    {
+      "id": 312,
+      "change_id": "5099be02-1bb9-4f14-bb85-502f1facef57",
+      "node_type": "observation",
+      "title": "RunPod burst was QUEUE-bound, not inference: measured 130ms execution_time vs 5.4s delay_time (workersMax=3 servicing concurrency=16). Fixed workersMax 3->10. Classifier is solved; real gate = SERIAL second-degree follower sweep at sweep.rs:87",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.106634-07:00",
+      "updated_at": "2026-06-25T21:04:20.106634-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95}"
+    },
+    {
+      "id": 313,
+      "change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "node_type": "decision",
+      "title": "Next #207 lever = parallelize the serial sweep.rs:87 fetch_followers loop with buffer_unordered (concurrency param already plumbed), NOT more GPU. API parallelism is the gate, not API speed. Tracked chainlink #178",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.116316-07:00",
+      "updated_at": "2026-06-25T21:04:20.116316-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":90}"
+    },
+    {
+      "id": 314,
+      "change_id": "d60ccd02-ad35-4a55-8495-1ac77b6b1d38",
+      "node_type": "action",
+      "title": "Parallelize sweep.rs second-degree fetch: concurrent buffer_unordered fetch + extracted pure dedup_second_degree fold (TDD test-first for order-independence)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:08:23.466774-07:00",
+      "updated_at": "2026-06-25T21:08:23.466774-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":90,\"files\":[\"src/pipeline/sweep.rs\"]}"
+    },
+    {
+      "id": 315,
+      "change_id": "2698fc56-5c80-4cb2-a7c7-85ac49281b0f",
+      "node_type": "outcome",
+      "title": "sweep.rs second-degree fetch parallelized: serial for-loop -> buffer_unordered(concurrency.clamp(1,64)) over fetch_followers + pure dedup_second_degree fold. 2 new unit tests (order-independence + error-skip) green; full web suite 31/31 binaries pass; clippy clean. Amplification.rs analog deferred (Bryan: sweep-only PR).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:28:14.958442-07:00",
+      "updated_at": "2026-06-25T21:28:14.958442-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95,\"files\":[\"src/pipeline/sweep.rs\"]}"
     }
   ],
   "edges": [
@@ -6568,6 +6634,61 @@
       "weight": 1.0,
       "rationale": "manual smoke verifies the goal",
       "created_at": "2026-06-23T17:25:11.469360-07:00"
+    },
+    {
+      "id": 303,
+      "from_node_id": 310,
+      "to_node_id": 311,
+      "from_change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "to_change_id": "07dbd4d8-e531-4e94-903d-fb0d158c5166",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Goal produced these shipped outcomes",
+      "created_at": "2026-06-25T21:04:37.329920-07:00"
+    },
+    {
+      "id": 304,
+      "from_node_id": 310,
+      "to_node_id": 312,
+      "from_change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "to_change_id": "5099be02-1bb9-4f14-bb85-502f1facef57",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Investigation finding under the goal",
+      "created_at": "2026-06-25T21:04:37.336430-07:00"
+    },
+    {
+      "id": 305,
+      "from_node_id": 312,
+      "to_node_id": 313,
+      "from_change_id": "5099be02-1bb9-4f14-bb85-502f1facef57",
+      "to_change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next-lever decision follows from the queue-vs-inference finding",
+      "created_at": "2026-06-25T21:04:37.342629-07:00"
+    },
+    {
+      "id": 306,
+      "from_node_id": 313,
+      "to_node_id": 314,
+      "from_change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "to_change_id": "d60ccd02-ad35-4a55-8495-1ac77b6b1d38",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementing the chosen #207 lever: parallelize the serial follower sweep",
+      "created_at": "2026-06-25T21:08:26.924453-07:00"
+    },
+    {
+      "id": 307,
+      "from_node_id": 314,
+      "to_node_id": 315,
+      "from_change_id": "d60ccd02-ad35-4a55-8495-1ac77b6b1d38",
+      "to_change_id": "2698fc56-5c80-4cb2-a7c7-85ac49281b0f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of parallelization action",
+      "created_at": "2026-06-25T21:28:20.544298-07:00"
     }
   ],
   "documents": [
