@@ -9,6 +9,7 @@
 // 5. Stores the results for the threat report
 
 use anyhow::Result;
+use futures::StreamExt;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -319,20 +320,58 @@ pub async fn run(
             info!("No quote/reply events to analyze");
         }
 
+        // Deduplicate amplifiers by handle first: multiple quote/reply events can
+        // share one amplifier, and we only need that amplifier's follower list
+        // once. Deduping cuts redundant concurrent fetches — and the rate-limit
+        // risk that comes with firing the same request many times at once.
+        // First-occurrence (event) order is preserved.
+        let mut unique_amplifiers: Vec<String> = Vec::new();
+        let mut seen_amplifiers: HashSet<String> = HashSet::new();
         for event in &scorable_events {
-            println!("\nFetching followers of @{}...", event.amplifier_handle);
+            if seen_amplifiers.insert(event.amplifier_handle.clone()) {
+                unique_amplifiers.push(event.amplifier_handle.clone());
+            }
+        }
 
-            match followers::fetch_followers(
-                client,
-                &event.amplifier_handle,
-                max_followers_per_amplifier,
-            )
-            .await
-            {
+        // Fetch each unique amplifier's followers concurrently, then process the
+        // results sequentially. Same #207 rationale as the sweep (`sweep.rs`): the
+        // serial network awaits were the dominant cost. The per-follower staleness
+        // check is a fast local DB query and the seen-DID dedup mutates shared
+        // state, so the processing loop stays sequential — only the network
+        // fan-out is parallelized. Carry the original index and sort the results
+        // back into it: `buffer_unordered` yields in completion (network-timing)
+        // order, so sorting restores deterministic, event-order candidate building
+        // and stable logs. Index by `usize` (not `&unique_amplifiers` items) so
+        // the mapped future carries no higher-ranked borrow — the same reason
+        // `run_gather` indexes by usize across the web `tokio::spawn` boundary.
+        let mut fetch_results: Vec<(usize, String, Result<Vec<followers::Follower>>)> =
+            futures::stream::iter(0..unique_amplifiers.len())
+                .map(|i| {
+                    let handle = unique_amplifiers[i].clone();
+                    async move {
+                        let result = followers::fetch_followers(
+                            client,
+                            &handle,
+                            max_followers_per_amplifier,
+                        )
+                        .await;
+                        (i, handle, result)
+                    }
+                })
+                .buffer_unordered(concurrency.clamp(1, 64))
+                .collect()
+                .await;
+        fetch_results.sort_by_key(|(i, _, _)| *i);
+
+        for (_, amplifier_handle, result) in fetch_results {
+            match result {
                 Ok(follower_list) => {
                     // Filter — find followers with stale scores. Exclude the
                     // protected user from their own threat report, and skip any
                     // DID already queued (amplifier entries take precedence).
+                    // Dedup runs here, after all fetches complete, so the shared
+                    // `seen_dids`/`candidates` have a single sequential mutator —
+                    // the result is the same set regardless of fetch arrival order.
                     let mut added = 0usize;
                     for f in follower_list
                         .iter()
@@ -357,7 +396,7 @@ pub async fn run(
                     }
 
                     println!(
-                        "  Found {} followers, {} need scoring ({} concurrent)...",
+                        "  @{amplifier_handle}: {} followers, {} need scoring ({} concurrent)...",
                         follower_list.len(),
                         added,
                         concurrency,
@@ -365,7 +404,7 @@ pub async fn run(
                 }
                 Err(e) => {
                     warn!(
-                        handle = event.amplifier_handle,
+                        handle = amplifier_handle,
                         error = %e,
                         "Failed to fetch followers, skipping"
                     );

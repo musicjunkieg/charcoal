@@ -3332,6 +3332,138 @@
       "created_at": "2026-06-23T17:25:11.461958-07:00",
       "updated_at": "2026-06-23T17:25:11.461958-07:00",
       "metadata_json": "{\"branch\":\"feat/cope-b-cost-guard\",\"commit\":\"25191d2\",\"confidence\":95}"
+    },
+    {
+      "id": 310,
+      "change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "node_type": "goal",
+      "title": "Onboarding speed + reliability (#207): make big-account scans survive, measure where the 2h+ goes, fix what's cheap",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.085107-07:00",
+      "updated_at": "2026-06-25T21:04:20.085107-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":90,\"prompt\":\"Watching staging scans + 'we still have the general issue of the api speed being the real gate... are we at max speed now?'\"}"
+    },
+    {
+      "id": 311,
+      "change_id": "07dbd4d8-e531-4e94-903d-fb0d158c5166",
+      "node_type": "outcome",
+      "title": "Shipped to staging: PR #58 (#208 classification decouple), #59 (gather panic isolation — survived live 2h45m scan that killed old code at 10min), #60 (untrack chainlink state), #61 (RunPod delayTime/executionTime split logging). #207 baseline = ~2h08m pre-burst, 100% Bluesky I/O",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.096468-07:00",
+      "updated_at": "2026-06-25T21:04:20.096468-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95}"
+    },
+    {
+      "id": 312,
+      "change_id": "5099be02-1bb9-4f14-bb85-502f1facef57",
+      "node_type": "observation",
+      "title": "RunPod burst was QUEUE-bound, not inference: measured 130ms execution_time vs 5.4s delay_time (workersMax=3 servicing concurrency=16). Fixed workersMax 3->10. Classifier is solved; real gate = SERIAL second-degree follower sweep at sweep.rs:87",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.106634-07:00",
+      "updated_at": "2026-06-25T21:04:20.106634-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95}"
+    },
+    {
+      "id": 313,
+      "change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "node_type": "decision",
+      "title": "Next #207 lever = parallelize the serial sweep.rs:87 fetch_followers loop with buffer_unordered (concurrency param already plumbed), NOT more GPU. API parallelism is the gate, not API speed. Tracked chainlink #178",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:04:20.116316-07:00",
+      "updated_at": "2026-06-25T21:04:20.116316-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":90}"
+    },
+    {
+      "id": 314,
+      "change_id": "d60ccd02-ad35-4a55-8495-1ac77b6b1d38",
+      "node_type": "action",
+      "title": "Parallelize sweep.rs second-degree fetch: concurrent buffer_unordered fetch + extracted pure dedup_second_degree fold (TDD test-first for order-independence)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:08:23.466774-07:00",
+      "updated_at": "2026-06-25T21:08:23.466774-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":90,\"files\":[\"src/pipeline/sweep.rs\"]}"
+    },
+    {
+      "id": 315,
+      "change_id": "2698fc56-5c80-4cb2-a7c7-85ac49281b0f",
+      "node_type": "outcome",
+      "title": "sweep.rs second-degree fetch parallelized: serial for-loop -> buffer_unordered(concurrency.clamp(1,64)) over fetch_followers + pure dedup_second_degree fold. 2 new unit tests (order-independence + error-skip) green; full web suite 31/31 binaries pass; clippy clean. Amplification.rs analog deferred (Bryan: sweep-only PR).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:28:14.958442-07:00",
+      "updated_at": "2026-06-25T21:28:14.958442-07:00",
+      "metadata_json": "{\"branch\":\"feat/runpod-latency-split\",\"confidence\":95,\"files\":[\"src/pipeline/sweep.rs\"]}"
+    },
+    {
+      "id": 316,
+      "change_id": "a1af5e99-2201-4546-8d08-1b85cbb68970",
+      "node_type": "outcome",
+      "title": "PR #62 opened (feat/parallelize-follower-sweep -> staging): sweep second-degree fetch parallelization. Commit cd6ae9c. Awaiting CodeRabbit + staging deploy. #178 amplification.rs analog deferred to follow-up.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:29:25.960016-07:00",
+      "updated_at": "2026-06-25T21:29:25.960016-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"commit\":\"cd6ae9c\",\"confidence\":95}"
+    },
+    {
+      "id": 317,
+      "change_id": "8ede9f38-95d4-4845-86e8-6f7de84f02f8",
+      "node_type": "action",
+      "title": "Parallelize amplification.rs follower fetch (#178 second half): same buffer_unordered fan-out + sequential staleness/dedup fold as sweep, on branch feat/parallelize-follower-sweep",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:56:49.769231-07:00",
+      "updated_at": "2026-06-25T21:56:49.769231-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":90,\"files\":[\"src/pipeline/amplification.rs\"]}"
+    },
+    {
+      "id": 318,
+      "change_id": "ed75ffd7-5650-471c-b512-13f165973f97",
+      "node_type": "outcome",
+      "title": "amplification.rs follower fetch parallelized (#178 second half): serial per-event loop -> buffer_unordered(concurrency.clamp(1,64)) fan-out + sequential staleness/dedup fold. No new pure logic (dedup property same as sweep, already unit-tested); composition suite guards e2e path. Full web suite 31/31 binaries pass; clippy+fmt clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T21:58:59.980809-07:00",
+      "updated_at": "2026-06-25T21:58:59.980809-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":95,\"files\":[\"src/pipeline/amplification.rs\"]}"
+    },
+    {
+      "id": 319,
+      "change_id": "0b1fd444-e8ac-4879-8968-904f0d834102",
+      "node_type": "observation",
+      "title": "Draft PR #63 (staging->main): Phase 6 prod promotion, 120 commits since PR #47. Carries #208 schema v9 migration + #206 cost-guard + RunPod CoPE-B + #178 (pending #62). Marked DRAFT; body has prod-readiness checklist (schema v9 backup, env vars, RunPod state, #178 scan + 429 watch).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T22:04:07.915566-07:00",
+      "updated_at": "2026-06-25T22:04:07.915566-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":90}"
+    },
+    {
+      "id": 320,
+      "change_id": "8b35ebe2-c83f-43e7-89d3-4026c809b3b1",
+      "node_type": "action",
+      "title": "Triage CodeRabbit PR #62: apply F1 (dedup amplifiers before fetch - real rate-limit win), F2/F3 (carry index+sort to restore deterministic event order - reproducibility not correctness, set is identical + gather re-orders downstream)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T22:08:44.264933-07:00",
+      "updated_at": "2026-06-25T22:08:44.264933-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":88,\"files\":[\"src/pipeline/amplification.rs\",\"src/pipeline/sweep.rs\"]}"
+    },
+    {
+      "id": 321,
+      "change_id": "b96f3904-e9e8-4546-9a6e-2af8d78017d6",
+      "node_type": "outcome",
+      "title": "CodeRabbit PR #62 fixes applied: F1 dedup amplifiers by handle (unique_amplifiers, first-occurrence order) cuts redundant concurrent fetches; F2/F3 carry usize index + sort_by_key to restore deterministic event/first-degree order; added dedup_preserves_input_order test. 3 sweep tests + full web suite (31 binaries) green; clippy+fmt clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-25T22:11:45.512683-07:00",
+      "updated_at": "2026-06-25T22:11:45.512683-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallelize-follower-sweep\",\"confidence\":95,\"files\":[\"src/pipeline/amplification.rs\",\"src/pipeline/sweep.rs\"]}"
     }
   ],
   "edges": [
@@ -6568,6 +6700,127 @@
       "weight": 1.0,
       "rationale": "manual smoke verifies the goal",
       "created_at": "2026-06-23T17:25:11.469360-07:00"
+    },
+    {
+      "id": 303,
+      "from_node_id": 310,
+      "to_node_id": 311,
+      "from_change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "to_change_id": "07dbd4d8-e531-4e94-903d-fb0d158c5166",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Goal produced these shipped outcomes",
+      "created_at": "2026-06-25T21:04:37.329920-07:00"
+    },
+    {
+      "id": 304,
+      "from_node_id": 310,
+      "to_node_id": 312,
+      "from_change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "to_change_id": "5099be02-1bb9-4f14-bb85-502f1facef57",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Investigation finding under the goal",
+      "created_at": "2026-06-25T21:04:37.336430-07:00"
+    },
+    {
+      "id": 305,
+      "from_node_id": 312,
+      "to_node_id": 313,
+      "from_change_id": "5099be02-1bb9-4f14-bb85-502f1facef57",
+      "to_change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next-lever decision follows from the queue-vs-inference finding",
+      "created_at": "2026-06-25T21:04:37.342629-07:00"
+    },
+    {
+      "id": 306,
+      "from_node_id": 313,
+      "to_node_id": 314,
+      "from_change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "to_change_id": "d60ccd02-ad35-4a55-8495-1ac77b6b1d38",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementing the chosen #207 lever: parallelize the serial follower sweep",
+      "created_at": "2026-06-25T21:08:26.924453-07:00"
+    },
+    {
+      "id": 307,
+      "from_node_id": 314,
+      "to_node_id": 315,
+      "from_change_id": "d60ccd02-ad35-4a55-8495-1ac77b6b1d38",
+      "to_change_id": "2698fc56-5c80-4cb2-a7c7-85ac49281b0f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of parallelization action",
+      "created_at": "2026-06-25T21:28:20.544298-07:00"
+    },
+    {
+      "id": 308,
+      "from_node_id": 315,
+      "to_node_id": 316,
+      "from_change_id": "2698fc56-5c80-4cb2-a7c7-85ac49281b0f",
+      "to_change_id": "a1af5e99-2201-4546-8d08-1b85cbb68970",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Shipped via PR #62",
+      "created_at": "2026-06-25T21:29:25.967437-07:00"
+    },
+    {
+      "id": 309,
+      "from_node_id": 313,
+      "to_node_id": 317,
+      "from_change_id": "47eba05c-9ab2-4fbc-8abc-5db79139be25",
+      "to_change_id": "8ede9f38-95d4-4845-86e8-6f7de84f02f8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second half of the #178 parallelization lever",
+      "created_at": "2026-06-25T21:56:49.776432-07:00"
+    },
+    {
+      "id": 310,
+      "from_node_id": 317,
+      "to_node_id": 318,
+      "from_change_id": "8ede9f38-95d4-4845-86e8-6f7de84f02f8",
+      "to_change_id": "ed75ffd7-5650-471c-b512-13f165973f97",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of amplification parallelization",
+      "created_at": "2026-06-25T21:58:59.988194-07:00"
+    },
+    {
+      "id": 311,
+      "from_node_id": 310,
+      "to_node_id": 319,
+      "from_change_id": "7d72a4f1-9c9c-4e75-b111-0ee7cf85fdd7",
+      "to_change_id": "0b1fd444-e8ac-4879-8968-904f0d834102",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Promotion vehicle for the onboarding-speed batch incl #178",
+      "created_at": "2026-06-25T22:04:07.922144-07:00"
+    },
+    {
+      "id": 312,
+      "from_node_id": 318,
+      "to_node_id": 320,
+      "from_change_id": "ed75ffd7-5650-471c-b512-13f165973f97",
+      "to_change_id": "8b35ebe2-c83f-43e7-89d3-4026c809b3b1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit review triage on the parallelization PR",
+      "created_at": "2026-06-25T22:08:44.272054-07:00"
+    },
+    {
+      "id": 313,
+      "from_node_id": 320,
+      "to_node_id": 321,
+      "from_change_id": "8b35ebe2-c83f-43e7-89d3-4026c809b3b1",
+      "to_change_id": "b96f3904-e9e8-4546-9a6e-2af8d78017d6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of CodeRabbit triage",
+      "created_at": "2026-06-25T22:11:45.519620-07:00"
     }
   ],
   "documents": [
