@@ -3563,6 +3563,39 @@
       "created_at": "2026-06-26T11:10:38.210647-07:00",
       "updated_at": "2026-06-26T11:10:38.210647-07:00",
       "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"confidence\":95,\"files\":[\"src/toxicity/cost_meter.rs\",\"src/toxicity/runpod_cope_b.rs\",\"tests/unit_classifier.rs\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 331,
+      "change_id": "e78796d4-793e-43d7-b70e-174c3e50a2a6",
+      "node_type": "outcome",
+      "title": "#185 SHIPPED to review: PR #65 (feat/cost-meter-realtime, commit 8ba7746), stacked on #64 (base=feat/runpod-transient-retry, auto-retargets to staging on #64 merge). Worker-seconds integral cost meter (real-time real spend across concurrent workers, capped at workersMax), RAII InFlightGuard, CHARCOAL_RUNPOD_WORKERS_MAX env. 12 TDD tests, 31 binaries + clippy web/default/pg clean. Corrects the #206 single-worker undercount Bryan flagged.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T11:12:04.530358-07:00",
+      "updated_at": "2026-06-26T11:12:04.530358-07:00",
+      "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"commit\":\"8ba7746\",\"confidence\":95}"
+    },
+    {
+      "id": 332,
+      "change_id": "9f8d9b04-ca2e-4e19-9ad6-b1f445506963",
+      "node_type": "outcome",
+      "title": "STAGING RE-RUN COMPLETE 18:36:34Z: phased scan complete accounts_scored=2900 degraded=FALSE, events=2951. CLEAN full scan via resume — resume skipped gather (so original-run gather skips excluded), burst fully drained 4421, finalize scored 2900 all Low tier (no High/Elevated; AI-discourse account, benign amplifier network), 0 429s, no abort. Re-run wall-clock 15:42->18:36 (~2h54m: amplification ~63min + resumed-burst ~36min + finalize ~74min). End-to-end validates #178 (0 429s at concurrency 8), #208 resume (gather skip + 484 prior persisted), RunPod path. Finalize ~74min/2900acct is the slow residual.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T11:39:44.997774-07:00",
+      "updated_at": "2026-06-26T11:39:44.997774-07:00",
+      "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"confidence\":97}"
+    },
+    {
+      "id": 333,
+      "change_id": "41ce7a02-a55b-4418-b94b-4f1fe23c803e",
+      "node_type": "outcome",
+      "title": "CodeRabbit PR #65 fix (valid): split ScanCostMeter into check() [ceiling gate, no in-flight] + guard() [bills only while held] + arm_and_check delegates. classify_with_timeout: check() once at top, guard per-attempt INSIDE the retry closure (backoff between attempts no longer billed), guard around poll_status (server-side exec IS billed). Closes the over-bill compounded by #183 wide-retries + #185 ×workers (was: error burst -> long backoff billed as 10 active workers -> spurious cost-cap). 2 new TDD tests (check pure-gate / guard bills-only-while-held); 31 binaries + clippy web/default/pg clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T12:31:36.654247-07:00",
+      "updated_at": "2026-06-26T12:31:36.654247-07:00",
+      "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"confidence\":95,\"files\":[\"src/toxicity/cost_meter.rs\",\"src/toxicity/runpod_cope_b.rs\"]}"
     }
   ],
   "edges": [
@@ -7019,6 +7052,39 @@
       "weight": 1.0,
       "rationale": "Real-cost fix following the cost-gap finding",
       "created_at": "2026-06-26T11:10:38.217688-07:00"
+    },
+    {
+      "id": 323,
+      "from_node_id": 330,
+      "to_node_id": 331,
+      "from_change_id": "387e99c4-f200-449e-89ca-3f622212a989",
+      "to_change_id": "e78796d4-793e-43d7-b70e-174c3e50a2a6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Shipped via PR #65",
+      "created_at": "2026-06-26T11:12:04.537665-07:00"
+    },
+    {
+      "id": 324,
+      "from_node_id": 329,
+      "to_node_id": 332,
+      "from_change_id": "6cfe2730-e126-4b65-908b-46743719b258",
+      "to_change_id": "9f8d9b04-ca2e-4e19-9ad6-b1f445506963",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Scan completed clean (degraded=false)",
+      "created_at": "2026-06-26T11:39:45.004790-07:00"
+    },
+    {
+      "id": 325,
+      "from_node_id": 331,
+      "to_node_id": 333,
+      "from_change_id": "e78796d4-793e-43d7-b70e-174c3e50a2a6",
+      "to_change_id": "41ce7a02-a55b-4418-b94b-4f1fe23c803e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit-driven accuracy fix on #185",
+      "created_at": "2026-06-26T12:31:36.660920-07:00"
     }
   ],
   "documents": [

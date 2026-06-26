@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8ba774637ecfa50d9fbc1a0c882489aaba72a9e0",
+    "short_hash": "8ba7746",
+    "author": "Bryan Guffey",
+    "date": "2026-06-26T11:10:54-07:00",
+    "message": "feat(cost): real-time spend across concurrent RunPod workers (#185)\n\nThe ScanCostMeter modeled ONE worker (elapsed × $3.29/hr), but RunPod\nbills $3.29/hr PER worker and the burst runs up to workersMax (10)\nconcurrently. So a multi-worker burst under-counted real spend by ~the\nworker multiple: the 2026-06-26 staging resume burst estimated ~$2 while\nreal cost was ~$6-10. The $2 \"cap\" was not a real spend cap.\n\nReplace the single-worker wall-clock with a worker-seconds INTEGRAL:\n  ∫ min(in_flight, workersMax) dt\naccumulated in a private `Acc` under a short (no-await) lock. Each RunPod\ncall arms an RAII `InFlightGuard` (enter on arm, leave on drop) so\nin_flight tracks true concurrency; the integral is capped at workersMax\n(extra in-flight calls queue, not bill). `estimated_cents()` and the\ndisaster-brake trip now read worker-seconds — the `over_ceiling`\npredicate is unchanged, just fed the real quantity. New env\n`CHARCOAL_RUNPOD_WORKERS_MAX` (default 10) sets the cap.\n\nTDD: 4 Acc integral tests (single/concurrent/cap/idle), 4 meter tests\n(trip/guard/disabled/real-dollar), migrated the 2 short-circuit tests to\nthe new force_worker_seconds seam; the 11 predicate tests are unchanged.\nFull --features web suite (31 binaries) green; clippy clean\nweb/default/postgres.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 7
+  },
+  {
     "hash": "4c0ed7b1f2f3a3060a9ea4b8cc8aa9f44d62e116",
     "short_hash": "4c0ed7b",
     "author": "Bryan Guffey",

@@ -362,9 +362,11 @@ impl RunPodCopeBClient {
         // returns a non-retryable error — it sits OUTSIDE the backon retry loop
         // below, so it is inherently non-retryable — that rides the same skip
         // path the live HTTP 402 already exercised.
-        // Hold the in-flight guard for the whole RunPod call (incl. retries): on
-        // drop it leaves the cost meter's in-flight set, billing its worker time.
-        let _in_flight = self.meter.arm_and_check()?;
+        // Cost ceiling GATE (no in-flight billing here): if we're already over
+        // budget, skip before issuing any request. The in-flight worker time is
+        // billed by a guard scoped to each real request below — NOT across the
+        // retry backoff gaps, which have no active GPU and would over-bill.
+        self.meter.check()?;
 
         let body = Self::build_request_body(content);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));
@@ -379,6 +381,7 @@ impl RunPodCopeBClient {
         let api_key = self.api_key.clone();
         let body_owned = body;
         let retries_in = retries.clone();
+        let meter = self.meter.clone();
 
         let attempt = move || {
             let client = client.clone();
@@ -386,7 +389,11 @@ impl RunPodCopeBClient {
             let key = api_key.clone();
             let body = body_owned.clone();
             let retries = retries_in.clone();
+            let meter = meter.clone();
             async move {
+                // Bill only the actual HTTP request: the guard drops before the
+                // next attempt, so backon's backoff sleep is never billed.
+                let _g = meter.guard();
                 let r = Self::attempt(&client, &url, &key, &body, timeout).await;
                 if r.is_err() {
                     retries.bump();
@@ -422,7 +429,12 @@ impl RunPodCopeBClient {
         // ~90s wait) — in that case poll /status until terminal.
         let verdict = match Self::parse_job(&response, latency_ms)? {
             JobOutcome::Completed(v) => v,
-            JobOutcome::Pending(id) => self.poll_status(&id, start, timeout).await?,
+            JobOutcome::Pending(id) => {
+                // The job is still executing server-side on a worker — that IS
+                // billable, so hold a guard across the poll loop.
+                let _g = self.meter.guard();
+                self.poll_status(&id, start, timeout).await?
+            }
         };
         Ok((verdict, observed))
     }

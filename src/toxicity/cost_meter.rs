@@ -227,22 +227,39 @@ impl ScanCostMeter {
     /// Arm-then-check. Called before each RunPod request. The first-ever call
     /// arms with elapsed 0 (cannot trip, given ceiling > 0); later calls measure
     /// real elapsed. Order is load-bearing: arm THEN check.
-    pub fn arm_and_check(&self) -> Result<InFlightGuard<'_>, CostCeilingExceeded> {
+    /// Ceiling gate ONLY — bring the integral current and evaluate the trip
+    /// without entering the in-flight set. Pair with [`guard`](Self::guard) to
+    /// bill the actual remote-work window, so client-side retry backoff (no
+    /// active GPU) is never billed as worker time.
+    pub fn check(&self) -> Result<(), CostCeilingExceeded> {
         let now = self.now_secs();
-        // Enter the in-flight set (charge the prior interval, then count this
-        // call) and read the running worker-seconds total for the trip check.
         let worker_secs = {
             let mut acc = self.acc.lock().unwrap();
-            acc.enter(now);
+            acc.accrue(now); // bring the integral current (no in-flight change)
             acc.worker_secs
         };
-        match self.check_with_elapsed(worker_secs) {
-            Ok(()) => Ok(InFlightGuard { meter: self }),
+        self.check_with_elapsed(worker_secs)
+    }
+
+    /// Enter the in-flight set for one unit of real remote work; the returned
+    /// guard leaves it (charging that interval to the integral) on drop. Scope
+    /// it to the actual request(s) — NOT across retry backoff gaps.
+    pub fn guard(&self) -> InFlightGuard<'_> {
+        let now = self.now_secs();
+        self.acc.lock().unwrap().enter(now);
+        InFlightGuard { meter: self }
+    }
+
+    /// Convenience: [`guard`](Self::guard) then [`check`](Self::check) (enter,
+    /// then evaluate the trip). On a trip the guard is released so the skipped
+    /// call doesn't leak an in-flight slot. Prefer split `check()` + `guard()`
+    /// when the billable window is narrower than the whole call (e.g. retries).
+    pub fn arm_and_check(&self) -> Result<InFlightGuard<'_>, CostCeilingExceeded> {
+        let guard = self.guard();
+        match self.check() {
+            Ok(()) => Ok(guard),
             Err(e) => {
-                // Over the ceiling — this call is skipped, so back its entry out
-                // rather than leak an in-flight slot into the integral.
-                let now = self.now_secs();
-                self.acc.lock().unwrap().leave(now);
+                drop(guard); // leaves the in-flight set; no slot leaked
                 Err(e)
             }
         }
@@ -356,5 +373,36 @@ mod meter_tests {
         m.force_worker_seconds(3600.0); // exactly one worker-hour = 329c
         let err: CostCeilingExceeded = m.arm_and_check().unwrap_err();
         assert_eq!(err.est_cents, 329);
+    }
+
+    #[test]
+    fn check_is_a_pure_gate_and_does_not_bill() {
+        // check() must NOT enter the in-flight set — so repeated checks across
+        // real time accrue zero worker-seconds. If check() (wrongly) entered,
+        // in_flight would grow and the gap would be billed. This is the guard
+        // against billing retry-backoff time (a non-zero rate amplifies any leak).
+        let m = ScanCostMeter::new(0, 360_000); // ceiling disabled, 100c/sec
+        m.check().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        m.check().unwrap();
+        assert_eq!(m.estimated_cents(), 0, "check() alone must bill nothing");
+    }
+
+    #[test]
+    fn guard_bills_only_while_held() {
+        // A guard bills its held interval; once dropped, no further worker time
+        // accrues — exactly the "don't bill backoff between attempts" property.
+        let m = ScanCostMeter::new(0, 360_000); // 100c/sec
+        {
+            let _g = m.guard();
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let during = m.estimated_cents();
+        std::thread::sleep(std::time::Duration::from_millis(25)); // no guard held
+        let after = m.estimated_cents();
+        assert_eq!(
+            during, after,
+            "no billing may accrue after the guard is dropped"
+        );
     }
 }

@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "exported_at": "2026-06-26T18:10:54.863006+00:00",
+  "exported_at": "2026-06-26T19:31:51.761710+00:00",
   "issues": [
+    {
+      "id": 186,
+      "title": "Batch the RunPod classifier (one request -> many texts) to cut warm-idle GPU cost",
+      "description": "Onboarding cost is dominated by warm-idle GPU time, not compute. The 2026-06-26 staging burst made 4421 classifier calls, each with RunPod executionTime ~130ms (single 0/1 token output, prefill-dominated). Actual GPU compute ≈ 4421×0.13s ≈ 9.6 GPU-min ≈ $0.53; real cost was ~$6-10 — ~90-95% warm-idle waste because the burst is queue-bound (delay ~3-4s vs compute ~0.13s) sending ONE text per /runsync request.\n\nROOT CAUSE: client sends one text per RunPod job; vLLM handler (gpu/cope-b-runpod/handler.py) already supports batching (max_num_seqs=32, AsyncLLMEngine continuous batching) but each serverless job carries a single text, so the batch capacity is unused.\n\nFIX: send batches of N texts per /runsync request. Handler accepts a list[str], returns list[verdict]; client (src/toxicity/runpod_cope_b.rs) batches the burst queue into chunks of N (e.g. 32) and maps results back by post_uri. Cuts requests ~Nx, finishes the burst in minutes instead of ~36, slashing worker-hours toward the ~$0.53 compute floor.\n\nEXPECTED: ~10-30x fewer RunPod requests; onboarding RunPod cost from ~$6-10 toward ~$0.50-1 (the $1/onboarding goal). Pairs with GPU right-sizing (deep-research in progress: A100 vs H100, quantization). Verify with the #185 honest cost meter post-deploy. TDD: handler batch test + client chunk/remap test; preserve per-row envelope (format_parent_reply) + verdict alignment by post_uri.\n\nRelates: #185 (cost meter), #207 (onboarding speed/cost), #206 (cost backstop), #196 (prod cost-guard).",
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "performance"
+      ],
+      "comments": [],
+      "created_at": "2026-06-26T19:17:01.642743+00:00",
+      "updated_at": "2026-06-26T19:17:01.642743+00:00",
+      "closed_at": null
+    },
     {
       "id": 185,
       "title": "Real-time real-cost accounting in ScanCostMeter (account for concurrent workers, not 1)",
