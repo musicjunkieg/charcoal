@@ -1,7 +1,52 @@
 {
   "version": 1,
-  "exported_at": "2026-06-26T15:52:23.396043+00:00",
+  "exported_at": "2026-06-26T19:50:20.345168+00:00",
   "issues": [
+    {
+      "id": 186,
+      "title": "Batch the RunPod classifier (one request -> many texts) to cut warm-idle GPU cost",
+      "description": "Onboarding cost is dominated by warm-idle GPU time, not compute. The 2026-06-26 staging burst made 4421 classifier calls, each with RunPod executionTime ~130ms (single 0/1 token output, prefill-dominated). Actual GPU compute ≈ 4421×0.13s ≈ 9.6 GPU-min ≈ $0.53; real cost was ~$6-10 — ~90-95% warm-idle waste because the burst is queue-bound (delay ~3-4s vs compute ~0.13s) sending ONE text per /runsync request.\n\nROOT CAUSE: client sends one text per RunPod job; vLLM handler (gpu/cope-b-runpod/handler.py) already supports batching (max_num_seqs=32, AsyncLLMEngine continuous batching) but each serverless job carries a single text, so the batch capacity is unused.\n\nFIX: send batches of N texts per /runsync request. Handler accepts a list[str], returns list[verdict]; client (src/toxicity/runpod_cope_b.rs) batches the burst queue into chunks of N (e.g. 32) and maps results back by post_uri. Cuts requests ~Nx, finishes the burst in minutes instead of ~36, slashing worker-hours toward the ~$0.53 compute floor.\n\nEXPECTED: ~10-30x fewer RunPod requests; onboarding RunPod cost from ~$6-10 toward ~$0.50-1 (the $1/onboarding goal). Pairs with GPU right-sizing (deep-research in progress: A100 vs H100, quantization). Verify with the #185 honest cost meter post-deploy. TDD: handler batch test + client chunk/remap test; preserve per-row envelope (format_parent_reply) + verdict alignment by post_uri.\n\nRelates: #185 (cost meter), #207 (onboarding speed/cost), #206 (cost backstop), #196 (prod cost-guard).",
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "performance"
+      ],
+      "comments": [],
+      "created_at": "2026-06-26T19:17:01.642743+00:00",
+      "updated_at": "2026-06-26T19:17:01.642743+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 185,
+      "title": "Real-time real-cost accounting in ScanCostMeter (account for concurrent workers, not 1)",
+      "description": "PROBLEM: ScanCostMeter (src/toxicity/cost_meter.rs) estimates spend as elapsed_secs/3600 * 329c/hr — a SINGLE-worker model. RunPod bills $3.29/hr PER worker (confirmed via get-endpoint costPerHr=3.29), and the burst deliberately runs up to workersMax=10 concurrently to drain the queue fast. So the meter undercounts real spend by ~the active-worker count (up to 10x). Live 2026-06-26 staging resume burst: app estimate ~$2.00 (squeaked under the $2 ceiling, 36m29s vs 36m28s trip threshold) while REAL RunPod cost was ~$6-10 (multiple H100 workers x $3.29/hr x 0.6hr). The $2 \"cap\" is not a real spend cap. (NOTE: workersMin=0 = scale-to-zero, no idle cost; workersStandby is FlashBoot warm-resume, not billed — earlier idle-cost worry was a misread.)\n\nGOAL: meter computes real-time ACTUAL spend reflecting concurrent worker usage, so the disaster-brake trips on real dollars and we have an accurate running spend number.\n\nDESIGN OPTIONS (decide):\n(A) Conservative brake — multiply estimate by the effective worker count = min(burst_concurrency, workersMax), configurable via env (e.g. CHARCOAL_RUNPOD_WORKERS / read from config). With (16,10) => x10 => $2 trips at ~3.6min. Simplest, self-contained, no RunPod API calls. Worst-case (assumes saturation) — safe for a brake, slightly over-counts early/late burst.\n(B) In-flight integral — meter tracks concurrently in-flight classify calls (counter inc on arm / dec on completion), integrates active_workers (capped at workersMax) over time x rate. Self-contained, more accurate (reflects ramp), real-time running spend. Moderate complexity.\n(C) Poll RunPod /health for workers.running periodically and integrate actual worker-seconds. Most accurate (true billing proxy) but adds a RunPod API dependency + polling loop inside the scan.\n\nRECOMMEND: (B) for accuracy without an external dependency, OR (A) if we just want a safe brake fast. Could ship (A) now + (B) as follow-up. Also: emit a periodic \"estimated spend so far\" INFO log during burst for observability regardless of which.\n\nRelates to #183 (burst resilience, same chokepoint), #206 (the cost backstop this corrects), and the historical prod #196 cost-guard. TDD: pure over_ceiling/estimate tests with a worker-count factor; in-flight counter tests for (B).",
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "hardening"
+      ],
+      "comments": [],
+      "created_at": "2026-06-26T17:55:40.271813+00:00",
+      "updated_at": "2026-06-26T17:55:40.271813+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 184,
+      "title": "Make the amplification phase resumable (skip it when resuming burst/finalize)",
+      "description": "PROBLEM: A resumed scan still re-runs the entire amplification phase (~65min for a big account) before it reaches the resumable part. #208 (classification burst decouple) made gather/burst/finalize restartable via the scan_phase marker inside run_phased_scan (src/pipeline/scan_phases/mod.rs) — but amplification::run (src/pipeline/amplification.rs) runs BEFORE run_phased_scan and is NOT gated on the marker. It re-collects Constellation events, re-scores amplifier NLI pairs, re-fetches all amplifier followers, and rebuilds the in-memory candidate set every single run. So when the original scan aborts/cost-caps in burst (scan_phase=\"burst\", e.g. the #178/#183 run with 4905 pending) and is re-triggered, it pays the full amplification tax again just to get back to where run_phased_scan can skip gather. Observed live 2026-06-26: re-run started 15:42 UTC, spent ~65min in amplification before reaching burst, even though the 4905-row queue was already staged.\n\nGOAL: When scan_phase indicates a resume (burst/finalize), skip amplification entirely (or short-circuit it) and go straight to run_phased_scan with the persisted candidate set + staged data — so a resume only does the work it actually left unfinished.\n\nAPPROACH (sketch, design first): persist the built candidate set (CandidateInput list + graph_distances/pile_on context) keyed by user_did alongside the existing scan_account_input staging, written at the point amplification hands off to run_phased_scan. On a run where scan_phase is burst/finalize, load the persisted candidates and skip amplification::run. On a fresh run (scan_phase None/Done/Gather), run amplification normally and (re)write the persisted candidates. Reconcile with the sweep path (run_sweep_phased) which has the same shape. Watch out: candidate sets can drift between runs (new events) — on resume we intentionally reuse the staged set, not rebuild. Also the amplification event-recording side effects (amplification_events table, last_scan_at) — decide whether those must run on resume.\n\nVALUE: cuts resume wall-clock by ~the amplification duration (~65min on a big account); makes cost-cap / transient-interrupt (#183) resumes cheap instead of near-full-rescans. Related: #208 (phased scan), #207 (onboarding speed), #183 (burst now interruptible+resumable), #206 (cost-cap resumes). NOT urgent — resume is correct today, just expensive.\n\nTDD: gate test for \"scan_phase=burst => amplification skipped, candidates loaded from staging => run_phased_scan resumes burst\"; fresh-run test for \"scan_phase=None => amplification runs + persists candidates\".",
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "enhancement"
+      ],
+      "comments": [],
+      "created_at": "2026-06-26T16:05:50.577533+00:00",
+      "updated_at": "2026-06-26T16:05:50.577533+00:00",
+      "closed_at": null
+    },
     {
       "id": 183,
       "title": "Retry RunPod transport/connect errors in burst (backon predicate gap)",

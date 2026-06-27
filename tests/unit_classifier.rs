@@ -381,7 +381,6 @@ mod retry {
     async fn classify_short_circuits_when_over_ceiling() {
         use charcoal::toxicity::cost_meter::ScanCostMeter;
         use std::sync::Arc;
-        use std::time::{Duration, Instant};
 
         let server = MockServer::start().await;
         // Any hit on /runsync would fail the test: expect ZERO requests.
@@ -393,7 +392,9 @@ mod retry {
 
         let meter = Arc::new(ScanCostMeter::new(500, 329));
         // Pre-arm the meter to a time well past the ceiling (no sleeping).
-        meter.force_started_at(Instant::now() - Duration::from_secs(6000));
+        // Pre-seed the worker-seconds integral past the ceiling: 6000 worker-sec
+        // × $3.29/hr ≈ $5.48 ≥ the $5 ceiling, so the next call short-circuits.
+        meter.force_worker_seconds(6000.0);
 
         let client = RunPodCopeBClient::new(server.uri(), "test-key".into())
             .unwrap()
@@ -418,7 +419,6 @@ mod retry {
         // the meter check must live there (the single RunPod request chokepoint).
         use charcoal::toxicity::cost_meter::ScanCostMeter;
         use std::sync::Arc;
-        use std::time::{Duration, Instant};
 
         let server = MockServer::start().await;
         // Any hit on /runsync would fail the test: expect ZERO requests.
@@ -429,7 +429,9 @@ mod retry {
             .await;
 
         let meter = Arc::new(ScanCostMeter::new(500, 329));
-        meter.force_started_at(Instant::now() - Duration::from_secs(6000));
+        // Pre-seed the worker-seconds integral past the ceiling: 6000 worker-sec
+        // × $3.29/hr ≈ $5.48 ≥ the $5 ceiling, so the next call short-circuits.
+        meter.force_worker_seconds(6000.0);
 
         let client = RunPodCopeBClient::new(server.uri(), "test-key".into())
             .unwrap()

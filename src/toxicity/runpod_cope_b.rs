@@ -20,7 +20,7 @@ use thiserror::Error;
 use std::sync::Arc;
 
 use super::classifier::{ClassifierTransientError, ClassifierVerdict, ToxicityClassifier};
-use super::cost_meter::ScanCostMeter;
+use super::cost_meter::{CostCeilingExceeded, ScanCostMeter};
 
 /// Calibration note (Chunk 5 / Step 5): verify distribution parity vs the
 /// reference (Zentropi) backend over ab_sample.jsonl; retune only if materially
@@ -55,6 +55,11 @@ fn classifier_max_retries(raw: Option<&str>) -> u32 {
 /// A non-retryable error (4xx) is permanent and is propagated as-is so the burst
 /// aborts (leaving its row pending would livelock every resume).
 fn classifier_error_from_exhausted(e: RunPodError) -> anyhow::Error {
+    // The cost backstop tripped mid-flight: surface the typed ceiling error so
+    // the burst keys on it (downcastable), exactly like a pre-flight trip.
+    if let RunPodError::CostCapped(c) = e {
+        return c.into();
+    }
     if e.is_retryable() {
         ClassifierTransientError::new(e.to_string()).into()
     } else {
@@ -137,6 +142,10 @@ enum RunPodError {
     ServerError(reqwest::StatusCode),
     #[error("RunPod HTTP {0} (non-retryable)")]
     ClientError(reqwest::StatusCode),
+    /// The per-attempt cost backstop tripped — non-retryable. Carries the typed
+    /// ceiling error so it can be surfaced (downcastable) to the burst phase.
+    #[error("RunPod cost ceiling: {0}")]
+    CostCapped(CostCeilingExceeded),
 }
 
 impl RunPodError {
@@ -356,14 +365,15 @@ impl RunPodCopeBClient {
         content: &str,
         timeout: Duration,
     ) -> Result<(ClassifierVerdict, u32)> {
-        // Cost backstop: arm-then-check before issuing ANY RunPod request. This
-        // is the single chokepoint every request path flows through (classify
-        // and warm_up), so the meter cannot be bypassed. Over the ceiling this
-        // returns a non-retryable error — it sits OUTSIDE the backon retry loop
-        // below, so it is inherently non-retryable — that rides the same skip
-        // path the live HTTP 402 already exercised.
-        self.meter.arm_and_check()?;
-
+        // Cost backstop: the ceiling is checked per-attempt INSIDE the retry
+        // closure below (before each request), so even a mid-burst budget blow
+        // stops further retries — a trip becomes a non-retryable
+        // `RunPodError::CostCapped` that backon returns at once, riding the same
+        // skip path the live HTTP 402 already exercised. classify_with_timeout is
+        // the single chokepoint every request path flows through (classify and
+        // warm_up), so the meter cannot be bypassed. The in-flight worker time is
+        // billed by a guard scoped to each real request — never across the retry
+        // backoff gaps, which have no active GPU.
         let body = Self::build_request_body(content);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));
         let start = Instant::now();
@@ -377,6 +387,7 @@ impl RunPodCopeBClient {
         let api_key = self.api_key.clone();
         let body_owned = body;
         let retries_in = retries.clone();
+        let meter = self.meter.clone();
 
         let attempt = move || {
             let client = client.clone();
@@ -384,7 +395,15 @@ impl RunPodCopeBClient {
             let key = api_key.clone();
             let body = body_owned.clone();
             let retries = retries_in.clone();
+            let meter = meter.clone();
             async move {
+                // Re-check the cost ceiling on EVERY attempt (including retries)
+                // BEFORE issuing the request. CostCapped is non-retryable, so
+                // backon returns it immediately — retries can't bypass the brake.
+                meter.check().map_err(RunPodError::CostCapped)?;
+                // Bill only the actual HTTP request: the guard drops before the
+                // next attempt, so backon's backoff sleep is never billed.
+                let _g = meter.guard();
                 let r = Self::attempt(&client, &url, &key, &body, timeout).await;
                 if r.is_err() {
                     retries.bump();
@@ -420,7 +439,12 @@ impl RunPodCopeBClient {
         // ~90s wait) — in that case poll /status until terminal.
         let verdict = match Self::parse_job(&response, latency_ms)? {
             JobOutcome::Completed(v) => v,
-            JobOutcome::Pending(id) => self.poll_status(&id, start, timeout).await?,
+            JobOutcome::Pending(id) => {
+                // The job is still executing server-side on a worker — that IS
+                // billable, so hold a guard across the poll loop.
+                let _g = self.meter.guard();
+                self.poll_status(&id, start, timeout).await?
+            }
         };
         Ok((verdict, observed))
     }
@@ -489,6 +513,24 @@ mod tests {
             e.downcast_ref::<crate::toxicity::classifier::ClassifierTransientError>()
                 .is_some(),
             "exhausted 5xx should surface as a transient classifier error"
+        );
+    }
+
+    #[test]
+    fn cost_capped_surfaces_as_ceiling_exceeded() {
+        // A per-attempt cost check that trips inside the retry closure must
+        // surface as the downcastable CostCeilingExceeded (the burst keys on it),
+        // not as a generic/transient error.
+        let e = classifier_error_from_exhausted(RunPodError::CostCapped(
+            crate::toxicity::cost_meter::CostCeilingExceeded {
+                est_cents: 600,
+                ceiling_cents: 500,
+            },
+        ));
+        assert!(
+            e.downcast_ref::<crate::toxicity::cost_meter::CostCeilingExceeded>()
+                .is_some(),
+            "cost-capped retry must surface as CostCeilingExceeded"
         );
     }
 
