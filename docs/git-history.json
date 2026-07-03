@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b05e9c2c372324ebf3cd568b59b64dd0d90f8ab1",
+    "short_hash": "b05e9c2",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:29:35-07:00",
+    "message": "feat(toxicity): RunPod client sends batched contents, parses verdicts array (#186)\n\nclassify_batch is now the single HTTP chokepoint: body {\"input\":{\"contents\":[...]}},\nparse {\"output\":{\"verdicts\":[...]}} positionally into Vec<ItemOutcome> (per-slot\nok/error, confidence still validated finite in [0,1]). classify() delegates to a\n1-element batch; max_batch_size from CHARCOAL_RUNPOD_BATCH_SIZE (default 32).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
     "hash": "a7a0ab02994d66ab3abea296988708bd44a525e2",
     "short_hash": "a7a0ab0",
     "author": "Bryan Guffey",

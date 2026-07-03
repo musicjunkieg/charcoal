@@ -1697,13 +1697,14 @@ mod burst_tests {
     use super::*;
     use anyhow::Result;
     use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use charcoal::pipeline::scan_phases::burst::{
         burst_batch, burst_concurrency, run_burst, BurstOutcome,
     };
     use charcoal::toxicity::classifier::{
-        ClassifierTransientError, ClassifierVerdict, ToxicityClassifier,
+        ClassifierTransientError, ClassifierVerdict, ItemOutcome, ToxicityClassifier,
     };
     use charcoal::toxicity::cost_meter::CostCeilingExceeded;
 
@@ -1899,7 +1900,7 @@ mod burst_tests {
         let outcome = run_burst(&db, BURST_USER, &classifier, 4, 100)
             .await
             .unwrap();
-        assert!(matches!(outcome, BurstOutcome::Complete));
+        assert!(matches!(outcome, BurstOutcome::Complete { .. }));
 
         let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
         assert_eq!(pending, 0, "all rows should be done after burst");
@@ -1933,7 +1934,7 @@ mod burst_tests {
             Arc::new(AlwaysOkClassifier::new(ok_verdict()));
 
         let outcome = run_burst(&db, BURST_USER, &classifier, 4, 2).await.unwrap();
-        assert!(matches!(outcome, BurstOutcome::Complete));
+        assert!(matches!(outcome, BurstOutcome::Complete { .. }));
 
         let pending = db.count_pending_classifications(BURST_USER).await.unwrap();
         assert_eq!(pending, 0, "all rows done after multi-iteration burst");
@@ -2175,6 +2176,179 @@ mod burst_tests {
         assert_eq!(
             calls[0], expected,
             "classifier must receive the format_parent_reply envelope for reply rows"
+        );
+    }
+
+    // ── batch doubles (Task 4) ──────────────────────────────────────────────
+
+    /// Returns one benign Verdict per input (length always matches the chunk),
+    /// counting calls. Ordering-safe under buffer_unordered.
+    struct EchoBatch {
+        batch_size: usize,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for EchoBatch {
+        async fn classify(&self, _c: &str) -> Result<ClassifierVerdict> {
+            anyhow::bail!("EchoBatch: use classify_batch")
+        }
+        async fn classify_batch(&self, contents: &[String]) -> Result<Vec<ItemOutcome>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(contents
+                .iter()
+                .map(|_| ItemOutcome::Verdict(ok_verdict()))
+                .collect())
+        }
+        fn name(&self) -> &'static str {
+            "echo-batch"
+        }
+        fn model_id(&self) -> &'static str {
+            "echo-batch"
+        }
+        fn policy_version(&self) -> &'static str {
+            "echo-batch"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+        fn max_batch_size(&self) -> usize {
+            self.batch_size
+        }
+    }
+
+    /// Returns a single scripted result on its one and only call. Use ONLY when
+    /// the test produces exactly one chunk (rows <= batch_size).
+    struct OneShotBatch {
+        result: Mutex<Option<Result<Vec<ItemOutcome>>>>,
+        batch_size: usize,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for OneShotBatch {
+        async fn classify(&self, _c: &str) -> Result<ClassifierVerdict> {
+            anyhow::bail!("OneShotBatch: use classify_batch")
+        }
+        async fn classify_batch(&self, _contents: &[String]) -> Result<Vec<ItemOutcome>> {
+            self.result
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap_or_else(|| Err(anyhow::anyhow!("OneShotBatch called twice")))
+        }
+        fn name(&self) -> &'static str {
+            "oneshot-batch"
+        }
+        fn model_id(&self) -> &'static str {
+            "oneshot-batch"
+        }
+        fn policy_version(&self) -> &'static str {
+            "oneshot-batch"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+        fn max_batch_size(&self) -> usize {
+            self.batch_size
+        }
+    }
+
+    // ── Task 4 tests ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn burst_per_item_error_records_benign_sentinel_and_counts_errored() {
+        // Two rows, batch_size 32 → one chunk, one classify_batch call. Slot 0 a
+        // real verdict, slot 1 an un-decodable error → benign sentinel
+        // (model="decode-error") + Complete{errored:1}. Both rows end 'done'.
+        let db = open_burst_db().await;
+        let acct = "did:plc:burstbatcherr";
+        let rows: Vec<QueueRow> = (0..2).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(OneShotBatch {
+            result: Mutex::new(Some(Ok(vec![
+                ItemOutcome::Verdict(ok_verdict()),
+                ItemOutcome::Error("unexpected model token: 'maybe'".into()),
+            ]))),
+            batch_size: 32,
+        });
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 4, 100)
+            .await
+            .unwrap();
+        assert_eq!(outcome, BurstOutcome::Complete { errored: 1 });
+
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            0
+        );
+        let verdicts = db.fetch_account_verdicts(BURST_USER, acct).await.unwrap();
+        assert_eq!(verdicts.len(), 2);
+        assert!(verdicts.iter().all(|v| v.status == "done"));
+        assert!(
+            verdicts
+                .iter()
+                .any(|v| v.model_id.as_deref() == Some("decode-error")),
+            "the errored slot should be recorded as a decode-error sentinel"
+        );
+    }
+
+    #[tokio::test]
+    async fn burst_chunks_by_max_batch_size() {
+        // 3 rows, batch_size 2 → chunks of [2, 1] → exactly 2 classify_batch
+        // calls. EchoBatch's per-input length is always correct, so ordering
+        // under buffer_unordered doesn't matter.
+        let db = open_burst_db().await;
+        let acct = "did:plc:burstchunks";
+        let rows: Vec<QueueRow> = (0..3).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let echo = Arc::new(EchoBatch {
+            batch_size: 2,
+            calls: AtomicUsize::new(0),
+        });
+        let classifier: Arc<dyn ToxicityClassifier> = echo.clone();
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 4, 100)
+            .await
+            .unwrap();
+        assert_eq!(outcome, BurstOutcome::Complete { errored: 0 });
+        assert_eq!(
+            echo.calls.load(Ordering::SeqCst),
+            2,
+            "3 rows / batch 2 = 2 chunks"
+        );
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn burst_request_level_cost_cap_still_returns_costcapped() {
+        // One chunk; the batch request returns a request-level CostCeilingExceeded
+        // → BurstOutcome::CostCapped (unchanged semantics), rows stay pending.
+        let db = open_burst_db().await;
+        let acct = "did:plc:burstcap";
+        let rows: Vec<QueueRow> = (0..2).map(|i| pending_row(acct, &i.to_string())).collect();
+        db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
+
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(OneShotBatch {
+            result: Mutex::new(Some(Err(CostCeilingExceeded {
+                est_cents: 600,
+                ceiling_cents: 500,
+            }
+            .into()))),
+            batch_size: 32,
+        });
+
+        let outcome = run_burst(&db, BURST_USER, &classifier, 4, 100)
+            .await
+            .unwrap();
+        assert_eq!(outcome, BurstOutcome::CostCapped);
+        assert_eq!(
+            db.count_pending_classifications(BURST_USER).await.unwrap(),
+            2
         );
     }
 

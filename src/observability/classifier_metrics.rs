@@ -62,6 +62,16 @@ pub fn record_backend_selected(backend: &str) {
     );
 }
 
+/// A batch slot could not be decoded into a verdict and was recorded as a
+/// benign sentinel. Emitted per errored slot so the rate is visible in logs.
+pub fn record_decode_error(backend: &str, count: u32) {
+    info!(
+        metric = "classifier_decode_errors",
+        backend = backend,
+        count = count,
+    );
+}
+
 pub fn estimate_cost_cents(backend: &str, elapsed_ms: u32) -> u32 {
     // RunPod: busy-time informational estimate at the backstop's default rate
     // (cost_meter::DEFAULT_RATE_CENTS_PER_HOUR). NOTE: this is busy-latency, not

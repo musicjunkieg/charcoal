@@ -232,10 +232,16 @@ pub async fn run_phased_scan(
                 summary.degraded = true;
                 return Ok(summary);
             }
-            BurstOutcome::Complete => {
+            BurstOutcome::Complete { errored } => {
+                if errored > 0 {
+                    // Some posts failed to decode and were recorded as benign
+                    // sentinels — the scan is incomplete/degraded.
+                    summary.degraded = true;
+                }
                 info!(
                     phase = "burst",
                     outcome = "complete",
+                    errored = errored,
                     "burst phase complete"
                 );
                 db.set_scan_state(user_did, "scan_phase", ScanPhase::Finalize.as_str())
