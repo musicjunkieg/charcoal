@@ -1,14 +1,22 @@
 //! Self-hosted CoPE-B-A4B classifier on RunPod Serverless.
 //!
-//! Wire shape:
+//! Wire shape (batch, Task 3):
 //!   POST <endpoint_url>/runsync
 //!   Authorization: Bearer <api_key>
-//!   {"input": {"content": "<envelope>"}}
-//!   -> {"output": {"toxic": bool, "confidence": float, "model": str, "policy_version": str}}
+//!   {"input": {"contents": ["<envelope>", ...]}}
+//!   -> {"output": {"verdicts": [
+//!         {"ok": true, "toxic": bool, "confidence": float,
+//!          "model": str, "policy_version": str},
+//!         {"ok": false, "error": str},
+//!         ...
+//!      ]}}
+//!
+//! classify() (single) delegates to a 1-element classify_batch, unwrapping
+//! slot 0. classify_batch() is the single HTTP chokepoint for all call paths.
 //!
 //! Retries on 5xx with bounded decorrelated jitter. 4xx surfaces immediately
 //! (config / contract issue). Timeout is split between warm-up and steady-
-//! state — see `RunPodCopeBClient::classify_with_timeout`.
+//! state — see `RunPodCopeBClient::classify_batch_with_timeout`.
 
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
@@ -19,7 +27,9 @@ use thiserror::Error;
 
 use std::sync::Arc;
 
-use super::classifier::{ClassifierTransientError, ClassifierVerdict, ToxicityClassifier};
+use super::classifier::{
+    ClassifierTransientError, ClassifierVerdict, ItemOutcome, ToxicityClassifier,
+};
 use super::cost_meter::{CostCeilingExceeded, ScanCostMeter};
 
 /// Calibration note (Chunk 5 / Step 5): verify distribution parity vs the
@@ -46,6 +56,13 @@ const DEFAULT_MAX_RETRIES: u32 = 6;
 fn classifier_max_retries(raw: Option<&str>) -> u32 {
     raw.and_then(|s| s.trim().parse::<u32>().ok())
         .unwrap_or(DEFAULT_MAX_RETRIES)
+}
+
+/// Resolve the RunPod batch size from env. Missing/garbage → 32; clamped 1..=128.
+fn runpod_batch_size(raw: Option<&str>) -> usize {
+    raw.and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(32)
+        .clamp(1, 128)
 }
 
 /// Map a final (post-retry) [`RunPodError`] into the error the classifier
@@ -92,7 +109,7 @@ struct JobEnvelope {
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
-    output: Option<RawOutput>,
+    output: Option<RawBatchOutput>,
     #[serde(default)]
     error: Option<serde_json::Value>,
     /// RunPod-reported queue wait time in milliseconds. Present on terminal
@@ -105,24 +122,37 @@ struct JobEnvelope {
     execution_time_ms: Option<u32>,
 }
 
-/// Result of interpreting a single job-envelope response.
-enum JobOutcome {
-    Completed(ClassifierVerdict),
+/// Result of interpreting a single batch job-envelope response.
+enum BatchJobOutcome {
+    Completed(Vec<ItemOutcome>),
     /// Job accepted but not finished yet; carries the id to poll `/status` with.
     Pending(String),
 }
 
+/// Batch output body: the handler returns `{"verdicts": [...]}` under RunPod's
+/// `output` wrapper.
 #[derive(Debug, Deserialize)]
-struct RawOutput {
-    toxic: bool,
-    confidence: f32,
+struct RawBatchOutput {
+    verdicts: Vec<RawItem>,
+}
+
+/// One verdict slot. `ok:true` carries the verdict fields; `ok:false` carries
+/// `error`. Fields are optional so a slot of either shape deserialises; the
+/// mapping in `parse_batch_response` enforces which fields must be present.
+#[derive(Debug, Deserialize)]
+struct RawItem {
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    toxic: Option<bool>,
+    #[serde(default)]
+    confidence: Option<f32>,
     #[serde(default = "default_model")]
     model: String,
-    /// Chunk 3's handler.py always emits policy_version; we default if the
-    /// field is missing (older handler, test stubs) so deserialization never
-    /// hard-fails on an otherwise-valid response.
     #[serde(default = "default_policy_version")]
     policy_version: String,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 fn default_model() -> String {
@@ -222,13 +252,45 @@ impl RunPodCopeBClient {
         self
     }
 
-    pub fn build_request_body(content: &str) -> String {
-        serde_json::json!({ "input": { "content": content } }).to_string()
+    pub fn build_batch_request_body(contents: &[String]) -> String {
+        serde_json::json!({ "input": { "contents": contents } }).to_string()
     }
 
-    /// Interpret one job-envelope response into a terminal verdict, a pending
-    /// signal (poll `/status`), or an error.
-    fn parse_job(raw: &str, latency_ms: u32) -> Result<JobOutcome> {
+    /// Map one completed batch envelope into per-slot outcomes. A slot whose
+    /// `ok` is false, or whose `confidence` is missing/NaN/out-of-[0,1], becomes
+    /// an `ItemOutcome::Error` (no silent fallback) rather than a Verdict.
+    fn map_verdicts(out: RawBatchOutput, latency_ms: u32) -> Vec<ItemOutcome> {
+        out.verdicts
+            .into_iter()
+            .map(|item| {
+                if !item.ok {
+                    return ItemOutcome::Error(
+                        item.error
+                            .unwrap_or_else(|| "unspecified item error".into()),
+                    );
+                }
+                let (Some(toxic), Some(confidence)) = (item.toxic, item.confidence) else {
+                    return ItemOutcome::Error("ok slot missing toxic/confidence".into());
+                };
+                if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+                    return ItemOutcome::Error(format!(
+                        "confidence out of contract (finite [0,1]): {confidence}"
+                    ));
+                }
+                ItemOutcome::Verdict(ClassifierVerdict {
+                    toxic_token: toxic,
+                    confidence,
+                    latency_ms,
+                    model_id: item.model,
+                    policy_version: item.policy_version,
+                })
+            })
+            .collect()
+    }
+
+    /// Interpret one job-envelope response as either a terminal batch of
+    /// outcomes or a pending signal (poll `/status`).
+    fn parse_batch_job(raw: &str, latency_ms: u32) -> Result<BatchJobOutcome> {
         let env: JobEnvelope = serde_json::from_str(raw)
             .with_context(|| format!("parse RunPod response body: {raw}"))?;
         let status = env.status.as_deref().unwrap_or("").to_ascii_uppercase();
@@ -241,47 +303,34 @@ impl RunPodCopeBClient {
             bail!("RunPod job {status}: {detail}");
         }
 
-        // Capture timing fields before the partial move of `env.output`.
         let delay_time_ms = env.delay_time_ms;
         let execution_time_ms = env.execution_time_ms;
 
         if let Some(out) = env.output {
-            // `confidence` crosses an external boundary. A NaN or out-of-[0,1]
-            // value would silently skew `is_toxic` threshold comparisons, so
-            // reject it loudly (no silent fallback) rather than propagate it.
-            let confidence = out.confidence;
-            if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
-                bail!("RunPod confidence out of contract (expected finite value in [0,1]): {confidence}");
-            }
             crate::observability::classifier_metrics::record_runpod_timing(
                 delay_time_ms,
                 execution_time_ms,
                 latency_ms,
             );
-            return Ok(JobOutcome::Completed(ClassifierVerdict {
-                toxic_token: out.toxic,
-                confidence,
-                latency_ms,
-                model_id: out.model,
-                policy_version: out.policy_version,
-            }));
+            return Ok(BatchJobOutcome::Completed(Self::map_verdicts(
+                out, latency_ms,
+            )));
         }
 
-        // No output. If the job is still running, return its id to poll on;
-        // otherwise the response is malformed (e.g. COMPLETED but no output).
         if matches!(status.as_str(), "IN_QUEUE" | "IN_PROGRESS") {
             let id = env
                 .id
                 .ok_or_else(|| anyhow::anyhow!("RunPod {status} response missing job id: {raw}"))?;
-            return Ok(JobOutcome::Pending(id));
+            return Ok(BatchJobOutcome::Pending(id));
         }
         bail!("RunPod job {status:?} returned no output: {raw}");
     }
 
-    pub fn parse_response(raw: &str, latency_ms: u32) -> Result<ClassifierVerdict> {
-        match Self::parse_job(raw, latency_ms)? {
-            JobOutcome::Completed(v) => Ok(v),
-            JobOutcome::Pending(id) => {
+    /// Test/entry helper: parse a terminal batch response into outcomes.
+    pub fn parse_batch_response(raw: &str, latency_ms: u32) -> Result<Vec<ItemOutcome>> {
+        match Self::parse_batch_job(raw, latency_ms)? {
+            BatchJobOutcome::Completed(v) => Ok(v),
+            BatchJobOutcome::Pending(id) => {
                 bail!("RunPod job {id} not terminal in the /runsync response (still pending)")
             }
         }
@@ -295,7 +344,7 @@ impl RunPodCopeBClient {
         job_id: &str,
         start: Instant,
         timeout: Duration,
-    ) -> Result<ClassifierVerdict> {
+    ) -> Result<Vec<ItemOutcome>> {
         let url = format!(
             "{}/status/{}",
             self.endpoint_url.trim_end_matches('/'),
@@ -326,14 +375,14 @@ impl RunPodCopeBClient {
             }
             let body = resp.text().await?;
             let latency_ms: u32 = start.elapsed().as_millis().try_into().unwrap_or(u32::MAX);
-            match Self::parse_job(&body, latency_ms)? {
-                JobOutcome::Completed(v) => return Ok(v),
-                JobOutcome::Pending(_) => continue,
+            match Self::parse_batch_job(&body, latency_ms)? {
+                BatchJobOutcome::Completed(v) => return Ok(v),
+                BatchJobOutcome::Pending(_) => continue,
             }
         }
     }
 
-    /// Single attempt — issued from inside the retry loop in classify_with_timeout.
+    /// Single attempt — issued from inside the retry loop in classify_batch_with_timeout.
     /// Returns the JSON body string on 2xx, a typed RunPodError otherwise.
     async fn attempt(
         client: &reqwest::Client,
@@ -360,21 +409,25 @@ impl RunPodCopeBClient {
         }
     }
 
-    async fn classify_with_timeout(
+    /// Single HTTP chokepoint for all classification paths. Takes a batch of
+    /// content strings; classify() passes a 1-element slice. Returns the
+    /// per-slot outcomes and the retry count for metrics.
+    ///
+    /// Cost backstop: the ceiling is checked per-attempt INSIDE the retry
+    /// closure below (before each request), so even a mid-burst budget blow
+    /// stops further retries — a trip becomes a non-retryable
+    /// `RunPodError::CostCapped` that backon returns at once, riding the same
+    /// skip path the live HTTP 402 already exercised. classify_batch_with_timeout
+    /// is the single chokepoint every request path flows through (classify,
+    /// classify_batch, and warm_up), so the meter cannot be bypassed. The
+    /// in-flight worker time is billed by a guard scoped to each real request
+    /// — never across the retry backoff gaps, which have no active GPU.
+    async fn classify_batch_with_timeout(
         &self,
-        content: &str,
+        contents: &[String],
         timeout: Duration,
-    ) -> Result<(ClassifierVerdict, u32)> {
-        // Cost backstop: the ceiling is checked per-attempt INSIDE the retry
-        // closure below (before each request), so even a mid-burst budget blow
-        // stops further retries — a trip becomes a non-retryable
-        // `RunPodError::CostCapped` that backon returns at once, riding the same
-        // skip path the live HTTP 402 already exercised. classify_with_timeout is
-        // the single chokepoint every request path flows through (classify and
-        // warm_up), so the meter cannot be bypassed. The in-flight worker time is
-        // billed by a guard scoped to each real request — never across the retry
-        // backoff gaps, which have no active GPU.
-        let body = Self::build_request_body(content);
+    ) -> Result<(Vec<ItemOutcome>, u32)> {
+        let body = Self::build_batch_request_body(contents);
         let url = format!("{}/runsync", self.endpoint_url.trim_end_matches('/'));
         let start = Instant::now();
         let retries = RetryCounter::default();
@@ -437,35 +490,58 @@ impl RunPodCopeBClient {
         let observed = retries.get();
         // /runsync may return before the job finishes (cold starts exceed its
         // ~90s wait) — in that case poll /status until terminal.
-        let verdict = match Self::parse_job(&response, latency_ms)? {
-            JobOutcome::Completed(v) => v,
-            JobOutcome::Pending(id) => {
+        let verdicts = match Self::parse_batch_job(&response, latency_ms)? {
+            BatchJobOutcome::Completed(v) => v,
+            BatchJobOutcome::Pending(id) => {
                 // The job is still executing server-side on a worker — that IS
                 // billable, so hold a guard across the poll loop.
                 let _g = self.meter.guard();
                 self.poll_status(&id, start, timeout).await?
             }
         };
-        Ok((verdict, observed))
+        Ok((verdicts, observed))
     }
 }
 
 #[async_trait]
 impl ToxicityClassifier for RunPodCopeBClient {
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict> {
-        // Cost backstop is enforced inside classify_with_timeout (the single
-        // RunPod request chokepoint), so both classify and warm_up are gated.
-        let (verdict, retries) = self
-            .classify_with_timeout(content, self.steady_timeout)
+        // Single classify rides the batch path (batch-only wire contract): send
+        // a 1-element batch and unwrap slot 0.
+        let (mut outcomes, retries) = self
+            .classify_batch_with_timeout(&[content.to_string()], self.steady_timeout)
             .await?;
-        crate::observability::classifier_metrics::record_request(
-            self.name(),
-            verdict.latency_ms,
-            verdict.toxic_token,
-            retries,
-        );
-        Ok(verdict)
+        let outcome = outcomes.drain(..).next().ok_or_else(|| {
+            anyhow::anyhow!("RunPod returned an empty batch for a single classify")
+        })?;
+        match outcome {
+            ItemOutcome::Verdict(verdict) => {
+                crate::observability::classifier_metrics::record_request(
+                    self.name(),
+                    verdict.latency_ms,
+                    verdict.toxic_token,
+                    retries,
+                );
+                Ok(verdict)
+            }
+            ItemOutcome::Error(e) => Err(anyhow::anyhow!("RunPod decode error: {e}")),
+        }
     }
+
+    async fn classify_batch(&self, contents: &[String]) -> Result<Vec<ItemOutcome>> {
+        let (outcomes, retries) = self
+            .classify_batch_with_timeout(contents, self.steady_timeout)
+            .await?;
+        // One metric line for the request; per-slot toxic flags aren't summed
+        // here (finalize aggregates verdicts). Record retries once per batch.
+        crate::observability::classifier_metrics::record_request(self.name(), 0, false, retries);
+        Ok(outcomes)
+    }
+
+    fn max_batch_size(&self) -> usize {
+        runpod_batch_size(std::env::var("CHARCOAL_RUNPOD_BATCH_SIZE").ok().as_deref())
+    }
+
     fn name(&self) -> &'static str {
         "runpod-cope-b"
     }
@@ -489,8 +565,8 @@ impl ToxicityClassifier for RunPodCopeBClient {
 /// longer timeout.
 pub async fn warm_up(client: &RunPodCopeBClient) -> Result<()> {
     let (_, _retries) = client
-        .classify_with_timeout(
-            "[Parent post]: warm-up\n\n[Reply]: warm-up",
+        .classify_batch_with_timeout(
+            &["[Parent post]: warm-up\n\n[Reply]: warm-up".to_string()],
             client.warmup_timeout,
         )
         .await?;
@@ -500,6 +576,7 @@ pub async fn warm_up(client: &RunPodCopeBClient) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::toxicity::classifier::ItemOutcome;
 
     #[test]
     fn exhausted_server_error_maps_to_transient() {
@@ -567,81 +644,97 @@ mod tests {
         );
     }
 
-    /// A minimal valid COMPLETED envelope WITH delayTime/executionTime.
-    fn completed_json_with_timing() -> &'static str {
+    // ── Batch wire fixtures (supersede the single-output fixtures) ──
+    fn batch_json_with_timing() -> &'static str {
         r#"{
             "id": "abc-123",
             "status": "COMPLETED",
             "delayTime": 4800,
             "executionTime": 700,
-            "output": {
-                "toxic": false,
-                "confidence": 0.1,
-                "model": "cope-b-a4b",
-                "policy_version": "policy-v1"
-            }
+            "output": { "verdicts": [
+                {"ok": true, "toxic": false, "confidence": 0.1,
+                 "model": "cope-b-a4b", "policy_version": "policy-v1"}
+            ] }
         }"#
     }
 
-    /// A minimal valid COMPLETED envelope WITHOUT delayTime/executionTime
-    /// (backward-compat: older handler responses, test stubs).
-    fn completed_json_without_timing() -> &'static str {
+    fn batch_json_without_timing() -> &'static str {
         r#"{
             "id": "def-456",
             "status": "COMPLETED",
-            "output": {
-                "toxic": true,
-                "confidence": 0.9,
-                "model": "cope-b-a4b",
-                "policy_version": "policy-v1"
-            }
+            "output": { "verdicts": [
+                {"ok": true, "toxic": true, "confidence": 0.9,
+                 "model": "cope-b-a4b", "policy_version": "policy-v1"}
+            ] }
         }"#
     }
 
     #[test]
-    fn test_runpod_timing_fields_parse_from_completed_envelope() {
-        let env: JobEnvelope =
-            serde_json::from_str(completed_json_with_timing()).expect("should deserialize");
-        assert_eq!(
-            env.delay_time_ms,
-            Some(4800),
-            "delayTime should deserialize to Some(4800)"
-        );
-        assert_eq!(
-            env.execution_time_ms,
-            Some(700),
-            "executionTime should deserialize to Some(700)"
-        );
+    fn build_batch_body_wraps_contents_list() {
+        let body = RunPodCopeBClient::build_batch_request_body(&["a".into(), "b".into()]);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["input"]["contents"][0], "a");
+        assert_eq!(v["input"]["contents"][1], "b");
     }
 
     #[test]
-    fn test_parse_response_succeeds_with_timing_fields() {
-        // parse_response is the public entry point; it should still return a
-        // valid verdict even when delayTime/executionTime are present.
-        let verdict = RunPodCopeBClient::parse_response(completed_json_with_timing(), 5500)
-            .expect("should parse successfully");
-        assert!(!verdict.toxic_token);
-        assert!((verdict.confidence - 0.1).abs() < f32::EPSILON);
-        assert_eq!(verdict.latency_ms, 5500);
+    fn parse_batch_maps_mixed_ok_and_error_slots_in_order() {
+        let raw = r#"{
+            "status": "COMPLETED",
+            "output": { "verdicts": [
+                {"ok": true, "toxic": true, "confidence": 0.8,
+                 "model": "cope-b-a4b", "policy_version": "p1"},
+                {"ok": false, "error": "unexpected model token: 'maybe'"}
+            ] }
+        }"#;
+        let out = RunPodCopeBClient::parse_batch_response(raw, 1234).unwrap();
+        assert_eq!(out.len(), 2);
+        match &out[0] {
+            ItemOutcome::Verdict(v) => {
+                assert!(v.toxic_token);
+                assert!((v.confidence - 0.8).abs() < f32::EPSILON);
+                assert_eq!(v.latency_ms, 1234);
+            }
+            _ => panic!("slot 0 should be a Verdict"),
+        }
+        assert!(matches!(out[1], ItemOutcome::Error(ref e) if e.contains("maybe")));
     }
 
     #[test]
-    fn test_timing_fields_absent_deserialize_to_none() {
-        let env: JobEnvelope =
-            serde_json::from_str(completed_json_without_timing()).expect("should deserialize");
-        assert_eq!(env.delay_time_ms, None, "missing delayTime should be None");
-        assert_eq!(
-            env.execution_time_ms, None,
-            "missing executionTime should be None"
-        );
+    fn parse_batch_rejects_out_of_range_confidence_as_item_error() {
+        // A NaN/out-of-[0,1] confidence must not silently skew thresholds; the
+        // slot becomes an ItemOutcome::Error, not a Verdict.
+        let raw = r#"{
+            "status": "COMPLETED",
+            "output": { "verdicts": [
+                {"ok": true, "toxic": true, "confidence": 1.7,
+                 "model": "cope-b-a4b", "policy_version": "p1"}
+            ] }
+        }"#;
+        let out = RunPodCopeBClient::parse_batch_response(raw, 1).unwrap();
+        assert!(matches!(out[0], ItemOutcome::Error(_)));
     }
 
     #[test]
-    fn test_parse_response_backward_compat_without_timing() {
-        // Older responses that omit timing fields should still parse correctly.
-        let verdict = RunPodCopeBClient::parse_response(completed_json_without_timing(), 1000)
-            .expect("should parse successfully without timing fields");
-        assert!(verdict.toxic_token);
-        assert!((verdict.confidence - 0.9).abs() < f32::EPSILON);
+    fn parse_batch_timing_fields_parse_from_envelope() {
+        let env: JobEnvelope = serde_json::from_str(batch_json_with_timing()).expect("deserialize");
+        assert_eq!(env.delay_time_ms, Some(4800));
+        assert_eq!(env.execution_time_ms, Some(700));
+    }
+
+    #[test]
+    fn parse_batch_single_verdict_with_timing() {
+        let out = RunPodCopeBClient::parse_batch_response(batch_json_with_timing(), 5500)
+            .expect("parse ok");
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], ItemOutcome::Verdict(ref v)
+            if !v.toxic_token && (v.confidence - 0.1).abs() < f32::EPSILON));
+    }
+
+    #[test]
+    fn parse_batch_single_verdict_without_timing() {
+        let out = RunPodCopeBClient::parse_batch_response(batch_json_without_timing(), 1000)
+            .expect("parse ok");
+        assert!(matches!(out[0], ItemOutcome::Verdict(ref v) if v.toxic_token));
     }
 }
