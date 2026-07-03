@@ -165,15 +165,25 @@ async def handler(event):
     sampling = _sampling_params()
 
     async def run_one(index: int, content: str) -> dict:
-        prompt = build_prompt(policy=POLICY, content=content)
-        # vLLM requires a unique request_id per concurrent generate() call.
-        request_id = f"{base_id}-{index}"
-        final = None
-        async for partial in engine.generate(prompt, sampling, request_id):
-            final = partial
-        if final is None:
-            return {"ok": False, "error": "vLLM engine produced no output"}
-        return result_slot(final.outputs[0])
+        # Per-slot isolation: `result_slot` already turns a decode failure into an
+        # ok:false slot, and this try/except extends that to an `engine.generate()`
+        # failure (or any other slot-level exception) so one bad request returns an
+        # ok:false slot instead of propagating out of `asyncio.gather` and failing
+        # the whole batch (cancelling sibling requests). We catch `Exception`, not
+        # `BaseException`, so `asyncio.CancelledError`/`GeneratorExit` still
+        # propagate for correct shutdown/abort behaviour.
+        try:
+            prompt = build_prompt(policy=POLICY, content=content)
+            # vLLM requires a unique request_id per concurrent generate() call.
+            request_id = f"{base_id}-{index}"
+            final = None
+            async for partial in engine.generate(prompt, sampling, request_id):
+                final = partial
+            if final is None:
+                return {"ok": False, "error": "vLLM engine produced no output"}
+            return result_slot(final.outputs[0])
+        except Exception as exc:  # noqa: BLE001 — deliberate per-slot isolation
+            return {"ok": False, "error": str(exc)}
 
     # gather preserves input order in its result list, so the verdicts stay
     # positionally aligned with `contents`. vLLM's AsyncLLMEngine batches the

@@ -532,9 +532,24 @@ impl ToxicityClassifier for RunPodCopeBClient {
         let (outcomes, retries) = self
             .classify_batch_with_timeout(contents, self.steady_timeout)
             .await?;
-        // One metric line for the request; per-slot toxic flags aren't summed
-        // here (finalize aggregates verdicts). Record retries once per batch.
-        crate::observability::classifier_metrics::record_request(self.name(), 0, false, retries);
+        // Record the batch request's real observed latency (every verdict slot
+        // shares the per-request wall clock stamped by classify_batch_with_timeout)
+        // rather than a 0 that would dilute the classifier_request_latency_ms
+        // histogram. Per-slot toxic flags aren't summed here (finalize aggregates
+        // verdicts); retries are recorded once per batch request.
+        let observed_latency_ms = outcomes
+            .iter()
+            .find_map(|o| match o {
+                ItemOutcome::Verdict(v) => Some(v.latency_ms),
+                ItemOutcome::Error(_) => None,
+            })
+            .unwrap_or(0);
+        crate::observability::classifier_metrics::record_request(
+            self.name(),
+            observed_latency_ms,
+            false,
+            retries,
+        );
         Ok(outcomes)
     }
 

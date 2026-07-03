@@ -131,8 +131,18 @@ pub async fn run_burst(
                         continue;
                     }
                     if outcomes.len() != chunk.len() {
-                        // Contract violation: positional alignment broken. Abort
+                        // Contract violation: positional alignment broken. Log at
+                        // detection time so this batching-specific failure signal
+                        // is always visible — otherwise a concurrently-in-flight
+                        // chunk tripping the cost cap would win outcome precedence
+                        // and return CostCapped before `other_error` is ever
+                        // inspected, discarding the mismatch silently. Abort
                         // (permanent) after persisting prior successes.
+                        warn!(
+                            expected = chunk.len(),
+                            got = outcomes.len(),
+                            "RunPod batch length mismatch — contract violation, aborting after persisting prior successes"
+                        );
                         if other_error.is_none() {
                             other_error = Some(anyhow::anyhow!(
                                 "RunPod batch length mismatch: {} verdicts for {} inputs",

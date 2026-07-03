@@ -135,6 +135,30 @@ async def test_handler_batch_isolates_undecodable_slot(patched_engine):
     assert verdicts[2]["ok"] is True and verdicts[2]["toxic"] is False
 
 
+async def test_handler_batch_isolates_engine_failure(patched_engine):
+    # If engine.generate() itself raises for ONE slot (not a decode error), that
+    # slot becomes ok:false and its siblings are unaffected — the exception must
+    # not escape run_one and fail the whole asyncio.gather batch.
+    handler, fake_engine = patched_engine
+
+    def _gen(prompt, *args, **kwargs):
+        # build_prompt is patched to f"<prompt>{content}</prompt>", so the middle
+        # slot's prompt carries "b". Raise for it only.
+        if "b" in prompt:
+            raise RuntimeError("engine boom")
+        return _async_iter(_mock_engine_result(token="1"))
+
+    fake_engine.generate = MagicMock(side_effect=_gen)
+    result = await handler.handler(
+        {"id": "req-b7", "input": {"contents": ["a", "b", "c"]}}
+    )
+    verdicts = result["verdicts"]
+    assert len(verdicts) == 3
+    assert verdicts[0]["ok"] is True
+    assert verdicts[1]["ok"] is False and "boom" in verdicts[1]["error"]
+    assert verdicts[2]["ok"] is True
+
+
 async def test_handler_batch_length_matches_input(patched_engine):
     handler, fake_engine = patched_engine
     _multi_engine(fake_engine, [_mock_engine_result(token="1") for _ in range(4)])
