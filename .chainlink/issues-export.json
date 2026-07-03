@@ -1,7 +1,28 @@
 {
   "version": 1,
-  "exported_at": "2026-06-28T18:09:36.659453+00:00",
+  "exported_at": "2026-07-03T19:19:51.573944+00:00",
   "issues": [
+    {
+      "id": 188,
+      "title": "Evaluate flat-rate hosting alternatives to Railway usage-based billing",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [
+        {
+          "content": "TRIGGER: Railway bill for May 2026 was $30.32 (Pro $20/mo subscription includes $20 usage, then metered above it on vCPU-time, RAM-GB-time, volume $/GB, egress). Bryan: \"it is already time to look at different options, either a VPS that does not charge on usage or something.\"\n\nSCOPE: evaluate flat-rate / fixed-price hosting alternatives to Railways usage-based model for the charcoal-web service (Axum API + SvelteKit SPA) + Postgres (pgvector) + a persistent volume for ONNX models (/data/models). Two environments today: prod (charcoal.watch <- main) and staging (<- staging), each with its own Postgres + volume.\n\nCANDIDATES TO PRICE OUT (flat monthly, no per-usage metering): Hetzner Cloud / dedicated (note: soot v2 spec already assumes a Hetzner box ~$80/mo fixed), a generic VPS (DigitalOcean/Linode/Vultr fixed droplet), Fly.io, bare metal. Compare against current Railway ~$30/mo trajectory.\n\nKEY REQUIREMENTS the target must satisfy:\n- Postgres 16+ with pgvector (384-dim embeddings) — self-managed on the box or a managed flat-rate add-on.\n- Persistent volume for ONNX models (~216MB toxicity+embeddings) + the NLI model (~87MB); models auto-download on first scan.\n- Docker deploy (Dockerfile already exists: Ubuntu 24.04, Rust 1.94 + Node 22, glibc 2.39 for ort-sys). Railway builder is DOCKERFILE not Railpack.\n- Custom domain + TLS for charcoal.watch (Porkbun DNS, currently ALIAS to Railway).\n- Two envs (prod + staging) — a single bigger box could host both via containers/compose.\n- Outbound bandwidth: scans are I/O-heavy against Bluesky public API + Constellation + RunPod; check egress is not separately metered/capped.\n\nNOTE — this is the HOSTING dimension that docs/research/infra-scaling-spike-2026-06.md and [[project_infra_scaling_spike]] deferred to second behind the job-queue/worker-pool work. The spike concluded I/O-bound (not CPU-bound), DB is the crux. This issue is narrower: just the billing-model migration (usage-based -> flat-rate). Does NOT include the GPU/RunPod classifier spend (that is #185 meter + #186 batching + #187 resilience) — RunPod stays separate regardless of where the web app runs.\n\nDELIVERABLE: a short comparison (monthly $ at current scale, migration effort, ops burden of self-managed Postgres vs managed, TLS/domain story) + a recommendation. Then a migration plan if we proceed.",
+          "created_at": "2026-06-29T18:28:07.895968+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-29T18:27:32.927899+00:00",
+      "updated_at": "2026-06-29T18:27:32.927899+00:00",
+      "closed_at": null
+    },
     {
       "id": 187,
       "title": "RunPod capacity resilience: multi-DC CoPE-B endpoints + GPU preference list + app-side endpoint failover",

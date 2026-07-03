@@ -3629,6 +3629,28 @@
       "created_at": "2026-06-28T11:08:24.424839-07:00",
       "updated_at": "2026-06-28T11:08:24.424839-07:00",
       "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"confidence\":90,\"prompt\":\"This branch can go away, we should be moving to starting 186. I merged the PR from this branch to staging already.\"}"
+    },
+    {
+      "id": 337,
+      "change_id": "f05ec1f6-f422-4940-8c9f-dd4752aa8c02",
+      "node_type": "action",
+      "title": "Wrote #186 design spec (batch RunPod classifier): batch-only contract, per-item isolation, positional align, fail-open-to-benign",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-28T11:09:45.716097-07:00",
+      "updated_at": "2026-06-28T11:09:45.716097-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"c33cb5d\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-06-27-batch-runpod-classifier-design.md\"]}"
+    },
+    {
+      "id": 338,
+      "change_id": "59ddc925-6069-4be5-9e75-1ecf150b9a86",
+      "node_type": "decision",
+      "title": "Implement #186 as 4 TDD tasks: trait (ItemOutcome/classify_batch/max_batch_size) → handler batch → RunPod client batch → burst+orchestrator capstone",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T12:12:32.392403-07:00",
+      "updated_at": "2026-07-03T12:12:32.392403-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"confidence\":88}"
     }
   ],
   "edges": [
@@ -7140,6 +7162,17 @@
       "weight": 1.0,
       "rationale": "PR #65 approved after 3 valid CodeRabbit rounds",
       "created_at": "2026-06-26T12:56:31.876705-07:00"
+    },
+    {
+      "id": 328,
+      "from_node_id": 336,
+      "to_node_id": 337,
+      "from_change_id": "276989d5-82be-40b2-8622-72c2d9da533d",
+      "to_change_id": "f05ec1f6-f422-4940-8c9f-dd4752aa8c02",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Design spec implementing the #186 goal",
+      "created_at": "2026-06-28T11:09:45.723272-07:00"
     }
   ],
   "documents": [

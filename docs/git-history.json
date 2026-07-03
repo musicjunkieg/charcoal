@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c33cb5d9d4a13aa36495685dfb8b3dfaf40a354a",
+    "short_hash": "c33cb5d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-28T11:09:36-07:00",
+    "message": "docs(cost): design spec for batching the RunPod classifier (#186)\n\nBatch-only wire contract, per-item isolation, positional alignment, and\nfail-open-to-benign for un-decodable slots (avoids the finalize NeedsRegather\nstorm a NULL-verdict row would cause). Additive trait (classify_batch +\nmax_batch_size); Zentropi/Stub stay 1-per-call and byte-identical to today.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 3
+  },
+  {
     "hash": "8ba774637ecfa50d9fbc1a0c882489aaba72a9e0",
     "short_hash": "8ba7746",
     "author": "Bryan Guffey",
