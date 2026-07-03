@@ -1,5 +1,61 @@
 [
   {
+    "hash": "a9824e5210aa577d2a2bcf501b1e2466464e3bcc",
+    "short_hash": "a9824e5",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:44:38-07:00",
+    "message": "docs: changelog entry for batched RunPod classifier + CHARCOAL_RUNPOD_BATCH_SIZE (#186)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "08249292591dfde8e2d18dbb1a92bf839df97cd6",
+    "short_hash": "0824929",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:39:37-07:00",
+    "message": "feat(burst): batch the classifier queue, fail-open on decode errors (#186)\n\nrun_burst chunks pending rows by classifier.max_batch_size() and fans out over\nchunks (buffer_unordered = concurrent jobs). Positional zip back to\n(account_did, post_uri); an un-decodable slot is recorded as a benign\ndecode-error sentinel + warn + metric. BurstOutcome::Complete{errored} flips the\nscan degraded flag when > 0. Request-level cost-cap/transient/permanent\nsemantics unchanged.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 7
+  },
+  {
+    "hash": "b05e9c2c372324ebf3cd568b59b64dd0d90f8ab1",
+    "short_hash": "b05e9c2",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:29:35-07:00",
+    "message": "feat(toxicity): RunPod client sends batched contents, parses verdicts array (#186)\n\nclassify_batch is now the single HTTP chokepoint: body {\"input\":{\"contents\":[...]}},\nparse {\"output\":{\"verdicts\":[...]}} positionally into Vec<ItemOutcome> (per-slot\nok/error, confidence still validated finite in [0,1]). classify() delegates to a\n1-element batch; max_batch_size from CHARCOAL_RUNPOD_BATCH_SIZE (default 32).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "a7a0ab02994d66ab3abea296988708bd44a525e2",
+    "short_hash": "a7a0ab0",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:19:36-07:00",
+    "message": "feat(gpu): batch-only handler with per-item isolation (#186)\n\nHandler now takes {\"input\":{\"contents\":[...]}} and returns {\"verdicts\":[...]}\nin input order via asyncio.gather over vLLM continuous batching. A single\nun-decodable slot becomes {\"ok\":false,\"error\":...} (new pure result_slot\nhelper) instead of failing the whole job. Tests rewritten to the batch shape.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "8cac810f35694ff87549d136cb19df2d0eba73c5",
+    "short_hash": "8cac810",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:13:27-07:00",
+    "message": "feat(toxicity): add classify_batch + max_batch_size to the classifier trait (#186)\n\nAdditive: ItemOutcome enum (per-slot Verdict|Error), a default classify_batch\nthat loops classify (Zentropi/Stub stay byte-identical to today), and\nmax_batch_size default 1. Foundation for RunPod batching.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
+    "hash": "46a4eeeaaa08f01945dcda53abe99771676e19c2",
+    "short_hash": "46a4eee",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T12:19:51-07:00",
+    "message": "docs(cost): TDD implementation plan for batching the RunPod classifier (#186)\n\n5 tasks bottom-up: trait (classify_batch/max_batch_size) → batch-only handler →\nRunPod client batch request/parse → burst chunk+fan-out+benign-sentinel+orchestrator\n→ config docs. Each task RED→GREEN, concrete code + exact test commands, grounded\nin the real burst_tests harness.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
+    "hash": "c33cb5d9d4a13aa36495685dfb8b3dfaf40a354a",
+    "short_hash": "c33cb5d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-28T11:09:36-07:00",
+    "message": "docs(cost): design spec for batching the RunPod classifier (#186)\n\nBatch-only wire contract, per-item isolation, positional alignment, and\nfail-open-to-benign for un-decodable slots (avoids the finalize NeedsRegather\nstorm a NULL-verdict row would cause). Additive trait (classify_batch +\nmax_batch_size); Zentropi/Stub stay 1-per-call and byte-identical to today.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 3
+  },
+  {
     "hash": "8ba774637ecfa50d9fbc1a0c882489aaba72a9e0",
     "short_hash": "8ba7746",
     "author": "Bryan Guffey",

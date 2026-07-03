@@ -3607,6 +3607,138 @@
       "created_at": "2026-06-26T12:43:48.814061-07:00",
       "updated_at": "2026-06-26T12:43:48.814061-07:00",
       "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"confidence\":95,\"files\":[\"src/toxicity/runpod_cope_b.rs\"]}"
+    },
+    {
+      "id": 335,
+      "change_id": "144d7466-8b4f-4843-b82c-4e8653da934b",
+      "node_type": "outcome",
+      "title": "PR #65 (#185 real-time cost meter) CodeRabbit APPROVED @ 41a2ec6, mergeable=CLEAN. 3 review rounds all valid: R1 don't-bill-backoff (check/guard split), R2 per-attempt re-check (CostCapped non-retryable), R3 stale-comment reconcile → APPROVED. Stacked on #64; auto-retargets to staging on #64 merge. Merge order: #64 → #65 into #63 Phase-6 batch. Polling stopped.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-26T12:56:31.869311-07:00",
+      "updated_at": "2026-06-26T12:56:31.869311-07:00",
+      "metadata_json": "{\"branch\":\"feat/cost-meter-realtime\",\"confidence\":97}"
+    },
+    {
+      "id": 336,
+      "change_id": "276989d5-82be-40b2-8622-72c2d9da533d",
+      "node_type": "goal",
+      "title": "Batch the RunPod classifier (#186): one /runsync per N texts to cut warm-idle GPU cost toward $1/onboarding",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-28T11:08:24.424839-07:00",
+      "updated_at": "2026-06-28T11:08:24.424839-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"confidence\":90,\"prompt\":\"This branch can go away, we should be moving to starting 186. I merged the PR from this branch to staging already.\"}"
+    },
+    {
+      "id": 337,
+      "change_id": "f05ec1f6-f422-4940-8c9f-dd4752aa8c02",
+      "node_type": "action",
+      "title": "Wrote #186 design spec (batch RunPod classifier): batch-only contract, per-item isolation, positional align, fail-open-to-benign",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-28T11:09:45.716097-07:00",
+      "updated_at": "2026-06-28T11:09:45.716097-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"c33cb5d\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-06-27-batch-runpod-classifier-design.md\"]}"
+    },
+    {
+      "id": 338,
+      "change_id": "59ddc925-6069-4be5-9e75-1ecf150b9a86",
+      "node_type": "decision",
+      "title": "Implement #186 as 4 TDD tasks: trait (ItemOutcome/classify_batch/max_batch_size) → handler batch → RunPod client batch → burst+orchestrator capstone",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T12:12:32.392403-07:00",
+      "updated_at": "2026-07-03T12:12:32.392403-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"confidence\":88}"
+    },
+    {
+      "id": 339,
+      "change_id": "a7d6a48e-32a9-4242-ba98-c9793011c381",
+      "node_type": "action",
+      "title": "Wrote #186 TDD impl plan (5 tasks: trait→handler→client→burst+orchestrator→docs), grounded in real burst_tests harness",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T12:19:59.804984-07:00",
+      "updated_at": "2026-07-03T12:19:59.804984-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"46a4eee\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-07-03-batch-runpod-classifier-impl.md\"]}"
+    },
+    {
+      "id": 340,
+      "change_id": "88e549b5-4015-4bdf-9d56-856bf293a95a",
+      "node_type": "outcome",
+      "title": "Task 1 DONE + reviewed: classify_batch/max_batch_size/ItemOutcome added to trait, 3 tests green, additive (Zentropi/Stub unchanged). commit 8cac810",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:16:57.526555-07:00",
+      "updated_at": "2026-07-03T13:16:57.526555-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"8cac810\",\"confidence\":95}"
+    },
+    {
+      "id": 341,
+      "change_id": "182ee1e3-dfb1-465f-8df2-3c1c4f50b2da",
+      "node_type": "outcome",
+      "title": "Task 2 DONE + reviewed: batch-only vLLM handler (contents[]->verdicts[]), per-item isolation via result_slot + asyncio.gather. 11 tests green. commit a7a0ab0",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:22:57.315789-07:00",
+      "updated_at": "2026-07-03T13:22:57.315789-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a7a0ab0\",\"confidence\":95}"
+    },
+    {
+      "id": 342,
+      "change_id": "2795fcb9-d34f-46b3-bf0c-6380d489ea9b",
+      "node_type": "outcome",
+      "title": "Task 3 DONE + reviewed: RunPod client batch chokepoint (contents[]->Vec<ItemOutcome>), classify delegates, CHARCOAL_RUNPOD_BATCH_SIZE=32. 10+22 tests green. commit b05e9c2",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:33:16.795036-07:00",
+      "updated_at": "2026-07-03T13:33:16.795036-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"b05e9c2\",\"confidence\":95}"
+    },
+    {
+      "id": 343,
+      "change_id": "960fdf69-05f2-4c6f-96f6-7b77904e32bd",
+      "node_type": "outcome",
+      "title": "Task 4 DONE + OPUS-reviewed: burst chunks by max_batch_size + classify_batch fan-out, benign decode-error sentinel, Complete{errored}->degraded. 549/0 suite. commit 0824929",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:45:49.918700-07:00",
+      "updated_at": "2026-07-03T13:45:49.918700-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"0824929\",\"confidence\":95}"
+    },
+    {
+      "id": 344,
+      "change_id": "8c4845c7-2aec-4e31-88df-f2ee853d609f",
+      "node_type": "outcome",
+      "title": "Task 5 DONE: CHANGELOG entry + CHARCOAL_RUNPOD_BATCH_SIZE doc. #186 impl complete (5 tasks). commit a9824e5",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:45:49.930471-07:00",
+      "updated_at": "2026-07-03T13:45:49.930471-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":95}"
+    },
+    {
+      "id": 345,
+      "change_id": "bffcda29-4eea-48a0-9ead-4aedabbec65d",
+      "node_type": "outcome",
+      "title": "FINAL whole-branch review (opus): #186 READY TO MERGE. All 6 cross-cutting concerns verified vs real code (wire contract, envelope, cost meter, livelock-safe resume, threshold, rollout). 6 minors=follow-up. 549/0 suite, clippy clean x3.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:48:07.931606-07:00",
+      "updated_at": "2026-07-03T13:48:07.931606-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":96}"
+    },
+    {
+      "id": 346,
+      "change_id": "f898572a-062a-4d5c-9dfd-14bb93fa1645",
+      "node_type": "outcome",
+      "title": "#186 SHIPPED to review: PR #66 (feat/batch-runpod-classifier -> staging). 5 TDD tasks, final whole-branch review passed, 549/0 + clippy x3 clean. Awaiting Bryan merge. Rollout: RunPod handler image before app.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:49:58.272279-07:00",
+      "updated_at": "2026-07-03T13:49:58.272279-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -7107,6 +7239,116 @@
       "weight": 1.0,
       "rationale": "CodeRabbit round-2 brake-bypass fix",
       "created_at": "2026-06-26T12:43:48.820701-07:00"
+    },
+    {
+      "id": 327,
+      "from_node_id": 334,
+      "to_node_id": 335,
+      "from_change_id": "0537de6d-5b08-4118-bb18-1427bfe7617f",
+      "to_change_id": "144d7466-8b4f-4843-b82c-4e8653da934b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR #65 approved after 3 valid CodeRabbit rounds",
+      "created_at": "2026-06-26T12:56:31.876705-07:00"
+    },
+    {
+      "id": 328,
+      "from_node_id": 336,
+      "to_node_id": 337,
+      "from_change_id": "276989d5-82be-40b2-8622-72c2d9da533d",
+      "to_change_id": "f05ec1f6-f422-4940-8c9f-dd4752aa8c02",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Design spec implementing the #186 goal",
+      "created_at": "2026-06-28T11:09:45.723272-07:00"
+    },
+    {
+      "id": 329,
+      "from_node_id": 338,
+      "to_node_id": 339,
+      "from_change_id": "59ddc925-6069-4be5-9e75-1ecf150b9a86",
+      "to_change_id": "a7d6a48e-32a9-4242-ba98-c9793011c381",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Impl plan realizing the 4-task decision",
+      "created_at": "2026-07-03T12:19:59.812467-07:00"
+    },
+    {
+      "id": 330,
+      "from_node_id": 339,
+      "to_node_id": 340,
+      "from_change_id": "a7d6a48e-32a9-4242-ba98-c9793011c381",
+      "to_change_id": "88e549b5-4015-4bdf-9d56-856bf293a95a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 1 of the impl plan complete",
+      "created_at": "2026-07-03T13:16:57.534650-07:00"
+    },
+    {
+      "id": 331,
+      "from_node_id": 340,
+      "to_node_id": 341,
+      "from_change_id": "88e549b5-4015-4bdf-9d56-856bf293a95a",
+      "to_change_id": "182ee1e3-dfb1-465f-8df2-3c1c4f50b2da",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 of the impl plan complete",
+      "created_at": "2026-07-03T13:22:57.322310-07:00"
+    },
+    {
+      "id": 332,
+      "from_node_id": 341,
+      "to_node_id": 342,
+      "from_change_id": "182ee1e3-dfb1-465f-8df2-3c1c4f50b2da",
+      "to_change_id": "2795fcb9-d34f-46b3-bf0c-6380d489ea9b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 of the impl plan complete",
+      "created_at": "2026-07-03T13:33:16.802535-07:00"
+    },
+    {
+      "id": 333,
+      "from_node_id": 342,
+      "to_node_id": 343,
+      "from_change_id": "2795fcb9-d34f-46b3-bf0c-6380d489ea9b",
+      "to_change_id": "960fdf69-05f2-4c6f-96f6-7b77904e32bd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 capstone complete",
+      "created_at": "2026-07-03T13:45:49.936859-07:00"
+    },
+    {
+      "id": 334,
+      "from_node_id": 343,
+      "to_node_id": 344,
+      "from_change_id": "960fdf69-05f2-4c6f-96f6-7b77904e32bd",
+      "to_change_id": "8c4845c7-2aec-4e31-88df-f2ee853d609f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 docs complete",
+      "created_at": "2026-07-03T13:45:49.943988-07:00"
+    },
+    {
+      "id": 335,
+      "from_node_id": 344,
+      "to_node_id": 345,
+      "from_change_id": "8c4845c7-2aec-4e31-88df-f2ee853d609f",
+      "to_change_id": "bffcda29-4eea-48a0-9ead-4aedabbec65d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Final whole-branch review passed",
+      "created_at": "2026-07-03T13:48:07.938222-07:00"
+    },
+    {
+      "id": 336,
+      "from_node_id": 345,
+      "to_node_id": 346,
+      "from_change_id": "bffcda29-4eea-48a0-9ead-4aedabbec65d",
+      "to_change_id": "f898572a-062a-4d5c-9dfd-14bb93fa1645",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR opened after passing final review",
+      "created_at": "2026-07-03T13:49:58.279134-07:00"
     }
   ],
   "documents": [

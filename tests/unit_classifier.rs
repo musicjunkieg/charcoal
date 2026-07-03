@@ -128,35 +128,41 @@ mod runpod {
     }
 
     // Wire-shape test: build the JSON body the client sends and assert structure.
-    // Doesn't hit the network.
+    // Doesn't hit the network. Batch wire shape: contents array under input.
     #[test]
     fn runpod_client_request_body_shape() {
         use serde_json::json;
-        let body = RunPodCopeBClient::build_request_body("hello world");
+        let body = RunPodCopeBClient::build_batch_request_body(&["hello world".into()]);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(v, json!({"input": {"content": "hello world"}}));
+        assert_eq!(v, json!({"input": {"contents": ["hello world"]}}));
     }
 
-    // Response parse: well-formed
+    // Response parse: well-formed batch verdict (Task 3 wire shape).
     #[test]
     fn runpod_client_parses_well_formed_response() {
-        let raw = r#"{"output":{"toxic":true,"confidence":0.92,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
-        let parsed = RunPodCopeBClient::parse_response(raw, 250).unwrap();
-        assert!(parsed.toxic_token);
-        assert!((parsed.confidence - 0.92).abs() < 1e-4);
-        assert_eq!(parsed.model_id, "cope-b-a4b");
-        assert_eq!(parsed.policy_version, "policy-v3");
-        assert_eq!(parsed.latency_ms, 250);
+        use charcoal::toxicity::classifier::ItemOutcome;
+        let raw = r#"{"output":{"verdicts":[{"ok":true,"toxic":true,"confidence":0.92,"model":"cope-b-a4b","policy_version":"policy-v3"}]}}"#;
+        let outcomes = RunPodCopeBClient::parse_batch_response(raw, 250).unwrap();
+        assert_eq!(outcomes.len(), 1);
+        match &outcomes[0] {
+            ItemOutcome::Verdict(v) => {
+                assert!(v.toxic_token);
+                assert!((v.confidence - 0.92).abs() < 1e-4);
+                assert_eq!(v.model_id, "cope-b-a4b");
+                assert_eq!(v.policy_version, "policy-v3");
+                assert_eq!(v.latency_ms, 250);
+            }
+            ItemOutcome::Error(e) => panic!("expected Verdict, got Error: {e}"),
+        }
     }
 
-    // Response parse: missing required field. The "missing field `output`"
-    // detail comes from serde and lives in the error *source chain*, not in
-    // anyhow's outermost context (which is "parse RunPod response body: ..."),
-    // so we format with {:#} to inspect the whole chain.
+    // Response parse: COMPLETED status with no output (no verdicts array) is an
+    // error — the job completed but returned nothing useful.
     #[test]
     fn runpod_client_response_missing_output_field_errors() {
         let raw = r#"{"status":"COMPLETED"}"#;
-        let err = RunPodCopeBClient::parse_response(raw, 0).unwrap_err();
+        let err = RunPodCopeBClient::parse_batch_response(raw, 0).unwrap_err();
+        // COMPLETED with no output → "returned no output" error message
         assert!(format!("{err:#}").to_lowercase().contains("output"));
     }
 
@@ -296,7 +302,8 @@ mod retry {
     async fn retries_on_5xx_then_succeeds() {
         let server = MockServer::start().await;
         // First two requests return 503; third returns 200.
-        let ok = r#"{"output":{"toxic":false,"confidence":0.1,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        // Batch wire shape: verdicts array under output.
+        let ok = r#"{"output":{"verdicts":[{"ok":true,"toxic":false,"confidence":0.1,"model":"cope-b-a4b","policy_version":"policy-v3"}]}}"#;
         Mock::given(method("POST"))
             .and(path("/runsync"))
             .respond_with(ResponseTemplate::new(503))
@@ -334,7 +341,8 @@ mod retry {
     #[tokio::test]
     async fn warm_up_helper_runs_against_endpoint() {
         let server = MockServer::start().await;
-        let ok = r#"{"output":{"toxic":false,"confidence":0.0,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        // Batch wire shape: verdicts array under output.
+        let ok = r#"{"output":{"verdicts":[{"ok":true,"toxic":false,"confidence":0.0,"model":"cope-b-a4b","policy_version":"policy-v3"}]}}"#;
         Mock::given(method("POST"))
             .and(path("/runsync"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(ok, "application/json"))
@@ -363,7 +371,8 @@ mod retry {
             ))
             .mount(&server)
             .await;
-        let done = r#"{"id":"job-xyz","status":"COMPLETED","output":{"toxic":true,"confidence":0.95,"model":"cope-b-a4b","policy_version":"policy-v3"}}"#;
+        // Batch wire shape: verdicts array under output.
+        let done = r#"{"id":"job-xyz","status":"COMPLETED","output":{"verdicts":[{"ok":true,"toxic":true,"confidence":0.95,"model":"cope-b-a4b","policy_version":"policy-v3"}]}}"#;
         Mock::given(method("GET"))
             .and(path("/status/job-xyz"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(done, "application/json"))

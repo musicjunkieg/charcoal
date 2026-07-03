@@ -1,7 +1,49 @@
 {
   "version": 1,
-  "exported_at": "2026-06-26T19:50:20.345168+00:00",
+  "exported_at": "2026-07-03T21:41:38.176250+00:00",
   "issues": [
+    {
+      "id": 188,
+      "title": "Evaluate flat-rate hosting alternatives to Railway usage-based billing",
+      "description": null,
+      "status": "open",
+      "priority": "medium",
+      "parent_id": null,
+      "labels": [
+        "research"
+      ],
+      "comments": [
+        {
+          "content": "TRIGGER: Railway bill for May 2026 was $30.32 (Pro $20/mo subscription includes $20 usage, then metered above it on vCPU-time, RAM-GB-time, volume $/GB, egress). Bryan: \"it is already time to look at different options, either a VPS that does not charge on usage or something.\"\n\nSCOPE: evaluate flat-rate / fixed-price hosting alternatives to Railways usage-based model for the charcoal-web service (Axum API + SvelteKit SPA) + Postgres (pgvector) + a persistent volume for ONNX models (/data/models). Two environments today: prod (charcoal.watch <- main) and staging (<- staging), each with its own Postgres + volume.\n\nCANDIDATES TO PRICE OUT (flat monthly, no per-usage metering): Hetzner Cloud / dedicated (note: soot v2 spec already assumes a Hetzner box ~$80/mo fixed), a generic VPS (DigitalOcean/Linode/Vultr fixed droplet), Fly.io, bare metal. Compare against current Railway ~$30/mo trajectory.\n\nKEY REQUIREMENTS the target must satisfy:\n- Postgres 16+ with pgvector (384-dim embeddings) — self-managed on the box or a managed flat-rate add-on.\n- Persistent volume for ONNX models (~216MB toxicity+embeddings) + the NLI model (~87MB); models auto-download on first scan.\n- Docker deploy (Dockerfile already exists: Ubuntu 24.04, Rust 1.94 + Node 22, glibc 2.39 for ort-sys). Railway builder is DOCKERFILE not Railpack.\n- Custom domain + TLS for charcoal.watch (Porkbun DNS, currently ALIAS to Railway).\n- Two envs (prod + staging) — a single bigger box could host both via containers/compose.\n- Outbound bandwidth: scans are I/O-heavy against Bluesky public API + Constellation + RunPod; check egress is not separately metered/capped.\n\nNOTE — this is the HOSTING dimension that docs/research/infra-scaling-spike-2026-06.md and [[project_infra_scaling_spike]] deferred to second behind the job-queue/worker-pool work. The spike concluded I/O-bound (not CPU-bound), DB is the crux. This issue is narrower: just the billing-model migration (usage-based -> flat-rate). Does NOT include the GPU/RunPod classifier spend (that is #185 meter + #186 batching + #187 resilience) — RunPod stays separate regardless of where the web app runs.\n\nDELIVERABLE: a short comparison (monthly $ at current scale, migration effort, ops burden of self-managed Postgres vs managed, TLS/domain story) + a recommendation. Then a migration plan if we proceed.",
+          "created_at": "2026-06-29T18:28:07.895968+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-29T18:27:32.927899+00:00",
+      "updated_at": "2026-06-29T18:27:32.927899+00:00",
+      "closed_at": null
+    },
+    {
+      "id": 187,
+      "title": "RunPod capacity resilience: multi-DC CoPE-B endpoints + GPU preference list + app-side endpoint failover",
+      "description": "PROBLEM: The CoPE-B classifier endpoint (f39lf61pc762a8) is single-DC + effectively single-GPU. Its weights network volume (b8rmatu3si, \"charcoal-cope-b-weights\", 70GB) is pinned to US-GA-2, which is H100-only and capacity-volatile (#205). A RunPod network volume is bound to one data center, and attaching it constrains the endpoint to that DC — so even when A100 80GB SXM is \"High\" stock GLOBALLY (verified 2026-06-26 via list-gpu-types), the endpoint cannot use it, and the cheaper A100 (~$2.7/hr vs H100 ~$3.3-4.2/hr) is unreachable. Bryan confirmed live: no A100 available to this endpoint. This is the #205 single-region/single-arch failure mode.\n\nGOAL: make CoPE-B serving resilient to both per-GPU and per-DC capacity dry-up, and unlock cheaper GPUs.\n\nTHREE LAYERS (do in order of leverage):\n1. RELOCATE / DIVERSIFY DC: create a weights volume (~50GB, zentropi-ai/cope-b-a4b) in a DC with broad/cheap stock (A100 + RTX PRO 6000 96GB + L40S), not just US-GA-2. One-time: spin a cheap pod in the target DC, huggingface-cli download into the new volume, create an endpoint bound to it.\n2. GPU PREFERENCE LIST per endpoint: allow multiple GPU types so RunPod picks cheapest-available — e.g. A100 80GB SXM (~$2.7) -> RTX PRO 6000 Blackwell 96GB (High stock, fits 50GB bf16, likely < H100) -> H100 80GB (fallback). Dodges per-GPU dry-up within a DC.\n3. MULTI-DC ENDPOINTS + APP-SIDE FAILOVER: one volume+endpoint per DC (each ~$3.5/mo storage, compute scales to zero). App routes across them: try preferred/cheapest endpoint, fall back on capacity error/timeout. RunPod does NOT auto-LB across separate endpoints. Code: charcoal has a single RUNPOD_ENDPOINT_URL today — generalize to RUNPOD_ENDPOINT_URLS (ordered list) + try-in-order failover in RunPodCopeBClient, next to the existing CHARCOAL_CLASSIFIER=zentropi escape hatch. TDD the failover (first endpoint errors -> second used).\n\nCOST: storage only (N x ~50GB ~ $3.5/mo each); compute still scale-to-zero. Unlocks A100 (~20-35% cheaper than H100) immediately and removes the single-DC stranding.\n\nRelates: #205 (capacity risk — this CLOSES that parked observation), #185 (honest cost meter — measures the savings), #186 (batching — orthogonal GPU-agnostic $1 lever), #196 (prod cost-guard), #207 (onboarding cost). Pairs with batching as the two-pronged path to <$1/onboarding.",
+      "status": "open",
+      "priority": "high",
+      "parent_id": null,
+      "labels": [
+        "infra"
+      ],
+      "comments": [
+        {
+          "content": "Field reality (Bryan 2026-06-26): A100 80GB serverless is capacity-constrained ACROSS RunPod, not just US-GA-2 — the list-gpu-types \"High\" label is aspirational; creating/running A100 endpoints struggles everywhere. PIVOT: do NOT target A100 as primary. (a) Realistic GPU-swap target = RTX PRO 6000 Blackwell 96GB (\"High\" stock, fits 50GB bf16, newer/cheaper-than-H100); A100 only opportunistic in the preference list; H200 141GB also \"High\" but pricier. (b) MORE IMPORTANT: batching (#186) is capacity-INDEPENDENT — runs on the existing H100, no new volume/DC, ~10-30x cut → the real path to $1 WITHOUT fighting A100 scarcity. SEQUENCE: #186 batching FIRST; #187 GPU/DC swap = bonus multiplier, not prerequisite. Bryan already creating volumes manually.",
+          "created_at": "2026-06-26T23:49:32.297340+00:00",
+          "kind": "note"
+        }
+      ],
+      "created_at": "2026-06-26T20:47:21.373288+00:00",
+      "updated_at": "2026-06-26T20:47:21.373288+00:00",
+      "closed_at": null
+    },
     {
       "id": 186,
       "title": "Batch the RunPod classifier (one request -> many texts) to cut warm-idle GPU cost",
