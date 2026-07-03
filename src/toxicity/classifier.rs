@@ -30,12 +30,47 @@ pub struct ClassifierVerdict {
     pub policy_version: String,
 }
 
+/// One slot of a batch classification result. The request already succeeded
+/// (HTTP 200, job COMPLETED); this distinguishes a decodable verdict from a
+/// single un-decodable slot. Request-level failures (transport / 5xx / 4xx /
+/// cost ceiling) are the outer `Result::Err`, never this enum.
+#[derive(Debug, Clone)]
+pub enum ItemOutcome {
+    /// The slot decoded to a verdict.
+    Verdict(ClassifierVerdict),
+    /// The job completed but this slot's content did not decode to "0"/"1".
+    /// Carries the backend's error detail for logging.
+    Error(String),
+}
+
 #[async_trait]
 pub trait ToxicityClassifier: Send + Sync {
     /// Classify a single text. For replies-with-parent, callers compose the
     /// envelope via `crate::toxicity::format_parent_reply` and pass the result
     /// as `content`. There is no `classify_pair` shortcut on the trait.
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict>;
+
+    /// Classify many texts in one backend round-trip, returning one
+    /// [`ItemOutcome`] per input in the SAME order. The default implementation
+    /// simply loops [`classify`]; the first request-level error short-circuits
+    /// to an outer `Err` (so backends without a real batch endpoint — Zentropi,
+    /// the test stub — behave exactly as they do today). Backends with native
+    /// batching (RunPod) override this.
+    async fn classify_batch(&self, contents: &[String]) -> Result<Vec<ItemOutcome>> {
+        let mut out = Vec::with_capacity(contents.len());
+        for content in contents {
+            out.push(ItemOutcome::Verdict(self.classify(content).await?));
+        }
+        Ok(out)
+    }
+
+    /// Maximum number of texts to send per [`classify_batch`] request. Default
+    /// `1` (today's one-text-per-call behaviour); RunPod overrides from
+    /// `CHARCOAL_RUNPOD_BATCH_SIZE`. The burst phase chunks its queue by this.
+    fn max_batch_size(&self) -> usize {
+        1
+    }
+
     fn name(&self) -> &'static str;
     fn model_id(&self) -> &'static str;
     fn policy_version(&self) -> &'static str;
@@ -190,5 +225,50 @@ pub fn build_backend_named(name: &str) -> Result<Arc<dyn ToxicityClassifier>> {
             Ok(Arc::new(client))
         }
         other => anyhow::bail!("unknown backend: {other:?} (expected runpod | zentropi)"),
+    }
+}
+
+#[cfg(test)]
+mod batch_trait_tests {
+    use super::*;
+
+    fn verdict(toxic: bool) -> ClassifierVerdict {
+        ClassifierVerdict {
+            toxic_token: toxic,
+            confidence: 0.9,
+            latency_ms: 1,
+            model_id: "stub".into(),
+            policy_version: "stub".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn default_classify_batch_maps_each_content_in_order() {
+        // A 2-verdict script → classify_batch over 2 inputs yields 2 Verdicts,
+        // in input order.
+        let c = StubClassifier::with_script(vec![verdict(true), verdict(false)]);
+        let out = c
+            .classify_batch(&["a".to_string(), "b".to_string()])
+            .await
+            .expect("batch ok");
+        assert_eq!(out.len(), 2);
+        assert!(matches!(out[0], ItemOutcome::Verdict(ref v) if v.toxic_token));
+        assert!(matches!(out[1], ItemOutcome::Verdict(ref v) if !v.toxic_token));
+    }
+
+    #[tokio::test]
+    async fn default_classify_batch_short_circuits_on_first_error() {
+        // Only one scripted verdict; the second classify() bails (script
+        // exhausted) → the whole batch surfaces an outer Err (today's
+        // request-level semantics; the default impl never yields ItemOutcome::Error).
+        let c = StubClassifier::with_script(vec![verdict(true)]);
+        let res = c.classify_batch(&["a".to_string(), "b".to_string()]).await;
+        assert!(res.is_err(), "second item exhausts the script → outer Err");
+    }
+
+    #[test]
+    fn default_max_batch_size_is_one() {
+        let c = StubClassifier::with_script(vec![]);
+        assert_eq!(c.max_batch_size(), 1);
     }
 }

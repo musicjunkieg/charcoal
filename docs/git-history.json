@@ -1,5 +1,13 @@
 [
   {
+    "hash": "46a4eeeaaa08f01945dcda53abe99771676e19c2",
+    "short_hash": "46a4eee",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T12:19:51-07:00",
+    "message": "docs(cost): TDD implementation plan for batching the RunPod classifier (#186)\n\n5 tasks bottom-up: trait (classify_batch/max_batch_size) → batch-only handler →\nRunPod client batch request/parse → burst chunk+fan-out+benign-sentinel+orchestrator\n→ config docs. Each task RED→GREEN, concrete code + exact test commands, grounded\nin the real burst_tests harness.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
     "hash": "c33cb5d9d4a13aa36495685dfb8b3dfaf40a354a",
     "short_hash": "c33cb5d",
     "author": "Bryan Guffey",

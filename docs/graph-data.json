@@ -3651,6 +3651,17 @@
       "created_at": "2026-07-03T12:12:32.392403-07:00",
       "updated_at": "2026-07-03T12:12:32.392403-07:00",
       "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"confidence\":88}"
+    },
+    {
+      "id": 339,
+      "change_id": "a7d6a48e-32a9-4242-ba98-c9793011c381",
+      "node_type": "action",
+      "title": "Wrote #186 TDD impl plan (5 tasks: trait→handler→client→burst+orchestrator→docs), grounded in real burst_tests harness",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T12:19:59.804984-07:00",
+      "updated_at": "2026-07-03T12:19:59.804984-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"46a4eee\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-07-03-batch-runpod-classifier-impl.md\"]}"
     }
   ],
   "edges": [
@@ -7173,6 +7184,17 @@
       "weight": 1.0,
       "rationale": "Design spec implementing the #186 goal",
       "created_at": "2026-06-28T11:09:45.723272-07:00"
+    },
+    {
+      "id": 329,
+      "from_node_id": 338,
+      "to_node_id": 339,
+      "from_change_id": "59ddc925-6069-4be5-9e75-1ecf150b9a86",
+      "to_change_id": "a7d6a48e-32a9-4242-ba98-c9793011c381",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Impl plan realizing the 4-task decision",
+      "created_at": "2026-07-03T12:19:59.812467-07:00"
     }
   ],
   "documents": [
