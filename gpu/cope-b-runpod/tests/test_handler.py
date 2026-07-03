@@ -88,44 +88,66 @@ def patched_engine(monkeypatch, tmp_path):
         yield handler, fake_engine
 
 
-async def test_handler_returns_toxic_true_when_model_emits_1(patched_engine):
-    handler, fake_engine = patched_engine
-    fake_engine.generate_result = _mock_engine_result(token="1", logprob=-0.05)
-    result = await handler.handler({"id": "req-1", "input": {"content": "test"}})
-    out = result  # handler returns the bare verdict; RunPod adds the "output" wrapper
-    assert out["toxic"] is True
-    assert out["model"] == "cope-b-a4b"
-    # Confidence is exp(logprob), so exp(-0.05) ≈ 0.95
-    assert 0.9 < out["confidence"] < 1.0
-
-
-async def test_handler_returns_toxic_false_when_model_emits_0(patched_engine):
-    handler, fake_engine = patched_engine
-    fake_engine.generate_result = _mock_engine_result(token="0", logprob=-0.2)
-    result = await handler.handler({"id": "req-2", "input": {"content": "test"}})
-    out = result  # handler returns the bare verdict; RunPod adds the "output" wrapper
-    assert out["toxic"] is False
-    assert 0.7 < out["confidence"] < 0.9   # exp(-0.2) ≈ 0.819
-
-
-async def test_handler_normalizes_decoded_token_with_sentinel_prefix(patched_engine):
-    """Gemma's SentencePiece tokenizer may return decoded_token with a leading
-    space or ▁ marker (`'▁1'` or `' 1'`). out.text.strip() is the bare token;
-    the logprobs lookup must normalize both sides before comparing or the
-    confidence calculation silently falls through to ValueError."""
-    handler, fake_engine = patched_engine
-    fake_engine.generate_result = _mock_engine_result(
-        token="1", logprob=-0.05, decoded_prefix="▁"
+def _multi_engine(fake_engine, results):
+    """Make fake_engine.generate return a fresh async-iterator per call, popping
+    one prebuilt RequestOutput per call in order. Lets a batch test give each
+    content its own token."""
+    it = iter(results)
+    fake_engine.generate = MagicMock(
+        side_effect=lambda *a, **k: _async_iter(next(it))
     )
-    result = await handler.handler({"id": "req-norm-1", "input": {"content": "test"}})
-    assert result["toxic"] is True
-    assert 0.9 < result["confidence"] < 1.0
 
-    fake_engine.generate_result = _mock_engine_result(
-        token="0", logprob=-0.1, decoded_prefix=" "
+
+async def test_handler_batch_returns_verdicts_in_input_order(patched_engine):
+    handler, fake_engine = patched_engine
+    _multi_engine(
+        fake_engine,
+        [_mock_engine_result(token="1", logprob=-0.05),
+         _mock_engine_result(token="0", logprob=-0.2)],
     )
-    result = await handler.handler({"id": "req-norm-2", "input": {"content": "test"}})
-    assert result["toxic"] is False
+    result = await handler.handler(
+        {"id": "req-b1", "input": {"contents": ["hostile", "benign"]}}
+    )
+    verdicts = result["verdicts"]
+    assert len(verdicts) == 2
+    assert verdicts[0]["ok"] is True and verdicts[0]["toxic"] is True
+    assert verdicts[1]["ok"] is True and verdicts[1]["toxic"] is False
+    assert verdicts[0]["model"] == "cope-b-a4b"
+
+
+async def test_handler_batch_isolates_undecodable_slot(patched_engine):
+    # Middle slot emits a non-binary token → that slot is ok:false, its
+    # siblings are unaffected (per-item isolation, no whole-batch failure).
+    handler, fake_engine = patched_engine
+    _multi_engine(
+        fake_engine,
+        [_mock_engine_result(token="1"),
+         _mock_engine_result(token="maybe"),
+         _mock_engine_result(token="0")],
+    )
+    result = await handler.handler(
+        {"id": "req-b2", "input": {"contents": ["a", "b", "c"]}}
+    )
+    verdicts = result["verdicts"]
+    assert len(verdicts) == 3
+    assert verdicts[0]["ok"] is True
+    assert verdicts[1]["ok"] is False and "error" in verdicts[1]
+    assert verdicts[2]["ok"] is True and verdicts[2]["toxic"] is False
+
+
+async def test_handler_batch_length_matches_input(patched_engine):
+    handler, fake_engine = patched_engine
+    _multi_engine(fake_engine, [_mock_engine_result(token="1") for _ in range(4)])
+    result = await handler.handler(
+        {"id": "req-b3", "input": {"contents": ["a", "b", "c", "d"]}}
+    )
+    assert len(result["verdicts"]) == 4
+
+
+async def test_handler_batch_empty_contents(patched_engine):
+    handler, _ = patched_engine
+    result = await handler.handler({"id": "req-b4", "input": {"contents": []}})
+    assert result["verdicts"] == []
 
 
 async def test_handler_returns_policy_version_from_env(patched_engine, monkeypatch):
@@ -133,26 +155,30 @@ async def test_handler_returns_policy_version_from_env(patched_engine, monkeypat
     monkeypatch.setenv("POLICY_VERSION", "policy-v3-2026-07-01")
     import importlib
     importlib.reload(handler)
-    # Reload reset the fake_engine reference and restored the real build_prompt;
-    # re-patch both so the module reads the new POLICY_VERSION but still runs
-    # against the mock engine and the no-op prompt builder.
     handler.build_prompt = lambda policy, content: f"<prompt>{content}</prompt>"
-    fake_engine.generate_result = _mock_engine_result(token="1")
+    _multi_engine(fake_engine, [_mock_engine_result(token="1")])
     handler._engine = fake_engine  # type: ignore[attr-defined]
-    result = await handler.handler({"id": "req-3", "input": {"content": "test"}})
-    assert result["policy_version"] == "policy-v3-2026-07-01"
+    result = await handler.handler({"id": "req-b5", "input": {"contents": ["test"]}})
+    assert result["verdicts"][0]["policy_version"] == "policy-v3-2026-07-01"
 
 
-async def test_handler_raises_on_missing_input(patched_engine):
+async def test_handler_raises_on_missing_contents(patched_engine):
     handler, _ = patched_engine
     with pytest.raises(KeyError):
-        await handler.handler({"id": "req-4", "input": {}})
+        await handler.handler({"id": "req-b6", "input": {}})
 
 
-async def test_handler_raises_on_unexpected_model_output(patched_engine):
-    """If the model emits something other than "0" or "1", surface the failure
-    rather than silently falling back. Spec: "No silent fallbacks."""
-    handler, fake_engine = patched_engine
-    fake_engine.generate_result = _mock_engine_result(token="maybe", logprob=-1.0)
-    with pytest.raises(ValueError, match="unexpected"):
-        await handler.handler({"id": "req-5", "input": {"content": "test"}})
+def test_result_slot_ok_for_binary_token():
+    # result_slot is pure: given a decoded output it returns an ok slot.
+    import handler  # type: ignore
+    out = _mock_engine_result(token="1", logprob=-0.05).outputs[0]
+    slot = handler.result_slot(out)
+    assert slot["ok"] is True and slot["toxic"] is True
+    assert 0.9 < slot["confidence"] < 1.0
+
+
+def test_result_slot_error_for_bad_token():
+    import handler  # type: ignore
+    out = _mock_engine_result(token="maybe", logprob=-1.0).outputs[0]
+    slot = handler.result_slot(out)
+    assert slot["ok"] is False and "error" in slot

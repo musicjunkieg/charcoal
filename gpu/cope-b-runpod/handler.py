@@ -22,6 +22,7 @@ Testability note (deviation from the plan's handler sketch):
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import uuid
@@ -122,46 +123,65 @@ def decode_verdict(text: str, logprob_map) -> tuple[bool, float]:
     return token == "1", confidence
 
 
-async def handler(event):
-    """Classify a single content string. event = {"id": ..., "input": {"content": ...}}.
+def result_slot(out) -> dict:
+    """Convert one vLLM output (`final.outputs[0]`) into a per-item result slot.
 
-    Returns the bare verdict dict {"toxic": bool, "confidence": float,
-    "model": str, "policy_version": str}. RunPod Serverless wraps this return
-    value in its own top-level "output" field, so the on-the-wire response is
-    {"output": {"toxic": ...}} — which is exactly what RunPodCopeBClient expects.
-    Returning {"output": {...}} here would double-nest it to
-    {"output": {"output": {...}}} and break the Rust parser.
-
-    Raises:
-        KeyError: input missing "content"
-        ValueError: model emitted a token other than "0" or "1"
+    Wraps `decode_verdict` so a single un-decodable slot (model emitted a
+    non-binary token, or the logprobs map is malformed) becomes an explicit
+    `{"ok": false, "error": ...}` entry instead of raising and failing the
+    whole batch. A decodable slot returns the full verdict with `ok: true`.
     """
-    inp = event["input"]
-    content = inp["content"]   # raises KeyError if missing — surfaced to caller
-
-    prompt = build_prompt(policy=POLICY, content=content)
-    request_id = event.get("id") or uuid.uuid4().hex
-
-    engine = _get_engine()
-    sampling = _sampling_params()
-
-    # AsyncLLMEngine.generate is an async iterator; the last yield contains the
-    # finished output. For max_tokens=1 there's exactly one yield.
-    final = None
-    async for partial in engine.generate(prompt, sampling, request_id):
-        final = partial
-    if final is None:
-        raise RuntimeError("vLLM engine produced no output")
-
-    out = final.outputs[0]
-    toxic, confidence = decode_verdict(out.text, out.logprobs[0])
-
+    try:
+        toxic, confidence = decode_verdict(out.text, out.logprobs[0])
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        return {"ok": False, "error": str(exc)}
     return {
+        "ok": True,
         "toxic": toxic,
         "confidence": confidence,
         "model": "cope-b-a4b",
         "policy_version": POLICY_VERSION,
     }
+
+
+async def handler(event):
+    """Classify a batch of content strings.
+
+    event = {"id": ..., "input": {"contents": ["<envelope>", ...]}}
+
+    Returns {"verdicts": [slot, ...]} where each slot is an ok verdict or an
+    ok:false error, positionally aligned with `contents`. RunPod Serverless
+    wraps this in its own top-level "output" field, so the wire response is
+    {"output": {"verdicts": [...]}} — what RunPodCopeBClient.classify_batch
+    expects.
+
+    Raises:
+        KeyError: input missing "contents".
+    """
+    contents = event["input"]["contents"]  # KeyError if missing — surfaced to caller
+    base_id = event.get("id") or uuid.uuid4().hex
+
+    engine = _get_engine()
+    sampling = _sampling_params()
+
+    async def run_one(index: int, content: str) -> dict:
+        prompt = build_prompt(policy=POLICY, content=content)
+        # vLLM requires a unique request_id per concurrent generate() call.
+        request_id = f"{base_id}-{index}"
+        final = None
+        async for partial in engine.generate(prompt, sampling, request_id):
+            final = partial
+        if final is None:
+            return {"ok": False, "error": "vLLM engine produced no output"}
+        return result_slot(final.outputs[0])
+
+    # gather preserves input order in its result list, so the verdicts stay
+    # positionally aligned with `contents`. vLLM's AsyncLLMEngine batches the
+    # concurrent generate() calls via continuous batching (max_num_seqs=32).
+    verdicts = await asyncio.gather(
+        *(run_one(i, c) for i, c in enumerate(contents))
+    )
+    return {"verdicts": list(verdicts)}
 
 
 if __name__ == "__main__":
