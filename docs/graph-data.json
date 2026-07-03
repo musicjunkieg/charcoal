@@ -3695,6 +3695,50 @@
       "created_at": "2026-07-03T13:33:16.795036-07:00",
       "updated_at": "2026-07-03T13:33:16.795036-07:00",
       "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"b05e9c2\",\"confidence\":95}"
+    },
+    {
+      "id": 343,
+      "change_id": "960fdf69-05f2-4c6f-96f6-7b77904e32bd",
+      "node_type": "outcome",
+      "title": "Task 4 DONE + OPUS-reviewed: burst chunks by max_batch_size + classify_batch fan-out, benign decode-error sentinel, Complete{errored}->degraded. 549/0 suite. commit 0824929",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:45:49.918700-07:00",
+      "updated_at": "2026-07-03T13:45:49.918700-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"0824929\",\"confidence\":95}"
+    },
+    {
+      "id": 344,
+      "change_id": "8c4845c7-2aec-4e31-88df-f2ee853d609f",
+      "node_type": "outcome",
+      "title": "Task 5 DONE: CHANGELOG entry + CHARCOAL_RUNPOD_BATCH_SIZE doc. #186 impl complete (5 tasks). commit a9824e5",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:45:49.930471-07:00",
+      "updated_at": "2026-07-03T13:45:49.930471-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":95}"
+    },
+    {
+      "id": 345,
+      "change_id": "bffcda29-4eea-48a0-9ead-4aedabbec65d",
+      "node_type": "outcome",
+      "title": "FINAL whole-branch review (opus): #186 READY TO MERGE. All 6 cross-cutting concerns verified vs real code (wire contract, envelope, cost meter, livelock-safe resume, threshold, rollout). 6 minors=follow-up. 549/0 suite, clippy clean x3.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:48:07.931606-07:00",
+      "updated_at": "2026-07-03T13:48:07.931606-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":96}"
+    },
+    {
+      "id": 346,
+      "change_id": "f898572a-062a-4d5c-9dfd-14bb93fa1645",
+      "node_type": "outcome",
+      "title": "#186 SHIPPED to review: PR #66 (feat/batch-runpod-classifier -> staging). 5 TDD tasks, final whole-branch review passed, 549/0 + clippy x3 clean. Awaiting Bryan merge. Rollout: RunPod handler image before app.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T13:49:58.272279-07:00",
+      "updated_at": "2026-07-03T13:49:58.272279-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -7261,6 +7305,50 @@
       "weight": 1.0,
       "rationale": "Task 3 of the impl plan complete",
       "created_at": "2026-07-03T13:33:16.802535-07:00"
+    },
+    {
+      "id": 333,
+      "from_node_id": 342,
+      "to_node_id": 343,
+      "from_change_id": "2795fcb9-d34f-46b3-bf0c-6380d489ea9b",
+      "to_change_id": "960fdf69-05f2-4c6f-96f6-7b77904e32bd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 capstone complete",
+      "created_at": "2026-07-03T13:45:49.936859-07:00"
+    },
+    {
+      "id": 334,
+      "from_node_id": 343,
+      "to_node_id": 344,
+      "from_change_id": "960fdf69-05f2-4c6f-96f6-7b77904e32bd",
+      "to_change_id": "8c4845c7-2aec-4e31-88df-f2ee853d609f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 docs complete",
+      "created_at": "2026-07-03T13:45:49.943988-07:00"
+    },
+    {
+      "id": 335,
+      "from_node_id": 344,
+      "to_node_id": 345,
+      "from_change_id": "8c4845c7-2aec-4e31-88df-f2ee853d609f",
+      "to_change_id": "bffcda29-4eea-48a0-9ead-4aedabbec65d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Final whole-branch review passed",
+      "created_at": "2026-07-03T13:48:07.938222-07:00"
+    },
+    {
+      "id": 336,
+      "from_node_id": 345,
+      "to_node_id": 346,
+      "from_change_id": "bffcda29-4eea-48a0-9ead-4aedabbec65d",
+      "to_change_id": "f898572a-062a-4d5c-9dfd-14bb93fa1645",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR opened after passing final review",
+      "created_at": "2026-07-03T13:49:58.279134-07:00"
     }
   ],
   "documents": [

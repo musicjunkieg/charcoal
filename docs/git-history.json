@@ -1,5 +1,21 @@
 [
   {
+    "hash": "a9824e5210aa577d2a2bcf501b1e2466464e3bcc",
+    "short_hash": "a9824e5",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:44:38-07:00",
+    "message": "docs: changelog entry for batched RunPod classifier + CHARCOAL_RUNPOD_BATCH_SIZE (#186)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "08249292591dfde8e2d18dbb1a92bf839df97cd6",
+    "short_hash": "0824929",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:39:37-07:00",
+    "message": "feat(burst): batch the classifier queue, fail-open on decode errors (#186)\n\nrun_burst chunks pending rows by classifier.max_batch_size() and fans out over\nchunks (buffer_unordered = concurrent jobs). Positional zip back to\n(account_did, post_uri); an un-decodable slot is recorded as a benign\ndecode-error sentinel + warn + metric. BurstOutcome::Complete{errored} flips the\nscan degraded flag when > 0. Request-level cost-cap/transient/permanent\nsemantics unchanged.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 7
+  },
+  {
     "hash": "b05e9c2c372324ebf3cd568b59b64dd0d90f8ab1",
     "short_hash": "b05e9c2",
     "author": "Bryan Guffey",
