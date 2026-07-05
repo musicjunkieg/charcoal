@@ -175,6 +175,12 @@ pub async fn run_phased_scan(
             candidates = candidates.len(),
             "entering gather phase"
         );
+        // Mark the phase at entry so GET /api/status can show "gathering"
+        // while this runs. Safe for resume: a crash mid-gather previously left
+        // a stale marker and fresh-started; a "gather" marker re-enters this
+        // same block (staging is cleared either way).
+        db.set_scan_state(user_did, "scan_phase", ScanPhase::Gather.as_str())
+            .await?;
         db.clear_scan_staging(user_did).await?;
         // Terminal (early-exit / insufficient-data) accounts are scored inside
         // gather and never reach Phase C, so count them here.
