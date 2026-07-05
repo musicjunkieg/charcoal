@@ -36,7 +36,14 @@
 	<div class="progress-detail">
 		{#if barPercent !== null}
 			<div class="bar-row">
-				<div class="bar-track">
+				<div
+					class="bar-track"
+					role="progressbar"
+					aria-valuenow={barPercent}
+					aria-valuemin={0}
+					aria-valuemax={100}
+					aria-label="{clsDone} of {clsTotal} posts classified"
+				>
 					<div class="bar-fill" style="width: {barPercent}%"></div>
 				</div>
 				<span class="bar-text">{clsDone} of {clsTotal} posts classified</span>

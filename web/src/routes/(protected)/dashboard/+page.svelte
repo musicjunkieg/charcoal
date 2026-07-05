@@ -38,6 +38,7 @@
 	// Which top-level view to render (welcome / all-clear / results).
 	let view = $derived(status ? dashboardView(status) : 'results');
 	let loading = $state(true);
+	let loadError = $state('');
 	let scanError = $state('');
 	let searchQuery = $state('');
 
@@ -75,15 +76,20 @@
 	}
 
 	async function loadData() {
+		loadError = '';
 		try {
-			const [s, e, a] = await Promise.all([
+			// allSettled so one flaky endpoint can't blank the whole dashboard:
+			// status is required (rethrown below), but events and top threats
+			// degrade independently — their panels just stay empty this load.
+			const [s, e, a] = await Promise.allSettled([
 				getStatus(),
 				getEvents(10),
 				getAccounts({ per_page: 5 })
 			]);
-			status = s;
-			events = e.events;
-			topAccounts = a.accounts;
+			if (s.status === 'rejected') throw s.reason;
+			status = s.value;
+			if (e.status === 'fulfilled') events = e.value.events;
+			if (a.status === 'fulfilled') topAccounts = a.value.accounts;
 			loadFingerprint();
 			// Load accuracy metrics in background (non-blocking)
 			getAccuracy()
@@ -94,10 +100,17 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
 			}
+			loadError = err instanceof Error ? err.message : 'Failed to load dashboard';
 		} finally {
 			loading = false;
 		}
+	}
+
+	function retryLoad() {
+		loading = true;
+		loadData();
 	}
 
 	function startPolling() {
@@ -474,6 +487,14 @@
 				</details>
 			{/if}
 		{/if}
+	{:else}
+		<!-- Status failed to load (non-auth error) — offer a retry instead of a blank page -->
+		<div class="load-error">
+			<p class="load-error-text">
+				Couldn't load the dashboard{loadError ? ` — ${loadError}` : ''}.
+			</p>
+			<button class="btn-scan" onclick={retryLoad}>Retry</button>
+		</div>
 	{/if}
 </div>
 
@@ -551,6 +572,20 @@
 		display: flex;
 		justify-content: center;
 		padding: 4rem 0;
+	}
+
+	.load-error {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 1rem;
+		padding: 4rem 2rem;
+		text-align: center;
+	}
+
+	.load-error-text {
+		font-size: 0.9375rem;
+		color: #a8a29e;
 	}
 
 	.spinner {

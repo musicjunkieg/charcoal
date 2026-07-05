@@ -99,22 +99,23 @@ pub async fn get_status(
     let (phase, progress) = if scan_running && mem_phase == WebScanPhase::Scoring {
         let db = &*state.db;
         let did = &auth.effective_did;
-        let db_scan_phase = match db.get_scan_state(did, "scan_phase").await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to read scan_phase marker");
-                None
-            }
-        };
-        let candidates_total = read_count(db, did, "candidates_total").await;
-        let classifications_total = read_count(db, did, "classifications_total").await;
-        let pending = match db.count_pending_classifications(did).await {
-            Ok(n) => Some(n),
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to count pending classifications");
-                None
-            }
-        };
+        // The four reads are independent; join them so this frequently-polled
+        // handler doesn't pay four sequential round-trips (SQLite serializes
+        // behind its connection mutex anyway, but Postgres genuinely benefits).
+        let (scan_phase_res, candidates_total, classifications_total, pending_res) = tokio::join!(
+            db.get_scan_state(did, "scan_phase"),
+            read_count(db, did, "candidates_total"),
+            read_count(db, did, "classifications_total"),
+            db.count_pending_classifications(did),
+        );
+        let db_scan_phase = scan_phase_res.unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to read scan_phase marker");
+            None
+        });
+        let pending = pending_res.map(Some).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to count pending classifications");
+            None
+        });
         refine_phase(
             mem_phase,
             scan_running,

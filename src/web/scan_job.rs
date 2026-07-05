@@ -566,14 +566,19 @@ async fn run_scan(
             seen_uris.insert(e.amplifier_post_uri.clone())
         }
     });
-    let event_count = events.len();
+    // Distinct amplifier accounts behind the events — computed here (rather
+    // than in Phase 5b where it used to live) so the progress message below
+    // reports the real amplifier count, not the event count.
+    let amplifier_did_set: std::collections::HashSet<String> =
+        events.iter().map(|e| e.amplifier_did.clone()).collect();
+    let amplifier_count = amplifier_did_set.len();
 
     // Phase 5: behavioral context
     set_progress(
         &scan_manager,
         user_did,
         WebScanPhase::Discovering,
-        &format!("Scoring followers of {event_count} amplifiers…"),
+        &format!("Scoring followers of {amplifier_count} amplifiers…"),
     )
     .await;
 
@@ -587,8 +592,6 @@ async fn run_scan(
     );
 
     // Phase 5b: classify social graph distance for all amplifiers
-    let amplifier_did_set: std::collections::HashSet<String> =
-        events.iter().map(|e| e.amplifier_did.clone()).collect();
     let graph_distances = if !amplifier_did_set.is_empty() {
         let did_refs: Vec<&str> = amplifier_did_set.iter().map(|s| s.as_str()).collect();
         crate::bluesky::relationships::classify_relationships(&client, user_did, &did_refs)
