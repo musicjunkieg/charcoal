@@ -185,6 +185,13 @@ pub async fn run_phased_scan(
         summary.degraded |= gathered.skipped;
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Burst.as_str())
             .await?;
+        // Record the burst denominator while pending == everything enqueued,
+        // so GET /api/status can report "X of Y classified" during the burst.
+        // On a resume that skips gather, the prior run's value is still
+        // correct: rows classified before the interruption are already done.
+        let enqueued = db.count_pending_classifications(user_did).await?;
+        db.set_scan_state(user_did, "classifications_total", &enqueued.to_string())
+            .await?;
     }
 
     // ── Phase: Burst (also the resume entry for phase == "burst") ──
