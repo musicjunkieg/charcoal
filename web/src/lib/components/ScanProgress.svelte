@@ -1,32 +1,15 @@
 <script lang="ts">
+	import { STEPS, classificationPercent, phaseToStepIndex } from '$lib/scan-steps.js';
 	import type { ScanStatus } from '$lib/types.js';
 
 	let { status, elapsed }: { status: ScanStatus; elapsed: string } = $props();
 
-	// Four user-meaningful steps mapped from the backend's finer-grained
-	// phases, so the checklist advances steadily instead of churning.
-	const STEPS = [
-		{ label: 'Reading your posts', phases: ['starting', 'loading_models', 'fingerprint'] },
-		{ label: "Finding who's engaging", phases: ['discovering'] },
-		{ label: 'Scoring accounts', phases: ['scoring', 'gathering', 'classifying'] },
-		{ label: 'Building your report', phases: ['finalizing'] }
-	];
-
-	let stepIndex = $derived(
-		Math.max(
-			0,
-			STEPS.findIndex((s) => s.phases.includes(status.phase))
-		)
-	);
+	let stepIndex = $derived(phaseToStepIndex(status.phase));
 
 	let clsTotal = $derived(status.progress?.classifications_total ?? null);
 	let clsDone = $derived(status.progress?.classifications_done ?? null);
 	let candidates = $derived(status.progress?.candidates_total ?? null);
-	let barPercent = $derived(
-		clsTotal !== null && clsDone !== null && clsTotal > 0
-			? Math.min(100, Math.round((clsDone / clsTotal) * 100))
-			: null
-	);
+	let barPercent = $derived(classificationPercent(clsDone, clsTotal));
 </script>
 
 <div class="scan-progress" aria-live="polite">

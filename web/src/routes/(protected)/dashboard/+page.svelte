@@ -12,6 +12,9 @@
 	} from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import { TIER_DESCRIPTIONS } from '$lib/tiers.js';
+	import { dashboardView } from '$lib/dashboard-state.js';
+	import { topKeywords } from '$lib/fingerprint-keywords.js';
+	import { pollActions } from '$lib/poll-actions.js';
 	import ScanProgress from '$lib/components/ScanProgress.svelte';
 	import type {
 		ScanStatus,
@@ -30,17 +33,10 @@
 	let accuracy = $state<AccuracyMetrics | null>(null);
 
 	// Top keywords across clusters, heaviest cluster first, deduplicated.
-	let topKeywords = $derived(
-		fingerprint?.fingerprint
-			? [
-					...new Set(
-						[...fingerprint.fingerprint.clusters]
-							.sort((a, b) => b.weight - a.weight)
-							.flatMap((c) => c.keywords)
-					)
-				].slice(0, 12)
-			: []
-	);
+	let keywords = $derived(topKeywords(fingerprint, 12));
+
+	// Which top-level view to render (welcome / all-clear / results).
+	let view = $derived(status ? dashboardView(status) : 'results');
 	let loading = $state(true);
 	let scanError = $state('');
 	let searchQuery = $state('');
@@ -108,18 +104,17 @@
 		if (pollTimer) clearInterval(pollTimer);
 		pollTimer = setInterval(async () => {
 			if (!status?.scan_running) return;
+			const prevRunning = status.scan_running;
 			try {
 				status = await getStatus();
 			} catch {
 				return;
 			}
-			if (status.scan_running) {
-				// Partial results fill in as the pipeline writes scores.
-				refreshResults();
-			} else {
-				// Falling edge: the scan just finished — one final refresh so
-				// the dashboard shows the complete results without a reload.
-				refreshResults();
+			// Refresh partial results while running; on the falling edge (scan
+			// just finished) also refresh once more so nothing is stale.
+			const actions = pollActions(prevRunning, status.scan_running);
+			if (actions.refreshResults) refreshResults();
+			if (actions.refreshAccuracy) {
 				getAccuracy()
 					.then((m) => {
 						accuracy = m;
@@ -245,7 +240,7 @@
 			<ScanProgress {status} elapsed={status.started_at ? elapsedTime(status.started_at) : ''} />
 		{/if}
 
-		{#if !status.started_at && status.tier_counts.total === 0 && !status.scan_running}
+		{#if view === 'welcome'}
 			<!-- First-run welcome screen -->
 			<div class="welcome">
 				<h2 class="welcome-title">Welcome to Charcoal</h2>
@@ -271,7 +266,7 @@
 					<p class="scan-error">{status.last_error}</p>
 				{/if}
 			</div>
-		{:else if status.tier_counts.total === 0 && !status.scan_running}
+		{:else if view === 'all-clear'}
 			<!-- Scan finished but found nothing to score — don't strand the user
 			     on a grid of zeros with no explanation. -->
 			<div class="welcome">
@@ -463,7 +458,7 @@
 			{/if}
 
 			<!-- Topic fingerprint — the topics Charcoal extracted from the user's posts -->
-			{#if topKeywords.length > 0 && fingerprint?.fingerprint}
+			{#if keywords.length > 0 && fingerprint?.fingerprint}
 				<details class="fingerprint-card">
 					<summary class="fingerprint-summary">Your topic fingerprint</summary>
 					<p class="fingerprint-hint">
@@ -472,7 +467,7 @@
 						raises an account's tier.
 					</p>
 					<div class="fingerprint-chips">
-						{#each topKeywords as keyword (keyword)}
+						{#each keywords as keyword (keyword)}
 							<span class="chip">{keyword}</span>
 						{/each}
 					</div>
