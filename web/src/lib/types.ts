@@ -37,11 +37,36 @@ export interface TierCounts {
 	total: number;
 }
 
+// Coarse scan stage from the backend. The setup stages come from the
+// in-memory scan job; gathering/classifying/finalizing are refined from
+// pipeline state while the heavy scoring stage runs.
+export type ScanPhase =
+	| 'idle'
+	| 'starting'
+	| 'loading_models'
+	| 'fingerprint'
+	| 'discovering'
+	| 'scoring'
+	| 'gathering'
+	| 'classifying'
+	| 'finalizing'
+	| 'done'
+	| 'failed';
+
+// Live progress counts; null while a stage hasn't recorded its denominator.
+export interface ScanProgress {
+	candidates_total: number | null;
+	classifications_total: number | null;
+	classifications_done: number | null;
+}
+
 export interface ScanStatus {
 	scan_running: boolean;
 	started_at: string | null;
 	progress_message: string;
 	last_error: string | null;
+	phase: ScanPhase;
+	progress: ScanProgress | null;
 	tier_counts: TierCounts;
 }
 
