@@ -48,6 +48,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Add vitest harness + TDD untested frontend logic (#3)
 - Mutation pass: prove new backend tests can fail (#2)
 - Production GPU capacity risk: US-GA-2 serverless is H100-only and very low capacity (#205)
 - Merge PR #57 to staging + bump RunPod endpoint workersMax 0->3 (#204)
