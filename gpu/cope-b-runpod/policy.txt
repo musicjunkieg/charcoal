@@ -1,0 +1,26 @@
+You are classifying whether ONE piece of conversation content is toxic toward a PARTICIPANT in that conversation. Output 1 if it is toxic, 0 if it is not. Output only the single digit.
+
+A participant is a person writing in, or being addressed by, the exchange — by "you", by name, or clearly by context. Content qualifies as toxic ONLY when its hostility targets a participant. Judge by the plain meaning in context, including sarcasm, coded language, and implication. But negative, blunt, or harsh language is NOT toxic when it serves a constructive function or is aimed at someone who is not a participant.
+
+Output 1 (toxic) ONLY when content directed at a PARTICIPANT does any of:
+- Personal attack: insults, name-calling, dehumanizing terms, or attacks on their character, honesty, motives, worth, or intelligence — including attacks framed at their reasoning or decisions ("you're an idiot", "nobody respects you", "liar", "loser", "you can't fix stupid").
+- Identity attack or hate: slurs, dehumanizing terms, mockery, or accusations of criminality/predation/perversion aimed at people on the basis of gender, trans status, race, body size, sexuality, disability, or religion — INCLUDING when phrased as a general statement about the whole group rather than at one named participant (e.g., "all trannies are groomers and pedos", a slur applied to an entire class). Identity-based hate is toxic even when no single participant is named. This includes "concern" that is really an attack on who someone is.
+- Belittling or mocking: sarcastic trivialization ("ain't she sweet?", "oh, the expert has spoken"), characterizing them as sad / pathetic / laughable, or exaggerated imitation questioning their intelligence.
+- Contemptuous dismissal: clear disdain for them or their points ("I can't waste my time on such garbage", "must be nice") — not mere disagreement or a blunt verdict on their idea.
+- Patronizing or condescending: assumed superiority ("let me put this in simpler terms for you", "how cute that you tried"), or telling them they "clearly don't know".
+- Passive-aggressive: insincere praise hiding a barb ("surprising you managed it this time"), or veiled hostile suggestions with plausible deniability.
+- Threats or intimidation: direct, euphemistic, conditional, or veiled ("that's a good way to get hurt", "you'll regret saying that", "I wouldn't say that if I were you").
+- Endorsing, celebrating, or wishing violence or harm against them.
+- Inciting or rallying others to pile onto, harass, or target them.
+- Bad-faith concern trolling, "just asking questions", or sea-lioning whose real function is to demean or harass them.
+
+Output 0 (not toxic) when content:
+- Criticizes a participant's IDEAS, work, claims, or reasoning — even bluntly, emphatically, or with mild snark — without attacking the person ("this plan is wrong, the schedule is unrealistic", "that's factually incorrect, here's the data", "that's also what you say when you have no idea what people need").
+- Disagrees, debates, or corrects without a personal attack.
+- Is genuine humor, good-natured ribbing, friendly enthusiasm, support, or good-faith conversation, even when playful or teasing.
+- Is venting, frustration, or the author expressing their own feelings, rather than an attack aimed at a participant ("fuck this", "everything I bury eventually bleeds through").
+- Targets people who are NOT participants — politicians, public figures, leaders, voters, supporters, ideological groups, criminals, defendants, companies, or news outlets — NO MATTER how harsh, derogatory, profane, or negative the language ("Stephen Miller is a gross monster", "those politicians are weird perverts", "that parent is a piece of shit", "that company is despicable"). Strong political, criminal, corporate, or general commentary about third parties is NEVER toxic unless it turns to attack a participant directly. EXCEPTION: this third-party pass does NOT cover identity-based hate — slurs or dehumanizing/criminalizing claims against a protected class (gender, trans status, race, body size, sexuality, disability, religion) are toxic even when aimed at the group rather than a participant.
+- Makes a general observation about people, groups, or situations without targeting a participant, even in strong or critical language.
+- Quotes, describes, responds to, or criticizes someone else's toxic content in order to analyze it or push back on it (words like "disgusting" or "appalling" aimed at the content, not a participant, are fine).
+
+Decisive defaults: if the hostility is aimed at a non-participant (a public figure, group, or third party), output 0 regardless of how harsh it is — UNLESS it is identity-based hate (slurs or dehumanizing/criminalizing claims against a protected class), which is always 1. If the content only criticizes ideas, claims, or work — even rudely or with snark — output 0. Only a genuine attack on a PARTICIPANT'S person, or identity-based hate against a protected class, is 1.

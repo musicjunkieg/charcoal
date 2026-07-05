@@ -163,7 +163,7 @@ mod db_tests {
 
 #[cfg(feature = "web")]
 mod scan_manager_tests {
-    use charcoal::web::scan_job::ScanManager;
+    use charcoal::web::scan_job::{ScanManager, WebScanPhase};
 
     #[test]
     fn test_scan_manager_starts_empty() {
@@ -183,6 +183,42 @@ mod scan_manager_tests {
         let mut mgr = ScanManager::new();
         mgr.try_start_scan("did:plc:abc").unwrap();
         assert!(mgr.try_start_scan("did:plc:def").is_err());
+    }
+
+    #[test]
+    fn test_scan_manager_busy_message_explains_global_gate() {
+        // The gate is global, so the message must not imply the conflict is
+        // the caller's own scan.
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        let msg = mgr.try_start_scan("did:plc:def").unwrap_err();
+        assert!(msg.contains("Another scan is already in progress"), "{msg}");
+        assert!(msg.contains("one at a time"), "{msg}");
+    }
+
+    #[test]
+    fn test_scan_manager_start_sets_starting_phase() {
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        let status = mgr.get_status("did:plc:abc").unwrap();
+        assert_eq!(status.phase, WebScanPhase::Starting);
+    }
+
+    #[test]
+    fn test_web_scan_phase_as_str_is_snake_case() {
+        assert_eq!(WebScanPhase::Idle.as_str(), "idle");
+        assert_eq!(WebScanPhase::Starting.as_str(), "starting");
+        assert_eq!(WebScanPhase::LoadingModels.as_str(), "loading_models");
+        assert_eq!(WebScanPhase::Fingerprint.as_str(), "fingerprint");
+        assert_eq!(WebScanPhase::Discovering.as_str(), "discovering");
+        assert_eq!(WebScanPhase::Scoring.as_str(), "scoring");
+        assert_eq!(WebScanPhase::Done.as_str(), "done");
+        assert_eq!(WebScanPhase::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn test_scan_manager_default_phase_is_idle() {
+        assert_eq!(WebScanPhase::default(), WebScanPhase::Idle);
     }
 
     #[test]

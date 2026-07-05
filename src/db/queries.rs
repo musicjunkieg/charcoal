@@ -8,7 +8,7 @@
 // data is isolated.
 
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
@@ -817,6 +817,17 @@ pub fn has_fingerprint(conn: &Connection, user_did: &str) -> Result<bool> {
 
 /// Delete all data for a user (cascade across all user-scoped tables).
 pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
+    // Staging tables first (#208) — they have no FK to the data tables, but
+    // clearing them up front keeps the delete in dependency order and ensures
+    // a user's queued classification work doesn't outlive the account itself.
+    conn.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    conn.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1",
+        params![user_did],
+    )?;
     conn.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],
@@ -863,8 +874,256 @@ pub fn get_all_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<Stri
     Ok(dids)
 }
 
-// rusqlite's optional() helper — converts "no rows" into None
-use rusqlite::OptionalExtension;
+// --- Classification staging (#208) ---
+
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
+
+/// Enqueue a batch of classifier work-queue rows for a user.
+///
+/// Uses UPSERT so Phase A is idempotent — the same `(user_did, account_did,
+/// post_uri)` triple can be written twice and will result in a single row.
+/// All fields (including pre-filled clean-pass verdicts) are written.
+pub fn enqueue_classifications(conn: &Connection, user_did: &str, rows: &[QueueRow]) -> Result<()> {
+    // Batch all inserts inside one transaction and one prepared statement to
+    // avoid re-acquiring the Mutex for every row.
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO classification_queue
+                 (user_did, account_did, post_uri, text, context_text,
+                  post_kind, onnx_score, status,
+                  toxic_token, confidence, model_id, policy_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(user_did, account_did, post_uri) DO UPDATE SET
+                 text           = excluded.text,
+                 context_text   = excluded.context_text,
+                 post_kind      = excluded.post_kind,
+                 onnx_score     = excluded.onnx_score,
+                 status         = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.status
+                                       ELSE excluded.status END,
+                 toxic_token    = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.toxic_token
+                                       ELSE excluded.toxic_token END,
+                 confidence     = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.confidence
+                                       ELSE excluded.confidence END,
+                 model_id       = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.model_id
+                                       ELSE excluded.model_id END,
+                 policy_version = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.policy_version
+                                       ELSE excluded.policy_version END",
+        )?;
+        for row in rows {
+            let toxic_token_int: Option<i64> = row.toxic_token.map(|b| if b { 1 } else { 0 });
+            let confidence_real: Option<f64> = row.confidence.map(f64::from);
+            stmt.execute(params![
+                user_did,
+                row.account_did,
+                row.post_uri,
+                row.text,
+                row.context_text,
+                row.post_kind,
+                row.onnx_score,
+                row.status,
+                toxic_token_int,
+                confidence_real,
+                row.model_id,
+                row.policy_version,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Stash a serialised `AccountInput` blob for an account (UPSERT).
+pub fn stash_account_input(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+    payload_json: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO scan_account_input (user_did, account_did, payload_json)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(user_did, account_did) DO UPDATE SET payload_json = excluded.payload_json",
+        params![user_did, account_did, payload_json],
+    )?;
+    Ok(())
+}
+
+/// Fetch up to `limit` pending queue rows for a user.
+pub fn fetch_pending_classifications(
+    conn: &Connection,
+    user_did: &str,
+    limit: i64,
+) -> Result<Vec<QueueRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT account_did, post_uri, text, context_text, post_kind,
+                onnx_score, status, toxic_token, confidence, model_id, policy_version
+         FROM classification_queue
+         WHERE user_did = ?1 AND status = 'pending'
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![user_did, limit], map_queue_row)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Record a batch of completed classifier verdicts.
+///
+/// Updates each matching row to `status='done'` and fills in all verdict
+/// fields.  All updates are batched inside a single transaction.
+pub fn record_classification_verdicts(
+    conn: &Connection,
+    user_did: &str,
+    verdicts: &[VerdictRow],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE classification_queue
+             SET status = 'done',
+                 toxic_token    = ?1,
+                 confidence     = ?2,
+                 model_id       = ?3,
+                 policy_version = ?4
+             WHERE user_did = ?5 AND account_did = ?6 AND post_uri = ?7",
+        )?;
+        for v in verdicts {
+            let toxic_token_int: i64 = if v.toxic_token { 1 } else { 0 };
+            let confidence_real: f64 = f64::from(v.confidence);
+            stmt.execute(params![
+                toxic_token_int,
+                confidence_real,
+                v.model_id,
+                v.policy_version,
+                user_did,
+                v.account_did,
+                v.post_uri,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// List distinct `account_did` values in the classification queue for a user.
+pub fn list_scan_accounts(conn: &Connection, user_did: &str) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT account_did FROM classification_queue WHERE user_did = ?1")?;
+    let dids = stmt
+        .query_map(params![user_did], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<String>, _>>()?;
+    Ok(dids)
+}
+
+/// Fetch all queue rows (any status) for a specific account.
+pub fn fetch_account_verdicts(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+) -> Result<Vec<QueueRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT account_did, post_uri, text, context_text, post_kind,
+                onnx_score, status, toxic_token, confidence, model_id, policy_version
+         FROM classification_queue
+         WHERE user_did = ?1 AND account_did = ?2",
+    )?;
+    let rows = stmt.query_map(params![user_did, account_did], map_queue_row)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Retrieve the stashed `AccountInput` JSON blob for an account, if any.
+pub fn fetch_account_input(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+) -> Result<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT payload_json FROM scan_account_input WHERE user_did = ?1 AND account_did = ?2",
+    )?;
+    let result = stmt
+        .query_row(params![user_did, account_did], |row| row.get(0))
+        .optional()?;
+    Ok(result)
+}
+
+/// Count rows with `status='pending'` in the classification queue for a user.
+pub fn count_pending_classifications(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM classification_queue WHERE user_did = ?1 AND status = 'pending'",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Delete all staging data for a user from `classification_queue` and
+/// `scan_account_input`.  Does NOT touch `scan_state`.
+pub fn clear_scan_staging(conn: &Connection, user_did: &str) -> Result<()> {
+    // Both deletes in one transaction so a crash can't leave half-cleared
+    // staging (mirrors the batched-write pattern used elsewhere in this file).
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Delete the staging data for a single account from `classification_queue` and
+/// `scan_account_input`.  Does NOT touch `scan_state`.
+pub fn clear_account_staging(conn: &Connection, user_did: &str, account_did: &str) -> Result<()> {
+    // Both deletes in one transaction so a crash can't leave half-cleared
+    // staging (mirrors the batched-write pattern used elsewhere in this file).
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1 AND account_did = ?2",
+        params![user_did, account_did],
+    )?;
+    tx.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1 AND account_did = ?2",
+        params![user_did, account_did],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+// ── shared row-mapper ─────────────────────────────────────────────────────────
+
+/// Map a `classification_queue` SELECT row into a `QueueRow`.
+///
+/// Expected column order (0-indexed):
+///   0  account_did, 1  post_uri,    2  text,          3  context_text,
+///   4  post_kind,   5  onnx_score,  6  status,
+///   7  toxic_token (INTEGER nullable), 8  confidence (REAL nullable),
+///   9  model_id,    10 policy_version
+fn map_queue_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRow> {
+    let toxic_int: Option<i64> = row.get(7)?;
+    let confidence_real: Option<f64> = row.get(8)?;
+    Ok(QueueRow {
+        account_did: row.get(0)?,
+        post_uri: row.get(1)?,
+        text: row.get(2)?,
+        context_text: row.get(3)?,
+        post_kind: row.get(4)?,
+        onnx_score: row.get(5)?,
+        status: row.get(6)?,
+        toxic_token: toxic_int.map(|i| i != 0),
+        confidence: confidence_real.map(|f| f as f32),
+        model_id: row.get(9)?,
+        policy_version: row.get(10)?,
+    })
+}
 
 #[cfg(test)]
 mod tests {

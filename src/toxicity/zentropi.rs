@@ -105,7 +105,11 @@ impl ZentropiClient {
 
     /// Classify a single text. Retries up to `MAX_RETRIES` times on transient
     /// failures (5xx, 429, network errors) with exponential backoff.
-    pub async fn classify(&self, text: &str) -> Result<ZentropiResponse> {
+    ///
+    /// Named `classify_raw` (not `classify`) to avoid method-resolution
+    /// ambiguity with the `ToxicityClassifier::classify` trait method, which
+    /// returns a `ClassifierVerdict` rather than the raw `ZentropiResponse`.
+    pub async fn classify_raw(&self, text: &str) -> Result<ZentropiResponse> {
         let request = ZentropiLabelerRequest {
             content_text: text.to_string(),
             labeler_id: self.labeler_id.clone(),
@@ -144,7 +148,7 @@ impl ZentropiClient {
         parent_text: &str,
         reply_text: &str,
     ) -> Result<ZentropiResponse> {
-        self.classify(&format_parent_reply(parent_text, reply_text))
+        self.classify_raw(&format_parent_reply(parent_text, reply_text))
             .await
     }
 
@@ -243,7 +247,7 @@ impl ZentropiClient {
             // half-failing labeler would still print 100% accuracy across
             // the surviving subset, masking the outage.
             results.total += 1;
-            match self.classify(text).await {
+            match self.classify_raw(text).await {
                 Ok(response) => {
                     let actual_toxic = response.is_toxic();
                     let correct = *expected_toxic == actual_toxic;
@@ -352,6 +356,59 @@ pub struct DiagnosticDetail {
     pub confidence: f64,
     pub compute_time: f64,
     pub correct: bool,
+}
+
+use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+
+/// Calibrated threshold for the Zentropi-hosted backend. CoPE-A's hosted API
+/// returns a confidence Zentropi has already calibrated — preserve current
+/// behavior by accepting any toxic verdict regardless of confidence.
+pub const ZENTROPI_THRESHOLD: f32 = 0.0;
+
+#[async_trait::async_trait]
+impl ToxicityClassifier for ZentropiClient {
+    async fn classify(&self, content: &str) -> anyhow::Result<ClassifierVerdict> {
+        let start = std::time::Instant::now();
+        let resp = self.classify_raw(content).await?;
+        let latency_ms: u32 = start.elapsed().as_millis().try_into().unwrap_or(u32::MAX);
+        let verdict = ClassifierVerdict {
+            toxic_token: resp.is_toxic(),
+            confidence: resp.confidence as f32,
+            latency_ms,
+            model_id: self.model_id().to_string(),
+            // Prefer the concrete hosted labeler version (ZENTROPI_LABELER_VERSION_ID)
+            // so audit/classifier records identify the exact policy that produced
+            // the verdict; fall back to the static banner only when unset.
+            policy_version: self
+                .labeler_version_id
+                .clone()
+                .unwrap_or_else(|| self.policy_version().to_string()),
+        };
+        crate::observability::classifier_metrics::record_request(
+            self.name(),
+            verdict.latency_ms,
+            verdict.toxic_token,
+            /* retries = */
+            0, // ZentropiClient uses its own retry loop; surfacing the count is a follow-up
+        );
+        Ok(verdict)
+    }
+    fn name(&self) -> &'static str {
+        "zentropi-hosted"
+    }
+    fn model_id(&self) -> &'static str {
+        "cope-a-9b" // bumped to cope-b in Chunk 6 if hosted CoPE-B lands
+    }
+    fn policy_version(&self) -> &'static str {
+        // The hosted labeler version is identified by ZENTROPI_LABELER_VERSION_ID
+        // at construction; this static accessor is a placeholder until the
+        // version ID is plumbed through (deferred to Chunk 6 alongside hosted
+        // CoPE-B research).
+        "zentropi-labeler"
+    }
+    fn threshold(&self) -> f32 {
+        ZENTROPI_THRESHOLD
+    }
 }
 
 #[cfg(test)]

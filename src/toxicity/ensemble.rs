@@ -3,33 +3,33 @@
 //! Stage 1: ONNX scores every post. Posts below `ONNX_CLEAN_THRESHOLD` (0.10) are
 //! treated as genuinely safe and skip stage 2 — no Zentropi call, no token cost.
 //!
-//! Stage 2: Posts at or above the threshold are sent to Zentropi for a binary
-//! verdict (toxic / not toxic). The Zentropi labeler holds a conversation-scoped
-//! policy that correctly distinguishes ally use of identity terms ("fuck yeah, fat
-//! liberation!") from hostile use ("fat people are disgusting").
+//! Stage 2: Posts at or above the threshold are sent to the configured
+//! `ToxicityClassifier` (RunPod CoPE-B or Zentropi-hosted CoPE) for a binary
+//! verdict (toxic / not toxic). The classifier policy is conversation-scoped —
+//! it distinguishes ally use of identity terms ("fuck yeah, fat liberation!")
+//! from hostile use ("fat people are disgusting").
 //!
-//! When Zentropi is not configured, stage 2 falls back to ONNX with a binary
-//! threshold (0.50) — preserving safe behavior at the cost of accuracy.
+//! There is no silent fallback: the classifier is required (constructed via
+//! `classifier::build_from_env`), and a classifier error propagates rather than
+//! degrading to an ONNX-threshold guess. The threshold that turns a raw
+//! `ClassifierVerdict` into a binary `is_toxic` is owned by the classifier impl
+//! (`classifier::is_toxic`), never by this module.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::debug;
 
+use super::classifier::{is_toxic, ToxicityClassifier};
 use super::format_parent_reply;
 use super::traits::{BinaryVerdict, ToxicityResult, ToxicityScorer};
-use super::zentropi::ZentropiClient;
 
-/// ONNX score below this is genuinely safe — skip Zentropi entirely.
+/// ONNX score below this is genuinely safe — skip the Stage-2 classifier entirely.
 pub const ONNX_CLEAN_THRESHOLD: f64 = 0.10;
 
-/// ONNX-only fallback threshold. Used when Zentropi is unavailable to derive
-/// a binary verdict from the continuous ONNX score.
-pub const ONNX_FALLBACK_BINARY_THRESHOLD: f64 = 0.50;
-
-/// Maximum concurrent Zentropi requests in flight per batch. Conservative bound
-/// to stay well under free-tier rate limits.
+/// Maximum concurrent Stage-2 classifier requests in flight per batch.
+/// Conservative bound to stay well under upstream rate limits.
 const ZENTROPI_CONCURRENCY: usize = 4;
 
 /// Per-post outcome from the two-stage pipeline.
@@ -43,21 +43,24 @@ pub struct TwoStageVerdict {
     pub onnx_attributes: super::traits::ToxicityAttributes,
     /// How the verdict was reached.
     pub source: VerdictSource,
-    /// Zentropi confidence in [0.0, 1.0] when stage 2 ran.
-    pub zentropi_confidence: Option<f64>,
+    /// Stage-2 classifier confidence in [0.0, 1.0] when stage 2 ran.
+    pub classifier_confidence: Option<f32>,
+    /// Stage-2 model identity (e.g. "cope-b-a4b") when stage 2 ran. Carried
+    /// for audit provenance.
+    pub classifier_model_id: Option<String>,
+    /// Stage-2 policy version when stage 2 ran. Carried for audit provenance.
+    pub classifier_policy_version: Option<String>,
 }
 
 /// Provenance of a `TwoStageVerdict`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerdictSource {
     /// ONNX cleared the post (< clean threshold). Stage 2 was skipped.
     OnnxCleared,
-    /// Zentropi classified the post as toxic.
-    ZentropiToxic,
-    /// Zentropi classified the post as safe.
-    ZentropiSafe,
-    /// Zentropi unavailable; verdict came from ONNX threshold fallback.
-    OnnxFallback,
+    /// The Stage-2 classifier classified the post as toxic.
+    ClassifierToxic,
+    /// The Stage-2 classifier classified the post as safe.
+    ClassifierSafe,
 }
 
 /// Two-stage scorer: continuous primary (typically ONNX) + optional binary classifier (Zentropi).
@@ -67,20 +70,32 @@ pub enum VerdictSource {
 /// want the binary verdict use `classify_post` / `classify_batch` directly.
 pub struct TwoStageToxicityScorer {
     primary: Box<dyn ToxicityScorer>,
-    zentropi: Option<Arc<ZentropiClient>>,
+    classifier: Arc<dyn ToxicityClassifier>,
 }
 
 impl TwoStageToxicityScorer {
-    /// Build a two-stage scorer. `zentropi = None` falls back to ONNX-only with the
-    /// binary threshold — useful for local development without a Zentropi key.
-    pub fn new(primary: Box<dyn ToxicityScorer>, zentropi: Option<Arc<ZentropiClient>>) -> Self {
-        Self { primary, zentropi }
+    /// Build a two-stage scorer. The Stage-2 `classifier` is required — there is
+    /// no ONNX-only fallback. Callers construct one via
+    /// `classifier::build_from_env` (which refuses to boot if unconfigured).
+    pub fn new(primary: Box<dyn ToxicityScorer>, classifier: Arc<dyn ToxicityClassifier>) -> Self {
+        Self {
+            primary,
+            classifier,
+        }
     }
 
-    /// Whether this scorer has Zentropi configured. Used by callers that want to
-    /// log the active classifier path at scan start.
-    pub fn has_zentropi(&self) -> bool {
-        self.zentropi.is_some()
+    /// Name of the active Stage-2 classifier backend. Used by callers that want
+    /// to log the active classifier path at scan start.
+    pub fn classifier_name(&self) -> &'static str {
+        self.classifier.name()
+    }
+
+    /// Clone the inner Stage-2 classifier handle. The phased scan pipeline
+    /// (#208) needs the classifier separately from the ONNX scorer + clean-pass,
+    /// all three of which live inside this one scorer. Cloning the `Arc` is
+    /// cheap (a refcount bump) and shares the same underlying client.
+    pub fn classifier(&self) -> Arc<dyn ToxicityClassifier> {
+        Arc::clone(&self.classifier)
     }
 
     /// Classify a single post. `context` is the parent post text for replies; pass
@@ -111,63 +126,60 @@ impl TwoStageToxicityScorer {
         let onnx_attributes = primary.attributes;
 
         if onnx_score < ONNX_CLEAN_THRESHOLD {
-            debug!(onnx_score, "Two-stage: ONNX cleared, skipping Zentropi");
+            debug!(
+                onnx_score,
+                "Two-stage: ONNX cleared, skipping Stage-2 classifier"
+            );
             return Ok(TwoStageVerdict {
                 is_toxic: false,
                 onnx_score,
                 onnx_attributes,
                 source: VerdictSource::OnnxCleared,
-                zentropi_confidence: None,
+                classifier_confidence: None,
+                classifier_model_id: None,
+                classifier_policy_version: None,
             });
         }
 
-        match &self.zentropi {
-            Some(client) => {
-                let response = match context {
-                    Some(parent) => client.classify_pair(parent, text).await,
-                    None => client.classify(text).await,
-                };
-                match response {
-                    Ok(r) => {
-                        let is_toxic = r.is_toxic();
-                        debug!(
-                            onnx_score,
-                            is_toxic,
-                            confidence = r.confidence,
-                            "Two-stage: Zentropi verdict"
-                        );
-                        Ok(TwoStageVerdict {
-                            is_toxic,
-                            onnx_score,
-                            onnx_attributes,
-                            source: if is_toxic {
-                                VerdictSource::ZentropiToxic
-                            } else {
-                                VerdictSource::ZentropiSafe
-                            },
-                            zentropi_confidence: Some(r.confidence),
-                        })
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Zentropi failed, falling back to ONNX threshold");
-                        Ok(TwoStageVerdict {
-                            is_toxic: onnx_score >= ONNX_FALLBACK_BINARY_THRESHOLD,
-                            onnx_score,
-                            onnx_attributes,
-                            source: VerdictSource::OnnxFallback,
-                            zentropi_confidence: None,
-                        })
-                    }
-                }
-            }
-            None => Ok(TwoStageVerdict {
-                is_toxic: onnx_score >= ONNX_FALLBACK_BINARY_THRESHOLD,
-                onnx_score,
-                onnx_attributes,
-                source: VerdictSource::OnnxFallback,
-                zentropi_confidence: None,
-            }),
-        }
+        // No silent fallback: a classifier error propagates via `?`. The
+        // classifier sees the same `primary_input` envelope ONNX scored, so the
+        // two stages are on identical text.
+        let verdict = self.classifier.classify(primary_input).await?;
+        let toxic = is_toxic(self.classifier.as_ref(), &verdict);
+        debug!(
+            onnx_score,
+            is_toxic = toxic,
+            confidence = verdict.confidence,
+            backend = self.classifier.name(),
+            "Two-stage: classifier verdict"
+        );
+        Ok(TwoStageVerdict {
+            is_toxic: toxic,
+            onnx_score,
+            onnx_attributes,
+            source: if toxic {
+                VerdictSource::ClassifierToxic
+            } else {
+                VerdictSource::ClassifierSafe
+            },
+            classifier_confidence: Some(verdict.confidence),
+            classifier_model_id: Some(verdict.model_id),
+            classifier_policy_version: Some(verdict.policy_version),
+        })
+    }
+
+    /// Run only the ONNX primary scorer over a batch of texts. Returns each
+    /// text's raw `toxicity` score as `Vec<f64>` in input order. The Stage-2
+    /// classifier is **never** invoked — this is the gather-phase seam that
+    /// splits posts into clean (score < `ONNX_CLEAN_THRESHOLD`) vs survivor
+    /// (≥ threshold) without incurring any RunPod/Zentropi cost.
+    ///
+    /// The returned scores are unfiltered: callers do the clean/survivor split
+    /// themselves using `ONNX_CLEAN_THRESHOLD`. This method owns only the
+    /// *data* path, not the split decision.
+    pub async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+        let results = self.primary.score_batch(texts).await?;
+        Ok(results.into_iter().map(|r| r.toxicity).collect())
     }
 
     /// Classify a batch of posts in parallel, with per-post context. Caller supplies
