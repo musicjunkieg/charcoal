@@ -92,9 +92,16 @@ export interface EventsResponse {
 	events: AmplificationEvent[];
 }
 
+// Matches the serialized TopicFingerprint returned by GET /api/fingerprint.
+export interface TopicCluster {
+	label: string;
+	keywords: string[];
+	weight: number;
+}
+
 export interface FingerprintResponse {
 	fingerprint: {
-		keywords: Array<{ term: string; weight: number }>;
+		clusters: TopicCluster[];
 		post_count: number;
 	} | null;
 	post_count: number;

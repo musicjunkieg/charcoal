@@ -2,18 +2,45 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getStatus, getEvents, getAccounts, triggerScan, getAccuracy } from '$lib/api.js';
+	import {
+		getStatus,
+		getEvents,
+		getAccounts,
+		getFingerprint,
+		triggerScan,
+		getAccuracy
+	} from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import { TIER_DESCRIPTIONS } from '$lib/tiers.js';
 	import ScanProgress from '$lib/components/ScanProgress.svelte';
-	import type { ScanStatus, AmplificationEvent, AccuracyMetrics, Account } from '$lib/types.js';
+	import type {
+		ScanStatus,
+		AmplificationEvent,
+		AccuracyMetrics,
+		Account,
+		FingerprintResponse
+	} from '$lib/types.js';
 
 	let isImpersonating = $derived(!!$page.url.searchParams.get('as_user'));
 
 	let status = $state<ScanStatus | null>(null);
 	let events = $state<AmplificationEvent[]>([]);
 	let topAccounts = $state<Account[]>([]);
+	let fingerprint = $state<FingerprintResponse | null>(null);
 	let accuracy = $state<AccuracyMetrics | null>(null);
+
+	// Top keywords across clusters, heaviest cluster first, deduplicated.
+	let topKeywords = $derived(
+		fingerprint?.fingerprint
+			? [
+					...new Set(
+						[...fingerprint.fingerprint.clusters]
+							.sort((a, b) => b.weight - a.weight)
+							.flatMap((c) => c.keywords)
+					)
+				].slice(0, 12)
+			: []
+	);
 	let loading = $state(true);
 	let scanError = $state('');
 	let searchQuery = $state('');
@@ -22,6 +49,15 @@
 	let scanning = $state(false);
 	let now = $state(Date.now());
 	let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+	// Non-blocking: 404 (not built yet) and network errors leave it null.
+	function loadFingerprint() {
+		getFingerprint()
+			.then((f) => {
+				fingerprint = f;
+			})
+			.catch(() => {});
+	}
 
 	// Refresh the live result panels (events + top threats). Called while a
 	// scan runs and once more when it finishes, so results appear without a
@@ -37,6 +73,9 @@
 				topAccounts = r.accounts;
 			})
 			.catch(() => {});
+		// The fingerprint is built early in a first scan — pick it up as soon
+		// as it exists so the promised "topic fingerprint" becomes visible.
+		if (!fingerprint) loadFingerprint();
 	}
 
 	async function loadData() {
@@ -49,6 +88,7 @@
 			status = s;
 			events = e.events;
 			topAccounts = a.accounts;
+			loadFingerprint();
 			// Load accuracy metrics in background (non-blocking)
 			getAccuracy()
 				.then((m) => {
@@ -420,6 +460,23 @@
 				<div class="empty-state">
 					<p>No amplification events yet. Run a scan to detect quotes and reposts.</p>
 				</div>
+			{/if}
+
+			<!-- Topic fingerprint — the topics Charcoal extracted from the user's posts -->
+			{#if topKeywords.length > 0 && fingerprint?.fingerprint}
+				<details class="fingerprint-card">
+					<summary class="fingerprint-summary">Your topic fingerprint</summary>
+					<p class="fingerprint-hint">
+						Built from {fingerprint.fingerprint.post_count} of your recent posts. Charcoal measures how
+						much a potential threat's posting overlaps with these topics — overlap plus hostility is what
+						raises an account's tier.
+					</p>
+					<div class="fingerprint-chips">
+						{#each topKeywords as keyword (keyword)}
+							<span class="chip">{keyword}</span>
+						{/each}
+					</div>
+				</details>
 			{/if}
 		{/if}
 	{/if}
@@ -828,6 +885,49 @@
 		text-align: center;
 		color: #57534e;
 		font-size: 0.9375rem;
+	}
+
+	/* Topic fingerprint card */
+	.fingerprint-card {
+		margin-top: 2rem;
+		padding: 1rem 1.25rem;
+		background: rgba(28, 25, 23, 0.5);
+		border: 1px solid rgba(168, 162, 158, 0.1);
+		border-radius: 14px;
+	}
+
+	.fingerprint-summary {
+		font-size: 1rem;
+		font-weight: 500;
+		color: #d6d3d1;
+		cursor: pointer;
+		letter-spacing: 0.01em;
+	}
+
+	.fingerprint-summary:hover {
+		color: #e8b48a;
+	}
+
+	.fingerprint-hint {
+		font-size: 0.8125rem;
+		color: #78716c;
+		line-height: 1.5;
+		margin: 0.75rem 0;
+	}
+
+	.fingerprint-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.chip {
+		padding: 0.25rem 0.75rem;
+		font-size: 0.8125rem;
+		color: #c9956c;
+		background: rgba(201, 149, 108, 0.08);
+		border: 1px solid rgba(201, 149, 108, 0.2);
+		border-radius: 999px;
 	}
 
 	.btn-scan:disabled {
