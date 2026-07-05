@@ -49,7 +49,13 @@ impl ScanManager {
     /// Atomically check the global gate and start a scan.
     pub fn try_start_scan(&mut self, user_did: &str) -> Result<(), String> {
         if self.any_running {
-            return Err("A scan is already running".to_string());
+            // Scans are gated globally, not per-user — the conflict may be
+            // another user's scan, so the message shouldn't imply it's theirs.
+            return Err(
+                "Another scan is already in progress on this server — scans run \
+                 one at a time. Try again in a few minutes."
+                    .to_string(),
+            );
         }
         self.any_running = true;
         self.statuses.insert(
@@ -59,6 +65,7 @@ impl ScanManager {
                 started_at: Some(chrono::Utc::now().to_rfc3339()),
                 progress_message: "Starting scan...".to_string(),
                 last_error: None,
+                phase: WebScanPhase::Starting,
             },
         );
         Ok(())
@@ -101,6 +108,42 @@ impl ScanManager {
     }
 }
 
+/// Coarse phase of the background scan, exposed via GET /api/status so the
+/// dashboard can render a step indicator instead of guessing from prose.
+///
+/// `Scoring` covers the whole phased pipeline (gather → burst → finalize);
+/// the status handler refines it further from the `scan_phase` marker the
+/// pipeline persists in `scan_state`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WebScanPhase {
+    /// No scan has run in this process lifetime.
+    #[default]
+    Idle,
+    Starting,
+    LoadingModels,
+    Fingerprint,
+    Discovering,
+    Scoring,
+    Done,
+    Failed,
+}
+
+impl WebScanPhase {
+    /// snake_case string used in the /api/status JSON.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            WebScanPhase::Idle => "idle",
+            WebScanPhase::Starting => "starting",
+            WebScanPhase::LoadingModels => "loading_models",
+            WebScanPhase::Fingerprint => "fingerprint",
+            WebScanPhase::Discovering => "discovering",
+            WebScanPhase::Scoring => "scoring",
+            WebScanPhase::Done => "done",
+            WebScanPhase::Failed => "failed",
+        }
+    }
+}
+
 /// Live status of the background scan, exposed via GET /api/status.
 #[derive(Debug, Clone, Default)]
 pub struct ScanStatus {
@@ -112,9 +155,26 @@ pub struct ScanStatus {
     pub progress_message: String,
     /// Error message from the last scan, if it failed.
     pub last_error: Option<String>,
+    /// Which coarse stage the scan is in.
+    pub phase: WebScanPhase,
 }
 
 use tokio::sync::RwLock;
+
+/// Update the live phase + progress message for a user's scan.
+/// Takes the write lock briefly; a no-op if the user has no status entry.
+async fn set_progress(
+    scan_manager: &Arc<RwLock<ScanManager>>,
+    user_did: &str,
+    phase: WebScanPhase,
+    message: &str,
+) {
+    let mut mgr = scan_manager.write().await;
+    if let Some(s) = mgr.get_status_mut(user_did) {
+        s.phase = phase;
+        s.progress_message = message.to_string();
+    }
+}
 
 /// Launch the scan pipeline in a background tokio task.
 /// Returns immediately. Callers poll `scan_manager` to track progress.
@@ -143,6 +203,7 @@ pub fn launch_scan(
             if let Some(status) = mgr.get_status_mut(&user_did) {
                 status.last_error = Some(e.to_string());
                 status.progress_message = "Scan failed — see server logs".to_string();
+                status.phase = WebScanPhase::Failed;
             }
         }
     });
@@ -220,12 +281,13 @@ async fn run_scan(
     actor_handle: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: load toxicity scorer
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Loading toxicity model…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::LoadingModels,
+        "Loading toxicity model…",
+    )
+    .await;
 
     let primary_scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
         let model_dir = config.model_dir.clone();
@@ -262,12 +324,13 @@ async fn run_scan(
     //
     // Loaded early so it can be reused for both auto-fingerprint embedding
     // (if needed) and amplifier scoring in the pipeline.
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Loading embedding model…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::LoadingModels,
+        "Loading embedding model…",
+    )
+    .await;
 
     let embed_dir = embedding_model_dir(&config.model_dir);
     let embedder = if embedding_files_present(&config.model_dir) {
@@ -296,12 +359,13 @@ async fn run_scan(
     };
 
     // Phase 2b: load NLI model (optional — falls back gracefully if unavailable)
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Loading NLI model…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::LoadingModels,
+        "Loading NLI model…",
+    )
+    .await;
 
     let nli_scorer = if nli_files_present(&config.model_dir) {
         let model_dir = config.model_dir.clone();
@@ -330,12 +394,13 @@ async fn run_scan(
     //
     // For web users there is no CLI step — if no fingerprint exists yet,
     // we build one automatically from the user's recent posts.
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Loading topic fingerprint…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::Fingerprint,
+        "Loading topic fingerprint…",
+    )
+    .await;
 
     let client = PublicAtpClient::new(&config.public_api_url)?;
 
@@ -344,13 +409,13 @@ async fn run_scan(
         None => {
             // Auto-fingerprint: fetch posts, run TF-IDF, compute embeddings, save to DB.
             // build_user_fingerprint handles the full pipeline including embeddings.
-            {
-                let mut mgr = scan_manager.write().await;
-                if let Some(s) = mgr.get_status_mut(user_did) {
-                    s.progress_message =
-                        "Building your topic fingerprint from recent posts…".to_string();
-                }
-            }
+            set_progress(
+                &scan_manager,
+                user_did,
+                WebScanPhase::Fingerprint,
+                "Building your topic fingerprint from recent posts…",
+            )
+            .await;
 
             build_user_fingerprint(&config, &*db, user_did, actor_handle).await?;
 
@@ -394,12 +459,13 @@ async fn run_scan(
         };
 
     // Phase 4: fetch amplification events from Constellation
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Fetching amplification events…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::Discovering,
+        "Fetching amplification events…",
+    )
+    .await;
 
     let constellation =
         crate::constellation::client::ConstellationClient::new(&config.constellation_url)?;
@@ -417,12 +483,13 @@ async fn run_scan(
     let mut events = constellation.find_amplification_events(&post_uris).await;
 
     // Also fetch likes via Constellation backlinks
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Detecting likes via Constellation…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::Discovering,
+        "Detecting likes via Constellation…",
+    )
+    .await;
     let like_events = constellation.find_likers(&post_uris).await;
     info!(
         like_count = like_events.len(),
@@ -431,12 +498,13 @@ async fn run_scan(
     events.extend(like_events);
 
     // Fetch reply threads and detect drive-by replies
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = "Detecting drive-by replies…".to_string();
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::Discovering,
+        "Detecting drive-by replies…",
+    )
+    .await;
     let follows_set = crate::bluesky::replies::fetch_follows_set(&client, user_did)
         .await
         .unwrap_or_default();
@@ -501,12 +569,13 @@ async fn run_scan(
     let event_count = events.len();
 
     // Phase 5: behavioral context
-    {
-        let mut mgr = scan_manager.write().await;
-        if let Some(s) = mgr.get_status_mut(user_did) {
-            s.progress_message = format!("Scoring followers of {event_count} amplifiers…");
-        }
-    }
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::Discovering,
+        &format!("Scoring followers of {event_count} amplifiers…"),
+    )
+    .await;
 
     let median_engagement = db.get_median_engagement(user_did).await?;
     let pile_on_refs = db.get_events_for_pile_on(user_did).await?;
@@ -533,7 +602,17 @@ async fn run_scan(
         "Classified amplifier graph distances"
     );
 
-    // Phase 6: run amplification pipeline
+    // Phase 6: run amplification pipeline. From here until completion the
+    // pipeline reports progress via the scan_state table (scan_phase marker +
+    // classification counts), which GET /api/status reads to refine this phase.
+    set_progress(
+        &scan_manager,
+        user_did,
+        WebScanPhase::Scoring,
+        "Scoring candidate accounts…",
+    )
+    .await;
+
     let weights = ThreatWeights::default();
     let result = crate::pipeline::amplification::run(
         &client,
@@ -567,6 +646,7 @@ async fn run_scan(
             info!(events, accounts, degraded, "Background scan completed");
             if let Some(s) = mgr.get_status_mut(user_did) {
                 s.last_error = None;
+                s.phase = WebScanPhase::Done;
                 s.progress_message = if degraded {
                     format!(
                         "Completed (incomplete — cost-capped or accounts skipped, \
@@ -581,6 +661,7 @@ async fn run_scan(
             error!(error = %e, "Pipeline error");
             if let Some(s) = mgr.get_status_mut(user_did) {
                 s.last_error = Some(e.to_string());
+                s.phase = WebScanPhase::Failed;
                 s.progress_message =
                     "Scan encountered an error — partial results may have been saved".to_string();
             }
