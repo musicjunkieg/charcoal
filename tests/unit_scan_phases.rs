@@ -2711,6 +2711,14 @@ mod orchestration_tests {
             db.get_scan_state(ORCH_USER, "scan_phase").await.unwrap(),
             Some("done".to_string())
         );
+        // The burst denominator was recorded at burst entry so GET /api/status
+        // can report "X of Y classified": one survivor post per account.
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "classifications_total")
+                .await
+                .unwrap(),
+            Some("2".to_string())
+        );
         // Staging is cleared (Done step).
         assert_eq!(
             db.count_pending_classifications(ORCH_USER).await.unwrap(),

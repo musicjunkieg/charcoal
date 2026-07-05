@@ -305,6 +305,41 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
     }
 
+    #[tokio::test]
+    async fn status_json_shape_is_backward_compatible_with_phase_fields() {
+        // Guard the /api/status contract: all pre-existing keys must survive,
+        // and the additive phase/progress fields report idle before any scan.
+        let app = build_test_app();
+        let cookie = session_cookie(TEST_DID);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).expect("response should be valid JSON");
+
+        // Pre-existing contract.
+        assert_eq!(json["scan_running"], false);
+        assert!(json["started_at"].is_null());
+        assert!(json["progress_message"].is_string());
+        assert!(json["last_error"].is_null());
+        assert!(json["tier_counts"]["total"].is_number());
+        // Additive fields.
+        assert_eq!(json["phase"], "idle");
+        assert!(json["progress"].is_null());
+    }
+
     // ---- Scan endpoint requires registered user ----
 
     #[tokio::test]

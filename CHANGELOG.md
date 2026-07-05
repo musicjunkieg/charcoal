@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Onboarding scan progress + live threat visibility in web UI (#1)
 - Batched RunPod classifier — the burst phase now sends **N post texts per `/runsync` request** instead of one, so vLLM's continuous batching (`max_num_seqs=32`) does the on-GPU parallelism and the queue-bound warm-idle waste (RunPod `delayTime` ~3-4s vs `executionTime` ~0.13s) collapses toward the compute floor — targeting ~$1/onboarding vs the prior ~$6-10. Handler and Rust client are batch-only (`{"input":{"contents":[…]}}` → `{"output":{"verdicts":[…]}}`); a post that fails to decode is recorded as an explicit benign `decode-error` sentinel (fail-open, logged + metered + scan `degraded`) rather than failing the batch or livelocking resume. Additive `classify_batch`/`max_batch_size` on the classifier trait keep Zentropi 1-per-call. New env: `CHARCOAL_RUNPOD_BATCH_SIZE` — texts per RunPod request (default 32 = handler `max_num_seqs`, clamped 1–128); in-flight texts ≈ `CHARCOAL_BURST_CONCURRENCY` × this (#186)
 - Classification burst decouple — scans now run **collect → burst → score**: Phase A gathers posts and runs the ONNX clean-pass (no classifier), Phase B drains a DB-staged queue through the classifier in **one contiguous burst window** (making the `ScanCostMeter` measure real burst cost, not wall-clock), Phase C scores from stored verdicts. Backed by schema v9 (`classification_queue` + `scan_account_input`) and a `scan_phase` marker for crash-/402-resumability. The adaptive two-pass NLI gate (`raw_score >= 8.0`) moves into Phase C; behavior is locked by a golden test. Env: `CHARCOAL_BURST_CONCURRENCY` (16), `CHARCOAL_BURST_BATCH` (500) (#208)
 - Per-scan RunPod cost backstop (`ScanCostMeter`) enforced at the per-call boundary — `elapsed × rate` metering hard-stops a runaway scan before disaster spend; on by default ($5 ceiling), only `CHARCOAL_SCAN_COST_CEILING_CENTS=0` disables (#206)
@@ -47,6 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Add vitest harness + TDD untested frontend logic (#3)
+- Mutation pass: prove new backend tests can fail (#2)
 - Production GPU capacity risk: US-GA-2 serverless is H100-only and very low capacity (#205)
 - Merge PR #57 to staging + bump RunPod endpoint workersMax 0->3 (#204)
 - Lower classify-gate AGREEMENT_THRESHOLD 0.90->0.85 (accept ~89% model-agreement ceiling) (#203)

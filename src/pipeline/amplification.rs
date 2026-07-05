@@ -427,6 +427,13 @@ pub async fn run(
         None => (0, false),
         Some(_) if candidates.is_empty() => (0, false),
         Some(scorer) => {
+            // Record how many accounts are queued for scoring so GET
+            // /api/status can show a denominator while the phased scan runs.
+            // This is the earliest point the number exists — the candidate set
+            // is only complete after follower expansion above.
+            db.set_scan_state(user_did, "candidates_total", &candidates.len().to_string())
+                .await?;
+
             let fetcher = AtpPostFetcher { client };
             let classifier = scorer.classifier();
 
