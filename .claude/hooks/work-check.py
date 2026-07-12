@@ -67,8 +67,29 @@ def load_config(chainlink_dir):
     return mode, blocked, allowed
 
 
+def _project_root_from_script():
+    """Derive project root from this script's location (.claude/hooks/<script>.py -> project root)."""
+    try:
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    except (NameError, OSError):
+        return None
+
+
 def find_chainlink_dir():
-    """Find the .chainlink directory by walking up from cwd."""
+    """Find the .chainlink directory.
+
+    Prefers the project root derived from the hook script's own path
+    (reliable even when cwd is a subdirectory), falling back to walking
+    up from cwd for standalone/test usage.
+    """
+    # Primary: resolve from script location
+    root = _project_root_from_script()
+    if root:
+        candidate = os.path.join(root, '.chainlink')
+        if os.path.isdir(candidate):
+            return candidate
+
+    # Fallback: walk up from cwd
     current = os.getcwd()
     for _ in range(10):
         candidate = os.path.join(current, '.chainlink')
@@ -152,13 +173,19 @@ def main():
 
     # PERMANENT BLOCK: git mutation commands are never allowed (all modes)
     if tool_name == 'Bash' and is_blocked_git(input_data, blocked_git):
-        command = input_data.get("tool_input", {}).get("command", "").strip()
         print(
-            f"BLOCKED: `{command}` — git mutation commands are reserved for the human.\n\n"
-            "DO NOT retry this command or attempt workarounds. Instead:\n"
-            "1. Tell the user exactly what command to run\n"
-            "2. Stop and wait for the user to do it themselves\n\n"
-            "Allowed git commands: status, diff, log, show, branch (read-only only)."
+            "MANDATORY COMPLIANCE — DO NOT ATTEMPT TO WORK AROUND THIS BLOCK.\n\n"
+            "Git mutation commands (commit, push, merge, rebase, reset, etc.) are "
+            "PERMANENTLY FORBIDDEN. The human performs all git write operations.\n\n"
+            "You MUST NOT:\n"
+            "  - Retry this command\n"
+            "  - Rewrite the command to achieve the same effect\n"
+            "  - Use a different tool to perform git mutations\n"
+            "  - Ask the user if you should bypass this restriction\n\n"
+            "You MUST instead:\n"
+            "  - Inform the user that this is a manual step for them\n"
+            "  - Continue with your other work\n\n"
+            "Read-only git commands (status, diff, log, show, branch) are allowed."
         )
         sys.exit(2)
 
@@ -184,21 +211,39 @@ def main():
         sys.exit(0)
 
     # No active work item — behavior depends on mode
-    nudge_msg = (
-        "No active chainlink issue. "
-        "Create and work on an issue before making changes.\n\n"
-        "  chainlink issue quick \"<describe your task>\" -p <priority> -l <label>\n\n"
+    strict_msg = (
+        "MANDATORY COMPLIANCE — DO NOT ATTEMPT TO WORK AROUND THIS BLOCK.\n\n"
+        "You cannot Write, Edit, or run Bash commands without an active chainlink issue. "
+        "This is a hard requirement enforced by the project, not a suggestion.\n\n"
+        "You MUST NOT:\n"
+        "  - Retry the same tool call hoping it will work\n"
+        "  - Try alternative tools or approaches to bypass this check\n"
+        "  - Proceed without creating an issue first\n"
+        "  - Tell the user the hook is preventing you from working\n\n"
+        "You MUST do exactly this, right now, before anything else:\n\n"
+        "  chainlink issue quick \"<describe what you are about to do>\" -p <priority> -l <label>\n\n"
+        "This single command creates an issue AND sets it as your active work item. "
+        "After running it, your tool calls will succeed.\n\n"
+        "If an issue already exists for this work, use:\n"
+        "  chainlink issue list -s open\n"
+        "  chainlink session work <id>\n\n"
+        "This is how the project tracks work. Comply, then continue."
+    )
+
+    normal_msg = (
+        "Reminder: No active chainlink issue. You should create one before making changes.\n\n"
+        "  chainlink issue quick \"<describe what you are about to do>\" -p <priority> -l <label>\n\n"
         "Or pick an existing issue:\n"
         "  chainlink issue list -s open\n"
         "  chainlink session work <id>"
     )
 
     if tracking_mode == "strict":
-        print(f"BLOCKED: {nudge_msg}")
+        print(strict_msg)
         sys.exit(2)
     else:
         # normal mode: remind but allow
-        print(f"Reminder: {nudge_msg}")
+        print(normal_msg)
         sys.exit(0)
 
 

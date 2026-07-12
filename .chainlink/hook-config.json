@@ -13,7 +13,8 @@
     "git checkout", "git pull", "git fetch",
     "cargo test", "cargo build", "cargo check", "cargo clippy", "cargo fmt",
     "npm test", "npm run", "npx ",
-    "tsc", "node ", "python ",
+    "pnpm test", "pnpm run", "pnpm dlx",
+    "tsc", "node ", "python ", "python3 ",
     "ls", "dir", "pwd", "echo",
     "deciduous "
   ]

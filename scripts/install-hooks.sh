@@ -1,31 +1,41 @@
 #!/usr/bin/env bash
-# Install Charcoal git hooks.
+# Install git hooks for this project.
 #
-# Run this once after cloning:
+# Run this once after `new-project` (or after cloning):
 #   ./scripts/install-hooks.sh
 #
 # Hooks installed:
-#   pre-commit  — blocks main commits; enforces fmt; auto-exports issues + graph
-#   pre-push    — blocks main pushes; runs full clippy + tests before GitHub
+#   pre-commit  — blocks main commits; runs format check; auto-exports
+#                 chainlink issues + deciduous graph; backs up DBs to S3
+#   pre-push    — blocks main pushes; runs full lint + tests
+#
+# This file is a TEMPLATE. Customize the language-specific quality gates
+# (search "CUSTOMIZE" in the heredocs below) for your project's stack.
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOKS_DIR="$REPO_ROOT/.git/hooks"
 
-echo "Installing Charcoal git hooks..."
+if [ ! -d "$HOOKS_DIR" ]; then
+    echo "❌ $HOOKS_DIR does not exist. Run 'git init' first."
+    exit 1
+fi
+
+PROJECT_NAME="$(basename "$REPO_ROOT")"
+echo "Installing $PROJECT_NAME git hooks..."
 
 # ── pre-commit ───────────────────────────────────────────────────────
 
 cat > "$HOOKS_DIR/pre-commit" << 'HOOK'
 #!/usr/bin/env bash
-# Charcoal pre-commit hook
+# pre-commit hook
 #
 # Rules:
 #   1. Block commits directly to main (use a feature branch + PR)
-#   2. If Rust/TOML files staged: enforce cargo fmt (fast gate only)
+#   2. Run language-specific format check on staged files
 #   3. Always: export chainlink issues + sync deciduous graph into the commit
-#   4. Always: upload both .db files to Tigris for crash recovery (if configured)
+#   4. Always: upload both .db files to S3-compatible storage (if configured)
 #
 # Bypass (emergency only): git commit --no-verify
 
@@ -33,7 +43,7 @@ set -e
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-# Load .env safely — handles quoted values, export prefixes, and special chars
+# Load .env safely — handles quoted values, export prefixes, special chars.
 # Does NOT execute the file as bash; parses key=value line by line.
 _load_env() {
     local line key value
@@ -63,24 +73,59 @@ if [ "$CURRENT_BRANCH" = "main" ]; then
     exit 1
 fi
 
-# ── 2. Rust quality gate (fmt only — clippy/tests run at push) ───────
-RUST_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(rs|toml)$' || true)
+# ── 2. Language-specific format gate ─────────────────────────────────
+# CUSTOMIZE: add/remove language gates as your project's stack requires.
+# Each gate is fast (format-check only, no clippy/tsc/etc).
 
-if [ -n "$RUST_FILES" ]; then
-    echo "🔍 Pre-commit: checking formatting..."
-    if ! cargo fmt --check 2>/dev/null; then
-        echo ""
-        echo "❌ Code is not formatted. Run: cargo fmt"
-        echo ""
-        exit 1
+# Rust: cargo fmt --check
+if [ -f "$REPO_ROOT/Cargo.toml" ]; then
+    RUST_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(rs|toml)$' || true)
+    if [ -n "$RUST_FILES" ]; then
+        echo "🔍 Pre-commit: cargo fmt --check..."
+        if ! (cd "$REPO_ROOT" && cargo fmt --check 2>/dev/null); then
+            echo ""
+            echo "❌ Rust code is not formatted. Run: cargo fmt"
+            echo ""
+            exit 1
+        fi
+        echo "✅ Rust formatting OK"
     fi
-    echo "✅ Formatting OK"
+fi
+
+# Node/TS: prettier --check (if .prettierrc* present)
+if [ -f "$REPO_ROOT/package.json" ] && ls "$REPO_ROOT"/.prettierrc* >/dev/null 2>&1; then
+    JS_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(js|ts|tsx|jsx|mjs|cjs|json|md|yml|yaml)$' || true)
+    if [ -n "$JS_FILES" ]; then
+        echo "🔍 Pre-commit: prettier --check..."
+        if ! (cd "$REPO_ROOT" && npx prettier --check $JS_FILES 2>/dev/null); then
+            echo ""
+            echo "❌ Files not formatted. Run: npx prettier --write ."
+            echo ""
+            exit 1
+        fi
+        echo "✅ JS/TS formatting OK"
+    fi
+fi
+
+# Python: ruff format --check (if pyproject.toml or ruff.toml present)
+if [ -f "$REPO_ROOT/pyproject.toml" ] || [ -f "$REPO_ROOT/ruff.toml" ]; then
+    PY_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.py$' || true)
+    if [ -n "$PY_FILES" ] && command -v ruff &>/dev/null; then
+        echo "🔍 Pre-commit: ruff format --check..."
+        if ! (cd "$REPO_ROOT" && ruff format --check $PY_FILES 2>/dev/null); then
+            echo ""
+            echo "❌ Python code is not formatted. Run: ruff format ."
+            echo ""
+            exit 1
+        fi
+        echo "✅ Python formatting OK"
+    fi
 fi
 
 # ── 3. Export chainlink issues ───────────────────────────────────────
 echo "📦 Pre-commit: exporting chainlink issues..."
-if chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null; then
-    git add .chainlink/issues-export.json
+if (cd "$REPO_ROOT" && chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null); then
+    git add -f .chainlink/issues-export.json
     echo "✅ Chainlink issues exported"
 else
     echo "⚠️  Chainlink export failed (non-blocking)"
@@ -88,15 +133,15 @@ fi
 
 # ── 4. Sync deciduous decision graph ────────────────────────────────
 echo "📦 Pre-commit: syncing decision graph..."
-if deciduous sync 2>/dev/null; then
-    [ -f docs/graph-data.json ] && git add docs/graph-data.json
-    [ -f docs/git-history.json ] && git add docs/git-history.json
+if (cd "$REPO_ROOT" && deciduous sync 2>/dev/null); then
+    [ -f "$REPO_ROOT/docs/graph-data.json" ] && git add docs/graph-data.json
+    [ -f "$REPO_ROOT/docs/git-history.json" ] && git add docs/git-history.json
     echo "✅ Decision graph synced"
 else
     echo "⚠️  Deciduous sync failed (non-blocking)"
 fi
 
-# ── 5. Upload DBs to S3-compatible blob storage (Cloudflare R2, Backblaze B2, etc.) ──
+# ── 5. Upload DBs to S3-compatible blob storage ─────────────────────
 if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BACKUP_S3_SECRET_ACCESS_KEY" ] && [ -n "$BACKUP_S3_ENDPOINT" ]; then
     if ! command -v aws &>/dev/null; then
         echo "⚠️  Backup configured but aws CLI not found — skipping (run: brew install awscli)"
@@ -133,7 +178,7 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
     fi
     fi  # end aws CLI check
 else
-    echo "⏭️  Backup not configured (set BACKUP_S3_BUCKET/BACKUP_S3_ACCESS_KEY_ID/BACKUP_S3_SECRET_ACCESS_KEY/BACKUP_S3_ENDPOINT in .env)"
+    echo "⏭️  Backup not configured (set BACKUP_S3_* vars in .env)"
 fi
 
 echo "✅ Pre-commit: all checks passed."
@@ -146,59 +191,119 @@ echo "  ✓ pre-commit"
 
 cat > "$HOOKS_DIR/pre-push" << 'HOOK'
 #!/usr/bin/env bash
-# Charcoal pre-push hook
+# pre-push hook
 #
 # Rules:
 #   1. Block pushes to main (PRs only — GitHub enforces this too, but belt+suspenders)
-#   2. If Rust/TOML changes in commits being pushed: run full clippy + tests
+#   2. Run full lint + tests for changed files in commits being pushed
 #
 # Bypass (emergency only): git push --no-verify
 
 set -e
 
 REMOTE="$1"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # ── 1. Block pushes to main ──────────────────────────────────────────
 # Git passes push targets on stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
 while read local_ref local_sha remote_ref remote_sha; do
     if [ "$remote_ref" = "refs/heads/main" ]; then
         echo ""
-        echo "❌ Direct push to main is not allowed."
-        echo "   Open a pull request instead."
+        echo "❌ Direct push to main is not allowed. Open a pull request instead."
         echo ""
         exit 1
     fi
 done
 
-# ── 2. Rust quality gate (full clippy + tests before code hits GitHub) ──
-REMOTE_REF=$(git rev-parse "$REMOTE/$(git branch --show-current)" 2>/dev/null || echo "")
+# ── 2. Determine changed files vs the remote ─────────────────────────
+CURRENT_BRANCH=$(git branch --show-current)
+REMOTE_REF=$(git rev-parse "$REMOTE/$CURRENT_BRANCH" 2>/dev/null || echo "")
 
 if [ -n "$REMOTE_REF" ]; then
-    RUST_FILES=$(git diff --name-only "$REMOTE_REF"..HEAD | grep -E '\.(rs|toml)$' || true)
+    CHANGED=$(git diff --name-only "$REMOTE_REF"..HEAD || true)
 else
-    # New branch — check all files vs main
-    RUST_FILES=$(git diff --name-only main..HEAD 2>/dev/null | grep -E '\.(rs|toml)$' || true)
+    # New branch — check vs main
+    CHANGED=$(git diff --name-only main..HEAD 2>/dev/null || true)
 fi
 
-if [ -z "$RUST_FILES" ]; then
-    echo "📝 Pre-push: no Rust changes, skipping quality gate."
-    exit 0
+# ── 3. Language-specific quality gates ───────────────────────────────
+# CUSTOMIZE: add/remove gates as your project's stack requires.
+
+# Rust: clippy + tests
+if [ -f "$REPO_ROOT/Cargo.toml" ]; then
+    if echo "$CHANGED" | grep -qE '\.(rs|toml)$'; then
+        echo "🔍 Pre-push: cargo clippy..."
+        if ! (cd "$REPO_ROOT" && cargo clippy --all-targets --quiet 2>&1); then
+            echo ""
+            echo "❌ Clippy warnings. Fix them before pushing."
+            echo ""
+            exit 1
+        fi
+
+        echo "🔍 Pre-push: cargo test..."
+        if ! (cd "$REPO_ROOT" && cargo test --quiet 2>&1); then
+            echo ""
+            echo "❌ Tests failed. Fix them before pushing."
+            echo ""
+            exit 1
+        fi
+        echo "✅ Rust gates passed"
+    fi
 fi
 
-echo "🔍 Pre-push: running clippy..."
-if ! cargo clippy --all-targets --features web --quiet 2>&1; then
-    echo ""
-    echo "❌ Clippy warnings found. Fix them before pushing."
-    echo ""
-    exit 1
+# Node/TS: tsc + tests
+if [ -f "$REPO_ROOT/package.json" ]; then
+    if echo "$CHANGED" | grep -qE '\.(ts|tsx|js|jsx)$'; then
+        if [ -f "$REPO_ROOT/tsconfig.json" ]; then
+            echo "🔍 Pre-push: tsc --noEmit..."
+            if ! (cd "$REPO_ROOT" && npx tsc --noEmit 2>&1); then
+                echo ""
+                echo "❌ TypeScript errors. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        fi
+
+        # Run npm test if a "test" script exists
+        if grep -q '"test"' "$REPO_ROOT/package.json"; then
+            echo "🔍 Pre-push: npm test..."
+            TEST_CMD="npm test"
+            command -v pnpm &>/dev/null && [ -f "$REPO_ROOT/pnpm-lock.yaml" ] && TEST_CMD="pnpm test"
+            if ! (cd "$REPO_ROOT" && $TEST_CMD 2>&1); then
+                echo ""
+                echo "❌ Tests failed. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        fi
+        echo "✅ JS/TS gates passed"
+    fi
 fi
 
-echo "🔍 Pre-push: running tests..."
-if ! cargo test --features web --quiet 2>&1; then
-    echo ""
-    echo "❌ Tests failed. Fix them before pushing."
-    echo ""
-    exit 1
+# Python: ruff check + pytest
+if [ -f "$REPO_ROOT/pyproject.toml" ] || [ -f "$REPO_ROOT/ruff.toml" ]; then
+    if echo "$CHANGED" | grep -qE '\.py$'; then
+        if command -v ruff &>/dev/null; then
+            echo "🔍 Pre-push: ruff check..."
+            if ! (cd "$REPO_ROOT" && ruff check . 2>&1); then
+                echo ""
+                echo "❌ Ruff issues. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        fi
+
+        if command -v pytest &>/dev/null && [ -d "$REPO_ROOT/tests" ]; then
+            echo "🔍 Pre-push: pytest..."
+            if ! (cd "$REPO_ROOT" && pytest -q 2>&1); then
+                echo ""
+                echo "❌ Tests failed. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        fi
+        echo "✅ Python gates passed"
+    fi
 fi
 
 echo "✅ Pre-push: all checks passed."
