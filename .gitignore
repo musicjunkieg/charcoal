@@ -1,20 +1,82 @@
-# Deciduous — local binary DB only; JSON exports in docs/ are tracked
-.deciduous/
+# ── Environment & secrets ──────────────────────────────────────────
+.env
+.env.local
+.env.*.local
 
-# Rust build artifacts
-/target/
+# ── macOS ──────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.apdisk
 
-# Environment secrets (but NOT .env.example — that's the template)
-/.env
+# ── Editors / IDEs ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Local credential files — these contain live API keys and must never be
-# committed. Code reads creds from env vars (see .env.example) only.
+# ── Rust ───────────────────────────────────────────────────────────
+target/
+Cargo.lock.bak
+**/*.rs.bk
+
+# ── Node / JavaScript / TypeScript ─────────────────────────────────
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.svelte-kit/
+.vite/
+.turbo/
+.parcel-cache/
+*.tsbuildinfo
+.npm/
+
+# ── Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Logs ───────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Claude Code per-clone state ────────────────────────────────────
+.claude/settings.local.json
+
+# ── Deciduous local DB ─────────────────────────────────────────────
+# (deciduous.db is backed up via pre-commit to S3, not tracked in git)
+.deciduous/deciduous.db
+.deciduous/deciduous.db-shm
+.deciduous/deciduous.db-wal
+
+# ── Chainlink local state ──────────────────────────────────────────
+# (issues.db is backed up via pre-commit to S3, not tracked in git)
+# (issues-export.json is force-added by the pre-commit hook)
+.chainlink/issues.db
+.chainlink/issues.db-shm
+.chainlink/issues.db-wal
+.chainlink/.cache/
+.chainlink/issues-export.json
+
+# --- Charcoal-specific ---
+
+# Local credential files (see .env.example for how to provide them)
 refs/zentropi_info.txt
-
-# SQLite database files
-*.db
-*.db-wal
-*.db-shm
 
 # Generated reports
 /output/
@@ -25,16 +87,12 @@ refs/zentropi_info.txt
 # Research scratch files
 /docs/research/
 
-# Chainlink local state — DB backed up to Tigris, no need to track exports
-.chainlink/issues.db
-.chainlink/.cache/
-.chainlink/issues-export.json
+# Broad SQLite catches (template's specific paths cover known dbs;
+# this catches any ad-hoc db elsewhere)
+*.db
+*.db-wal
+*.db-shm
 
-# Git worktrees (local ephemeral state)
-.worktrees/
-.claude/worktrees/
-
-# Downloaded ML model artifacts — fetched via `charcoal download-model`,
-# never committed (the binary blobs are ~210 MB and derivable from
-# upstream Hugging Face releases)
-models/
+# Broad deciduous catch (template covers specific files; this catches
+# any other artifacts under .deciduous/)
+.deciduous/

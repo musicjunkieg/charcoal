@@ -1,5 +1,13 @@
 {
   "enableAllProjectMcpServers": true,
+  "enabledPlugins": {
+    "railway@claude-plugins-official": true,
+    "superpowers@superpowers-marketplace": true,
+    "commit-commands@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "rust-skills@rust-skills": true,
+    "frontend-design@claude-plugins-official": true
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/pre-web-check.py",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/pre-web-check.py",
             "timeout": 5
           }
         ]
@@ -17,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/work-check.py",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/work-check.py",
             "timeout": 3
           }
         ]
@@ -28,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/prompt-guard.py",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/prompt-guard.py",
             "timeout": 5
           }
         ]
@@ -40,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/post-edit-check.py",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/post-edit-check.py",
             "timeout": 5
           }
         ]
@@ -52,8 +60,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/session-start.py",
+            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/session-start.py",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/chainlink-uncommitted.sh"
           }
         ]
       }
