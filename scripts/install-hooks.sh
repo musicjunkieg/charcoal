@@ -94,10 +94,17 @@ fi
 
 # Node/TS: prettier --check (if .prettierrc* present)
 if [ -f "$REPO_ROOT/package.json" ] && ls "$REPO_ROOT"/.prettierrc* >/dev/null 2>&1; then
-    JS_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(js|ts|tsx|jsx|mjs|cjs|json|md|yml|yaml)$' || true)
-    if [ -n "$JS_FILES" ]; then
+    # Read staged files into an array (via while+append, portable to bash
+    # 3.2 on macOS — no mapfile) then splat with "${JS_FILES[@]}". Using
+    # $JS_FILES unquoted would word-split filenames with spaces or shell
+    # metachars into bogus prettier args.
+    JS_FILES=()
+    while IFS= read -r _f; do
+        [ -n "$_f" ] && JS_FILES+=("$_f")
+    done < <(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(js|ts|tsx|jsx|mjs|cjs|json|md|yml|yaml)$' || true)
+    if [ ${#JS_FILES[@]} -gt 0 ]; then
         echo "🔍 Pre-commit: prettier --check..."
-        if ! (cd "$REPO_ROOT" && npx prettier --check $JS_FILES 2>/dev/null); then
+        if ! (cd "$REPO_ROOT" && npx prettier --check "${JS_FILES[@]}" 2>/dev/null); then
             echo ""
             echo "❌ Files not formatted. Run: npx prettier --write ."
             echo ""
@@ -109,10 +116,14 @@ fi
 
 # Python: ruff format --check (if pyproject.toml or ruff.toml present)
 if [ -f "$REPO_ROOT/pyproject.toml" ] || [ -f "$REPO_ROOT/ruff.toml" ]; then
-    PY_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.py$' || true)
-    if [ -n "$PY_FILES" ] && command -v ruff &>/dev/null; then
+    # See JS_FILES note above — same word-splitting hazard, same fix.
+    PY_FILES=()
+    while IFS= read -r _f; do
+        [ -n "$_f" ] && PY_FILES+=("$_f")
+    done < <(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.py$' || true)
+    if [ ${#PY_FILES[@]} -gt 0 ] && command -v ruff &>/dev/null; then
         echo "🔍 Pre-commit: ruff format --check..."
-        if ! (cd "$REPO_ROOT" && ruff format --check $PY_FILES 2>/dev/null); then
+        if ! (cd "$REPO_ROOT" && ruff format --check "${PY_FILES[@]}" 2>/dev/null); then
             echo ""
             echo "❌ Python code is not formatted. Run: ruff format ."
             echo ""
@@ -122,11 +133,68 @@ if [ -f "$REPO_ROOT/pyproject.toml" ] || [ -f "$REPO_ROOT/ruff.toml" ]; then
     fi
 fi
 
+# ── Helper: skip an export add if it would clobber committed content ─
+# When a worktree lacks the underlying .db source (e.g. a fresh clone,
+# cloud sandbox, or ephemeral worktree), running `chainlink export` /
+# `deciduous sync` produces a valid-shape but *empty* JSON. Adding that
+# to the commit silently overwrites HEAD's rich version. This helper
+# compares the item count at $2 (e.g. "issues", "nodes") between the
+# fresh file and HEAD — if fresh has 0 but HEAD has some, we treat it
+# as a worktree without state and preserve HEAD's version.
+#
+# Args: $1 = repo-relative path, $2 = top-level JSON key (list-typed)
+# Returns 0 (true) if adding would clobber; 1 (false) if safe to add.
+# Requires python3; degrades to always-safe-to-add if python3 missing.
+_would_clobber() {
+    local path="$1" key="$2"
+    [ -f "$REPO_ROOT/$path" ] || return 1  # nothing to add anyway
+    command -v python3 >/dev/null 2>&1 || return 1
+
+    # NB: using `python3 -c '...'` (not `python3 - <<HEREDOC`) so that
+    # stdin stays available for the piped `git show` in the second call.
+    # A heredoc on `python3 -` would clobber the pipe.
+    local fresh_count committed_count
+    fresh_count=$(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    v = d.get(sys.argv[2], [])
+    print(len(v) if isinstance(v, list) else 0)
+except Exception:
+    print(-1)
+' "$REPO_ROOT/$path" "$key" 2>/dev/null || echo -1)
+
+    # Fresh has content, or parse failed → don't second-guess, safe to add.
+    [ "$fresh_count" != "0" ] && return 1
+
+    committed_count=$(git show "HEAD:$path" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    v = d.get(sys.argv[1], [])
+    print(len(v) if isinstance(v, list) else 0)
+except Exception:
+    print(-1)
+' "$key" 2>/dev/null || echo -1)
+
+    # HEAD empty or file not committed → nothing to preserve.
+    { [ "${committed_count:-0}" -gt 0 ] 2>/dev/null; } || return 1
+
+    # Would clobber. Restore working tree so the file that lands (if
+    # anything else stages it) matches HEAD.
+    git checkout HEAD -- "$path" 2>/dev/null || true
+    return 0
+}
+
 # ── 3. Export chainlink issues ───────────────────────────────────────
 echo "📦 Pre-commit: exporting chainlink issues..."
 if (cd "$REPO_ROOT" && chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null); then
-    git add -f .chainlink/issues-export.json
-    echo "✅ Chainlink issues exported"
+    if _would_clobber ".chainlink/issues-export.json" "issues"; then
+        echo "⚠️  Skipping issues-export.json: fresh export empty but HEAD has content (worktree may lack .chainlink/issues.db). Committed version preserved."
+    else
+        git add -f .chainlink/issues-export.json
+        echo "✅ Chainlink issues exported"
+    fi
 else
     echo "⚠️  Chainlink export failed (non-blocking)"
 fi
@@ -134,7 +202,15 @@ fi
 # ── 4. Sync deciduous decision graph ────────────────────────────────
 echo "📦 Pre-commit: syncing decision graph..."
 if (cd "$REPO_ROOT" && deciduous sync 2>/dev/null); then
-    [ -f "$REPO_ROOT/docs/graph-data.json" ] && git add docs/graph-data.json
+    if [ -f "$REPO_ROOT/docs/graph-data.json" ]; then
+        if _would_clobber "docs/graph-data.json" "nodes"; then
+            echo "⚠️  Skipping graph-data.json: fresh export empty but HEAD has content (worktree may lack .deciduous/deciduous.db). Committed version preserved."
+        else
+            git add docs/graph-data.json
+        fi
+    fi
+    # git-history.json is derived from git log, not from .deciduous state,
+    # so it's not at clobber risk in an empty-state worktree.
     [ -f "$REPO_ROOT/docs/git-history.json" ] && git add docs/git-history.json
     echo "✅ Decision graph synced"
 else

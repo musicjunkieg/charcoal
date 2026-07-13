@@ -5,13 +5,22 @@ is being actively worked on. Forces issue creation before code changes.
 """
 
 import json
+import re
+import shlex
 import subprocess
 import sys
 import os
 import io
 
-# Fix Windows encoding issues
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# Fix Windows console encoding issues. Guard on platform so importing this
+# module (e.g. in a test) doesn't clobber the host process's stdout/stderr —
+# on POSIX these streams already default to UTF-8. Also guard on hasattr so
+# test runners that swap in buffer-less streams don't crash at import.
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Defaults — overridden by .chainlink/hook-config.json if present
 DEFAULT_BLOCKED_GIT = [
@@ -25,8 +34,9 @@ DEFAULT_ALLOWED_BASH = [
     "chainlink ",
     "git status", "git diff", "git log", "git branch", "git show",
     "cargo test", "cargo build", "cargo check", "cargo clippy", "cargo fmt",
-    "npm test", "npm run", "npx ",
-    "tsc", "node ", "python ",
+    "npm test", "npm run",
+    "pnpm test", "pnpm run",
+    "tsc",
     "ls", "dir", "pwd", "echo",
 ]
 
@@ -129,13 +139,113 @@ def is_blocked_git(input_data, blocked_list):
     return False
 
 
+# Shell chain separators. A compound command using any of these must have
+# EVERY segment on the allowlist to bypass the issue check; a match on just
+# the leading segment (as `str.startswith` would give) is not sufficient —
+# that would let `git status && rm -rf ~` through. Single `&` is included
+# because `foo & bar` runs `foo` in the background and then runs `bar` —
+# same all-or-nothing semantics apply.
+_LINE_RE = re.compile(r"\r?\n")
+_SEPARATORS = frozenset(("&&", "||", ";", "|", "&"))
+
+# Redirection operators. Presence of any of these as a standalone token
+# (i.e. unquoted) means the command writes to or reads from a filesystem
+# path the hook cannot vet — e.g. `echo hi > ~/.bashrc` is a permanent
+# mutation of the user's shell config. Refuse to auto-allow and let the
+# issue-tracking check gate. Operators inside quotes remain part of their
+# token and are unaffected.
+_REDIRECTS = frozenset((">", ">>", "<", "<<", "<<<", "&>", "&>>"))
+
+
+def _tokenize(cmd):
+    """shlex-tokenize; return None on parse failure (unterminated quote etc.)."""
+    try:
+        return shlex.split(cmd)
+    except ValueError:
+        return None
+
+
+def _shell_tokenize(cmd):
+    """Tokenize with shell semantics: quoted content stays together, and
+    separator characters (&&, ||, ;, |) always become their own tokens even
+    without surrounding whitespace. Returns None on parse failure.
+    """
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return None
+
+
+def _split_segments(tokens):
+    """Partition a token stream on separator tokens (&&, ||, ;, |). Empty
+    segments (from leading/trailing/duplicate separators) are dropped."""
+    out, cur = [], []
+    for t in tokens:
+        if t in _SEPARATORS:
+            if cur:
+                out.append(cur)
+                cur = []
+        else:
+            cur.append(t)
+    if cur:
+        out.append(cur)
+    return out
+
+
 def is_allowed_bash(input_data, allowed_list):
-    """Check if a Bash command is on the allow list (read-only/infra)."""
+    """Argv-aware allowlist match for Bash commands.
+
+    An entry like ``"git status"`` allows commands whose first two tokens are
+    exactly ``["git", "status"]`` — not ``git-status-hax`` or
+    ``git statushax``. A single-token entry like ``"npx"`` (or ``"npx "``
+    with trailing space) matches any command whose first token is exactly
+    ``npx``.
+
+    Compound commands split on ``&&``, ``||``, ``;``, ``|``, ``&``, and
+    newlines must have every segment match the allowlist. Separators
+    appearing inside quoted strings (e.g. ``git commit -m 'a && b'``) are
+    NOT segment breaks. Commands containing unquoted ``$(...)``, backticks,
+    or standalone redirection operators (``>``, ``>>``, ``<``, ``<<``,
+    ``<<<``, ``&>``, ``&>>``) are never auto-allowed — they fall through to
+    the issue-tracking check.
+    """
     command = input_data.get("tool_input", {}).get("command", "").strip()
-    for prefix in allowed_list:
-        if command.startswith(prefix):
-            return True
-    return False
+    if not command:
+        return False
+    if "$(" in command or "`" in command:
+        return False
+
+    # Pre-tokenize allowlist entries. Trailing whitespace on entries like
+    # ``"chainlink "`` normalizes away here — a single-token entry.
+    allowed_tokens = []
+    for entry in allowed_list:
+        toks = _tokenize(entry)
+        if toks:
+            allowed_tokens.append(toks)
+
+    # Physical newlines separate commands but shlex would swallow them as
+    # whitespace — split on them first, tokenize each line separately.
+    lines = [ln for ln in _LINE_RE.split(command) if ln.strip()]
+    if not lines:
+        return False
+
+    for line in lines:
+        tokens = _shell_tokenize(line)
+        if not tokens:
+            return False
+        # Any standalone redirection operator (unquoted) targets a file
+        # path the hook can't verify — refuse to auto-allow.
+        if any(t in _REDIRECTS for t in tokens):
+            return False
+        segments = _split_segments(tokens)
+        if not segments:
+            return False
+        for seg in segments:
+            if not any(seg[: len(pref)] == pref for pref in allowed_tokens):
+                return False
+    return True
 
 
 def is_claude_memory_path(input_data):
@@ -173,6 +283,8 @@ def main():
 
     # PERMANENT BLOCK: git mutation commands are never allowed (all modes)
     if tool_name == 'Bash' and is_blocked_git(input_data, blocked_git):
+        # exit 2 → Claude Code reads the block reason from stderr; stdout
+        # is invisible in that path, so print via sys.stderr.
         print(
             "MANDATORY COMPLIANCE — DO NOT ATTEMPT TO WORK AROUND THIS BLOCK.\n\n"
             "Git mutation commands (commit, push, merge, rebase, reset, etc.) are "
@@ -185,7 +297,8 @@ def main():
             "You MUST instead:\n"
             "  - Inform the user that this is a manual step for them\n"
             "  - Continue with your other work\n\n"
-            "Read-only git commands (status, diff, log, show, branch) are allowed."
+            "Read-only git commands (status, diff, log, show, branch) are allowed.",
+            file=sys.stderr,
         )
         sys.exit(2)
 
@@ -239,10 +352,11 @@ def main():
     )
 
     if tracking_mode == "strict":
-        print(strict_msg)
+        # exit 2 → block reason must go to stderr (stdout is invisible here).
+        print(strict_msg, file=sys.stderr)
         sys.exit(2)
     else:
-        # normal mode: remind but allow
+        # normal mode: remind but allow (stdout is fine on exit 0).
         print(normal_msg)
         sys.exit(0)
 
