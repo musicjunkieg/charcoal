@@ -5,7 +5,6 @@ is being actively worked on. Forces issue creation before code changes.
 """
 
 import json
-import re
 import shlex
 import subprocess
 import sys
@@ -145,16 +144,102 @@ def is_blocked_git(input_data, blocked_list):
 # that would let `git status && rm -rf ~` through. Single `&` is included
 # because `foo & bar` runs `foo` in the background and then runs `bar` —
 # same all-or-nothing semantics apply.
-_LINE_RE = re.compile(r"\r?\n")
 _SEPARATORS = frozenset(("&&", "||", ";", "|", "&"))
 
-# Redirection operators. Presence of any of these as a standalone token
-# (i.e. unquoted) means the command writes to or reads from a filesystem
-# path the hook cannot vet — e.g. `echo hi > ~/.bashrc` is a permanent
-# mutation of the user's shell config. Refuse to auto-allow and let the
-# issue-tracking check gate. Operators inside quotes remain part of their
-# token and are unaffected.
-_REDIRECTS = frozenset((">", ">>", "<", "<<", "<<<", "&>", "&>>"))
+
+def _split_on_unquoted_newlines(cmd):
+    """Split cmd on newlines that aren't inside a shell quote.
+
+    A naive regex split on ``\\r?\\n`` would break legitimate multi-line
+    values inside quotes — most importantly ``git commit -m 'line one
+    (newline) line two'``, which is a common workflow. Bash preserves the
+    embedded newline as part of the quoted string; splitting there would
+    truncate the command mid-quote and cause `shlex` to fail, blocking
+    the whole command.
+
+    Quoting rules honored:
+      - single quotes: everything (including newlines) is literal until the
+        next single quote — no escapes.
+      - double quotes: newlines are literal; backslash escapes the next
+        char (for our purposes, we just consume the backslash+char pair
+        so a quoted `\\"` doesn't close the quote).
+      - unquoted: an unescaped newline separates commands. A backslash
+        immediately before a newline is line-continuation (bash elides
+        both); we do the same.
+    """
+    segments = []
+    current = []
+    quote = None  # None, "'", or '"'
+    i = 0
+    n = len(cmd)
+    while i < n:
+        c = cmd[i]
+        if quote is None:
+            if c == "\\" and i + 1 < n:
+                nxt = cmd[i + 1]
+                if nxt == "\n":
+                    # line continuation — elide `\<newline>`
+                    i += 2
+                    continue
+                if nxt == "\r" and i + 2 < n and cmd[i + 2] == "\n":
+                    i += 3
+                    continue
+                # Other escapes: keep both chars, they're just literals
+                current.append(c)
+                current.append(nxt)
+                i += 2
+                continue
+            if c == "'":
+                quote = "'"
+                current.append(c)
+            elif c == '"':
+                quote = '"'
+                current.append(c)
+            elif c == "\n":
+                if current:
+                    segments.append("".join(current))
+                current = []
+            elif c == "\r" and i + 1 < n and cmd[i + 1] == "\n":
+                if current:
+                    segments.append("".join(current))
+                current = []
+                i += 1  # consume the \r; \n is consumed by the i+=1 below
+            else:
+                current.append(c)
+        elif quote == "'":
+            # Single quotes: no escapes; only a closing single quote matters.
+            current.append(c)
+            if c == "'":
+                quote = None
+        else:  # quote == '"'
+            if c == "\\" and i + 1 < n:
+                # Double-quote backslash escape: consume backslash + next char.
+                current.append(c)
+                current.append(cmd[i + 1])
+                i += 2
+                continue
+            current.append(c)
+            if c == '"':
+                quote = None
+        i += 1
+    if current:
+        segments.append("".join(current))
+    return segments
+
+# Redirection / fd-manipulation operators, plus process substitution
+# markers. Any of these appearing as a standalone (unquoted) token means
+# the command reads/writes a filesystem path the hook can't vet, or in
+# the case of `<(...)`/`>(...)`, executes an arbitrary subshell whose
+# body we haven't inspected. Refuse to auto-allow and let the
+# issue-tracking check gate. Operators inside quotes stay as part of a
+# larger token (e.g. `echo '<(foo)'` tokenizes as `['echo', '<(foo)']`)
+# and are unaffected — only unquoted standalone tokens match.
+_REDIRECTS = frozenset((
+    ">", ">>", "<", "<<", "<<<",   # basic redirection
+    "&>", "&>>", ">&",             # fd redirection / merging
+    "<>", ">|",                    # bidirectional / force-clobber
+    "<(", ">(",                    # process substitution (executes inner cmd)
+))
 
 
 def _tokenize(cmd):
@@ -207,9 +292,11 @@ def is_allowed_bash(input_data, allowed_list):
     newlines must have every segment match the allowlist. Separators
     appearing inside quoted strings (e.g. ``git commit -m 'a && b'``) are
     NOT segment breaks. Commands containing unquoted ``$(...)``, backticks,
-    or standalone redirection operators (``>``, ``>>``, ``<``, ``<<``,
-    ``<<<``, ``&>``, ``&>>``) are never auto-allowed — they fall through to
-    the issue-tracking check.
+    or standalone redirection / fd / process-substitution operators
+    (``>``, ``>>``, ``<``, ``<<``, ``<<<``, ``&>``, ``&>>``, ``>&``,
+    ``<>``, ``>|``, ``<(``, ``>(``) are never auto-allowed — they fall
+    through to the issue-tracking check. See ``_REDIRECTS`` for the
+    authoritative list.
     """
     command = input_data.get("tool_input", {}).get("command", "").strip()
     if not command:
@@ -225,9 +312,11 @@ def is_allowed_bash(input_data, allowed_list):
         if toks:
             allowed_tokens.append(toks)
 
-    # Physical newlines separate commands but shlex would swallow them as
-    # whitespace — split on them first, tokenize each line separately.
-    lines = [ln for ln in _LINE_RE.split(command) if ln.strip()]
+    # Physical newlines separate commands, but shlex would swallow them as
+    # whitespace. Split on them first — respecting shell quoting so an
+    # embedded newline inside a quoted arg (e.g. multi-line commit message)
+    # stays part of its command — then tokenize each line separately.
+    lines = [ln for ln in _split_on_unquoted_newlines(command) if ln.strip()]
     if not lines:
         return False
 
