@@ -153,6 +153,16 @@ _would_clobber() {
     # NB: using `python3 -c '...'` (not `python3 - <<HEREDOC`) so that
     # stdin stays available for the piped `git show` in the second call.
     # A heredoc on `python3 -` would clobber the pipe.
+    #
+    # fresh_count semantics:
+    #   >0  → fresh export has content, safe to add
+    #    0  → fresh export is a valid-shape but empty JSON (worktree may
+    #         lack the .db source) → check HEAD before deciding
+    #   -1  → fresh file is unreadable, malformed, truncated, or otherwise
+    #         invalid — the `except Exception` catches any load / decode /
+    #         type failure. Treat the same as 0: check HEAD; if HEAD has
+    #         real content, preserve it rather than committing garbage on
+    #         top of it.
     local fresh_count committed_count
     fresh_count=$(python3 -c '
 import json, sys
@@ -164,8 +174,10 @@ except Exception:
     print(-1)
 ' "$REPO_ROOT/$path" "$key" 2>/dev/null || echo -1)
 
-    # Fresh has content, or parse failed → don't second-guess, safe to add.
-    [ "$fresh_count" != "0" ] && return 1
+    # Fresh has verifiable content → safe to add.
+    if [ "$fresh_count" != "0" ] && [ "$fresh_count" != "-1" ]; then
+        return 1
+    fi
 
     committed_count=$(git show "HEAD:$path" 2>/dev/null | python3 -c '
 import json, sys
@@ -177,11 +189,17 @@ except Exception:
     print(-1)
 ' "$key" 2>/dev/null || echo -1)
 
-    # HEAD empty or file not committed → nothing to preserve.
-    { [ "${committed_count:-0}" -gt 0 ] 2>/dev/null; } || return 1
+    # HEAD empty, missing, or itself unparseable → nothing to preserve.
+    # (`committed_count -le 0` matches both 0 and -1, and -eq'ing against a
+    #  potentially-empty string is why the `${committed_count:-0}` default.)
+    if ! [ "${committed_count:-0}" -gt 0 ] 2>/dev/null; then
+        return 1
+    fi
 
-    # Would clobber. Restore working tree so the file that lands (if
-    # anything else stages it) matches HEAD.
+    # Would clobber (either fresh is empty-but-valid, or fresh is
+    # invalid/unreadable and we refuse to overwrite HEAD with
+    # unverifiable data). Restore working tree so the file that lands
+    # matches HEAD.
     git checkout HEAD -- "$path" 2>/dev/null || true
     return 0
 }
@@ -190,7 +208,7 @@ except Exception:
 echo "📦 Pre-commit: exporting chainlink issues..."
 if (cd "$REPO_ROOT" && chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null); then
     if _would_clobber ".chainlink/issues-export.json" "issues"; then
-        echo "⚠️  Skipping issues-export.json: fresh export empty but HEAD has content (worktree may lack .chainlink/issues.db). Committed version preserved."
+        echo "⚠️  Skipping issues-export.json: fresh export empty or invalid but HEAD has content (worktree may lack .chainlink/issues.db, or the export was truncated/corrupt). Committed version preserved."
     else
         git add -f .chainlink/issues-export.json
         echo "✅ Chainlink issues exported"
@@ -204,7 +222,7 @@ echo "📦 Pre-commit: syncing decision graph..."
 if (cd "$REPO_ROOT" && deciduous sync 2>/dev/null); then
     if [ -f "$REPO_ROOT/docs/graph-data.json" ]; then
         if _would_clobber "docs/graph-data.json" "nodes"; then
-            echo "⚠️  Skipping graph-data.json: fresh export empty but HEAD has content (worktree may lack .deciduous/deciduous.db). Committed version preserved."
+            echo "⚠️  Skipping graph-data.json: fresh export empty or invalid but HEAD has content (worktree may lack .deciduous/deciduous.db, or the export was truncated/corrupt). Committed version preserved."
         else
             git add docs/graph-data.json
         fi
