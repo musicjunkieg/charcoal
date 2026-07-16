@@ -143,8 +143,10 @@ def is_blocked_git(input_data, blocked_list):
 # the leading segment (as `str.startswith` would give) is not sufficient —
 # that would let `git status && rm -rf ~` through. Single `&` is included
 # because `foo & bar` runs `foo` in the background and then runs `bar` —
-# same all-or-nothing semantics apply.
-_SEPARATORS = frozenset(("&&", "||", ";", "|", "&"))
+# same all-or-nothing semantics apply. `|&` is bash's shorthand for
+# `2>&1 |` — pipes stdout AND stderr into the next command; shlex groups
+# it as one token, so it needs its own entry (not covered by `|` alone).
+_SEPARATORS = frozenset(("&&", "||", ";", "|", "&", "|&"))
 
 
 def _split_on_unquoted_newlines(cmd):
@@ -236,7 +238,7 @@ def _split_on_unquoted_newlines(cmd):
 # and are unaffected — only unquoted standalone tokens match.
 _REDIRECTS = frozenset((
     ">", ">>", "<", "<<", "<<<",   # basic redirection
-    "&>", "&>>", ">&",             # fd redirection / merging
+    "&>", "&>>", ">&", "<&",       # fd redirection / merging (both directions)
     "<>", ">|",                    # bidirectional / force-clobber
     "<(", ">(",                    # process substitution (executes inner cmd)
 ))
@@ -288,15 +290,16 @@ def is_allowed_bash(input_data, allowed_list):
     with trailing space) matches any command whose first token is exactly
     ``npx``.
 
-    Compound commands split on ``&&``, ``||``, ``;``, ``|``, ``&``, and
-    newlines must have every segment match the allowlist. Separators
-    appearing inside quoted strings (e.g. ``git commit -m 'a && b'``) are
-    NOT segment breaks. Commands containing unquoted ``$(...)``, backticks,
-    or standalone redirection / fd / process-substitution operators
-    (``>``, ``>>``, ``<``, ``<<``, ``<<<``, ``&>``, ``&>>``, ``>&``,
-    ``<>``, ``>|``, ``<(``, ``>(``) are never auto-allowed — they fall
-    through to the issue-tracking check. See ``_REDIRECTS`` for the
-    authoritative list.
+    Compound commands split on ``&&``, ``||``, ``;``, ``|``, ``|&``,
+    ``&``, and newlines must have every segment match the allowlist.
+    Separators appearing inside quoted strings (e.g.
+    ``git commit -m 'a && b'``) are NOT segment breaks. Commands
+    containing unquoted ``$(...)``, backticks, or standalone
+    redirection / fd / process-substitution operators (``>``, ``>>``,
+    ``<``, ``<<``, ``<<<``, ``&>``, ``&>>``, ``>&``, ``<&``, ``<>``,
+    ``>|``, ``<(``, ``>(``) are never auto-allowed — they fall through
+    to the issue-tracking check. See ``_SEPARATORS`` and ``_REDIRECTS``
+    for the authoritative lists.
     """
     command = input_data.get("tool_input", {}).get("command", "").strip()
     if not command:
