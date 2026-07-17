@@ -254,8 +254,11 @@ def _tokenize(cmd):
 
 def _shell_tokenize(cmd):
     """Tokenize with shell semantics: quoted content stays together, and
-    separator characters (&&, ||, ;, |) always become their own tokens even
-    without surrounding whitespace. Returns None on parse failure.
+    punctuation runs (``&&``, ``||``, ``;``, ``|``, ``|&``, ``&``, ``>``,
+    ``>>``, ``<``, ``<&``, ``>&``, etc.) become their own tokens even
+    without surrounding whitespace. See ``_SEPARATORS`` and ``_REDIRECTS``
+    for how those tokens are subsequently classified. Returns None on
+    parse failure.
     """
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
@@ -266,8 +269,9 @@ def _shell_tokenize(cmd):
 
 
 def _split_segments(tokens):
-    """Partition a token stream on separator tokens (&&, ||, ;, |). Empty
-    segments (from leading/trailing/duplicate separators) are dropped."""
+    """Partition a token stream on separator tokens (see ``_SEPARATORS``:
+    ``&&``, ``||``, ``;``, ``|``, ``|&``, ``&``). Empty segments (from
+    leading/trailing/duplicate separators) are dropped."""
     out, cur = [], []
     for t in tokens:
         if t in _SEPARATORS:
