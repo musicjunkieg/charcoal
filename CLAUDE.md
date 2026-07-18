@@ -344,11 +344,21 @@ git commit -m 'first line
 Body text here.'
 ```
 
-**NEVER use `EnterWorktree` or git worktrees.**
-Worktrees crash this machine. Always use a plain branch:
-```
-git checkout -b feat/my-feature
-```
+**Git worktrees are allowed.**
+Previously this rule said worktrees crash the machine — that turned out to
+be stale after the mid-2026 upgrade. Multiple recent sessions have used
+worktrees against charcoal without issue. Prefer a plain branch for small
+work (`git checkout -b feat/my-feature`); use a worktree when you need to
+keep an in-flight branch untangled from other work.
+
+**Project-specific ignores live in `.gitignore.local`, not `.gitignore`.**
+`.gitignore` is template-managed and gets overwritten by
+`update-project-from-template`; anything project-only (`refs/zentropi_info.txt`,
+`/output/`, `/backups/`, `/docs/research/`) belongs in `.gitignore.local`.
+`scripts/install-hooks.sh` symlinks `.git/info/exclude` at the shared gitdir
+to that file so git honors it transparently — run install-hooks.sh once from
+the primary checkout (not a worktree) after the first clone or after adding
+`.gitignore.local` in a fresh clone.
 
 **Atomic commits — push regularly.**
 Commit after each logical unit of work. Push the feature branch frequently
