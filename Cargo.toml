@@ -17,6 +17,17 @@ atrium-api = "0.25.7"
 # HTTP client (for public AT Protocol API, Constellation, and Perspective API)
 reqwest = { version = "0.12", features = ["json"] }
 
+# WebSocket client for the Jetstream firehose sampler. Only pulled in by the
+# `estimate` feature (the network-estimation tooling) so the default build and
+# its dependency tree stay lean. webpki-roots avoids depending on system certs.
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
+
+# rustls 0.23 can't auto-select a crypto provider when more than one is present
+# in the dependency tree (aws-lc-rs + ring both get enabled via feature
+# unification). We pin `ring` and install it explicitly at startup. Gated to the
+# `estimate` feature alongside the WebSocket client that needs it.
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
+
 # Database (SQLite — optional, enabled by the `sqlite` default feature)
 rusqlite = { version = "0.38", features = ["bundled"], optional = true }
 
@@ -63,6 +74,10 @@ chrono = { version = "0.4", features = ["serde"] }
 default = ["sqlite"]
 sqlite = ["dep:rusqlite"]
 postgres = ["dep:sqlx-core", "dep:sqlx-postgres", "dep:pgvector"]
+# Network-estimation tooling (the `estimate` binary): Jetstream firehose
+# sampling + candidate harvesting for estimating Zentropi call volume across
+# the Bluesky network. Off by default — build with `--features estimate`.
+estimate = ["dep:tokio-tungstenite", "dep:rustls"]
 web = ["dep:axum", "dep:tower-http", "dep:include_dir", "dep:hmac", "dep:sha2", "dep:rand", "dep:hex", "dep:atproto-oauth", "dep:atproto-oauth-axum", "dep:atproto-identity", "dep:base64", "dep:percent-encoding"]
 
 # PostgreSQL support — split crates avoid the sqlx umbrella's transitive
@@ -139,6 +154,16 @@ optional = true
 [dependencies.percent-encoding]
 version = "2"
 optional = true
+
+# The estimation binary is gated on the `estimate` feature. The explicit
+# [[bin]] entry (with required-features) overrides cargo's auto-discovery of
+# src/bin/estimate.rs, so a plain `cargo build` does NOT try to compile it
+# (and pull in tokio-tungstenite). The default `charcoal` binary (src/main.rs)
+# is still auto-discovered as usual.
+[[bin]]
+name = "estimate"
+path = "src/bin/estimate.rs"
+required-features = ["estimate"]
 
 [dev-dependencies]
 tower = "0.5"
