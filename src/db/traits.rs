@@ -98,8 +98,9 @@ pub trait Database: Send + Sync {
     /// of batch size.
     ///
     /// Returns the number of rows inserted. Backend behavior differs:
-    /// Postgres uses `UNNEST`, which binds 9 arrays and is a genuine single
-    /// round-trip at any batch size. SQLite runs one transaction but chunks
+    /// Postgres uses `UNNEST`, which binds 8 arrays plus a single scalar
+    /// (user_did) and is a genuine single round-trip at any batch size.
+    /// SQLite runs one transaction but chunks
     /// into multi-row `INSERT`s of 100 rows each (bind-parameter limits), so
     /// large batches issue multiple statements within that one transaction.
     ///

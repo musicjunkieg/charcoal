@@ -477,11 +477,16 @@ impl Database for PgDatabase {
             return Ok(0);
         }
 
-        // UNNEST binds 9 arrays regardless of row count, so this is one
+        // UNNEST binds 8 arrays plus $1 (user_did, a single scalar broadcast
+        // by the SELECT to every row) regardless of row count, so this is one
         // round-trip for any batch size and never approaches Postgres's
-        // 65535-parameter statement cap. `WITH ORDINALITY` is not needed:
-        // Postgres expands UNNEST in array order, so serial ids ascend in
-        // slice order, which the determinism contract requires.
+        // 65535-parameter statement cap. `WITH ORDINALITY` is not needed: in
+        // observed Postgres behavior (not a documented guarantee) UNNEST
+        // expands its arrays in array order, and INSERT...SELECT over a
+        // set-returning function without an ORDER BY preserves that order —
+        // so serial ids ascend in slice order, which the determinism
+        // contract requires. If that behavior ever changes, switch to
+        // `WITH ORDINALITY` plus an explicit `ORDER BY ordinality`.
         let event_types: Vec<String> = events.iter().map(|e| e.event_type.clone()).collect();
         let amplifier_dids: Vec<String> = events.iter().map(|e| e.amplifier_did.clone()).collect();
         let amplifier_handles: Vec<String> =
@@ -500,8 +505,11 @@ impl Database for PgDatabase {
             .collect();
         let context_scores: Vec<Option<f64>> = events.iter().map(|e| e.context_score).collect();
 
-        // The explicit float8[] cast is required: an all-NULL context_score
-        // array is otherwise untyped and Postgres rejects it.
+        // All eight arrays carry explicit ::text[]/::float8[] casts so
+        // Postgres can type UNNEST's output columns without inspecting
+        // values. That's required for context_score in particular — an
+        // all-NULL array has no inferable element type, and Postgres
+        // rejects it without the explicit ::float8[] cast.
         let result = sqlx_core::query::query(
             "INSERT INTO amplification_events
                 (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,

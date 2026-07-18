@@ -3827,6 +3827,17 @@
       "created_at": "2026-07-18T12:44:50.086002-07:00",
       "updated_at": "2026-07-18T12:44:50.086002-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-07-18-scan-speedup-and-hosting.md\"]}"
+    },
+    {
+      "id": 355,
+      "change_id": "36c7cede-0e5a-42a3-838b-e78ca36be712",
+      "node_type": "action",
+      "title": "Fix #192 batch-insert test/comment findings from code review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T16:45:22.108230-07:00",
+      "updated_at": "2026-07-18T16:45:22.108230-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallel-amplification-events\",\"confidence\":90,\"files\":[\"src/db/postgres.rs\",\"src/db/traits.rs\",\"tests/db_postgres.rs\"]}"
     }
   ],
   "edges": [

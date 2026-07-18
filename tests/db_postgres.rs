@@ -164,10 +164,16 @@ async fn test_pg_account_score_upsert_and_rank() {
     assert!(ranked.iter().any(|s| s.did == "did:plc:pgtest1"));
 }
 
-/// Delete rows written by the batch-insert tests (#192), scoped by the
-/// distinct `original_post_uri` markers each test uses, so the tests are
-/// idempotent across runs without racing other tests that share TEST_USER.
-async fn cleanup_batch_test_data(url: &str) -> Result<()> {
+/// Delete rows written by a batch-insert test (#192), scoped to the single
+/// `original_post_uri` marker the caller passes.
+///
+/// Each batch test MUST use its own distinct marker and pass only that
+/// marker here. These tests run concurrently (cargo test's default
+/// threading) and share TEST_USER, so a cleanup that touched more than one
+/// test's marker could delete rows a *different*, concurrently-running test
+/// had already inserted — the cleanup would protect against stale data from
+/// a previous run while introducing a live race against the current one.
+async fn cleanup_batch_test_data(url: &str, original_post_uri: &str) -> Result<()> {
     use sqlx_core::pool::Pool;
     use sqlx_postgres::Postgres;
 
@@ -176,13 +182,10 @@ async fn cleanup_batch_test_data(url: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
 
     sqlx_core::query::query(
-        "DELETE FROM amplification_events WHERE user_did = $1 AND original_post_uri = ANY($2)",
+        "DELETE FROM amplification_events WHERE user_did = $1 AND original_post_uri = $2",
     )
     .bind(TEST_USER)
-    .bind([
-        "at://did:plc:me/app.bsky.feed.post/b1",
-        "at://did:plc:me/app.bsky.feed.post/pgorder1",
-    ])
+    .bind(original_post_uri)
     .execute(&pool)
     .await
     .map_err(|e| anyhow::anyhow!("cleanup: amplification_events (batch) delete failed: {e}"))?;
@@ -195,7 +198,9 @@ async fn test_pg_batch_insert_matches_serial() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_batch_test_data(&url).await.unwrap();
+    cleanup_batch_test_data(&url, "at://did:plc:me/app.bsky.feed.post/b1")
+        .await
+        .unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     let events = vec![
@@ -262,7 +267,36 @@ async fn test_pg_batch_insert_empty_slice_is_noop() {
     let Some(url) = database_url() else {
         return;
     };
+    const MARKER: &str = "at://did:plc:me/app.bsky.feed.post/pgemptybatch";
+    cleanup_batch_test_data(&url, MARKER).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // Seed one real row under this test's marker first. Without a seed, "no
+    // row with this marker" is true both before and after an empty-slice
+    // call, so it can't distinguish "wrote nothing" from "wrote something
+    // wrong" — the count has to move for a spurious insert to be visible.
+    db.insert_amplification_event(
+        TEST_USER,
+        "repost",
+        "did:plc:pgemptybatch_seed",
+        "pgemptybatch_seed.bsky.social",
+        MARKER,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let count_before = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .count();
+    assert_eq!(count_before, 1, "seed row must be visible before the call");
 
     let n = db
         .insert_amplification_events_batch(TEST_USER, &[])
@@ -270,14 +304,20 @@ async fn test_pg_batch_insert_empty_slice_is_noop() {
         .unwrap();
     assert_eq!(n, 0);
 
-    // Nothing carrying this test's marker URI should exist — an empty slice
-    // must be a true no-op, not fall through to inserting a sentinel row.
-    let stored = db.get_recent_events(TEST_USER, 1000).await.unwrap();
-    assert!(
-        !stored
-            .iter()
-            .any(|e| e.original_post_uri == "at://did:plc:me/app.bsky.feed.post/pgemptybatch"),
-        "empty-slice insert must not write any rows"
+    // An empty-slice call must write NOTHING: the row count under this
+    // marker must be unchanged from before the call, not just "the marker
+    // string used by this assertion is absent" (which a garbage insert with
+    // a different URI would satisfy just as well).
+    let count_after = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .count();
+    assert_eq!(
+        count_after, count_before,
+        "empty-slice insert must not change the row count"
     );
 }
 
@@ -286,20 +326,30 @@ async fn test_pg_batch_insert_many_rows_preserve_own_values() {
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_batch_test_data(&url).await.unwrap();
+    const MARKER: &str = "at://did:plc:me/app.bsky.feed.post/pgorder1";
+    cleanup_batch_test_data(&url, MARKER).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     // 250 rows (mirrors the SQLite test, which chunks at 100/statement).
-    // Postgres has no chunk boundary — UNNEST binds 9 arrays regardless of
-    // row count — but this is still the test that would catch a column-order
-    // mistake in the UNNEST rewrite: a mismatched array would smear one
-    // row's values onto another rather than failing outright.
+    // Postgres has no chunk boundary — UNNEST binds 8 arrays plus the $1
+    // scalar regardless of row count — but this is still the test that
+    // would catch a column-order mistake in the UNNEST rewrite: a
+    // mismatched array would smear one row's values onto another (or onto
+    // the wrong column) rather than failing outright.
+    //
+    // event_type alternates quote/repost by row index (rather than staying
+    // constant) and amplifier_did is per-row unique, and both are asserted
+    // below — this is what catches a $2/$3 (event_type/amplifier_did) bind
+    // transposition specifically: with a constant event_type and an
+    // unasserted amplifier_did, that exact swap would land
+    // event_type="did:plc:pgorderNNNN" / amplifier_did="repost" on every
+    // row and no assertion here would notice.
     let events: Vec<charcoal::db::models::NewAmplificationEvent> = (0..250)
         .map(|i| charcoal::db::models::NewAmplificationEvent {
-            event_type: "repost".to_string(),
+            event_type: if i % 2 == 0 { "repost" } else { "quote" }.to_string(),
             amplifier_did: format!("did:plc:pgorder{:04}", i),
             amplifier_handle: format!("pgorder{:04}.bsky.social", i),
-            original_post_uri: "at://did:plc:me/app.bsky.feed.post/pgorder1".to_string(),
+            original_post_uri: MARKER.to_string(),
             amplifier_post_uri: None,
             amplifier_text: Some(format!("text-{}", i)),
             original_post_text: None,
@@ -316,7 +366,7 @@ async fn test_pg_batch_insert_many_rows_preserve_own_values() {
     let stored = db.get_recent_events(TEST_USER, 1000).await.unwrap();
     let stored: Vec<_> = stored
         .into_iter()
-        .filter(|e| e.original_post_uri == "at://did:plc:me/app.bsky.feed.post/pgorder1")
+        .filter(|e| e.original_post_uri == MARKER)
         .collect();
     assert_eq!(stored.len(), 250);
 
@@ -325,6 +375,9 @@ async fn test_pg_batch_insert_many_rows_preserve_own_values() {
     let mut by_id = stored;
     by_id.sort_by_key(|e| e.id);
     for (i, e) in by_id.iter().enumerate() {
+        let expected_event_type = if i % 2 == 0 { "repost" } else { "quote" };
+        assert_eq!(e.event_type, expected_event_type);
+        assert_eq!(e.amplifier_did, format!("did:plc:pgorder{:04}", i));
         assert_eq!(e.amplifier_handle, format!("pgorder{:04}.bsky.social", i));
         assert_eq!(e.amplifier_text, Some(format!("text-{}", i)));
         assert_eq!(e.context_score, Some(i as f64 / 1000.0));
