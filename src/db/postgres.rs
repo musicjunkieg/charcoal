@@ -476,23 +476,56 @@ impl Database for PgDatabase {
         if events.is_empty() {
             return Ok(0);
         }
-        let mut inserted = 0usize;
-        for e in events {
-            self.insert_amplification_event(
-                user_did,
-                &e.event_type,
-                &e.amplifier_did,
-                &e.amplifier_handle,
-                &e.original_post_uri,
-                e.amplifier_post_uri.as_deref(),
-                e.amplifier_text.as_deref(),
-                e.original_post_text.as_deref(),
-                e.context_score,
-            )
-            .await?;
-            inserted += 1;
-        }
-        Ok(inserted)
+
+        // UNNEST binds 9 arrays regardless of row count, so this is one
+        // round-trip for any batch size and never approaches Postgres's
+        // 65535-parameter statement cap. `WITH ORDINALITY` is not needed:
+        // Postgres expands UNNEST in array order, so serial ids ascend in
+        // slice order, which the determinism contract requires.
+        let event_types: Vec<String> = events.iter().map(|e| e.event_type.clone()).collect();
+        let amplifier_dids: Vec<String> = events.iter().map(|e| e.amplifier_did.clone()).collect();
+        let amplifier_handles: Vec<String> =
+            events.iter().map(|e| e.amplifier_handle.clone()).collect();
+        let original_post_uris: Vec<String> =
+            events.iter().map(|e| e.original_post_uri.clone()).collect();
+        let amplifier_post_uris: Vec<Option<String>> = events
+            .iter()
+            .map(|e| e.amplifier_post_uri.clone())
+            .collect();
+        let amplifier_texts: Vec<Option<String>> =
+            events.iter().map(|e| e.amplifier_text.clone()).collect();
+        let original_post_texts: Vec<Option<String>> = events
+            .iter()
+            .map(|e| e.original_post_text.clone())
+            .collect();
+        let context_scores: Vec<Option<f64>> = events.iter().map(|e| e.context_score).collect();
+
+        // The explicit float8[] cast is required: an all-NULL context_score
+        // array is otherwise untyped and Postgres rejects it.
+        let result = sqlx_core::query::query(
+            "INSERT INTO amplification_events
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                 amplifier_post_uri, amplifier_text, original_post_text, context_score)
+             SELECT $1, t.event_type, t.amplifier_did, t.amplifier_handle, t.original_post_uri,
+                    t.amplifier_post_uri, t.amplifier_text, t.original_post_text, t.context_score
+             FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[],
+                         $6::text[], $7::text[], $8::text[], $9::float8[])
+                  AS t(event_type, amplifier_did, amplifier_handle, original_post_uri,
+                       amplifier_post_uri, amplifier_text, original_post_text, context_score)",
+        )
+        .bind(user_did)
+        .bind(&event_types)
+        .bind(&amplifier_dids)
+        .bind(&amplifier_handles)
+        .bind(&original_post_uris)
+        .bind(&amplifier_post_uris)
+        .bind(&amplifier_texts)
+        .bind(&original_post_texts)
+        .bind(&context_scores)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() as usize)
     }
 
     async fn get_recent_events(

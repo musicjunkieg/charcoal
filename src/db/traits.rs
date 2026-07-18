@@ -92,12 +92,16 @@ pub trait Database: Send + Sync {
         context_score: Option<f64>,
     ) -> Result<i64>;
 
-    /// Insert many amplification events for a user in a single statement.
+    /// Insert many amplification events for a user, collapsing what used to
+    /// be one network round-trip per event (359 events ≈ 2m16s of a 28m scan,
+    /// chainlink #192) into a small, fixed number of round-trips regardless
+    /// of batch size.
     ///
-    /// Returns the number of rows inserted. Exists because the amplification
-    /// pipeline was issuing one network round-trip per event (359 events ≈ 2m16s
-    /// of a 28m scan, chainlink #192); one multi-row statement collapses that to
-    /// a single round-trip.
+    /// Returns the number of rows inserted. Backend behavior differs:
+    /// Postgres uses `UNNEST`, which binds 9 arrays and is a genuine single
+    /// round-trip at any batch size. SQLite runs one transaction but chunks
+    /// into multi-row `INSERT`s of 100 rows each (bind-parameter limits), so
+    /// large batches issue multiple statements within that one transaction.
     ///
     /// Rows MUST be inserted in slice order so auto-increment ids ascend in
     /// input order — downstream evidence output and tests depend on it.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-18T23:08:44.261307+00:00",
+  "exported_at": "2026-07-18T23:31:24.234667+00:00",
   "issues": [
     {
       "id": 192,
@@ -36,6 +36,16 @@
         {
           "content": "PLAN WRITTEN, awaiting Bryan approval before any implementation. docs/superpowers/plans/2026-07-18-batch-amplification-event-inserts.md on branch feat/parallel-amplification-events.\n\n5 tasks: (1) NewAmplificationEvent model + trait method + compiling stubs; (2) SQLite chunked multi-row insert in queries.rs; (3) Postgres UNNEST impl; (4) two-pass restructure of the event loop; (5) changelog. Tasks 1+2 share a commit because T1 stub forward-references the T2 function.\n\nBehavior-preservation contract baked in as 5 explicit acceptance criteria, each mapped to a test in the self-review: same rows in same id order, same values, same stdout, same return value, empty-slice no-op. Ordering tests assert on id rather than detected_at because a batch shares one DB-stamped timestamp. Chunk-boundary test uses 250 rows across 3 chunks to catch placeholder base-index bugs.\n\nDeliberate scope call recorded in the plan: pass 1 of the loop stays SEQUENTIAL. Only ~6 of 359 events do network work, so parallelizing buys almost nothing and would reorder the println evidence output. Batching the writes is the whole win. NO subagent-driven-development run yet — human gate first, per Bryan process note.",
           "created_at": "2026-07-18T22:58:45.979188+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Tasks 1+2 complete: NewAmplificationEvent + trait method + SQLite chunked multi-row insert. 3 tests green incl. a 250-row chunk-boundary test. Postgres still on the temporary per-row loop stub.",
+          "created_at": "2026-07-18T23:08:58.236005+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "SDD Task 1+2 complete (commit 4469d44). SPEC ✅ / QUALITY Approved, no Critical findings. Reviewer mutation-tested the SQLite chunk arithmetic: a stride off-by-one and a count-preserving value smear were both caught by the 250-row test. Controller independently re-verified 3/3 batch tests + cargo check clean on web and postgres (IDE diagnostics claiming E0046/E0425 were stale pre-index, same as the #186 precedent).\n\nTWO REVIEW FINDINGS CARRIED FORWARD:\n1. ERROR-PATH BEHAVIOR CHANGE (needs Bryan visibility). Batching makes the write all-or-nothing; the old per-event loop kept events 0..k on a mid-loop crash. CLAUDE.md lists \"crash-resilient pipelines (incremental DB writes)\" as a deliberate property, and the plan contract was silent on the error path. DECIDED: accept all-or-nothing, because per #184 a resumed scan re-runs the ENTIRE amplification phase from scratch — partially-persisted events are never resumed from, so they would be re-collected and re-inserted as DUPLICATES. All-or-nothing is strictly better for idempotency here. Will be documented in the Task 4 code comment and flagged in the final report.\n2. POSTGRES TEST PARITY. The contract is currently asserted for SQLite only, but prod runs Postgres, and Task 3 replaces the trivial per-row stub with UNNEST where column-order and ordering bugs are plausible. Task 3 dispatch extended beyond the plan to port all three tests (id ascent, empty no-op, multi-row fidelity) to tests/db_postgres.rs.",
+          "created_at": "2026-07-18T23:17:51.405051+00:00",
           "kind": "note"
         }
       ],

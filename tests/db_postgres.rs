@@ -164,6 +164,173 @@ async fn test_pg_account_score_upsert_and_rank() {
     assert!(ranked.iter().any(|s| s.did == "did:plc:pgtest1"));
 }
 
+/// Delete rows written by the batch-insert tests (#192), scoped by the
+/// distinct `original_post_uri` markers each test uses, so the tests are
+/// idempotent across runs without racing other tests that share TEST_USER.
+async fn cleanup_batch_test_data(url: &str) -> Result<()> {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url)
+        .await
+        .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
+
+    sqlx_core::query::query(
+        "DELETE FROM amplification_events WHERE user_did = $1 AND original_post_uri = ANY($2)",
+    )
+    .bind(TEST_USER)
+    .bind([
+        "at://did:plc:me/app.bsky.feed.post/b1",
+        "at://did:plc:me/app.bsky.feed.post/pgorder1",
+    ])
+    .execute(&pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("cleanup: amplification_events (batch) delete failed: {e}"))?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_pg_batch_insert_matches_serial() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    cleanup_batch_test_data(&url).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let events = vec![
+        charcoal::db::models::NewAmplificationEvent {
+            event_type: "quote".to_string(),
+            amplifier_did: "did:plc:pgbatch1".to_string(),
+            amplifier_handle: "pgbatch1.bsky.social".to_string(),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/b1".to_string(),
+            amplifier_post_uri: Some("at://did:plc:pgbatch1/app.bsky.feed.post/q1".to_string()),
+            amplifier_text: Some("batched quote".to_string()),
+            original_post_text: Some("the original".to_string()),
+            context_score: Some(0.42),
+        },
+        charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: "did:plc:pgbatch2".to_string(),
+            amplifier_handle: "pgbatch2.bsky.social".to_string(),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/b1".to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: None,
+            original_post_text: None,
+            context_score: None,
+        },
+    ];
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+
+    // Filter to this test's marker post URI rather than trusting the raw
+    // top-10: other batch-insert tests in this file share TEST_USER and run
+    // concurrently (cargo test's default threading), so get_recent_events's
+    // global DESC ordering can otherwise surface unrelated rows here.
+    let stored: Vec<_> = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == "at://did:plc:me/app.bsky.feed.post/b1")
+        .collect();
+    assert_eq!(stored.len(), 2);
+
+    let first = stored
+        .iter()
+        .find(|e| e.amplifier_handle == "pgbatch1.bsky.social")
+        .expect("first event missing");
+    let second = stored
+        .iter()
+        .find(|e| e.amplifier_handle == "pgbatch2.bsky.social")
+        .expect("second event missing");
+
+    assert!(first.id < second.id, "ids must ascend in input order");
+    assert_eq!(first.amplifier_text, Some("batched quote".to_string()));
+    assert_eq!(first.original_post_text, Some("the original".to_string()));
+    assert_eq!(first.context_score, Some(0.42));
+    assert_eq!(second.amplifier_text, None);
+    assert_eq!(second.context_score, None);
+}
+
+#[tokio::test]
+async fn test_pg_batch_insert_empty_slice_is_noop() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &[])
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+
+    // Nothing carrying this test's marker URI should exist — an empty slice
+    // must be a true no-op, not fall through to inserting a sentinel row.
+    let stored = db.get_recent_events(TEST_USER, 1000).await.unwrap();
+    assert!(
+        !stored
+            .iter()
+            .any(|e| e.original_post_uri == "at://did:plc:me/app.bsky.feed.post/pgemptybatch"),
+        "empty-slice insert must not write any rows"
+    );
+}
+
+#[tokio::test]
+async fn test_pg_batch_insert_many_rows_preserve_own_values() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    cleanup_batch_test_data(&url).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // 250 rows (mirrors the SQLite test, which chunks at 100/statement).
+    // Postgres has no chunk boundary — UNNEST binds 9 arrays regardless of
+    // row count — but this is still the test that would catch a column-order
+    // mistake in the UNNEST rewrite: a mismatched array would smear one
+    // row's values onto another rather than failing outright.
+    let events: Vec<charcoal::db::models::NewAmplificationEvent> = (0..250)
+        .map(|i| charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: format!("did:plc:pgorder{:04}", i),
+            amplifier_handle: format!("pgorder{:04}.bsky.social", i),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/pgorder1".to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: Some(format!("text-{}", i)),
+            original_post_text: None,
+            context_score: Some(i as f64 / 1000.0),
+        })
+        .collect();
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 250);
+
+    let stored = db.get_recent_events(TEST_USER, 1000).await.unwrap();
+    let stored: Vec<_> = stored
+        .into_iter()
+        .filter(|e| e.original_post_uri == "at://did:plc:me/app.bsky.feed.post/pgorder1")
+        .collect();
+    assert_eq!(stored.len(), 250);
+
+    // Every row must keep its own field values — check by id order, which is
+    // input order per the determinism contract.
+    let mut by_id = stored;
+    by_id.sort_by_key(|e| e.id);
+    for (i, e) in by_id.iter().enumerate() {
+        assert_eq!(e.amplifier_handle, format!("pgorder{:04}.bsky.social", i));
+        assert_eq!(e.amplifier_text, Some(format!("text-{}", i)));
+        assert_eq!(e.context_score, Some(i as f64 / 1000.0));
+    }
+}
+
 #[tokio::test]
 async fn test_pg_amplification_event() {
     let Some(url) = database_url() else {
