@@ -6,6 +6,15 @@
 .env.*
 !.env.example
 
+# ── Per-project ignore extensions ──────────────────────────────────
+# `.gitignore.local` is the extension point for project-specific ignore
+# patterns that don't belong in the template. The template ignores it
+# so it never lands in git, and git respects its patterns locally like
+# a normal .gitignore. This lets `update-project-from-template` overwrite
+# .gitignore freely without clobbering project-only entries. See the
+# CLAUDE.md convention block for the migration pattern.
+.gitignore.local
+
 # ── macOS ──────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble
@@ -82,17 +91,3 @@ logs/
 # (issues-export.json is force-added by the pre-commit hook)
 .chainlink/.cache/
 .chainlink/issues-export.json
-
-# ── Charcoal-specific ──────────────────────────────────────────────
-
-# Local credential files (see .env.example for how to provide them)
-refs/zentropi_info.txt
-
-# Generated reports
-/output/
-
-# Database and report backups
-/backups/
-
-# Research scratch files
-/docs/research/

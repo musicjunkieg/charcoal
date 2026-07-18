@@ -15,10 +15,25 @@
 set -e
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOOKS_DIR="$REPO_ROOT/.git/hooks"
+
+# Resolve the shared hooks directory. In a regular repo `--git-common-dir`
+# returns `.git` (relative to REPO_ROOT); in a git worktree it returns the
+# absolute path to the primary checkout's `.git` (worktrees share hooks
+# with the primary). Either way, `cd + pwd -P` normalizes to an absolute
+# path so the rest of the script works regardless of cwd.
+#
+# The assignment lives inside an `if` conditional so `set -e` doesn't
+# abort us on a failed `git rev-parse` before we get a chance to print
+# the friendly "not a git repo" error. Both the exit-nonzero case and
+# the succeeded-but-empty case land in the same branch.
+if ! _common_gitdir="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir 2>/dev/null)" || [ -z "$_common_gitdir" ]; then
+    echo "❌ Not inside a git repository ($REPO_ROOT). Run 'git init' first."
+    exit 1
+fi
+HOOKS_DIR="$(cd "$REPO_ROOT" && cd "$_common_gitdir" && pwd -P)/hooks"
 
 if [ ! -d "$HOOKS_DIR" ]; then
-    echo "❌ $HOOKS_DIR does not exist. Run 'git init' first."
+    echo "❌ $HOOKS_DIR does not exist. Corrupted git repo?"
     exit 1
 fi
 
@@ -405,6 +420,77 @@ HOOK
 
 chmod +x "$HOOKS_DIR/pre-push"
 echo "  ✓ pre-push"
+
+# Returns 0 iff $1 is Git's default `info/exclude` stub — i.e. contains
+# only comment lines and blanks, no real ignore patterns. We can't
+# byte-compare against a canonical stub because different git versions
+# ship different stub text; instead, treat "no non-comment, non-blank
+# lines" as the safe signature. This preserves user files that keep
+# Git's header AND add patterns below.
+_exclude_is_default_stub() {
+    local file="$1"
+    [ -f "$file" ] || return 1
+    # Look for any line that has content and isn't a comment.
+    if grep -qE '^[[:space:]]*[^[:space:]#]' "$file" 2>/dev/null; then
+        return 1
+    fi
+    return 0
+}
+
+# ── Wire .gitignore.local into git's per-repo excludes ────────────────
+#
+# Git does NOT read `.gitignore.local` automatically — only the main
+# `.gitignore` is read by default. To make the extension convention
+# actually work, this script symlinks the per-clone `.git/info/exclude`
+# (git's documented "in-repo but untracked" gitignore extension point)
+# to the project's `.gitignore.local`. Git resolves the symlink
+# transparently and applies its patterns on top of `.gitignore` +
+# the user's global excludes.
+#
+# Per-clone by design: each clone runs `install-hooks.sh` once, so each
+# clone gets the wiring. If a downstream user changes `.gitignore.local`
+# later, the symlink means live edits propagate — no re-run needed.
+#
+# Detect linked worktrees. Git resolves `info/` from `$GIT_COMMON_DIR`,
+# which is the primary checkout's `.git` — shared across all worktrees.
+# `LOCAL_IGNORE` however points to the CURRENT worktree. If we run the
+# wiring from a linked worktree we'd repoint the shared exclude at that
+# worktree's local file, hijacking ignore behavior for every worktree.
+# Skip and let the primary worktree handle it.
+_git_dir_abs="$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-dir)" && pwd -P)"
+_common_dir_abs="$(cd "$REPO_ROOT" && cd "$_common_gitdir" && pwd -P)"
+EXCLUDE_FILE="$_common_dir_abs/info/exclude"
+LOCAL_IGNORE="$REPO_ROOT/.gitignore.local"
+
+if [ "$_git_dir_abs" != "$_common_dir_abs" ]; then
+    echo "  ⏭  Linked worktree — .gitignore.local wiring belongs to the primary"
+    echo "     checkout; run install-hooks.sh there once. This worktree already"
+    echo "     inherits whatever the primary set up (worktrees share info/exclude)."
+elif [ -e "$LOCAL_IGNORE" ] || [ -h "$EXCLUDE_FILE" ]; then
+    if [ -h "$EXCLUDE_FILE" ]; then
+        # Only touch symlinks we can positively identify as ours (pointing
+        # at $LOCAL_IGNORE). Any other symlink is user-managed — leave it.
+        _current="$(readlink "$EXCLUDE_FILE" 2>/dev/null || true)"
+        if [ "$_current" = "$LOCAL_IGNORE" ]; then
+            echo "  ✓ .git/info/exclude -> .gitignore.local (already wired)"
+        else
+            echo "  ⚠️  .git/info/exclude is a symlink pointing elsewhere — leaving alone."
+            echo "     Current target: $_current"
+            echo "     To wire .gitignore.local, remove the symlink and re-run."
+        fi
+    elif [ ! -e "$EXCLUDE_FILE" ] || _exclude_is_default_stub "$EXCLUDE_FILE"; then
+        # File is missing or is Git's default stub with zero real patterns.
+        # `_exclude_is_default_stub` verifies the ENTIRE file is comment /
+        # blank lines only — not just the first line — so a user who kept
+        # the header and added their own patterns below is preserved.
+        mkdir -p "$(dirname "$EXCLUDE_FILE")"
+        ln -sf "$LOCAL_IGNORE" "$EXCLUDE_FILE"
+        echo "  ✓ .git/info/exclude -> .gitignore.local (wiring project-local ignores)"
+    else
+        echo "  ⚠️  .git/info/exclude has custom content — leaving alone."
+        echo "     To wire .gitignore.local, back up .git/info/exclude and re-run."
+    fi
+fi
 
 echo ""
 echo "Done. Both hooks are installed."
