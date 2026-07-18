@@ -632,3 +632,48 @@ fn amplification_event_types_include_like_and_reply() {
     assert!(reply_event.amplifier_text.is_some());
     assert!(reply_event.context_score.is_some());
 }
+
+/// The determinism contract for #192: whatever order the pipeline builds
+/// events in, the batch payload must preserve input order so ids ascend
+/// with it. This tests the ordering invariant directly against the DB,
+/// independent of the network-dependent pipeline.
+#[tokio::test]
+async fn batched_amplification_events_preserve_input_order() {
+    use charcoal::db::models::NewAmplificationEvent;
+    use charcoal::db::Database;
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    charcoal::db::schema::create_tables(&conn).unwrap();
+    let db = charcoal::db::sqlite::SqliteDatabase::new(conn);
+    let user = "did:plc:testuser000000000000";
+
+    // Deliberately non-alphabetical handles: if the implementation ever sorts
+    // or reorders internally, id order would stop matching input order.
+    let order = ["zulu", "alpha", "mike", "bravo"];
+    let events: Vec<NewAmplificationEvent> = order
+        .iter()
+        .map(|h| NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: format!("did:plc:{}", h),
+            amplifier_handle: format!("{}.bsky.social", h),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/x".to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: None,
+            original_post_text: None,
+            context_score: None,
+        })
+        .collect();
+
+    db.insert_amplification_events_batch(user, &events)
+        .await
+        .unwrap();
+
+    let mut stored = db.get_recent_events(user, 100).await.unwrap();
+    stored.sort_by_key(|e| e.id);
+
+    let stored_order: Vec<String> = stored
+        .iter()
+        .map(|e| e.amplifier_handle.replace(".bsky.social", ""))
+        .collect();
+    assert_eq!(stored_order, order.to_vec());
+}

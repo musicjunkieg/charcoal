@@ -3838,6 +3838,17 @@
       "created_at": "2026-07-18T16:45:22.108230-07:00",
       "updated_at": "2026-07-18T16:45:22.108230-07:00",
       "metadata_json": "{\"branch\":\"feat/parallel-amplification-events\",\"confidence\":90,\"files\":[\"src/db/postgres.rs\",\"src/db/traits.rs\",\"tests/db_postgres.rs\"]}"
+    },
+    {
+      "id": 356,
+      "change_id": "bf251f4f-6c07-4312-8f9c-d35fb18409ac",
+      "node_type": "outcome",
+      "title": "Fixed all 4 findings: seeded empty-slice count test, per-test cleanup markers, event_type+amplifier_did asserted (mutation-verified fail-then-pass), comments corrected. 12/12 pg tests x5 clean, clippy x3 clean, web suite 0 failed. commit 9517fb9",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T16:45:51.338869-07:00",
+      "updated_at": "2026-07-18T16:45:51.338869-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallel-amplification-events\",\"commit\":\"9517fb9\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -7547,6 +7558,28 @@
       "weight": 1.0,
       "rationale": "Decision implemented as plan + issue triage",
       "created_at": "2026-07-18T12:44:54.141946-07:00"
+    },
+    {
+      "id": 346,
+      "from_node_id": 356,
+      "to_node_id": 355,
+      "from_change_id": "bf251f4f-6c07-4312-8f9c-d35fb18409ac",
+      "to_change_id": "36c7cede-0e5a-42a3-838b-e78ca36be712",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "outcome of the fix action",
+      "created_at": "2026-07-18T16:45:54.250305-07:00"
+    },
+    {
+      "id": 347,
+      "from_node_id": 355,
+      "to_node_id": 356,
+      "from_change_id": "36c7cede-0e5a-42a3-838b-e78ca36be712",
+      "to_change_id": "bf251f4f-6c07-4312-8f9c-d35fb18409ac",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "action produced this outcome",
+      "created_at": "2026-07-18T16:45:59.646476-07:00"
     }
   ],
   "documents": [

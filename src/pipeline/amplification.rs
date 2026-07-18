@@ -81,8 +81,17 @@ pub async fn run(
     )
     .await?;
 
-    // Store each event in the database, fetching quote text when available.
-    // Look up original post text from the cache for all event types.
+    // Build the full set of rows first, then write them in ONE statement.
+    //
+    // This loop used to insert per event, which cost one DB round-trip each —
+    // 359 events ≈ 2m16s of a 28m scan (#192). The per-event work below is
+    // unchanged; only the write is deferred. The loop stays sequential on
+    // purpose: the `fetch_post_text` call is gated on quote/reply, so only a
+    // handful of events do network work, and going concurrent here would
+    // reorder the evidence output below for no meaningful gain.
+    let mut pending_events: Vec<crate::db::models::NewAmplificationEvent> =
+        Vec::with_capacity(events.len());
+
     for event in &events {
         let mut amplifier_text: Option<String> = None;
         let mut quote_toxicity: Option<f64> = None;
@@ -175,18 +184,19 @@ pub async fn run(
             _ => None,
         };
 
-        db.insert_amplification_event(
-            user_did,
-            &event.event_type,
-            &event.amplifier_did,
-            &event.amplifier_handle,
-            event.original_post_uri.as_deref().unwrap_or("unknown"),
-            Some(&event.amplifier_post_uri),
-            amplifier_text.as_deref(),
-            original_post_text,
+        pending_events.push(crate::db::models::NewAmplificationEvent {
+            event_type: event.event_type.clone(),
+            amplifier_did: event.amplifier_did.clone(),
+            amplifier_handle: event.amplifier_handle.clone(),
+            original_post_uri: event
+                .original_post_uri
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            amplifier_post_uri: Some(event.amplifier_post_uri.clone()),
+            amplifier_text: amplifier_text.clone(),
+            original_post_text: original_post_text.map(|s| s.to_string()),
             context_score,
-        )
-        .await?;
+        });
 
         let event_label = match event.event_type.as_str() {
             "quote" => "Quote",
@@ -207,6 +217,15 @@ pub async fn run(
             println!("    \"{}\"{}", preview, tox_str);
         }
     }
+
+    // One round-trip for the whole batch (#192).
+    let inserted = db
+        .insert_amplification_events_batch(user_did, &pending_events)
+        .await?;
+    info!(
+        events = inserted,
+        "Recorded amplification events in one batch"
+    );
 
     // Phase B: Score amplifiers and (optionally) their followers via the
     // three-phase `run_phased_scan` orchestrator (#208).
