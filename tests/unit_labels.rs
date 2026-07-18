@@ -672,3 +672,115 @@ async fn trait_insert_amplification_event_new_fields_none() {
     assert!(events[0].original_post_text.is_none());
     assert!(events[0].context_score.is_none());
 }
+
+#[tokio::test]
+async fn trait_batch_insert_assigns_ids_in_input_order() {
+    let db = test_db().await;
+
+    let events = vec![
+        charcoal::db::models::NewAmplificationEvent {
+            event_type: "quote".to_string(),
+            amplifier_did: "did:plc:amp1".to_string(),
+            amplifier_handle: "first.bsky.social".to_string(),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/abc".to_string(),
+            amplifier_post_uri: Some("at://did:plc:amp1/app.bsky.feed.post/q1".to_string()),
+            amplifier_text: Some("look at this".to_string()),
+            original_post_text: Some("my original post".to_string()),
+            context_score: Some(0.85),
+        },
+        charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: "did:plc:amp2".to_string(),
+            amplifier_handle: "second.bsky.social".to_string(),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/abc".to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: None,
+            original_post_text: None,
+            context_score: None,
+        },
+    ];
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+
+    // get_recent_events orders by detected_at DESC. All rows in one batch share
+    // a detected_at, so assert on the set and on id ordering instead.
+    let stored = db.get_recent_events(TEST_USER, 10).await.unwrap();
+    assert_eq!(stored.len(), 2);
+
+    let first = stored
+        .iter()
+        .find(|e| e.amplifier_handle == "first.bsky.social")
+        .expect("first event missing");
+    let second = stored
+        .iter()
+        .find(|e| e.amplifier_handle == "second.bsky.social")
+        .expect("second event missing");
+
+    // Determinism contract: ids ascend in input order.
+    assert!(first.id < second.id, "ids must ascend in input order");
+
+    assert_eq!(first.event_type, "quote");
+    assert_eq!(
+        first.original_post_text,
+        Some("my original post".to_string())
+    );
+    assert_eq!(first.context_score, Some(0.85));
+    assert_eq!(second.event_type, "repost");
+    assert_eq!(second.amplifier_text, None);
+    assert_eq!(second.context_score, None);
+}
+
+#[tokio::test]
+async fn trait_batch_insert_empty_slice_is_noop() {
+    let db = test_db().await;
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &[])
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(db.get_recent_events(TEST_USER, 10).await.unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn trait_batch_insert_spans_chunk_boundary_in_order() {
+    let db = test_db().await;
+
+    // 250 rows forces three chunks at ROWS_PER_STATEMENT = 100, exercising the
+    // placeholder base-index arithmetic across boundaries.
+    let events: Vec<charcoal::db::models::NewAmplificationEvent> = (0..250)
+        .map(|i| charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: format!("did:plc:amp{:04}", i),
+            amplifier_handle: format!("amp{:04}.bsky.social", i),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/abc".to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: Some(format!("text-{}", i)),
+            original_post_text: None,
+            context_score: Some(i as f64 / 1000.0),
+        })
+        .collect();
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 250);
+
+    let stored = db.get_recent_events(TEST_USER, 1000).await.unwrap();
+    assert_eq!(stored.len(), 250);
+
+    // Every row must keep its own field values — a base-index bug would smear
+    // values across rows. Check by id order, which is input order.
+    let mut by_id = stored.clone();
+    by_id.sort_by_key(|e| e.id);
+    for (i, e) in by_id.iter().enumerate() {
+        assert_eq!(e.amplifier_handle, format!("amp{:04}.bsky.social", i));
+        assert_eq!(e.amplifier_text, Some(format!("text-{}", i)));
+        assert_eq!(e.context_score, Some(i as f64 / 1000.0));
+    }
+}

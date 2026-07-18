@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9caefde17babc2879d5ef380689253af0b9aa3b2",
+    "short_hash": "9caefde",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T14:41:38-07:00",
+    "message": "fix(cost): address CodeRabbit PR #66 — engine-failure isolation, mismatch logging, batch latency (#186)\n\n- handler: run_one catches any per-slot Exception (not just decode errors) so an\n  engine.generate() failure returns an ok:false slot instead of failing the whole\n  asyncio.gather batch (CancelledError/GeneratorExit still propagate). +test.\n- burst: warn! at batch length-mismatch detection so the contract violation is\n  always visible even when a concurrent chunk cost-cap wins outcome precedence.\n- runpod client: classify_batch records the real observed batch latency instead\n  of 0, keeping classifier_request_latency_ms meaningful.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
     "hash": "a9824e5210aa577d2a2bcf501b1e2466464e3bcc",
     "short_hash": "a9824e5",
     "author": "Bryan Guffey",

@@ -14,7 +14,8 @@ use rusqlite::Connection;
 use tokio::sync::Mutex;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    UserLabel, UserRow,
 };
 use super::traits::Database;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
@@ -134,6 +135,15 @@ impl Database for SqliteDatabase {
             original_post_text,
             context_score,
         )
+    }
+
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        super::queries::insert_amplification_events_batch(&conn, user_did, events)
     }
 
     async fn get_recent_events(

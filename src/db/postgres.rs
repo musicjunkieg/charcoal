@@ -18,8 +18,8 @@ use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::Database;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
@@ -466,6 +466,33 @@ impl Database for PgDatabase {
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))
+    }
+
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+        let mut inserted = 0usize;
+        for e in events {
+            self.insert_amplification_event(
+                user_did,
+                &e.event_type,
+                &e.amplifier_did,
+                &e.amplifier_handle,
+                &e.original_post_uri,
+                e.amplifier_post_uri.as_deref(),
+                e.amplifier_text.as_deref(),
+                e.original_post_text.as_deref(),
+                e.context_score,
+            )
+            .await?;
+            inserted += 1;
+        }
+        Ok(inserted)
     }
 
     async fn get_recent_events(
