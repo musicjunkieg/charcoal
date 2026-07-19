@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-18T23:57:07.308134+00:00",
+  "exported_at": "2026-07-19T00:05:11.655515+00:00",
   "issues": [
     {
       "id": 192,
@@ -51,6 +51,11 @@
         {
           "content": "Task 3 complete: Postgres UNNEST impl replaces the per-row stub. One round-trip for any batch size. Parity + empty-slice + 250-row column-fidelity tests green against local Postgres (12/12 db_postgres.rs, 117/117 full postgres suite). Clippy clean web/default/postgres. Commit bfeb40b.",
           "created_at": "2026-07-18T23:31:36.409089+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 4 complete: amplification event loop restructured to two passes — collect then batch-insert. 359 round-trips become 1. println evidence output still emits in event order inside pass 1; loop deliberately left sequential.",
+          "created_at": "2026-07-18T23:57:15.105375+00:00",
           "kind": "note"
         }
       ],

@@ -81,7 +81,7 @@ pub async fn run(
     )
     .await?;
 
-    // Build the full set of rows first, then write them in ONE statement.
+    // Build the full set of rows first, then write them in one batched call.
     //
     // This loop used to insert per event, which cost one DB round-trip each —
     // 359 events ≈ 2m16s of a 28m scan (#192). The per-event work below is
@@ -218,7 +218,13 @@ pub async fn run(
         }
     }
 
-    // One round-trip for the whole batch (#192).
+    // This write is deliberately all-or-nothing: the old per-event loop
+    // committed incrementally, so a crash at event k left 0..k persisted.
+    // That departs from the crash-resilient/incremental-write design CLAUDE.md
+    // calls for elsewhere, but per #184 a resumed scan re-runs amplification
+    // collection from scratch — a partial write is never resumed from, only
+    // re-collected and re-inserted as duplicates. All-or-nothing is strictly
+    // better for idempotency here, not merely an acceptable trade-off.
     let inserted = db
         .insert_amplification_events_batch(user_did, &pending_events)
         .await?;
