@@ -137,4 +137,38 @@ mod typeahead_tests {
             limiter.tracked_keys()
         );
     }
+
+    // ── the query must never reach the logs (CWE-532) ────────────────────────
+    //
+    // reqwest::Error's Display includes the request URL. Our request carries the
+    // user's typed handle in `q=`, so logging the raw error would leak a
+    // pre-auth query — defeating both the proxy and the no-query-logging rule.
+    // This asserts the leak is real without `without_url`, so the guard cannot
+    // be quietly removed later.
+    #[tokio::test]
+    async fn upstream_errors_do_not_leak_the_typed_handle() {
+        let secret = "someones-private-handle";
+        // Port 1 refuses immediately — a transport error with no real network.
+        let url = format!("http://127.0.0.1:1/xrpc/x?q={secret}");
+
+        let err = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .expect_err("connection to port 1 must fail");
+
+        let raw = format!("{err:#}");
+        let redacted = format!("{:#}", err.without_url());
+
+        assert!(
+            raw.contains(secret),
+            "precondition: the raw error is expected to embed the query — \
+             if this ever stops being true the redaction may be unnecessary, \
+             but verify before removing it. raw={raw}"
+        );
+        assert!(
+            !redacted.contains(secret),
+            "redacted error still leaked the query: {redacted}"
+        );
+    }
 }

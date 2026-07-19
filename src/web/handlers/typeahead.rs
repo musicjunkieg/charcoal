@@ -130,7 +130,12 @@ pub async fn suggest(
     let response = match request.await {
         Ok(r) => r,
         Err(e) => {
-            warn!(error = %format!("{e:#}"), "typeahead upstream request failed");
+            // `without_url` is load-bearing, not cosmetic: reqwest::Error's
+            // Display includes the request URL, and this request carries the
+            // user's typed handle in `q=`. Logging the raw error would leak the
+            // pre-auth query into our logs — the exact thing the proxy and the
+            // no-query-logging rule above exist to prevent.
+            warn!(error = %format!("{:#}", e.without_url()), "typeahead upstream request failed");
             // Degrade to "no suggestions" rather than an error: typeahead is an
             // enhancement, and a broken one must never block someone logging in.
             return Json(Vec::<Suggestion>::new()).into_response();
@@ -145,7 +150,11 @@ pub async fn suggest(
     let parsed: UpstreamResponse = match response.json().await {
         Ok(p) => p,
         Err(e) => {
-            warn!(error = %format!("{e:#}"), "typeahead upstream returned unparseable JSON");
+            // Same reasoning as above — strip the URL so the query cannot leak.
+            warn!(
+                error = %format!("{:#}", e.without_url()),
+                "typeahead upstream returned unparseable JSON"
+            );
             return Json(Vec::<Suggestion>::new()).into_response();
         }
     };
