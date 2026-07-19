@@ -80,8 +80,17 @@ fi
 # ── 3. Export chainlink issues ───────────────────────────────────────
 echo "📦 Pre-commit: exporting chainlink issues..."
 if chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null; then
-    git add .chainlink/issues-export.json
-    echo "✅ Chainlink issues exported"
+    # The export is a regenerated artifact, and .gitignore lists it. Staging it
+    # anyway kept it tracked, which made every branch integration conflict on
+    # churned JSON (#181). --no-index asks "do the ignore rules cover this?"
+    # rather than "is it tracked?", so the answer stays correct even if the file
+    # ever gets re-added to the index by accident.
+    if git check-ignore -q --no-index .chainlink/issues-export.json; then
+        echo "✅ Chainlink issues exported (gitignored — not staged)"
+    else
+        git add .chainlink/issues-export.json
+        echo "✅ Chainlink issues exported"
+    fi
 else
     echo "⚠️  Chainlink export failed (non-blocking)"
 fi
