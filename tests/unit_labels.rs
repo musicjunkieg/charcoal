@@ -806,7 +806,7 @@ async fn trait_batch_insert_spans_chunk_boundary_in_order() {
 async fn trait_get_recent_events_breaks_detected_at_ties_by_id_desc() {
     let db = test_db().await;
 
-    // A single batch insert gives every row the same detected_at (#192): the
+    // A single batch insert gives every row the same detected_at (#216): the
     // whole batch runs in one transaction, so `NOW()` is captured once, not
     // once per row. `get_recent_events` orders by `detected_at DESC` alone
     // would then leave same-batch rows in an arbitrary (storage-dependent)

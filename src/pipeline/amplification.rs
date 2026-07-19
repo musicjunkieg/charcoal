@@ -84,7 +84,7 @@ pub async fn run(
     // Build the full set of rows first, then write them in one batched call.
     //
     // This loop used to insert per event, which cost one DB round-trip each —
-    // 359 events ≈ 2m16s of a 28m scan (#192). The per-event work below is
+    // 359 events ≈ 2m16s of a 28m scan (#216). The per-event work below is
     // unchanged; only the write is deferred. The loop stays sequential on
     // purpose: the `fetch_post_text` call is gated on quote/reply, so only a
     // handful of events do network work, and going concurrent here would

@@ -94,7 +94,7 @@ pub trait Database: Send + Sync {
 
     /// Insert many amplification events for a user, collapsing what used to
     /// be one network round-trip per event (359 events ≈ 2m16s of a 28m scan,
-    /// chainlink #192) into a small, fixed number of round-trips regardless
+    /// chainlink #216) into a small, fixed number of round-trips regardless
     /// of batch size.
     ///
     /// Returns the number of rows inserted. Backend behavior differs:

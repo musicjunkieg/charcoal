@@ -633,7 +633,7 @@ fn amplification_event_types_include_like_and_reply() {
     assert!(reply_event.context_score.is_some());
 }
 
-/// The determinism contract for #192: whatever order the pipeline builds
+/// The determinism contract for #216: whatever order the pipeline builds
 /// events in, the batch payload must preserve input order so ids ascend
 /// with it. This tests the ordering invariant directly against the DB,
 /// independent of the network-dependent pipeline.

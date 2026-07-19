@@ -164,7 +164,7 @@ async fn test_pg_account_score_upsert_and_rank() {
     assert!(ranked.iter().any(|s| s.did == "did:plc:pgtest1"));
 }
 
-/// Delete rows written by a batch-insert test (#192), scoped to the single
+/// Delete rows written by a batch-insert test (#216), scoped to the single
 /// `original_post_uri` marker the caller passes.
 ///
 /// Each batch test MUST use its own distinct marker and pass only that
@@ -398,7 +398,7 @@ async fn test_pg_get_recent_events_breaks_detected_at_ties_by_id_desc() {
     cleanup_batch_test_data(&url, MARKER).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    // A single batch insert gives every row the same detected_at (#192): the
+    // A single batch insert gives every row the same detected_at (#216): the
     // whole batch runs in one transaction, so `NOW()` is captured once, not
     // once per row. `get_recent_events` ordering by `detected_at DESC` alone
     // would then leave same-batch rows in an arbitrary (storage-dependent)
