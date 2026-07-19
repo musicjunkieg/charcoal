@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
-- Pre-commit hook re-adds gitignored .chainlink/issues-export.json (forces --no-verify) — update hook to skip the untracked export. (#181)
+- Pre-commit hook no longer stages the gitignored `.chainlink/issues-export.json`. The file is also untracked, so the `.gitignore` entry can finally apply — a gitignore rule has no effect on an already-tracked file, which is why it kept conflicting on every branch integration. (`--no-verify` remains an emergency bypass, unrelated to this.) (#181)
 - Batch the 5 NLI hypotheses into one padded `[5, max_len]` forward pass instead of 5 sequential single-item inferences — ~5× fewer NLI ONNX runs, biggest in the amplification event loop (NLI per event). NOTE: the quantized `nli-deberta-v3-xsmall` export is not perfectly padding-invariant, so batching shifts `context_score` by a small, systematic amount (measured ≈0.006 on the final hostility, ≈0.002–0.008 per hypothesis) — accepted as within the model's own quantization noise and immaterial to threat tiers (bands 8/15/35). The batch-vs-single equivalence is pinned by a model-gated unit test at a 0.02 tolerance (#213)
 
 ### Added
