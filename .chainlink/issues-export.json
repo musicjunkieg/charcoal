@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-19T07:22:14.612637+00:00",
+  "exported_at": "2026-07-19T14:09:34.200261+00:00",
   "issues": [
     {
       "id": 219,
@@ -286,6 +286,11 @@
         {
           "content": "Task 3 PUSHED — PR #82 into staging: https://github.com/musicjunkieg/charcoal/pull/82. Real Check,Lint&Test gate PASSED (3m19s); analyze/CodeQL green; CodeRabbit review in progress. PR body prominently documents the accepted ~0.006 context_score shift + the 0.02 test tolerance. Not merged (merge-hold until staging scan done).",
           "created_at": "2026-07-19T07:16:57.374709+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "STAGING SCAN COMPLETE (2026-07-19, accounts_scored=8174, events=3090, degraded=true) — Task 4 gate RESOLVED + Task 1/2 production validation.\n\n=== TASK 4 GATE: VIABLE (proceed) ===\nStage-1 terminal rate across gather-window samples: 20.2%, 18.7%, 30.6% (later/smaller sample) — clusters ~18-20%. LOW. Since ~80% of accounts proceed to Stage 2 and pay the 50-post fetch anyway, collapsing the double-fetch (fetch 50 once, slice first 25 for Stage-1) saves the redundant 25-fetch for the majority. The \"high terminal rate inverts the economics\" concern does NOT apply. Task 4 is unblocked — build it.\n\n=== TASK 1 VALIDATED IN PROD (bonus) ===\nfinalize per-account timing on this run: median 1.072s, p90 1.422s, mean 1.132s (469-sample finalize window). Pre-Task-1 baseline was median 1.56s. => ~31% per-account finalize reduction, matching the predicted embedding-move win. Task 1 (#79) confirmed working — the embedding is out of the serial finalize loop.\n\n=== TASK 2 CHECK (bonus) ===\nZERO real rate-limit/429 lines in captured logs (an initial grep hit \"429\" inside timestamp microseconds — false positive). 8-concurrent follower fetches ran cleanly; scan completed. CAVEAT: railway CLI caps historical fetch at ~500 lines, so I could NOT fully inspect the amplification/discovery window where 429s would appear — but nothing rate-limited surfaced and the run completed. Low confidence it is fully 429-free, high confidence no systemic rate-limiting.\n\n=== NOTES ===\n- degraded=true cause not determined from capped logs (could be per-account gather skips / transient / cost-cap — NOT necessarily 429s). Worth a look but not blocking.\n- Scan was HUGE: 8174 accounts scored, ran ~06:39->11:15 UTC (~4.5h), dominated by amplification follower-fetch + gather + a long finalize (8174 accounts even at 1.07s each ≈ 2.4h). This is the 1465-amplifier account.\n\n#213 STATUS: Tasks 1(#79 merged),2(#80 merged),3(#82 open+approved),5(#81 open+approved). Task 4 GATE CLEARED -> only remaining build. All merges still HELD pending Bryan.",
+          "created_at": "2026-07-19T14:03:53.582009+00:00",
           "kind": "note"
         }
       ],

@@ -435,6 +435,24 @@ impl Database for PgDatabase {
         }
     }
 
+    async fn get_fresh_scored_dids(
+        &self,
+        user_did: &str,
+        max_age_days: i64,
+    ) -> Result<Vec<String>> {
+        // Same cutoff as is_score_stale (make_interval + bound i32), inverted:
+        // fresh = scored_at >= NOW() - interval.
+        let rows = sqlx_core::query::query(
+            "SELECT did FROM account_scores
+             WHERE user_did = $1 AND scored_at >= NOW() - make_interval(days => $2)",
+        )
+        .bind(user_did)
+        .bind(i32::try_from(max_age_days).context("max_age_days exceeds i32 range")?)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get::<String, _>(0)).collect())
+    }
+
     async fn insert_amplification_event(
         &self,
         user_did: &str,

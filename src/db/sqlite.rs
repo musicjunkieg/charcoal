@@ -110,6 +110,15 @@ impl Database for SqliteDatabase {
         super::queries::is_score_stale(&conn, user_did, did, max_age_days)
     }
 
+    async fn get_fresh_scored_dids(
+        &self,
+        user_did: &str,
+        max_age_days: i64,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_fresh_scored_dids(&conn, user_did, max_age_days)
+    }
+
     async fn insert_amplification_event(
         &self,
         user_did: &str,
