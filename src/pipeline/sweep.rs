@@ -125,10 +125,19 @@ pub async fn run(
     );
 
     // Step 3: Filter to accounts with stale or missing scores (candidate set).
-    // Same staleness gate as before the phased-pipeline rewire.
+    // Same staleness gate as before, but one bulk query instead of an
+    // is_score_stale round-trip per candidate (#213). On error, fall back to an
+    // empty fresh set so everything is treated stale — byte-identical to the old
+    // per-call `.unwrap_or(true)`.
+    let fresh: HashSet<String> = db
+        .get_fresh_scored_dids(user_did, 7)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let mut stale = Vec::new();
     for f in &second_degree_pool {
-        if db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
+        if !fresh.contains(&f.did) {
             stale.push(f);
         }
     }

@@ -732,3 +732,82 @@ async fn test_pg_staging_round_trip() {
         "clear_scan_staging must empty scan_account_input"
     );
 }
+
+#[tokio::test]
+async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+    use std::collections::HashSet;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // Marker DIDs unique to this test; clean them up first so a prior run's rows
+    // can't leak in.
+    let fresh_did = "did:plc:pgfresh_stale_test_ok";
+    let stale_did = "did:plc:pgfresh_stale_test_old";
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    for did in [fresh_did, stale_did] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+            .bind(TEST_USER)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // Insert both fresh, then age one to 8 days (stale). Raw INSERT so we can
+    // control scored_at directly (the trait upsert always stamps NOW()).
+    for (did, age_days) in [(fresh_did, 0i32), (stale_did, 8i32)] {
+        sqlx_core::query::query(
+            "INSERT INTO account_scores (user_did, did, handle, scored_at)
+             VALUES ($1, $2, $3, NOW() - make_interval(days => $4))",
+        )
+        .bind(TEST_USER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(age_days)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let fresh: HashSet<String> = db
+        .get_fresh_scored_dids(TEST_USER, 7)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+
+    assert!(
+        fresh.contains(fresh_did),
+        "recently-scored DID must be fresh"
+    );
+    assert!(
+        !fresh.contains(stale_did),
+        "8-day-old DID must not be fresh"
+    );
+
+    // Equivalence with the per-DID path (same make_interval cutoff), including
+    // a never-scored DID which must be stale/absent.
+    for did in [fresh_did, stale_did, "did:plc:pgfresh_never_scored"] {
+        let stale = db.is_score_stale(TEST_USER, did, 7).await.unwrap();
+        assert_eq!(
+            fresh.contains(did),
+            !stale,
+            "fresh-set membership must equal !is_score_stale for {did}"
+        );
+    }
+
+    // Cleanup.
+    for did in [fresh_did, stale_did] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+            .bind(TEST_USER)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
