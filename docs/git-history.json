@@ -1,5 +1,21 @@
 [
   {
+    "hash": "e6732f835026880c769536495b4e899a2eabf7fb",
+    "short_hash": "e6732f8",
+    "author": "Bryan Guffey",
+    "date": "2026-07-19T07:44:23-07:00",
+    "message": "fix(toxicity): truncate over-long input instead of dropping the account (#220)\n\nThe 2026-07-19 staging scan finished degraded=true with 59 accounts silently\nskipped. 34 of them failed with a bare \"ONNX inference failed\".\n\nROOT CAUSE: Bluesky caps a post at 300 GRAPHEMES, not tokens. That is ~63\ntokens of Latin ASCII but 602 in emoji, 902 in CJK, and 4202 in ZWJ family\nemoji — all past the 512 that unbiased-toxic-roberta accepts. onnx.rs derived\nmax_len from the longest input in the batch with no clamp, so session.run\nhard-errored at the /roberta/Expand node (\"invalid expand shape\"). Because\nscoring is batched per account, ONE over-long post took the entire batch down\nand gather skipped the whole account.\n\nThe dropped accounts were selected by SCRIPT, not at random: CJK, Cyrillic,\nArabic, Devanagari and emoji-heavy text failed while Latin-script accounts\npassed. For a harassment detector that is a fairness gap, not just a\ncompleteness one. Note it is not purely a non-English issue — ZWJ emoji cost\n~14 tokens each, so emoji-heavy English overflows too.\n\nFIX: configure the tokenizer with TruncationParams (what HuggingFace does by\ndefault), which keeps special tokens correct where a manual id-slice would drop\nthe trailing </s>.\n\nDirection is Left, deliberately. Replies are scored as the envelope\n\"[Parent post]: <p>\\n\\n[Reply]: <r>\"; the default Right truncation cuts from the\nend and would eat THE REPLY — the text actually being judged — while preserving\nthe parent nobody scores. Mutation-verified: with Right, a hostile and a benign\nreply both score 0.0012, i.e. every over-long reply silently reads as benign.\n\nALSO: log the anyhow source chain ({e:#}) in the scan_phases error paths. Plain\n%e prints only the outermost .context() and drops the cause, which is the single\nreason this took a log dig instead of five minutes.\n\nVerified the sibling embedder does NOT share the bug (MiniLM tolerates\nover-long input where RoBERTa errors), so the fix does not merely relocate the\ncrash. Covered by a regression test since the toxicity fix removes the\nshort-circuit that was hiding that path.\n\nTests: 6 model-gated regression tests, all mutation-checked. Full web suite\n0 failures, clippy clean on web + default.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_015ihdqt1uvmUacx8vDMy9Mq",
+    "files_changed": 8
+  },
+  {
+    "hash": "b74a8f27d4b2948628047dc8650ed4b5d49c3057",
+    "short_hash": "b74a8f2",
+    "author": "chaos gremlin",
+    "date": "2026-07-19T07:24:18-07:00",
+    "message": "Merge pull request #83 from musicjunkieg/fix/pre-commit-export\n\nfix(hooks): stop pre-commit staging the gitignored chainlink export (#181)",
+    "files_changed": 0
+  },
+  {
     "hash": "9517fb9a9a31a06c4371f7306a0d963e566230ae",
     "short_hash": "9517fb9",
     "author": "Bryan Guffey",

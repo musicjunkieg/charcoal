@@ -49,5 +49,27 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --features web
 
+      # The ONNX regression tests (tests/unit_toxicity_token_limit.rs, #220) are
+      # model-gated and SKIP when the model files are absent. Without this the
+      # suite goes green in CI while never exercising the path at all — a
+      # regression test that cannot fail protects nothing.
+      #
+      # ~216MB (126MB toxicity + 90MB embedding), so it is cached. The key
+      # includes download.rs so changing a model URL busts the cache.
+      - name: Cache ONNX models
+        id: cache-models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ${{ runner.os }}-charcoal-models-${{ hashFiles('src/toxicity/download.rs') }}
+
+      - name: Download ONNX models
+        if: steps.cache-models.outputs.cache-hit != 'true'
+        run: cargo run --features web -- download-model
+        env:
+          CHARCOAL_MODEL_DIR: models
+
       - name: Tests
         run: cargo test --features web
+        env:
+          CHARCOAL_MODEL_DIR: models

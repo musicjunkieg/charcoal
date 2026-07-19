@@ -3849,6 +3849,61 @@
       "created_at": "2026-07-18T16:45:51.338869-07:00",
       "updated_at": "2026-07-18T16:45:51.338869-07:00",
       "metadata_json": "{\"branch\":\"feat/parallel-amplification-events\",\"commit\":\"9517fb9\",\"confidence\":90}"
+    },
+    {
+      "id": 357,
+      "change_id": "61376f62-3fcd-4b26-89ed-b2bab5b26213",
+      "node_type": "goal",
+      "title": "Diagnose degraded=true on the 8174-account staging scan (#220)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-19T07:31:32.183528-07:00",
+      "updated_at": "2026-07-19T07:31:32.183528-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95,\"prompt\":\"make sure 83 goes green after cocderabbit reviews, if any, then merge it, and then start on the diagnosis\"}"
+    },
+    {
+      "id": 358,
+      "change_id": "2389688e-1381-49d5-89da-30b74f9645a8",
+      "node_type": "action",
+      "title": "Eliminate 3 of 4 degraded sources by control flow, then probe ONNX tokenization limits against the real model",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-19T07:31:32.199683-07:00",
+      "updated_at": "2026-07-19T07:31:32.199683-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"b74a8f2\",\"confidence\":95,\"files\":[\"src/pipeline/scan_phases/mod.rs\",\"src/toxicity/onnx.rs\"]}"
+    },
+    {
+      "id": 359,
+      "change_id": "4c7213ac-d8f0-46fe-a000-1c8e10b2a8cd",
+      "node_type": "outcome",
+      "title": "CONFIRMED: 300-grapheme non-Latin posts exceed RoBERTa 512-token limit, hard-error at the Expand node, and poison the whole batch — 34 accounts dropped, selected by script not at random",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-19T07:31:32.213663-07:00",
+      "updated_at": "2026-07-19T07:31:32.213663-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"b74a8f2\",\"confidence\":95}"
+    },
+    {
+      "id": 360,
+      "change_id": "1a3019b6-0972-4b46-a7f7-9f4f8599385e",
+      "node_type": "action",
+      "title": "Fix #220: tokenizer truncation (Left direction) + anyhow source-chain logging in scan_phases",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-19T07:45:15.433703-07:00",
+      "updated_at": "2026-07-19T07:45:15.433703-07:00",
+      "metadata_json": "{\"branch\":\"fix/220-onnx-token-limit\",\"commit\":\"e6732f8\",\"confidence\":95,\"files\":[\"src/toxicity/onnx.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/unit_toxicity_token_limit.rs\"]}"
+    },
+    {
+      "id": 361,
+      "change_id": "cdeb5b6f-eb03-42af-a571-2ec66d2c6d01",
+      "node_type": "outcome",
+      "title": "PR #84: 6 mutation-checked tests green, suite 0 failures, clippy clean. Right-truncation mutation proved it would silently score every hostile reply as benign (0.0012 both)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-19T07:45:15.448464-07:00",
+      "updated_at": "2026-07-19T07:45:15.448464-07:00",
+      "metadata_json": "{\"branch\":\"fix/220-onnx-token-limit\",\"commit\":\"e6732f8\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -7580,6 +7635,50 @@
       "weight": 1.0,
       "rationale": "action produced this outcome",
       "created_at": "2026-07-18T16:45:59.646476-07:00"
+    },
+    {
+      "id": 349,
+      "from_node_id": 358,
+      "to_node_id": 359,
+      "from_change_id": "2389688e-1381-49d5-89da-30b74f9645a8",
+      "to_change_id": "4c7213ac-d8f0-46fe-a000-1c8e10b2a8cd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Empirical result",
+      "created_at": "2026-07-19T07:31:32.225726-07:00"
+    },
+    {
+      "id": 350,
+      "from_node_id": 357,
+      "to_node_id": 358,
+      "from_change_id": "61376f62-3fcd-4b26-89ed-b2bab5b26213",
+      "to_change_id": "2389688e-1381-49d5-89da-30b74f9645a8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Diagnosis approach",
+      "created_at": "2026-07-19T07:31:49.012538-07:00"
+    },
+    {
+      "id": 351,
+      "from_node_id": 359,
+      "to_node_id": 360,
+      "from_change_id": "4c7213ac-d8f0-46fe-a000-1c8e10b2a8cd",
+      "to_change_id": "1a3019b6-0972-4b46-a7f7-9f4f8599385e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix follows diagnosis",
+      "created_at": "2026-07-19T07:45:15.454591-07:00"
+    },
+    {
+      "id": 352,
+      "from_node_id": 360,
+      "to_node_id": 361,
+      "from_change_id": "1a3019b6-0972-4b46-a7f7-9f4f8599385e",
+      "to_change_id": "cdeb5b6f-eb03-42af-a571-2ec66d2c6d01",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-07-19T07:45:15.459731-07:00"
     }
   ],
   "documents": [

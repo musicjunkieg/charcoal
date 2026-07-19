@@ -385,9 +385,13 @@ async fn run_gather(
             Ok(GatherOutcome::Enqueued) => {}
             Err(e) => {
                 sweep.skipped = true;
+                // `{e:#}` (alternate Display) walks the anyhow source chain; plain
+                // `%e` prints only the outermost .context() and drops the cause.
+                // That difference cost hours on #220: every one of these read
+                // "ONNX inference failed" with the actual ort error invisible.
                 warn!(
                     account_did,
-                    error = %e,
+                    error = %format!("{e:#}"),
                     "gather failed for account — skipping it and continuing the scan"
                 );
             }
@@ -494,7 +498,7 @@ async fn recover_account(
         Err(e) => {
             warn!(
                 account_did,
-                error = %e,
+                error = %format!("{e:#}"),
                 "re-gather recovery failed for account — skipping it and continuing the scan"
             );
             false
