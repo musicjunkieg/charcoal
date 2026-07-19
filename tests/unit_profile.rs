@@ -284,6 +284,7 @@ async fn score_from_sample_survivor_no_context() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on
         None,  // nli_scorer
@@ -318,4 +319,128 @@ async fn score_from_sample_survivor_no_context() {
     // Fingerprint quality on 6 originals + 6 reply/quote = Degraded (>=15 total
     // is false here → 12 total, originals < 15, originals > 0 → Unreliable).
     assert!(score.fingerprint_quality.is_some());
+}
+
+// ============================================================
+// Task 1 (#213): topic-overlap embedding moves out of finalize into gather.
+// select_fingerprint_posts is the ONE shared selection used by both phases,
+// so gather feeds the embedder exactly the posts finalize would have.
+// ============================================================
+
+use charcoal::scoring::profile::select_fingerprint_posts;
+use charcoal::topics::embeddings::cosine_similarity_embeddings;
+
+fn reply(uri: &str, text: &str) -> ReplyPost {
+    ReplyPost {
+        post: post(uri, text),
+        parent_uri: "at://parent/1".to_string(),
+    }
+}
+
+#[test]
+fn select_fingerprint_posts_uses_only_originals_when_at_least_15() {
+    let originals: Vec<Post> = (0..15)
+        .map(|i| post(&format!("at://o/{i}"), &format!("original {i}")))
+        .collect();
+    let sample = PostSample {
+        originals,
+        replies: vec![reply("at://r/1", "a reply")],
+        quotes: vec![post("at://q/1", "a quote")],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 17,
+    };
+
+    let selected = select_fingerprint_posts(&sample);
+
+    // 15 originals ≥ 15 → originals only; the reply and quote are excluded.
+    assert_eq!(selected.len(), 15);
+    assert_eq!(selected[0], "original 0");
+    assert_eq!(selected[14], "original 14");
+    assert!(!selected.iter().any(|t| t == "a reply" || t == "a quote"));
+}
+
+#[test]
+fn select_fingerprint_posts_falls_back_to_all_when_fewer_than_15_originals() {
+    let sample = PostSample {
+        originals: vec![post("at://o/1", "orig one"), post("at://o/2", "orig two")],
+        replies: vec![reply("at://r/1", "reply one")],
+        quotes: vec![post("at://q/1", "quote one")],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 4,
+    };
+
+    let selected = select_fingerprint_posts(&sample);
+
+    // < 15 originals → originals ++ replies ++ quotes, in that order.
+    assert_eq!(
+        selected,
+        vec![
+            "orig one".to_string(),
+            "orig two".to_string(),
+            "reply one".to_string(),
+            "quote one".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn score_from_sample_uses_precomputed_target_embedding_without_an_embedder() {
+    // The precomputed target vector (from Phase A gather) must drive topic
+    // overlap directly — no embedder call, exact cosine of protected vs target.
+    let originals: Vec<Post> = (0..5)
+        .map(|i| post(&format!("at://o/{i}"), &format!("original {i}")))
+        .collect();
+    let all_post_texts: Vec<String> = originals.iter().map(|p| p.text.clone()).collect();
+    let contexts: Vec<Option<String>> = vec![None; 5];
+    let verdicts: Vec<_> = (0..5).map(|_| binary_verdict(false, 0.1)).collect();
+
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 5,
+    };
+
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let protected: Vec<f64> = vec![1.0, 2.0, 2.0];
+    let precomputed: Vec<f64> = vec![2.0, 2.0, 1.0];
+    let expected_overlap = cosine_similarity_embeddings(&protected, &precomputed);
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,               // embedder — deliberately absent; precomputed must win
+        Some(&protected),   // protected_embedding
+        Some(&precomputed), // precomputed_target_embedding (NEW, from gather)
+        0.0,                // median_engagement
+        false,              // pile_on
+        None,               // nli_scorer
+        None,               // protected_posts_with_embeddings
+        None,               // direct_pairs
+        None,               // data_dir
+        None,               // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score
+        .topic_overlap
+        .expect("overlap should be Some via precomputed path");
+    assert!(
+        (overlap - expected_overlap).abs() < 1e-12,
+        "precomputed overlap {overlap} != expected cosine {expected_overlap}"
+    );
 }

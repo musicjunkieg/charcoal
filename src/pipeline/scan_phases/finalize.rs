@@ -193,6 +193,9 @@ pub async fn finalize_account(
                 weights,
                 embedder,
                 protected_embedding,
+                // Precomputed in Phase A (gather); when present the overlap step
+                // skips the (mutex-serialized) embedding entirely (#213).
+                blob.target_embedding.as_deref(),
                 blob.median_engagement,
                 blob.is_pile_on,
                 $nli,

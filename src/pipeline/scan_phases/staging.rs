@@ -19,7 +19,7 @@ use crate::bluesky::posts::PostSample;
 /// Bumped whenever the shape of `AccountInput` changes in a breaking way.
 /// Stored alongside every serialised blob so Phase C can reject stale rows
 /// rather than silently misinterpret them.
-pub const ACCOUNT_INPUT_SCHEMA_VERSION: u32 = 1;
+pub const ACCOUNT_INPUT_SCHEMA_VERSION: u32 = 2;
 
 // ── ScanPhase ─────────────────────────────────────────────────────────────────
 
@@ -172,6 +172,15 @@ pub struct AccountInput {
     /// Fingerprint quality tier computed from the sample's originals count:
     /// `"normal"`, `"degraded"`, or `"unreliable"`.
     pub fingerprint_quality: String,
+
+    /// Target mean sentence-embedding, precomputed in Phase A (gather) over
+    /// `select_fingerprint_posts(&sample)`. Moving this ONNX work out of the
+    /// serial Phase-C finalize loop is the whole point of #213 — in Phase A it
+    /// overlaps network I/O instead of serializing on the global model mutex.
+    /// `None` when no embedder was loaded at gather time; Phase C then embeds
+    /// at score time (old behavior) or falls back to TF-IDF.
+    #[serde(default)]
+    pub target_embedding: Option<Vec<f64>>,
 }
 
 impl AccountInput {
@@ -198,6 +207,7 @@ impl AccountInput {
             direct_pairs: None,
             graph_distance: None,
             fingerprint_quality: "normal".to_string(),
+            target_embedding: None,
         }
     }
 }
