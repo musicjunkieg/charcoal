@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-19T00:43:53.937659+00:00",
+  "exported_at": "2026-07-19T01:13:21.673339+00:00",
   "issues": [
     {
       "id": 217,
@@ -81,6 +81,11 @@
         {
           "content": "PUSHED. PR #77 opened into staging: https://github.com/musicjunkieg/charcoal/pull/77 (mergeStateStatus UNSTABLE = CI still running; not self-merged). Branch feat/parallel-amplification-events, 7 commits e72b681..8f0d4c4.",
           "created_at": "2026-07-19T00:34:31.932659+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "RENUMBERED: this issue was #192, now #216 after the 2026-07-19 DB reconciliation. Commit 097e38c on feat/parallel-amplification-events updates the live references (CHANGELOG, src comments, test comments, plan doc). Commit messages earlier on the branch still say (#192) — historical record, not rewritten. PR #77 body still references #192 and is being updated separately.",
+          "created_at": "2026-07-19T00:46:41.320128+00:00",
           "kind": "note"
         }
       ],

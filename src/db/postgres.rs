@@ -480,13 +480,15 @@ impl Database for PgDatabase {
         // UNNEST binds 8 arrays plus $1 (user_did, a single scalar broadcast
         // by the SELECT to every row) regardless of row count, so this is one
         // round-trip for any batch size and never approaches Postgres's
-        // 65535-parameter statement cap. `WITH ORDINALITY` is not needed: in
-        // observed Postgres behavior (not a documented guarantee) UNNEST
-        // expands its arrays in array order, and INSERT...SELECT over a
-        // set-returning function without an ORDER BY preserves that order —
-        // so serial ids ascend in slice order, which the determinism
-        // contract requires. If that behavior ever changes, switch to
-        // `WITH ORDINALITY` plus an explicit `ORDER BY ordinality`.
+        // 65535-parameter statement cap.
+        //
+        // `WITH ORDINALITY` + `ORDER BY ord` is load-bearing, not decorative.
+        // Postgres does NOT guarantee row order for INSERT ... SELECT without
+        // an explicit ORDER BY — the planner is free to reorder. Our contract
+        // requires serial ids to ascend in slice order, so we cannot rely on
+        // the observed behavior that UNNEST happens to emit in array order.
+        // WITH ORDINALITY numbers the elements at their source, and ordering
+        // by that number makes the guarantee explicit instead of incidental.
         let event_types: Vec<String> = events.iter().map(|e| e.event_type.clone()).collect();
         let amplifier_dids: Vec<String> = events.iter().map(|e| e.amplifier_did.clone()).collect();
         let amplifier_handles: Vec<String> =
@@ -518,8 +520,11 @@ impl Database for PgDatabase {
                     t.amplifier_post_uri, t.amplifier_text, t.original_post_text, t.context_score
              FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[],
                          $6::text[], $7::text[], $8::text[], $9::float8[])
+                  WITH ORDINALITY
                   AS t(event_type, amplifier_did, amplifier_handle, original_post_uri,
-                       amplifier_post_uri, amplifier_text, original_post_text, context_score)",
+                       amplifier_post_uri, amplifier_text, original_post_text, context_score,
+                       ord)
+             ORDER BY t.ord",
         )
         .bind(user_did)
         .bind(&event_types)
