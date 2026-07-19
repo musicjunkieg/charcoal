@@ -3739,6 +3739,116 @@
       "created_at": "2026-07-03T13:49:58.272279-07:00",
       "updated_at": "2026-07-03T13:49:58.272279-07:00",
       "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"a9824e5\",\"confidence\":95}"
+    },
+    {
+      "id": 347,
+      "change_id": "bf06770f-7ae1-4031-9959-c692c805fa82",
+      "node_type": "outcome",
+      "title": "CodeRabbit PR #66 round-1 addressed (commit 9caefde): FIXED engine-failure per-slot isolation (handler +test), length-mismatch warn! at detection, batch real-latency metric; SKIPPED burst catch_unwind (pre-existing, non-batching, ->#180) w/ reply. All 3 inline comments replied individually. 549/0 + gpu 12 + clippy x3 clean.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T14:42:50.777452-07:00",
+      "updated_at": "2026-07-03T14:42:50.777452-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"9caefde\",\"confidence\":93}"
+    },
+    {
+      "id": 348,
+      "change_id": "513ebb41-d0de-497b-94f0-4e1ebb2d3e78",
+      "node_type": "outcome",
+      "title": "PR #66 (#186 batch classifier) APPROVED by CodeRabbit @ 9caefde after round-1 fixes. mergeable=CLEAN, all 6 checks pass (CodeQL x4 + CodeRabbit). Ready for Bryan to merge -> staging. Post-merge: rebuild RunPod handler image BEFORE app deploy.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-03T15:07:02.756874-07:00",
+      "updated_at": "2026-07-03T15:07:02.756874-07:00",
+      "metadata_json": "{\"branch\":\"feat/batch-runpod-classifier\",\"commit\":\"9caefde\",\"confidence\":96}"
+    },
+    {
+      "id": 349,
+      "change_id": "1fb213f6-1c73-4599-a45f-f54d76bbd80d",
+      "node_type": "goal",
+      "title": "Research CPU-side scan speedup + Railway-to-Hetzner hosting move",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T12:38:53.822381-07:00",
+      "updated_at": "2026-07-18T12:38:53.822381-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":90,\"prompt\":\"In ~/Code/charcoal, we should have a research task to speed up the CPU side of the work when we are doing scanning. It should likely be tied into the work of moving from Railway to something more scalable at lower cost like Hetzner. Pull those tasks up from chainlink and go do research on them in order to formulate a plan.\"}"
+    },
+    {
+      "id": 350,
+      "change_id": "bc97fe91-f412-4685-90fe-dacf86f17f5e",
+      "node_type": "observation",
+      "title": "Railway prod compute is ~0 vCPU over 30 days; metered usage ~2-5 USD/mo, well inside Pro's included 20 USD",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T12:38:58.301867-07:00",
+      "updated_at": "2026-07-18T12:38:58.301867-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":95}"
+    },
+    {
+      "id": 351,
+      "change_id": "195c6938-e408-452a-9263-c5f08ad4c265",
+      "node_type": "observation",
+      "title": "Scan bottleneck is a global ONNX session Mutex + embed_batch misplaced in serial finalize loop, not CPU core starvation; sweep loops already parallelized on staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T12:39:00.359863-07:00",
+      "updated_at": "2026-07-18T12:39:00.359863-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":90}"
+    },
+    {
+      "id": 352,
+      "change_id": "d1528a31-2f83-424e-82a4-2941f22f1ce2",
+      "node_type": "decision",
+      "title": "Do the code speedup; decline the hosting migration for now",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T12:39:06.441331-07:00",
+      "updated_at": "2026-07-18T12:39:06.441331-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-07-18-scan-speedup-and-hosting.md\"]}"
+    },
+    {
+      "id": 353,
+      "change_id": "c4ba09fa-d134-4cc5-a240-31b02aa57551",
+      "node_type": "observation",
+      "title": "chainlink #188 body (in a comment) confirms scope is billing-model only and cites the infra spike conclusion: I/O-bound not CPU-bound, DB is the crux",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T12:44:50.076014-07:00",
+      "updated_at": "2026-07-18T12:44:50.076014-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 354,
+      "change_id": "e5e44678-66ff-4d69-bdf7-8034d5432ff5",
+      "node_type": "outcome",
+      "title": "Plan written; #178 closed as already-shipped; #189 opened for the real speedup work; #188 recommended decline",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T12:44:50.086002-07:00",
+      "updated_at": "2026-07-18T12:44:50.086002-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-07-18-scan-speedup-and-hosting.md\"]}"
+    },
+    {
+      "id": 355,
+      "change_id": "36c7cede-0e5a-42a3-838b-e78ca36be712",
+      "node_type": "action",
+      "title": "Fix #192 batch-insert test/comment findings from code review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T16:45:22.108230-07:00",
+      "updated_at": "2026-07-18T16:45:22.108230-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallel-amplification-events\",\"confidence\":90,\"files\":[\"src/db/postgres.rs\",\"src/db/traits.rs\",\"tests/db_postgres.rs\"]}"
+    },
+    {
+      "id": 356,
+      "change_id": "bf251f4f-6c07-4312-8f9c-d35fb18409ac",
+      "node_type": "outcome",
+      "title": "Fixed all 4 findings: seeded empty-slice count test, per-test cleanup markers, event_type+amplifier_did asserted (mutation-verified fail-then-pass), comments corrected. 12/12 pg tests x5 clean, clippy x3 clean, web suite 0 failed. commit 9517fb9",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-18T16:45:51.338869-07:00",
+      "updated_at": "2026-07-18T16:45:51.338869-07:00",
+      "metadata_json": "{\"branch\":\"feat/parallel-amplification-events\",\"commit\":\"9517fb9\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -7349,6 +7459,127 @@
       "weight": 1.0,
       "rationale": "PR opened after passing final review",
       "created_at": "2026-07-03T13:49:58.279134-07:00"
+    },
+    {
+      "id": 337,
+      "from_node_id": 346,
+      "to_node_id": 347,
+      "from_change_id": "f898572a-062a-4d5c-9dfd-14bb93fa1645",
+      "to_change_id": "bf06770f-7ae1-4031-9959-c692c805fa82",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR review round-1 fixes",
+      "created_at": "2026-07-03T14:42:50.784197-07:00"
+    },
+    {
+      "id": 338,
+      "from_node_id": 347,
+      "to_node_id": 348,
+      "from_change_id": "bf06770f-7ae1-4031-9959-c692c805fa82",
+      "to_change_id": "513ebb41-d0de-497b-94f0-4e1ebb2d3e78",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR approved after review round",
+      "created_at": "2026-07-03T15:07:02.763547-07:00"
+    },
+    {
+      "id": 339,
+      "from_node_id": 349,
+      "to_node_id": 350,
+      "from_change_id": "1fb213f6-1c73-4599-a45f-f54d76bbd80d",
+      "to_change_id": "bc97fe91-f412-4685-90fe-dacf86f17f5e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Research finding",
+      "created_at": "2026-07-18T12:39:11.810871-07:00"
+    },
+    {
+      "id": 340,
+      "from_node_id": 349,
+      "to_node_id": 351,
+      "from_change_id": "1fb213f6-1c73-4599-a45f-f54d76bbd80d",
+      "to_change_id": "195c6938-e408-452a-9263-c5f08ad4c265",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Research finding",
+      "created_at": "2026-07-18T12:39:11.817854-07:00"
+    },
+    {
+      "id": 341,
+      "from_node_id": 350,
+      "to_node_id": 352,
+      "from_change_id": "bc97fe91-f412-4685-90fe-dacf86f17f5e",
+      "to_change_id": "d1528a31-2f83-424e-82a4-2941f22f1ce2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Cost data undercuts migration rationale",
+      "created_at": "2026-07-18T12:39:11.823669-07:00"
+    },
+    {
+      "id": 342,
+      "from_node_id": 351,
+      "to_node_id": 352,
+      "from_change_id": "195c6938-e408-452a-9263-c5f08ad4c265",
+      "to_change_id": "d1528a31-2f83-424e-82a4-2941f22f1ce2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "More cores would not fix the bottleneck",
+      "created_at": "2026-07-18T12:39:11.828905-07:00"
+    },
+    {
+      "id": 343,
+      "from_node_id": 349,
+      "to_node_id": 353,
+      "from_change_id": "1fb213f6-1c73-4599-a45f-f54d76bbd80d",
+      "to_change_id": "c4ba09fa-d134-4cc5-a240-31b02aa57551",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Corrected task source on staging",
+      "created_at": "2026-07-18T12:44:54.129581-07:00"
+    },
+    {
+      "id": 344,
+      "from_node_id": 353,
+      "to_node_id": 352,
+      "from_change_id": "c4ba09fa-d134-4cc5-a240-31b02aa57551",
+      "to_change_id": "d1528a31-2f83-424e-82a4-2941f22f1ce2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Issue scope corroborates the decision",
+      "created_at": "2026-07-18T12:44:54.135731-07:00"
+    },
+    {
+      "id": 345,
+      "from_node_id": 352,
+      "to_node_id": 354,
+      "from_change_id": "d1528a31-2f83-424e-82a4-2941f22f1ce2",
+      "to_change_id": "e5e44678-66ff-4d69-bdf7-8034d5432ff5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision implemented as plan + issue triage",
+      "created_at": "2026-07-18T12:44:54.141946-07:00"
+    },
+    {
+      "id": 346,
+      "from_node_id": 356,
+      "to_node_id": 355,
+      "from_change_id": "bf251f4f-6c07-4312-8f9c-d35fb18409ac",
+      "to_change_id": "36c7cede-0e5a-42a3-838b-e78ca36be712",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "outcome of the fix action",
+      "created_at": "2026-07-18T16:45:54.250305-07:00"
+    },
+    {
+      "id": 347,
+      "from_node_id": 355,
+      "to_node_id": 356,
+      "from_change_id": "36c7cede-0e5a-42a3-838b-e78ca36be712",
+      "to_change_id": "bf251f4f-6c07-4312-8f9c-d35fb18409ac",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "action produced this outcome",
+      "created_at": "2026-07-18T16:45:59.646476-07:00"
     }
   ],
   "documents": [

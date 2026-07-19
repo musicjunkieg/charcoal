@@ -1,5 +1,21 @@
 [
   {
+    "hash": "9517fb9a9a31a06c4371f7306a0d963e566230ae",
+    "short_hash": "9517fb9",
+    "author": "Bryan Guffey",
+    "date": "2026-07-18T16:45:45-07:00",
+    "message": "fix(#192): close batch-insert test gaps and correct UNNEST comments\n\nCode review found the UNNEST SQL correct but the tests around it had\nreal holes: the empty-slice test asserted a tautology instead of\nproving nothing was written, two batch tests shared a cleanup helper\nthat raced their own concurrently-running rows, and the 250-row test\nnever asserted event_type or amplifier_did so a $2/$3 bind\ntransposition would have gone undetected.\n\n- empty-slice test now seeds a row, counts before/after, and asserts\n  the count is unchanged\n- cleanup_batch_test_data takes a per-test marker so no test can\n  delete another concurrently-running test rows\n- 250-row test alternates event_type quote/repost by index and\n  asserts event_type + amplifier_did per row; verified by temporarily\n  swapping the $2/$3 binds (test failed as predicted) then reverting\n  (tests pass again)\n- corrected two inaccurate comments: UNNEST binds 8 arrays plus a\n  scalar (not 9), and the array-order guarantee is observed Postgres\n  behavior, not documented\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "9caefde17babc2879d5ef380689253af0b9aa3b2",
+    "short_hash": "9caefde",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T14:41:38-07:00",
+    "message": "fix(cost): address CodeRabbit PR #66 — engine-failure isolation, mismatch logging, batch latency (#186)\n\n- handler: run_one catches any per-slot Exception (not just decode errors) so an\n  engine.generate() failure returns an ok:false slot instead of failing the whole\n  asyncio.gather batch (CancelledError/GeneratorExit still propagate). +test.\n- burst: warn! at batch length-mismatch detection so the contract violation is\n  always visible even when a concurrent chunk cost-cap wins outcome precedence.\n- runpod client: classify_batch records the real observed batch latency instead\n  of 0, keeping classifier_request_latency_ms meaningful.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
     "hash": "a9824e5210aa577d2a2bcf501b1e2466464e3bcc",
     "short_hash": "a9824e5",
     "author": "Bryan Guffey",

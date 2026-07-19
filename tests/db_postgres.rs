@@ -164,6 +164,301 @@ async fn test_pg_account_score_upsert_and_rank() {
     assert!(ranked.iter().any(|s| s.did == "did:plc:pgtest1"));
 }
 
+/// Delete rows written by a batch-insert test (#216), scoped to the single
+/// `original_post_uri` marker the caller passes.
+///
+/// Each batch test MUST use its own distinct marker and pass only that
+/// marker here. These tests run concurrently (cargo test's default
+/// threading) and share TEST_USER, so a cleanup that touched more than one
+/// test's marker could delete rows a *different*, concurrently-running test
+/// had already inserted — the cleanup would protect against stale data from
+/// a previous run while introducing a live race against the current one.
+async fn cleanup_batch_test_data(url: &str, original_post_uri: &str) -> Result<()> {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url)
+        .await
+        .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
+
+    sqlx_core::query::query(
+        "DELETE FROM amplification_events WHERE user_did = $1 AND original_post_uri = $2",
+    )
+    .bind(TEST_USER)
+    .bind(original_post_uri)
+    .execute(&pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("cleanup: amplification_events (batch) delete failed: {e}"))?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_pg_batch_insert_matches_serial() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    cleanup_batch_test_data(&url, "at://did:plc:me/app.bsky.feed.post/b1")
+        .await
+        .unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let events = vec![
+        charcoal::db::models::NewAmplificationEvent {
+            event_type: "quote".to_string(),
+            amplifier_did: "did:plc:pgbatch1".to_string(),
+            amplifier_handle: "pgbatch1.bsky.social".to_string(),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/b1".to_string(),
+            amplifier_post_uri: Some("at://did:plc:pgbatch1/app.bsky.feed.post/q1".to_string()),
+            amplifier_text: Some("batched quote".to_string()),
+            original_post_text: Some("the original".to_string()),
+            context_score: Some(0.42),
+        },
+        charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: "did:plc:pgbatch2".to_string(),
+            amplifier_handle: "pgbatch2.bsky.social".to_string(),
+            original_post_uri: "at://did:plc:me/app.bsky.feed.post/b1".to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: None,
+            original_post_text: None,
+            context_score: None,
+        },
+    ];
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+
+    // Filter to this test's marker post URI rather than trusting the raw
+    // top-10: other batch-insert tests in this file share TEST_USER and run
+    // concurrently (cargo test's default threading), so get_recent_events's
+    // global DESC ordering can otherwise surface unrelated rows here.
+    let stored: Vec<_> = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == "at://did:plc:me/app.bsky.feed.post/b1")
+        .collect();
+    assert_eq!(stored.len(), 2);
+
+    let first = stored
+        .iter()
+        .find(|e| e.amplifier_handle == "pgbatch1.bsky.social")
+        .expect("first event missing");
+    let second = stored
+        .iter()
+        .find(|e| e.amplifier_handle == "pgbatch2.bsky.social")
+        .expect("second event missing");
+
+    assert!(first.id < second.id, "ids must ascend in input order");
+    assert_eq!(first.amplifier_text, Some("batched quote".to_string()));
+    assert_eq!(first.original_post_text, Some("the original".to_string()));
+    assert_eq!(first.context_score, Some(0.42));
+    assert_eq!(
+        first.amplifier_post_uri,
+        Some("at://did:plc:pgbatch1/app.bsky.feed.post/q1".to_string())
+    );
+    assert_eq!(second.amplifier_text, None);
+    assert_eq!(second.context_score, None);
+    assert_eq!(second.amplifier_post_uri, None);
+}
+
+#[tokio::test]
+async fn test_pg_batch_insert_empty_slice_is_noop() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    const MARKER: &str = "at://did:plc:me/app.bsky.feed.post/pgemptybatch";
+    cleanup_batch_test_data(&url, MARKER).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // Seed one real row under this test's marker first. Without a seed, "no
+    // row with this marker" is true both before and after an empty-slice
+    // call, so it can't distinguish "wrote nothing" from "wrote something
+    // wrong" — the count has to move for a spurious insert to be visible.
+    db.insert_amplification_event(
+        TEST_USER,
+        "repost",
+        "did:plc:pgemptybatch_seed",
+        "pgemptybatch_seed.bsky.social",
+        MARKER,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let count_before = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .count();
+    assert_eq!(count_before, 1, "seed row must be visible before the call");
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &[])
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+
+    // An empty-slice call must write NOTHING: the row count under this
+    // marker must be unchanged from before the call, not just "the marker
+    // string used by this assertion is absent" (which a garbage insert with
+    // a different URI would satisfy just as well).
+    let count_after = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .count();
+    assert_eq!(
+        count_after, count_before,
+        "empty-slice insert must not change the row count"
+    );
+}
+
+#[tokio::test]
+async fn test_pg_batch_insert_many_rows_preserve_own_values() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    const MARKER: &str = "at://did:plc:me/app.bsky.feed.post/pgorder1";
+    cleanup_batch_test_data(&url, MARKER).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // 250 rows (mirrors the SQLite test, which chunks at 100/statement).
+    // Postgres has no chunk boundary — UNNEST binds 8 arrays plus the $1
+    // scalar regardless of row count — but this is still the test that
+    // would catch a column-order mistake in the UNNEST rewrite: a
+    // mismatched array would smear one row's values onto another (or onto
+    // the wrong column) rather than failing outright.
+    //
+    // event_type alternates quote/repost by row index (rather than staying
+    // constant) and amplifier_did is per-row unique, and both are asserted
+    // below — this is what catches a $2/$3 (event_type/amplifier_did) bind
+    // transposition specifically: with a constant event_type and an
+    // unasserted amplifier_did, that exact swap would land
+    // event_type="did:plc:pgorderNNNN" / amplifier_did="repost" on every
+    // row and no assertion here would notice.
+    let events: Vec<charcoal::db::models::NewAmplificationEvent> = (0..250)
+        .map(|i| charcoal::db::models::NewAmplificationEvent {
+            event_type: if i % 2 == 0 { "repost" } else { "quote" }.to_string(),
+            amplifier_did: format!("did:plc:pgorder{:04}", i),
+            amplifier_handle: format!("pgorder{:04}.bsky.social", i),
+            original_post_uri: MARKER.to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: Some(format!("text-{}", i)),
+            original_post_text: None,
+            context_score: Some(i as f64 / 1000.0),
+        })
+        .collect();
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 250);
+
+    let stored = db.get_recent_events(TEST_USER, 1000).await.unwrap();
+    let stored: Vec<_> = stored
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .collect();
+    assert_eq!(stored.len(), 250);
+
+    // Every row must keep its own field values — check by id order, which is
+    // input order per the determinism contract.
+    let mut by_id = stored;
+    by_id.sort_by_key(|e| e.id);
+    for (i, e) in by_id.iter().enumerate() {
+        let expected_event_type = if i % 2 == 0 { "repost" } else { "quote" };
+        assert_eq!(e.event_type, expected_event_type);
+        assert_eq!(e.amplifier_did, format!("did:plc:pgorder{:04}", i));
+        assert_eq!(e.amplifier_handle, format!("pgorder{:04}.bsky.social", i));
+        assert_eq!(e.amplifier_text, Some(format!("text-{}", i)));
+        assert_eq!(e.context_score, Some(i as f64 / 1000.0));
+    }
+}
+
+#[tokio::test]
+async fn test_pg_get_recent_events_breaks_detected_at_ties_by_id_desc() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    const MARKER: &str = "at://did:plc:me/app.bsky.feed.post/pgtie";
+    cleanup_batch_test_data(&url, MARKER).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // A single batch insert gives every row the same detected_at (#216): the
+    // whole batch runs in one transaction, so `NOW()` is captured once, not
+    // once per row. `get_recent_events` ordering by `detected_at DESC` alone
+    // would then leave same-batch rows in an arbitrary (storage-dependent)
+    // order — verified empirically against this same live Postgres instance
+    // (250 rows, 1 distinct timestamp, non-sequential id order returned).
+    // The `id DESC` tiebreaker makes "newest first" deterministic: ids
+    // ascend in input order, so the returned order must be the exact reverse
+    // of insertion order.
+    let events: Vec<charcoal::db::models::NewAmplificationEvent> = (0..20)
+        .map(|i| charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: format!("did:plc:pgtie{:04}", i),
+            amplifier_handle: format!("pgtie{:04}.bsky.social", i),
+            original_post_uri: MARKER.to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: None,
+            original_post_text: None,
+            context_score: None,
+        })
+        .collect();
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 20);
+
+    let stored: Vec<_> = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .collect();
+    assert_eq!(stored.len(), 20);
+
+    // All rows share one detected_at — prove the shared-timestamp premise,
+    // not just assert the assumed consequence.
+    let distinct_timestamps: std::collections::HashSet<_> =
+        stored.iter().map(|e| e.detected_at.clone()).collect();
+    assert_eq!(
+        distinct_timestamps.len(),
+        1,
+        "batch insert must share one detected_at across all rows"
+    );
+
+    // With detected_at tied, the tiebreaker must produce strictly descending
+    // ids — i.e. the exact reverse of insertion order.
+    for pair in stored.windows(2) {
+        assert!(
+            pair[0].id > pair[1].id,
+            "ids must be strictly descending: {} then {}",
+            pair[0].id,
+            pair[1].id
+        );
+    }
+    assert_eq!(stored[0].amplifier_did, "did:plc:pgtie0019");
+    assert_eq!(stored[19].amplifier_did, "did:plc:pgtie0000");
+}
+
 #[tokio::test]
 async fn test_pg_amplification_event() {
     let Some(url) = database_url() else {

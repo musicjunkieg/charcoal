@@ -18,8 +18,8 @@ use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::Database;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
@@ -468,6 +468,79 @@ impl Database for PgDatabase {
         Ok(row.get::<i64, _>(0))
     }
 
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        // UNNEST binds 8 arrays plus $1 (user_did, a single scalar broadcast
+        // by the SELECT to every row) regardless of row count, so this is one
+        // round-trip for any batch size and never approaches Postgres's
+        // 65535-parameter statement cap.
+        //
+        // `WITH ORDINALITY` + `ORDER BY ord` is load-bearing, not decorative.
+        // Postgres does NOT guarantee row order for INSERT ... SELECT without
+        // an explicit ORDER BY — the planner is free to reorder. Our contract
+        // requires serial ids to ascend in slice order, so we cannot rely on
+        // the observed behavior that UNNEST happens to emit in array order.
+        // WITH ORDINALITY numbers the elements at their source, and ordering
+        // by that number makes the guarantee explicit instead of incidental.
+        let event_types: Vec<String> = events.iter().map(|e| e.event_type.clone()).collect();
+        let amplifier_dids: Vec<String> = events.iter().map(|e| e.amplifier_did.clone()).collect();
+        let amplifier_handles: Vec<String> =
+            events.iter().map(|e| e.amplifier_handle.clone()).collect();
+        let original_post_uris: Vec<String> =
+            events.iter().map(|e| e.original_post_uri.clone()).collect();
+        let amplifier_post_uris: Vec<Option<String>> = events
+            .iter()
+            .map(|e| e.amplifier_post_uri.clone())
+            .collect();
+        let amplifier_texts: Vec<Option<String>> =
+            events.iter().map(|e| e.amplifier_text.clone()).collect();
+        let original_post_texts: Vec<Option<String>> = events
+            .iter()
+            .map(|e| e.original_post_text.clone())
+            .collect();
+        let context_scores: Vec<Option<f64>> = events.iter().map(|e| e.context_score).collect();
+
+        // All eight arrays carry explicit ::text[]/::float8[] casts so
+        // Postgres can type UNNEST's output columns without inspecting
+        // values. That's required for context_score in particular — an
+        // all-NULL array has no inferable element type, and Postgres
+        // rejects it without the explicit ::float8[] cast.
+        let result = sqlx_core::query::query(
+            "INSERT INTO amplification_events
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                 amplifier_post_uri, amplifier_text, original_post_text, context_score)
+             SELECT $1, t.event_type, t.amplifier_did, t.amplifier_handle, t.original_post_uri,
+                    t.amplifier_post_uri, t.amplifier_text, t.original_post_text, t.context_score
+             FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[],
+                         $6::text[], $7::text[], $8::text[], $9::float8[])
+                  WITH ORDINALITY
+                  AS t(event_type, amplifier_did, amplifier_handle, original_post_uri,
+                       amplifier_post_uri, amplifier_text, original_post_text, context_score,
+                       ord)
+             ORDER BY t.ord",
+        )
+        .bind(user_did)
+        .bind(&event_types)
+        .bind(&amplifier_dids)
+        .bind(&amplifier_handles)
+        .bind(&original_post_uris)
+        .bind(&amplifier_post_uris)
+        .bind(&amplifier_texts)
+        .bind(&original_post_texts)
+        .bind(&context_scores)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() as usize)
+    }
+
     async fn get_recent_events(
         &self,
         user_did: &str,
@@ -484,7 +557,7 @@ impl Database for PgDatabase {
                     original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1
-             ORDER BY detected_at DESC
+             ORDER BY detected_at DESC, id DESC
              LIMIT $2",
         )
         .bind(user_did)
@@ -551,7 +624,7 @@ impl Database for PgDatabase {
                     followers_fetched, followers_scored, original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1 AND amplifier_did = $2
-             ORDER BY detected_at DESC",
+             ORDER BY detected_at DESC, id DESC",
         )
         .bind(user_did)
         .bind(amplifier_did)
