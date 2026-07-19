@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-19T06:47:54.736500+00:00",
+  "exported_at": "2026-07-19T14:09:34.200261+00:00",
   "issues": [
     {
       "id": 219,
@@ -266,6 +266,31 @@
         {
           "content": "TASK 3 GATE RESOLVED — VIABLE. Ran a throwaway ort spike (examples/nli_batch_spike.rs, deleted, not committed) loading the real Xenova/nli-deberta-v3-xsmall model_quantized.onnx and running a [2, max_len] batched inference.\n\nRESULT: batch axis IS dynamic. Baseline [1,27]->[1,3]; batched [2,27]->[2,3]; NO segfault (clean exit 0). Per-row logits sensible (row0 attack hypothesis entailment-high, row1 support neutral). So the nli.rs:181-184 segfault warning is specifically about EXTRA INPUTS (token_type_ids), not the batch dimension — batching the 5 hypotheses into one [5, max_len] forward pass is safe to build.\n\nCAVEAT for when Task 3 is implemented: the batched path pads shorter hypotheses to max_len; equivalence to the current 5x [1, seq] single runs depends on the model respecting attention_mask for pad positions (DeBERTa does). The TDD must include an equivalence test: batched [5,max_len] scores == 5 sequential single-item scores within float tolerance, for the same premise. That is the correctness heart, same shape as the #216 batch-insert equivalence.\n\nTask 3 unblocked (was GATED). Remaining #213: 3 batch NLI [NOW VIABLE], 4 Stage1/2 double-fetch [still GATED on terminal-rate measurement from a staging scan], 5 is_score_stale N+1 [starting now].",
           "created_at": "2026-07-19T06:36:33.033416+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 5 COMPLETE (commit 2e36d13, branch feat/bulk-staleness-lookup, not pushed). Killed the is_score_stale N+1.\n\nNew Database::get_fresh_scored_dids(user, days) — one query returning DIDs scored within the window (exact complement of is_score_stale). Each discovery loop fetches it once and tests membership in memory:\n- sweep.rs second-degree filter\n- amplification.rs amplifier loop (:276) AND follower loop (:409) — ONE fetch covers both (scores not written until Phase C, set stable across them).\n\nCutoff matches is_score_stale per backend (SQLite datetime, Postgres make_interval), inverted to >=. Error -> empty fresh set -> all treated stale, byte-identical to the old .unwrap_or(true).\n\nTDD (RED-first): tests/unit_staleness.rs proves bulk-set membership == !is_score_stale for the same data incl. the 7/8-day boundary + user-scoping; live-Postgres parity test test_pg_get_fresh_scored_dids_matches_is_score_stale exercises the make_interval path.\n\nVERIFIED: web 0 failures; 14/14 live Postgres; clippy clean web/default/postgres; fmt clean.\n\n#213 STATUS: Task 1 merged (#79), Task 2 merged (#80), Task 5 done (this). Task 3 GATE CLEARED (NLI batch axis is dynamic, viable — verified by spike). Task 4 still GATED on Stage-1 terminal-rate measurement from a staging scan.",
+          "created_at": "2026-07-19T06:48:08.271474+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 5 PUSHED — PR #81 into staging: https://github.com/musicjunkieg/charcoal/pull/81. Real Check,Lint&Test gate PASSED (2m11s); analyze/CodeQL green; CodeRabbit review in progress. Not merged.",
+          "created_at": "2026-07-19T06:52:41.404497+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 3 COMPLETE (commit 601e613, branch feat/batch-nli-hypotheses, not pushed). Bryan ACCEPTED the small score shift.\n\nBatched the 5 NLI hypotheses into one padded [5, max_len] forward pass, replacing 5 sequential single-item inferences. ~5x fewer NLI ONNX runs; biggest in the amplification event loop (NLI per event).\n\nGATE: spike confirmed the quantized nli-deberta-v3-xsmall export has a dynamic batch axis + no segfault (segfault warning is about extra inputs like token_type_ids, still never sent).\n\nACCEPTED SHIFT: export is not perfectly padding-invariant -> batched differs from unpadded single by ~0.002-0.008/hypothesis, ~0.006 on final context_score. Systematic (batched reads lower), not float noise. Bryan accepted: within model quantization noise, immaterial to tiers (8/15/35), worth the 5x. NOT hidden — model-gated unit test asserts batched == 5x-single within a documented 0.02 tolerance.\n\nscore_entailments_batched subsumes the old score_entailment (batch-of-1 = old path exactly). VERIFIED: web 0 failures; clippy clean web/default/postgres; fmt clean; NLI equivalence test green locally with model present.\n\n#213 STATUS: Tasks 1 (#79 merged), 2 (#80 merged), 5 (#81 open/approved), 3 (this, open). ONLY Task 4 remains — GATED on Stage-1 terminal-rate measurement from the staging scan currently running.",
+          "created_at": "2026-07-19T07:11:38.584022+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 3 PUSHED — PR #82 into staging: https://github.com/musicjunkieg/charcoal/pull/82. Real Check,Lint&Test gate PASSED (3m19s); analyze/CodeQL green; CodeRabbit review in progress. PR body prominently documents the accepted ~0.006 context_score shift + the 0.02 test tolerance. Not merged (merge-hold until staging scan done).",
+          "created_at": "2026-07-19T07:16:57.374709+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "STAGING SCAN COMPLETE (2026-07-19, accounts_scored=8174, events=3090, degraded=true) — Task 4 gate RESOLVED + Task 1/2 production validation.\n\n=== TASK 4 GATE: VIABLE (proceed) ===\nStage-1 terminal rate across gather-window samples: 20.2%, 18.7%, 30.6% (later/smaller sample) — clusters ~18-20%. LOW. Since ~80% of accounts proceed to Stage 2 and pay the 50-post fetch anyway, collapsing the double-fetch (fetch 50 once, slice first 25 for Stage-1) saves the redundant 25-fetch for the majority. The \"high terminal rate inverts the economics\" concern does NOT apply. Task 4 is unblocked — build it.\n\n=== TASK 1 VALIDATED IN PROD (bonus) ===\nfinalize per-account timing on this run: median 1.072s, p90 1.422s, mean 1.132s (469-sample finalize window). Pre-Task-1 baseline was median 1.56s. => ~31% per-account finalize reduction, matching the predicted embedding-move win. Task 1 (#79) confirmed working — the embedding is out of the serial finalize loop.\n\n=== TASK 2 CHECK (bonus) ===\nZERO real rate-limit/429 lines in captured logs (an initial grep hit \"429\" inside timestamp microseconds — false positive). 8-concurrent follower fetches ran cleanly; scan completed. CAVEAT: railway CLI caps historical fetch at ~500 lines, so I could NOT fully inspect the amplification/discovery window where 429s would appear — but nothing rate-limited surfaced and the run completed. Low confidence it is fully 429-free, high confidence no systemic rate-limiting.\n\n=== NOTES ===\n- degraded=true cause not determined from capped logs (could be per-account gather skips / transient / cost-cap — NOT necessarily 429s). Worth a look but not blocking.\n- Scan was HUGE: 8174 accounts scored, ran ~06:39->11:15 UTC (~4.5h), dominated by amplification follower-fetch + gather + a long finalize (8174 accounts even at 1.07s each ≈ 2.4h). This is the 1465-amplifier account.\n\n#213 STATUS: Tasks 1(#79 merged),2(#80 merged),3(#82 open+approved),5(#81 open+approved). Task 4 GATE CLEARED -> only remaining build. All merges still HELD pending Bryan.",
+          "created_at": "2026-07-19T14:03:53.582009+00:00",
           "kind": "note"
         }
       ],
