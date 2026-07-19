@@ -32,6 +32,8 @@ use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome, Stage1Ou
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::{mean_embedding, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
+use tracing::warn;
+
 use crate::toxicity::ensemble::{TwoStageToxicityScorer, ONNX_CLEAN_THRESHOLD};
 use crate::toxicity::traits::ToxicityScorer;
 
@@ -104,6 +106,80 @@ impl CleanPassScorer for TwoStageToxicityScorer {
         // ONNX scorer, never the Stage-2 classifier).
         TwoStageToxicityScorer::onnx_clean_pass(self, texts).await
     }
+}
+
+/// Score every text, isolating per-post failures so one bad post cannot cost
+/// the account its entire scan (#221).
+///
+/// Scoring is batched per account for throughput. That made #220's damage
+/// wildly disproportionate: a single unscoreable post failed the whole batch,
+/// `gather_account` returned `Err`, and the account was dropped along with all
+/// of its perfectly scoreable posts — turning a 4.3% post-level failure rate
+/// into 100% account loss for 34 accounts.
+///
+/// Fast path is unchanged: one batch call. Only on failure does this fall back
+/// to scoring each text individually, so a healthy scan pays nothing.
+///
+/// `None` marks a text that could not be scored even alone. It is deliberately
+/// NOT a fallback number: `onnx_score` feeds an early-exit gate in
+/// `scoring::profile` that reads `< ONNX_CLEAN_THRESHOLD` as clean (a low
+/// sentinel would silently pass a post nobody scored) and it drives evidence
+/// sorting (a high sentinel would put an unreadable post at the top of the
+/// evidence list). Absence is the only honest encoding, and it leaves the
+/// caller to decide what to do about it.
+///
+/// Never returns `Err`: propagating one here would reopen the exact
+/// account-loss path this exists to close.
+pub async fn clean_pass_isolated(
+    clean_pass: &dyn CleanPassScorer,
+    texts: &[String],
+) -> Vec<Option<f64>> {
+    if texts.is_empty() {
+        return Vec::new();
+    }
+
+    match clean_pass.onnx_clean_pass(texts).await {
+        Ok(scores) if scores.len() == texts.len() => scores.into_iter().map(Some).collect(),
+        Ok(scores) => {
+            // A length mismatch means we cannot trust the positional mapping,
+            // and mis-attributing one post's score to another is worse than
+            // failing: nothing would look wrong. Fall back to per-item, where
+            // each score is unambiguously its own.
+            warn!(
+                returned = scores.len(),
+                expected = texts.len(),
+                "clean pass returned the wrong number of scores — retrying per post"
+            );
+            score_individually(clean_pass, texts).await
+        }
+        Err(e) => {
+            warn!(
+                posts = texts.len(),
+                error = %format!("{e:#}"),
+                "clean pass failed for the batch — retrying per post to isolate the bad one"
+            );
+            score_individually(clean_pass, texts).await
+        }
+    }
+}
+
+/// Score one text at a time so a single failure is contained to that text.
+async fn score_individually(
+    clean_pass: &dyn CleanPassScorer,
+    texts: &[String],
+) -> Vec<Option<f64>> {
+    let mut out = Vec::with_capacity(texts.len());
+    for text in texts {
+        // Deliberately sequential: this path only runs after a batch already
+        // failed, so it is rare, and the ONNX session is behind a global mutex
+        // anyway — concurrency here would buy nothing but contention.
+        let slice = std::slice::from_ref(text);
+        match clean_pass.onnx_clean_pass(slice).await {
+            Ok(scores) if scores.len() == 1 => out.push(Some(scores[0])),
+            _ => out.push(None),
+        }
+    }
+    out
 }
 
 /// Per-account inputs Phase A needs in order to build the `AccountInput` blob.
@@ -242,19 +318,52 @@ pub async fn gather_account(
 
     // Run the ONNX clean-pass over the envelope texts and split each post into
     // clean (done) vs survivor (pending) based on the envelope-based score.
-    let onnx_scores = clean_pass.onnx_clean_pass(&envelope_texts).await?;
-    anyhow::ensure!(
-        onnx_scores.len() == rows.len(),
-        "onnx_clean_pass returned {} scores for {} posts",
-        onnx_scores.len(),
-        rows.len()
-    );
-    for (row, onnx_score) in rows.iter_mut().zip(onnx_scores.iter()) {
-        row.onnx_score = *onnx_score;
-        if *onnx_score < ONNX_CLEAN_THRESHOLD {
-            mark_clean(row);
+    //
+    // Per-post isolated (#221): this used to be `.await?`, so ONE unscoreable
+    // post failed the batch, propagated out of `gather_account`, and cost the
+    // account its whole scan. Now a bad post is dropped and its neighbours
+    // survive.
+    let onnx_scores = clean_pass_isolated(clean_pass, &envelope_texts).await;
+    debug_assert_eq!(onnx_scores.len(), rows.len());
+
+    let total_posts = rows.len();
+    let mut scored_rows = Vec::with_capacity(total_posts);
+    for (mut row, onnx_score) in rows.into_iter().zip(onnx_scores) {
+        // An unscoreable post is DROPPED rather than given a fallback score:
+        // any sentinel would be wrong somewhere (see `clean_pass_isolated`).
+        let Some(onnx_score) = onnx_score else {
+            continue;
+        };
+        row.onnx_score = onnx_score;
+        if onnx_score < ONNX_CLEAN_THRESHOLD {
+            mark_clean(&mut row);
         }
         // else: leave as a pending survivor (verdict fields stay None).
+        scored_rows.push(row);
+    }
+    let dropped = total_posts - scored_rows.len();
+    let rows = scored_rows;
+
+    if dropped > 0 {
+        warn!(
+            account_did = inputs.account_did,
+            dropped,
+            total_posts,
+            "dropped unscoreable posts — the account is still scored on the rest"
+        );
+    }
+
+    // Every post unscoreable means we have no toxicity signal at all for this
+    // account. Scoring it anyway would emit a confident-looking result derived
+    // from nothing, so fail here and let the caller record it as a skip — a
+    // known gap is better than a fabricated score. This is the one case where
+    // the account is still lost, and it is now a genuine absence of data rather
+    // than one bad post poisoning the batch.
+    if rows.is_empty() && total_posts > 0 {
+        anyhow::bail!(
+            "all {total_posts} posts were unscoreable by the ONNX clean pass — \
+             no toxicity signal available for this account"
+        );
     }
 
     // Precompute the target mean embedding HERE (#213), where it overlaps the
