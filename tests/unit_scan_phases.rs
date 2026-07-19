@@ -702,6 +702,7 @@ mod gather_tests {
             direct_pairs: None,
             graph_distance: None,
             embedder: None,
+            has_protected_embedding: false,
         }
     }
 

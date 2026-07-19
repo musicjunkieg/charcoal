@@ -129,6 +129,7 @@ fn gather_inputs<'a>(
         direct_pairs: candidate.direct_pairs.as_deref(),
         graph_distance: candidate.graph_distance,
         embedder: deps.embedder,
+        has_protected_embedding: deps.protected_embedding.is_some(),
     }
 }
 

@@ -134,6 +134,13 @@ pub struct GatherInputs<'a> {
     /// in the Phase-C finalize loop. `None` disables the precompute (Phase C
     /// then embeds at score time or falls back to TF-IDF).
     pub embedder: Option<&'a SentenceEmbedder>,
+    /// Whether the scan has a protected-user embedding. The precomputed target
+    /// vector is only ever consumed by Phase C when a protected embedding also
+    /// exists; without one, Phase C scores via TF-IDF regardless. So we skip
+    /// the precompute entirely when this is false — otherwise Phase A would run
+    /// pointless inference AND an embed failure would `?`-skip the account,
+    /// where TF-IDF would have scored it fine.
+    pub has_protected_embedding: bool,
 }
 
 /// Gather Phase A work for a single account.
@@ -256,15 +263,21 @@ pub async fn gather_account(
     // Uses the SAME `select_fingerprint_posts` selection Phase C would, so the
     // cosine computed downstream is byte-identical. Computed before `sample` is
     // moved into the blob below.
-    let target_embedding = if let Some(emb) = inputs.embedder {
-        let fp_posts = select_fingerprint_posts(&sample);
-        if fp_posts.is_empty() {
-            None
-        } else {
-            Some(mean_embedding(&emb.embed_batch(&fp_posts).await?))
+    // Gate on BOTH an embedder AND a protected embedding: Phase C consumes the
+    // precomputed vector only when a protected embedding exists, and otherwise
+    // scores via TF-IDF. Computing it without a protected embedding would be
+    // wasted inference and — because of the `?` below — would turn an embed
+    // failure into a skipped account that TF-IDF would have scored (#213).
+    let target_embedding = match (inputs.embedder, inputs.has_protected_embedding) {
+        (Some(emb), true) => {
+            let fp_posts = select_fingerprint_posts(&sample);
+            if fp_posts.is_empty() {
+                None
+            } else {
+                Some(mean_embedding(&emb.embed_batch(&fp_posts).await?))
+            }
         }
-    } else {
-        None
+        _ => None,
     };
 
     // Batch the writes: one stash, one enqueue. Stash the AccountInput blob
