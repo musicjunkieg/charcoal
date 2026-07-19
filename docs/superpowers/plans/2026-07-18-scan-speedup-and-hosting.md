@@ -6,7 +6,7 @@
 
 **Headline:** The two tasks do *not* reinforce each other. The research inverted the premise. Part 1 explains why; Part 2 is the work that actually pays.
 
-**Chainlink issues:** #188 (hosting, evaluated → recommend decline) · #178 (**closed** — already shipped) · **#189** (the real speedup work, successor to #178) · related: #179, #180, #182, #184.
+**Chainlink issues:** #188 (hosting — **closed 2026-07-19 as evaluated-declined**) · #178 (**closed** — already shipped) · **#213** (the real speedup work, successor to #178; was #189 before the 2026-07-19 DB reconciliation) · related: #179, #180, #182, #184.
 
 > **Branch note:** this plan is written against `staging`, which is where the live chainlink DB and the current code both live. An earlier draft was written on `main` and got two things wrong as a result — see "Corrections" at the end.
 
@@ -73,7 +73,9 @@ This is the finding that really settles it. The scan is not core-starved. From t
 - **The serial sweep loops the task assumed are already fixed.** `sweep.rs:95-107` and `amplification.rs:347-364` both use `buffer_unordered(concurrency)`. That was landed under the real #178. The serial `for` loop only survives on `main`, which is behind.
 - **The real serialization is a global mutex, not a core shortage.** All three ONNX sessions are `Arc<Mutex<Session>>` (`toxicity/onnx.rs:45`, `topics/embeddings.rs:31`, `scoring/nli.rs:100`). Only one inference of a given model runs **process-wide** at a time, regardless of gather concurrency. Adding cores does not widen this.
 - **`ort` already parallelizes intra-op across cores** (no `with_intra_threads` override anywhere), so a single forward pass already uses the box. Extra cores give sub-linear returns.
-- **Finalize's ~74 min is one misplaced `embed_batch`.** `profile.rs:458` runs up to 50 posts through MiniLM per account, inside the serial `run_finalize` loop (`scan_phases/mod.rs:430`), holding that global mutex. 2900 × ~1.5s ≈ 72 min — it matches the measurement exactly.
+- **Finalize is one misplaced `embed_batch`.** `profile.rs:458` runs up to 50 posts through MiniLM per account, inside the serial `run_finalize` loop (`scan_phases/mod.rs:430`), holding that global mutex.
+  **Verified against a real run** (2026-07-18 staging, Railway deploy logs): 473 accounts, finalize 03:12:24 → 03:21:14 = **8m50s**, at a median **1.56s/account** (p90 1.61s, max 1.98s). That distribution is far too tight for network or DB, which jitter — it is deterministic CPU.
+  The **~74 min / 2900-account** figure quoted elsewhere in this plan comes from prior-session notes dated 2026-06-26, which fall outside Railway's log retention and could **not** be verified. The per-account cost is the number to trust — it reproduced exactly across both runs — so the mechanism is confirmed even though the totals are not.
 - **DB round-trips are real but small.** Finalize does 3 queries/account; co-locating the DB would save single-digit minutes, an order of magnitude less than the ONNX and HTTP serialization.
 
 **Conclusion:** the scan is bound by *where work is scheduled*, not by how much CPU is available. Part 2 fixes that for free. A hosting move would have cost money and changed nothing.
@@ -256,6 +258,6 @@ Finalize is a serial loop; gather is I/O-bound at concurrency 8 with idle CPU. G
 The first draft of this plan was written from `main`, whose `.chainlink/issues.db` is a stale snapshot ending at #177. Two things changed on re-reading the real issues via the CLI:
 
 1. **#188's substance lives in a *comment*, not the description** — so the export's empty `description` field made it look like a bare title. The comment contains the trigger quote, six explicit requirements, the deliverable format, the soot-v2 note, and the "I/O-bound not CPU-bound, DB is the crux" line. §1.4a and §1.5 exist because of it. The conclusion did not change; it got better supported, and the "these two tasks reinforce each other" framing turned out to be contradicted by the issue itself.
-2. **#178 was already implemented and has been closed.** Verified on `staging`: `sweep.rs:105` and `amplification.rs:361` both use `buffer_unordered(concurrency.clamp(1,64))` with `sort_by_key`, landed in `cd6ae9c` / `1d367e1` / `dd07ad5` (PR #62). The serial loop in its title only survives on `main`. The residual serial loops are in `constellation/client.rs` and `web/scan_job.rs`, which is now Task 2 under **#189**.
+2. **#178 was already implemented and has been closed.** Verified on `staging`: `sweep.rs:105` and `amplification.rs:361` both use `buffer_unordered(concurrency.clamp(1,64))` with `sort_by_key`, landed in `cd6ae9c` / `1d367e1` / `dd07ad5` (PR #62). The serial loop in its title only survives on `main`. The residual serial loops are in `constellation/client.rs` and `web/scan_job.rs`, which is now Task 2 under **#213**.
 
 Also worth knowing for next time: `chainlink import` assigns IDs in file order, and the export is sorted **descending** — importing it as-is silently reverses every ID (#188→#1), breaking every cross-reference in the issue bodies. Sort ascending first. And `chainlink issue close` appends the raw issue title to `CHANGELOG.md`, which for an already-shipped issue produces a duplicate entry.
