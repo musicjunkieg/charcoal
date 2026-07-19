@@ -714,6 +714,85 @@ mod gather_tests {
         Arc::new(db)
     }
 
+    // Clean-pass that fails the WHOLE batch if it contains the poison text —
+    // the shape of the #220 ONNX failure. Succeeds for any batch without it,
+    // so per-item retries can still score the good posts.
+    struct PoisonCleanPass(String);
+
+    #[async_trait]
+    impl CleanPassScorer for PoisonCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            if texts.iter().any(|t| t.contains(&self.0)) {
+                anyhow::bail!("ONNX inference failed: invalid expand shape");
+            }
+            Ok(vec![0.0; texts.len()])
+        }
+    }
+
+    // ── #221: one unscoreable post must not cost the whole account ──
+    //
+    // This is the end-to-end proof that `clean_pass_isolated` is actually WIRED
+    // IN. Before #221 the call site was `.await?`, so a poisoned batch
+    // propagated out of `gather_account` and the caller dropped the account
+    // along with every one of its scoreable posts — a 4.3% post failure rate
+    // became 100% account loss for 34 accounts on the 2026-07-19 scan.
+    #[tokio::test]
+    async fn one_poisoned_post_no_longer_costs_the_whole_account() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // Enough posts to clear the Stage-1 minimum, exactly one poisoned.
+        let mut originals: Vec<_> = (0..20)
+            .map(|i| make_post(&format!("at://p/{i}"), "supernova remnants and pulsars"))
+            .collect();
+        originals.push(make_post("at://p/poison", "POISON breaks the batch"));
+        let total = originals.len();
+
+        let sample = PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: total,
+        };
+        let fetcher = CannedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        // Non-clean Stage-1 scores so the account does NOT early-exit — we need
+        // it to reach the Proceed branch where the batched clean pass runs.
+        let scorer = FixedScorer(0.9);
+        let clean = PoisonCleanPass("POISON".to_string());
+
+        let outcome = gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await;
+
+        // Before #221 this was Err and the account vanished from the scan.
+        let outcome = outcome.expect("one unscoreable post must not fail the account");
+        assert_eq!(
+            outcome,
+            charcoal::pipeline::scan_phases::gather::GatherOutcome::Enqueued,
+            "the account must proceed to Phase C, not terminate at Stage 1"
+        );
+
+        // The account was staged, so Phase C will still score it.
+        let staged = db.list_scan_accounts(TEST_USER).await.unwrap();
+        assert_eq!(
+            staged.len(),
+            1,
+            "the account must still be staged for finalize"
+        );
+    }
+
     // ── < 5 posts → Insufficient Data, no enqueue/stash ──
     #[tokio::test]
     async fn gather_insufficient_data_finalizes_and_stages_nothing() {
