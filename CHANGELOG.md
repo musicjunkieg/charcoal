@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Batch amplification event inserts into a single batched write instead of one round-trip per event — the amplification event loop was ~2m16s of a 28m24s scan at 359 sequential inserts. Postgres uses one `UNNEST` round-trip at any batch size; SQLite uses one transaction chunked at 100 rows per statement. New `Database::insert_amplification_events_batch` (#192, chainlink)
+
 ### Added
 - Onboarding scan progress + live threat visibility in web UI (#1)
 - Batched RunPod classifier — the burst phase now sends **N post texts per `/runsync` request** instead of one, so vLLM's continuous batching (`max_num_seqs=32`) does the on-GPU parallelism and the queue-bound warm-idle waste (RunPod `delayTime` ~3-4s vs `executionTime` ~0.13s) collapses toward the compute floor — targeting ~$1/onboarding vs the prior ~$6-10. Handler and Rust client are batch-only (`{"input":{"contents":[…]}}` → `{"output":{"verdicts":[…]}}`); a post that fails to decode is recorded as an explicit benign `decode-error` sentinel (fail-open, logged + metered + scan `degraded`) rather than failing the batch or livelocking resume. Additive `classify_batch`/`max_batch_size` on the classifier trait keep Zentropi 1-per-call. New env: `CHARCOAL_RUNPOD_BATCH_SIZE` — texts per RunPod request (default 32 = handler `max_num_seqs`, clamped 1–128); in-flight texts ≈ `CHARCOAL_BURST_CONCURRENCY` × this (#186)
