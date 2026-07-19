@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-19T07:11:24.791407+00:00",
+  "exported_at": "2026-07-19T07:22:14.612637+00:00",
   "issues": [
     {
       "id": 219,
@@ -276,6 +276,16 @@
         {
           "content": "Task 5 PUSHED — PR #81 into staging: https://github.com/musicjunkieg/charcoal/pull/81. Real Check,Lint&Test gate PASSED (2m11s); analyze/CodeQL green; CodeRabbit review in progress. Not merged.",
           "created_at": "2026-07-19T06:52:41.404497+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 3 COMPLETE (commit 601e613, branch feat/batch-nli-hypotheses, not pushed). Bryan ACCEPTED the small score shift.\n\nBatched the 5 NLI hypotheses into one padded [5, max_len] forward pass, replacing 5 sequential single-item inferences. ~5x fewer NLI ONNX runs; biggest in the amplification event loop (NLI per event).\n\nGATE: spike confirmed the quantized nli-deberta-v3-xsmall export has a dynamic batch axis + no segfault (segfault warning is about extra inputs like token_type_ids, still never sent).\n\nACCEPTED SHIFT: export is not perfectly padding-invariant -> batched differs from unpadded single by ~0.002-0.008/hypothesis, ~0.006 on final context_score. Systematic (batched reads lower), not float noise. Bryan accepted: within model quantization noise, immaterial to tiers (8/15/35), worth the 5x. NOT hidden — model-gated unit test asserts batched == 5x-single within a documented 0.02 tolerance.\n\nscore_entailments_batched subsumes the old score_entailment (batch-of-1 = old path exactly). VERIFIED: web 0 failures; clippy clean web/default/postgres; fmt clean; NLI equivalence test green locally with model present.\n\n#213 STATUS: Tasks 1 (#79 merged), 2 (#80 merged), 5 (#81 open/approved), 3 (this, open). ONLY Task 4 remains — GATED on Stage-1 terminal-rate measurement from the staging scan currently running.",
+          "created_at": "2026-07-19T07:11:38.584022+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 3 PUSHED — PR #82 into staging: https://github.com/musicjunkieg/charcoal/pull/82. Real Check,Lint&Test gate PASSED (3m19s); analyze/CodeQL green; CodeRabbit review in progress. PR body prominently documents the accepted ~0.006 context_score shift + the 0.02 test tolerance. Not merged (merge-hold until staging scan done).",
+          "created_at": "2026-07-19T07:16:57.374709+00:00",
           "kind": "note"
         }
       ],

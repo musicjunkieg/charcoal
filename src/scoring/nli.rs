@@ -151,8 +151,9 @@ impl NliScorer {
     /// `[N, max_len]` run (#213). Batch-of-1 is the previous single-item path
     /// exactly (no padding). Verified against 5× single runs in the unit test.
     ///
-    /// DeBERTa NLI output: 3-class logits [contradiction, neutral, entailment]
-    /// per row; we softmax each row and return the entailment score.
+    /// DeBERTa NLI output: 3-class logits [contradiction, entailment, neutral]
+    /// per row (entailment at index 1, matching `softmax_entailment`); we
+    /// softmax each row and return the entailment score.
     async fn score_entailments_batched(
         &self,
         premise: &str,
@@ -217,15 +218,26 @@ impl NliScorer {
                     })
                     .context("NLI ONNX inference failed")?;
 
-                // Output shape: [batch, 3] — per row [contradiction, neutral, entailment].
-                let (_shape, data) = outputs[0]
+                // Output: [batch, 3] — per row [contradiction, entailment, neutral].
+                let (out_shape, data) = outputs[0]
                     .try_extract_tensor::<f32>()
                     .context("Failed to extract NLI output tensor")?;
+
+                // Validate the model contract before mapping: exactly [batch, 3].
+                // Otherwise chunks_exact(3) below would silently drop a remainder
+                // and score_pair would leave hypotheses at 0.0 — a model-contract
+                // mismatch must fail loudly, not skew the hostility score.
+                anyhow::ensure!(
+                    **out_shape == [batch as i64, 3],
+                    "NLI output shape {:?} != expected [{batch}, 3]",
+                    &**out_shape,
+                );
 
                 data.to_vec()
             };
 
             // Softmax each row's 3 logits → entailment probability.
+            // (data.len() == batch * 3, guaranteed by the shape check above.)
             Ok(logits_data
                 .chunks_exact(3)
                 .map(softmax_entailment)
