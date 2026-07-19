@@ -72,6 +72,21 @@ struct UpstreamActor {
     avatar: Option<String>,
 }
 
+/// Render an upstream error for logging with the request URL stripped.
+///
+/// THE ONLY sanctioned way to turn a `reqwest::Error` into a log string in this
+/// module. `reqwest::Error`'s Display embeds the request URL, and our request
+/// carries the user's typed handle in `q=` — so logging the error directly puts
+/// a pre-auth query into our logs (CWE-532), defeating the entire reason this
+/// endpoint proxies upstream instead of letting the browser call it.
+///
+/// If you are adding another upstream error path, use this. Do not format the
+/// error directly.
+fn redact_upstream_error(e: reqwest::Error) -> String {
+    // Takes ownership because `without_url` consumes the error.
+    format!("{:#}", e.without_url())
+}
+
 /// Best-effort client identity for rate limiting.
 ///
 /// Charcoal always runs behind Railway's proxy, so the socket address would be
@@ -130,12 +145,7 @@ pub async fn suggest(
     let response = match request.await {
         Ok(r) => r,
         Err(e) => {
-            // `without_url` is load-bearing, not cosmetic: reqwest::Error's
-            // Display includes the request URL, and this request carries the
-            // user's typed handle in `q=`. Logging the raw error would leak the
-            // pre-auth query into our logs — the exact thing the proxy and the
-            // no-query-logging rule above exist to prevent.
-            warn!(error = %format!("{:#}", e.without_url()), "typeahead upstream request failed");
+            warn!(error = %redact_upstream_error(e), "typeahead upstream request failed");
             // Degrade to "no suggestions" rather than an error: typeahead is an
             // enhancement, and a broken one must never block someone logging in.
             return Json(Vec::<Suggestion>::new()).into_response();
@@ -150,9 +160,8 @@ pub async fn suggest(
     let parsed: UpstreamResponse = match response.json().await {
         Ok(p) => p,
         Err(e) => {
-            // Same reasoning as above — strip the URL so the query cannot leak.
             warn!(
-                error = %format!("{:#}", e.without_url()),
+                error = %redact_upstream_error(e),
                 "typeahead upstream returned unparseable JSON"
             );
             return Json(Vec::<Suggestion>::new()).into_response();
@@ -184,4 +193,39 @@ pub fn build_limiter() -> Arc<crate::web::typeahead::TypeaheadLimiter> {
         Duration::from_secs(10),
         10_000,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_upstream_error;
+
+    /// Asserts BOTH directions: that the raw error genuinely embeds the query
+    /// (so the redaction is demonstrably necessary and cannot be dropped later
+    /// as "redundant"), and that `redact_upstream_error` removes it.
+    ///
+    /// SCOPE: this proves the helper is correct. It does NOT prove every call
+    /// site uses it — that is why the helper carries a "do not format the error
+    /// directly" note and is the only error-to-string path in this module.
+    #[tokio::test]
+    async fn redaction_strips_the_typed_handle_from_upstream_errors() {
+        let secret = "someones-private-handle";
+        // Port 1 refuses immediately: a real transport error, no network needed.
+        let url = format!("http://127.0.0.1:1/xrpc/x?q={secret}");
+
+        let err = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .expect_err("connection to port 1 must fail");
+
+        assert!(
+            format!("{err:#}").contains(secret),
+            "precondition: the raw error is expected to embed the query"
+        );
+        let redacted = redact_upstream_error(err);
+        assert!(
+            !redacted.contains(secret),
+            "redacted error still leaked the query: {redacted}"
+        );
+    }
 }
