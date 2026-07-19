@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-19T06:20:37.774777+00:00",
+  "exported_at": "2026-07-19T06:47:54.736500+00:00",
   "issues": [
     {
       "id": 219,
@@ -241,6 +241,31 @@
         {
           "content": "Task 1 MERGED to staging — PR #79 as merge commit 40a4e18 (feature 493b4a8 + CodeRabbit gate fix 63b6d3f). Went through the real Check,Lint&Test gate. CodeRabbit APPROVED. The topic-overlap embedding now precomputes in Phase A gather instead of the serial finalize loop — the ~31% scan-time win. Confirm the actual wall-clock drop on the next staging scan (measure the finalize phase duration vs the prior 8m50s/473 accounts). Task 1 done; tasks 2-5 remain (2 parallelize discovery loops; 3 batch NLI [gated: segfault check]; 4 Stage1/2 double-fetch [gated: terminal-rate measurement]; 5 is_score_stale N+1).",
           "created_at": "2026-07-19T06:12:32.769124+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 2 COMPLETE (commit 2b46995, branch feat/parallelize-discovery-loops, not pushed).\n\nParallelized the three serial discovery loops (~200 sequential round-trips before the pipeline starts):\n- constellation/client.rs find_amplification_events (2N calls) + find_likers (N): fetch quote/repost/like backlinks concurrently via buffer_unordered(8), sort back to URI order, run a PURE dedup fold. Extracted dedup_amplification_events + dedup_liker_events (mirroring sweep::dedup_second_degree) so ordering+dedup are unit-testable with no network.\n- web/scan_job.rs reply loop (N fetch_replies_to_post): parallelize the fetch, process in post order. Drive-by filter it feeds is already a tested pure fn; no cross-post state.\n\nByte-identical to serial: same fetch-concurrently + sort + single-threaded-fold pattern proven in sweep.rs. Signatures unchanged (concurrency is a module const, not a param).\n\nTDD (RED-first): 3 tests on the pure folds — serial-order preservation, cross-URI dedup, errored-URI skipping (dedup_amplification_events_preserves_serial_order_and_dedups / _skips_errored_uris / dedup_liker_events_preserves_order).\n\nConcurrency capped at 8: Constellation has no documented rate limit and PublicAtpClient has no backoff (#182). WATCH staging logs for 429s after deploy; if any appear, do #182 before raising.\n\nVERIFIED: web 0 failures; clippy clean web/default/postgres; fmt clean.\n\n#213 status: Task 1 merged (PR #79), Task 2 done (this). Remaining: 3 batch NLI [GATED segfault check], 4 Stage1/2 double-fetch [GATED terminal-rate measurement], 5 is_score_stale N+1.",
+          "created_at": "2026-07-19T06:20:57.369538+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 2 PUSHED — PR #80 into staging: https://github.com/musicjunkieg/charcoal/pull/80. Real Check,Lint&Test gate PASSED (3m12s); CodeQL/analyze green; CodeRabbit review in progress. Not merged.",
+          "created_at": "2026-07-19T06:28:32.843437+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 2 PR #80: CodeRabbit APPROVED on the FIRST review with zero inline comments and no nitpicks — no fix round needed. CI: Check,Lint&Test pass (3m12s), all analyze/CodeQL green, MERGEABLE/CLEAN. Ready to merge on Bryan's call.",
+          "created_at": "2026-07-19T06:29:32.215958+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 2 MERGED to staging — PR #80 as merge commit 2b2605e (feature 2b46995). Real Check,Lint&Test gate passed, CodeRabbit APPROVED first pass. The three discovery loops now fetch concurrently (buffer_unordered 8). #213 Tasks 1 (PR #79) and 2 (PR #80) both merged. Remaining: 3 batch NLI [GATED segfault check], 4 Stage1/2 double-fetch [GATED terminal-rate], 5 is_score_stale N+1. POST-DEPLOY WATCH: discovery request rate ~8x — watch staging logs for 429s on the next scan; if any, land #182 before raising the cap.",
+          "created_at": "2026-07-19T06:31:26.985102+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "TASK 3 GATE RESOLVED — VIABLE. Ran a throwaway ort spike (examples/nli_batch_spike.rs, deleted, not committed) loading the real Xenova/nli-deberta-v3-xsmall model_quantized.onnx and running a [2, max_len] batched inference.\n\nRESULT: batch axis IS dynamic. Baseline [1,27]->[1,3]; batched [2,27]->[2,3]; NO segfault (clean exit 0). Per-row logits sensible (row0 attack hypothesis entailment-high, row1 support neutral). So the nli.rs:181-184 segfault warning is specifically about EXTRA INPUTS (token_type_ids), not the batch dimension — batching the 5 hypotheses into one [5, max_len] forward pass is safe to build.\n\nCAVEAT for when Task 3 is implemented: the batched path pads shorter hypotheses to max_len; equivalence to the current 5x [1, seq] single runs depends on the model respecting attention_mask for pad positions (DeBERTa does). The TDD must include an equivalence test: batched [5,max_len] scores == 5 sequential single-item scores within float tolerance, for the same premise. That is the correctness heart, same shape as the #216 batch-insert equivalence.\n\nTask 3 unblocked (was GATED). Remaining #213: 3 batch NLI [NOW VIABLE], 4 Stage1/2 double-fetch [still GATED on terminal-rate measurement from a staging scan], 5 is_score_stale N+1 [starting now].",
+          "created_at": "2026-07-19T06:36:33.033416+00:00",
           "kind": "note"
         }
       ],

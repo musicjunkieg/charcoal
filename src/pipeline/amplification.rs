@@ -255,6 +255,18 @@ pub async fn run(
     let mut candidates: Vec<CandidateInput> = Vec::new();
     let mut seen_dids: HashSet<String> = HashSet::new();
 
+    // Fetch the fresh-scored DID set ONCE for both the amplifier and follower
+    // staleness gates below, instead of an is_score_stale round-trip per
+    // candidate (#213). Scores aren't written until Phase C, so the set is
+    // stable across both loops. Empty-on-error → everything treated stale,
+    // matching the old per-call `.unwrap_or(true)`.
+    let fresh_scored: HashSet<String> = db
+        .get_fresh_scored_dids(user_did, 7)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
     // ── Amplifier candidates ──
     let mut amplifier_handles: HashMap<String, String> = HashMap::new();
     for event in &events {
@@ -273,7 +285,7 @@ pub async fn run(
             if handle == protected_handle || did == user_did {
                 continue;
             }
-            if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
+            if fresh_scored.contains(did) {
                 continue;
             }
 
@@ -406,7 +418,7 @@ pub async fn run(
                         // check (mirrors the amplifier-path exclusion above).
                         .filter(|f| f.handle != protected_handle && f.did != user_did)
                     {
-                        if !db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
+                        if fresh_scored.contains(&f.did) {
                             continue;
                         }
                         if seen_dids.insert(f.did.clone()) {

@@ -75,6 +75,13 @@ pub trait Database: Send + Sync {
     /// Check if an account's score is stale for a user (older than the given number of days).
     async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool>;
 
+    /// Return the DIDs scored within the last `max_age_days` — the complement
+    /// of `is_score_stale` over a whole user's scores, in one query. Discovery
+    /// loops fetch this once and test membership in memory instead of one
+    /// `is_score_stale` round-trip per candidate (#213).
+    async fn get_fresh_scored_dids(&self, user_did: &str, max_age_days: i64)
+        -> Result<Vec<String>>;
+
     // --- Amplification events ---
 
     /// Record a new amplification event for a user and return its ID.

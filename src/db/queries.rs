@@ -259,6 +259,31 @@ pub fn is_score_stale(
     }
 }
 
+/// Return the DIDs the user has scored within the last `max_age_days` — i.e.
+/// the accounts a per-candidate `is_score_stale` check would call *fresh*
+/// (row exists AND `scored_at >= now - max_age_days`).
+///
+/// Discovery loops fetch this set once and test membership in memory instead
+/// of issuing one `is_score_stale` round-trip per candidate (#213). The cutoff
+/// MUST match `is_score_stale` exactly, or candidates get silently re-scored or
+/// skipped; `fresh_set_is_exactly_the_non_stale_dids` guards that.
+pub fn get_fresh_scored_dids(
+    conn: &Connection,
+    user_did: &str,
+    max_age_days: i64,
+) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT did FROM account_scores
+         WHERE user_did = ?1 AND datetime(scored_at) >= datetime('now', ?2)",
+    )?;
+    let dids = stmt
+        .query_map(params![user_did, format!("-{max_age_days} days")], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(dids)
+}
+
 // --- Amplification events ---
 
 /// Insert an amplification event with an explicit detected_at timestamp for a specific user.
