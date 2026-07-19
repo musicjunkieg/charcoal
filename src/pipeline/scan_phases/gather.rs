@@ -28,8 +28,9 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, PostSample};
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
-use crate::scoring::profile::{stage1_outcome, Stage1Outcome};
+use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome, Stage1Outcome};
 use crate::scoring::threat::ThreatWeights;
+use crate::topics::embeddings::{mean_embedding, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::ensemble::{TwoStageToxicityScorer, ONNX_CLEAN_THRESHOLD};
 use crate::toxicity::traits::ToxicityScorer;
@@ -128,6 +129,11 @@ pub struct GatherInputs<'a> {
     pub direct_pairs: Option<&'a [(String, String)]>,
     /// Social graph distance from the protected user, if classified.
     pub graph_distance: Option<GraphDistance>,
+    /// Sentence embedder for precomputing the target mean embedding here in
+    /// Phase A (#213), where the ONNX work overlaps I/O instead of serializing
+    /// in the Phase-C finalize loop. `None` disables the precompute (Phase C
+    /// then embeds at score time or falls back to TF-IDF).
+    pub embedder: Option<&'a SentenceEmbedder>,
 }
 
 /// Gather Phase A work for a single account.
@@ -244,6 +250,23 @@ pub async fn gather_account(
         // else: leave as a pending survivor (verdict fields stay None).
     }
 
+    // Precompute the target mean embedding HERE (#213), where it overlaps the
+    // account's network I/O, instead of in the serial Phase-C finalize loop
+    // where every account's embedding serializes on the global model mutex.
+    // Uses the SAME `select_fingerprint_posts` selection Phase C would, so the
+    // cosine computed downstream is byte-identical. Computed before `sample` is
+    // moved into the blob below.
+    let target_embedding = if let Some(emb) = inputs.embedder {
+        let fp_posts = select_fingerprint_posts(&sample);
+        if fp_posts.is_empty() {
+            None
+        } else {
+            Some(mean_embedding(&emb.embed_batch(&fp_posts).await?))
+        }
+    } else {
+        None
+    };
+
     // Batch the writes: one stash, one enqueue. Stash the AccountInput blob
     // BEFORE enqueuing the queue rows. If the stash fails we return early and
     // no `pending` queue rows exist — so Phase B can never classify orphaned
@@ -259,6 +282,7 @@ pub async fn gather_account(
         direct_pairs: inputs.direct_pairs.map(|p| p.to_vec()),
         graph_distance: inputs.graph_distance.map(|d| d.as_str().to_string()),
         fingerprint_quality: fingerprint_quality(&blob_sample_counts(&rows)),
+        target_embedding,
     };
     let payload = serde_json::to_string(&blob)?;
     db.stash_account_input(user_did, inputs.account_did, &payload)

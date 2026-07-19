@@ -149,6 +149,9 @@ pub async fn build_profile(
         weights,
         embedder,
         protected_embedding,
+        // build_profile is the monolithic (non-decoupled) path — it has no
+        // Phase-A precompute, so it embeds at score time exactly as before.
+        None,
         median_engagement,
         pile_on,
         nli_scorer,
@@ -324,6 +327,32 @@ pub async fn stage1_outcome(
 /// staged-scan blob design but is not used by the scoring math — overlap and
 /// fingerprint quality are recomputed here from the 50-post sample, identically
 /// to the original monolithic `build_profile`.
+/// Select the posts used to build an account's topic fingerprint / target
+/// embedding from its Stage-2 `PostSample`.
+///
+/// Prefers originals (chosen topics, not inherited) when there are enough of
+/// them (≥ 15); otherwise falls back to all posts — originals ++ reply texts
+/// ++ quote texts, in that order.
+///
+/// This is the single source of truth for the selection. Phase C
+/// (`score_from_sample`) uses it to build the fingerprint, and Phase A
+/// (`gather`) uses it to feed the embedder when it precomputes the target
+/// vector, so the two phases can never diverge on which posts represent the
+/// account (#213).
+pub fn select_fingerprint_posts(sample: &posts::PostSample) -> Vec<String> {
+    if sample.originals.len() >= 15 {
+        sample.originals.iter().map(|p| p.text.clone()).collect()
+    } else {
+        sample
+            .originals
+            .iter()
+            .map(|p| p.text.clone())
+            .chain(sample.replies.iter().map(|r| r.post.text.clone()))
+            .chain(sample.quotes.iter().map(|p| p.text.clone()))
+            .collect()
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn score_from_sample(
     stage2_sample: &posts::PostSample,
@@ -334,6 +363,11 @@ pub async fn score_from_sample(
     weights: &ThreatWeights,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    // Target mean embedding precomputed in Phase A (gather), where the ONNX
+    // work overlaps I/O instead of serializing in Phase C. When `Some`, the
+    // overlap step uses it directly and never touches `embedder` — the whole
+    // point of #213. `None` falls back to embedding here (old blobs) or TF-IDF.
+    precomputed_target_embedding: Option<&[f64]>,
     median_engagement: f64,
     pile_on: bool,
     nli_scorer: Option<&NliScorer>,
@@ -354,19 +388,11 @@ pub async fn score_from_sample(
         sample.replies.len() + sample.quotes.len(),
     );
 
-    // Fingerprinting uses originals when available (chosen topics, not inherited)
-    let fingerprint_posts: Vec<String> = if sample.originals.len() >= 15 {
-        sample.originals.iter().map(|p| p.text.clone()).collect()
-    } else {
-        // Fall back to all posts for fingerprinting
-        sample
-            .originals
-            .iter()
-            .map(|p| p.text.clone())
-            .chain(sample.replies.iter().map(|r| r.post.text.clone()))
-            .chain(sample.quotes.iter().map(|p| p.text.clone()))
-            .collect()
-    };
+    // Fingerprinting uses originals when available (chosen topics, not inherited).
+    // Extracted into `select_fingerprint_posts` so Phase A (gather) can feed the
+    // embedder EXACTLY these posts when it precomputes the target vector — one
+    // shared selection makes producer/consumer divergence impossible (#213).
+    let fingerprint_posts: Vec<String> = select_fingerprint_posts(sample);
 
     let all_posts_flat: Vec<&Post> = sample
         .originals
@@ -455,7 +481,16 @@ pub async fn score_from_sample(
     // Prefer sentence embeddings when available — they capture semantic
     // similarity ("fatphobia" ≈ "obesity") that keyword matching misses.
     // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
-    let topic_overlap = if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
+    let topic_overlap = if let (Some(precomputed), Some(protected_emb)) =
+        (precomputed_target_embedding, protected_embedding)
+    {
+        // Precomputed path (#213): Phase A already embedded `fingerprint_posts`
+        // (the identical selection, via `select_fingerprint_posts`) and averaged
+        // them, so the cosine here is byte-identical to the embed-at-finalize
+        // path below — only the (expensive, mutex-serialized) embedding moved to
+        // Phase A where it overlaps I/O.
+        embeddings::cosine_similarity_embeddings(protected_emb, precomputed)
+    } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
         // Embedding path: embed target's posts, average, compare
         let target_embeddings = emb.embed_batch(&fingerprint_posts).await?;
         let target_mean = embeddings::mean_embedding(&target_embeddings);

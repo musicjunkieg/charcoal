@@ -527,6 +527,40 @@ fn account_input_is_versioned_and_roundtrips() {
     assert_eq!(back, blob);
 }
 
+#[test]
+fn account_input_target_embedding_survives_json_roundtrip() {
+    // The precomputed target embedding (#213) is carried on the blob through the
+    // DB work queue as JSON, so its wire format must round-trip exactly.
+    let mut blob = AccountInput::new_for_test();
+    blob.target_embedding = Some(vec![0.5, -0.25, 1.0, 0.0]);
+    let json = serde_json::to_string(&blob).unwrap();
+    let back: AccountInput = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.target_embedding, Some(vec![0.5, -0.25, 1.0, 0.0]));
+    assert_eq!(back, blob);
+}
+
+#[test]
+fn account_input_deserializes_legacy_blob_without_target_embedding() {
+    // A blob serialized before #213 (no `target_embedding` key) must still
+    // deserialize — `#[serde(default)]` fills it with None. The schema_version
+    // gate at finalize handles rejecting/regathering; serde must not hard-fail.
+    let legacy = r#"{
+        "schema_version": 1,
+        "account_handle": "legacy.bsky.social",
+        "sample": {"originals": [], "replies": [], "quotes": [],
+                   "reply_ratio": 0.0, "quote_ratio": 0.0, "total_posts": 0},
+        "parent_texts": {},
+        "median_engagement": 0.0,
+        "is_pile_on": false,
+        "direct_pairs": null,
+        "graph_distance": null,
+        "fingerprint_quality": "normal"
+    }"#;
+    let back: AccountInput = serde_json::from_str(legacy).unwrap();
+    assert_eq!(back.target_embedding, None);
+    assert_eq!(back.account_handle, "legacy.bsky.social");
+}
+
 // ── Phase A: gather_account tests ───────────────────────────────────────────
 
 mod gather_tests {
@@ -667,6 +701,7 @@ mod gather_tests {
             is_pile_on: false,
             direct_pairs: None,
             graph_distance: None,
+            embedder: None,
         }
     }
 
@@ -1121,6 +1156,7 @@ mod finalize_tests {
             direct_pairs,
             graph_distance: None,
             fingerprint_quality: "unreliable".to_string(),
+            target_embedding: None,
         };
         let payload = serde_json::to_string(&blob).unwrap();
         db.stash_account_input(FIN_USER, ACCT, &payload)
@@ -1337,6 +1373,7 @@ mod finalize_tests {
             direct_pairs: None,
             graph_distance: None,
             fingerprint_quality: "unreliable".to_string(),
+            target_embedding: None,
         };
         db.stash_account_input(FIN_USER, ACCT, &serde_json::to_string(&blob).unwrap())
             .await
@@ -1386,6 +1423,7 @@ mod finalize_tests {
             direct_pairs: None,
             graph_distance: None,
             fingerprint_quality: "unreliable".to_string(),
+            target_embedding: None,
         };
         db.stash_account_input(FIN_USER, ACCT, &serde_json::to_string(&blob).unwrap())
             .await
@@ -2761,6 +2799,7 @@ mod orchestration_tests {
             direct_pairs: None,
             graph_distance: None,
             fingerprint_quality: "unreliable".to_string(),
+            target_embedding: None,
         };
         db.stash_account_input(ORCH_USER, acct, &serde_json::to_string(&blob).unwrap())
             .await
