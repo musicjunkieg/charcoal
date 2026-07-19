@@ -23,3 +23,5 @@ CREATE TABLE IF NOT EXISTS scan_skips (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scan_skips_user ON scan_skips (user_did);
+
+INSERT INTO schema_version (version) VALUES (10) ON CONFLICT DO NOTHING;

@@ -11,6 +11,7 @@
 //! no log filter reaches them. Hence an explicit gate.
 
 use charcoal::output::should_show_progress;
+use std::io::IsTerminal;
 
 #[test]
 fn defaults_to_terminal_detection() {
@@ -49,6 +50,14 @@ fn override_can_force_progress_off_in_a_terminal() {
 fn progress_is_disabled_when_stdout_is_not_a_terminal() {
     if std::env::var("CHARCOAL_PROGRESS").is_ok() {
         eprintln!("SKIP: CHARCOAL_PROGRESS is set, which overrides detection");
+        return;
+    }
+    // Under `--nocapture`, or any run whose stdout is attached to a terminal,
+    // the gate correctly resolves TRUE and this assertion would be wrong. Skip
+    // rather than assert — the policy itself stays covered by the
+    // should_show_progress tests, which inject the terminal flag directly.
+    if std::io::stdout().is_terminal() {
+        eprintln!("SKIP: stdout is a terminal, so the gate is correctly enabled");
         return;
     }
     assert!(

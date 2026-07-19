@@ -293,7 +293,19 @@ pub async fn run_phased_scan(
     // account was dropped or six hundred, which is precisely what turned #220
     // into a multi-hour log dig. A count on this line answers "how bad" without
     // any log spelunking, and `scan_skips` answers "which ones, and why".
-    let skipped = db.count_scan_skips(user_did).await.unwrap_or(-1);
+    // Non-fatal: a failed count must not sink a completed scan. But it must not
+    // be silent either — an unexplained -1 in the logs is the same
+    // swallowed-cause problem #220 spent hours on.
+    let skipped = match db.count_scan_skips(user_did).await {
+        Ok(n) => n,
+        Err(e) => {
+            warn!(
+                error = %format!("{e:#}"),
+                "could not read the scan skip count — reporting -1"
+            );
+            -1
+        }
+    };
     info!(
         phase = "done",
         accounts_scored = summary.accounts_scored,
@@ -347,7 +359,12 @@ async fn run_gather(
     // compiler's `FnOnce is not general enough` HRTB inference when this future
     // is held across the web background-scan's `tokio::spawn` boundary; indexing
     // by `usize` keeps the closure free of a higher-ranked borrow.
-    let results: Vec<(String, Result<GatherOutcome>)> = futures::stream::iter(0..candidates.len())
+    // NOT collected into a Vec: results are consumed as each future completes so
+    // a failure is persisted immediately (#226 review). Buffering every result
+    // first meant a crash during a long gather lost every skip recorded so far
+    // — precisely the durability the scan_skips table exists to provide, and
+    // contrary to this project's incremental-DB-writes rule for pipelines.
+    let mut results = futures::stream::iter(0..candidates.len())
         .map(|i| {
             let did = candidates[i].account_did.clone();
             let did_for_panic = did.clone();
@@ -380,16 +397,14 @@ async fn run_gather(
                 (did, result)
             }
         })
-        .buffer_unordered(deps.gather_concurrency.clamp(1, 64))
-        .collect()
-        .await;
+        .buffer_unordered(deps.gather_concurrency.clamp(1, 64));
 
     // Resilient gather: a single account's failure (e.g. a transient Bluesky
     // fetch error) must NOT abort the whole scan — and on resume must not
     // re-fail the batch (livelock risk). Log per-account failures and continue
     // with the accounts that gathered successfully.
     let mut sweep = GatherSweep::default();
-    for (account_did, result) in results {
+    while let Some((account_did, result)) = results.next().await {
         match result {
             Ok(GatherOutcome::Terminal) => sweep.terminal_scored += 1,
             Ok(GatherOutcome::Enqueued) => {}
