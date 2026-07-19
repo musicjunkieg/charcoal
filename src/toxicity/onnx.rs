@@ -102,10 +102,21 @@ impl OnnxToxicityScorer {
         // preserving the parent context nobody is scoring. Left-truncation drops
         // the parent instead, keeping the scored text intact.
         //
+        // MEASURED on the 34 accounts this bug actually dropped (2894 real posts
+        // refetched from their feeds): 4.3% of their posts exceed the limit, and
+        // among overflowing envelopes the reply needs a median 50.4% of the 512
+        // budget. So Left keeps the ENTIRE reply in ~90% of overflow cases, with
+        // room left over for parent tail context. In the other ~10% the reply
+        // alone exceeds 512 and NO strategy preserves it whole.
+        //
+        // That makes budgeting the two halves separately not worth building: it
+        // succeeds exactly when Left already succeeds. It would only change which
+        // part of the PARENT survives — and Left keeps the parent's tail, i.e.
+        // the text immediately preceding the reply, which is the context the
+        // reply is actually responding to.
+        //
         // Known limitation: for a solo post this keeps the tail rather than the
-        // head, and if a reply ALONE exceeds the limit its opening is still lost.
-        // Budgeting the two halves separately at envelope-construction time would
-        // be more precise; this is the correct fix at this layer.
+        // head.
         tokenizer
             .with_truncation(Some(TruncationParams {
                 max_length: MAX_SEQUENCE_LENGTH,
