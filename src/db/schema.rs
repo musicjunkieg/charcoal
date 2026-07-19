@@ -330,6 +330,36 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // v10 — scan_skips: a durable record of accounts dropped from a scan.
+    //
+    // A skipped account is a real gap in a scan's coverage, and until now the
+    // only evidence was a WARN log line. #220 had to reconstruct which accounts
+    // were dropped, and why, by grepping Railway logs — and #226 showed those
+    // logs are not even reliable, since Railway drops messages by rate (not by
+    // severity) once a replica exceeds 500/sec, taking WARN lines with them.
+    //
+    // The PK is (user_did, account_did, phase): a re-gather that fails again
+    // updates rather than duplicates, so the count keeps meaning "accounts
+    // missing from this scan". The same account failing at two different
+    // phases is two distinct facts and gets two rows.
+    run_migration(conn, 10, |c| {
+        c.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS scan_skips (
+                user_did        TEXT    NOT NULL,
+                account_did     TEXT    NOT NULL,
+                phase           TEXT    NOT NULL,
+                error           TEXT    NOT NULL,
+                skipped_at      TEXT    NOT NULL,
+                PRIMARY KEY (user_did, account_did, phase)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scan_skips_user
+                ON scan_skips (user_did);
+            ",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -385,8 +415,9 @@ mod tests {
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
-        // inferred_pairs, classification_queue, scan_account_input = 10 tables
-        assert_eq!(count, 10i64);
+        // inferred_pairs, classification_queue, scan_account_input,
+        // scan_skips = 11 tables
+        assert_eq!(count, 11i64);
     }
 
     #[test]
@@ -450,7 +481,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v9
+        // Verify schema_version has all versions through v10
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -458,7 +489,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     #[test]
@@ -559,10 +590,11 @@ mod tests {
         let count = table_count(&conn).unwrap();
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
-        // inferred_pairs, classification_queue, scan_account_input = 10 tables
-        assert_eq!(count, 10i64);
+        // inferred_pairs, classification_queue, scan_account_input,
+        // scan_skips = 11 tables
+        assert_eq!(count, 11i64);
 
-        // Verify schema_version includes v4 through v9
+        // Verify schema_version includes v4 through v10
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -570,6 +602,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 }

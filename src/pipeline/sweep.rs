@@ -64,13 +64,13 @@ pub async fn run(
     data_dir: Option<&std::path::Path>,
 ) -> Result<(usize, usize, bool)> {
     // Step 1: Fetch the protected user's followers
-    println!("Fetching your followers (up to {max_first_degree})...");
+    crate::progress!("Fetching your followers (up to {max_first_degree})...");
     let first_degree =
         followers::fetch_followers(client, protected_handle, max_first_degree).await?;
     info!(count = first_degree.len(), "First-degree followers fetched");
 
     // Step 2: Fetch second-degree followers (followers of your followers)
-    println!(
+    crate::progress!(
         "Scanning second-degree network ({} followers, up to {} each)...",
         first_degree.len(),
         max_second_degree_per,
@@ -119,7 +119,7 @@ pub async fn run(
 
     let second_degree_pool = dedup_second_degree(&mut seen, ordered);
 
-    println!(
+    crate::progress!(
         "  Found {} unique second-degree accounts",
         second_degree_pool.len(),
     );
@@ -143,11 +143,11 @@ pub async fn run(
     }
 
     if stale.is_empty() {
-        println!("  All second-degree accounts have recent scores.");
+        crate::progress!("  All second-degree accounts have recent scores.");
         return Ok((second_degree_pool.len(), 0, false));
     }
 
-    println!(
+    crate::progress!(
         "  {} need scoring ({} concurrent)...",
         stale.len(),
         concurrency,
@@ -218,7 +218,7 @@ pub async fn run_topic_first(
         .into_iter()
         .collect();
 
-    println!(
+    crate::progress!(
         "  {} accounts already scored, searching for new discoveries...",
         scored_dids.len()
     );
@@ -233,7 +233,7 @@ pub async fn run_topic_first(
     )
     .await?;
 
-    println!("  Found {} new accounts to score", new_dids.len());
+    crate::progress!("  Found {} new accounts to score", new_dids.len());
 
     if new_dids.is_empty() {
         return Ok((0, 0, false));
@@ -245,7 +245,7 @@ pub async fn run_topic_first(
 
     let did_handle_pairs: Vec<(String, String)> = did_handle_map.into_iter().collect();
 
-    println!(
+    crate::progress!(
         "  Resolved {}/{} DIDs to handles",
         did_handle_pairs.len(),
         new_dids.len()

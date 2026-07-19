@@ -17,6 +17,17 @@ use super::models::{
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
+/// One account dropped from a scan, with the reason (#226).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanSkip {
+    pub account_did: String,
+    /// Pipeline phase the skip happened in — "gather", "finalize", …
+    pub phase: String,
+    /// Full anyhow source chain (`{e:#}`), stored verbatim.
+    pub error: String,
+    pub skipped_at: String,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -292,6 +303,37 @@ pub trait Database: Send + Sync {
     /// `scan_account_input`.  Does NOT touch the `scan_phase` key in
     /// `scan_state` — that is the orchestrator's responsibility.
     async fn clear_scan_staging(&self, user_did: &str) -> Result<()>;
+
+    /// Record that an account was dropped from a scan, and why (#226).
+    ///
+    /// A skip is a real gap in a scan's coverage, so it belongs in the database
+    /// rather than only in a log line. Railway drops log messages by rate once
+    /// a replica exceeds 500/sec — WARN included — which made the #220
+    /// skip counts a floor rather than a total.
+    ///
+    /// `error` should be the FULL anyhow chain (`{e:#}`), not just the
+    /// outermost context; the missing cause is what made #220 expensive.
+    ///
+    /// Upserts on (user_did, account_did, phase) so a failing re-gather updates
+    /// rather than duplicating.
+    async fn record_scan_skip(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        phase: &str,
+        error: &str,
+    ) -> Result<()>;
+
+    /// Number of accounts skipped in the current scan. Surfaced on the
+    /// scan-complete log line so `degraded=true` carries a magnitude.
+    async fn count_scan_skips(&self, user_did: &str) -> Result<i64>;
+
+    /// All skips recorded for a user, for diagnosis and reporting.
+    async fn list_scan_skips(&self, user_did: &str) -> Result<Vec<ScanSkip>>;
+
+    /// Drop a user's recorded skips. Called at gather entry so the count always
+    /// describes the CURRENT scan rather than accumulating across every run.
+    async fn clear_scan_skips(&self, user_did: &str) -> Result<()>;
 
     /// Delete the staging data for a single account from both
     /// `classification_queue` and `scan_account_input`.  Used by Phase C to
