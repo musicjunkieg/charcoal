@@ -184,6 +184,9 @@ pub async fn run_phased_scan(
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Gather.as_str())
             .await?;
         db.clear_scan_staging(user_did).await?;
+        // Drop the previous run's skips so the count describes THIS scan rather
+        // than accumulating across every scan ever (#226).
+        db.clear_scan_skips(user_did).await?;
         // Terminal (early-exit / insufficient-data) accounts are scored inside
         // gather and never reach Phase C, so count them here.
         let gathered = run_gather(db, user_did, candidates, deps).await?;
@@ -285,10 +288,17 @@ pub async fn run_phased_scan(
     // ── Phase: Done — clear both staging tables (leaves scan_phase intact) ──
     db.clear_scan_staging(user_did).await?;
 
+    // Report the skip COUNT alongside the flag (#226). `degraded=true` on its
+    // own is a bare bool with no magnitude — it reads identically whether one
+    // account was dropped or six hundred, which is precisely what turned #220
+    // into a multi-hour log dig. A count on this line answers "how bad" without
+    // any log spelunking, and `scan_skips` answers "which ones, and why".
+    let skipped = db.count_scan_skips(user_did).await.unwrap_or(-1);
     info!(
         phase = "done",
         accounts_scored = summary.accounts_scored,
         degraded = summary.degraded,
+        accounts_skipped = skipped,
         "phased scan complete"
     );
 
@@ -389,11 +399,27 @@ async fn run_gather(
                 // `%e` prints only the outermost .context() and drops the cause.
                 // That difference cost hours on #220: every one of these read
                 // "ONNX inference failed" with the actual ort error invisible.
+                let chain = format!("{e:#}");
                 warn!(
                     account_did,
-                    error = %format!("{e:#}"),
+                    error = %chain,
                     "gather failed for account — skipping it and continuing the scan"
                 );
+                // Durably record the gap (#226). The WARN above is best-effort:
+                // Railway drops log messages by RATE once a replica exceeds
+                // 500/sec, severity included, so counting skips from logs gives
+                // a floor rather than a total. A failure to record must not
+                // itself abort the scan — it is diagnostics, not pipeline work.
+                if let Err(rec_err) = db
+                    .record_scan_skip(user_did, &account_did, "gather", &chain)
+                    .await
+                {
+                    warn!(
+                        account_did,
+                        error = %format!("{rec_err:#}"),
+                        "failed to record scan skip — the skip itself still stands"
+                    );
+                }
             }
         }
     }
