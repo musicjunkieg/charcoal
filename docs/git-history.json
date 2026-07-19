@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b74a8f27d4b2948628047dc8650ed4b5d49c3057",
+    "short_hash": "b74a8f2",
+    "author": "chaos gremlin",
+    "date": "2026-07-19T07:24:18-07:00",
+    "message": "Merge pull request #83 from musicjunkieg/fix/pre-commit-export\n\nfix(hooks): stop pre-commit staging the gitignored chainlink export (#181)",
+    "files_changed": 0
+  },
+  {
     "hash": "9517fb9a9a31a06c4371f7306a0d963e566230ae",
     "short_hash": "9517fb9",
     "author": "Bryan Guffey",

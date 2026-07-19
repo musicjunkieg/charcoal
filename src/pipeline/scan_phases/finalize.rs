@@ -85,7 +85,7 @@ pub async fn finalize_account(
             // account's staging so Phase A re-gathers it from scratch.
             warn!(
                 account_did,
-                error = %e,
+                error = %format!("{e:#}"),
                 "AccountInput blob failed to deserialize — clearing staging and re-gathering"
             );
             db.clear_account_staging(user_did, account_did).await?;

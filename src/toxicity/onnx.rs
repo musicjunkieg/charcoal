@@ -15,8 +15,15 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use ort::session::Session;
 use ort::value::Tensor;
-use tokenizers::Tokenizer;
+use tokenizers::{Tokenizer, TruncationDirection, TruncationParams};
 use tracing::debug;
+
+/// Maximum sequence length the model accepts.
+///
+/// unbiased-toxic-roberta is a RoBERTa model: 514 position embeddings, of which
+/// 512 are usable for content. Feeding it more fails at the /roberta/Expand node
+/// with "invalid expand shape" rather than degrading gracefully (#220).
+const MAX_SEQUENCE_LENGTH: usize = 512;
 
 use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
 
@@ -73,8 +80,39 @@ impl OnnxToxicityScorer {
             .commit_from_file(&model_path)
             .with_context(|| format!("Failed to load ONNX model from {}", model_path.display()))?;
 
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+        let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+
+        // Cap sequences at the model's position-embedding limit (#220).
+        //
+        // Bluesky caps a post at 300 GRAPHEMES, not tokens — which is ~63 tokens
+        // of Latin ASCII but 902 in CJK, 602 in emoji, and 4202 in ZWJ family
+        // emoji. Anything past 512 made session.run hard-error at the Expand
+        // node, and because scoring is batched per account, one over-long post
+        // took the whole account's batch down with it.
+        //
+        // Truncating in the tokenizer (rather than slicing the id vectors after
+        // the fact) is what HuggingFace does by default, and it keeps the
+        // special tokens correct — a manual slice would drop the trailing </s>.
+        //
+        // DIRECTION MATTERS, and the default (Right) is wrong for us. Replies are
+        // scored as the envelope "[Parent post]: <p>\n\n[Reply]: <r>" (see
+        // toxicity::format_parent_reply). Right-truncation cuts from the end, so
+        // it would eat THE REPLY — the very text being judged — while faithfully
+        // preserving the parent context nobody is scoring. Left-truncation drops
+        // the parent instead, keeping the scored text intact.
+        //
+        // Known limitation: for a solo post this keeps the tail rather than the
+        // head, and if a reply ALONE exceeds the limit its opening is still lost.
+        // Budgeting the two halves separately at envelope-construction time would
+        // be more precise; this is the correct fix at this layer.
+        tokenizer
+            .with_truncation(Some(TruncationParams {
+                max_length: MAX_SEQUENCE_LENGTH,
+                direction: TruncationDirection::Left,
+                ..Default::default()
+            }))
+            .map_err(|e| anyhow::anyhow!("Failed to configure tokenizer truncation: {}", e))?;
 
         debug!("Loaded ONNX toxicity model from {}", model_dir.display());
 
@@ -121,11 +159,21 @@ impl ToxicityScorer for OnnxToxicityScorer {
                 .collect::<Result<Vec<_>>>()?;
 
             let batch_size = encodings.len();
+            // Safe to use unclamped: the tokenizer is configured with
+            // TruncationParams at load, so no encoding can exceed
+            // MAX_SEQUENCE_LENGTH. Deliberately NOT clamped here as well —
+            // clamping max_len without also truncating each encoding's ids
+            // would silently corrupt the tensor shape (the copy loop below
+            // pushes seq_len ids per row, not max_len).
             let max_len = encodings
                 .iter()
                 .map(|e| e.get_ids().len())
                 .max()
                 .unwrap_or(0);
+            debug_assert!(
+                max_len <= MAX_SEQUENCE_LENGTH,
+                "tokenizer truncation should cap sequences at {MAX_SEQUENCE_LENGTH}, got {max_len}"
+            );
 
             // Build flat input tensors with right-padding to max_len.
             // Shape: [batch_size, max_len]

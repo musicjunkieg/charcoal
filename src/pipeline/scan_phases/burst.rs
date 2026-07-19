@@ -196,7 +196,7 @@ pub async fn run_burst(
                         cost_capped = true;
                     } else if err.downcast_ref::<ClassifierTransientError>().is_some() {
                         warn!(
-                            error = %err,
+                            error = %format!("{err:#}"),
                             "classifier transient failure — interrupting burst, scan resumable"
                         );
                         interrupted = true;
