@@ -142,35 +142,62 @@ impl NliScorer {
         })
     }
 
-    /// Run a single NLI inference: given a premise and hypothesis, return
-    /// the entailment probability (0.0-1.0).
+    /// Run NLI inference for one premise against many hypotheses in a SINGLE
+    /// batched forward pass, returning one entailment probability (0.0-1.0)
+    /// per hypothesis, in input order.
+    ///
+    /// Replaces the old one-inference-per-hypothesis loop (5 sequential
+    /// spawn_blocking + mutex + ONNX runs per pair) with one padded
+    /// `[N, max_len]` run (#213). Batch-of-1 is the previous single-item path
+    /// exactly (no padding). Verified against 5× single runs in the unit test.
     ///
     /// DeBERTa NLI output: 3-class logits [contradiction, neutral, entailment]
-    /// We apply softmax and return the entailment score.
-    async fn score_entailment(&self, premise: &str, hypothesis: &str) -> Result<f64> {
+    /// per row; we softmax each row and return the entailment score.
+    async fn score_entailments_batched(
+        &self,
+        premise: &str,
+        hypotheses: &[&str],
+    ) -> Result<Vec<f64>> {
+        if hypotheses.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let session = Arc::clone(&self.session);
         let tokenizer = Arc::clone(&self.tokenizer);
         let premise = premise.to_string();
-        let hypothesis = hypothesis.to_string();
+        let hypotheses: Vec<String> = hypotheses.iter().map(|h| h.to_string()).collect();
 
         tokio::task::spawn_blocking(move || {
-            // DeBERTa tokenizer handles pair encoding: [CLS] premise [SEP] hypothesis [SEP]
-            let encoding = tokenizer
-                .encode((premise.as_str(), hypothesis.as_str()), true)
-                .map_err(|e| anyhow::anyhow!("NLI tokenization failed: {}", e))?;
+            let batch = hypotheses.len();
 
-            let ids = encoding.get_ids();
-            let mask = encoding.get_attention_mask();
-            let seq_len = ids.len();
+            // Encode each (premise, hypothesis) pair, then pad all rows to the
+            // longest so they stack into one [batch, max_len] tensor. Pad token
+            // id 0, mask 0 — mirrors topics::embeddings::embed_batch.
+            let mut encoded: Vec<(Vec<i64>, Vec<i64>)> = Vec::with_capacity(batch);
+            for h in &hypotheses {
+                // DeBERTa tokenizer handles pair encoding: [CLS] premise [SEP] hyp [SEP]
+                let enc = tokenizer
+                    .encode((premise.as_str(), h.as_str()), true)
+                    .map_err(|e| anyhow::anyhow!("NLI tokenization failed: {}", e))?;
+                let ids = enc.get_ids().iter().map(|&id| id as i64).collect();
+                let mask = enc.get_attention_mask().iter().map(|&m| m as i64).collect();
+                encoded.push((ids, mask));
+            }
+            let max_len = encoded.iter().map(|(ids, _)| ids.len()).max().unwrap_or(0);
 
-            let input_ids: Vec<i64> = ids.iter().map(|&id| id as i64).collect();
-            let attention_mask: Vec<i64> = mask.iter().map(|&m| m as i64).collect();
+            let mut input_ids_flat: Vec<i64> = Vec::with_capacity(batch * max_len);
+            let mut attention_mask_flat: Vec<i64> = Vec::with_capacity(batch * max_len);
+            for (mut ids, mut mask) in encoded {
+                ids.resize(max_len, 0); // pad token id 0
+                mask.resize(max_len, 0); // pad positions masked out
+                input_ids_flat.extend(ids);
+                attention_mask_flat.extend(mask);
+            }
 
-            let shape = [1i64, seq_len as i64];
-
-            let input_ids_tensor =
-                Tensor::from_array((shape, input_ids)).context("Failed to create input_ids")?;
-            let attention_mask_tensor = Tensor::from_array((shape, attention_mask))
+            let shape = [batch as i64, max_len as i64];
+            let input_ids_tensor = Tensor::from_array((shape, input_ids_flat))
+                .context("Failed to create input_ids")?;
+            let attention_mask_tensor = Tensor::from_array((shape, attention_mask_flat))
                 .context("Failed to create attention_mask")?;
 
             let logits_data = {
@@ -181,7 +208,8 @@ impl NliScorer {
                 // Xenova's nli-deberta-v3-xsmall ONNX export only accepts
                 // input_ids and attention_mask (no token_type_ids). Passing
                 // an unexpected input causes ort to segfault rather than
-                // return an error, so we only send the two known inputs.
+                // return an error, so we only send the two known inputs. The
+                // batch axis IS dynamic (verified before building #213).
                 let outputs = session
                     .run(ort::inputs! {
                         "input_ids" => input_ids_tensor,
@@ -189,7 +217,7 @@ impl NliScorer {
                     })
                     .context("NLI ONNX inference failed")?;
 
-                // Output shape: [1, 3] — logits for [contradiction, neutral, entailment]
+                // Output shape: [batch, 3] — per row [contradiction, neutral, entailment].
                 let (_shape, data) = outputs[0]
                     .try_extract_tensor::<f32>()
                     .context("Failed to extract NLI output tensor")?;
@@ -197,7 +225,11 @@ impl NliScorer {
                 data.to_vec()
             };
 
-            Ok(softmax_entailment(&logits_data))
+            // Softmax each row's 3 logits → entailment probability.
+            Ok(logits_data
+                .chunks_exact(3)
+                .map(softmax_entailment)
+                .collect())
         })
         .await
         .context("NLI spawn_blocking panicked")?
@@ -216,6 +248,12 @@ impl NliScorer {
     ) -> Result<(f64, HypothesisScores)> {
         let premise = format!("Original: {} Response: {}", original_text, response_text);
 
+        // One batched forward pass for all 5 hypotheses (#213), replacing the
+        // old 5 sequential single-item inferences. Results come back in
+        // HYPOTHESES order.
+        let hyps: Vec<&str> = HYPOTHESES.iter().map(|(_, h)| *h).collect();
+        let scores = self.score_entailments_batched(&premise, &hyps).await?;
+
         let mut hypothesis_scores = HypothesisScores {
             attack: 0.0,
             contempt: 0.0,
@@ -223,9 +261,7 @@ impl NliScorer {
             good_faith_disagree: 0.0,
             support: 0.0,
         };
-
-        for (name, hypothesis) in &HYPOTHESES {
-            let score = self.score_entailment(&premise, hypothesis).await?;
+        for ((name, _), score) in HYPOTHESES.iter().zip(scores) {
             match *name {
                 "attack" => hypothesis_scores.attack = score,
                 "contempt" => hypothesis_scores.contempt = score,
@@ -249,5 +285,66 @@ impl NliScorer {
         );
 
         Ok((hostility, hypothesis_scores))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::toxicity::download::{default_model_dir, nli_files_present};
+
+    /// The batched forward pass (#213) must produce the same entailment score
+    /// per hypothesis as running each hypothesis as its own [1, seq] inference.
+    /// Batch-of-1 IS the old single-item path (no padding), so comparing
+    /// batch-of-5 against 5× batch-of-1 proves padding + the batch dimension
+    /// don't change results.
+    ///
+    /// Requires the NLI model locally; skips in CI where it isn't downloaded
+    /// (same gating the rest of the ONNX code relies on).
+    #[tokio::test]
+    async fn batched_entailments_match_per_hypothesis_single_runs() {
+        let base = default_model_dir();
+        if !nli_files_present(&base) {
+            eprintln!("SKIP: NLI model not present at {}", base.display());
+            return;
+        }
+        let scorer = NliScorer::load(&base).expect("load NLI model");
+
+        let premise =
+            "Original: fat people deserve healthcare too Response: lol imagine being that big";
+        // Hypotheses of DIFFERENT lengths so the batch actually pads.
+        let hyps: Vec<&str> = HYPOTHESES.iter().map(|(_, h)| *h).collect();
+
+        // Batch-of-5 (padded to the longest).
+        let batched = scorer
+            .score_entailments_batched(premise, &hyps)
+            .await
+            .expect("batched inference");
+        assert_eq!(batched.len(), hyps.len());
+
+        // 5× batch-of-1 (each unpadded — the previous single-item path).
+        let mut singles = Vec::new();
+        for h in hyps.iter() {
+            let single = scorer
+                .score_entailments_batched(premise, std::slice::from_ref(h))
+                .await
+                .expect("single inference");
+            singles.push(single[0]);
+        }
+
+        // This quantized DeBERTa export is NOT perfectly padding-invariant: a
+        // batched (padded) row differs from its unpadded single run by a small,
+        // systematic amount (measured ≈0.002–0.008 per hypothesis, ≈0.006 on the
+        // final hostility). That is a real behavior shift, accepted as within
+        // the model's own quantization noise and immaterial to threat tiers
+        // (bands 8/15/35). This bound catches segfaults, transposed rows, or any
+        // LARGE divergence; it does not pretend the padding artifact is zero.
+        const PAD_ARTIFACT_TOLERANCE: f64 = 0.02;
+        for (i, (b, s)) in batched.iter().zip(&singles).enumerate() {
+            assert!(
+                (b - s).abs() < PAD_ARTIFACT_TOLERANCE,
+                "hypothesis {i}: batched {b} vs single {s} exceeds padding tolerance",
+            );
+        }
     }
 }
