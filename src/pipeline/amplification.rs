@@ -206,16 +206,18 @@ pub async fn run(
             "reply" => "Reply",
             other => other,
         };
-        println!(
+        crate::progress!(
             "  {} by @{} ({})",
-            event_label, event.amplifier_handle, event.indexed_at,
+            event_label,
+            event.amplifier_handle,
+            event.indexed_at,
         );
         if let Some(ref text) = amplifier_text {
             let preview = crate::output::truncate_chars(text, 120);
             let tox_str = quote_toxicity
                 .map(|t| format!(" [tox: {:.2}]", t))
                 .unwrap_or_default();
-            println!("    \"{}\"{}", preview, tox_str);
+            crate::progress!("    \"{}\"{}", preview, tox_str);
         }
     }
 
@@ -277,7 +279,7 @@ pub async fn run(
 
     let amplifier_count = amplifier_handles.len();
     if amplifier_count > 0 {
-        println!("\nScoring {} amplifiers…", amplifier_count);
+        crate::progress!("\nScoring {} amplifiers…", amplifier_count);
 
         for (did, handle) in &amplifier_handles {
             // Skip the protected user themselves. Match on BOTH handle and DID:
@@ -348,7 +350,7 @@ pub async fn run(
                 skipped = skipped_count,
                 "Skipping follower analysis for reposts/likes"
             );
-            println!(
+            crate::progress!(
                 "  Skipping {} reposts/likes (follower analysis is quote/reply-only)",
                 skipped_count
             );
@@ -433,7 +435,7 @@ pub async fn run(
                         }
                     }
 
-                    println!(
+                    crate::progress!(
                         "  @{amplifier_handle}: {} followers, {} need scoring ({} concurrent)...",
                         follower_list.len(),
                         added,

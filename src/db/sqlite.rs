@@ -17,7 +17,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     UserLabel, UserRow,
 };
-use super::traits::Database;
+use super::traits::{Database, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
@@ -380,6 +380,32 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::clear_account_staging(&conn, user_did, account_did)
     }
+
+    async fn record_scan_skip(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        phase: &str,
+        error: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::record_scan_skip(&conn, user_did, account_did, phase, error)
+    }
+
+    async fn count_scan_skips(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_scan_skips(&conn, user_did)
+    }
+
+    async fn list_scan_skips(&self, user_did: &str) -> Result<Vec<ScanSkip>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_scan_skips(&conn, user_did)
+    }
+
+    async fn clear_scan_skips(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_scan_skips(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
@@ -489,8 +515,8 @@ mod tests {
         let count = db.table_count().await.unwrap();
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
-        // classification_queue, scan_account_input = 10 tables (v9)
-        assert_eq!(count, 10);
+        // classification_queue, scan_account_input, scan_skips = 11 tables (v10)
+        assert_eq!(count, 11);
     }
 
     #[tokio::test]

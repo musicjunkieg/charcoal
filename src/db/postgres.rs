@@ -21,7 +21,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::Database;
+use super::traits::{Database, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
@@ -131,6 +131,10 @@ impl PgDatabase {
                 (
                     9,
                     include_str!("../../migrations/postgres/0009_classification_staging.sql"),
+                ),
+                (
+                    10,
+                    include_str!("../../migrations/postgres/0010_scan_skips.sql"),
                 ),
             ];
 
@@ -1377,6 +1381,68 @@ impl Database for PgDatabase {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    async fn record_scan_skip(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        phase: &str,
+        error: &str,
+    ) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO scan_skips (user_did, account_did, phase, error, skipped_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (user_did, account_did, phase) DO UPDATE SET
+                 error = EXCLUDED.error,
+                 skipped_at = EXCLUDED.skipped_at",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .bind(phase)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn count_scan_skips(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query("SELECT COUNT(*) FROM scan_skips WHERE user_did = $1")
+            .bind(user_did)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn list_scan_skips(&self, user_did: &str) -> Result<Vec<ScanSkip>> {
+        let rows = sqlx_core::query::query(
+            "SELECT account_did, phase, error, skipped_at
+             FROM scan_skips WHERE user_did = $1
+             ORDER BY skipped_at DESC, account_did ASC",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ScanSkip {
+                account_did: row.get::<String, _>(0),
+                phase: row.get::<String, _>(1),
+                error: row.get::<String, _>(2),
+                // TIMESTAMPTZ here vs TEXT in SQLite — normalise to a string so
+                // the trait surface is identical across backends.
+                skipped_at: row.get::<chrono::DateTime<chrono::Utc>, _>(3).to_rfc3339(),
+            })
+            .collect())
+    }
+
+    async fn clear_scan_skips(&self, user_did: &str) -> Result<()> {
+        sqlx_core::query::query("DELETE FROM scan_skips WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

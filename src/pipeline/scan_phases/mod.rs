@@ -184,6 +184,9 @@ pub async fn run_phased_scan(
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Gather.as_str())
             .await?;
         db.clear_scan_staging(user_did).await?;
+        // Drop the previous run's skips so the count describes THIS scan rather
+        // than accumulating across every scan ever (#226).
+        db.clear_scan_skips(user_did).await?;
         // Terminal (early-exit / insufficient-data) accounts are scored inside
         // gather and never reach Phase C, so count them here.
         let gathered = run_gather(db, user_did, candidates, deps).await?;
@@ -285,10 +288,29 @@ pub async fn run_phased_scan(
     // ── Phase: Done — clear both staging tables (leaves scan_phase intact) ──
     db.clear_scan_staging(user_did).await?;
 
+    // Report the skip COUNT alongside the flag (#226). `degraded=true` on its
+    // own is a bare bool with no magnitude — it reads identically whether one
+    // account was dropped or six hundred, which is precisely what turned #220
+    // into a multi-hour log dig. A count on this line answers "how bad" without
+    // any log spelunking, and `scan_skips` answers "which ones, and why".
+    // Non-fatal: a failed count must not sink a completed scan. But it must not
+    // be silent either — an unexplained -1 in the logs is the same
+    // swallowed-cause problem #220 spent hours on.
+    let skipped = match db.count_scan_skips(user_did).await {
+        Ok(n) => n,
+        Err(e) => {
+            warn!(
+                error = %format!("{e:#}"),
+                "could not read the scan skip count — reporting -1"
+            );
+            -1
+        }
+    };
     info!(
         phase = "done",
         accounts_scored = summary.accounts_scored,
         degraded = summary.degraded,
+        accounts_skipped = skipped,
         "phased scan complete"
     );
 
@@ -337,7 +359,12 @@ async fn run_gather(
     // compiler's `FnOnce is not general enough` HRTB inference when this future
     // is held across the web background-scan's `tokio::spawn` boundary; indexing
     // by `usize` keeps the closure free of a higher-ranked borrow.
-    let results: Vec<(String, Result<GatherOutcome>)> = futures::stream::iter(0..candidates.len())
+    // NOT collected into a Vec: results are consumed as each future completes so
+    // a failure is persisted immediately (#226 review). Buffering every result
+    // first meant a crash during a long gather lost every skip recorded so far
+    // — precisely the durability the scan_skips table exists to provide, and
+    // contrary to this project's incremental-DB-writes rule for pipelines.
+    let mut results = futures::stream::iter(0..candidates.len())
         .map(|i| {
             let did = candidates[i].account_did.clone();
             let did_for_panic = did.clone();
@@ -370,16 +397,14 @@ async fn run_gather(
                 (did, result)
             }
         })
-        .buffer_unordered(deps.gather_concurrency.clamp(1, 64))
-        .collect()
-        .await;
+        .buffer_unordered(deps.gather_concurrency.clamp(1, 64));
 
     // Resilient gather: a single account's failure (e.g. a transient Bluesky
     // fetch error) must NOT abort the whole scan — and on resume must not
     // re-fail the batch (livelock risk). Log per-account failures and continue
     // with the accounts that gathered successfully.
     let mut sweep = GatherSweep::default();
-    for (account_did, result) in results {
+    while let Some((account_did, result)) = results.next().await {
         match result {
             Ok(GatherOutcome::Terminal) => sweep.terminal_scored += 1,
             Ok(GatherOutcome::Enqueued) => {}
@@ -389,11 +414,27 @@ async fn run_gather(
                 // `%e` prints only the outermost .context() and drops the cause.
                 // That difference cost hours on #220: every one of these read
                 // "ONNX inference failed" with the actual ort error invisible.
+                let chain = format!("{e:#}");
                 warn!(
                     account_did,
-                    error = %format!("{e:#}"),
+                    error = %chain,
                     "gather failed for account — skipping it and continuing the scan"
                 );
+                // Durably record the gap (#226). The WARN above is best-effort:
+                // Railway drops log messages by RATE once a replica exceeds
+                // 500/sec, severity included, so counting skips from logs gives
+                // a floor rather than a total. A failure to record must not
+                // itself abort the scan — it is diagnostics, not pipeline work.
+                if let Err(rec_err) = db
+                    .record_scan_skip(user_did, &account_did, "gather", &chain)
+                    .await
+                {
+                    warn!(
+                        account_did,
+                        error = %format!("{rec_err:#}"),
+                        "failed to record scan skip — the skip itself still stands"
+                    );
+                }
             }
         }
     }

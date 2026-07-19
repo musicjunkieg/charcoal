@@ -14,6 +14,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
+use super::traits::ScanSkip;
 
 // --- Users ---
 
@@ -1214,6 +1215,76 @@ fn map_queue_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRow> {
         model_id: row.get(9)?,
         policy_version: row.get(10)?,
     })
+}
+
+// ── scan_skips (#226) ────────────────────────────────────────────────────────
+//
+// A skipped account is a real gap in a scan's coverage. Before this table the
+// only evidence was a WARN log line, and Railway drops log messages by RATE
+// (not severity) once a replica exceeds 500/sec — so those counts were a floor,
+// not a total. See #220 for the diagnosis this would have made trivial.
+
+/// Record (or update) one skipped account.
+///
+/// Upserts on (user_did, account_did, phase): a re-gather that fails again
+/// refreshes the row instead of adding one, so the count keeps meaning
+/// "accounts missing from this scan".
+pub fn record_scan_skip(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+    phase: &str,
+    error: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO scan_skips (user_did, account_did, phase, error, skipped_at)
+         VALUES (?1, ?2, ?3, ?4, datetime('now'))
+         ON CONFLICT(user_did, account_did, phase) DO UPDATE SET
+             error = excluded.error,
+             skipped_at = excluded.skipped_at",
+        params![user_did, account_did, phase, error],
+    )?;
+    Ok(())
+}
+
+/// Number of accounts skipped in the current scan for a user.
+pub fn count_scan_skips(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM scan_skips WHERE user_did = ?1",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// All skips recorded for a user, newest first.
+pub fn list_scan_skips(conn: &Connection, user_did: &str) -> Result<Vec<ScanSkip>> {
+    let mut stmt = conn.prepare(
+        "SELECT account_did, phase, error, skipped_at
+         FROM scan_skips WHERE user_did = ?1
+         ORDER BY skipped_at DESC, account_did ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![user_did], |row| {
+            Ok(ScanSkip {
+                account_did: row.get(0)?,
+                phase: row.get(1)?,
+                error: row.get(2)?,
+                skipped_at: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Delete a user's recorded skips. Called at gather entry so the count always
+/// describes the current scan.
+pub fn clear_scan_skips(conn: &Connection, user_did: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM scan_skips WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
