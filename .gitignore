@@ -25,7 +25,10 @@ refs/zentropi_info.txt
 # Research scratch files
 /docs/research/
 
-# Chainlink local state — DB backed up to Tigris, no need to track exports
+# Chainlink local state. NOTE: there is NO automatic backup unless the four
+# BACKUP_S3_* vars are set in .env (see .env.example) — the pre-commit hook
+# skips the upload silently when they are unset. Target is Cloudflare R2.
+# issues.db is per-clone; issues-export.json is the shared recovery source.
 .chainlink/issues.db
 .chainlink/.cache/
 .chainlink/issues-export.json
