@@ -48,6 +48,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - AT Protocol tokens stored in-memory for future XRPC calls
 
 ### Changed
+- Batch amplification event inserts into a single batched write instead of one round-trip per event — the amplification event loop was ~2m16s of a 28m24s scan at 359 sequential inserts. Postgres uses one `UNNEST` round-trip at any batch size; SQLite uses one transaction chunked at 100 rows per statement. New `Database::insert_amplification_events_batch` (#216, chainlink)
 - Add vitest harness + TDD untested frontend logic (#3)
 - Mutation pass: prove new backend tests can fail (#2)
 - Production GPU capacity risk: US-GA-2 serverless is H100-only and very low capacity (#205)

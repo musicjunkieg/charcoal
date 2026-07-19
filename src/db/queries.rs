@@ -11,8 +11,8 @@ use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 
 // --- Users ---
@@ -323,19 +323,85 @@ pub fn insert_amplification_event(
     Ok(conn.last_insert_rowid())
 }
 
+/// Insert many amplification events in one transaction, batched into
+/// multi-row `INSERT` statements.
+///
+/// SQLite binds a maximum of 999 parameters per statement on older builds and
+/// each row uses 9, so rows are chunked at 100 (999/9 = 111, minus headroom).
+/// All chunks share one transaction, so the batch is atomic and ids ascend in
+/// slice order.
+pub fn insert_amplification_events_batch(
+    conn: &Connection,
+    user_did: &str,
+    events: &[NewAmplificationEvent],
+) -> Result<usize> {
+    if events.is_empty() {
+        return Ok(0);
+    }
+
+    const ROWS_PER_STATEMENT: usize = 100;
+    const COLS: usize = 9;
+
+    let tx = conn.unchecked_transaction()?;
+    let mut inserted = 0usize;
+
+    for chunk in events.chunks(ROWS_PER_STATEMENT) {
+        // Build "(?1,?2,...,?9),(?10,...)" with 1-based positional parameters.
+        let placeholders: Vec<String> = (0..chunk.len())
+            .map(|row| {
+                let base = row * COLS;
+                let slots: Vec<String> = (1..=COLS).map(|c| format!("?{}", base + c)).collect();
+                format!("({})", slots.join(","))
+            })
+            .collect();
+
+        let sql = format!(
+            "INSERT INTO amplification_events
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                 amplifier_post_uri, amplifier_text, original_post_text, context_score)
+             VALUES {}",
+            placeholders.join(",")
+        );
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(chunk.len() * COLS);
+        for e in chunk {
+            params.push(Box::new(user_did.to_string()));
+            params.push(Box::new(e.event_type.clone()));
+            params.push(Box::new(e.amplifier_did.clone()));
+            params.push(Box::new(e.amplifier_handle.clone()));
+            params.push(Box::new(e.original_post_uri.clone()));
+            params.push(Box::new(e.amplifier_post_uri.clone()));
+            params.push(Box::new(e.amplifier_text.clone()));
+            params.push(Box::new(e.original_post_text.clone()));
+            params.push(Box::new(e.context_score));
+        }
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        inserted += tx.execute(&sql, param_refs.as_slice())?;
+    }
+
+    tx.commit()?;
+    Ok(inserted)
+}
+
 /// Get recent amplification events for a specific user.
 pub fn get_recent_events(
     conn: &Connection,
     user_did: &str,
     limit: u32,
 ) -> Result<Vec<AmplificationEvent>> {
+    // Batched inserts (insert_amplification_events_batch) give every row in a
+    // batch the SAME detected_at timestamp, so `ORDER BY detected_at DESC`
+    // alone leaves same-batch rows in an arbitrary order. `id DESC` breaks the
+    // tie deterministically — ids ascend in insertion order, so this keeps
+    // "newest first" stable within a batch, not just across batches.
     let mut stmt = conn.prepare(
         "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
                 amplifier_post_uri, amplifier_text, detected_at, followers_fetched, followers_scored,
                 original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1
-         ORDER BY detected_at DESC
+         ORDER BY detected_at DESC, id DESC
          LIMIT ?2",
     )?;
 
@@ -399,7 +465,7 @@ pub fn get_events_by_amplifier(
                 followers_scored, original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1 AND amplifier_did = ?2
-         ORDER BY detected_at DESC",
+         ORDER BY detected_at DESC, id DESC",
     )?;
     let rows = stmt.query_map(params![user_did, amplifier_did], |row| {
         Ok(AmplificationEvent {

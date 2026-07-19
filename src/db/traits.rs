@@ -12,7 +12,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    UserLabel, UserRow,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -90,6 +91,27 @@ pub trait Database: Send + Sync {
         original_post_text: Option<&str>,
         context_score: Option<f64>,
     ) -> Result<i64>;
+
+    /// Insert many amplification events for a user, collapsing what used to
+    /// be one network round-trip per event (359 events ≈ 2m16s of a 28m scan,
+    /// chainlink #216) into a small, fixed number of round-trips regardless
+    /// of batch size.
+    ///
+    /// Returns the number of rows inserted. Backend behavior differs:
+    /// Postgres uses `UNNEST`, which binds 8 arrays plus a single scalar
+    /// (user_did) and is a genuine single round-trip at any batch size.
+    /// SQLite runs one transaction but chunks
+    /// into multi-row `INSERT`s of 100 rows each (bind-parameter limits), so
+    /// large batches issue multiple statements within that one transaction.
+    ///
+    /// Rows MUST be inserted in slice order so auto-increment ids ascend in
+    /// input order — downstream evidence output and tests depend on it.
+    /// An empty slice is a no-op returning `Ok(0)`.
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize>;
 
     /// Get recent amplification events for a user, ordered by detection time descending.
     async fn get_recent_events(
