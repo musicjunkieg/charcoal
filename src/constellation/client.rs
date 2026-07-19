@@ -5,6 +5,7 @@
 // format used by the notification pipeline, so they can be merged seamlessly.
 
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use serde::Deserialize;
 use tracing::{debug, warn};
 
@@ -12,6 +13,11 @@ use crate::bluesky::amplification::AmplificationNotification;
 
 /// Constellation source path for like backlinks.
 pub const LIKES_SOURCE: &str = "app.bsky.feed.like:subject.uri";
+
+/// Concurrency for the discovery backlink fetches (#213). Kept low on purpose:
+/// Constellation publishes no rate limit and `PublicAtpClient` has no backoff
+/// (#182). Do not raise past ~8 until #182 lands.
+const DISCOVERY_CONCURRENCY: usize = 8;
 
 /// A single backlink record from the Constellation API.
 #[derive(Debug, Clone, Deserialize)]
@@ -94,64 +100,40 @@ impl ConstellationClient {
         &self,
         post_uris: &[String],
     ) -> Vec<AmplificationNotification> {
-        let mut events = Vec::new();
-        let mut seen_uris = std::collections::HashSet::new();
+        // Fetch each URI's quote + repost backlinks concurrently (was one serial
+        // pair of round-trips per URI — ~2N sequential calls, #213). Carry the
+        // original index and sort back into `post_uris` order before the dedup
+        // fold, so the single-threaded `seen` set produces byte-identical output
+        // to the old serial loop. Concurrency is capped low: Constellation has
+        // no documented rate limit and `PublicAtpClient` has no backoff (#182).
+        let mut fetched: Vec<(
+            usize,
+            String,
+            Result<BacklinksResponse>,
+            Result<BacklinksResponse>,
+        )> = futures::stream::iter(0..post_uris.len())
+            .map(|i| {
+                let uri = post_uris[i].clone();
+                async move {
+                    let quotes = self
+                        .get_backlinks(&uri, "app.bsky.feed.post:embed.record.uri", 100)
+                        .await;
+                    let reposts = self
+                        .get_backlinks(&uri, "app.bsky.feed.repost:subject.uri", 100)
+                        .await;
+                    (i, uri, quotes, reposts)
+                }
+            })
+            .buffer_unordered(DISCOVERY_CONCURRENCY)
+            .collect()
+            .await;
+        fetched.sort_by_key(|(i, _, _, _)| *i);
 
-        for uri in post_uris {
-            // Query for quote-posts referencing this URI
-            // Source format: collection:json_path — quotes embed the original via embed.record.uri
-            match self
-                .get_backlinks(uri, "app.bsky.feed.post:embed.record.uri", 100)
-                .await
-            {
-                Ok(resp) => {
-                    for record in &resp.records {
-                        let amp_uri =
-                            format!("at://{}/{}/{}", record.did, record.collection, record.rkey);
-                        if seen_uris.insert(amp_uri.clone()) {
-                            events.push(AmplificationNotification {
-                                event_type: "quote".to_string(),
-                                amplifier_did: record.did.clone(),
-                                amplifier_handle: record.did.clone(),
-                                original_post_uri: Some(uri.clone()),
-                                amplifier_post_uri: amp_uri,
-                                indexed_at: String::new(),
-                            });
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(uri = uri, error = %e, "Failed to query Constellation for quotes");
-                }
-            }
-
-            // Query for reposts referencing this URI
-            // Source format: collection:json_path — reposts reference the original via subject.uri
-            match self
-                .get_backlinks(uri, "app.bsky.feed.repost:subject.uri", 100)
-                .await
-            {
-                Ok(resp) => {
-                    for record in &resp.records {
-                        let amp_uri =
-                            format!("at://{}/{}/{}", record.did, record.collection, record.rkey);
-                        if seen_uris.insert(amp_uri.clone()) {
-                            events.push(AmplificationNotification {
-                                event_type: "repost".to_string(),
-                                amplifier_did: record.did.clone(),
-                                amplifier_handle: record.did.clone(),
-                                original_post_uri: Some(uri.clone()),
-                                amplifier_post_uri: amp_uri,
-                                indexed_at: String::new(),
-                            });
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(uri = uri, error = %e, "Failed to query Constellation for reposts");
-                }
-            }
-        }
+        let ordered = fetched
+            .into_iter()
+            .map(|(_, uri, quotes, reposts)| (uri, quotes, reposts))
+            .collect();
+        let events = dedup_amplification_events(ordered);
 
         debug!(
             total_events = events.len(),
@@ -168,31 +150,28 @@ impl ConstellationClient {
     /// a new post, so `amplifier_post_uri` is empty. Deduplicates by
     /// (amplifier_did, original_post_uri).
     pub async fn find_likers(&self, post_uris: &[String]) -> Vec<AmplificationNotification> {
-        let mut results = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        for uri in post_uris {
-            match self.get_backlinks(uri, LIKES_SOURCE, 100).await {
-                Ok(resp) => {
-                    for record in &resp.records {
-                        let key = (record.did.clone(), uri.clone());
-                        if seen.insert(key) {
-                            results.push(AmplificationNotification {
-                                event_type: "like".to_string(),
-                                amplifier_did: record.did.clone(),
-                                amplifier_handle: record.did.clone(),
-                                original_post_uri: Some(uri.clone()),
-                                amplifier_post_uri: String::new(),
-                                indexed_at: String::new(),
-                            });
-                        }
+        // Fetch each URI's like backlinks concurrently, sort back to URI order,
+        // then run the single-threaded dedup fold — byte-identical to the old
+        // serial loop. Same low concurrency cap as `find_amplification_events`.
+        let mut fetched: Vec<(usize, String, Result<BacklinksResponse>)> =
+            futures::stream::iter(0..post_uris.len())
+                .map(|i| {
+                    let uri = post_uris[i].clone();
+                    async move {
+                        let result = self.get_backlinks(&uri, LIKES_SOURCE, 100).await;
+                        (i, uri, result)
                     }
-                }
-                Err(e) => {
-                    warn!(uri = uri, error = %e, "Failed to query Constellation for likes");
-                }
-            }
-        }
+                })
+                .buffer_unordered(DISCOVERY_CONCURRENCY)
+                .collect()
+                .await;
+        fetched.sort_by_key(|(i, _, _)| *i);
+
+        let ordered = fetched
+            .into_iter()
+            .map(|(_, uri, result)| (uri, result))
+            .collect();
+        let results = dedup_liker_events(ordered);
 
         debug!(
             like_count = results.len(),
@@ -202,4 +181,99 @@ impl ConstellationClient {
 
         results
     }
+}
+
+/// Pure dedup fold for amplification events (#213). Consumes per-URI
+/// `(uri, quote_result, repost_result)` in `post_uris` order and produces the
+/// deduped event list — quotes then reposts per URI, deduped by
+/// `amplifier_post_uri` across the whole set. Extracted from the (now parallel)
+/// network loop so the ordering/dedup logic is unit-testable without network,
+/// mirroring `sweep::dedup_second_degree`.
+pub fn dedup_amplification_events(
+    fetch_results: Vec<(String, Result<BacklinksResponse>, Result<BacklinksResponse>)>,
+) -> Vec<AmplificationNotification> {
+    let mut events = Vec::new();
+    let mut seen_uris = std::collections::HashSet::new();
+
+    for (uri, quotes, reposts) in fetch_results {
+        push_backlink_events(&mut events, &mut seen_uris, &uri, "quote", quotes, "quotes");
+        push_backlink_events(
+            &mut events,
+            &mut seen_uris,
+            &uri,
+            "repost",
+            reposts,
+            "reposts",
+        );
+    }
+
+    events
+}
+
+/// Push deduped events for one backlink response into `events`. Shared by the
+/// quote and repost passes so both dedup against the same `seen_uris` set in
+/// exactly the order the serial loop used.
+fn push_backlink_events(
+    events: &mut Vec<AmplificationNotification>,
+    seen_uris: &mut std::collections::HashSet<String>,
+    uri: &str,
+    event_type: &str,
+    result: Result<BacklinksResponse>,
+    what: &str,
+) {
+    match result {
+        Ok(resp) => {
+            for record in &resp.records {
+                let amp_uri = format!("at://{}/{}/{}", record.did, record.collection, record.rkey);
+                if seen_uris.insert(amp_uri.clone()) {
+                    events.push(AmplificationNotification {
+                        event_type: event_type.to_string(),
+                        amplifier_did: record.did.clone(),
+                        amplifier_handle: record.did.clone(),
+                        original_post_uri: Some(uri.to_string()),
+                        amplifier_post_uri: amp_uri,
+                        indexed_at: String::new(),
+                    });
+                }
+            }
+        }
+        Err(e) => {
+            warn!(uri = uri, error = %e, "Failed to query Constellation for {what}");
+        }
+    }
+}
+
+/// Pure dedup fold for like events (#213). Consumes per-URI `(uri, result)` in
+/// order and dedups by `(amplifier_did, original_post_uri)`, mirroring the old
+/// serial `find_likers` loop.
+pub fn dedup_liker_events(
+    fetch_results: Vec<(String, Result<BacklinksResponse>)>,
+) -> Vec<AmplificationNotification> {
+    let mut results = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for (uri, result) in fetch_results {
+        match result {
+            Ok(resp) => {
+                for record in &resp.records {
+                    let key = (record.did.clone(), uri.clone());
+                    if seen.insert(key) {
+                        results.push(AmplificationNotification {
+                            event_type: "like".to_string(),
+                            amplifier_did: record.did.clone(),
+                            amplifier_handle: record.did.clone(),
+                            original_post_uri: Some(uri.clone()),
+                            amplifier_post_uri: String::new(),
+                            indexed_at: String::new(),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(uri = uri, error = %e, "Failed to query Constellation for likes");
+            }
+        }
+    }
+
+    results
 }

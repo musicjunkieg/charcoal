@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use tracing::{error, info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
@@ -508,8 +508,27 @@ async fn run_scan(
     let follows_set = crate::bluesky::replies::fetch_follows_set(&client, user_did)
         .await
         .unwrap_or_default();
-    for post in &posts {
-        match crate::bluesky::replies::fetch_replies_to_post(&client, &post.uri).await {
+    // Fetch each post's replies concurrently (was one serial round-trip per
+    // post, #213), then process in post order so the emitted events are
+    // byte-identical to the old serial loop. Concurrency capped low —
+    // `PublicAtpClient` has no backoff yet (#182).
+    const REPLY_FETCH_CONCURRENCY: usize = 8;
+    let mut fetched_replies: Vec<(usize, String, _)> = futures::stream::iter(0..posts.len())
+        .map(|i| {
+            let uri = posts[i].uri.clone();
+            let client = &client;
+            async move {
+                let result = crate::bluesky::replies::fetch_replies_to_post(client, &uri).await;
+                (i, uri, result)
+            }
+        })
+        .buffer_unordered(REPLY_FETCH_CONCURRENCY)
+        .collect()
+        .await;
+    fetched_replies.sort_by_key(|(i, _, _)| *i);
+
+    for (_, post_uri, reply_result) in fetched_replies {
+        match reply_result {
             Ok(replies) => {
                 let reply_dids: Vec<String> =
                     replies.iter().map(|(did, _, _)| did.clone()).collect();
@@ -525,7 +544,7 @@ async fn run_scan(
                             event_type: "reply".to_string(),
                             amplifier_did: did.clone(),
                             amplifier_handle: did.clone(), // resolved below
-                            original_post_uri: Some(post.uri.clone()),
+                            original_post_uri: Some(post_uri.clone()),
                             amplifier_post_uri: uri.clone(),
                             indexed_at: String::new(),
                         });
@@ -533,7 +552,7 @@ async fn run_scan(
                 }
             }
             Err(e) => {
-                warn!(uri = post.uri, error = %e, "Failed to fetch replies");
+                warn!(uri = post_uri, error = %e, "Failed to fetch replies");
             }
         }
     }

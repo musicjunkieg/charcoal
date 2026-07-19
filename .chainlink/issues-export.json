@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "exported_at": "2026-07-19T06:01:15.780970+00:00",
+  "exported_at": "2026-07-19T06:20:37.774777+00:00",
   "issues": [
     {
       "id": 219,
@@ -231,6 +231,16 @@
         {
           "content": "Task 1 PUSHED — PR #79 into staging: https://github.com/musicjunkieg/charcoal/pull/79. Real Check, Lint & Test gate PASSED (2m12s) — the gate #78 added to staging PRs. CodeQL/analyze all green; CodeRabbit review in progress. Not merged.",
           "created_at": "2026-07-19T05:55:11.129628+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "PR #79 CodeRabbit APPROVED after one round. Finding (Major): Phase A precomputed the target embedding even when no protected embedding existed — wasted inference AND, via the ? on embed_batch, an embed failure would skip the account where TF-IDF would have scored it. Fixed 63b6d3f: gate the precompute on embedder AND has_protected_embedding (from deps.protected_embedding.is_some()). Re-review APPROVED. web 0 failures, clippy clean x3, fmt clean. Not merged — Bryan decides.",
+          "created_at": "2026-07-19T06:03:08.539118+00:00",
+          "kind": "note"
+        },
+        {
+          "content": "Task 1 MERGED to staging — PR #79 as merge commit 40a4e18 (feature 493b4a8 + CodeRabbit gate fix 63b6d3f). Went through the real Check,Lint&Test gate. CodeRabbit APPROVED. The topic-overlap embedding now precomputes in Phase A gather instead of the serial finalize loop — the ~31% scan-time win. Confirm the actual wall-clock drop on the next staging scan (measure the finalize phase duration vs the prior 8m50s/473 accounts). Task 1 done; tasks 2-5 remain (2 parallelize discovery loops; 3 batch NLI [gated: segfault check]; 4 Stage1/2 double-fetch [gated: terminal-rate measurement]; 5 is_score_stale N+1).",
+          "created_at": "2026-07-19T06:12:32.769124+00:00",
           "kind": "note"
         }
       ],
