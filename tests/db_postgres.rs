@@ -258,8 +258,13 @@ async fn test_pg_batch_insert_matches_serial() {
     assert_eq!(first.amplifier_text, Some("batched quote".to_string()));
     assert_eq!(first.original_post_text, Some("the original".to_string()));
     assert_eq!(first.context_score, Some(0.42));
+    assert_eq!(
+        first.amplifier_post_uri,
+        Some("at://did:plc:pgbatch1/app.bsky.feed.post/q1".to_string())
+    );
     assert_eq!(second.amplifier_text, None);
     assert_eq!(second.context_score, None);
+    assert_eq!(second.amplifier_post_uri, None);
 }
 
 #[tokio::test]
@@ -382,6 +387,76 @@ async fn test_pg_batch_insert_many_rows_preserve_own_values() {
         assert_eq!(e.amplifier_text, Some(format!("text-{}", i)));
         assert_eq!(e.context_score, Some(i as f64 / 1000.0));
     }
+}
+
+#[tokio::test]
+async fn test_pg_get_recent_events_breaks_detected_at_ties_by_id_desc() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    const MARKER: &str = "at://did:plc:me/app.bsky.feed.post/pgtie";
+    cleanup_batch_test_data(&url, MARKER).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // A single batch insert gives every row the same detected_at (#192): the
+    // whole batch runs in one transaction, so `NOW()` is captured once, not
+    // once per row. `get_recent_events` ordering by `detected_at DESC` alone
+    // would then leave same-batch rows in an arbitrary (storage-dependent)
+    // order — verified empirically against this same live Postgres instance
+    // (250 rows, 1 distinct timestamp, non-sequential id order returned).
+    // The `id DESC` tiebreaker makes "newest first" deterministic: ids
+    // ascend in input order, so the returned order must be the exact reverse
+    // of insertion order.
+    let events: Vec<charcoal::db::models::NewAmplificationEvent> = (0..20)
+        .map(|i| charcoal::db::models::NewAmplificationEvent {
+            event_type: "repost".to_string(),
+            amplifier_did: format!("did:plc:pgtie{:04}", i),
+            amplifier_handle: format!("pgtie{:04}.bsky.social", i),
+            original_post_uri: MARKER.to_string(),
+            amplifier_post_uri: None,
+            amplifier_text: None,
+            original_post_text: None,
+            context_score: None,
+        })
+        .collect();
+
+    let n = db
+        .insert_amplification_events_batch(TEST_USER, &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 20);
+
+    let stored: Vec<_> = db
+        .get_recent_events(TEST_USER, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original_post_uri == MARKER)
+        .collect();
+    assert_eq!(stored.len(), 20);
+
+    // All rows share one detected_at — prove the shared-timestamp premise,
+    // not just assert the assumed consequence.
+    let distinct_timestamps: std::collections::HashSet<_> =
+        stored.iter().map(|e| e.detected_at.clone()).collect();
+    assert_eq!(
+        distinct_timestamps.len(),
+        1,
+        "batch insert must share one detected_at across all rows"
+    );
+
+    // With detected_at tied, the tiebreaker must produce strictly descending
+    // ids — i.e. the exact reverse of insertion order.
+    for pair in stored.windows(2) {
+        assert!(
+            pair[0].id > pair[1].id,
+            "ids must be strictly descending: {} then {}",
+            pair[0].id,
+            pair[1].id
+        );
+    }
+    assert_eq!(stored[0].amplifier_did, "did:plc:pgtie0019");
+    assert_eq!(stored[19].amplifier_did, "did:plc:pgtie0000");
 }
 
 #[tokio::test]

@@ -105,9 +105,10 @@ pub async fn run(
             .map(|s| s.as_str());
 
         // For quote and reply events, fetch the amplifier's text UNCONDITIONALLY
-        // so it is persisted as event evidence (`insert_amplification_event`)
-        // even on a non-`--analyze` scan. Only the SCORING of that text is
-        // gated on a real scorer being present.
+        // so it is persisted as event evidence (via the batched
+        // `insert_amplification_events_batch` write) even on a non-`--analyze`
+        // scan. Only the SCORING of that text is gated on a real scorer being
+        // present.
         if event.event_type == "quote" || event.event_type == "reply" {
             match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {

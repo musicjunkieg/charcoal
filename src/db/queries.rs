@@ -390,13 +390,18 @@ pub fn get_recent_events(
     user_did: &str,
     limit: u32,
 ) -> Result<Vec<AmplificationEvent>> {
+    // Batched inserts (insert_amplification_events_batch) give every row in a
+    // batch the SAME detected_at timestamp, so `ORDER BY detected_at DESC`
+    // alone leaves same-batch rows in an arbitrary order. `id DESC` breaks the
+    // tie deterministically — ids ascend in insertion order, so this keeps
+    // "newest first" stable within a batch, not just across batches.
     let mut stmt = conn.prepare(
         "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
                 amplifier_post_uri, amplifier_text, detected_at, followers_fetched, followers_scored,
                 original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1
-         ORDER BY detected_at DESC
+         ORDER BY detected_at DESC, id DESC
          LIMIT ?2",
     )?;
 
@@ -460,7 +465,7 @@ pub fn get_events_by_amplifier(
                 followers_scored, original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1 AND amplifier_did = ?2
-         ORDER BY detected_at DESC",
+         ORDER BY detected_at DESC, id DESC",
     )?;
     let rows = stmt.query_map(params![user_did, amplifier_did], |row| {
         Ok(AmplificationEvent {

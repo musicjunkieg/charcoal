@@ -552,7 +552,7 @@ impl Database for PgDatabase {
                     original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1
-             ORDER BY detected_at DESC
+             ORDER BY detected_at DESC, id DESC
              LIMIT $2",
         )
         .bind(user_did)
@@ -619,7 +619,7 @@ impl Database for PgDatabase {
                     followers_fetched, followers_scored, original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1 AND amplifier_did = $2
-             ORDER BY detected_at DESC",
+             ORDER BY detected_at DESC, id DESC",
         )
         .bind(user_did)
         .bind(amplifier_did)
