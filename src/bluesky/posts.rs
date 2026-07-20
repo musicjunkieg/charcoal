@@ -13,6 +13,33 @@ use tracing::{debug, info, warn};
 use super::client::PublicAtpClient;
 
 /// A simplified post — just the fields Charcoal needs for analysis.
+/// Strip NUL bytes from ingested post text (#224).
+///
+/// A post containing a NUL killed one account's gather on the 2026-07-19
+/// staging scan with `unsupported Unicode escape sequence`. serde_json
+/// serialises NUL as `\u0000`, which PostgreSQL rejects in JSONB — and
+/// `top_toxic_posts` and `payload_json` are both JSONB. Postgres TEXT columns
+/// cannot hold a NUL either, so `classification_queue.text` fails on the same
+/// input.
+///
+/// Applied HERE, at ingestion, rather than at the database write boundary:
+/// sanitising per-backend would let SQLite and Postgres hold different text for
+/// the same post, so two backends would score identically-fetched content
+/// differently. Strip it once, where the text enters the system.
+///
+/// Deliberately narrow — ONLY NUL. Other C0 controls are legal in both JSON and
+/// Postgres text, and newlines in particular are load-bearing (the reply
+/// envelope is built with "\n\n"), so removing more would silently change the
+/// text the toxicity model scores.
+pub fn sanitize_post_text(text: &str) -> String {
+    if text.contains('\0') {
+        text.replace('\0', "")
+    } else {
+        // Overwhelmingly the common case — avoid reallocating for every post.
+        text.to_string()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Post {
     pub uri: String,
@@ -144,7 +171,7 @@ pub async fn fetch_recent_posts(
             let text = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
                 post_view.record.clone(),
             )
-            .map(|record| record.data.text.clone())
+            .map(|record| sanitize_post_text(&record.data.text))
             .unwrap_or_default();
 
             // Skip empty posts and very short posts (likely just links/images).
@@ -262,7 +289,7 @@ pub async fn fetch_posts_with_replies(
                 Err(_) => continue,
             };
 
-            let text = record.data.text.clone();
+            let text = sanitize_post_text(&record.data.text);
 
             // Skip empty posts and very short posts (likely just links/images).
             if text.chars().count() < 15 {
@@ -382,7 +409,7 @@ pub async fn fetch_post_text(client: &PublicAtpClient, uri: &str) -> Result<Opti
     let text = output.posts.first().and_then(|post_view| {
         atrium_api::app::bsky::feed::post::Record::try_from_unknown(post_view.record.clone())
             .ok()
-            .map(|record| record.data.text.clone())
+            .map(|record| sanitize_post_text(&record.data.text))
     });
 
     Ok(text)
@@ -428,7 +455,7 @@ pub async fn fetch_parent_posts(
                     if let Ok(record) = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
                         post_view.record.clone(),
                     ) {
-                        result.insert(post_view.uri.clone(), record.data.text.clone());
+                        result.insert(post_view.uri.clone(), sanitize_post_text(&record.data.text));
                     }
                 }
             }
