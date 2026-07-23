@@ -153,18 +153,72 @@ After partitioning, before scoring:
 const MIN_ASSESSABLE_POSTS: usize = 5;  // mirrors MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT
 ```
 
-- assessable count ≥ 5  → score normally on the assessable subset.
-- assessable count < 5   → construct `ThreatTier::NotAssessed`; do not compute a
-  threat score.
+The gate takes two counts — `assessable` (posts `assess_language` kept) and
+`unassessable` (posts it dropped) — and must distinguish three outcomes, because
+"couldn't read the language" is a different condition from the pre-existing
+"Insufficient Data" (too few posts to score at all):
+
+| `assessable` | `unassessable` | outcome |
+|---|---|---|
+| ≥ 5 | any | **score** on the assessable subset (normal path) |
+| < 5 | `unassessable ≥ 1` **and** `unassessable ≥ assessable` | **`NotAssessed`** — abstain |
+| < 5 | otherwise (a genuinely sparse account) | **`Insufficient Data`** — existing terminal outcome, unchanged |
+
+`NotAssessed` fires only when unassessable posts are *the reason* there is not
+enough assessable content. A sparse English-only account (e.g. 3 English posts,
+no foreign-language text) stays `Insufficient Data` — it is not mislabelled
+"unsupported language". This decision is a single shared helper (see Component 4a)
+so both the Stage-1 and Stage-2 call sites reach identical verdicts.
 
 Worked examples:
 
-| posts | result |
-|---|---|
-| 90 en / 10 ja | scored on 90 |
-| 40 en / 60 ja | scored on 40 |
-| 3 en / 97 ja | NotAssessed |
-| 0 en / 50 ja | NotAssessed |
+| posts | assessable / unassessable | result |
+|---|---|---|
+| 90 en / 10 ja | 90 / 10 | scored on 90 |
+| 40 en / 60 ja | 40 / 60 | scored on 40 |
+| 3 en / 97 ja | 3 / 97 | NotAssessed (unassessable dominates) |
+| 0 en / 50 ja | 0 / 50 | NotAssessed |
+| 3 en / 0 other | 3 / 0 | Insufficient Data (sparse, unchanged) |
+| 2 en / 2 ja | 2 / 2 | NotAssessed (`unassessable ≥ assessable`, ≥1) |
+
+### Component 4a — the partition + gate seam applies at BOTH stages
+
+The account has two terminal paths that can assign a tier, and **both** must be
+guarded — filtering only at the Stage-2 scoring seam leaves the Stage-1 bug live.
+
+1. **Stage 1** (`stage1_outcome`, `profile.rs:179`) runs the ONNX clean-pass on a
+   25-post sample and can early-exit an account to `Low` (clean +
+   topically-irrelevant) or to `Insufficient Data` (`<5` posts) *before Stage 2
+   runs*. A non-English account scores ~0.0004 = clean; if off-topic it early-exits
+   to `Low` — the exact bug, on a path the Stage-2 gate never sees.
+2. **Stage 2** (`score_from_sample`, `profile.rs:357`) is the scoring seam in
+   Component 3.
+
+Single seam covering both: a `PostSample`-level partition applied immediately
+after each fetch, before any classification or Stage-1 clean-pass. It returns the
+assessable sample and the dropped (`unassessable`) count. Concretely:
+
+- **Component 2** already puts `langs` on every `Post`, so the partition is a pure
+  function of the sample.
+- A new helper `partition_assessable(sample: &PostSample) -> (PostSample, usize)`
+  (returns the assessable-only sample and the count dropped) lives alongside
+  `assess_language`.
+- **Stage 1:** partition the 25-post sample first. Then apply the Component-4 gate
+  to `(assessable_len, dropped)`: if it yields `NotAssessed`, return a terminal
+  `NotAssessed` `AccountScore` (mirroring the existing `Insufficient Data` terminal
+  branch at `profile.rs:194-212`, but with tier `NotAssessed` and
+  `posts_analyzed = assessable_len + dropped`). Otherwise Stage 1 proceeds on the
+  assessable-only sample exactly as today — so a mixed account's clean-pass /
+  overlap only ever sees text the model can read.
+- **Stage 2:** partition the 50-post sample before building `all_post_texts`, so the
+  classifier is never called on unassessable posts (the cost saving), and the
+  1:1 verdict/post alignment in `score_from_sample` is preserved (it only ever sees
+  the assessable subset). Apply the same Component-4 gate; on `NotAssessed`, return
+  a terminal `NotAssessed` score instead of computing one.
+
+Because the partition drops unassessable posts from the sample, the assessable
+count *is* the resulting sample's post count, and `compute_reply_weighted_toxicity`
+(Component 3) gets assessable-only denominators with no change to its body.
 
 ### Component 5 — `ThreatTier::NotAssessed`
 
@@ -242,22 +296,30 @@ it as its own bucket.
 ## Data flow (end to end)
 
 ```
-getAuthorFeed record ──► Post { text, langs, .. }        (Component 2)
+getAuthorFeed record ──► Post { text, langs, .. }              (Component 2)
                               │
-                     assess_language(text, langs)          (Component 1)
+              PostSample ──► partition_assessable(sample)        (Components 1, 4a)
+                              │  → (assessable_sample, dropped)
                               │
-              ┌───────────────┴────────────────┐
-        Assessable                        Unassessable
-              │                                 │
-    classify_batch_with_contexts          (dropped — not classified,
-              │                             no ONNX/CoPE-B cost)
-    compute_reply_weighted_toxicity
-      (assessable-only denominator)
-              │
-       assessable count ≥ 5 ? ──── no ──► ThreatTier::NotAssessed   (Components 4,5)
-              │ yes
-       threat score ──► ThreatTier::from_score ──► Low/Watch/Elevated/High
+                  coverage_gate(assessable_len, dropped)         (Component 4)
+                   ├─ <5 & unassessable dominates ─► ThreatTier::NotAssessed
+                   ├─ <5 & sparse ─────────────────► "Insufficient Data" (unchanged)
+                   └─ ≥5 ──► proceed on assessable_sample
+                                   │
+                       (Stage 1)   │   (Stage 2)
+              ONNX clean-pass /    │   classify_batch_with_contexts
+              overlap early-exit   │   (assessable posts only — no wasted
+                                   │    ONNX/CoPE-B on unreadable text)
+                                   │
+                       compute_reply_weighted_toxicity
+                         (assessable-only denominator)
+                                   │
+                       threat score ──► ThreatTier::from_score
+                                        ──► Low/Watch/Elevated/High
 ```
+
+The gate runs at BOTH the Stage-1 25-post seam and the Stage-2 50-post seam
+(Component 4a); the diagram shows one pass for brevity.
 
 ## Error handling
 
@@ -275,7 +337,13 @@ getAuthorFeed record ──► Post { text, langs, .. }        (Component 2)
 - **Regression fixture:** promote `examples/lang_gate_probe.rs`'s parallel-translation
   samples (with the positive/negative/gibberish controls) into a checked-in test
   asserting the two regimes hold, so a future model swap that changes this is caught.
-- **Coverage-gate boundary:** 4 assessable → NotAssessed; 5 assessable → scored.
+- **Coverage-gate three-way (Component 4):** `(5, 0)` → score; `(4, 10)` →
+  NotAssessed; `(3, 0)` → Insufficient Data (sparse, not mislabelled); `(2, 2)` →
+  NotAssessed (`unassessable ≥ assessable`, ≥1); `(0, 50)` → NotAssessed.
+- **`partition_assessable`:** a mixed sample yields an assessable-only sub-sample
+  and the correct dropped count, preserving originals/replies/quotes bucketing.
+- **Stage-1 abstention (Component 4a):** a 25-post non-Latin sample that would have
+  early-exited to `Low` now returns terminal `NotAssessed`, not `Low`.
 - **Composition:** mixed-language account scored on its English subset with the
   correct (reduced) denominator; majority-non-English account → NotAssessed.
 - **Exhaustiveness:** a test (or the compile itself) confirming `NotAssessed` is
