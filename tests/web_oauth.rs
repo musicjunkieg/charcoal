@@ -340,6 +340,62 @@ mod tests {
         assert!(json["progress"].is_null());
     }
 
+    #[tokio::test]
+    async fn status_surfaces_not_assessed_count_in_tier_counts() {
+        // #222 language abstention: accounts whose score was withheld
+        // (unsupported language) are stored with threat_tier="NotAssessed"
+        // and a NULL score, so get_ranked_threats(0.0) never sees them.
+        // The authoritative count must come from count_not_assessed and
+        // show up in tier_counts.not_assessed rather than silently
+        // vanishing or being folded into "low".
+        use charcoal::db::models::AccountScore;
+
+        let (app, db) = build_test_app_with_db();
+
+        let not_assessed = AccountScore {
+            did: "did:plc:notassessed".to_string(),
+            handle: "unsupported.bsky.social".to_string(),
+            toxicity_score: None,
+            topic_overlap: None,
+            threat_score: None,
+            threat_tier: Some("NotAssessed".to_string()),
+            posts_analyzed: 5,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        db.upsert_account_score(TEST_DID, &not_assessed)
+            .await
+            .unwrap();
+
+        let cookie = session_cookie(TEST_DID);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).expect("response should be valid JSON");
+
+        assert_eq!(json["tier_counts"]["not_assessed"], 1);
+        // Must not have leaked into "low" (get_ranked_threats(0.0) filters
+        // out NULL-score rows before the tier loop even runs).
+        assert_eq!(json["tier_counts"]["low"], 0);
+    }
+
     // ---- Scan endpoint requires registered user ----
 
     #[tokio::test]

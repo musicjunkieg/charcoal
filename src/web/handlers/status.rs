@@ -145,9 +145,20 @@ pub async fn get_status(
             Some("High") => high += 1,
             Some("Elevated") => elevated += 1,
             Some("Watch") => watch += 1,
+            Some("NotAssessed") => {} // counted separately via count_not_assessed below
+            Some("Insufficient Data") => {} // pre-existing terminal, not a threat tier
             _ => low += 1,
         }
     }
+
+    // get_ranked_threats(0.0) filters out NULL-score rows, so NotAssessed
+    // accounts never reach the loop above — the authoritative count comes
+    // from this dedicated query instead (#222 language abstention).
+    let not_assessed = state
+        .db
+        .count_not_assessed(&auth.effective_did)
+        .await
+        .unwrap_or(0);
 
     Json(serde_json::json!({
         "scan_running": scan_running,
@@ -161,6 +172,7 @@ pub async fn get_status(
             "elevated": elevated,
             "watch": watch,
             "low": low,
+            "not_assessed": not_assessed,
             "total": threats.len(),
         }
     }))
