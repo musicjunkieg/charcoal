@@ -10,7 +10,7 @@ function status(overrides: Partial<ScanStatus>): ScanStatus {
 		last_error: null,
 		phase: 'idle',
 		progress: null,
-		tier_counts: { high: 0, elevated: 0, watch: 0, low: 0, total: 0 },
+		tier_counts: { high: 0, elevated: 0, watch: 0, low: 0, not_assessed: 0, total: 0 },
 		...overrides
 	};
 }
@@ -38,7 +38,7 @@ describe('dashboardView', () => {
 	});
 
 	it('shows results whenever any accounts are scored, scanning or not', () => {
-		const counts = { high: 1, elevated: 0, watch: 2, low: 5, total: 8 };
+		const counts = { high: 1, elevated: 0, watch: 2, low: 5, not_assessed: 0, total: 8 };
 		expect(dashboardView(status({ tier_counts: counts }))).toBe('results');
 		expect(
 			dashboardView(
@@ -52,7 +52,7 @@ describe('dashboardView', () => {
 
 	it('shows results with data even if started_at is missing (server restarted)', () => {
 		// started_at lives in server memory only; scored accounts are in the DB.
-		const counts = { high: 0, elevated: 0, watch: 0, low: 3, total: 3 };
+		const counts = { high: 0, elevated: 0, watch: 0, low: 3, not_assessed: 0, total: 3 };
 		expect(dashboardView(status({ tier_counts: counts, started_at: null }))).toBe('results');
 	});
 });
