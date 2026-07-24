@@ -394,9 +394,15 @@ impl Database for PgDatabase {
                 serde_json::from_value(top_posts_json).unwrap_or_default();
 
             // Recalculate tier from stored score so threshold changes
-            // take effect without rescanning.
+            // take effect without rescanning — unless the stored tier is
+            // NotAssessed (#222), which must survive unchanged since its
+            // NULL score would otherwise resolve to no tier at all.
             let threat_score: Option<f64> = row.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            let stored_tier: Option<String> = row.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
 
             let behavioral_signals: Option<serde_json::Value> = row.get(9);
 
@@ -773,7 +779,13 @@ impl Database for PgDatabase {
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_value(top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = r.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = r.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             let behavioral_signals: Option<serde_json::Value> = r.get(9);
             AccountScore {
                 did: r.get(0),
@@ -815,7 +827,13 @@ impl Database for PgDatabase {
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_value(top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = r.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = r.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             let behavioral_signals: Option<serde_json::Value> = r.get(9);
             AccountScore {
                 did: r.get(0),
@@ -907,7 +925,13 @@ impl Database for PgDatabase {
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_value(top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = row.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = row.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             let behavioral_signals: Option<serde_json::Value> = row.get(9);
 
             accounts.push(AccountScore {

@@ -207,7 +207,14 @@ pub fn get_ranked_threats(
         // Recalculate tier from stored score so threshold changes
         // take effect without rescanning.
         let threat_score: Option<f64> = row.get(4)?;
-        let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+        // Preserve a stored NotAssessed tier (#222) instead of recomputing —
+        // a NotAssessed row has a NULL score, which would otherwise resolve
+        // to no tier at all (or "Low" for a real 0.0 score).
+        let stored_tier: Option<String> = row.get(5)?;
+        let threat_tier = match stored_tier.as_deref() {
+            Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+            _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+        };
         Ok(AccountScore {
             did: row.get(0)?,
             handle: row.get(1)?,
@@ -568,7 +575,13 @@ pub fn get_account_by_handle(
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_str(&top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = row.get(4)?;
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = row.get(5)?;
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             Ok(AccountScore {
                 did: row.get(0)?,
                 handle: row.get(1)?,
@@ -610,7 +623,13 @@ pub fn get_account_by_did(
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_str(&top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = row.get(4)?;
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = row.get(5)?;
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             Ok(AccountScore {
                 did: row.get(0)?,
                 handle: row.get(1)?,
@@ -699,7 +718,13 @@ pub fn get_unlabeled_accounts(
         let top_toxic_posts: Vec<ToxicPost> =
             serde_json::from_str(&top_posts_json).unwrap_or_default();
         let threat_score: Option<f64> = row.get(4)?;
-        let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+        // Preserve a stored NotAssessed tier (#222) instead of recomputing
+        // from the (NULL) score.
+        let stored_tier: Option<String> = row.get(5)?;
+        let threat_tier = match stored_tier.as_deref() {
+            Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+            _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+        };
         Ok(AccountScore {
             did: row.get(0)?,
             handle: row.get(1)?,
@@ -1411,6 +1436,67 @@ mod tests {
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].handle, "test.bsky.social");
         assert_eq!(ranked[0].threat_score, Some(65.0));
+    }
+
+    /// #222: a NotAssessed row (NULL score, tier "NotAssessed") must survive
+    /// the read path's tier-recompute unchanged — it must never be recomputed
+    /// to "Low" the way a real NULL/0.0 score would be.
+    #[test]
+    fn not_assessed_row_survives_read_recompute() {
+        let conn = test_db();
+
+        let score = AccountScore {
+            did: "did:plc:notassessed".to_string(),
+            handle: "unassessed.bsky.social".to_string(),
+            toxicity_score: None,
+            topic_overlap: None,
+            threat_score: None,
+            threat_tier: Some(ThreatTier::NotAssessed.as_str().to_string()),
+            posts_analyzed: 5,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        upsert_account_score(&conn, TEST_USER, &score).unwrap();
+
+        // The write path must store SQL NULL, not coerce None to 0.0.
+        let stored_score: Option<f64> = conn
+            .query_row(
+                "SELECT threat_score FROM account_scores WHERE user_did = ?1 AND did = ?2",
+                params![TEST_USER, "did:plc:notassessed"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored_score, None,
+            "threat_score must persist as NULL, not 0.0"
+        );
+
+        // get_account_by_did recomputes the tier from the stored score on
+        // every read; it must preserve a stored NotAssessed tier instead.
+        let fetched = get_account_by_did(&conn, TEST_USER, "did:plc:notassessed")
+            .unwrap()
+            .expect("account should be found");
+        assert_eq!(fetched.threat_score, None);
+        assert_eq!(
+            fetched.threat_tier.as_deref(),
+            Some(ThreatTier::NotAssessed.as_str()),
+            "NotAssessed tier must not be recomputed to Low"
+        );
+        assert_ne!(fetched.threat_tier.as_deref(), Some("Low"));
+
+        // Same guarantee via the handle lookup.
+        let fetched_by_handle = get_account_by_handle(&conn, TEST_USER, "unassessed.bsky.social")
+            .unwrap()
+            .expect("account should be found by handle");
+        assert_eq!(
+            fetched_by_handle.threat_tier.as_deref(),
+            Some(ThreatTier::NotAssessed.as_str())
+        );
     }
 
     #[test]
