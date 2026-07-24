@@ -75,6 +75,16 @@ fn emoji_only_is_assessable() {
 }
 
 #[test]
+fn nonlatin_digits_and_symbols_count_as_neither() {
+    // CodeRabbit C4: Thai digits (๐-๙) and Arabic-Indic digits (٠-٩) fall inside
+    // the broad script *block* ranges but are category Nd, not letters — so a post
+    // of only non-Latin digits/symbols must stay Assessable, matching the "digits
+    // count as neither" contract (they must NOT trip the >=5-non-Latin threshold).
+    assert_eq!(assess_language("๗๘๙๐๑๒๓ ฿", &[]), Assessability::Assessable);
+    assert_eq!(assess_language("١٢٣٤٥٦٧", &[]), Assessability::Assessable);
+}
+
+#[test]
 fn short_nonlatin_below_threshold_is_assessable() {
     // Fewer than 5 non-Latin chars and not dominant → Assessable (e.g. a stray glyph).
     assert_eq!(assess_language("ok 日", &en()), Assessability::Assessable);

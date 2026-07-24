@@ -394,6 +394,9 @@ mod tests {
         // Must not have leaked into "low" (get_ranked_threats(0.0) filters
         // out NULL-score rows before the tier loop even runs).
         assert_eq!(json["tier_counts"]["low"], 0);
+        // Total spans the NotAssessed population too (#222, CodeRabbit C2):
+        // 0 ranked + 1 not_assessed == 1, so the tier counts reconcile.
+        assert_eq!(json["tier_counts"]["total"], 1);
     }
 
     // ---- Scan endpoint requires registered user ----

@@ -635,7 +635,13 @@ async fn main() -> Result<()> {
 
             let threats = db.get_ranked_threats(&did, min_score as f64).await?;
 
-            if threats.is_empty() {
+            // NotAssessed accounts carry a NULL score and are excluded from
+            // get_ranked_threats, so fetch their count separately BEFORE the
+            // empty-result guard — a scan whose entire population came back
+            // NotAssessed still has real results worth reporting (#222).
+            let not_assessed_count = db.count_not_assessed(&did).await? as usize;
+
+            if threats.is_empty() && not_assessed_count == 0 {
                 println!("No accounts scored yet. Run `charcoal scan --analyze` first.");
                 return Ok(());
             }
@@ -652,8 +658,6 @@ async fn main() -> Result<()> {
                 .get_fingerprint(&did)
                 .await?
                 .and_then(|(json, _, _)| serde_json::from_str(&json).ok());
-
-            let not_assessed_count = db.count_not_assessed(&did).await? as usize;
 
             let report_path = charcoal::output::markdown::generate_report(
                 &threats,

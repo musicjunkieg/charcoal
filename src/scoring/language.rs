@@ -26,7 +26,11 @@ fn is_nonlatin_dominant(text: &str) -> bool {
     for c in text.chars() {
         if c.is_ascii_alphabetic() {
             latin += 1;
-        } else if is_nonlatin_script(c) {
+        } else if c.is_alphabetic() && is_nonlatin_script(c) {
+            // `is_alphabetic()` (Unicode Alphabetic property) excludes digits and
+            // punctuation that fall inside the broad script *block* ranges — e.g.
+            // Thai digits (๐-๙) and Arabic-Indic digits (٠-٩) are category Nd, so
+            // they count as neither, matching this heuristic's documented contract.
             nonlatin += 1;
         }
     }

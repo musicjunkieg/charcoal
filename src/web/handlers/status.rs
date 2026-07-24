@@ -153,12 +153,24 @@ pub async fn get_status(
 
     // get_ranked_threats(0.0) filters out NULL-score rows, so NotAssessed
     // accounts never reach the loop above — the authoritative count comes
-    // from this dedicated query instead (#222 language abstention).
-    let not_assessed = state
-        .db
-        .count_not_assessed(&auth.effective_did)
-        .await
-        .unwrap_or(0);
+    // from this dedicated query instead (#222 language abstention). A DB
+    // failure here must NOT be silently coerced to 0: NotAssessed is a
+    // safety signal ("we couldn't assess these accounts"), and a zero would
+    // be indistinguishable from a real error, understating what's unknown.
+    // Fail consistently with get_ranked_threats above (500), rather than
+    // returning misleading tier_counts.
+    let not_assessed = match state.db.count_not_assessed(&auth.effective_did).await {
+        Ok(n) => n as u32,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error counting not-assessed in get_status");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+
+    // Total spans ALL examined accounts, including the NotAssessed population
+    // that get_ranked_threats excludes — so high+elevated+watch+low+not_assessed
+    // reconciles to total.
+    let total = threats.len() as u32 + not_assessed;
 
     Json(serde_json::json!({
         "scan_running": scan_running,
@@ -173,7 +185,7 @@ pub async fn get_status(
             "watch": watch,
             "low": low,
             "not_assessed": not_assessed,
-            "total": threats.len(),
+            "total": total,
         }
     }))
     .into_response()

@@ -225,11 +225,11 @@ async fn main() -> Result<()> {
     let pos = summaries
         .iter()
         .find(|s| s.0.starts_with("en_hostile"))
-        .unwrap();
+        .ok_or_else(|| anyhow::anyhow!("missing en_hostile control group"))?;
     let neg = summaries
         .iter()
         .find(|s| s.0.starts_with("en_benign"))
-        .unwrap();
+        .ok_or_else(|| anyhow::anyhow!("missing en_benign control group"))?;
     println!("\nCONTROL CHECK");
     if pos.4 == 0 && neg.4 == neg.5 {
         println!("  PASS — English hostile all reached stage 2, English benign all cleared.");
