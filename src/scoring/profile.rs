@@ -128,6 +128,20 @@ pub async fn build_profile(
     // Account wasn't clean enough for early exit — run the full analysis.
     let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
 
+    // #222: partition before classification so unassessable posts never reach the
+    // ONNX gate / CoPE-B, and a now-unassessable-dominant account abstains.
+    let (sample, dropped) = crate::scoring::language::partition_assessable(&sample);
+    if crate::scoring::language::coverage_gate(sample.total_posts, dropped)
+        == crate::scoring::language::CoverageOutcome::NotAssessed
+    {
+        return Ok(not_assessed_score(
+            target_did,
+            target_handle,
+            (sample.total_posts + dropped) as u32,
+            graph_distance,
+        ));
+    }
+
     // All posts go to toxicity scoring, with per-post context for replies.
     // Originals and quotes are scored solo; replies are scored as a parent/reply
     // pair so the conversation-scoped Zentropi labeler can correctly evaluate

@@ -677,3 +677,133 @@ async fn batched_amplification_events_preserve_input_order() {
         .collect();
     assert_eq!(stored_order, order.to_vec());
 }
+
+// ============================================================
+// #222 Stage-2 integration: build_profile partitions before classification
+// ============================================================
+//
+// `build_profile`'s Stage 2 fetches a 50-post sample, then (as of this task)
+// partitions it via `partition_assessable`/`coverage_gate` before anything
+// reaches the classifier. `build_profile` itself needs network (it fetches),
+// so this test drives the exact sequence of pure calls it performs
+// immediately after the fetch: partition, gate, build `all_post_texts` and
+// `contexts` from the *shadowed* (assessable-only) sample, classify (canned
+// verdicts — no network/ONNX), then `score_from_sample`. It proves a 46-post
+// English+Japanese mix is scored on exactly the 6 English posts, not all 46.
+use charcoal::bluesky::posts::{Post, PostSample};
+use charcoal::scoring::language::{coverage_gate, partition_assessable, CoverageOutcome};
+use charcoal::scoring::profile::score_from_sample;
+use charcoal::toxicity::traits::{BinaryVerdict, ToxicityAttributes};
+
+fn lang_post(uri: &str, text: &str, langs: &[&str]) -> Post {
+    Post {
+        uri: uri.to_string(),
+        text: text.to_string(),
+        created_at: None,
+        like_count: 0,
+        repost_count: 0,
+        quote_count: 0,
+        is_quote: false,
+        langs: langs.iter().map(|l| l.to_string()).collect(),
+    }
+}
+
+#[tokio::test]
+async fn stage2_scores_only_assessable_subset() {
+    // 6 English originals + 40 Japanese originals — a 50-post-fetch-shaped
+    // sample (trimmed to 46 total posts) from a mixed-language account.
+    let mut originals: Vec<Post> = (0..6)
+        .map(|i| {
+            lang_post(
+                &format!("at://en/{i}"),
+                "a normal english post about hobbies and weekends",
+                &["en"],
+            )
+        })
+        .collect();
+    originals.extend((0..40).map(|i| {
+        lang_post(
+            &format!("at://ja/{i}"),
+            "\u{3053}\u{3093}\u{306B}\u{3061}\u{306F}\u{4E16}\u{754C}",
+            &["ja"],
+        )
+    }));
+
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 46,
+    };
+
+    // Mirrors build_profile's Stage 2: partition BEFORE classification, and the
+    // partitioned sample shadows the original binding from here on.
+    let (sample, dropped) = partition_assessable(&sample);
+    assert_eq!(
+        sample.total_posts, 6,
+        "6 English originals should survive partitioning"
+    );
+    assert_eq!(dropped, 40, "40 Japanese originals should be dropped");
+    assert_eq!(
+        coverage_gate(sample.total_posts, dropped),
+        CoverageOutcome::Score,
+        "6 assessable posts >= MIN_ASSESSABLE_POSTS should proceed to Score, not abstain"
+    );
+
+    let all_post_texts: Vec<String> = sample.originals.iter().map(|p| p.text.clone()).collect();
+    assert_eq!(
+        all_post_texts.len(),
+        6,
+        "classifier must see exactly the 6 assessable texts, not all 46"
+    );
+    let contexts: Vec<Option<String>> = vec![None; all_post_texts.len()];
+    let verdicts: Vec<BinaryVerdict> = all_post_texts
+        .iter()
+        .map(|_| BinaryVerdict {
+            is_toxic: false,
+            onnx_score: 0.05,
+            onnx_attributes: ToxicityAttributes::default(),
+        })
+        .collect();
+
+    let weights = ThreatWeights::default();
+    let fp = TopicFingerprint {
+        clusters: vec![TopicCluster {
+            label: "hobbies".to_string(),
+            keywords: vec!["hobbies".to_string(), "post".to_string()],
+            weight: 1.0,
+        }],
+        post_count: 10,
+    };
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,  // embedder
+        None,  // protected_embedding
+        None,  // precomputed_target_embedding
+        0.0,   // median_engagement
+        false, // pile_on
+        None,  // nli_scorer
+        None,  // protected_posts_with_embeddings
+        None,  // direct_pairs
+        None,  // data_dir
+        None,  // graph_distance
+        "mixed.bsky.social",
+        "did:plc:mixed",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    // The denominator (posts_analyzed) must reflect the assessable subset (6),
+    // not the full 46-post fetch — proving the classifier only ever saw the
+    // shadowed, partitioned sample.
+    assert_eq!(score.posts_analyzed, 6);
+}
