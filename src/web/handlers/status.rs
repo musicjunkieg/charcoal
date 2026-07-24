@@ -167,10 +167,13 @@ pub async fn get_status(
         }
     };
 
-    // Total spans ALL examined accounts, including the NotAssessed population
-    // that get_ranked_threats excludes — so high+elevated+watch+low+not_assessed
-    // reconciles to total.
-    let total = threats.len() as u32 + not_assessed;
+    // Total is the sum of the exposed buckets, so it reconciles BY CONSTRUCTION
+    // regardless of what get_ranked_threats returns. This deliberately excludes
+    // the non-threat terminals the loop skips — `Insufficient Data` (and, were it
+    // ever returned, `NotAssessed`) — which carry a NULL score and so aren't
+    // returned by get_ranked_threats(0.0) today anyway. Computing total from
+    // threats.len() would count those skipped rows in the total but in no bucket.
+    let total = high + elevated + watch + low + not_assessed;
 
     Json(serde_json::json!({
         "scan_running": scan_running,
