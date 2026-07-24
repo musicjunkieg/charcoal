@@ -41,6 +41,7 @@ fn post(uri: &str, text: &str) -> Post {
         repost_count: 0,
         quote_count: 0,
         is_quote: false,
+        langs: vec![],
     }
 }
 

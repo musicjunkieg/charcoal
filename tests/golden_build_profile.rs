@@ -48,6 +48,7 @@ fn make_post(uri: &str, text: &str) -> Post {
         repost_count: 0,
         quote_count: 0,
         is_quote: false,
+        langs: vec![],
     }
 }
 
@@ -637,6 +638,7 @@ async fn golden_c_benign_gate_fires() {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         })
         .collect();
     let replies: Vec<ReplyPost> = (0..5)

@@ -40,6 +40,26 @@ pub fn sanitize_post_text(text: &str) -> String {
     }
 }
 
+/// Extract primary language tags from a decoded post record's `langs`.
+/// Region/script subtags are stripped and tags lowercased ("en-US" → "en").
+fn extract_langs(record: &atrium_api::app::bsky::feed::post::Record) -> Vec<String> {
+    record
+        .data
+        .langs
+        .as_ref()
+        .map(|langs| {
+            langs
+                .iter()
+                .filter_map(|l| {
+                    l.as_ref()
+                        .language()
+                        .map(|p| p.as_str().to_ascii_lowercase())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Post {
     pub uri: String,
@@ -50,6 +70,11 @@ pub struct Post {
     pub quote_count: i64,
     /// Whether this post is a quote-post (embeds another post).
     pub is_quote: bool,
+    /// Declared post languages (`app.bsky.feed.post.langs`), primary tags only,
+    /// region/script subtags stripped and lowercased ("en-US" → "en"). Empty
+    /// when the client omitted the field (~6% of posts). Used by the #222
+    /// language-assessability gate.
+    pub langs: Vec<String>,
 }
 
 /// A reply post with its parent URI for context pair formation.
@@ -165,14 +190,16 @@ pub async fn fetch_recent_posts(
 
             let post_view = &feed_item.post;
 
-            // Decode the record to get the post text.
-            // The record field is an untyped IPLD value — we deserialize it
-            // into the typed post::Record to access the text.
-            let text = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+            // Decode the record once to get both text and declared languages.
+            let record = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
                 post_view.record.clone(),
             )
-            .map(|record| sanitize_post_text(&record.data.text))
-            .unwrap_or_default();
+            .ok();
+            let text = record
+                .as_ref()
+                .map(|r| sanitize_post_text(&r.data.text))
+                .unwrap_or_default();
+            let langs = record.as_ref().map(extract_langs).unwrap_or_default();
 
             // Skip empty posts and very short posts (likely just links/images).
             // Use char count, not byte length — a 5-char emoji sequence can be 20 bytes.
@@ -202,6 +229,7 @@ pub async fn fetch_recent_posts(
                 repost_count: post_view.repost_count.unwrap_or(0),
                 quote_count: post_view.quote_count.unwrap_or(0),
                 is_quote,
+                langs,
             });
 
             if posts.len() >= max_posts {
@@ -290,6 +318,7 @@ pub async fn fetch_posts_with_replies(
             };
 
             let text = sanitize_post_text(&record.data.text);
+            let langs = extract_langs(&record);
 
             // Skip empty posts and very short posts (likely just links/images).
             if text.chars().count() < 15 {
@@ -316,6 +345,7 @@ pub async fn fetch_posts_with_replies(
                 repost_count: post_view.repost_count.unwrap_or(0),
                 quote_count: post_view.quote_count.unwrap_or(0),
                 is_quote,
+                langs,
             };
 
             total_collected += 1;

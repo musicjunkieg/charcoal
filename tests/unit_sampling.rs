@@ -124,6 +124,7 @@ fn parent_uri_deduplication() {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         },
         parent_uri: "at://did:plc:other/app.bsky.feed.post/0".to_string(),
     });
@@ -146,6 +147,7 @@ fn make_posts(n: usize) -> Vec<Post> {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         })
         .collect()
 }
@@ -161,6 +163,7 @@ fn make_reply_posts(n: usize) -> Vec<ReplyPost> {
                 repost_count: 0,
                 quote_count: 0,
                 is_quote: false,
+                langs: vec![],
             },
             parent_uri: format!("at://did:plc:other/app.bsky.feed.post/{}", i),
         })

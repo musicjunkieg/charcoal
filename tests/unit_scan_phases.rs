@@ -659,6 +659,7 @@ mod gather_tests {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         }
     }
 
@@ -1132,6 +1133,7 @@ mod finalize_tests {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         }
     }
 
@@ -2574,6 +2576,7 @@ mod orchestration_tests {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         }
     }
 

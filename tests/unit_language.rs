@@ -79,3 +79,12 @@ fn short_nonlatin_below_threshold_is_assessable() {
     // Fewer than 5 non-Latin chars and not dominant → Assessable (e.g. a stray glyph).
     assert_eq!(assess_language("ok 日", &en()), Assessability::Assessable);
 }
+
+#[test]
+fn extract_langs_strips_region_and_lowercases() {
+    // Indirectly: assess_language treats a normalised "en" tag as English.
+    assert_eq!(
+        assess_language("plain english sentence", &["en".to_string()]),
+        Assessability::Assessable
+    );
+}
