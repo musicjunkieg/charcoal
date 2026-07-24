@@ -172,6 +172,120 @@ async fn stage1_early_exit_low_when_clean_and_irrelevant() {
 }
 
 // ============================================================
+// stage1_outcome — coverage gate: unassessable-language posts (#222)
+// ============================================================
+
+fn post_with_langs(uri: &str, text: &str, langs: &[&str]) -> Post {
+    Post {
+        uri: uri.to_string(),
+        text: text.to_string(),
+        created_at: None,
+        like_count: 0,
+        repost_count: 0,
+        quote_count: 0,
+        is_quote: false,
+        langs: langs.iter().map(|l| l.to_string()).collect(),
+    }
+}
+
+#[tokio::test]
+async fn stage1_non_latin_sample_returns_not_assessed_not_low() {
+    // 25 Japanese-language originals: langs=["ja"] makes every post
+    // unassessable regardless of the (also non-Latin) script. Clean scorer
+    // (0.0) + irrelevant topics would previously early-exit to "Low" — the
+    // coverage gate must intercept before that clean-pass runs.
+    let originals: Vec<Post> = (0..25)
+        .map(|i| {
+            post_with_langs(
+                &format!("at://a/{i}"),
+                "\u{3053}\u{3093}\u{306B}\u{3061}\u{306F}\u{4E16}\u{754C}",
+                &["ja"],
+            )
+        })
+        .collect();
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 25,
+    };
+    let scorer = FixedScorer(0.0);
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let outcome = stage1_outcome(
+        &sample,
+        &scorer,
+        "nihongo.bsky.social",
+        "did:plc:nihongo",
+        &fp,
+        &weights,
+        None,
+    )
+    .await
+    .expect("stage1_outcome should not error");
+
+    match outcome {
+        Stage1Outcome::Terminal(score) => {
+            assert_eq!(score.threat_tier.as_deref(), Some("NotAssessed"));
+            assert!(score.threat_score.is_none());
+            assert!(score.toxicity_score.is_none());
+            assert_eq!(score.posts_analyzed, 25);
+        }
+        Stage1Outcome::Proceed { .. } => {
+            panic!("expected Terminal NotAssessed for a non-Latin-language sample")
+        }
+    }
+}
+
+#[tokio::test]
+async fn stage1_sparse_english_still_insufficient_data() {
+    // 3 English posts — sparse, but not a language-coverage problem: the
+    // coverage gate must yield InsufficientData (not NotAssessed) and fall
+    // through to the existing <5-posts terminal.
+    let originals = vec![
+        post_with_langs("at://a/1", "hello there", &["en"]),
+        post_with_langs("at://a/2", "good morning", &["en"]),
+        post_with_langs("at://a/3", "nice weather today", &["en"]),
+    ];
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 3,
+    };
+    let scorer = FixedScorer(0.0);
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let outcome = stage1_outcome(
+        &sample,
+        &scorer,
+        "sparse.bsky.social",
+        "did:plc:sparse",
+        &fp,
+        &weights,
+        None,
+    )
+    .await
+    .expect("stage1_outcome should not error");
+
+    match outcome {
+        Stage1Outcome::Terminal(score) => {
+            assert_eq!(score.threat_tier.as_deref(), Some("Insufficient Data"));
+            assert_eq!(score.posts_analyzed, 3);
+            assert!(score.toxicity_score.is_none());
+            assert!(score.threat_score.is_none());
+        }
+        Stage1Outcome::Proceed { .. } => panic!("expected Terminal for <5 posts"),
+    }
+}
+
+// ============================================================
 // stage1_outcome — Proceed branch: toxic content survives early exit
 // ============================================================
 
