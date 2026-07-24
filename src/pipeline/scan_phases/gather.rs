@@ -261,6 +261,22 @@ pub async fn gather_account(
     // ── Stage 2: full I/O with 50 posts (no classification — that's Phase B) ──
     let sample = fetcher.fetch_sample(inputs.account_handle, 50).await?;
 
+    // #222: partition before building QueueRows so the burst never classifies
+    // unassessable text; abstain if the assessable subset is too thin.
+    let (sample, dropped) = crate::scoring::language::partition_assessable(&sample);
+    if crate::scoring::language::coverage_gate(sample.total_posts, dropped)
+        == crate::scoring::language::CoverageOutcome::NotAssessed
+    {
+        let score = crate::scoring::profile::not_assessed_score(
+            inputs.account_did,
+            inputs.account_handle,
+            (sample.total_posts + dropped) as u32,
+            inputs.graph_distance,
+        );
+        db.upsert_account_score(user_did, &score).await?;
+        return Ok(GatherOutcome::Terminal);
+    }
+
     let parent_uris: Vec<String> = sample
         .replies
         .iter()
