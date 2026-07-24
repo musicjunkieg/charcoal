@@ -421,7 +421,7 @@ fn report_includes_all_tier_counts() {
     ];
 
     let tmp_path = "/tmp/charcoal_test_all_tiers.md";
-    let result = charcoal::output::markdown::generate_report(&accounts, None, &[], tmp_path);
+    let result = charcoal::output::markdown::generate_report(&accounts, None, &[], tmp_path, 0);
     assert!(result.is_ok());
 
     let content = std::fs::read_to_string(tmp_path).unwrap();
@@ -437,7 +437,7 @@ fn report_includes_all_tier_counts() {
 #[test]
 fn report_empty_accounts() {
     let tmp_path = "/tmp/charcoal_test_empty_accounts.md";
-    let result = charcoal::output::markdown::generate_report(&[], None, &[], tmp_path);
+    let result = charcoal::output::markdown::generate_report(&[], None, &[], tmp_path, 0);
     assert!(result.is_ok());
 
     let content = std::fs::read_to_string(tmp_path).unwrap();
@@ -467,7 +467,7 @@ fn report_includes_fingerprint_section() {
     };
 
     let tmp_path = "/tmp/charcoal_test_fp_section.md";
-    let result = charcoal::output::markdown::generate_report(&[], Some(&fp), &[], tmp_path);
+    let result = charcoal::output::markdown::generate_report(&[], Some(&fp), &[], tmp_path, 0);
     assert!(result.is_ok());
 
     let content = std::fs::read_to_string(tmp_path).unwrap();
@@ -514,7 +514,7 @@ fn report_quotes_but_not_reposts() {
     ];
 
     let tmp_path = "/tmp/charcoal_test_events_filter.md";
-    let result = charcoal::output::markdown::generate_report(&[], None, &events, tmp_path);
+    let result = charcoal::output::markdown::generate_report(&[], None, &events, tmp_path, 0);
     assert!(result.is_ok());
 
     let content = std::fs::read_to_string(tmp_path).unwrap();
@@ -545,7 +545,7 @@ fn report_escapes_pipe_in_quote_text() {
     }];
 
     let tmp_path = "/tmp/charcoal_test_pipe_escape.md";
-    let result = charcoal::output::markdown::generate_report(&[], None, &events, tmp_path);
+    let result = charcoal::output::markdown::generate_report(&[], None, &events, tmp_path, 0);
     assert!(result.is_ok());
 
     let content = std::fs::read_to_string(tmp_path).unwrap();

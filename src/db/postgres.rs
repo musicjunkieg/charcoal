@@ -1469,6 +1469,16 @@ impl Database for PgDatabase {
             .await?;
         Ok(())
     }
+
+    async fn count_not_assessed(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = $1 AND threat_tier = 'NotAssessed'",
+        )
+        .bind(user_did)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
 }
 
 // ── shared row-mapper ─────────────────────────────────────────────────────────

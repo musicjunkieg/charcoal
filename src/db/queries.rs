@@ -1282,6 +1282,20 @@ pub fn count_scan_skips(conn: &Connection, user_did: &str) -> Result<i64> {
     Ok(count)
 }
 
+/// Count accounts whose `threat_tier` is `'NotAssessed'` for a user (#222).
+///
+/// `get_ranked_threats` filters on `threat_score >= ?`, which always excludes
+/// NULL-score NotAssessed rows, so this can't be derived from that result
+/// set — it needs its own query.
+pub fn count_not_assessed(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed'",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
 /// All skips recorded for a user, newest first.
 pub fn list_scan_skips(conn: &Connection, user_did: &str) -> Result<Vec<ScanSkip>> {
     let mut stmt = conn.prepare(

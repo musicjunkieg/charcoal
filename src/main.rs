@@ -653,11 +653,14 @@ async fn main() -> Result<()> {
                 .await?
                 .and_then(|(json, _, _)| serde_json::from_str(&json).ok());
 
+            let not_assessed_count = db.count_not_assessed(&did).await? as usize;
+
             let report_path = charcoal::output::markdown::generate_report(
                 &threats,
                 fingerprint.as_ref(),
                 &events,
                 "output/charcoal-report.md",
+                not_assessed_count,
             )?;
 
             println!(

@@ -20,6 +20,7 @@ pub fn generate_report(
     fingerprint: Option<&TopicFingerprint>,
     events: &[AmplificationEvent],
     output_path: &str,
+    not_assessed_count: usize,
 ) -> Result<String> {
     let mut md = String::new();
 
@@ -54,6 +55,10 @@ pub fn generate_report(
     writeln!(md, "| Elevated | {elevated} |")?;
     writeln!(md, "| Watch | {watch} |")?;
     writeln!(md, "| Low | {low} |")?;
+    writeln!(
+        md,
+        "| Not assessed (unsupported language) | {not_assessed_count} |"
+    )?;
     writeln!(md, "| **Total** | **{total}** |")?;
     writeln!(md)?;
 
@@ -266,7 +271,7 @@ mod tests {
         ];
 
         let tmp_path = "/tmp/charcoal_test_report.md";
-        let result = generate_report(&accounts, None, &[], tmp_path);
+        let result = generate_report(&accounts, None, &[], tmp_path, 3);
         assert!(result.is_ok());
 
         let content = std::fs::read_to_string(tmp_path).unwrap();
@@ -275,6 +280,7 @@ mod tests {
         assert!(content.contains("Elevated"));
         assert!(content.contains("Evidence"));
         assert!(content.contains("toxic post example"));
+        assert!(content.contains("| Not assessed (unsupported language) | 3 |"));
 
         // Clean up
         let _ = std::fs::remove_file(tmp_path);
