@@ -88,3 +88,84 @@ fn short_nonlatin_below_threshold_is_assessable() {
 // `bluesky::posts::tests::extract_langs_strips_region_and_lowercases` in
 // src/bluesky/posts.rs, which calls `extract_langs` directly against
 // "en-US" / "ZH-Hans" (#222).
+
+// Task 2 tests for coverage_gate and partition_assessable.
+use charcoal::bluesky::posts::{Post, PostSample, ReplyPost};
+use charcoal::scoring::language::{coverage_gate, partition_assessable, CoverageOutcome};
+
+fn post(text: &str, langs: &[&str]) -> Post {
+    Post {
+        uri: "at://x".to_string(),
+        text: text.to_string(),
+        created_at: None,
+        like_count: 0,
+        repost_count: 0,
+        quote_count: 0,
+        is_quote: false,
+        langs: langs.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+fn sample_of(originals: Vec<Post>) -> PostSample {
+    let total = originals.len();
+    PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: total,
+    }
+}
+
+#[test]
+fn gate_scores_when_five_assessable() {
+    assert_eq!(coverage_gate(5, 0), CoverageOutcome::Score);
+    assert_eq!(coverage_gate(5, 100), CoverageOutcome::Score);
+}
+
+#[test]
+fn gate_not_assessed_when_unassessable_dominates() {
+    assert_eq!(coverage_gate(4, 10), CoverageOutcome::NotAssessed);
+    assert_eq!(coverage_gate(0, 50), CoverageOutcome::NotAssessed);
+    assert_eq!(coverage_gate(2, 2), CoverageOutcome::NotAssessed); // >= assessable, >=1
+}
+
+#[test]
+fn gate_insufficient_data_when_sparse_english() {
+    assert_eq!(coverage_gate(3, 0), CoverageOutcome::InsufficientData);
+    assert_eq!(coverage_gate(0, 0), CoverageOutcome::InsufficientData);
+}
+
+#[test]
+fn partition_drops_unassessable_and_counts() {
+    let s = sample_of(vec![
+        post("this is a normal english post", &["en"]),
+        post("another english sentence here", &["en"]),
+        post("お前は本当に馬鹿だ、死ね", &["ja"]),
+    ]);
+    let (kept, dropped) = partition_assessable(&s);
+    assert_eq!(kept.originals.len(), 2);
+    assert_eq!(dropped, 1);
+    assert_eq!(kept.total_posts, 2);
+}
+
+#[test]
+fn partition_preserves_bucketing() {
+    let s = PostSample {
+        originals: vec![post("english original text here", &["en"])],
+        replies: vec![ReplyPost {
+            post: post("english reply text here", &["en"]),
+            parent_uri: "at://p".to_string(),
+        }],
+        quotes: vec![post("ไปตายซะ นะไอ้โง่ ควยๆ", &["th"])],
+        reply_ratio: 0.5,
+        quote_ratio: 0.5,
+        total_posts: 3,
+    };
+    let (kept, dropped) = partition_assessable(&s);
+    assert_eq!(kept.originals.len(), 1);
+    assert_eq!(kept.replies.len(), 1);
+    assert_eq!(kept.quotes.len(), 0);
+    assert_eq!(dropped, 1);
+}

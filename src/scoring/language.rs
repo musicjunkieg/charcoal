@@ -82,3 +82,89 @@ pub fn assess_language(text: &str, langs: &[String]) -> Assessability {
         Assessability::Assessable
     }
 }
+
+use crate::bluesky::posts::{Post, PostSample, ReplyPost};
+
+/// Minimum assessable posts required to produce a score. Mirrors
+/// `crate::scoring::profile::MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT`.
+pub const MIN_ASSESSABLE_POSTS: usize = 5;
+
+/// What the coverage gate decided for an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverageOutcome {
+    /// Enough assessable posts — score on the assessable subset.
+    Score,
+    /// Too few assessable posts, and unassessable posts are the reason — abstain.
+    NotAssessed,
+    /// Too few posts overall (a genuinely sparse account) — existing terminal.
+    InsufficientData,
+}
+
+/// Map assessable/unassessable counts to an outcome (spec Component 4).
+///
+/// - `assessable >= MIN_ASSESSABLE_POSTS` → `Score`.
+/// - else if `unassessable >= 1 && unassessable >= assessable` → `NotAssessed`.
+/// - else → `InsufficientData` (a sparse account, not mislabelled as language).
+pub fn coverage_gate(assessable: usize, unassessable: usize) -> CoverageOutcome {
+    if assessable >= MIN_ASSESSABLE_POSTS {
+        CoverageOutcome::Score
+    } else if unassessable >= 1 && unassessable >= assessable {
+        CoverageOutcome::NotAssessed
+    } else {
+        CoverageOutcome::InsufficientData
+    }
+}
+
+/// Split a sample into an assessable-only sample plus the count of dropped
+/// (unassessable) posts. Ratios and `total_posts` are recomputed for the kept
+/// subset so downstream behavioral signals reflect the scored posts.
+pub fn partition_assessable(sample: &PostSample) -> (PostSample, usize) {
+    let keep_post = |p: &Post| assess_language(&p.text, &p.langs) == Assessability::Assessable;
+
+    let originals: Vec<Post> = sample
+        .originals
+        .iter()
+        .filter(|p| keep_post(p))
+        .cloned()
+        .collect();
+    let replies: Vec<ReplyPost> = sample
+        .replies
+        .iter()
+        .filter(|r| keep_post(&r.post))
+        .cloned()
+        .collect();
+    let quotes: Vec<Post> = sample
+        .quotes
+        .iter()
+        .filter(|p| keep_post(p))
+        .cloned()
+        .collect();
+
+    let original_count = sample.originals.len() + sample.replies.len() + sample.quotes.len();
+    let kept = originals.len() + replies.len() + quotes.len();
+    let dropped = original_count - kept;
+
+    let non_repost = kept as f64;
+    let reply_ratio = if non_repost > 0.0 {
+        replies.len() as f64 / non_repost
+    } else {
+        0.0
+    };
+    let quote_ratio = if non_repost > 0.0 {
+        quotes.len() as f64 / non_repost
+    } else {
+        0.0
+    };
+
+    (
+        PostSample {
+            originals,
+            replies,
+            quotes,
+            reply_ratio,
+            quote_ratio,
+            total_posts: kept,
+        },
+        dropped,
+    )
+}
