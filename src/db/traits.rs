@@ -340,4 +340,15 @@ pub trait Database: Send + Sync {
     /// discard an account whose stashed blob is unreadable or version-stale
     /// (the deploy-straddle re-gather path) without disturbing other accounts.
     async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()>;
+
+    // --- Language abstention (#222) ---
+
+    /// Count accounts whose `threat_tier` is `'NotAssessed'` for a user.
+    ///
+    /// `get_ranked_threats` filters on `threat_score >= ?`, which always
+    /// excludes NULL-score NotAssessed rows — so this count cannot be derived
+    /// from the accounts slice the report already has. It must come from its
+    /// own query. Shared by the markdown report and (later) the status
+    /// dashboard.
+    async fn count_not_assessed(&self, user_did: &str) -> Result<i64>;
 }

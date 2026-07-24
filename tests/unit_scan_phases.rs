@@ -659,6 +659,7 @@ mod gather_tests {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         }
     }
 
@@ -1098,6 +1099,118 @@ mod gather_tests {
             "UPSERT: gather twice yields one row per post"
         );
     }
+
+    // Fetcher keyed on `limit`: returns a distinct sample for the Stage-1
+    // (25-post) vs Stage-2 (50-post) call. Needed to exercise the #222
+    // coverage gate, which only applies to the Stage-2 sample — the canned
+    // `CannedFetcher` above returns the same sample for both and can't
+    // distinguish them.
+    struct TwoStageFetcher {
+        stage1: PostSample,
+        stage2: PostSample,
+        parents: HashMap<String, String>,
+    }
+
+    #[async_trait]
+    impl PostFetcher for TwoStageFetcher {
+        async fn fetch_sample(&self, _handle: &str, limit: usize) -> Result<PostSample> {
+            Ok(if limit <= 25 {
+                self.stage1.clone()
+            } else {
+                self.stage2.clone()
+            })
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(self.parents.clone())
+        }
+    }
+
+    // ── #222: Stage-2 sample dominated by unassessable posts → abstain ──
+    //
+    // Stage 1's 25-post sample is assessable and topically on-point, so it
+    // proceeds past the early-exit gate (Stage1Outcome::Proceed). Stage 2's
+    // 50-post sample is entirely non-English (langs=["th"]), so
+    // `partition_assessable` drops all of it and `coverage_gate` returns
+    // `NotAssessed`. This must be caught BEFORE any QueueRow is built — the
+    // burst classifier must never see the unassessable posts — and it must
+    // write a terminal NotAssessed score instead of enqueuing/stashing.
+    #[tokio::test]
+    async fn gather_abstains_on_unassessable_stage2_sample() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let stage1 = survivor_sample();
+
+        let originals: Vec<Post> = (0..6)
+            .map(|i| {
+                let mut p = make_post(&format!("at://u/{i}"), "some post text unrelated");
+                p.langs = vec!["th".to_string()];
+                p
+            })
+            .collect();
+        let stage2 = PostSample {
+            total_posts: originals.len(),
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+        };
+
+        let fetcher = TwoStageFetcher {
+            stage1,
+            stage2,
+            parents: HashMap::new(),
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = FixedCleanPass(0.0);
+
+        let outcome = gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            charcoal::pipeline::scan_phases::gather::GatherOutcome::Terminal,
+            "an unassessable-dominant Stage-2 sample must abstain, not enqueue"
+        );
+
+        let score = db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("terminal NotAssessed score must be written");
+        assert_eq!(score.threat_tier.as_deref(), Some("NotAssessed"));
+        assert_eq!(
+            score.posts_analyzed, 6,
+            "posts_analyzed must count the dropped (unassessable) posts"
+        );
+
+        // The burst must never see these posts, and Phase C has nothing to
+        // finalize — no QueueRows, no stashed blob.
+        assert!(
+            db.fetch_account_verdicts(TEST_USER, ACCT)
+                .await
+                .unwrap()
+                .is_empty(),
+            "no QueueRows should be enqueued when the account abstains"
+        );
+        assert!(
+            db.fetch_account_input(TEST_USER, ACCT)
+                .await
+                .unwrap()
+                .is_none(),
+            "no AccountInput blob should be stashed when the account abstains"
+        );
+    }
 }
 
 // ── Phase C: finalize_account tests ─────────────────────────────────────────
@@ -1132,6 +1245,7 @@ mod finalize_tests {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         }
     }
 
@@ -2574,6 +2688,7 @@ mod orchestration_tests {
             repost_count: 0,
             quote_count: 0,
             is_quote: false,
+            langs: vec![],
         }
     }
 

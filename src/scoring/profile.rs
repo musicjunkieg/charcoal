@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, FingerprintQuality, Post};
 use crate::bluesky::relationships::GraphDistance;
-use crate::db::models::{AccountScore, ToxicPost};
+use crate::db::models::{AccountScore, ThreatTier, ToxicPost};
 use crate::scoring::behavioral;
 use crate::scoring::nli::NliScorer;
 use crate::scoring::threat::{self, ThreatWeights};
@@ -48,6 +48,32 @@ pub enum Stage1Outcome {
         /// failed). Carried for diagnostics; Stage 2 recomputes its own overlap.
         stage1_overlap: Option<f64>,
     },
+}
+
+/// Build the terminal `AccountScore` for an account whose posts our English-only
+/// models cannot assess (#222). Shared by the Stage-1 and both Stage-2 seams.
+pub(crate) fn not_assessed_score(
+    did: &str,
+    handle: &str,
+    posts_analyzed: u32,
+    graph_distance: Option<GraphDistance>,
+) -> AccountScore {
+    AccountScore {
+        did: did.to_string(),
+        handle: handle.to_string(),
+        toxicity_score: None,
+        topic_overlap: None,
+        threat_score: None,
+        threat_tier: Some(ThreatTier::NotAssessed.as_str().to_string()),
+        posts_analyzed,
+        top_toxic_posts: vec![],
+        scored_at: String::new(),
+        behavioral_signals: None,
+        context_score: None,
+        graph_distance: graph_distance.map(|d| d.as_str().to_string()),
+        fingerprint_quality: None,
+        scoring_confidence: None,
+    }
 }
 
 /// Build a complete threat profile for a single account.
@@ -101,6 +127,20 @@ pub async fn build_profile(
     // ── Stage 2: Full pipeline with 50 posts ──
     // Account wasn't clean enough for early exit — run the full analysis.
     let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
+
+    // #222: partition before classification so unassessable posts never reach the
+    // ONNX gate / CoPE-B, and a now-unassessable-dominant account abstains.
+    let (sample, dropped) = crate::scoring::language::partition_assessable(&sample);
+    if crate::scoring::language::coverage_gate(sample.total_posts, dropped)
+        == crate::scoring::language::CoverageOutcome::NotAssessed
+    {
+        return Ok(not_assessed_score(
+            target_did,
+            target_handle,
+            (sample.total_posts + dropped) as u32,
+            graph_distance,
+        ));
+    }
 
     // All posts go to toxicity scoring, with per-post context for replies.
     // Originals and quotes are scored solo; replies are scored as a parent/reply
@@ -185,6 +225,29 @@ pub async fn stage1_outcome(
     weights: &ThreatWeights,
     graph_distance: Option<GraphDistance>,
 ) -> Result<Stage1Outcome> {
+    // #222: drop posts our English-only models cannot assess, and decide whether
+    // the account is scoreable, unassessable, or genuinely sparse — BEFORE the
+    // ONNX clean-pass, so a non-English account can't early-exit to Low.
+    let (assessable_sample, dropped) =
+        crate::scoring::language::partition_assessable(stage1_sample);
+    match crate::scoring::language::coverage_gate(assessable_sample.total_posts, dropped) {
+        crate::scoring::language::CoverageOutcome::NotAssessed => {
+            return Ok(Stage1Outcome::Terminal(Box::new(not_assessed_score(
+                target_did,
+                target_handle,
+                (assessable_sample.total_posts + dropped) as u32,
+                graph_distance,
+            ))));
+        }
+        crate::scoring::language::CoverageOutcome::InsufficientData => {
+            // Falls through to the existing <5 terminal below (sparse account).
+        }
+        crate::scoring::language::CoverageOutcome::Score => {}
+    }
+
+    // From here down, operate on the assessable-only sample.
+    let stage1_sample = &assessable_sample;
+
     if stage1_sample.total_posts < 5 {
         info!(
             handle = target_handle,

@@ -143,6 +143,10 @@ pub enum ThreatTier {
     Watch,
     Elevated,
     High,
+    /// Outside the ordered Low→High scale. The account's posts were in a
+    /// language our English-only models cannot assess, so no score was produced
+    /// (#222). Constructed only at the coverage gate, never from a score.
+    NotAssessed,
 }
 
 impl ThreatTier {
@@ -152,6 +156,9 @@ impl ThreatTier {
     /// overlap amplifies toxicity. A score of 35+ requires meaningful
     /// toxicity combined with topic proximity — the core threat signal.
     /// Low-toxicity accounts stay low regardless of topic overlap.
+    ///
+    /// Never returns `NotAssessed`; that tier is set at the coverage gate, not
+    /// derived from a score.
     pub fn from_score(score: f64) -> Self {
         match score {
             s if s >= 35.0 => ThreatTier::High,
@@ -167,6 +174,7 @@ impl ThreatTier {
             ThreatTier::Watch => "Watch",
             ThreatTier::Elevated => "Elevated",
             ThreatTier::High => "High",
+            ThreatTier::NotAssessed => "NotAssessed",
         }
     }
 }

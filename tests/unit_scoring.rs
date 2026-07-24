@@ -108,6 +108,20 @@ fn tier_round_trip_score_to_string() {
 }
 
 // ============================================================
+// ThreatTier::NotAssessed — outside the ordered scale (#222)
+// ============================================================
+
+#[test]
+fn not_assessed_has_stable_string_and_is_never_score_derived() {
+    assert_eq!(ThreatTier::NotAssessed.as_str(), "NotAssessed");
+    // from_score must never produce NotAssessed — it is constructed only at the
+    // coverage gate.
+    for s in [0.0, 7.9, 8.0, 14.9, 15.0, 34.9, 35.0, 100.0] {
+        assert_ne!(ThreatTier::from_score(s), ThreatTier::NotAssessed);
+    }
+}
+
+// ============================================================
 // compute_threat_score — gate boundary precision
 // ============================================================
 
