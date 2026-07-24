@@ -548,3 +548,54 @@ pub async fn fetch_reply_ratio(client: &PublicAtpClient, handle: &str) -> Result
 
     Ok((reply_count, total))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::extract_langs;
+    use atrium_api::app::bsky::feed::post::{Record, RecordData};
+    use atrium_api::types::string::{Datetime, Language};
+    use std::str::FromStr;
+
+    /// Builds a minimal decoded post record carrying the given `langs`.
+    /// Only `created_at`/`text` are otherwise required by `RecordData`.
+    fn record_with_langs(langs: Option<Vec<Language>>) -> Record {
+        RecordData {
+            created_at: Datetime::now(),
+            embed: None,
+            entities: None,
+            facets: None,
+            labels: None,
+            langs,
+            reply: None,
+            tags: None,
+            text: "test post".to_string(),
+        }
+        .into()
+    }
+
+    /// #222 — the test this replaces (`extract_langs_strips_region_and_lowercases`
+    /// in tests/unit_language.rs) never called `extract_langs`; it fed
+    /// `assess_language` an already-normalized "en" tag, so the normalization
+    /// logic itself had no regression coverage. This exercises `extract_langs`
+    /// directly against region-tagged, mixed-case input straight from the
+    /// decoded atrium record — the actual code path `fetch_recent_posts` and
+    /// `fetch_posts_with_replies` run.
+    #[test]
+    fn extract_langs_strips_region_and_lowercases() {
+        let record = record_with_langs(Some(vec![
+            Language::from_str("en-US").unwrap(),
+            Language::from_str("ZH-Hans").unwrap(),
+        ]));
+
+        assert_eq!(
+            extract_langs(&record),
+            vec!["en".to_string(), "zh".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_langs_none_is_empty() {
+        let record = record_with_langs(None);
+        assert_eq!(extract_langs(&record), Vec::<String>::new());
+    }
+}

@@ -80,11 +80,11 @@ fn short_nonlatin_below_threshold_is_assessable() {
     assert_eq!(assess_language("ok 日", &en()), Assessability::Assessable);
 }
 
-#[test]
-fn extract_langs_strips_region_and_lowercases() {
-    // Indirectly: assess_language treats a normalised "en" tag as English.
-    assert_eq!(
-        assess_language("plain english sentence", &["en".to_string()]),
-        Assessability::Assessable
-    );
-}
+// `extract_langs_strips_region_and_lowercases` previously lived here as an
+// indirect check via `assess_language`, but it only ever fed an
+// already-normalized "en" tag in — it never called `extract_langs` and never
+// exercised a region-tagged or uppercase input, so it had no real coverage
+// of the normalization behavior. Superseded by
+// `bluesky::posts::tests::extract_langs_strips_region_and_lowercases` in
+// src/bluesky/posts.rs, which calls `extract_langs` directly against
+// "en-US" / "ZH-Hans" (#222).
