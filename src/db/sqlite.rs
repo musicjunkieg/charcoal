@@ -406,6 +406,11 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::clear_scan_skips(&conn, user_did)
     }
+
+    async fn count_not_assessed(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_not_assessed(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
@@ -484,6 +489,52 @@ mod tests {
         let ranked = db.get_ranked_threats(TEST_USER, 0.0).await.unwrap();
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].handle, "test.bsky.social");
+    }
+
+    #[tokio::test]
+    async fn test_trait_count_not_assessed() {
+        let db = test_db().await;
+
+        // A NotAssessed account (null score — unsupported language, #222).
+        let not_assessed = AccountScore {
+            did: "did:plc:notassessed".to_string(),
+            handle: "unsupported.bsky.social".to_string(),
+            toxicity_score: None,
+            topic_overlap: None,
+            threat_score: None,
+            threat_tier: Some("NotAssessed".to_string()),
+            posts_analyzed: 5,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        // A normally-scored account that must NOT be counted.
+        let normal = AccountScore {
+            did: "did:plc:normal".to_string(),
+            handle: "normal.bsky.social".to_string(),
+            toxicity_score: Some(0.1),
+            topic_overlap: Some(0.1),
+            threat_score: Some(5.0),
+            threat_tier: Some("Low".to_string()),
+            posts_analyzed: 10,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        db.upsert_account_score(TEST_USER, &not_assessed)
+            .await
+            .unwrap();
+        db.upsert_account_score(TEST_USER, &normal).await.unwrap();
+
+        assert_eq!(db.count_not_assessed(TEST_USER).await.unwrap(), 1);
     }
 
     #[tokio::test]

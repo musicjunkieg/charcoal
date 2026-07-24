@@ -3915,6 +3915,72 @@
       "created_at": "2026-07-19T08:26:11.660824-07:00",
       "updated_at": "2026-07-19T08:26:11.660824-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"7b67c48\",\"confidence\":95}"
+    },
+    {
+      "id": 363,
+      "change_id": "670efed3-b644-4a52-bc26-b87fda5fa48b",
+      "node_type": "outcome",
+      "title": "#220 CONFIRMED IN PRODUCTION: 902-token clown-emoji post now scored (was structurally impossible before); 34 ONNX failures -> 0; the 34 affected accounts 33 scored / 0 skipped; 6 remaining skips are the expected atrium-panic and 400-Bad-Request classes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-20T00:39:38.540942-07:00",
+      "updated_at": "2026-07-20T00:39:38.540942-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":98}"
+    },
+    {
+      "id": 364,
+      "change_id": "adfc3545-9c72-4fe4-8b10-b5054f9192d4",
+      "node_type": "observation",
+      "title": "Verification trap seen 3x: a clean result only means something if the population COULD have produced a dirty one. classification_queue was survivorship-biased (populated after the clean pass, max 510 just under the 512 ceiling); zeu.dev and Bryan's networks contained no over-512 text at all",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-20T00:39:38.561907-07:00",
+      "updated_at": "2026-07-20T00:39:38.561907-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 365,
+      "change_id": "173d1dce-7141-4b4d-9315-43925edcb9b7",
+      "node_type": "action",
+      "title": "Measure ONNX clean-pass behaviour on non-Latin text (#222)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-20T05:33:24.491207-07:00",
+      "updated_at": "2026-07-20T05:33:24.491207-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":85,\"files\":[\"examples/lang_gate_probe.rs\"]}"
+    },
+    {
+      "id": 366,
+      "change_id": "1748af0a-454a-42e6-b455-d7a35c65ea8d",
+      "node_type": "outcome",
+      "title": "ONNX gate has zero discrimination on non-Latin script: hostile Thai/JA/RU score 0.0004, identical to non-Latin gibberish; all cleared to is_toxic=false",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-20T05:35:10.462969-07:00",
+      "updated_at": "2026-07-20T05:35:10.462969-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":95}"
+    },
+    {
+      "id": 367,
+      "change_id": "278e9f6e-61b8-4fcb-a229-5209485cebeb",
+      "node_type": "observation",
+      "title": "Staging non-Latin population is small (264/374143 posts, 4/7738 accounts majority) and contains only 4 Thai posts — contradicts the Thai-dominant framing in #220/#225",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-20T05:39:29.687061-07:00",
+      "updated_at": "2026-07-20T05:39:29.687061-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":90}"
+    },
+    {
+      "id": 368,
+      "change_id": "2ecf21bb-b9b4-4e8d-a799-1de11326802a",
+      "node_type": "observation",
+      "title": "app.bsky.feed.post langs: 94% coverage, but 9.1% declare 'en' on non-Latin text — usable as primary abstain signal only with a script cross-check; removes need for whatlang",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-20T06:03:40.056592-07:00",
+      "updated_at": "2026-07-20T06:03:40.056592-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -7701,6 +7767,61 @@
       "weight": 1.0,
       "rationale": "Merged after review",
       "created_at": "2026-07-19T08:26:11.672495-07:00"
+    },
+    {
+      "id": 354,
+      "from_node_id": 361,
+      "to_node_id": 363,
+      "from_change_id": "cdeb5b6f-eb03-42af-a571-2ec66d2c6d01",
+      "to_change_id": "670efed3-b644-4a52-bc26-b87fda5fa48b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Production validation of the #220 fix",
+      "created_at": "2026-07-20T00:39:38.553344-07:00"
+    },
+    {
+      "id": 355,
+      "from_node_id": 363,
+      "to_node_id": 364,
+      "from_change_id": "670efed3-b644-4a52-bc26-b87fda5fa48b",
+      "to_change_id": "adfc3545-9c72-4fe4-8b10-b5054f9192d4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Methodological lesson from the validation",
+      "created_at": "2026-07-20T00:39:43.886475-07:00"
+    },
+    {
+      "id": 356,
+      "from_node_id": 365,
+      "to_node_id": 366,
+      "from_change_id": "173d1dce-7141-4b4d-9315-43925edcb9b7",
+      "to_change_id": "1748af0a-454a-42e6-b455-d7a35c65ea8d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Probe result",
+      "created_at": "2026-07-20T05:35:10.469943-07:00"
+    },
+    {
+      "id": 357,
+      "from_node_id": 366,
+      "to_node_id": 367,
+      "from_change_id": "1748af0a-454a-42e6-b455-d7a35c65ea8d",
+      "to_change_id": "278e9f6e-61b8-4fcb-a229-5209485cebeb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Population sizing",
+      "created_at": "2026-07-20T05:39:29.694247-07:00"
+    },
+    {
+      "id": 358,
+      "from_node_id": 367,
+      "to_node_id": 368,
+      "from_change_id": "278e9f6e-61b8-4fcb-a229-5209485cebeb",
+      "to_change_id": "2ecf21bb-b9b4-4e8d-a799-1de11326802a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Detection signal evaluation",
+      "created_at": "2026-07-20T06:03:40.063104-07:00"
     }
   ],
   "documents": [

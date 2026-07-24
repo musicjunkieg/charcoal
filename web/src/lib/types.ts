@@ -34,6 +34,10 @@ export interface TierCounts {
 	elevated: number;
 	watch: number;
 	low: number;
+	// Accounts whose posts couldn't be scored — unsupported language (#222
+	// language abstention). Excluded from `total`, so it's a distinct bucket
+	// rather than a threat tier.
+	not_assessed: number;
 	total: number;
 }
 

@@ -3,6 +3,7 @@
 pub mod audit_log;
 pub mod behavioral;
 pub mod context;
+pub mod language;
 pub mod nli;
 pub mod profile;
 pub mod threat;

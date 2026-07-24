@@ -337,6 +337,14 @@
 					<span class="tier-count">{status.tier_counts.low}</span>
 					<span class="tier-label">Low</span>
 				</a>
+				<!-- Not a threat tier — accounts whose posts couldn't be scored
+				     (unsupported language, #222). Neutral styling and no tier
+				     filter link, since the accounts page doesn't support this
+				     as a filterable tier. -->
+				<div class="tier-card tier-not-assessed" title="Unable to score — unsupported language">
+					<span class="tier-count">{status.tier_counts.not_assessed}</span>
+					<span class="tier-label">Not assessed</span>
+				</div>
 			</div>
 
 			<!-- Tier legend -->
@@ -610,7 +618,7 @@
 	/* Tier Cards */
 	.tier-grid {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(5, 1fr);
 		gap: 1rem;
 		margin-bottom: 2rem;
 	}
@@ -663,6 +671,10 @@
 	}
 	.tier-low {
 		color: #a8a29e;
+	}
+	.tier-not-assessed {
+		color: #78716c;
+		cursor: default;
 	}
 
 	/* Partial-results banner */
