@@ -55,4 +55,14 @@ describe('dashboardView', () => {
 		const counts = { high: 0, elevated: 0, watch: 0, low: 3, not_assessed: 0, total: 3 };
 		expect(dashboardView(status({ tier_counts: counts, started_at: null }))).toBe('results');
 	});
+
+	it('shows results (not all-clear) when a completed scan scored only not_assessed accounts (#222)', () => {
+		// total excludes not_assessed (NULL-scored accounts are filtered out of
+		// get_ranked_threats), so a scan whose entire population came back
+		// not_assessed must not be presented as "nothing to worry about."
+		const counts = { high: 0, elevated: 0, watch: 0, low: 0, not_assessed: 4, total: 0 };
+		expect(
+			dashboardView(status({ tier_counts: counts, started_at: '2026-07-05T12:00:00Z' }))
+		).toBe('results');
+	});
 });
