@@ -3944,9 +3944,9 @@
       "node_type": "action",
       "title": "Measure ONNX clean-pass behaviour on non-Latin text (#222)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-20T05:33:24.491207-07:00",
-      "updated_at": "2026-07-20T05:33:24.491207-07:00",
+      "updated_at": "2026-07-24T11:24:17.574354-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":85,\"files\":[\"examples/lang_gate_probe.rs\"]}"
     },
     {
@@ -3955,9 +3955,9 @@
       "node_type": "outcome",
       "title": "ONNX gate has zero discrimination on non-Latin script: hostile Thai/JA/RU score 0.0004, identical to non-Latin gibberish; all cleared to is_toxic=false",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-20T05:35:10.462969-07:00",
-      "updated_at": "2026-07-20T05:35:10.462969-07:00",
+      "updated_at": "2026-07-24T11:24:17.580819-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":95}"
     },
     {
@@ -3966,9 +3966,9 @@
       "node_type": "observation",
       "title": "Staging non-Latin population is small (264/374143 posts, 4/7738 accounts majority) and contains only 4 Thai posts — contradicts the Thai-dominant framing in #220/#225",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-20T05:39:29.687061-07:00",
-      "updated_at": "2026-07-20T05:39:29.687061-07:00",
+      "updated_at": "2026-07-24T11:24:17.585743-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":90}"
     },
     {
@@ -3977,10 +3977,142 @@
       "node_type": "observation",
       "title": "app.bsky.feed.post langs: 94% coverage, but 9.1% declare 'en' on non-Latin text — usable as primary abstain signal only with a script cross-check; removes need for whatlang",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-20T06:03:40.056592-07:00",
-      "updated_at": "2026-07-20T06:03:40.056592-07:00",
+      "updated_at": "2026-07-24T11:24:17.591151-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"184cb09\",\"confidence\":90}"
+    },
+    {
+      "id": 369,
+      "change_id": "f5a5946a-9def-41ee-bb07-d1748a2e0c2c",
+      "node_type": "decision",
+      "title": "Abstain via ThreatTier::NotAssessed on unassessable-language accounts rather than scoring them (correctness over volume — Bryan's call)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-24T11:24:10.846717-07:00",
+      "updated_at": "2026-07-24T11:24:17.596020-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"2096408\",\"confidence\":95}"
+    },
+    {
+      "id": 370,
+      "change_id": "7327f780-b477-4e73-a02e-caad2098250f",
+      "node_type": "action",
+      "title": "Implement #222 language abstention (13-task subagent-driven build): assess_language gate + partition + coverage_gate + NotAssessed across all 3 scoring paths + report/status/dashboard surfacing",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-24T11:24:10.864028-07:00",
+      "updated_at": "2026-07-24T11:24:17.601208-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"2096408\",\"confidence\":95,\"files\":[\"src/scoring/language.rs\",\"src/scoring/profile.rs\",\"src/pipeline/scan_phases/gather.rs\",\"src/db/models.rs\"]}"
+    },
+    {
+      "id": 371,
+      "change_id": "b409d59a-5ec2-4434-85a9-b8b6ec14c9ba",
+      "node_type": "outcome",
+      "title": "#222 MERGED to staging (PR #89, CodeRabbit APPROVED after 2 rounds) + deployed: staging build SUCCESS, HTTP 200, deployed commit 2096408. Non-English accounts now abstain (NotAssessed) instead of silently scoring Low",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-24T11:24:10.879307-07:00",
+      "updated_at": "2026-07-24T11:24:17.606120-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"2096408\",\"confidence\":95}"
+    },
+    {
+      "id": 372,
+      "change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "node_type": "goal",
+      "title": "#230: abstain from NLI scoring on unassessable-language amplification pairs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:53.073268-07:00",
+      "updated_at": "2026-07-25T15:41:53.073268-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"all right, let's start a new chainlink session and pick up with what's next\"}"
+    },
+    {
+      "id": 373,
+      "change_id": "d4df0e9a-da58-4fed-b536-be9995175eb2",
+      "node_type": "observation",
+      "title": "quote_toxicity at amplification.rs:117 is display-only — computed, printed, discarded; never persisted or scored. The #230 kickoff premise (English model silently scores non-English quotes as benign) does NOT hold on the toxicity path",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:53.084072-07:00",
+      "updated_at": "2026-07-25T15:41:53.084072-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95,\"files\":[\"src/pipeline/amplification.rs\"]}"
+    },
+    {
+      "id": 374,
+      "change_id": "a58e8f6b-1348-4533-aa7e-69eaee672ba2",
+      "node_type": "observation",
+      "title": "Third ungated NLI seam found at profile.rs:686 (Mode B inferred pairs) — absent from the #230 kickoff note; also writes account_scores.context_score and feeds the live threat multiplier",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:53.094968-07:00",
+      "updated_at": "2026-07-25T15:41:53.094968-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95,\"files\":[\"src/scoring/profile.rs\"]}"
+    },
+    {
+      "id": 375,
+      "change_id": "61cdb91f-efc8-4a21-b171-9ee1351554b5",
+      "node_type": "observation",
+      "title": "Error direction here is INFLATION not suppression: context_multiplier = 1.0 + ctx*0.5 is bounded below at 1.0, so NLI noise can only push scores up (<=1.5x). Mirror image of #222",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:53.104555-07:00",
+      "updated_at": "2026-07-25T15:41:53.104555-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"files\":[\"src/scoring/threat.rs\"]}"
+    },
+    {
+      "id": 376,
+      "change_id": "0ca4f812-482b-452a-9b77-541c75baf9fb",
+      "node_type": "observation",
+      "title": "Model-gated tests silently SKIP under the Safehouse sandbox (models live outside the project dir, denied at kernel level) and report ok having asserted nothing — including unit_scan_phases.rs 'finalize amplifier-NLI case', which covers the exact path #230 modifies",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:58.839810-07:00",
+      "updated_at": "2026-07-25T15:41:58.839810-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95,\"files\":[\"tests/unit_scan_phases.rs\",\"src/scoring/nli.rs\"]}"
+    },
+    {
+      "id": 377,
+      "change_id": "da64f677-be8e-468b-8bcc-9ab729c6994f",
+      "node_type": "option",
+      "title": "A: inline assess_language checks at each of the 4 call sites, no shared helper",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:58.850480-07:00",
+      "updated_at": "2026-07-25T15:41:58.850480-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":50}"
+    },
+    {
+      "id": 378,
+      "change_id": "31499146-e427-48ba-822b-985170a8269b",
+      "node_type": "option",
+      "title": "B: shared pair_is_assessable helper in scoring::language, called explicitly at each site (matches #222 not_assessed_score pattern)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:58.860208-07:00",
+      "updated_at": "2026-07-25T15:41:58.860208-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":70}"
+    },
+    {
+      "id": 379,
+      "change_id": "d4775531-3d6d-4414-a805-4d26ad158bae",
+      "node_type": "option",
+      "title": "C: gate inside NliScorer::score_pair itself, returning Ok(None) to abstain — every current and future NLI caller gated by construction",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:41:58.869917-07:00",
+      "updated_at": "2026-07-25T15:41:58.869917-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":85}"
+    },
+    {
+      "id": 380,
+      "change_id": "af990dad-35fa-4da5-b577-51bcb0ae548c",
+      "node_type": "decision",
+      "title": "Approach C: gate inside NliScorer::score_pair (Ok(None) = abstained, Err = failed). Pair rule = BOTH texts must pass assess_language; language signal = script-only at both seams (no schema change); tox site gates on amplifier text alone (per-post predicate for per-post scoring)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:42:04.813514-07:00",
+      "updated_at": "2026-07-25T15:42:04.813514-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -7822,6 +7954,160 @@
       "weight": 1.0,
       "rationale": "Detection signal evaluation",
       "created_at": "2026-07-20T06:03:40.063104-07:00"
+    },
+    {
+      "id": 359,
+      "from_node_id": 368,
+      "to_node_id": 369,
+      "from_change_id": "2ecf21bb-b9b4-4e8d-a799-1de11326802a",
+      "to_change_id": "f5a5946a-9def-41ee-bb07-d1748a2e0c2c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "langs+script measurement → chose the abstain design",
+      "created_at": "2026-07-24T11:24:17.551600-07:00"
+    },
+    {
+      "id": 360,
+      "from_node_id": 366,
+      "to_node_id": 369,
+      "from_change_id": "1748af0a-454a-42e6-b455-d7a35c65ea8d",
+      "to_change_id": "f5a5946a-9def-41ee-bb07-d1748a2e0c2c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "zero-signal measurement justified abstaining",
+      "created_at": "2026-07-24T11:24:17.558176-07:00"
+    },
+    {
+      "id": 361,
+      "from_node_id": 369,
+      "to_node_id": 370,
+      "from_change_id": "f5a5946a-9def-41ee-bb07-d1748a2e0c2c",
+      "to_change_id": "7327f780-b477-4e73-a02e-caad2098250f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation of the chosen approach",
+      "created_at": "2026-07-24T11:24:17.563529-07:00"
+    },
+    {
+      "id": 362,
+      "from_node_id": 370,
+      "to_node_id": 371,
+      "from_change_id": "7327f780-b477-4e73-a02e-caad2098250f",
+      "to_change_id": "b409d59a-5ec2-4434-85a9-b8b6ec14c9ba",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "merged + deployed",
+      "created_at": "2026-07-24T11:24:17.568674-07:00"
+    },
+    {
+      "id": 363,
+      "from_node_id": 372,
+      "to_node_id": 377,
+      "from_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "to_change_id": "da64f677-be8e-468b-8bcc-9ab729c6994f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option explored for #230",
+      "created_at": "2026-07-25T15:42:04.820030-07:00"
+    },
+    {
+      "id": 364,
+      "from_node_id": 372,
+      "to_node_id": 378,
+      "from_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "to_change_id": "31499146-e427-48ba-822b-985170a8269b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option explored for #230",
+      "created_at": "2026-07-25T15:42:04.827229-07:00"
+    },
+    {
+      "id": 365,
+      "from_node_id": 372,
+      "to_node_id": 379,
+      "from_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "to_change_id": "d4775531-3d6d-4414-a805-4d26ad158bae",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option explored for #230",
+      "created_at": "2026-07-25T15:42:04.833454-07:00"
+    },
+    {
+      "id": 366,
+      "from_node_id": 377,
+      "to_node_id": 380,
+      "from_change_id": "da64f677-be8e-468b-8bcc-9ab729c6994f",
+      "to_change_id": "af990dad-35fa-4da5-b577-51bcb0ae548c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected: policy duplicated in 4 places, drifts on edit",
+      "created_at": "2026-07-25T15:42:04.840305-07:00"
+    },
+    {
+      "id": 367,
+      "from_node_id": 378,
+      "to_node_id": 380,
+      "from_change_id": "31499146-e427-48ba-822b-985170a8269b",
+      "to_change_id": "af990dad-35fa-4da5-b577-51bcb0ae548c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected: a future NLI call site silently skips the gate — how this bug arose",
+      "created_at": "2026-07-25T15:42:04.846275-07:00"
+    },
+    {
+      "id": 368,
+      "from_node_id": 379,
+      "to_node_id": 380,
+      "from_change_id": "d4775531-3d6d-4414-a805-4d26ad158bae",
+      "to_change_id": "af990dad-35fa-4da5-b577-51bcb0ae548c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chosen: structural invariant; also catches the profile.rs:686 seam the kickoff note missed",
+      "created_at": "2026-07-25T15:42:04.852812-07:00"
+    },
+    {
+      "id": 369,
+      "from_node_id": 373,
+      "to_node_id": 372,
+      "from_change_id": "d4df0e9a-da58-4fed-b536-be9995175eb2",
+      "to_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observation reframed the goal: tox path is not the bug",
+      "created_at": "2026-07-25T15:42:08.626264-07:00"
+    },
+    {
+      "id": 370,
+      "from_node_id": 374,
+      "to_node_id": 372,
+      "from_change_id": "a58e8f6b-1348-4533-aa7e-69eaee672ba2",
+      "to_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observation widened the goal: three NLI seams, not two",
+      "created_at": "2026-07-25T15:42:08.633701-07:00"
+    },
+    {
+      "id": 371,
+      "from_node_id": 375,
+      "to_node_id": 372,
+      "from_change_id": "61cdb91f-efc8-4a21-b171-9ee1351554b5",
+      "to_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observation set severity: bounded false-positive, not false-negative",
+      "created_at": "2026-07-25T15:42:08.639840-07:00"
+    },
+    {
+      "id": 372,
+      "from_node_id": 376,
+      "to_node_id": 372,
+      "from_change_id": "0ca4f812-482b-452a-9b77-541c75baf9fb",
+      "to_change_id": "22e660ee-8362-4610-8bbb-c7d64633e1a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observation constrains how #230 can be verified",
+      "created_at": "2026-07-25T15:42:08.645789-07:00"
     }
   ],
   "documents": [

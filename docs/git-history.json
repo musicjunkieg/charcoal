@@ -1,5 +1,13 @@
 [
   {
+    "hash": "20964086975ec8e9471b3777160d9706f6dbee1d",
+    "short_hash": "2096408",
+    "author": "chaos gremlin",
+    "date": "2026-07-24T09:16:28-07:00",
+    "message": "Merge pull request #89 from musicjunkieg/feat/language-abstention\n\nfix(#222): abstain from toxicity scoring on unassessable-language accounts",
+    "files_changed": 0
+  },
+  {
     "hash": "184cb096546e5731bed21c28c9041a8b86e69959",
     "short_hash": "184cb09",
     "author": "chaos gremlin",
