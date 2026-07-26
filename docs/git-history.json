@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7007d963d1eee29359020e749d2f2cef8cfcf58f",
+    "short_hash": "7007d96",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T01:46:13-07:00",
+    "message": "docs(230): stop claiming the quarantined test pins batching equivalence\n\nThe entry said equivalence \"is pinned by a model-gated unit test\" in the\npresent tense, then explained the test is ignored. An ignored test is no CI\nguarantee. It also stated the acceptance (\"within quantization noise,\nimmaterial to tiers\") as platform-general when it was macOS ARM64 only.\n\nNow: measurements labelled macOS-only at the point they are quoted, the pin\ndescribed as intended-but-never-executed, and the quarantine stated once\ninstead of twice.\n\nFound by CodeRabbit on PR #90.\n\nRefs #230, #91",
+    "files_changed": 3
+  },
+  {
     "hash": "de8537092bcc3ac4770c7adaa049f76a95a3800c",
     "short_hash": "de85370",
     "author": "Bryan Guffey",
