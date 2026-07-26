@@ -330,7 +330,7 @@ mod tests {
     ///
     /// Requires the NLI model locally; skips when it isn't present.
     ///
-    /// QUARANTINED (#91). This test had never actually run in CI: it called
+    /// QUARANTINED (#231). This test had never actually run in CI: it called
     /// `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR=models`, so it
     /// returned early and reported `ok` having asserted nothing. #230 switched
     /// it to `resolve_model_dir()`, it ran for the first time, and it FAILED on
@@ -345,8 +345,8 @@ mod tests {
     ///
     /// `#[ignore]` rather than a reverted env lookup or a widened tolerance:
     /// ignoring reports honestly in the summary, where both alternatives would
-    /// go back to claiming a pass. Run it with `--ignored` when working #91.
-    #[ignore = "#91: batched-vs-single diverges 0.14 on Linux x86_64; passes on macOS ARM64"]
+    /// go back to claiming a pass. Run it with `--ignored` when working #231.
+    #[ignore = "#231: batched-vs-single diverges 0.14 on Linux x86_64; passes on macOS ARM64"]
     #[tokio::test]
     async fn batched_entailments_match_per_hypothesis_single_runs() {
         let base = resolve_model_dir();
