@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c142676f63dbe05531710add2105d2d93b172c7d",
+    "short_hash": "c142676",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:03:45-07:00",
+    "message": "docs(230): changelog for amplification-pair language abstention\n\nRefs #230",
+    "files_changed": 1
+  },
+  {
     "hash": "b6d148488dbc1e66f0e966f4acf13ba1ce96585c",
     "short_hash": "b6d1484",
     "author": "Bryan Guffey",

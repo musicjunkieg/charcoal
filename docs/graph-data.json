@@ -4122,7 +4122,7 @@
       "description": null,
       "status": "completed",
       "created_at": "2026-07-25T15:43:52.619216-07:00",
-      "updated_at": "2026-07-25T20:31:06.653557-07:00",
+      "updated_at": "2026-07-25T21:04:11.495429-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b01169a\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-07-25-amplification-language-abstention-design.md\"]}"
     },
     {
@@ -4133,7 +4133,7 @@
       "description": null,
       "status": "completed",
       "created_at": "2026-07-25T19:10:07.131854-07:00",
-      "updated_at": "2026-07-25T20:31:06.660082-07:00",
+      "updated_at": "2026-07-25T21:04:11.502779-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"4b6b859\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-07-25-amplification-language-abstention-impl.md\"]}"
     },
     {
@@ -4175,10 +4175,21 @@
       "node_type": "action",
       "title": "Implement #230 (5-task TDD plan, direct sequential execution): pair_is_assessable, resolve_model_dir, score_pair gate + 3 call sites, tox site + tox_suffix, changelog",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-25T20:43:27.346835-07:00",
-      "updated_at": "2026-07-25T20:43:27.346835-07:00",
+      "updated_at": "2026-07-25T21:04:11.509598-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b6d1484\",\"confidence\":90,\"files\":[\"src/scoring/language.rs\",\"src/scoring/nli.rs\",\"src/scoring/profile.rs\",\"src/pipeline/amplification.rs\",\"src/toxicity/download.rs\"]}"
+    },
+    {
+      "id": 387,
+      "change_id": "21d5e3eb-240a-414a-a32c-89804b381980",
+      "node_type": "outcome",
+      "title": "#230 implemented and pushed (7 commits, 01c131e..c142676): score_pair returns Ok(None) on unassessable pairs, all 3 NLI seams gated by construction, tox site gated on amplifier text alone. Real-model regression test VERIFIED running (no SKIP) — 7 remaining skips are all pre-existing toxicity/embedding, unchanged from baseline. Clippy clean on no-features/web/postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T21:04:08.138712-07:00",
+      "updated_at": "2026-07-25T21:04:08.138712-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"c142676\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -8251,6 +8262,17 @@
       "weight": 1.0,
       "rationale": "Grant resolves the NLI half of the silent-skip hazard",
       "created_at": "2026-07-25T20:43:31.256824-07:00"
+    },
+    {
+      "id": 380,
+      "from_node_id": 386,
+      "to_node_id": 387,
+      "from_change_id": "fb2c16e6-c938-4917-9951-f835c8a128e9",
+      "to_change_id": "21d5e3eb-240a-414a-a32c-89804b381980",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-07-25T21:04:11.488557-07:00"
     }
   ],
   "documents": [
