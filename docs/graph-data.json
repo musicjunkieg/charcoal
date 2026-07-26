@@ -4113,6 +4113,17 @@
       "created_at": "2026-07-25T15:42:04.813514-07:00",
       "updated_at": "2026-07-25T15:42:04.813514-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":85}"
+    },
+    {
+      "id": 381,
+      "change_id": "f4e5d8e5-7730-4d6a-b203-88ea2795cccb",
+      "node_type": "action",
+      "title": "Wrote #230 design spec (docs/superpowers/specs/2026-07-25-amplification-language-abstention-design.md) and committed on feat/amplification-language-abstention",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T15:43:52.619216-07:00",
+      "updated_at": "2026-07-25T15:43:52.619216-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b01169a\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-07-25-amplification-language-abstention-design.md\"]}"
     }
   ],
   "edges": [
@@ -8108,6 +8119,17 @@
       "weight": 1.0,
       "rationale": "Observation constrains how #230 can be verified",
       "created_at": "2026-07-25T15:42:08.645789-07:00"
+    },
+    {
+      "id": 373,
+      "from_node_id": 380,
+      "to_node_id": 381,
+      "from_change_id": "af990dad-35fa-4da5-b577-51bcb0ae548c",
+      "to_change_id": "f4e5d8e5-7730-4d6a-b203-88ea2795cccb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of the chosen approach begins with the spec",
+      "created_at": "2026-07-25T15:43:52.628688-07:00"
     }
   ],
   "documents": [

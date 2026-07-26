@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b01169a436476628a599d6889ced0fed3e18f806",
+    "short_hash": "b01169a",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T15:43:42-07:00",
+    "message": "docs(230): design spec for amplification-pair language abstention\n\nBrainstormed design for #230. Two corrections to the issue kickoff note,\nboth established from the code:\n\n- quote_toxicity (amplification.rs:117) is display-only — computed,\n  printed, discarded. Never persisted, never scored. The premise that an\n  English model silently scores non-English quotes as benign does not\n  hold on the toxicity path.\n- There are three ungated NLI seams, not two. profile.rs:686 (Mode B\n  inferred pairs) was missing from the note and feeds the same\n  account_scores.context_score multiplier.\n\nError direction is inflation, not suppression: context_multiplier is\nbounded below at 1.0, so NLI noise can only push scores up (<=1.5x).\nBounded false positive — mirror image of #222.\n\nDesign: pair_is_assessable(orig, resp) -> bool in scoring::language,\ninvoked inside NliScorer::score_pair, which grows Ok(None) to mean\nabstained (Err keeps meaning failed). Gating by construction rather than\nper call site, because a caller-invoked gate has now been missed twice.\nScript-only language signal at both seams — no schema change. Tox site\ngates on amplifier text alone (per-post predicate for per-post scoring).\n\nAlso records a verification hazard: model-gated tests silently pass under\nthe Safehouse sandbox, including the finalize amplifier-NLI case that\ncovers the exact path this change touches.\n\nRefs #230\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TPJYigwtfZvjFBBXbABCbD",
+    "files_changed": 3
+  },
+  {
     "hash": "20964086975ec8e9471b3777160d9706f6dbee1d",
     "short_hash": "2096408",
     "author": "chaos gremlin",
