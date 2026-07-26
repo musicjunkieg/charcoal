@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b6d148488dbc1e66f0e966f4acf13ba1ce96585c",
+    "short_hash": "b6d1484",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T20:31:13-07:00",
+    "message": "chore(230): sync decision graph after spec + plan\n\nRefs #230",
+    "files_changed": 2
+  },
+  {
     "hash": "4b6b85948e2012cec1bed757f391597b8f945124",
     "short_hash": "4b6b859",
     "author": "Bryan Guffey",

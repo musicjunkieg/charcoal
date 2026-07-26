@@ -4146,6 +4146,39 @@
       "created_at": "2026-07-25T20:31:06.633258-07:00",
       "updated_at": "2026-07-25T20:31:08.940492-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"4b6b859\",\"confidence\":90}"
+    },
+    {
+      "id": 384,
+      "change_id": "27a4ab7c-49b5-4a6c-960e-e9af26e2b0aa",
+      "node_type": "observation",
+      "title": "cargo test captures stderr from PASSING tests, so the plan's 'grep ^SKIP' verification step returns nothing regardless — the exact false-confidence failure it was written to prevent. Needs -- --show-output",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T20:43:06.136783-07:00",
+      "updated_at": "2026-07-25T20:43:06.136783-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b6d1484\",\"confidence\":95,\"files\":[\"docs/superpowers/plans/2026-07-25-amplification-language-abstention-impl.md\"]}"
+    },
+    {
+      "id": 385,
+      "change_id": "fb167151-0182-4a55-a21b-4098d10ee551",
+      "node_type": "observation",
+      "title": "Sandbox grant for the models dir is READ-ONLY: NLI model loads and runs (verified with a negative control), but charcoal download-model cannot write there, so the 7 toxicity/embedding-gated skips need Bryan to run it outside the sandbox",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T20:43:22.179726-07:00",
+      "updated_at": "2026-07-25T20:43:22.179726-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b6d1484\",\"confidence\":100}"
+    },
+    {
+      "id": 386,
+      "change_id": "fb2c16e6-c938-4917-9951-f835c8a128e9",
+      "node_type": "action",
+      "title": "Implement #230 (5-task TDD plan, direct sequential execution): pair_is_assessable, resolve_model_dir, score_pair gate + 3 call sites, tox site + tox_suffix, changelog",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T20:43:27.346835-07:00",
+      "updated_at": "2026-07-25T20:43:27.346835-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b6d1484\",\"confidence\":90,\"files\":[\"src/scoring/language.rs\",\"src/scoring/nli.rs\",\"src/scoring/profile.rs\",\"src/pipeline/amplification.rs\",\"src/toxicity/download.rs\"]}"
     }
   ],
   "edges": [
@@ -8174,6 +8207,50 @@
       "weight": 1.0,
       "rationale": "Result of the planning arc",
       "created_at": "2026-07-25T20:31:06.640850-07:00"
+    },
+    {
+      "id": 376,
+      "from_node_id": 380,
+      "to_node_id": 386,
+      "from_change_id": "af990dad-35fa-4da5-b577-51bcb0ae548c",
+      "to_change_id": "fb2c16e6-c938-4917-9951-f835c8a128e9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of approach C",
+      "created_at": "2026-07-25T20:43:31.236912-07:00"
+    },
+    {
+      "id": 377,
+      "from_node_id": 386,
+      "to_node_id": 384,
+      "from_change_id": "fb2c16e6-c938-4917-9951-f835c8a128e9",
+      "to_change_id": "27a4ab7c-49b5-4a6c-960e-e9af26e2b0aa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Found while baselining before implementation",
+      "created_at": "2026-07-25T20:43:31.244187-07:00"
+    },
+    {
+      "id": 378,
+      "from_node_id": 386,
+      "to_node_id": 385,
+      "from_change_id": "fb2c16e6-c938-4917-9951-f835c8a128e9",
+      "to_change_id": "fb167151-0182-4a55-a21b-4098d10ee551",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Found while validating the sandbox grant",
+      "created_at": "2026-07-25T20:43:31.250674-07:00"
+    },
+    {
+      "id": 379,
+      "from_node_id": 376,
+      "to_node_id": 385,
+      "from_change_id": "0ca4f812-482b-452a-9b77-541c75baf9fb",
+      "to_change_id": "fb167151-0182-4a55-a21b-4098d10ee551",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Grant resolves the NLI half of the silent-skip hazard",
+      "created_at": "2026-07-25T20:43:31.256824-07:00"
     }
   ],
   "documents": [
