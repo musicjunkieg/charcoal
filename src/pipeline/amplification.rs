@@ -22,6 +22,7 @@ use crate::bluesky::posts;
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
 use crate::pipeline::scan_phases::burst;
+use crate::scoring::language::{assess_language, Assessability};
 // `TwoStageToxicityScorer` impls both `ToxicityScorer` and `CleanPassScorer`
 // (the gather seam). The phased pipeline needs both views plus the classifier,
 // so amplification takes the concrete scorer and coerces it into the two `&dyn`
@@ -42,6 +43,24 @@ use crate::toxicity::traits::ToxicityScorer;
 /// `(events_processed, accounts_scored, degraded)` — `degraded` is true when the
 /// scan is incomplete: either the cost ceiling was hit, or one or more accounts
 /// were skipped due to fetch/score errors. Re-run to resume.
+/// Render the toxicity suffix for an amplification-event progress line.
+///
+/// Three states, deliberately distinguishable in output (#230):
+/// - scored                   → `" [tox: 0.42]"`
+/// - not scored, assessable   → `""` (no `--analyze`; nothing to report)
+/// - not scored, unassessable → `" [tox: n/a — language]"`
+///
+/// The third case previously printed `[tox: 0.00]`, which read as "we checked
+/// and it was benign" when the truth was "an English-only model was handed text
+/// it cannot read".
+fn tox_suffix(quote_toxicity: Option<f64>, assessable: bool) -> String {
+    match (quote_toxicity, assessable) {
+        (Some(t), _) => format!(" [tox: {:.2}]", t),
+        (None, true) => String::new(),
+        (None, false) => " [tox: n/a — language]".to_string(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
@@ -95,6 +114,11 @@ pub async fn run(
     for event in &events {
         let mut amplifier_text: Option<String> = None;
         let mut quote_toxicity: Option<f64> = None;
+        // Defaults to true so events with no fetched text — reposts, likes, and
+        // fetch failures — render exactly as they did before. The language
+        // marker is reserved for text we actually looked at and declined to
+        // score.
+        let mut amplifier_assessable = true;
 
         // Look up the original (protected user's) post text from the cache
         // (resolved before scoring so the ensemble scorer can use it as context)
@@ -112,16 +136,32 @@ pub async fn run(
         if event.event_type == "quote" || event.event_type == "reply" {
             match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {
-                    // Score only when a real scorer is present (i.e. `--analyze`).
-                    if let Some(scorer) = scorer {
-                        match scorer.score_with_context(&text, original_post_text).await {
-                            Ok(result) => {
-                                quote_toxicity = Some(result.toxicity);
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "Failed to score amplifier text");
+                    // #230: never hand non-English text to the English-only
+                    // toxicity models. Skipping the call rather than scoring and
+                    // discarding also avoids a Zentropi/RunPod round-trip per
+                    // non-English quote.
+                    //
+                    // Gated on the amplifier text ALONE, not the pair: this
+                    // scores one post with the other as context, so it takes the
+                    // per-post predicate. The NLI seams take the pair predicate.
+                    amplifier_assessable = assess_language(&text, &[]) == Assessability::Assessable;
+                    if amplifier_assessable {
+                        // Score only when a real scorer is present (i.e. `--analyze`).
+                        if let Some(scorer) = scorer {
+                            match scorer.score_with_context(&text, original_post_text).await {
+                                Ok(result) => {
+                                    quote_toxicity = Some(result.toxicity);
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to score amplifier text");
+                                }
                             }
                         }
+                    } else {
+                        debug!(
+                            uri = event.amplifier_post_uri,
+                            "Skipped toxicity scoring: unassessable language"
+                        );
                     }
                     amplifier_text = Some(text);
                 }
@@ -221,9 +261,7 @@ pub async fn run(
         );
         if let Some(ref text) = amplifier_text {
             let preview = crate::output::truncate_chars(text, 120);
-            let tox_str = quote_toxicity
-                .map(|t| format!(" [tox: {:.2}]", t))
-                .unwrap_or_default();
+            let tox_str = tox_suffix(quote_toxicity, amplifier_assessable);
             crate::progress!("    \"{}\"{}", preview, tox_str);
         }
     }
@@ -512,4 +550,34 @@ pub async fn run(
     };
 
     Ok((events.len(), accounts_scored, degraded))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tox_suffix;
+
+    #[test]
+    fn scored_text_renders_the_score() {
+        assert_eq!(tox_suffix(Some(0.42), true), " [tox: 0.42]");
+    }
+
+    #[test]
+    fn unscored_assessable_text_renders_nothing() {
+        // No `--analyze`: there was no scorer, so there is nothing to say.
+        assert_eq!(tox_suffix(None, true), "");
+    }
+
+    #[test]
+    fn unassessable_text_renders_the_language_marker() {
+        // Distinguishable from both "[tox: 0.00]" (a real benign score) and ""
+        // (not scored at all) — the reader can tell we looked and declined.
+        assert_eq!(tox_suffix(None, false), " [tox: n/a — language]");
+    }
+
+    #[test]
+    fn a_real_score_wins_over_the_assessable_flag() {
+        // Defensive: if a score somehow exists, show it rather than claiming
+        // we abstained.
+        assert_eq!(tox_suffix(Some(0.0), false), " [tox: 0.00]");
+    }
 }
