@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2f35c41bd43f3712e08263fa7d9e7593a7601de0",
+    "short_hash": "2f35c41",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:06:58-07:00",
+    "message": "docs(230): models were in ./models all along — test binaries never load .env\n\nFull model-gated coverage needs no sandbox grant. All three ONNX models have\nbeen in ./models inside the project since May/June, readable and writable, and\n.env:25 already sets CHARCOAL_MODEL_DIR=./models. dotenvy runs only in\nmain.rs:184, so test binaries never load .env and fall back to\ndefault_model_dir() — the platform data dir, which holds only the NLI model.\n\nCHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output\n=> 40 suites, ZERO skips. Replaces the seven-line skip baseline with the real\nexpectation: no output.\n\nRefs #230",
+    "files_changed": 3
+  },
+  {
     "hash": "38674e950ec72417e279c272295e5e5554046b6c",
     "short_hash": "38674e9",
     "author": "Bryan Guffey",

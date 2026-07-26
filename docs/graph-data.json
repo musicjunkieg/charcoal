@@ -4201,6 +4201,17 @@
       "created_at": "2026-07-25T21:06:47.512813-07:00",
       "updated_at": "2026-07-25T21:06:47.512813-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"38674e9\",\"confidence\":100,\"files\":[\".env\",\"src/config.rs\",\"src/main.rs\"]}"
+    },
+    {
+      "id": 389,
+      "change_id": "2c2db893-a1be-4039-8c63-fb7764c49c86",
+      "node_type": "outcome",
+      "title": "PR #90 opened: feat/amplification-language-abstention -> staging (12 commits, b01169a..2f35c41)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T22:46:07.402961-07:00",
+      "updated_at": "2026-07-25T22:46:07.402961-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"2f35c41\",\"confidence\":100}"
     }
   ],
   "edges": [
@@ -8306,6 +8317,17 @@
       "weight": 1.0,
       "rationale": "Found immediately after implementation, upgrades the verification claim",
       "created_at": "2026-07-25T21:06:50.958941-07:00"
+    },
+    {
+      "id": 383,
+      "from_node_id": 387,
+      "to_node_id": 389,
+      "from_change_id": "21d5e3eb-240a-414a-a32c-89804b381980",
+      "to_change_id": "2c2db893-a1be-4039-8c63-fb7764c49c86",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR opened after implementation verified",
+      "created_at": "2026-07-25T22:46:07.410457-07:00"
     }
   ],
   "documents": [

@@ -78,9 +78,11 @@ impl Config {
             _ => ScorerBackend::Onnx,
         };
 
-        let model_dir = env::var("CHARCOAL_MODEL_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| crate::toxicity::download::default_model_dir());
+        // Delegates to the shared resolver so a blank/whitespace CHARCOAL_MODEL_DIR
+        // falls back to the platform default here too (#230). The old inline
+        // `PathBuf::from` turned an exported-but-empty value into an empty path,
+        // sending every model lookup to a bare relative name in the cwd.
+        let model_dir = crate::toxicity::download::resolve_model_dir();
 
         #[cfg(feature = "web")]
         let allowed_did = env::var("CHARCOAL_ALLOWED_DID").unwrap_or_default();
