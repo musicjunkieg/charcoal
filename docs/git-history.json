@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4b6b85948e2012cec1bed757f391597b8f945124",
+    "short_hash": "4b6b859",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T19:09:51-07:00",
+    "message": "docs(230): TDD implementation plan for amplification-pair language abstention\n\nFive tasks: pair_is_assessable predicate, resolve_model_dir helper, the\nscore_pair gate plus all three call sites (atomic — the signature change\nbreaks them together), the toxicity-site gate with tox_suffix rendering,\nand changelog plus final verification.\n\nRecords the verification hazard prominently: model-gated tests silently\npass under the Safehouse sandbox, so Task 5 requires listing every SKIPped\ntest in the PR rather than reporting a green run as end-to-end coverage.\n\nRefs #230",
+    "files_changed": 3
+  },
+  {
     "hash": "b01169a436476628a599d6889ced0fed3e18f806",
     "short_hash": "b01169a",
     "author": "Bryan Guffey",

@@ -4021,9 +4021,9 @@
       "node_type": "goal",
       "title": "#230: abstain from NLI scoring on unassessable-language amplification pairs",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-25T15:41:53.073268-07:00",
-      "updated_at": "2026-07-25T15:41:53.073268-07:00",
+      "updated_at": "2026-07-25T20:31:06.647070-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"all right, let's start a new chainlink session and pick up with what's next\"}"
     },
     {
@@ -4120,10 +4120,32 @@
       "node_type": "action",
       "title": "Wrote #230 design spec (docs/superpowers/specs/2026-07-25-amplification-language-abstention-design.md) and committed on feat/amplification-language-abstention",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-25T15:43:52.619216-07:00",
-      "updated_at": "2026-07-25T15:43:52.619216-07:00",
+      "updated_at": "2026-07-25T20:31:06.653557-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"b01169a\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-07-25-amplification-language-abstention-design.md\"]}"
+    },
+    {
+      "id": 382,
+      "change_id": "bb20d9b8-31f2-4dd8-a44e-3b30d32ae210",
+      "node_type": "action",
+      "title": "Wrote #230 TDD implementation plan (5 tasks): pair_is_assessable, resolve_model_dir, score_pair gate + 3 call sites (atomic), tox site + tox_suffix, changelog/verification",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-25T19:10:07.131854-07:00",
+      "updated_at": "2026-07-25T20:31:06.660082-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"4b6b859\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-07-25-amplification-language-abstention-impl.md\"]}"
+    },
+    {
+      "id": 383,
+      "change_id": "189bb193-38af-44b7-be00-709181521cb0",
+      "node_type": "outcome",
+      "title": "#230 spec + TDD plan complete and pushed (b01169a, 4b6b859) on feat/amplification-language-abstention; implementation not started — paused for a read-only sandbox grant so the real-model regression test can actually assert",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-25T20:31:06.633258-07:00",
+      "updated_at": "2026-07-25T20:31:08.940492-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"4b6b859\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -8130,6 +8152,28 @@
       "weight": 1.0,
       "rationale": "Implementation of the chosen approach begins with the spec",
       "created_at": "2026-07-25T15:43:52.628688-07:00"
+    },
+    {
+      "id": 374,
+      "from_node_id": 381,
+      "to_node_id": 382,
+      "from_change_id": "f4e5d8e5-7730-4d6a-b203-88ea2795cccb",
+      "to_change_id": "bb20d9b8-31f2-4dd8-a44e-3b30d32ae210",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spec approved by Bryan, plan follows",
+      "created_at": "2026-07-25T19:10:07.141037-07:00"
+    },
+    {
+      "id": 375,
+      "from_node_id": 382,
+      "to_node_id": 383,
+      "from_change_id": "bb20d9b8-31f2-4dd8-a44e-3b30d32ae210",
+      "to_change_id": "189bb193-38af-44b7-be00-709181521cb0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the planning arc",
+      "created_at": "2026-07-25T20:31:06.640850-07:00"
     }
   ],
   "documents": [
