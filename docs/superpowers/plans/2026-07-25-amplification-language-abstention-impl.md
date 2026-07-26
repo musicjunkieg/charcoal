@@ -32,25 +32,17 @@
 
 ## Verification Status (updated 2026-07-26)
 
-**The read-only sandbox grant landed.** `~/Library/Application Support/charcoal/models` is now readable, and the NLI model actually loads and runs. Verified in both directions: `finalize_amplifier_always_runs_nli` executed the ONNX model with no SKIP notice, and the same test pointed at an empty `CHARCOAL_MODEL_DIR` printed its SKIP and asserted nothing. The population can fail; it didn't. Task 3's real-model regression test therefore has genuine coverage.
+**All model-gated tests can run, and do.** Verified in both directions: with the models reachable, `finalize_amplifier_always_runs_nli` executed the ONNX model with no SKIP notice; the same test pointed at an empty `CHARCOAL_MODEL_DIR` printed its SKIP and asserted nothing. The population can fail; it didn't. Task 3's real-model regression test has genuine coverage.
 
-Two residual hazards remain:
+A read-only sandbox grant for `~/Library/Application Support/charcoal/models` also landed, but hazard 2 below makes it redundant — `./models` was the answer all along.
+
+Two hazards to keep in mind:
 
 **1. `grep "^SKIP"` on a plain `cargo test` run is a no-op.** libtest captures stderr from *passing* tests and discards it, so a SKIP notice emitted by a test that returns early never reaches the terminal. A grep for it comes back empty whether or not anything skipped — the exact false-confidence failure the check was written to prevent. **Always pass `-- --show-output`.**
 
-**2. Only the NLI model is downloaded.** The toxicity model (`unbiased-toxic-roberta`, in the base dir) and the embedding model (`all-MiniLM-L6-v2/`) are absent, and the grant is read-only so `charcoal download-model` cannot write there — it must be run outside the sandbox. Seven tests skip for this reason. They are pre-existing and unrelated to #230, but they are the baseline to compare against:
+**2. Test binaries do not load `.env`, so they look in the wrong models directory.** All three models (toxicity, `all-MiniLM-L6-v2/`, `nli-deberta-v3-xsmall/`) already live in **`./models` inside the project**, readable and writable, and `.env:25` sets `CHARCOAL_MODEL_DIR=./models`. But `dotenvy` runs only in `main.rs:184` — test harnesses never see it and fall back to `default_model_dir()`, the platform data dir, which holds only the NLI model.
 
-```
-SKIP batch poisoning: toxicity model not present
-SKIP emoji-heavy english: toxicity model not present
-SKIP overlong single post: toxicity model not present
-SKIP short-input control: toxicity model not present
-SKIP truncation direction: toxicity model not present
-SKIP embedder over-long: embedding model not present
-SKIP finalize follower-NLI case: NLI and/or embedding model not present
-```
-
-If a run produces *more* SKIP lines than these seven, something regressed. If `score_pair_abstains_on_nonlatin_but_still_scores_english` ever appears in the list, the real-model coverage has been lost and the PR must say so rather than claiming the gate is verified end to end.
+**Run the suite as `CHARCOAL_MODEL_DIR=./models cargo test --features web` and every model-gated test executes: 40 suites, zero SKIP lines.** That is the expected result; any SKIP output is a list of things not verified. Without the env var, seven tests skip on the missing toxicity/embedding models — a harness artifact, not a code problem.
 
 ## File Structure
 
@@ -876,11 +868,11 @@ Expected: `test result: ok.` across all suites.
 
 - [ ] **Step 3: Confirm which model-gated tests skipped**
 
-Run: `cargo test --features web -- --show-output 2>&1 | grep -iE "^\s*SKIP" | sort -u`
+Run: `CHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output 2>&1 | grep -iE "^\s*SKIP" | sort -u`
 
-`--show-output` is **required**: without it libtest discards stderr from passing tests and the grep returns empty regardless, which reads as "nothing skipped" when tests may have skipped en masse.
+Both parts matter. `CHARCOAL_MODEL_DIR=./models` points the harness at the models that are actually on disk (test binaries do not load `.env`). `--show-output` is required because libtest discards stderr from passing tests, so without it the grep returns empty regardless — reading as "nothing skipped" when tests may have skipped en masse.
 
-Expected: exactly the seven-line baseline recorded under "Verification Status" — all toxicity/embedding, none NLI. **Record this list in the PR description.** More lines than the baseline means a regression. If `score_pair_abstains_on_nonlatin_but_still_scores_english` appears, the real-model coverage does not exist and the PR must say so rather than claiming the gate is verified end to end.
+Expected: **no output at all.** Every model-gated test runs. **Record that in the PR description.** Any SKIP line is a list of things not verified; if `score_pair_abstains_on_nonlatin_but_still_scores_english` appears, the real-model coverage does not exist and the PR must say so rather than claiming the gate is verified end to end.
 
 - [ ] **Step 4: Clippy across all feature combinations**
 

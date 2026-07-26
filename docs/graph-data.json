@@ -4190,6 +4190,17 @@
       "created_at": "2026-07-25T21:04:08.138712-07:00",
       "updated_at": "2026-07-25T21:04:08.138712-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"c142676\",\"confidence\":95}"
+    },
+    {
+      "id": 388,
+      "change_id": "5d449c36-c2c0-411e-9c4d-f0de9407f061",
+      "node_type": "observation",
+      "title": "All 3 ONNX models were in ./models inside the project all along (readable+writable); .env:25 sets CHARCOAL_MODEL_DIR=./models but dotenvy runs only in main.rs so TEST BINARIES never load .env and fall back to the platform dir. CHARCOAL_MODEL_DIR=./models cargo test = 40 suites, ZERO skips. The sandbox grant was never needed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-25T21:06:47.512813-07:00",
+      "updated_at": "2026-07-25T21:06:47.512813-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"38674e9\",\"confidence\":100,\"files\":[\".env\",\"src/config.rs\",\"src/main.rs\"]}"
     }
   ],
   "edges": [
@@ -8273,6 +8284,28 @@
       "weight": 1.0,
       "rationale": "Implementation outcome",
       "created_at": "2026-07-25T21:04:11.488557-07:00"
+    },
+    {
+      "id": 381,
+      "from_node_id": 385,
+      "to_node_id": 388,
+      "from_change_id": "fb167151-0182-4a55-a21b-4098d10ee551",
+      "to_change_id": "5d449c36-c2c0-411e-9c4d-f0de9407f061",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Supersedes: the grant was redundant",
+      "created_at": "2026-07-25T21:06:50.951707-07:00"
+    },
+    {
+      "id": 382,
+      "from_node_id": 387,
+      "to_node_id": 388,
+      "from_change_id": "21d5e3eb-240a-414a-a32c-89804b381980",
+      "to_change_id": "5d449c36-c2c0-411e-9c4d-f0de9407f061",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Found immediately after implementation, upgrades the verification claim",
+      "created_at": "2026-07-25T21:06:50.958941-07:00"
     }
   ],
   "documents": [
