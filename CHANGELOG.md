@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Abstain from NLI context scoring on unassessable-language pairs (#230) —
+  the English-only MNLI cross-encoder returned noise on non-English text,
+  which `context_multiplier` turned into up to a 1.5x threat-score inflation.
+  The gate now lives inside `score_pair`, so all three NLI seams are covered,
+  including the Mode B inferred-pair path. Amplifier toxicity scoring abstains
+  on the same basis and the progress line reports `[tox: n/a — language]`
+  instead of a misleading `[tox: 0.00]`.
+
 ### Changed
 - Verify danabra.mov re-scan 2026-07-20 (post-#224) (#229)
 - Railway drops scan logs at 500/sec — observability gap during scans (#226)
