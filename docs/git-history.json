@@ -1,5 +1,13 @@
 [
   {
+    "hash": "de8537092bcc3ac4770c7adaa049f76a95a3800c",
+    "short_hash": "de85370",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T01:41:11-07:00",
+    "message": "test(230): quarantine #213 batching test — fails on Linux x86_64 (#91)\n\nSwitching this test to resolve_model_dir() in this PR made it run in CI for\nthe FIRST time: it previously read default_model_dir() while CI sets\nCHARCOAL_MODEL_DIR=models, so it returned early and reported ok having\nasserted nothing on every run since #213 merged.\n\nIt now runs, and fails on Linux x86_64: hypothesis 0 comes back batched\n0.031 vs single 0.172 against a 0.02 tolerance. Model bytes are identical to\nthe ones that pass on macOS ARM64 (sha256 3fac2500... matches HuggingFace),\nso this is a platform/ONNX-Runtime divergence, not a model-version drift.\n\nProduction runs Linux x86_64, so #213 tolerance — measured on Apple Silicon\nonly — was never verified on the platform that serves users. A 5.6x swing in\nan entailment probability may be structural, not quantization noise.\nTracked in #91 with an investigation plan.\n\nQuarantined with #[ignore] rather than reverting the env lookup or widening\nthe tolerance: ignoring reports honestly in the summary, where both\nalternatives would go back to claiming a pass. CHANGELOG #213 entry corrected\nto record that its measurements were macOS-only.\n\nRefs #230, #91",
+    "files_changed": 2
+  },
+  {
     "hash": "2f35c41bd43f3712e08263fa7d9e7593a7601de0",
     "short_hash": "2f35c41",
     "author": "Bryan Guffey",

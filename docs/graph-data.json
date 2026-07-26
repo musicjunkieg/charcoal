@@ -4212,6 +4212,28 @@
       "created_at": "2026-07-25T22:46:07.402961-07:00",
       "updated_at": "2026-07-25T22:46:07.402961-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"2f35c41\",\"confidence\":100}"
+    },
+    {
+      "id": 390,
+      "change_id": "80d19ce8-7c7b-4346-baf4-e7c1cca4b402",
+      "node_type": "observation",
+      "title": "#213 batching test NEVER ran in CI (read default_model_dir while CI sets CHARCOAL_MODEL_DIR=models) — un-skipped by #230 Task 2, then FAILED on Linux x86_64: hypothesis 0 batched 0.031 vs single 0.172 vs 0.02 tolerance. Model bytes identical to macOS (sha256 3fac2500 matches HF) so it is a platform/ORT divergence. Production IS Linux x86_64, so #213 tolerance was never verified where it matters",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-26T01:42:05.890482-07:00",
+      "updated_at": "2026-07-26T01:42:05.890482-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"de85370\",\"confidence\":95,\"files\":[\"src/scoring/nli.rs\",\".github/workflows/ci.yml\"]}"
+    },
+    {
+      "id": 391,
+      "change_id": "6beea9f5-87e6-4855-a039-d5a5d333d182",
+      "node_type": "decision",
+      "title": "Quarantine the #213 batching test with #[ignore] + file issue #91, rather than reverting to default_model_dir (re-hides it) or widening the tolerance (claims a false pass) — Bryan's call",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-26T01:42:16.066954-07:00",
+      "updated_at": "2026-07-26T01:42:16.066954-07:00",
+      "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"de85370\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -8328,6 +8350,28 @@
       "weight": 1.0,
       "rationale": "PR opened after implementation verified",
       "created_at": "2026-07-25T22:46:07.410457-07:00"
+    },
+    {
+      "id": 384,
+      "from_node_id": 389,
+      "to_node_id": 390,
+      "from_change_id": "2c2db893-a1be-4039-8c63-fb7764c49c86",
+      "to_change_id": "80d19ce8-7c7b-4346-baf4-e7c1cca4b402",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CI surfaced this after the PR opened",
+      "created_at": "2026-07-26T01:42:16.074048-07:00"
+    },
+    {
+      "id": 385,
+      "from_node_id": 390,
+      "to_node_id": 391,
+      "from_change_id": "80d19ce8-7c7b-4346-baf4-e7c1cca4b402",
+      "to_change_id": "6beea9f5-87e6-4855-a039-d5a5d333d182",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Finding forced a scope decision",
+      "created_at": "2026-07-26T01:42:20.442139-07:00"
     }
   ],
   "documents": [
