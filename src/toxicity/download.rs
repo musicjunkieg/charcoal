@@ -41,6 +41,25 @@ pub fn default_model_dir() -> PathBuf {
         .join("models")
 }
 
+/// Resolve the model directory from an explicit override, falling back to the
+/// platform default. A blank override is treated as unset — an exported-but-
+/// empty `CHARCOAL_MODEL_DIR` must not send every lookup to the filesystem root.
+///
+/// Takes the override as a parameter rather than reading the environment so it
+/// stays pure and testable: `std::env::set_var` races Rust's parallel test
+/// threads.
+pub fn resolve_model_dir_from(override_dir: Option<String>) -> PathBuf {
+    override_dir
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_model_dir)
+}
+
+/// [`resolve_model_dir_from`] reading `CHARCOAL_MODEL_DIR`.
+pub fn resolve_model_dir() -> PathBuf {
+    resolve_model_dir_from(std::env::var("CHARCOAL_MODEL_DIR").ok())
+}
+
 /// Subdirectory within model_dir for the sentence embedding model.
 pub fn embedding_model_dir(base: &Path) -> PathBuf {
     base.join("all-MiniLM-L6-v2")

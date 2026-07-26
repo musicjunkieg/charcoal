@@ -303,7 +303,7 @@ impl NliScorer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::toxicity::download::{default_model_dir, nli_files_present};
+    use crate::toxicity::download::{nli_files_present, resolve_model_dir};
 
     /// The batched forward pass (#213) must produce the same entailment score
     /// per hypothesis as running each hypothesis as its own [1, seq] inference.
@@ -315,7 +315,7 @@ mod tests {
     /// (same gating the rest of the ONNX code relies on).
     #[tokio::test]
     async fn batched_entailments_match_per_hypothesis_single_runs() {
-        let base = default_model_dir();
+        let base = resolve_model_dir();
         if !nli_files_present(&base) {
             eprintln!("SKIP: NLI model not present at {}", base.display());
             return;
