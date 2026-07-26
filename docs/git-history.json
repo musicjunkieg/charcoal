@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6708a04d514e92398fae30a0fbab2be90293e268",
+    "short_hash": "6708a04",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T11:44:55-07:00",
+    "message": "docs(230): record the language-gate evasion trade-off at the gate (#232)\n\nCodeRabbit flagged pair_is_assessable as an evasion lever (CWE-693): an\namplifier controls their own text, so padding an English hostile reply until\nit is majority non-Latin drops the pair and forfeits the context multiplier.\nReal, and #230 made it deterministic where it was previously arbitrary noise\n— so in adversarial terms this is partially a regression, not purely a raised\nceiling. Recorded honestly in #232 rather than argued away.\n\nBounded: the multiplier is [1.0, 1.5] so at most ~33% off the threat score,\nthe post must be MAJORITY non-Latin (mixed-script mostly-English is not\ndropped — pinned by tests/unit_language.rs), and #222 coverage_gate sends\nbroadly non-Latin engagement to the surfaced NotAssessed tier rather than a\nquiet Low. Residue is one targeted pair on an otherwise-English account.\n\nNot taking the suggested fix. \"Score the assessable span\" is not\nimplementable: HYPOTHESES are relational against one joint premise, so\ndropping a side asks whether a text attacks the author of a text that is no\nlonger there, and dropping only the non-Latin characters would hand the\nattacker control over which substring reaches the model. A real fix needs a\nmultilingual cross-encoder or abstention-as-signal — scoped in #232.\n\nComment only, no behavior change.\n\nRefs #230, #232",
+    "files_changed": 1
+  },
+  {
     "hash": "7007d963d1eee29359020e749d2f2cef8cfcf58f",
     "short_hash": "7007d96",
     "author": "Bryan Guffey",
