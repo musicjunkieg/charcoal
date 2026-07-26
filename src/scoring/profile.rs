@@ -9,7 +9,7 @@
 // 6. Returns a complete AccountScore ready for storage
 
 use anyhow::Result;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, FingerprintQuality, Post};
@@ -590,7 +590,7 @@ pub async fn score_from_sample(
                 let mut pair_scores = Vec::new();
                 for (original, response) in pairs {
                     match nli.score_pair(original, response).await {
-                        Ok((score, hypothesis_scores)) => {
+                        Ok(Some((score, hypothesis_scores))) => {
                             pair_scores.push(score);
                             info!(
                                 target_did = target_did,
@@ -626,6 +626,13 @@ pub async fn score_from_sample(
                                     }
                                 }
                             }
+                        }
+                        Ok(None) => {
+                            debug!(
+                                target_did = target_did,
+                                pair_type = "direct",
+                                "Skipped NLI pair: unassessable language"
+                            );
                         }
                         Err(e) => {
                             warn!(error = %e, "NLI scoring failed for direct pair");
@@ -684,7 +691,7 @@ pub async fn score_from_sample(
                             }
 
                             match nli.score_pair(original, target_text).await {
-                                Ok((score, hypothesis_scores)) => {
+                                Ok(Some((score, hypothesis_scores))) => {
                                     pair_scores.push(score);
                                     info!(
                                         target_did = target_did,
@@ -720,6 +727,13 @@ pub async fn score_from_sample(
                                             }
                                         }
                                     }
+                                }
+                                Ok(None) => {
+                                    debug!(
+                                        target_did = target_did,
+                                        pair_type = "inferred",
+                                        "Skipped NLI pair: unassessable language"
+                                    );
                                 }
                                 Err(e) => {
                                     warn!(error = %e, "NLI scoring failed for inferred pair");

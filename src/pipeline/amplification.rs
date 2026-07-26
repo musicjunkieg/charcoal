@@ -11,7 +11,7 @@
 use anyhow::Result;
 use futures::StreamExt;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use std::collections::{HashMap, HashSet};
 
@@ -141,7 +141,7 @@ pub async fn run(
         let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {
             (Some(nli), Some(amp_text), Some(orig_text)) => {
                 match nli.score_pair(orig_text, amp_text).await {
-                    Ok((score, hypothesis_scores)) => {
+                    Ok(Some((score, hypothesis_scores))) => {
                         info!(
                             handle = event.amplifier_handle,
                             context_score = format!("{:.3}", score),
@@ -175,6 +175,13 @@ pub async fn run(
                             }
                         }
                         Some(score)
+                    }
+                    Ok(None) => {
+                        debug!(
+                            handle = event.amplifier_handle,
+                            "Skipped NLI for event pair: unassessable language"
+                        );
+                        None
                     }
                     Err(e) => {
                         warn!(error = %e, "NLI scoring failed for event pair");

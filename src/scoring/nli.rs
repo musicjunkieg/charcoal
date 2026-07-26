@@ -25,6 +25,8 @@ use ort::value::Tensor;
 use tokenizers::Tokenizer;
 use tracing::debug;
 
+use crate::scoring::language::pair_is_assessable;
+
 /// Raw entailment scores from running NLI hypotheses on a text pair.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HypothesisScores {
@@ -253,11 +255,26 @@ impl NliScorer {
     /// The premise combines both texts so the model sees the interaction:
     /// "Original: {original} Response: {response}"
     /// Each hypothesis template is tested against this premise.
+    ///
+    /// Returns `Ok(None)` when the pair's language is unassessable (#230),
+    /// `Err` only when inference itself failed.
     pub async fn score_pair(
         &self,
         original_text: &str,
         response_text: &str,
-    ) -> Result<(f64, HypothesisScores)> {
+    ) -> Result<Option<(f64, HypothesisScores)>> {
+        // #230: the HYPOTHESES below are English sentences and this cross-encoder
+        // is MNLI-trained, so a non-English side yields a cross-lingual
+        // entailment judgment that is noise, not weak signal. Left ungated it
+        // inflates threat scores by up to 1.5x via context_multiplier.
+        //
+        // The gate lives HERE rather than at each call site because two call
+        // sites were missed before — inside the scorer, every current and future
+        // caller is gated by construction.
+        if !pair_is_assessable(original_text, response_text) {
+            return Ok(None);
+        }
+
         let premise = format!("Original: {} Response: {}", original_text, response_text);
 
         // One batched forward pass for all 5 hypotheses (#213), replacing the
@@ -296,7 +313,7 @@ impl NliScorer {
             "NLI scored pair"
         );
 
-        Ok((hostility, hypothesis_scores))
+        Ok(Some((hostility, hypothesis_scores)))
     }
 }
 
