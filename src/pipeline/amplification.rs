@@ -36,13 +36,6 @@ use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::ensemble::TwoStageToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
 
-/// Run the amplification detection pipeline.
-///
-/// Processes pre-fetched amplification events (from Constellation backlinks),
-/// fetches amplifier followers, and scores them. Returns
-/// `(events_processed, accounts_scored, degraded)` — `degraded` is true when the
-/// scan is incomplete: either the cost ceiling was hit, or one or more accounts
-/// were skipped due to fetch/score errors. Re-run to resume.
 /// Render the toxicity suffix for an amplification-event progress line.
 ///
 /// Three states, deliberately distinguishable in output (#230):
@@ -61,6 +54,13 @@ fn tox_suffix(quote_toxicity: Option<f64>, assessable: bool) -> String {
     }
 }
 
+/// Run the amplification detection pipeline.
+///
+/// Processes pre-fetched amplification events (from Constellation backlinks),
+/// fetches amplifier followers, and scores them. Returns
+/// `(events_processed, accounts_scored, degraded)` — `degraded` is true when the
+/// scan is incomplete: either the cost ceiling was hit, or one or more accounts
+/// were skipped due to fetch/score errors. Re-run to resume.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
