@@ -1,4 +1,4 @@
-use charcoal::scoring::language::{assess_language, Assessability};
+use charcoal::scoring::language::{assess_language, pair_is_assessable, Assessability};
 
 fn en() -> Vec<String> {
     vec!["en".to_string()]
@@ -178,4 +178,54 @@ fn partition_preserves_bucketing() {
     assert_eq!(kept.replies.len(), 1);
     assert_eq!(kept.quotes.len(), 0);
     assert_eq!(dropped, 1);
+}
+
+// --- #230: pair-level assessability ---
+
+#[test]
+fn pair_both_english_is_assessable() {
+    assert!(pair_is_assessable(
+        "fat people deserve healthcare too",
+        "lol imagine being that big"
+    ));
+}
+
+#[test]
+fn pair_nonlatin_response_is_unassessable() {
+    // The response side alone is enough to poison the entailment judgment.
+    assert!(!pair_is_assessable(
+        "fat people deserve healthcare too",
+        "お前は本当に馬鹿だ、死ね"
+    ));
+}
+
+#[test]
+fn pair_nonlatin_original_is_unassessable() {
+    // The protected user's own post is never language-filtered upstream, so
+    // this side must be checked too (a non-English protected user on the
+    // hosted instance would otherwise get noise on every pair).
+    assert!(!pair_is_assessable(
+        "แกมันโง่ชิบหาย ไปตายซะ",
+        "that is a terrible take"
+    ));
+}
+
+#[test]
+fn pair_both_nonlatin_is_unassessable() {
+    assert!(!pair_is_assessable(
+        "Ты чёртов идиот, иди убей себя",
+        "お前は本当に馬鹿だ、死ね"
+    ));
+}
+
+#[test]
+fn pair_inherits_assess_language_verdicts_no_new_policy() {
+    // Emoji count as neither script, and short non-Latin runs sit below
+    // MIN_NONLATIN_CHARS — both are Assessable per assess_language. The pair
+    // predicate must not invent stricter rules of its own.
+    assert_eq!(assess_language("🎉🎉🎉", &[]), Assessability::Assessable);
+    assert!(pair_is_assessable("🎉🎉🎉", "congrats on the news"));
+
+    assert_eq!(assess_language("ok です", &[]), Assessability::Assessable);
+    assert!(pair_is_assessable("ok です", "glad to hear it"));
 }

@@ -87,6 +87,25 @@ pub fn assess_language(text: &str, langs: &[String]) -> Assessability {
     }
 }
 
+/// Whether an NLI text pair can be scored by our English-only cross-encoder.
+///
+/// Both sides matter (#230): `NliScorer::score_pair` builds a combined premise
+/// ("Original: {a} Response: {b}") and tests it against English hypothesis
+/// templates, so either side being non-English makes the entailment judgment
+/// noise rather than a weak signal.
+///
+/// Returns `bool` rather than [`Assessability`] because the pair case has
+/// exactly two outcomes and no caller needs to know which side failed — it
+/// abstains either way.
+///
+/// Called with empty `langs` at both NLI seams: the account-side pairs are
+/// re-derived from stored event text, which carries no `langs`, so the Unicode
+/// script heuristic is the only signal available on both sides consistently.
+pub fn pair_is_assessable(original: &str, response: &str) -> bool {
+    assess_language(original, &[]) == Assessability::Assessable
+        && assess_language(response, &[]) == Assessability::Assessable
+}
+
 use crate::bluesky::posts::{Post, PostSample, ReplyPost};
 
 /// Minimum assessable posts required to produce a score. Mirrors

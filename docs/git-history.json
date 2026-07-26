@@ -1,5 +1,85 @@
 [
   {
+    "hash": "6708a04d514e92398fae30a0fbab2be90293e268",
+    "short_hash": "6708a04",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T11:44:55-07:00",
+    "message": "docs(230): record the language-gate evasion trade-off at the gate (#232)\n\nCodeRabbit flagged pair_is_assessable as an evasion lever (CWE-693): an\namplifier controls their own text, so padding an English hostile reply until\nit is majority non-Latin drops the pair and forfeits the context multiplier.\nReal, and #230 made it deterministic where it was previously arbitrary noise\n— so in adversarial terms this is partially a regression, not purely a raised\nceiling. Recorded honestly in #232 rather than argued away.\n\nBounded: the multiplier is [1.0, 1.5] so at most ~33% off the threat score,\nthe post must be MAJORITY non-Latin (mixed-script mostly-English is not\ndropped — pinned by tests/unit_language.rs), and #222 coverage_gate sends\nbroadly non-Latin engagement to the surfaced NotAssessed tier rather than a\nquiet Low. Residue is one targeted pair on an otherwise-English account.\n\nNot taking the suggested fix. \"Score the assessable span\" is not\nimplementable: HYPOTHESES are relational against one joint premise, so\ndropping a side asks whether a text attacks the author of a text that is no\nlonger there, and dropping only the non-Latin characters would hand the\nattacker control over which substring reaches the model. A real fix needs a\nmultilingual cross-encoder or abstention-as-signal — scoped in #232.\n\nComment only, no behavior change.\n\nRefs #230, #232",
+    "files_changed": 1
+  },
+  {
+    "hash": "7007d963d1eee29359020e749d2f2cef8cfcf58f",
+    "short_hash": "7007d96",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T01:46:13-07:00",
+    "message": "docs(230): stop claiming the quarantined test pins batching equivalence\n\nThe entry said equivalence \"is pinned by a model-gated unit test\" in the\npresent tense, then explained the test is ignored. An ignored test is no CI\nguarantee. It also stated the acceptance (\"within quantization noise,\nimmaterial to tiers\") as platform-general when it was macOS ARM64 only.\n\nNow: measurements labelled macOS-only at the point they are quoted, the pin\ndescribed as intended-but-never-executed, and the quarantine stated once\ninstead of twice.\n\nFound by CodeRabbit on PR #90.\n\nRefs #230, #91",
+    "files_changed": 3
+  },
+  {
+    "hash": "de8537092bcc3ac4770c7adaa049f76a95a3800c",
+    "short_hash": "de85370",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T01:41:11-07:00",
+    "message": "test(230): quarantine #213 batching test — fails on Linux x86_64 (#91)\n\nSwitching this test to resolve_model_dir() in this PR made it run in CI for\nthe FIRST time: it previously read default_model_dir() while CI sets\nCHARCOAL_MODEL_DIR=models, so it returned early and reported ok having\nasserted nothing on every run since #213 merged.\n\nIt now runs, and fails on Linux x86_64: hypothesis 0 comes back batched\n0.031 vs single 0.172 against a 0.02 tolerance. Model bytes are identical to\nthe ones that pass on macOS ARM64 (sha256 3fac2500... matches HuggingFace),\nso this is a platform/ONNX-Runtime divergence, not a model-version drift.\n\nProduction runs Linux x86_64, so #213 tolerance — measured on Apple Silicon\nonly — was never verified on the platform that serves users. A 5.6x swing in\nan entailment probability may be structural, not quantization noise.\nTracked in #91 with an investigation plan.\n\nQuarantined with #[ignore] rather than reverting the env lookup or widening\nthe tolerance: ignoring reports honestly in the summary, where both\nalternatives would go back to claiming a pass. CHANGELOG #213 entry corrected\nto record that its measurements were macOS-only.\n\nRefs #230, #91",
+    "files_changed": 2
+  },
+  {
+    "hash": "2f35c41bd43f3712e08263fa7d9e7593a7601de0",
+    "short_hash": "2f35c41",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:06:58-07:00",
+    "message": "docs(230): models were in ./models all along — test binaries never load .env\n\nFull model-gated coverage needs no sandbox grant. All three ONNX models have\nbeen in ./models inside the project since May/June, readable and writable, and\n.env:25 already sets CHARCOAL_MODEL_DIR=./models. dotenvy runs only in\nmain.rs:184, so test binaries never load .env and fall back to\ndefault_model_dir() — the platform data dir, which holds only the NLI model.\n\nCHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output\n=> 40 suites, ZERO skips. Replaces the seven-line skip baseline with the real\nexpectation: no output.\n\nRefs #230",
+    "files_changed": 3
+  },
+  {
+    "hash": "38674e950ec72417e279c272295e5e5554046b6c",
+    "short_hash": "38674e9",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:04:16-07:00",
+    "message": "chore(230): sync decision graph after implementation\n\nRefs #230",
+    "files_changed": 2
+  },
+  {
+    "hash": "c142676f63dbe05531710add2105d2d93b172c7d",
+    "short_hash": "c142676",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:03:45-07:00",
+    "message": "docs(230): changelog for amplification-pair language abstention\n\nRefs #230",
+    "files_changed": 1
+  },
+  {
+    "hash": "b6d148488dbc1e66f0e966f4acf13ba1ce96585c",
+    "short_hash": "b6d1484",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T20:31:13-07:00",
+    "message": "chore(230): sync decision graph after spec + plan\n\nRefs #230",
+    "files_changed": 2
+  },
+  {
+    "hash": "4b6b85948e2012cec1bed757f391597b8f945124",
+    "short_hash": "4b6b859",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T19:09:51-07:00",
+    "message": "docs(230): TDD implementation plan for amplification-pair language abstention\n\nFive tasks: pair_is_assessable predicate, resolve_model_dir helper, the\nscore_pair gate plus all three call sites (atomic — the signature change\nbreaks them together), the toxicity-site gate with tox_suffix rendering,\nand changelog plus final verification.\n\nRecords the verification hazard prominently: model-gated tests silently\npass under the Safehouse sandbox, so Task 5 requires listing every SKIPped\ntest in the PR rather than reporting a green run as end-to-end coverage.\n\nRefs #230",
+    "files_changed": 3
+  },
+  {
+    "hash": "b01169a436476628a599d6889ced0fed3e18f806",
+    "short_hash": "b01169a",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T15:43:42-07:00",
+    "message": "docs(230): design spec for amplification-pair language abstention\n\nBrainstormed design for #230. Two corrections to the issue kickoff note,\nboth established from the code:\n\n- quote_toxicity (amplification.rs:117) is display-only — computed,\n  printed, discarded. Never persisted, never scored. The premise that an\n  English model silently scores non-English quotes as benign does not\n  hold on the toxicity path.\n- There are three ungated NLI seams, not two. profile.rs:686 (Mode B\n  inferred pairs) was missing from the note and feeds the same\n  account_scores.context_score multiplier.\n\nError direction is inflation, not suppression: context_multiplier is\nbounded below at 1.0, so NLI noise can only push scores up (<=1.5x).\nBounded false positive — mirror image of #222.\n\nDesign: pair_is_assessable(orig, resp) -> bool in scoring::language,\ninvoked inside NliScorer::score_pair, which grows Ok(None) to mean\nabstained (Err keeps meaning failed). Gating by construction rather than\nper call site, because a caller-invoked gate has now been missed twice.\nScript-only language signal at both seams — no schema change. Tox site\ngates on amplifier text alone (per-post predicate for per-post scoring).\n\nAlso records a verification hazard: model-gated tests silently pass under\nthe Safehouse sandbox, including the finalize amplifier-NLI case that\ncovers the exact path this change touches.\n\nRefs #230\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TPJYigwtfZvjFBBXbABCbD",
+    "files_changed": 3
+  },
+  {
+    "hash": "20964086975ec8e9471b3777160d9706f6dbee1d",
+    "short_hash": "2096408",
+    "author": "chaos gremlin",
+    "date": "2026-07-24T09:16:28-07:00",
+    "message": "Merge pull request #89 from musicjunkieg/feat/language-abstention\n\nfix(#222): abstain from toxicity scoring on unassessable-language accounts",
+    "files_changed": 0
+  },
+  {
     "hash": "184cb096546e5731bed21c28c9041a8b86e69959",
     "short_hash": "184cb09",
     "author": "chaos gremlin",

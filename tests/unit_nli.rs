@@ -194,3 +194,35 @@ fn avg_context_score_single_value() {
 // preflight: the NliAuditEntry type and the entry-age rotation helper no longer
 // exist. The generalized AuditWriter (rotation by UTC-date filename) and its
 // JSONL serde shape are covered in tests/unit_audit_log.rs.
+
+// --- #230: model dir resolution ---
+
+#[test]
+fn resolve_model_dir_uses_explicit_override() {
+    let resolved = charcoal::toxicity::download::resolve_model_dir_from(Some(
+        "/tmp/charcoal-models-override".to_string(),
+    ));
+    assert_eq!(
+        resolved,
+        std::path::PathBuf::from("/tmp/charcoal-models-override")
+    );
+}
+
+#[test]
+fn resolve_model_dir_falls_back_when_unset() {
+    let resolved = charcoal::toxicity::download::resolve_model_dir_from(None);
+    assert_eq!(resolved, charcoal::toxicity::download::default_model_dir());
+}
+
+#[test]
+fn resolve_model_dir_treats_blank_override_as_unset() {
+    // An exported-but-empty CHARCOAL_MODEL_DIR must not resolve to "" and send
+    // every model lookup to the filesystem root.
+    for blank in ["", "   "] {
+        assert_eq!(
+            charcoal::toxicity::download::resolve_model_dir_from(Some(blank.to_string())),
+            charcoal::toxicity::download::default_model_dir(),
+            "blank override {blank:?} should fall back"
+        );
+    }
+}
