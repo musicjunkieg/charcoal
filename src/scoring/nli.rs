@@ -271,6 +271,22 @@ impl NliScorer {
         // The gate lives HERE rather than at each call site because two call
         // sites were missed before — inside the scorer, every current and future
         // caller is gated by construction.
+        //
+        // KNOWN TRADE-OFF (#232): this abstention is an evasion lever. An
+        // amplifier controls their own text, so padding an English hostile reply
+        // until it is majority non-Latin drops the pair here and forfeits the
+        // context multiplier (bounded [1.0, 1.5], so at most ~33% off the threat
+        // score). Bounded further by #222 at the account level — broadly
+        // non-Latin engagement trips `coverage_gate` into the surfaced
+        // `NotAssessed` tier rather than a quiet Low — so the residue is a
+        // targeted single pair on an otherwise-English account.
+        //
+        // Not fixable by "scoring the assessable side": HYPOTHESES are
+        // relational and run against one joint premise, so dropping a side asks
+        // whether a text attacks the author of a text that is no longer there,
+        // and dropping only the non-Latin characters would let the attacker
+        // choose which substring reaches the model. A real fix needs a
+        // multilingual cross-encoder or abstention-as-signal; see #232.
         if !pair_is_assessable(original_text, response_text) {
             return Ok(None);
         }
