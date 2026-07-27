@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- `estimate` tool: project Zentropi API call volume across the Bluesky network.
+  Five-stage pipeline behind the off-by-default `estimate` feature — candidate
+  harvesting (Jetstream firehose + topic-keyword search), profile-viability
+  filtering, free Constellation engagement stratification, an instrumented
+  dry-run that drives the real `build_profile` with a counting scorer (no
+  Zentropi calls), and population-reweighted aggregation into a network
+  distribution. See `docs/zentropi-call-volume-estimation.md`.
 - Integrate Zentropi CoPE as production toxicity classifier (#173)
 - Wire topic-first discovery into sweep pipeline with --sweep-mode flag (#172)
 - Wire adaptive sampling early exit into build_profile (#171)
