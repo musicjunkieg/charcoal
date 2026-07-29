@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3e1f13084c4803230a7d1e4cc5a3b963b89b43be",
+    "short_hash": "3e1f130",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T23:29:01-07:00",
+    "message": "chore(231): drop the temporary x86_64 diagnostic workflow\n\nIt existed because ci.yml does not run on feature branches and the #231\ndivergence was invisible on ARM64. It has served its purpose: the fp32 fix\nis verified on Linux x86_64 (equivalence test passes, all batch deltas\n+0.000000, full suite green with zero skips).\n\nOngoing protection comes from ci.yml, which runs the now-un-quarantined\nequivalence test on ubuntu-latest for every PR to staging and main.\n\nRefs #231",
+    "files_changed": 1
+  },
+  {
     "hash": "904584251c6f1a37b2f6b18af5bbf36264185839",
     "short_hash": "9045842",
     "author": "Bryan Guffey",

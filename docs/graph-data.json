@@ -4274,9 +4274,9 @@
       "node_type": "goal",
       "title": "#231: NLI batched-vs-single entailment diverges 0.14 on Linux x86_64 (production platform)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-28T22:36:49.149823-07:00",
-      "updated_at": "2026-07-28T22:36:49.149823-07:00",
+      "updated_at": "2026-07-28T23:29:24.831262-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":95,\"prompt\":\"okay, lets pick up our next issue\"}"
     },
     {
@@ -4329,9 +4329,9 @@
       "node_type": "action",
       "title": "Build the #231 characterization instrument: a dup2 (same-length, unpadded) vs pad2 (padded) vs batch5 matrix that separates the batch dimension from padding, plus a temporary workflow_dispatch CI job to run it on Linux x86_64",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-28T22:39:24.224793-07:00",
-      "updated_at": "2026-07-28T22:39:24.224793-07:00",
+      "updated_at": "2026-07-28T23:29:24.837328-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"653de23\",\"confidence\":90,\"files\":[\"src/scoring/nli.rs\",\".github/workflows/nli-231-diagnostic.yml\"]}"
     },
     {
@@ -4340,9 +4340,9 @@
       "node_type": "outcome",
       "title": "Root cause FOUND and quantified. The export is dynamically quantized (50 DynamicQuantizeLinear + 74 MatMulInteger): the activation scale is PER-TENSOR, computed at runtime over the whole [batch,seq,hidden] tensor, so batching heterogeneous rows changes the scale and moves EVERY row - padded or not. Proof: dup2 ([h,h], batch=2, zero padding) is bit-exact vs single on BOTH platforms, while any heterogeneous batch diverges. On x86_64 (EPYC, AVX2 but NO VNNI) the perturbation is ~20x larger than ARM. Production impact: mockery pair hostility 0.132 -> 0.000, total signal loss on the platform serving users",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-28T22:50:45.379695-07:00",
-      "updated_at": "2026-07-28T22:50:45.379695-07:00",
+      "updated_at": "2026-07-28T23:29:24.842833-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"d09c13e\",\"confidence\":95}"
     },
     {
@@ -4373,9 +4373,9 @@
       "node_type": "action",
       "title": "Evaluate the fp32 NLI export (284MB, 144 MatMul, zero DynamicQuantizeLinear) on both platforms per Bryan's call",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-28T23:03:48.439643-07:00",
-      "updated_at": "2026-07-28T23:03:48.439643-07:00",
+      "updated_at": "2026-07-28T23:29:24.848462-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"9045842\",\"confidence\":90,\"files\":[\".github/workflows/nli-231-diagnostic.yml\"]}"
     },
     {
@@ -4384,9 +4384,9 @@
       "node_type": "outcome",
       "title": "fp32 is exactly equivalence-preserving on BOTH platforms: d(batch5)=+0.000000 on all 5 hypotheses, pad2==single, and the equivalence test PASSES on Linux x86_64. It also makes NLI cross-platform reproducible - fp32 hyp0=0.131468 IDENTICAL on macOS ARM64 and Linux x86_64, where the quantized model gave 0.122 vs 0.172. Decisive cost finding: fp32-batched (92.7ms/pair) is FASTER than the correctness-preserving alternative quantized-unbatched (112.3ms/pair) on Linux, so fp32 dominates 'drop batching' on both correctness AND speed. Only cost is size: 284MB vs 87MB (+197MB volume/RAM)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-28T23:03:48.461508-07:00",
-      "updated_at": "2026-07-28T23:03:48.461508-07:00",
+      "updated_at": "2026-07-28T23:29:24.854255-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"9045842\",\"confidence\":95}"
     },
     {
@@ -4395,10 +4395,32 @@
       "node_type": "decision",
       "title": "Switch NLI to the fp32 export (onnx/model.onnx). Railway headroom verified: volume 1376/50000MB, staging scan-peak RAM 3.77GB vs a 32GB Pro ceiling, so +197MB is ~12% utilization and no OOM risk. Cost ~$2/mo prod (#188). Chosen over dropping batching because fp32 is exact on BOTH platforms AND faster per pair (92.7ms vs 112.3ms)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-28T23:17:17.151824-07:00",
-      "updated_at": "2026-07-28T23:17:17.151824-07:00",
+      "updated_at": "2026-07-28T23:29:24.860032-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":92}"
+    },
+    {
+      "id": 407,
+      "change_id": "9d54f350-5aac-40e9-9c38-9c165c0fb49f",
+      "node_type": "action",
+      "title": "Implement the fp32 switch: NLI_MODEL_FILE=model.onnx + self-migrating nli_files_present + stale-quantized cleanup, un-quarantine the equivalence test at 1e-4, CHANGELOG/README/CLAUDE.md",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-28T23:29:24.795754-07:00",
+      "updated_at": "2026-07-28T23:29:24.865488-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"3e1f130\",\"confidence\":92,\"files\":[\"src/scoring/nli.rs\",\"src/toxicity/download.rs\",\"tests/unit_nli.rs\",\"CHANGELOG.md\",\"README.md\"]}"
+    },
+    {
+      "id": 408,
+      "change_id": "31720ffa-47b5-461b-8909-8ff7287c4f51",
+      "node_type": "outcome",
+      "title": "#231 FIXED and verified on Linux x86_64 in CI: download-model fetches the 284MB fp32 export, the un-quarantined equivalence test PASSES at 1e-4, characterization shows +0.000000 on all 5 hypotheses, full suite green with ZERO skips. Negative control holds - the same test FAILS against the quantized model on macOS (0.11441 vs 0.12195), so the defect class no longer needs x86 to surface. Temporary diagnostic workflow removed; ci.yml now carries the gate",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-28T23:29:24.818058-07:00",
+      "updated_at": "2026-07-28T23:29:24.870892-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"3e1f130\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -8713,6 +8735,28 @@
       "weight": 1.0,
       "rationale": "Decision follows the fp32 evaluation + Railway headroom check",
       "created_at": "2026-07-28T23:17:17.160718-07:00"
+    },
+    {
+      "id": 402,
+      "from_node_id": 406,
+      "to_node_id": 407,
+      "from_change_id": "ddd3dc58-6f2c-4ae3-8986-bcb3d08b67a3",
+      "to_change_id": "9d54f350-5aac-40e9-9c38-9c165c0fb49f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementing the fp32 decision",
+      "created_at": "2026-07-28T23:29:24.803533-07:00"
+    },
+    {
+      "id": 403,
+      "from_node_id": 407,
+      "to_node_id": 408,
+      "from_change_id": "9d54f350-5aac-40e9-9c38-9c165c0fb49f",
+      "to_change_id": "31720ffa-47b5-461b-8909-8ff7287c4f51",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified result of the implementation",
+      "created_at": "2026-07-28T23:29:24.825111-07:00"
     }
   ],
   "documents": [
