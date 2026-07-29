@@ -409,4 +409,101 @@ mod tests {
             );
         }
     }
+
+    /// #231 diagnostic — NOT a gate. Prints the batched-vs-single matrix so the
+    /// same numbers can be read off macOS ARM64 and Linux x86_64 and compared.
+    ///
+    /// It separates the two candidate mechanisms, which the equivalence test
+    /// above conflates because batch-of-5 changes both at once:
+    ///
+    /// - `dup2` runs `[h_i, h_i]` — batch of 2 with IDENTICAL row lengths, so
+    ///   `max_len == len(h_i)` and NOTHING is padded. Divergence from `single`
+    ///   here means the BATCH DIMENSION alone changes the result (e.g. a
+    ///   per-tensor dynamic-quantization scale computed over the whole batch,
+    ///   or a different int8 GEMM kernel for batch>1) — padding is innocent.
+    /// - `pad2` runs `[h_i, h_longest]` — batch of 2 where row i IS padded.
+    ///   Divergence beyond `dup2` is attributable to PADDING specifically.
+    ///
+    /// Run with:
+    ///   CHARCOAL_MODEL_DIR=./models cargo test --lib \
+    ///     scoring::nli::tests::characterize -- --ignored --nocapture
+    #[ignore = "#231 diagnostic: prints a measurement matrix, asserts nothing"]
+    #[tokio::test]
+    async fn characterize_batch_divergence() {
+        let base = resolve_model_dir();
+        if !nli_files_present(&base) {
+            eprintln!("SKIP: NLI model not present at {}", base.display());
+            return;
+        }
+        let scorer = NliScorer::load(&base).expect("load NLI model");
+
+        // Same premise as the equivalence test, so the numbers are comparable.
+        let premise =
+            "Original: fat people deserve healthcare too Response: lol imagine being that big";
+        let hyps: Vec<&str> = HYPOTHESES.iter().map(|(_, h)| *h).collect();
+
+        // Token length per (premise, hypothesis) pair drives who gets padded.
+        let lens: Vec<usize> = hyps
+            .iter()
+            .map(|h| {
+                scorer
+                    .tokenizer
+                    .encode((premise, *h), true)
+                    .expect("tokenize")
+                    .get_ids()
+                    .len()
+            })
+            .collect();
+        let longest = lens
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, l)| **l)
+            .map(|(i, _)| i)
+            .expect("non-empty");
+
+        println!(
+            "#231 arch={} os={}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+        println!("#231 token lens: {lens:?} (longest = hypothesis {longest})");
+
+        let batch5 = scorer
+            .score_entailments_batched(premise, &hyps)
+            .await
+            .expect("batch5");
+
+        println!(
+            "#231 {:<3} {:<4} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "hyp", "len", "single", "dup2", "pad2", "batch5", "d(dup2)", "d(batch5)"
+        );
+        for (i, h) in hyps.iter().enumerate() {
+            let single = scorer
+                .score_entailments_batched(premise, std::slice::from_ref(h))
+                .await
+                .expect("single")[0];
+            // Batch of 2, identical rows => no padding at all.
+            let dup2 = scorer
+                .score_entailments_batched(premise, &[*h, *h])
+                .await
+                .expect("dup2")[0];
+            // Batch of 2 against the longest hypothesis => row i is padded.
+            let pad2 = scorer
+                .score_entailments_batched(premise, &[*h, hyps[longest]])
+                .await
+                .expect("pad2")[0];
+
+            println!(
+                "#231 {:<3} {:<4} {:>10.6} {:>10.6} {:>10.6} {:>10.6} {:>+10.6} {:>+10.6}",
+                i,
+                lens[i],
+                single,
+                dup2,
+                pad2,
+                batch5[i],
+                dup2 - single,
+                batch5[i] - single,
+            );
+        }
+    }
 }

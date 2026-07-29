@@ -1,0 +1,78 @@
+# TEMPORARY (#231). Delete once the batched-vs-single divergence is resolved.
+#
+# No container runtime is reachable from the dev sandbox, so this workflow is
+# the Linux x86_64 arm of the investigation: it runs the SAME diagnostic that
+# was run on macOS ARM64 and prints the batched-vs-single matrix, so the two
+# platforms can be compared line for line.
+name: "#231 NLI batch diagnostic"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/231-nli-batch-divergence]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  diagnose:
+    name: NLI batched-vs-single on Linux x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Report CPU features
+        run: |
+          echo "arch: $(uname -m)"
+          lscpu | sed -n '1,20p'
+          echo "avx2:      $(grep -c avx2 /proc/cpuinfo || true)"
+          echo "avx512f:   $(grep -c avx512f /proc/cpuinfo || true)"
+          echo "avx512vnni:$(grep -c avx512_vnni /proc/cpuinfo || true)"
+          echo "avxvnni:   $(grep -c avx_vnni /proc/cpuinfo || true)"
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # Same key as ci.yml so this reuses the models cache rather than
+      # re-downloading 216MB.
+      - name: Cache ONNX models
+        id: cache-models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: ${{ runner.os }}-charcoal-models-${{ hashFiles('src/toxicity/download.rs') }}
+
+      - name: Download ONNX models
+        if: steps.cache-models.outputs.cache-hit != 'true'
+        run: cargo run --features web -- download-model
+        env:
+          CHARCOAL_MODEL_DIR: models
+
+      - name: Verify NLI model bytes match the macOS copy
+        run: sha256sum models/nli-deberta-v3-xsmall/model_quantized.onnx
+
+      - name: Characterization matrix
+        run: |
+          cargo test --lib --features web \
+            scoring::nli::tests::characterize -- --ignored --nocapture
+        env:
+          CHARCOAL_MODEL_DIR: models
+
+      - name: Equivalence test (expected to FAIL — this is the bug)
+        continue-on-error: true
+        run: |
+          cargo test --lib --features web \
+            scoring::nli::tests::batched_entailments_match -- --ignored --nocapture
+        env:
+          CHARCOAL_MODEL_DIR: models

@@ -4256,6 +4256,83 @@
       "created_at": "2026-07-26T11:45:50.999816-07:00",
       "updated_at": "2026-07-26T11:45:50.999816-07:00",
       "metadata_json": "{\"branch\":\"feat/amplification-language-abstention\",\"commit\":\"6708a04\",\"confidence\":90,\"files\":[\"src/scoring/nli.rs\",\"src/scoring/language.rs\"]}"
+    },
+    {
+      "id": 394,
+      "change_id": "b7ac08c0-9a4a-47f8-9ed5-5d7316cf7d10",
+      "node_type": "outcome",
+      "title": "#230 MERGED to staging (PR #90, merge commit 653de23) and DEPLOYED: Railway staging deploy 816fd863 SUCCESS on 653de23, /health returns {status:ok} HTTP 200. NLI + toxicity language abstention now live on staging",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-27T00:34:15.394172-07:00",
+      "updated_at": "2026-07-27T00:34:27.165899-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"653de23\",\"confidence\":100}"
+    },
+    {
+      "id": 395,
+      "change_id": "65cfb060-ad45-480f-ab23-9fe2c3c281c6",
+      "node_type": "goal",
+      "title": "#231: NLI batched-vs-single entailment diverges 0.14 on Linux x86_64 (production platform)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:36:49.149823-07:00",
+      "updated_at": "2026-07-28T22:36:49.149823-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":95,\"prompt\":\"okay, lets pick up our next issue\"}"
+    },
+    {
+      "id": 396,
+      "change_id": "361eba7c-60c0-41ce-922b-fd629059b13b",
+      "node_type": "option",
+      "title": "A: reproduce on Linux x86_64 locally via the project Dockerfile (Ubuntu 24.04) for fast iteration",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:36:59.029723-07:00",
+      "updated_at": "2026-07-28T22:36:59.029723-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":60}"
+    },
+    {
+      "id": 397,
+      "change_id": "d25d654d-58c4-49cb-8cd9-1ea2446d4652",
+      "node_type": "option",
+      "title": "B: use GitHub Actions ubuntu-latest as the x86_64 characterization loop (workflow_dispatch, models already cached)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:36:59.041235-07:00",
+      "updated_at": "2026-07-28T22:36:59.041235-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":85}"
+    },
+    {
+      "id": 398,
+      "change_id": "b97845c6-d327-4781-89ea-6b2e2d3b2154",
+      "node_type": "option",
+      "title": "C: rent a RunPod x86_64 CPU instance and build charcoal there",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:36:59.052353-07:00",
+      "updated_at": "2026-07-28T22:36:59.052353-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":40}"
+    },
+    {
+      "id": 399,
+      "change_id": "e2da7f7e-084e-45d0-b2eb-e56721e2f4e7",
+      "node_type": "decision",
+      "title": "Option B: GitHub Actions ubuntu-latest is the x86_64 loop — no container runtime is reachable from the Safehouse sandbox (no docker daemon, /Applications denied, no colima/podman), and CI is the exact platform that failed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:37:03.312961-07:00",
+      "updated_at": "2026-07-28T22:37:03.312961-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":85}"
+    },
+    {
+      "id": 400,
+      "change_id": "3c06727e-0d3f-4bdd-9766-5cc8a4ed3ebd",
+      "node_type": "action",
+      "title": "Build the #231 characterization instrument: a dup2 (same-length, unpadded) vs pad2 (padded) vs batch5 matrix that separates the batch dimension from padding, plus a temporary workflow_dispatch CI job to run it on Linux x86_64",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:39:24.224793-07:00",
+      "updated_at": "2026-07-28T22:39:24.224793-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"653de23\",\"confidence\":90,\"files\":[\"src/scoring/nli.rs\",\".github/workflows/nli-231-diagnostic.yml\"]}"
     }
   ],
   "edges": [
@@ -8416,6 +8493,94 @@
       "weight": 1.0,
       "rationale": "Non-blocking outside-diff finding after approval",
       "created_at": "2026-07-26T11:45:55.823813-07:00"
+    },
+    {
+      "id": 388,
+      "from_node_id": 393,
+      "to_node_id": 394,
+      "from_change_id": "d05a2db3-1ef8-4900-ac85-171c13025599",
+      "to_change_id": "b7ac08c0-9a4a-47f8-9ed5-5d7316cf7d10",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merged and deployed after triage",
+      "created_at": "2026-07-27T00:34:27.157827-07:00"
+    },
+    {
+      "id": 389,
+      "from_node_id": 395,
+      "to_node_id": 396,
+      "from_change_id": "65cfb060-ad45-480f-ab23-9fe2c3c281c6",
+      "to_change_id": "361eba7c-60c0-41ce-922b-fd629059b13b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Repro-loop option",
+      "created_at": "2026-07-28T22:36:59.059235-07:00"
+    },
+    {
+      "id": 390,
+      "from_node_id": 395,
+      "to_node_id": 397,
+      "from_change_id": "65cfb060-ad45-480f-ab23-9fe2c3c281c6",
+      "to_change_id": "d25d654d-58c4-49cb-8cd9-1ea2446d4652",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Repro-loop option",
+      "created_at": "2026-07-28T22:36:59.065472-07:00"
+    },
+    {
+      "id": 391,
+      "from_node_id": 395,
+      "to_node_id": 398,
+      "from_change_id": "65cfb060-ad45-480f-ab23-9fe2c3c281c6",
+      "to_change_id": "b97845c6-d327-4781-89ea-6b2e2d3b2154",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Repro-loop option",
+      "created_at": "2026-07-28T22:36:59.071757-07:00"
+    },
+    {
+      "id": 392,
+      "from_node_id": 396,
+      "to_node_id": 399,
+      "from_change_id": "361eba7c-60c0-41ce-922b-fd629059b13b",
+      "to_change_id": "e2da7f7e-084e-45d0-b2eb-e56721e2f4e7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chose between repro loops",
+      "created_at": "2026-07-28T22:37:03.321626-07:00"
+    },
+    {
+      "id": 393,
+      "from_node_id": 397,
+      "to_node_id": 399,
+      "from_change_id": "d25d654d-58c4-49cb-8cd9-1ea2446d4652",
+      "to_change_id": "e2da7f7e-084e-45d0-b2eb-e56721e2f4e7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chose between repro loops",
+      "created_at": "2026-07-28T22:37:03.328304-07:00"
+    },
+    {
+      "id": 394,
+      "from_node_id": 398,
+      "to_node_id": 399,
+      "from_change_id": "b97845c6-d327-4781-89ea-6b2e2d3b2154",
+      "to_change_id": "e2da7f7e-084e-45d0-b2eb-e56721e2f4e7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chose between repro loops",
+      "created_at": "2026-07-28T22:37:03.335875-07:00"
+    },
+    {
+      "id": 395,
+      "from_node_id": 399,
+      "to_node_id": 400,
+      "from_change_id": "e2da7f7e-084e-45d0-b2eb-e56721e2f4e7",
+      "to_change_id": "3c06727e-0d3f-4bdd-9766-5cc8a4ed3ebd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementing the chosen repro loop",
+      "created_at": "2026-07-28T22:39:24.233597-07:00"
     }
   ],
   "documents": [

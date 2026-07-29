@@ -1,5 +1,13 @@
 [
   {
+    "hash": "653de23d01f962e883e18e5111bc25bd8d3b7fd8",
+    "short_hash": "653de23",
+    "author": "chaos gremlin",
+    "date": "2026-07-26T13:28:41-07:00",
+    "message": "Merge pull request #90 from musicjunkieg/feat/amplification-language-abstention",
+    "files_changed": 0
+  },
+  {
     "hash": "6708a04d514e92398fae30a0fbab2be90293e268",
     "short_hash": "6708a04",
     "author": "Bryan Guffey",
