@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d09c13ee5300f6e66c91c8ddcc4d0f9c926a1a87",
+    "short_hash": "d09c13e",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T22:44:31-07:00",
+    "message": "test(231): measure batching impact on the score the product uses\n\nThe per-hypothesis matrix shows entailment probabilities move; this shows\nwhat that does to compute_hostility_score and to context_multiplier, over\nsix pair types (mockery, contempt, misrepresentation, good-faith\ndisagreement, support, neutral) rather than one example. Also times both\npaths so the cost of reverting batching is a measured number.\n\nRefs #231",
+    "files_changed": 1
+  },
+  {
     "hash": "653de23d01f962e883e18e5111bc25bd8d3b7fd8",
     "short_hash": "653de23",
     "author": "chaos gremlin",

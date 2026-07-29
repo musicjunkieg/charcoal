@@ -4333,6 +4333,39 @@
       "created_at": "2026-07-28T22:39:24.224793-07:00",
       "updated_at": "2026-07-28T22:39:24.224793-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"653de23\",\"confidence\":90,\"files\":[\"src/scoring/nli.rs\",\".github/workflows/nli-231-diagnostic.yml\"]}"
+    },
+    {
+      "id": 401,
+      "change_id": "2b77ed8e-642d-4115-830a-35943e450981",
+      "node_type": "outcome",
+      "title": "Root cause FOUND and quantified. The export is dynamically quantized (50 DynamicQuantizeLinear + 74 MatMulInteger): the activation scale is PER-TENSOR, computed at runtime over the whole [batch,seq,hidden] tensor, so batching heterogeneous rows changes the scale and moves EVERY row - padded or not. Proof: dup2 ([h,h], batch=2, zero padding) is bit-exact vs single on BOTH platforms, while any heterogeneous batch diverges. On x86_64 (EPYC, AVX2 but NO VNNI) the perturbation is ~20x larger than ARM. Production impact: mockery pair hostility 0.132 -> 0.000, total signal loss on the platform serving users",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:50:45.379695-07:00",
+      "updated_at": "2026-07-28T22:50:45.379695-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"d09c13e\",\"confidence\":95}"
+    },
+    {
+      "id": 402,
+      "change_id": "1770392d-b448-4abd-9df6-3ed04edc434c",
+      "node_type": "observation",
+      "title": "#213's claimed ~5x batching speedup measures 1.69x on both platforms (6 pairs, debug build) - the correctness cost buys far less than the optimization claimed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:50:45.405335-07:00",
+      "updated_at": "2026-07-28T22:50:45.405335-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":80}"
+    },
+    {
+      "id": 403,
+      "change_id": "1bad2e6e-ab74-46b7-872a-cda9fb0a9465",
+      "node_type": "observation",
+      "title": "Quantized NLI was NEVER platform-stable even unbatched: single-path hypothesis 0 is 0.122 on macOS ARM64 vs 0.172 on Linux x86_64. Dev-machine NLI numbers have never predicted production numbers, independent of #213",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T22:50:45.424168-07:00",
+      "updated_at": "2026-07-28T22:50:45.424168-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -8581,6 +8614,39 @@
       "weight": 1.0,
       "rationale": "Implementing the chosen repro loop",
       "created_at": "2026-07-28T22:39:24.233597-07:00"
+    },
+    {
+      "id": 396,
+      "from_node_id": 400,
+      "to_node_id": 401,
+      "from_change_id": "3c06727e-0d3f-4bdd-9766-5cc8a4ed3ebd",
+      "to_change_id": "2b77ed8e-642d-4115-830a-35943e450981",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the characterization instrument",
+      "created_at": "2026-07-28T22:50:45.391428-07:00"
+    },
+    {
+      "id": 397,
+      "from_node_id": 401,
+      "to_node_id": 402,
+      "from_change_id": "2b77ed8e-642d-4115-830a-35943e450981",
+      "to_change_id": "1770392d-b448-4abd-9df6-3ed04edc434c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Measured alongside the impact table",
+      "created_at": "2026-07-28T22:50:45.413414-07:00"
+    },
+    {
+      "id": 398,
+      "from_node_id": 401,
+      "to_node_id": 403,
+      "from_change_id": "2b77ed8e-642d-4115-830a-35943e450981",
+      "to_change_id": "1bad2e6e-ab74-46b7-872a-cda9fb0a9465",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second finding from the same matrix",
+      "created_at": "2026-07-28T22:50:45.431148-07:00"
     }
   ],
   "documents": [

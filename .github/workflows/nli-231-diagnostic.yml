@@ -76,3 +76,31 @@ jobs:
             scoring::nli::tests::batched_entailments_match -- --ignored --nocapture
         env:
           CHARCOAL_MODEL_DIR: models
+
+      # The fp32 export has no DynamicQuantizeLinear, so there is no shared
+      # per-tensor activation scale for batching to perturb. On macOS ARM64 it
+      # is exactly equivalence-preserving; this checks x86_64, which is the
+      # platform that actually matters, and times it so the cost is measured
+      # rather than assumed.
+      - name: Fetch fp32 NLI export (284MB)
+        run: |
+          mkdir -p fp32-models/nli-deberta-v3-xsmall
+          cp models/nli-deberta-v3-xsmall/tokenizer.json fp32-models/nli-deberta-v3-xsmall/
+          # Named model_quantized.onnx only so the existing loader finds it.
+          curl -sL -o fp32-models/nli-deberta-v3-xsmall/model_quantized.onnx \
+            https://huggingface.co/Xenova/nli-deberta-v3-xsmall/resolve/main/onnx/model.onnx
+          ls -l fp32-models/nli-deberta-v3-xsmall/
+
+      - name: fp32 characterization + impact on x86_64
+        run: |
+          cargo test --lib --features web \
+            scoring::nli::tests::characterize -- --ignored --nocapture
+        env:
+          CHARCOAL_MODEL_DIR: fp32-models
+
+      - name: fp32 equivalence test (expected to PASS)
+        run: |
+          cargo test --lib --features web \
+            scoring::nli::tests::batched_entailments_match -- --ignored --nocapture
+        env:
+          CHARCOAL_MODEL_DIR: fp32-models
