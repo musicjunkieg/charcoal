@@ -506,4 +506,127 @@ mod tests {
             );
         }
     }
+
+    /// #231 impact measurement — NOT a gate. The per-hypothesis matrix above
+    /// shows the entailment probabilities move; this shows what that does to
+    /// the number the product actually uses, over a spread of pair types so the
+    /// conclusion does not rest on one cherry-picked example.
+    ///
+    /// Prints, per pair, the `compute_hostility_score` from the pre-#213 single
+    /// path and from the #213 batched path, plus the resulting
+    /// `context_multiplier = 1.0 + hostility * 0.5` that feeds the live threat
+    /// formula. Also times both paths so the correctness cost of reverting
+    /// batching can be weighed against its speedup.
+    #[ignore = "#231 diagnostic: prints an impact table, asserts nothing"]
+    #[tokio::test]
+    async fn characterize_hostility_impact() {
+        let base = resolve_model_dir();
+        if !nli_files_present(&base) {
+            eprintln!("SKIP: NLI model not present at {}", base.display());
+            return;
+        }
+        let scorer = NliScorer::load(&base).expect("load NLI model");
+        let hyps: Vec<&str> = HYPOTHESES.iter().map(|(_, h)| *h).collect();
+
+        // A spread: overt mockery, contemptuous dismissal, strawmanning,
+        // good-faith disagreement, and outright support. If batching were
+        // benign the two columns would track each other across all of them.
+        let pairs: [(&str, &str, &str); 6] = [
+            (
+                "mockery",
+                "fat people deserve healthcare too",
+                "lol imagine being that big",
+            ),
+            (
+                "contempt",
+                "trans kids need gender affirming care",
+                "nobody with a functioning brain believes this garbage",
+            ),
+            (
+                "misrepresent",
+                "we should fund public transit",
+                "so you want to ban all cars, got it",
+            ),
+            (
+                "good_faith",
+                "we should fund public transit",
+                "I disagree — I think the cost per rider is too high here",
+            ),
+            (
+                "support",
+                "fat people deserve healthcare too",
+                "absolutely, and denying it is straightforward discrimination",
+            ),
+            (
+                "neutral",
+                "the bus route changed today",
+                "which stop does it use now?",
+            ),
+        ];
+
+        let to_scores = |v: &[f64]| HypothesisScores {
+            attack: v[0],
+            contempt: v[1],
+            misrepresent: v[2],
+            good_faith_disagree: v[3],
+            support: v[4],
+        };
+
+        println!(
+            "#231impact arch={} os={}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+        println!(
+            "#231impact {:<14} {:>10} {:>10} {:>10} {:>9} {:>9}",
+            "pair", "single", "batched", "delta", "mult_1x", "mult_5x"
+        );
+
+        let mut single_nanos = 0u128;
+        let mut batched_nanos = 0u128;
+
+        for (label, original, response) in pairs {
+            let premise = format!("Original: {} Response: {}", original, response);
+
+            let t = std::time::Instant::now();
+            let mut singles = Vec::new();
+            for h in hyps.iter() {
+                singles.push(
+                    scorer
+                        .score_entailments_batched(&premise, std::slice::from_ref(h))
+                        .await
+                        .expect("single")[0],
+                );
+            }
+            single_nanos += t.elapsed().as_nanos();
+
+            let t = std::time::Instant::now();
+            let batched = scorer
+                .score_entailments_batched(&premise, &hyps)
+                .await
+                .expect("batched");
+            batched_nanos += t.elapsed().as_nanos();
+
+            let h_single = compute_hostility_score(&to_scores(&singles));
+            let h_batched = compute_hostility_score(&to_scores(&batched));
+
+            println!(
+                "#231impact {:<14} {:>10.6} {:>10.6} {:>+10.6} {:>9.4} {:>9.4}",
+                label,
+                h_single,
+                h_batched,
+                h_batched - h_single,
+                1.0 + h_single * 0.5,
+                1.0 + h_batched * 0.5,
+            );
+        }
+
+        println!(
+            "#231impact timing: 5x-single {:.1}ms vs batched {:.1}ms over {} pairs ({:.2}x)",
+            single_nanos as f64 / 1e6,
+            batched_nanos as f64 / 1e6,
+            pairs.len(),
+            single_nanos as f64 / batched_nanos as f64,
+        );
+    }
 }
