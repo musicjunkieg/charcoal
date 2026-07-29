@@ -1,8 +1,13 @@
 //! NLI-based contextual hostility scoring.
 //!
-//! Uses a DeBERTa-v3-xsmall cross-encoder (quantized ONNX, ~87MB) to score
+//! Uses a DeBERTa-v3-xsmall cross-encoder (fp32 ONNX, ~284MB) to score
 //! text pairs for hostile engagement patterns. The model takes a premise and
 //! hypothesis and outputs entailment/contradiction/neutral probabilities.
+//!
+//! The fp32 export is deliberate (#231): the quantized one derives its
+//! activation scale at runtime from the whole batch tensor, so batching
+//! hypotheses corrupted every row's score on x86-64 — the platform production
+//! runs on.
 //!
 //! Five hypothesis templates detect different hostility signals:
 //! - Attack/mockery (ad hominem, direct hostility)
@@ -107,7 +112,8 @@ impl NliScorer {
     /// Load the NLI model and tokenizer from the nli-deberta-v3-xsmall subdirectory.
     pub fn load(model_dir: &Path) -> Result<Self> {
         let nli_dir = crate::toxicity::download::nli_model_dir(model_dir);
-        let model_path = nli_dir.join("model_quantized.onnx");
+        // fp32 export, not the quantized one — see NLI_MODEL_FILE (#231).
+        let model_path = nli_dir.join("model.onnx");
         let tokenizer_path = nli_dir.join("tokenizer.json");
 
         if !model_path.exists() {
@@ -346,23 +352,22 @@ mod tests {
     ///
     /// Requires the NLI model locally; skips when it isn't present.
     ///
-    /// QUARANTINED (#231). This test had never actually run in CI: it called
-    /// `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR=models`, so it
-    /// returned early and reported `ok` having asserted nothing. #230 switched
-    /// it to `resolve_model_dir()`, it ran for the first time, and it FAILED on
-    /// Linux x86_64 — hypothesis 0 came back batched 0.031 vs single 0.172,
-    /// against a 0.02 tolerance. The model bytes are identical to the ones that
-    /// pass on macOS ARM64 (sha256 3fac2500…, matching HuggingFace), so this is
-    /// a platform/ONNX-Runtime divergence, not a model-version difference.
+    /// RESOLVED (#231), and this is now the regression gate for that fix.
     ///
-    /// It matters because production is Linux x86_64: #213's tolerance was
-    /// measured on Apple Silicon only, and a 5.6x swing in an entailment
-    /// probability may be structural rather than quantization noise.
+    /// History worth keeping: this test had never actually run in CI, because
+    /// it called `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR=models`
+    /// — it returned early and reported `ok` having asserted nothing. #230
+    /// switched it to `resolve_model_dir()`, it ran for the first time, and it
+    /// FAILED on Linux x86_64: hypothesis 0 came back batched 0.031 vs single
+    /// 0.172. That was not noise. The quantized export derives one per-tensor
+    /// activation scale at runtime from the whole batch, so batching rows with
+    /// different content moved every row, and production (Linux x86_64) was on
+    /// the badly-affected side — one mocking reply scored 0.132 unbatched and
+    /// 0.000 batched.
     ///
-    /// `#[ignore]` rather than a reverted env lookup or a widened tolerance:
-    /// ignoring reports honestly in the summary, where both alternatives would
-    /// go back to claiming a pass. Run it with `--ignored` when working #231.
-    #[ignore = "#231: batched-vs-single diverges 0.14 on Linux x86_64; passes on macOS ARM64"]
+    /// The fix was the fp32 export, which has no quantization ops. Batching is
+    /// now exact rather than approximate, which is why the tolerance below is
+    /// 1e-4 instead of #213's 0.02.
     #[tokio::test]
     async fn batched_entailments_match_per_hypothesis_single_runs() {
         let base = resolve_model_dir();
@@ -394,18 +399,21 @@ mod tests {
             singles.push(single[0]);
         }
 
-        // This quantized DeBERTa export is NOT perfectly padding-invariant: a
-        // batched (padded) row differs from its unpadded single run by a small,
-        // systematic amount (measured ≈0.002–0.008 per hypothesis, ≈0.006 on the
-        // final hostility). That is a real behavior shift, accepted as within
-        // the model's own quantization noise and immaterial to threat tiers
-        // (bands 8/15/35). This bound catches segfaults, transposed rows, or any
-        // LARGE divergence; it does not pretend the padding artifact is zero.
-        const PAD_ARTIFACT_TOLERANCE: f64 = 0.02;
+        // With the fp32 export there is no per-tensor activation scale for the
+        // batch to perturb, so batched and single agree EXACTLY: measured
+        // +0.000000 on all five hypotheses on both Linux x86_64 and macOS
+        // ARM64. The tolerance is 1e-4 rather than 0.0 only to allow for
+        // floating-point reassociation if ONNX Runtime picks a different
+        // kernel or thread count — not to accommodate a known deviation.
+        //
+        // Keep this tight. #213 set it to 0.02 to paper over a quantization
+        // artifact, and a tolerance that loose would have accepted the #231
+        // failure that drove one pair's hostility from 0.132 to 0.000.
+        const BATCH_EQUIVALENCE_TOLERANCE: f64 = 1e-4;
         for (i, (b, s)) in batched.iter().zip(&singles).enumerate() {
             assert!(
-                (b - s).abs() < PAD_ARTIFACT_TOLERANCE,
-                "hypothesis {i}: batched {b} vs single {s} exceeds padding tolerance",
+                (b - s).abs() < BATCH_EQUIVALENCE_TOLERANCE,
+                "hypothesis {i}: batched {b} vs single {s} exceeds batch-equivalence tolerance",
             );
         }
     }

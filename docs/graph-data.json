@@ -4366,6 +4366,39 @@
       "created_at": "2026-07-28T22:50:45.424168-07:00",
       "updated_at": "2026-07-28T22:50:45.424168-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":85}"
+    },
+    {
+      "id": 404,
+      "change_id": "129ae6ff-b485-4c54-aba7-517bd09f5d7e",
+      "node_type": "action",
+      "title": "Evaluate the fp32 NLI export (284MB, 144 MatMul, zero DynamicQuantizeLinear) on both platforms per Bryan's call",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T23:03:48.439643-07:00",
+      "updated_at": "2026-07-28T23:03:48.439643-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"9045842\",\"confidence\":90,\"files\":[\".github/workflows/nli-231-diagnostic.yml\"]}"
+    },
+    {
+      "id": 405,
+      "change_id": "80f5e8f9-326f-49bd-b3d5-13647b20cafa",
+      "node_type": "outcome",
+      "title": "fp32 is exactly equivalence-preserving on BOTH platforms: d(batch5)=+0.000000 on all 5 hypotheses, pad2==single, and the equivalence test PASSES on Linux x86_64. It also makes NLI cross-platform reproducible - fp32 hyp0=0.131468 IDENTICAL on macOS ARM64 and Linux x86_64, where the quantized model gave 0.122 vs 0.172. Decisive cost finding: fp32-batched (92.7ms/pair) is FASTER than the correctness-preserving alternative quantized-unbatched (112.3ms/pair) on Linux, so fp32 dominates 'drop batching' on both correctness AND speed. Only cost is size: 284MB vs 87MB (+197MB volume/RAM)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T23:03:48.461508-07:00",
+      "updated_at": "2026-07-28T23:03:48.461508-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"9045842\",\"confidence\":95}"
+    },
+    {
+      "id": 406,
+      "change_id": "ddd3dc58-6f2c-4ae3-8986-bcb3d08b67a3",
+      "node_type": "decision",
+      "title": "Switch NLI to the fp32 export (onnx/model.onnx). Railway headroom verified: volume 1376/50000MB, staging scan-peak RAM 3.77GB vs a 32GB Pro ceiling, so +197MB is ~12% utilization and no OOM risk. Cost ~$2/mo prod (#188). Chosen over dropping batching because fp32 is exact on BOTH platforms AND faster per pair (92.7ms vs 112.3ms)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-28T23:17:17.151824-07:00",
+      "updated_at": "2026-07-28T23:17:17.151824-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -8647,6 +8680,39 @@
       "weight": 1.0,
       "rationale": "Second finding from the same matrix",
       "created_at": "2026-07-28T22:50:45.431148-07:00"
+    },
+    {
+      "id": 399,
+      "from_node_id": 401,
+      "to_node_id": 404,
+      "from_change_id": "2b77ed8e-642d-4115-830a-35943e450981",
+      "to_change_id": "129ae6ff-b485-4c54-aba7-517bd09f5d7e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bryan chose: evaluate fp32 before deciding the fix",
+      "created_at": "2026-07-28T23:03:48.446974-07:00"
+    },
+    {
+      "id": 400,
+      "from_node_id": 404,
+      "to_node_id": 405,
+      "from_change_id": "129ae6ff-b485-4c54-aba7-517bd09f5d7e",
+      "to_change_id": "80f5e8f9-326f-49bd-b3d5-13647b20cafa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the fp32 evaluation",
+      "created_at": "2026-07-28T23:03:48.468596-07:00"
+    },
+    {
+      "id": 401,
+      "from_node_id": 405,
+      "to_node_id": 406,
+      "from_change_id": "80f5e8f9-326f-49bd-b3d5-13647b20cafa",
+      "to_change_id": "ddd3dc58-6f2c-4ae3-8986-bcb3d08b67a3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision follows the fp32 evaluation + Railway headroom check",
+      "created_at": "2026-07-28T23:17:17.160718-07:00"
     }
   ],
   "documents": [

@@ -1,9 +1,10 @@
-# TEMPORARY (#231). Delete once the batched-vs-single divergence is resolved.
+# TEMPORARY (#231). Delete once the fix has merged.
 #
-# No container runtime is reachable from the dev sandbox, so this workflow is
-# the Linux x86_64 arm of the investigation: it runs the SAME diagnostic that
-# was run on macOS ARM64 and prints the batched-vs-single matrix, so the two
-# platforms can be compared line for line.
+# ci.yml only triggers on main/staging, so a feature branch gets no x86_64
+# signal — and x86_64 is the whole point of #231: the divergence was invisible
+# on the dev machine's ARM64. This runs the NLI tests plus the characterization
+# matrix on Linux x86_64 so the fix is verified on the platform production
+# actually runs on, before the PR is opened.
 name: "#231 NLI batch diagnostic"
 
 on:
@@ -16,7 +17,7 @@ env:
 
 jobs:
   diagnose:
-    name: NLI batched-vs-single on Linux x86_64
+    name: NLI batch equivalence on Linux x86_64
     runs-on: ubuntu-latest
 
     steps:
@@ -28,9 +29,7 @@ jobs:
       - name: Report CPU features
         run: |
           echo "arch: $(uname -m)"
-          lscpu | sed -n '1,20p'
           echo "avx2:      $(grep -c avx2 /proc/cpuinfo || true)"
-          echo "avx512f:   $(grep -c avx512f /proc/cpuinfo || true)"
           echo "avx512vnni:$(grep -c avx512_vnni /proc/cpuinfo || true)"
           echo "avxvnni:   $(grep -c avx_vnni /proc/cpuinfo || true)"
 
@@ -44,8 +43,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      # Same key as ci.yml so this reuses the models cache rather than
-      # re-downloading 216MB.
+      # Key includes download.rs, so the #231 model switch busts this cache and
+      # the fp32 export is fetched by the real download path rather than a
+      # hand-rolled curl — which also proves that path works.
       - name: Cache ONNX models
         id: cache-models
         uses: actions/cache@v4
@@ -59,48 +59,36 @@ jobs:
         env:
           CHARCOAL_MODEL_DIR: models
 
-      - name: Verify NLI model bytes match the macOS copy
-        run: sha256sum models/nli-deberta-v3-xsmall/model_quantized.onnx
+      - name: Confirm the fp32 export is what landed
+        run: |
+          ls -l models/nli-deberta-v3-xsmall/
+          test -f models/nli-deberta-v3-xsmall/model.onnx \
+            || { echo "fp32 model.onnx missing"; exit 1; }
+          test ! -f models/nli-deberta-v3-xsmall/model_quantized.onnx \
+            || { echo "stale quantized export was not removed"; exit 1; }
 
-      - name: Characterization matrix
+      # The gate: batched must equal single at 1e-4 on x86_64.
+      - name: NLI batch-equivalence regression test
+        run: |
+          cargo test --lib --features web \
+            scoring::nli::tests::batched_entailments_match -- --nocapture
+        env:
+          CHARCOAL_MODEL_DIR: models
+
+      - name: Characterization matrix (for the record)
         run: |
           cargo test --lib --features web \
             scoring::nli::tests::characterize -- --ignored --nocapture
         env:
           CHARCOAL_MODEL_DIR: models
 
-      - name: Equivalence test (expected to FAIL — this is the bug)
-        continue-on-error: true
+      - name: Full suite on x86_64, with skip check
         run: |
-          cargo test --lib --features web \
-            scoring::nli::tests::batched_entailments_match -- --ignored --nocapture
+          cargo test --features web -- --show-output 2>&1 | tee /tmp/out.txt
+          if grep -qE "SKIP:" /tmp/out.txt; then
+            echo "::error::model-gated tests skipped on x86_64"
+            grep -E "SKIP:" /tmp/out.txt
+            exit 1
+          fi
         env:
           CHARCOAL_MODEL_DIR: models
-
-      # The fp32 export has no DynamicQuantizeLinear, so there is no shared
-      # per-tensor activation scale for batching to perturb. On macOS ARM64 it
-      # is exactly equivalence-preserving; this checks x86_64, which is the
-      # platform that actually matters, and times it so the cost is measured
-      # rather than assumed.
-      - name: Fetch fp32 NLI export (284MB)
-        run: |
-          mkdir -p fp32-models/nli-deberta-v3-xsmall
-          cp models/nli-deberta-v3-xsmall/tokenizer.json fp32-models/nli-deberta-v3-xsmall/
-          # Named model_quantized.onnx only so the existing loader finds it.
-          curl -sL -o fp32-models/nli-deberta-v3-xsmall/model_quantized.onnx \
-            https://huggingface.co/Xenova/nli-deberta-v3-xsmall/resolve/main/onnx/model.onnx
-          ls -l fp32-models/nli-deberta-v3-xsmall/
-
-      - name: fp32 characterization + impact on x86_64
-        run: |
-          cargo test --lib --features web \
-            scoring::nli::tests::characterize -- --ignored --nocapture
-        env:
-          CHARCOAL_MODEL_DIR: fp32-models
-
-      - name: fp32 equivalence test (expected to PASS)
-        run: |
-          cargo test --lib --features web \
-            scoring::nli::tests::batched_entailments_match -- --ignored --nocapture
-        env:
-          CHARCOAL_MODEL_DIR: fp32-models

@@ -67,11 +67,12 @@ Creates the SQLite database and tables.
 cargo run -- download-model
 ```
 
-Downloads two ONNX models (~216 MB total) to your local machine:
+Downloads three ONNX models (~500 MB total) to your local machine:
 - **Toxicity model** — Detoxify unbiased-toxic-roberta (~126 MB) for toxicity scoring
 - **Embedding model** — all-MiniLM-L6-v2 (~90 MB) for semantic topic overlap
+- **NLI cross-encoder** — nli-deberta-v3-xsmall (~284 MB) for contextual hostility
 
-This is a one-time step. Both models run entirely locally — no API key needed,
+This is a one-time step. All three models run entirely locally — no API key needed,
 no rate limits. Files are stored in `~/.local/share/charcoal/models/` (macOS:
 `~/Library/Application Support/charcoal/models/`).
 

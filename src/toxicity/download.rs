@@ -32,6 +32,25 @@ const TOXICITY_TOKENIZER_FILE: &str = "tokenizer.json";
 const EMBEDDING_MODEL_FILE: &str = "onnx/model.onnx";
 const EMBEDDING_TOKENIZER_FILE: &str = "tokenizer.json";
 
+/// Files for the NLI cross-encoder model (stored in a subdirectory).
+///
+/// This is the fp32 export, NOT `model_quantized.onnx` (#231). The quantized
+/// export is *dynamically* quantized: `DynamicQuantizeLinear` derives one
+/// per-tensor activation scale at runtime from the min/max of the whole
+/// `[batch, seq, hidden]` tensor. Batching hypotheses with different content
+/// therefore changes the scale and shifts every row's result — including rows
+/// that were never padded — and on x86-64 without VNNI the `u8s8 MatMulInteger`
+/// path amplifies that ~20x over ARM. Measured on Linux x86_64, it drove one
+/// mocking reply's contextual hostility from 0.132 to 0.000.
+///
+/// The fp32 export has no quantization ops, so batching is exact on both
+/// platforms and the scores are finally reproducible between a dev Mac and
+/// production. It costs 284MB instead of 87MB, and is still faster per pair
+/// than the alternative fix of abandoning batching.
+const NLI_MODEL_FILE: &str = "model.onnx";
+const NLI_MODEL_REMOTE_PATH: &str = "onnx/model.onnx";
+const NLI_TOKENIZER_FILE: &str = "tokenizer.json";
+
 /// Returns the default directory for storing model files.
 /// Uses the platform data directory: ~/.local/share/charcoal/models/ on Linux.
 pub fn default_model_dir() -> PathBuf {
@@ -82,9 +101,13 @@ pub fn nli_model_dir(base: &Path) -> PathBuf {
 }
 
 /// Check whether both required NLI model files exist.
+///
+/// Deployments that predate #231 have the old `model_quantized.onnx` on their
+/// volume; this reports absent for them, so `download_model` fetches the fp32
+/// export and the switch happens without manual intervention.
 pub fn nli_files_present(dir: &Path) -> bool {
     let nli_dir = nli_model_dir(dir);
-    nli_dir.join("model_quantized.onnx").exists() && nli_dir.join("tokenizer.json").exists()
+    nli_dir.join(NLI_MODEL_FILE).exists() && nli_dir.join(NLI_TOKENIZER_FILE).exists()
 }
 
 /// Download all ONNX models (toxicity + embedding).
@@ -176,32 +199,43 @@ pub async fn download_model(dir: &Path) -> Result<()> {
         )
     })?;
 
-    let nli_tokenizer_path = nli_dir.join("tokenizer.json");
+    let nli_tokenizer_path = nli_dir.join(NLI_TOKENIZER_FILE);
     if nli_tokenizer_path.exists() {
         info!("NLI tokenizer already exists, skipping");
-        println!("  tokenizer.json (already exists)");
+        println!("  {} (already exists)", NLI_TOKENIZER_FILE);
     } else {
-        println!("  Downloading tokenizer.json...");
+        println!("  Downloading {}...", NLI_TOKENIZER_FILE);
         download_file(
-            &format!("{}/tokenizer.json", NLI_HF_URL),
+            &format!("{}/{}", NLI_HF_URL, NLI_TOKENIZER_FILE),
             &nli_tokenizer_path,
             false,
         )
         .await?;
     }
 
-    let nli_model_path = nli_dir.join("model_quantized.onnx");
+    let nli_model_path = nli_dir.join(NLI_MODEL_FILE);
     if nli_model_path.exists() {
         info!("NLI model already exists, skipping");
-        println!("  model_quantized.onnx (already exists)");
+        println!("  {} (already exists)", NLI_MODEL_FILE);
     } else {
-        println!("  Downloading model_quantized.onnx (~87 MB)...");
+        println!("  Downloading {} (~284 MB)...", NLI_MODEL_FILE);
         download_file(
-            &format!("{}/onnx/model_quantized.onnx", NLI_HF_URL),
+            &format!("{}/{}", NLI_HF_URL, NLI_MODEL_REMOTE_PATH),
             &nli_model_path,
             true,
         )
         .await?;
+    }
+
+    // Reclaim the pre-#231 quantized export if it is still sitting on the
+    // volume; nothing loads it any more and it is 87MB.
+    let stale_quantized = nli_dir.join("model_quantized.onnx");
+    if stale_quantized.exists() {
+        match std::fs::remove_file(&stale_quantized) {
+            Ok(()) => println!("  removed superseded model_quantized.onnx (#231)"),
+            // Best-effort cleanup: a read-only volume must not fail the download.
+            Err(e) => info!("Could not remove stale quantized NLI model: {}", e),
+        }
     }
 
     Ok(())

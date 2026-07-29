@@ -7,6 +7,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Switch the NLI cross-encoder to the **fp32** export and fix corrupted
+  contextual hostility scores in production (#231). The quantized
+  `nli-deberta-v3-xsmall` export is *dynamically* quantized:
+  `DynamicQuantizeLinear` derives a single per-tensor activation scale at
+  runtime from the min/max of the whole `[batch, seq, hidden]` tensor. Batching
+  the 5 hypotheses (#213) therefore put rows with different content into one
+  tensor, changing that scale and shifting **every** row — including rows that
+  were never padded. Attention masking keeps pad positions out of attention
+  scores but not out of the tensor whose range sets the scale. On x86-64 without
+  VNNI, ONNX Runtime's `u8s8 MatMulInteger` path amplified the perturbation
+  roughly 20x over ARM, so **production was on the badly-affected side while the
+  dev machine was not**. Measured on Linux x86_64: a mocking reply ("lol imagine
+  being that big" → "fat people deserve healthcare too") scored `0.132`
+  unbatched and `0.000` batched — the hypothesis ranking inverted so *support*
+  outranked *attack*, erasing the signal. Error direction was suppression, on
+  the exact harassment shape this tool exists to catch.
+
+  The mechanism was isolated with a batch-of-2 of *identical* rows (no padding,
+  no heterogeneity), which is bit-exact on both platforms, while any
+  heterogeneous batch diverges. The fp32 export has no quantization ops, so
+  batching is now **exact** (`+0.000000` on all five hypotheses on both
+  platforms) and NLI is finally reproducible between a dev Mac and production —
+  the quantized model gave `0.122` on ARM vs `0.172` on x86 for the same input,
+  so dev numbers never predicted prod numbers, batching aside.
+
+  Costs 284 MB instead of 87 MB (Railway volume 1.4/50 GB, staging scan-peak RAM
+  3.8 GB against a 32 GB ceiling, ~$2/mo). It is nonetheless *faster* than the
+  alternative fix: fp32-batched runs 92.7 ms/pair versus 112.3 ms/pair for
+  reverting to unbatched-quantized. **Context scores will shift on redeploy** —
+  the previous values were wrong, not merely noisy. `nli_files_present` now looks
+  for `model.onnx`, so existing volumes re-download automatically and the stale
+  quantized file is removed. The equivalence test is un-quarantined and its
+  tolerance tightened from `0.02` to `1e-4`; at that bound it fails against the
+  quantized model on macOS too, so this class of defect no longer needs x86 to
+  surface.
 - Abstain from NLI context scoring on unassessable-language pairs (#230) —
   the English-only MNLI cross-encoder returned noise on non-English text,
   which `context_multiplier` turned into up to a 1.5x threat-score inflation.
@@ -20,7 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Railway drops scan logs at 500/sec — observability gap during scans (#226)
 - Diagnose degraded=true on the 8174-account staging scan (2026-07-19) (#220)
 - Pre-commit hook no longer stages the gitignored `.chainlink/issues-export.json`. The file is also untracked, so the `.gitignore` entry can finally apply — a gitignore rule has no effect on an already-tracked file, which is why it kept conflicting on every branch integration. (`--no-verify` remains an emergency bypass, unrelated to this.) (#181)
-- Batch the 5 NLI hypotheses into one padded `[5, max_len]` forward pass instead of 5 sequential single-item inferences — ~5× fewer NLI ONNX runs, biggest in the amplification event loop (NLI per event). NOTE: the quantized `nli-deberta-v3-xsmall` export is not perfectly padding-invariant, so batching shifts `context_score` by a small, systematic amount — **measured on macOS ARM64 only** (≈0.006 on the final hostility, ≈0.002–0.008 per hypothesis), and accepted *on that platform* as within the model's own quantization noise and immaterial to threat tiers (bands 8/15/35). A model-gated unit test at a 0.02 tolerance was intended to pin the batch-vs-single equivalence, but it never actually executed in CI (it read `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR`), so **nothing has ever enforced this bound** (#213). **CORRECTION (#231):** on Linux x86_64 — the platform production runs on — the same model bytes diverge by **0.14** on hypothesis 0 (batched 0.031 vs single 0.172), far outside that tolerance. The equivalence claim was therefore never verified where it matters, and the test is now quarantined with `#[ignore]`, so it provides no CI guarantee pending #231
+- Batch the 5 NLI hypotheses into one padded `[5, max_len]` forward pass instead of 5 sequential single-item inferences — ~5× fewer NLI ONNX runs, biggest in the amplification event loop (NLI per event). NOTE: the quantized `nli-deberta-v3-xsmall` export is not perfectly padding-invariant, so batching shifts `context_score` by a small, systematic amount — **measured on macOS ARM64 only** (≈0.006 on the final hostility, ≈0.002–0.008 per hypothesis), and accepted *on that platform* as within the model's own quantization noise and immaterial to threat tiers (bands 8/15/35). A model-gated unit test at a 0.02 tolerance was intended to pin the batch-vs-single equivalence, but it never actually executed in CI (it read `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR`), so **nothing has ever enforced this bound** (#213). **CORRECTION (#231):** on Linux x86_64 — the platform production runs on — the same model bytes diverge by **0.14** on hypothesis 0 (batched 0.031 vs single 0.172), far outside that tolerance. The equivalence claim was therefore never verified where it matters. **RESOLVED (#231):** the cause was the quantized export's runtime per-tensor activation scale, not padding; the fp32 export makes batching exact on both platforms, and the equivalence test is un-quarantined at a `1e-4` tolerance. The batching speedup here was also overstated — measured 1.69x, not ~5x (#213)
 
 ### Added
 - Add handle typeahead to the login screen (proxied via backend) (#227)

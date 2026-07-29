@@ -1,5 +1,13 @@
 [
   {
+    "hash": "904584251c6f1a37b2f6b18af5bbf36264185839",
+    "short_hash": "9045842",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T23:01:53-07:00",
+    "message": "test(231): evaluate the fp32 NLI export on Linux x86_64\n\nBryan chose to evaluate fp32 before deciding how to fix #231. The fp32\nexport contains 144 MatMul and ZERO DynamicQuantizeLinear/MatMulInteger,\nso there is no shared per-tensor activation scale for batching to perturb.\n\nOn macOS ARM64 it is exactly equivalence-preserving -- d(batch5) is\n+0.000000 on all five hypotheses and pad2 matches single -- while still\nrunning batched 1.95x faster than 5x single. It also gives the reference\nvalues the quantized model was approximating: hypothesis 0 truth 0.131468\nvs quantized 0.121953 (macOS) and 0.171669 (Linux), so the quantized model\nwas distorting even unbatched.\n\nThis runs the same measurement on x86_64, the platform that matters, and\ntimes it so the inference-cost side of the trade-off is measured.\n\nRefs #231",
+    "files_changed": 3
+  },
+  {
     "hash": "d09c13ee5300f6e66c91c8ddcc4d0f9c926a1a87",
     "short_hash": "d09c13e",
     "author": "Bryan Guffey",
