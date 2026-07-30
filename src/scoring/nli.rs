@@ -111,10 +111,14 @@ pub struct NliScorer {
 impl NliScorer {
     /// Load the NLI model and tokenizer from the nli-deberta-v3-xsmall subdirectory.
     pub fn load(model_dir: &Path) -> Result<Self> {
+        use crate::toxicity::download::{NLI_MODEL_FILE, NLI_TOKENIZER_FILE};
+
         let nli_dir = crate::toxicity::download::nli_model_dir(model_dir);
-        // fp32 export, not the quantized one — see NLI_MODEL_FILE (#231).
-        let model_path = nli_dir.join("model.onnx");
-        let tokenizer_path = nli_dir.join("tokenizer.json");
+        // Shared with nli_files_present so the check and the load cannot
+        // disagree. NLI_MODEL_FILE is the fp32 export, not the quantized
+        // one — see its definition for why (#231).
+        let model_path = nli_dir.join(NLI_MODEL_FILE);
+        let tokenizer_path = nli_dir.join(NLI_TOKENIZER_FILE);
 
         if !model_path.exists() {
             anyhow::bail!(

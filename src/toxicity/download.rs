@@ -47,9 +47,12 @@ const EMBEDDING_TOKENIZER_FILE: &str = "tokenizer.json";
 /// platforms and the scores are finally reproducible between a dev Mac and
 /// production. It costs 284MB instead of 87MB, and is still faster per pair
 /// than the alternative fix of abandoning batching.
-const NLI_MODEL_FILE: &str = "model.onnx";
+/// `pub(crate)` so `NliScorer::load` opens exactly what `nli_files_present`
+/// checks for. Duplicating these literals would let the presence check and the
+/// loader drift apart — the failure shape that kept #231 hidden.
+pub(crate) const NLI_MODEL_FILE: &str = "model.onnx";
 const NLI_MODEL_REMOTE_PATH: &str = "onnx/model.onnx";
-const NLI_TOKENIZER_FILE: &str = "tokenizer.json";
+pub(crate) const NLI_TOKENIZER_FILE: &str = "tokenizer.json";
 
 /// Returns the default directory for storing model files.
 /// Uses the platform data directory: ~/.local/share/charcoal/models/ on Linux.
