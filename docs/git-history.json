@@ -1,5 +1,61 @@
 [
   {
+    "hash": "b561f3c115bb45fc0e7a62919469dca29ecc869c",
+    "short_hash": "b561f3c",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T17:08:56-07:00",
+    "message": "chore(233): sync decision graph after the download streaming fix\n\nRefs #231 #233",
+    "files_changed": 2
+  },
+  {
+    "hash": "5d37b1f2ccac876435318320a7434bf4fff7f079",
+    "short_hash": "5d37b1f",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T17:01:36-07:00",
+    "message": "fix(233): stream model downloads to disk instead of buffering in RAM\n\ndownload_file called response.bytes() -- despite a comment claiming it\nstreamed -- holding the whole artifact in memory before a blocking\nstd::fs::write. With the fp32 NLI model (#231) that is ~284MB resident per\ndownload, on the async runtime.\n\nThe sharper problem was crash safety: a killed container mid-write left a\nTRUNCATED file at the destination, and nli_files_present only checks\nexistence. A partial model.onnx would look present and then fail ONNX\nparsing on every boot -- a poison state needing manual cleanup on the\nvolume. That risk is load-bearing for #231, whose migration story is\n\"existing volumes re-download themselves\".\n\nDownloads now stream chunk-by-chunk to a sibling .part file and atomically\nrename into place. Sibling rather than the system temp dir so the rename\nstays on one filesystem (the Railway volume); a cross-device rename would\nsilently degrade to a copy and reintroduce the partial-file window.\n\nThree tests via wiremock: full body lands and the .part is cleaned up; a\nfailed request leaves nothing at dest; a stale .part from a killed run is\ntruncated rather than appended to.\n\nClippy clean on web/postgres/no-features; 40 suites pass, zero skips.\n\nCloses #233",
+    "files_changed": 6
+  },
+  {
+    "hash": "bef90020feaee56bead58942e48301c3731afdc5",
+    "short_hash": "bef9002",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T16:48:18-07:00",
+    "message": "refactor(231): share NLI filename constants between loader and presence check\n\nNliScorer::load hardcoded \"model.onnx\"/\"tokenizer.json\" while\nnli_files_present used NLI_MODEL_FILE/NLI_TOKENIZER_FILE, so the two could\ndrift apart -- a presence check that disagrees with what actually loads is\nthe failure shape that kept #231 hidden for so long. Making the constants\npub(crate) and using them in both places removes that gap.\n\nVerified the constant is wired rather than merely compiling: renaming\nmodel.onnx makes the gated test report SKIP, so the check and the loader\nresolve the same name.\n\nClippy clean on web and no-features; 40 suites pass with zero skips.\n\nRefs #231",
+    "files_changed": 2
+  },
+  {
+    "hash": "3e1f13084c4803230a7d1e4cc5a3b963b89b43be",
+    "short_hash": "3e1f130",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T23:29:01-07:00",
+    "message": "chore(231): drop the temporary x86_64 diagnostic workflow\n\nIt existed because ci.yml does not run on feature branches and the #231\ndivergence was invisible on ARM64. It has served its purpose: the fp32 fix\nis verified on Linux x86_64 (equivalence test passes, all batch deltas\n+0.000000, full suite green with zero skips).\n\nOngoing protection comes from ci.yml, which runs the now-un-quarantined\nequivalence test on ubuntu-latest for every PR to staging and main.\n\nRefs #231",
+    "files_changed": 1
+  },
+  {
+    "hash": "904584251c6f1a37b2f6b18af5bbf36264185839",
+    "short_hash": "9045842",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T23:01:53-07:00",
+    "message": "test(231): evaluate the fp32 NLI export on Linux x86_64\n\nBryan chose to evaluate fp32 before deciding how to fix #231. The fp32\nexport contains 144 MatMul and ZERO DynamicQuantizeLinear/MatMulInteger,\nso there is no shared per-tensor activation scale for batching to perturb.\n\nOn macOS ARM64 it is exactly equivalence-preserving -- d(batch5) is\n+0.000000 on all five hypotheses and pad2 matches single -- while still\nrunning batched 1.95x faster than 5x single. It also gives the reference\nvalues the quantized model was approximating: hypothesis 0 truth 0.131468\nvs quantized 0.121953 (macOS) and 0.171669 (Linux), so the quantized model\nwas distorting even unbatched.\n\nThis runs the same measurement on x86_64, the platform that matters, and\ntimes it so the inference-cost side of the trade-off is measured.\n\nRefs #231",
+    "files_changed": 3
+  },
+  {
+    "hash": "d09c13ee5300f6e66c91c8ddcc4d0f9c926a1a87",
+    "short_hash": "d09c13e",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T22:44:31-07:00",
+    "message": "test(231): measure batching impact on the score the product uses\n\nThe per-hypothesis matrix shows entailment probabilities move; this shows\nwhat that does to compute_hostility_score and to context_multiplier, over\nsix pair types (mockery, contempt, misrepresentation, good-faith\ndisagreement, support, neutral) rather than one example. Also times both\npaths so the cost of reverting batching is a measured number.\n\nRefs #231",
+    "files_changed": 1
+  },
+  {
+    "hash": "653de23d01f962e883e18e5111bc25bd8d3b7fd8",
+    "short_hash": "653de23",
+    "author": "chaos gremlin",
+    "date": "2026-07-26T13:28:41-07:00",
+    "message": "Merge pull request #90 from musicjunkieg/feat/amplification-language-abstention",
+    "files_changed": 0
+  },
+  {
     "hash": "6708a04d514e92398fae30a0fbab2be90293e268",
     "short_hash": "6708a04",
     "author": "Bryan Guffey",

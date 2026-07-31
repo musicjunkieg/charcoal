@@ -25,7 +25,7 @@ fn nli_files_present_returns_true_when_both_files_exist() {
     let dir = std::env::temp_dir().join("charcoal-nli-test-present");
     let nli_dir = charcoal::toxicity::download::nli_model_dir(&dir);
     std::fs::create_dir_all(&nli_dir).unwrap();
-    std::fs::write(nli_dir.join("model_quantized.onnx"), b"fake model").unwrap();
+    std::fs::write(nli_dir.join("model.onnx"), b"fake model").unwrap();
     std::fs::write(nli_dir.join("tokenizer.json"), b"fake tokenizer").unwrap();
     assert!(charcoal::toxicity::download::nli_files_present(&dir));
 
@@ -39,7 +39,24 @@ fn nli_files_present_returns_false_when_model_missing() {
     let nli_dir = charcoal::toxicity::download::nli_model_dir(&dir);
     std::fs::create_dir_all(&nli_dir).unwrap();
     std::fs::write(nli_dir.join("tokenizer.json"), b"fake tokenizer").unwrap();
-    // model_quantized.onnx missing
+    // model.onnx missing
+    assert!(!charcoal::toxicity::download::nli_files_present(&dir));
+
+    // Cleanup
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A volume left over from before #231 holds `model_quantized.onnx` and no
+/// `model.onnx`. It must report absent so `download_model` fetches the fp32
+/// export, otherwise an upgraded deploy would keep loading the quantized model
+/// whose batching corrupts scores on x86-64.
+#[test]
+fn nli_files_present_returns_false_for_pre_231_quantized_only_dir() {
+    let dir = std::env::temp_dir().join("charcoal-nli-test-pre231");
+    let nli_dir = charcoal::toxicity::download::nli_model_dir(&dir);
+    std::fs::create_dir_all(&nli_dir).unwrap();
+    std::fs::write(nli_dir.join("model_quantized.onnx"), b"old quantized model").unwrap();
+    std::fs::write(nli_dir.join("tokenizer.json"), b"fake tokenizer").unwrap();
     assert!(!charcoal::toxicity::download::nli_files_present(&dir));
 
     // Cleanup

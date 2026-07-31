@@ -1,8 +1,13 @@
 //! NLI-based contextual hostility scoring.
 //!
-//! Uses a DeBERTa-v3-xsmall cross-encoder (quantized ONNX, ~87MB) to score
+//! Uses a DeBERTa-v3-xsmall cross-encoder (fp32 ONNX, ~284MB) to score
 //! text pairs for hostile engagement patterns. The model takes a premise and
 //! hypothesis and outputs entailment/contradiction/neutral probabilities.
+//!
+//! The fp32 export is deliberate (#231): the quantized one derives its
+//! activation scale at runtime from the whole batch tensor, so batching
+//! hypotheses corrupted every row's score on x86-64 — the platform production
+//! runs on.
 //!
 //! Five hypothesis templates detect different hostility signals:
 //! - Attack/mockery (ad hominem, direct hostility)
@@ -106,9 +111,14 @@ pub struct NliScorer {
 impl NliScorer {
     /// Load the NLI model and tokenizer from the nli-deberta-v3-xsmall subdirectory.
     pub fn load(model_dir: &Path) -> Result<Self> {
+        use crate::toxicity::download::{NLI_MODEL_FILE, NLI_TOKENIZER_FILE};
+
         let nli_dir = crate::toxicity::download::nli_model_dir(model_dir);
-        let model_path = nli_dir.join("model_quantized.onnx");
-        let tokenizer_path = nli_dir.join("tokenizer.json");
+        // Shared with nli_files_present so the check and the load cannot
+        // disagree. NLI_MODEL_FILE is the fp32 export, not the quantized
+        // one — see its definition for why (#231).
+        let model_path = nli_dir.join(NLI_MODEL_FILE);
+        let tokenizer_path = nli_dir.join(NLI_TOKENIZER_FILE);
 
         if !model_path.exists() {
             anyhow::bail!(
@@ -346,23 +356,22 @@ mod tests {
     ///
     /// Requires the NLI model locally; skips when it isn't present.
     ///
-    /// QUARANTINED (#231). This test had never actually run in CI: it called
-    /// `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR=models`, so it
-    /// returned early and reported `ok` having asserted nothing. #230 switched
-    /// it to `resolve_model_dir()`, it ran for the first time, and it FAILED on
-    /// Linux x86_64 — hypothesis 0 came back batched 0.031 vs single 0.172,
-    /// against a 0.02 tolerance. The model bytes are identical to the ones that
-    /// pass on macOS ARM64 (sha256 3fac2500…, matching HuggingFace), so this is
-    /// a platform/ONNX-Runtime divergence, not a model-version difference.
+    /// RESOLVED (#231), and this is now the regression gate for that fix.
     ///
-    /// It matters because production is Linux x86_64: #213's tolerance was
-    /// measured on Apple Silicon only, and a 5.6x swing in an entailment
-    /// probability may be structural rather than quantization noise.
+    /// History worth keeping: this test had never actually run in CI, because
+    /// it called `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR=models`
+    /// — it returned early and reported `ok` having asserted nothing. #230
+    /// switched it to `resolve_model_dir()`, it ran for the first time, and it
+    /// FAILED on Linux x86_64: hypothesis 0 came back batched 0.031 vs single
+    /// 0.172. That was not noise. The quantized export derives one per-tensor
+    /// activation scale at runtime from the whole batch, so batching rows with
+    /// different content moved every row, and production (Linux x86_64) was on
+    /// the badly-affected side — one mocking reply scored 0.132 unbatched and
+    /// 0.000 batched.
     ///
-    /// `#[ignore]` rather than a reverted env lookup or a widened tolerance:
-    /// ignoring reports honestly in the summary, where both alternatives would
-    /// go back to claiming a pass. Run it with `--ignored` when working #231.
-    #[ignore = "#231: batched-vs-single diverges 0.14 on Linux x86_64; passes on macOS ARM64"]
+    /// The fix was the fp32 export, which has no quantization ops. Batching is
+    /// now exact rather than approximate, which is why the tolerance below is
+    /// 1e-4 instead of #213's 0.02.
     #[tokio::test]
     async fn batched_entailments_match_per_hypothesis_single_runs() {
         let base = resolve_model_dir();
@@ -394,19 +403,242 @@ mod tests {
             singles.push(single[0]);
         }
 
-        // This quantized DeBERTa export is NOT perfectly padding-invariant: a
-        // batched (padded) row differs from its unpadded single run by a small,
-        // systematic amount (measured ≈0.002–0.008 per hypothesis, ≈0.006 on the
-        // final hostility). That is a real behavior shift, accepted as within
-        // the model's own quantization noise and immaterial to threat tiers
-        // (bands 8/15/35). This bound catches segfaults, transposed rows, or any
-        // LARGE divergence; it does not pretend the padding artifact is zero.
-        const PAD_ARTIFACT_TOLERANCE: f64 = 0.02;
+        // With the fp32 export there is no per-tensor activation scale for the
+        // batch to perturb, so batched and single agree EXACTLY: measured
+        // +0.000000 on all five hypotheses on both Linux x86_64 and macOS
+        // ARM64. The tolerance is 1e-4 rather than 0.0 only to allow for
+        // floating-point reassociation if ONNX Runtime picks a different
+        // kernel or thread count — not to accommodate a known deviation.
+        //
+        // Keep this tight. #213 set it to 0.02 to paper over a quantization
+        // artifact, and a tolerance that loose would have accepted the #231
+        // failure that drove one pair's hostility from 0.132 to 0.000.
+        const BATCH_EQUIVALENCE_TOLERANCE: f64 = 1e-4;
         for (i, (b, s)) in batched.iter().zip(&singles).enumerate() {
             assert!(
-                (b - s).abs() < PAD_ARTIFACT_TOLERANCE,
-                "hypothesis {i}: batched {b} vs single {s} exceeds padding tolerance",
+                (b - s).abs() < BATCH_EQUIVALENCE_TOLERANCE,
+                "hypothesis {i}: batched {b} vs single {s} exceeds batch-equivalence tolerance",
             );
         }
+    }
+
+    /// #231 diagnostic — NOT a gate. Prints the batched-vs-single matrix so the
+    /// same numbers can be read off macOS ARM64 and Linux x86_64 and compared.
+    ///
+    /// It separates the two candidate mechanisms, which the equivalence test
+    /// above conflates because batch-of-5 changes both at once:
+    ///
+    /// - `dup2` runs `[h_i, h_i]` — batch of 2 with IDENTICAL row lengths, so
+    ///   `max_len == len(h_i)` and NOTHING is padded. Divergence from `single`
+    ///   here means the BATCH DIMENSION alone changes the result (e.g. a
+    ///   per-tensor dynamic-quantization scale computed over the whole batch,
+    ///   or a different int8 GEMM kernel for batch>1) — padding is innocent.
+    /// - `pad2` runs `[h_i, h_longest]` — batch of 2 where row i IS padded.
+    ///   Divergence beyond `dup2` is attributable to PADDING specifically.
+    ///
+    /// Run with:
+    ///   CHARCOAL_MODEL_DIR=./models cargo test --lib \
+    ///     scoring::nli::tests::characterize -- --ignored --nocapture
+    #[ignore = "#231 diagnostic: prints a measurement matrix, asserts nothing"]
+    #[tokio::test]
+    async fn characterize_batch_divergence() {
+        let base = resolve_model_dir();
+        if !nli_files_present(&base) {
+            eprintln!("SKIP: NLI model not present at {}", base.display());
+            return;
+        }
+        let scorer = NliScorer::load(&base).expect("load NLI model");
+
+        // Same premise as the equivalence test, so the numbers are comparable.
+        let premise =
+            "Original: fat people deserve healthcare too Response: lol imagine being that big";
+        let hyps: Vec<&str> = HYPOTHESES.iter().map(|(_, h)| *h).collect();
+
+        // Token length per (premise, hypothesis) pair drives who gets padded.
+        let lens: Vec<usize> = hyps
+            .iter()
+            .map(|h| {
+                scorer
+                    .tokenizer
+                    .encode((premise, *h), true)
+                    .expect("tokenize")
+                    .get_ids()
+                    .len()
+            })
+            .collect();
+        let longest = lens
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, l)| **l)
+            .map(|(i, _)| i)
+            .expect("non-empty");
+
+        println!(
+            "#231 arch={} os={}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+        println!("#231 token lens: {lens:?} (longest = hypothesis {longest})");
+
+        let batch5 = scorer
+            .score_entailments_batched(premise, &hyps)
+            .await
+            .expect("batch5");
+
+        println!(
+            "#231 {:<3} {:<4} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "hyp", "len", "single", "dup2", "pad2", "batch5", "d(dup2)", "d(batch5)"
+        );
+        for (i, h) in hyps.iter().enumerate() {
+            let single = scorer
+                .score_entailments_batched(premise, std::slice::from_ref(h))
+                .await
+                .expect("single")[0];
+            // Batch of 2, identical rows => no padding at all.
+            let dup2 = scorer
+                .score_entailments_batched(premise, &[*h, *h])
+                .await
+                .expect("dup2")[0];
+            // Batch of 2 against the longest hypothesis => row i is padded.
+            let pad2 = scorer
+                .score_entailments_batched(premise, &[*h, hyps[longest]])
+                .await
+                .expect("pad2")[0];
+
+            println!(
+                "#231 {:<3} {:<4} {:>10.6} {:>10.6} {:>10.6} {:>10.6} {:>+10.6} {:>+10.6}",
+                i,
+                lens[i],
+                single,
+                dup2,
+                pad2,
+                batch5[i],
+                dup2 - single,
+                batch5[i] - single,
+            );
+        }
+    }
+
+    /// #231 impact measurement — NOT a gate. The per-hypothesis matrix above
+    /// shows the entailment probabilities move; this shows what that does to
+    /// the number the product actually uses, over a spread of pair types so the
+    /// conclusion does not rest on one cherry-picked example.
+    ///
+    /// Prints, per pair, the `compute_hostility_score` from the pre-#213 single
+    /// path and from the #213 batched path, plus the resulting
+    /// `context_multiplier = 1.0 + hostility * 0.5` that feeds the live threat
+    /// formula. Also times both paths so the correctness cost of reverting
+    /// batching can be weighed against its speedup.
+    #[ignore = "#231 diagnostic: prints an impact table, asserts nothing"]
+    #[tokio::test]
+    async fn characterize_hostility_impact() {
+        let base = resolve_model_dir();
+        if !nli_files_present(&base) {
+            eprintln!("SKIP: NLI model not present at {}", base.display());
+            return;
+        }
+        let scorer = NliScorer::load(&base).expect("load NLI model");
+        let hyps: Vec<&str> = HYPOTHESES.iter().map(|(_, h)| *h).collect();
+
+        // A spread: overt mockery, contemptuous dismissal, strawmanning,
+        // good-faith disagreement, and outright support. If batching were
+        // benign the two columns would track each other across all of them.
+        let pairs: [(&str, &str, &str); 6] = [
+            (
+                "mockery",
+                "fat people deserve healthcare too",
+                "lol imagine being that big",
+            ),
+            (
+                "contempt",
+                "trans kids need gender affirming care",
+                "nobody with a functioning brain believes this garbage",
+            ),
+            (
+                "misrepresent",
+                "we should fund public transit",
+                "so you want to ban all cars, got it",
+            ),
+            (
+                "good_faith",
+                "we should fund public transit",
+                "I disagree — I think the cost per rider is too high here",
+            ),
+            (
+                "support",
+                "fat people deserve healthcare too",
+                "absolutely, and denying it is straightforward discrimination",
+            ),
+            (
+                "neutral",
+                "the bus route changed today",
+                "which stop does it use now?",
+            ),
+        ];
+
+        let to_scores = |v: &[f64]| HypothesisScores {
+            attack: v[0],
+            contempt: v[1],
+            misrepresent: v[2],
+            good_faith_disagree: v[3],
+            support: v[4],
+        };
+
+        println!(
+            "#231impact arch={} os={}",
+            std::env::consts::ARCH,
+            std::env::consts::OS
+        );
+        println!(
+            "#231impact {:<14} {:>10} {:>10} {:>10} {:>9} {:>9}",
+            "pair", "single", "batched", "delta", "mult_1x", "mult_5x"
+        );
+
+        let mut single_nanos = 0u128;
+        let mut batched_nanos = 0u128;
+
+        for (label, original, response) in pairs {
+            let premise = format!("Original: {} Response: {}", original, response);
+
+            let t = std::time::Instant::now();
+            let mut singles = Vec::new();
+            for h in hyps.iter() {
+                singles.push(
+                    scorer
+                        .score_entailments_batched(&premise, std::slice::from_ref(h))
+                        .await
+                        .expect("single")[0],
+                );
+            }
+            single_nanos += t.elapsed().as_nanos();
+
+            let t = std::time::Instant::now();
+            let batched = scorer
+                .score_entailments_batched(&premise, &hyps)
+                .await
+                .expect("batched");
+            batched_nanos += t.elapsed().as_nanos();
+
+            let h_single = compute_hostility_score(&to_scores(&singles));
+            let h_batched = compute_hostility_score(&to_scores(&batched));
+
+            println!(
+                "#231impact {:<14} {:>10.6} {:>10.6} {:>+10.6} {:>9.4} {:>9.4}",
+                label,
+                h_single,
+                h_batched,
+                h_batched - h_single,
+                1.0 + h_single * 0.5,
+                1.0 + h_batched * 0.5,
+            );
+        }
+
+        println!(
+            "#231impact timing: 5x-single {:.1}ms vs batched {:.1}ms over {} pairs ({:.2}x)",
+            single_nanos as f64 / 1e6,
+            batched_nanos as f64 / 1e6,
+            pairs.len(),
+            single_nanos as f64 / batched_nanos as f64,
+        );
     }
 }
