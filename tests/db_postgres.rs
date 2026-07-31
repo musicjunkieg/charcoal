@@ -811,3 +811,44 @@ async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
             .unwrap();
     }
 }
+
+/// Account deletion must clear `scan_skips` on the Postgres backend too (#234).
+///
+/// Production runs Postgres, so the SQLite test for this proves nothing about
+/// the deployed path. `scan_skips` holds the user's DID, the DIDs of accounts
+/// scanned on their behalf, and raw error text.
+/// Uses its OWN user, not the shared `TEST_USER`: this test calls
+/// `delete_user_data`, and these tests run in parallel against one database, so
+/// deleting the shared user would pull data out from under its neighbours.
+#[tokio::test]
+async fn test_pg_delete_user_data_clears_scan_skips() {
+    const DEL_USER: &str = "did:plc:pgtest_del0000000000000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // Start from a known state without touching the shared fixtures.
+    db.delete_user_data(DEL_USER).await.unwrap();
+
+    db.upsert_user(DEL_USER, "pgtest-del.bsky.social")
+        .await
+        .unwrap();
+    db.record_scan_skip(DEL_USER, "did:plc:pgharasser", "gather", "boom")
+        .await
+        .unwrap();
+    assert_eq!(
+        db.count_scan_skips(DEL_USER).await.unwrap(),
+        1,
+        "precondition: the skip must exist, or this test cannot fail"
+    );
+
+    db.delete_user_data(DEL_USER).await.unwrap();
+
+    assert_eq!(
+        db.count_scan_skips(DEL_USER).await.unwrap(),
+        0,
+        "scan_skips must not survive account deletion on Postgres"
+    );
+}

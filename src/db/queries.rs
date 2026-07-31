@@ -945,6 +945,13 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
         "DELETE FROM scan_account_input WHERE user_did = ?1",
         params![user_did],
     )?;
+    // #234: scan_skips holds the user's DID, the DIDs of accounts scanned on
+    // their behalf, and raw error text. It is user-scoped like everything else
+    // here and must not outlive the account.
+    conn.execute(
+        "DELETE FROM scan_skips WHERE user_did = ?1",
+        params![user_did],
+    )?;
     conn.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],

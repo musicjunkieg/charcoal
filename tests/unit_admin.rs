@@ -159,6 +159,63 @@ mod db_tests {
         let users = db.list_users().await.unwrap();
         assert!(users.is_empty());
     }
+
+    /// Deleting an account must take its `scan_skips` rows with it (#234).
+    ///
+    /// Those rows hold the user's DID, the DIDs of accounts scanned on their
+    /// behalf, and raw error text. Charcoal's users are people being harassed;
+    /// "delete my account" has to mean it. `scan_skips` (v10, #226) was the one
+    /// user-scoped table `delete_user_data` never cleared.
+    #[tokio::test]
+    async fn delete_user_data_clears_scan_skips() {
+        let db = setup_db().await;
+        db.upsert_user("did:plc:abc", "alice.bsky.social")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:abc", "did:plc:harasser", "gather", "boom")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.count_scan_skips("did:plc:abc").await.unwrap(),
+            1,
+            "precondition: the skip must exist, or this test cannot fail"
+        );
+
+        db.delete_user_data("did:plc:abc").await.unwrap();
+
+        assert_eq!(
+            db.count_scan_skips("did:plc:abc").await.unwrap(),
+            0,
+            "scan_skips must not survive account deletion"
+        );
+    }
+
+    /// Deleting one user must not touch another user's skips.
+    #[tokio::test]
+    async fn delete_user_data_leaves_other_users_scan_skips_intact() {
+        let db = setup_db().await;
+        db.upsert_user("did:plc:abc", "alice.bsky.social")
+            .await
+            .unwrap();
+        db.upsert_user("did:plc:xyz", "bob.bsky.social")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:abc", "did:plc:harasser", "gather", "boom")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:xyz", "did:plc:harasser", "gather", "boom")
+            .await
+            .unwrap();
+
+        db.delete_user_data("did:plc:abc").await.unwrap();
+
+        assert_eq!(db.count_scan_skips("did:plc:abc").await.unwrap(), 0);
+        assert_eq!(
+            db.count_scan_skips("did:plc:xyz").await.unwrap(),
+            1,
+            "deleting one account must not clear another's skips"
+        );
+    }
 }
 
 #[cfg(feature = "web")]

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "10eb97a793ef47dcd159a327be81f053f407e3de",
+    "short_hash": "10eb97a",
+    "author": "chaos gremlin",
+    "date": "2026-07-30T18:58:20-07:00",
+    "message": "Merge pull request #92 from musicjunkieg/fix/231-nli-batch-divergence",
+    "files_changed": 0
+  },
+  {
     "hash": "b561f3c115bb45fc0e7a62919469dca29ecc869c",
     "short_hash": "b561f3c",
     "author": "Bryan Guffey",

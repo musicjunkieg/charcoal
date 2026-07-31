@@ -4509,6 +4509,17 @@
       "created_at": "2026-07-30T18:40:52.952768-07:00",
       "updated_at": "2026-07-30T18:40:52.952768-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"b561f3c\",\"confidence\":95}"
+    },
+    {
+      "id": 417,
+      "change_id": "da810d44-a067-45af-abea-372233c552a5",
+      "node_type": "outcome",
+      "title": "#231 + #233 MERGED (10eb97a) and DEPLOYED to staging: Railway cda059cd SUCCESS, /health 200, zero errors or panics. Migration verified end-to-end - nli_files_present correctly reported absent, ONLY the NLI model re-downloaded, 284MB fp32 streamed to /data/models in ~10s, cleanup logged 'removed superseded model_quantized.onnx'. Volume 1376MB -> 1574MB, matching the predicted 1573MB to within 1MB. staging->main promotion now unblocked",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-30T19:03:05.733779-07:00",
+      "updated_at": "2026-07-30T19:03:05.747477-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"10eb97a\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -8933,6 +8944,17 @@
       "weight": 1.0,
       "rationale": "Correcting a factual error in the #233 rationale",
       "created_at": "2026-07-30T18:40:52.960300-07:00"
+    },
+    {
+      "id": 412,
+      "from_node_id": 415,
+      "to_node_id": 417,
+      "from_change_id": "19f7fa21-f21d-4f96-b4a8-d9263ff1029f",
+      "to_change_id": "da810d44-a067-45af-abea-372233c552a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merge + staging deploy verification",
+      "created_at": "2026-07-30T19:03:05.741672-07:00"
     }
   ],
   "documents": [
