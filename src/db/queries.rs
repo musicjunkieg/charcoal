@@ -934,49 +934,62 @@ pub fn has_fingerprint(conn: &Connection, user_did: &str) -> Result<bool> {
 
 /// Delete all data for a user (cascade across all user-scoped tables).
 pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
+    // One transaction for the whole sequence, matching the Postgres backend.
+    // Without it, a failure partway through leaves the account half-deleted —
+    // e.g. `scan_skips` cleared while the `users` row survives, or the reverse:
+    // the account gone but its scanned-account DIDs and error text still on
+    // disk. For a deletion path the partial outcome is the dangerous one, so it
+    // has to be all-or-nothing.
+    //
+    // `unchecked_transaction` because this takes `&Connection`; rusqlite's
+    // `transaction()` needs `&mut`, which would ripple through every caller for
+    // no behavioural gain.
+    let tx = conn.unchecked_transaction()?;
+
     // Staging tables first (#208) — they have no FK to the data tables, but
     // clearing them up front keeps the delete in dependency order and ensures
     // a user's queued classification work doesn't outlive the account itself.
-    conn.execute(
+    tx.execute(
         "DELETE FROM classification_queue WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_account_input WHERE user_did = ?1",
         params![user_did],
     )?;
     // #234: scan_skips holds the user's DID, the DIDs of accounts scanned on
     // their behalf, and raw error text. It is user-scoped like everything else
     // here and must not outlive the account.
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_skips WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM user_labels WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM amplification_events WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM account_scores WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_state WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM topic_fingerprint WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
+    tx.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
+    tx.commit()?;
     Ok(())
 }
 
