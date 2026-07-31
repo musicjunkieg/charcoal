@@ -1,5 +1,13 @@
 [
   {
+    "hash": "5d37b1f2ccac876435318320a7434bf4fff7f079",
+    "short_hash": "5d37b1f",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T17:01:36-07:00",
+    "message": "fix(233): stream model downloads to disk instead of buffering in RAM\n\ndownload_file called response.bytes() -- despite a comment claiming it\nstreamed -- holding the whole artifact in memory before a blocking\nstd::fs::write. With the fp32 NLI model (#231) that is ~284MB resident per\ndownload, on the async runtime.\n\nThe sharper problem was crash safety: a killed container mid-write left a\nTRUNCATED file at the destination, and nli_files_present only checks\nexistence. A partial model.onnx would look present and then fail ONNX\nparsing on every boot -- a poison state needing manual cleanup on the\nvolume. That risk is load-bearing for #231, whose migration story is\n\"existing volumes re-download themselves\".\n\nDownloads now stream chunk-by-chunk to a sibling .part file and atomically\nrename into place. Sibling rather than the system temp dir so the rename\nstays on one filesystem (the Railway volume); a cross-device rename would\nsilently degrade to a copy and reintroduce the partial-file window.\n\nThree tests via wiremock: full body lands and the .part is cleaned up; a\nfailed request leaves nothing at dest; a stale .part from a killed run is\ntruncated rather than appended to.\n\nClippy clean on web/postgres/no-features; 40 suites pass, zero skips.\n\nCloses #233",
+    "files_changed": 6
+  },
+  {
     "hash": "bef90020feaee56bead58942e48301c3731afdc5",
     "short_hash": "bef9002",
     "author": "Bryan Guffey",

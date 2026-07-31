@@ -4439,9 +4439,9 @@
       "node_type": "goal",
       "title": "#233: download_file buffers the entire model in RAM and can leave a truncated artifact that nli_files_present accepts",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-30T16:53:58.253252-07:00",
-      "updated_at": "2026-07-30T16:53:58.253252-07:00",
+      "updated_at": "2026-07-30T17:08:50.922346-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":88,\"prompt\":\"Coderabbit has a new piece of feedback for you\"}"
     },
     {
@@ -4472,10 +4472,32 @@
       "node_type": "decision",
       "title": "Option A: true streaming + atomic rename. Fixes peak RAM (284MB -> chunk-sized), the fake progress bar, the blocking write on the async runtime, AND the poison-state risk where a truncated model.onnx passes nli_files_present and then fails ONNX parse on every boot",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-07-30T16:53:58.300223-07:00",
-      "updated_at": "2026-07-30T16:53:58.300223-07:00",
+      "updated_at": "2026-07-30T17:08:50.927943-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":88}"
+    },
+    {
+      "id": 414,
+      "change_id": "93b31b99-b866-4a3d-9ed2-6ef3f4b140b7",
+      "node_type": "action",
+      "title": "Implement #233: stream download_file to a sibling .part + atomic rename, reqwest stream feature, 3 wiremock tests",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-30T17:08:50.887121-07:00",
+      "updated_at": "2026-07-30T17:08:50.933296-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"5d37b1f\",\"confidence\":90,\"files\":[\"src/toxicity/download.rs\",\"Cargo.toml\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 415,
+      "change_id": "19f7fa21-f21d-4f96-b4a8-d9263ff1029f",
+      "node_type": "outcome",
+      "title": "#233 fixed and validated END-TO-END: CI's model cache key hashes download.rs, so the change busted it and all 3 models re-downloaded through the new streaming path against real HuggingFace (incl. the 284MB fp32 NLI). The model-loading tests then passed, which proves the streamed bytes are byte-correct - a mis-streamed ONNX file would fail to parse. 40 suites, zero skips, all 7 PR checks pass, mergeStateStatus CLEAN",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-30T17:08:50.908603-07:00",
+      "updated_at": "2026-07-30T17:08:50.939575-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"5d37b1f\",\"confidence\":93}"
     }
   ],
   "edges": [
@@ -8867,6 +8889,28 @@
       "weight": 1.0,
       "rationale": "Rejected: does not address peak RAM or the blocking write",
       "created_at": "2026-07-30T16:53:58.312671-07:00"
+    },
+    {
+      "id": 409,
+      "from_node_id": 413,
+      "to_node_id": 414,
+      "from_change_id": "7d29ea1a-c4ed-450b-abc0-ee8610690288",
+      "to_change_id": "93b31b99-b866-4a3d-9ed2-6ef3f4b140b7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementing the streaming decision",
+      "created_at": "2026-07-30T17:08:50.894323-07:00"
+    },
+    {
+      "id": 410,
+      "from_node_id": 414,
+      "to_node_id": 415,
+      "from_change_id": "93b31b99-b866-4a3d-9ed2-6ef3f4b140b7",
+      "to_change_id": "19f7fa21-f21d-4f96-b4a8-d9263ff1029f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified result",
+      "created_at": "2026-07-30T17:08:50.915778-07:00"
     }
   ],
   "documents": [
