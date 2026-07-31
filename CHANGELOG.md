@@ -17,9 +17,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   boot — a poison state needing manual cleanup on the Railway volume. Downloads
   now stream chunk-by-chunk to a sibling `.part` file and atomically rename into
   place, so the destination only ever holds a complete artifact. The sibling
-  location keeps the rename on one filesystem; a cross-device rename would
-  degrade to a copy and reintroduce the partial-file window. The progress bar
-  also advances during the transfer now rather than jumping to 100% at the end.
+  location keeps the rename on one filesystem, which matters because `rename(2)`
+  does not fall back to copying across filesystems — it fails with `EXDEV`. A
+  staging file under the system temp dir would therefore break the download
+  outright wherever `/tmp` and the volume are separate mounts, which on Railway
+  they are. The progress bar also advances during the transfer now rather than
+  jumping to 100% at the end.
 - Switch the NLI cross-encoder to the **fp32** export and fix corrupted
   contextual hostility scores in production (#231). The quantized
   `nli-deberta-v3-xsmall` export is *dynamically* quantized:

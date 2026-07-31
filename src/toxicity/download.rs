@@ -299,8 +299,10 @@ async fn download_file(url: &str, dest: &Path, show_progress: bool) -> Result<()
     //
     // The temp file is a sibling rather than something under the system temp
     // dir so the rename stays on one filesystem (the Railway volume) and is
-    // therefore atomic; a cross-device rename would silently degrade to a
-    // copy and reintroduce the partial-file window.
+    // therefore atomic. `rename(2)` does not fall back to copying across
+    // filesystems — it fails with `EXDEV` — so staging in the temp dir would
+    // break the download outright wherever /tmp and the volume are separate
+    // mounts, which on Railway they are.
     let part_path = dest.with_extension("part");
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = 0;
