@@ -4421,6 +4421,61 @@
       "created_at": "2026-07-28T23:29:24.818058-07:00",
       "updated_at": "2026-07-28T23:29:24.870892-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"3e1f130\",\"confidence\":95}"
+    },
+    {
+      "id": 409,
+      "change_id": "076b91ed-bf4d-4d2e-a27b-10c16ff88ce5",
+      "node_type": "action",
+      "title": "Address CodeRabbit nitpick on PR #92: share NLI_MODEL_FILE/NLI_TOKENIZER_FILE (pub(crate)) between NliScorer::load and nli_files_present instead of duplicating literals",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-30T16:48:40.598830-07:00",
+      "updated_at": "2026-07-30T16:48:40.613739-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"bef9002\",\"confidence\":88,\"files\":[\"src/scoring/nli.rs\",\"src/toxicity/download.rs\"]}"
+    },
+    {
+      "id": 410,
+      "change_id": "4a5ca06a-27cb-45f8-aec6-565834dfae9f",
+      "node_type": "goal",
+      "title": "#233: download_file buffers the entire model in RAM and can leave a truncated artifact that nli_files_present accepts",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-30T16:53:58.253252-07:00",
+      "updated_at": "2026-07-30T16:53:58.253252-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":88,\"prompt\":\"Coderabbit has a new piece of feedback for you\"}"
+    },
+    {
+      "id": 411,
+      "change_id": "d7585b5d-6b85-4b5b-8206-d28b4cfe2102",
+      "node_type": "option",
+      "title": "A: stream response chunks to a .part sibling then atomically rename (same filesystem as the Railway volume)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-30T16:53:58.265196-07:00",
+      "updated_at": "2026-07-30T16:53:58.265196-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":85}"
+    },
+    {
+      "id": 412,
+      "change_id": "76c0e9da-8b24-409b-a799-294520445791",
+      "node_type": "option",
+      "title": "B: keep buffering but add a size/checksum validation step after write",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-30T16:53:58.276834-07:00",
+      "updated_at": "2026-07-30T16:53:58.276834-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":35}"
+    },
+    {
+      "id": 413,
+      "change_id": "7d29ea1a-c4ed-450b-abc0-ee8610690288",
+      "node_type": "decision",
+      "title": "Option A: true streaming + atomic rename. Fixes peak RAM (284MB -> chunk-sized), the fake progress bar, the blocking write on the async runtime, AND the poison-state risk where a truncated model.onnx passes nli_files_present and then fails ONNX parse on every boot",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-30T16:53:58.300223-07:00",
+      "updated_at": "2026-07-30T16:53:58.300223-07:00",
+      "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"confidence\":88}"
     }
   ],
   "edges": [
@@ -8757,6 +8812,61 @@
       "weight": 1.0,
       "rationale": "Verified result of the implementation",
       "created_at": "2026-07-28T23:29:24.825111-07:00"
+    },
+    {
+      "id": 404,
+      "from_node_id": 408,
+      "to_node_id": 409,
+      "from_change_id": "31720ffa-47b5-461b-8909-8ff7287c4f51",
+      "to_change_id": "076b91ed-bf4d-4d2e-a27b-10c16ff88ce5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review follow-up on the #231 fix",
+      "created_at": "2026-07-30T16:48:40.606287-07:00"
+    },
+    {
+      "id": 405,
+      "from_node_id": 410,
+      "to_node_id": 411,
+      "from_change_id": "4a5ca06a-27cb-45f8-aec6-565834dfae9f",
+      "to_change_id": "d7585b5d-6b85-4b5b-8206-d28b4cfe2102",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Download-robustness option",
+      "created_at": "2026-07-30T16:53:58.283956-07:00"
+    },
+    {
+      "id": 406,
+      "from_node_id": 410,
+      "to_node_id": 412,
+      "from_change_id": "4a5ca06a-27cb-45f8-aec6-565834dfae9f",
+      "to_change_id": "76c0e9da-8b24-409b-a799-294520445791",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Download-robustness option",
+      "created_at": "2026-07-30T16:53:58.289503-07:00"
+    },
+    {
+      "id": 407,
+      "from_node_id": 411,
+      "to_node_id": 413,
+      "from_change_id": "d7585b5d-6b85-4b5b-8206-d28b4cfe2102",
+      "to_change_id": "7d29ea1a-c4ed-450b-abc0-ee8610690288",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chosen",
+      "created_at": "2026-07-30T16:53:58.307044-07:00"
+    },
+    {
+      "id": 408,
+      "from_node_id": 412,
+      "to_node_id": 413,
+      "from_change_id": "76c0e9da-8b24-409b-a799-294520445791",
+      "to_change_id": "7d29ea1a-c4ed-450b-abc0-ee8610690288",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected: does not address peak RAM or the blocking write",
+      "created_at": "2026-07-30T16:53:58.312671-07:00"
     }
   ],
   "documents": [

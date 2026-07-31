@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bef90020feaee56bead58942e48301c3731afdc5",
+    "short_hash": "bef9002",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T16:48:18-07:00",
+    "message": "refactor(231): share NLI filename constants between loader and presence check\n\nNliScorer::load hardcoded \"model.onnx\"/\"tokenizer.json\" while\nnli_files_present used NLI_MODEL_FILE/NLI_TOKENIZER_FILE, so the two could\ndrift apart -- a presence check that disagrees with what actually loads is\nthe failure shape that kept #231 hidden for so long. Making the constants\npub(crate) and using them in both places removes that gap.\n\nVerified the constant is wired rather than merely compiling: renaming\nmodel.onnx makes the gated test report SKIP, so the check and the loader\nresolve the same name.\n\nClippy clean on web and no-features; 40 suites pass with zero skips.\n\nRefs #231",
+    "files_changed": 2
+  },
+  {
     "hash": "3e1f13084c4803230a7d1e4cc5a3b963b89b43be",
     "short_hash": "3e1f130",
     "author": "Bryan Guffey",

@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Stream model downloads to disk instead of buffering them in memory (#233).
+  `download_file` called `response.bytes()` — despite a comment claiming it
+  streamed — holding the entire artifact in RAM before a blocking
+  `std::fs::write`. With the fp32 NLI model (#231) that is ~284MB resident per
+  download, on the async runtime. Worse, a crash mid-write left a **truncated
+  file at the destination**, and `nli_files_present` only checks existence, so a
+  partial `model.onnx` would look present and then fail ONNX parsing on every
+  boot — a poison state needing manual cleanup on the Railway volume. Downloads
+  now stream chunk-by-chunk to a sibling `.part` file and atomically rename into
+  place, so the destination only ever holds a complete artifact. The sibling
+  location keeps the rename on one filesystem; a cross-device rename would
+  degrade to a copy and reintroduce the partial-file window. The progress bar
+  also advances during the transfer now rather than jumping to 100% at the end.
 - Switch the NLI cross-encoder to the **fp32** export and fix corrupted
   contextual hostility scores in production (#231). The quantized
   `nli-deberta-v3-xsmall` export is *dynamically* quantized:

@@ -15,7 +15,9 @@ tokio = { version = "1", features = ["full"] }
 atrium-api = "0.25.7"
 
 # HTTP client (for public AT Protocol API, Constellation, and Perspective API)
-reqwest = { version = "0.12", features = ["json"] }
+# `stream` lets download_file write model files chunk-by-chunk instead of
+# buffering a whole ~284MB artifact in memory (#233).
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # Database (SQLite — optional, enabled by the `sqlite` default feature)
 rusqlite = { version = "0.38", features = ["bundled"], optional = true }
