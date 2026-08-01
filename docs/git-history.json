@@ -1,5 +1,21 @@
 [
   {
+    "hash": "da719650de3abaa585382809a5a04029f1e5409d",
+    "short_hash": "da71965",
+    "author": "Bryan Guffey",
+    "date": "2026-07-31T15:54:51-07:00",
+    "message": "fix(234): make the SQLite deletion sequence atomic\n\nCodeRabbit on PR #93: delete_user_data ran independent conn.execute calls\nwith no transaction, so a failure partway through left the account\nhalf-deleted -- scan_skips cleared while the users row survived, or the\naccount gone with its scanned-account DIDs and error text still on disk. For\na deletion path the partial outcome is the dangerous one.\n\nIt was also asymmetric: the Postgres backend already wrapped the same\nsequence in a transaction. Production runs Postgres, so this does not change\nthe promotion risk -- it closes the gap for local/CLI SQLite use and makes\nthe two backends behave the same.\n\nunchecked_transaction() because the fn takes &Connection; rusqlite\ntransaction() needs &mut, which would ripple through every caller for no\nbehavioural gain. CodeRabbit rated this a heavy lift assuming that\nsignature change was required.\n\nTest forces a real mid-sequence failure by dropping the users table so the\nfinal statement fails, then asserts the earlier scan_skips delete rolled\nback. Without the transaction each execute autocommits, so scan_skips would\nalready be gone and the assertion fails -- it genuinely guards.\n\n40 suites zero skips, 15 Postgres tests, clippy clean on all three feature\nsets.\n\nRefs #234",
+    "files_changed": 2
+  },
+  {
+    "hash": "10eb97a793ef47dcd159a327be81f053f407e3de",
+    "short_hash": "10eb97a",
+    "author": "chaos gremlin",
+    "date": "2026-07-30T18:58:20-07:00",
+    "message": "Merge pull request #92 from musicjunkieg/fix/231-nli-batch-divergence",
+    "files_changed": 0
+  },
+  {
     "hash": "b561f3c115bb45fc0e7a62919469dca29ecc869c",
     "short_hash": "b561f3c",
     "author": "Bryan Guffey",

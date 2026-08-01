@@ -4509,6 +4509,72 @@
       "created_at": "2026-07-30T18:40:52.952768-07:00",
       "updated_at": "2026-07-30T18:40:52.952768-07:00",
       "metadata_json": "{\"branch\":\"fix/231-nli-batch-divergence\",\"commit\":\"b561f3c\",\"confidence\":95}"
+    },
+    {
+      "id": 417,
+      "change_id": "da810d44-a067-45af-abea-372233c552a5",
+      "node_type": "outcome",
+      "title": "#231 + #233 MERGED (10eb97a) and DEPLOYED to staging: Railway cda059cd SUCCESS, /health 200, zero errors or panics. Migration verified end-to-end - nli_files_present correctly reported absent, ONLY the NLI model re-downloaded, 284MB fp32 streamed to /data/models in ~10s, cleanup logged 'removed superseded model_quantized.onnx'. Volume 1376MB -> 1574MB, matching the predicted 1573MB to within 1MB. staging->main promotion now unblocked",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-30T19:03:05.733779-07:00",
+      "updated_at": "2026-07-30T19:03:05.747477-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"10eb97a\",\"confidence\":95}"
+    },
+    {
+      "id": 418,
+      "change_id": "db1d2636-448d-427c-824f-82d65894afe2",
+      "node_type": "goal",
+      "title": "Prepare and de-draft the staging->main production promotion (PR #63), triage CodeRabbit",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-31T16:00:21.421049-07:00",
+      "updated_at": "2026-07-31T16:00:21.488284-07:00",
+      "metadata_json": "{\"branch\":\"fix/promotion-preflight\",\"confidence\":90,\"prompt\":\"The promotion PR exists in draft today. Please update it and move it out of draft. Review the coderabbit comments as they come in -check every 5 minutes. Since we are promoting into production, make recommendations to me on what should be fixed now or what can wait.\"}"
+    },
+    {
+      "id": 419,
+      "change_id": "487fa267-a3ff-4d76-a399-93eaa495227b",
+      "node_type": "observation",
+      "title": "PROMOTION BLOCKER (not from CodeRabbit): CHARCOAL_CLASSIFIER is unset on prod and the promotion makes it REQUIRED with no default. main builds a Zentropi client implicitly from ZENTROPI_API_KEY as an Option; staging requires explicit selection. build_from_env() runs per scan (web/scan_job.rs:309), NOT at boot - so the deploy goes green, /health returns 200, and EVERY SCAN fails. Silent functional outage behind a healthy service",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-07-31T16:00:21.432829-07:00",
+      "updated_at": "2026-07-31T16:00:21.432829-07:00",
+      "metadata_json": "{\"branch\":\"fix/promotion-preflight\",\"confidence\":95}"
+    },
+    {
+      "id": 420,
+      "change_id": "084b6cf7-5c35-420b-a952-ad480ffd131a",
+      "node_type": "action",
+      "title": "Fix the two prod-path CodeRabbit findings pre-merge (#234 scan_skips privacy + atomicity, #235 Constellation timeouts); defer #236/#237/#238 to issues",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-31T16:00:21.453992-07:00",
+      "updated_at": "2026-07-31T16:00:21.493746-07:00",
+      "metadata_json": "{\"branch\":\"fix/promotion-preflight\",\"commit\":\"da71965\",\"confidence\":90}"
+    },
+    {
+      "id": 421,
+      "change_id": "3aa6734d-3af8-49d0-9bfb-c73494339dbd",
+      "node_type": "outcome",
+      "title": "PR #93 APPROVED by CodeRabbit, all 7 checks pass. scan_skips now cleared on deletion in BOTH backends (negative-controlled on each), SQLite deletion made atomic via unchecked_transaction with a real rollback test, Constellation bounded 30s/10s. 40 suites zero skips, 15 Postgres tests, clippy clean x3",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-31T16:00:21.475460-07:00",
+      "updated_at": "2026-07-31T16:00:21.499643-07:00",
+      "metadata_json": "{\"branch\":\"fix/promotion-preflight\",\"commit\":\"da71965\",\"confidence\":93}"
+    },
+    {
+      "id": 422,
+      "change_id": "b18e231d-b8d4-475d-903f-195db76bc3bb",
+      "node_type": "outcome",
+      "title": "CodeRabbit accepted ALL 9 findings on PR #63 after per-comment replies explaining the fix-now vs defer reasoning. It withdrew the SKILL.md finding outright, acknowledged the rest as validly deferred, and after '@coderabbitai resolve' flipped to APPROVED - CHANGES_REQUESTED cleared. Remaining blockers are unrelated to review: (1) CHARCOAL_CLASSIFIER unset on prod, (2) PR #63 mergeStateStatus=DIRTY from main-only template commits #70-#75",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-07-31T17:30:18.631985-07:00",
+      "updated_at": "2026-07-31T17:30:18.651679-07:00",
+      "metadata_json": "{\"branch\":\"fix/promotion-preflight\",\"commit\":\"da71965\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -8933,6 +8999,61 @@
       "weight": 1.0,
       "rationale": "Correcting a factual error in the #233 rationale",
       "created_at": "2026-07-30T18:40:52.960300-07:00"
+    },
+    {
+      "id": 412,
+      "from_node_id": 415,
+      "to_node_id": 417,
+      "from_change_id": "19f7fa21-f21d-4f96-b4a8-d9263ff1029f",
+      "to_change_id": "da810d44-a067-45af-abea-372233c552a5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merge + staging deploy verification",
+      "created_at": "2026-07-30T19:03:05.741672-07:00"
+    },
+    {
+      "id": 413,
+      "from_node_id": 418,
+      "to_node_id": 419,
+      "from_change_id": "db1d2636-448d-427c-824f-82d65894afe2",
+      "to_change_id": "487fa267-a3ff-4d76-a399-93eaa495227b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Found while auditing prod-vs-staging env drift",
+      "created_at": "2026-07-31T16:00:21.439703-07:00"
+    },
+    {
+      "id": 414,
+      "from_node_id": 418,
+      "to_node_id": 420,
+      "from_change_id": "db1d2636-448d-427c-824f-82d65894afe2",
+      "to_change_id": "084b6cf7-5c35-420b-a952-ad480ffd131a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bryan chose: env var + scan_skips + timeouts",
+      "created_at": "2026-07-31T16:00:21.460973-07:00"
+    },
+    {
+      "id": 415,
+      "from_node_id": 420,
+      "to_node_id": 421,
+      "from_change_id": "084b6cf7-5c35-420b-a952-ad480ffd131a",
+      "to_change_id": "3aa6734d-3af8-49d0-9bfb-c73494339dbd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified result",
+      "created_at": "2026-07-31T16:00:21.482274-07:00"
+    },
+    {
+      "id": 416,
+      "from_node_id": 421,
+      "to_node_id": 422,
+      "from_change_id": "3aa6734d-3af8-49d0-9bfb-c73494339dbd",
+      "to_change_id": "b18e231d-b8d4-475d-903f-195db76bc3bb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review-response outcome",
+      "created_at": "2026-07-31T17:30:18.642540-07:00"
     }
   ],
   "documents": [

@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Clear `scan_skips` when an account is deleted (#234). `delete_user_data`
+  cleared every user-scoped table except `scan_skips` (added in v10, #226), so a
+  deleted account left behind the user's DID, the DIDs of accounts scanned on
+  their behalf, and raw error text. Charcoal's users are people being harassed;
+  "delete my account" has to mean it. Fixed in both backends, inside the
+  existing Postgres transaction, with coverage on **both** — the SQLite test
+  alone would prove nothing about production, which runs Postgres.
+- Bound Constellation requests with a 30s request timeout and a 10s connect
+  timeout (#235). `ConstellationClient` set neither, so a server that accepts a
+  connection and then never answers would hold one of the eight discovery
+  concurrency slots for the life of the process, with no error to show for it.
+  Discovery could quietly stop making progress. Regression test asserts a
+  stalled request gives up on its own rather than hanging.
 - Stream model downloads to disk instead of buffering them in memory (#233).
   `download_file` called `response.bytes()` — despite a comment claiming it
   streamed — holding the entire artifact in RAM before a blocking

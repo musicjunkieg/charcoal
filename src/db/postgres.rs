@@ -1147,6 +1147,13 @@ impl Database for PgDatabase {
             .bind(user_did)
             .execute(&mut *tx)
             .await?;
+        // #234: scan_skips holds the user's DID, the DIDs of accounts scanned
+        // on their behalf, and raw error text. It is user-scoped like
+        // everything else here and must not outlive the account.
+        sqlx_core::query::query("DELETE FROM scan_skips WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         sqlx_core::query::query("DELETE FROM inferred_pairs WHERE user_did = $1")
             .bind(user_did)
             .execute(&mut *tx)

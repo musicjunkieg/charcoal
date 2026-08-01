@@ -14,101 +14,22 @@ file dumps into smaller chunks to stay well under output token limits.
 
 ## Current status
 
-The MVP is functional. All 7 implementation phases are complete:
-1. Project skeleton, config, and database
-2. Public AT Protocol API client (unauthenticated, read-only)
-3. Topic fingerprint with TF-IDF
-4. Toxicity scoring (ONNX local model, Perspective API fallback)
-5. Amplification detection pipeline (Constellation-primary)
-6. Profile scoring and threat tiers
-7. Reports, markdown output, and polish
+The MVP and all post-MVP phases are shipped and deployed. **Do not trust a
+status list in this file — it goes stale.** For what is actually true right now:
 
-Post-MVP improvements applied:
-- **Public API refactor**: removed `bsky-sdk` and authentication — all read
-  operations use the public AT Protocol API via `PublicAtpClient` (reqwest).
-  Only `BLUESKY_HANDLE` needed, no app password required.
-- **Constellation-primary**: amplification detection now always uses the
-  Constellation backlink index (1+ year of data). Notification polling removed.
-  The `--constellation` flag is gone — it's always on.
-- **Behavioral signals** (PR #5): quote ratio, reply ratio, pile-on detection,
-  and engagement metrics feed a Gate + Multiplier Hybrid scoring modifier.
-  Benign gate caps allies at Watch tier (12.0); hostile multiplier boosts
-  threat scores by 1.0–1.5x. Pile-on detection uses 24-hour sliding window
-  with 5+ distinct amplifiers threshold. DB schema v3 stores behavioral
-  signals as JSON on `account_scores`.
-- **Multi-user schema** (v0.5): `users` table and `user_did` column on all data
-  tables (`topic_fingerprint`, `account_scores`, `amplification_events`,
-  `scan_state`). Composite primary keys for per-user data isolation. CLI resolves
-  `BLUESKY_HANDLE` to a DID at startup; web handlers extract user DID from OAuth
-  session. DB schema v4 with automatic migration.
-- Sentence embeddings for semantic topic overlap (all-MiniLM-L6-v2, 384-dim)
-- Multiplicative threat scoring: `tox * 70 * (1 + overlap * 1.5)` — overlap
-  amplifies toxicity instead of contributing independently, so allies with high
-  overlap but low toxicity stay Low tier
-- Cosine similarity for topic overlap (replaced weighted Jaccard)
-- Weighted toxicity categories (identity_attack/insult/threat elevated)
-- Crash-resilient pipelines (incremental DB writes + panic catching)
-- Mode 2 background sweep for second-degree network
-- UTF-8 safe string truncation (prevents panics on emoji/CJK text)
-- LazyLock regex compilation (avoids redundant compilations in TF-IDF)
-- ONNX inference offloaded to `spawn_blocking` (keeps async runtime responsive)
-- Git hooks for pre-commit (fmt + clippy + tests) and pre-push (tests + clippy)
-- Batch DID→handle resolution via `app.bsky.actor.getProfiles`
-- Validate command: scores blocked accounts via PDS repo access to verify
-  pipeline accuracy (resolves DIDs via plc.directory, discovers PDS endpoints)
-- DB migrations run automatically on `db::open()` (not just `charcoal init`)
-- **PostgreSQL backend**: trait-based dual-backend architecture (`Database` async
-  trait with `SqliteDatabase` and `PgDatabase` implementations). SQLite remains
-  the default; PostgreSQL is available via `--features postgres` and activated at
-  runtime when `DATABASE_URL` is set. Uses pgvector for embeddings, JSONB for
-  structured data. `charcoal migrate` command transfers all data from SQLite to
-  PostgreSQL.
+- `CHANGELOG.md` — what shipped, in order, with the reasoning
+- `git log` / `chainlink issue list -s open` — current work and open issues
+- `Cargo.toml` — feature flags (`web`, `postgres`) and dependency versions
+- `src/db/schema.rs` + `migrations/postgres/` — the live schema version
 
-- **v0.3 Web GUI** (PR #9): Axum-based API server + SvelteKit single-page dashboard,
-  gated behind `--features web`. Stateless HMAC-SHA256 session cookies. Endpoints:
-  login/logout, GET /api/status (tier counts + scan progress), GET /api/accounts
-  (paginated, sortable), GET /api/accounts/{handle}, GET /api/events, GET /api/fingerprint,
-  POST /api/scan (triggers background scan). Dashboard shows elapsed scan time and
-  disables the scan button while a scan is running. SvelteKit SPA embedded at compile
-  time via `include_dir!`. Railway deployment config included (`railway.toml`).
+Deployed at https://charcoal.watch (Railway, `main`), with a staging
+environment at `charcoal-web-staging.up.railway.app` (`staging` branch, its own
+Postgres + volume).
 
-- **v0.4 AT Protocol OAuth**: Backend-driven OAuth via `atproto-oauth` crate (from
-  tangled.org/ngerakines.me/atproto-crates). Replaces password auth with Bluesky sign-in.
-  PAR + PKCE + DPoP + private_key_jwt. DID-embedded session cookies with CHARCOAL_ALLOWED_DID
-  gate (single-user). Stable P-256 signing key derived from CHARCOAL_SESSION_SECRET
-  (deterministic across restarts). AT Protocol tokens stored
-  in-memory for future XRPC calls (muting/blocking milestone). Env vars:
-  `CHARCOAL_ALLOWED_DID`, `CHARCOAL_OAUTH_CLIENT_ID`, `CHARCOAL_SESSION_SECRET`.
-
-277 tests passing via `cargo test --features web` (excludes PostgreSQL-gated
-tests, which require `--features postgres` and a live `DATABASE_URL`). Clippy
-clean. CLI commands: `init`, `fingerprint`, `download-model`, `scan`, `sweep`,
-`score`, `report`, `status`, `validate`, `migrate` (postgres feature), `serve`
-(web feature).
-
-**Phase 1.75 — Contextual Scoring** (in progress on `feat/contextual-scoring`):
-- Schema v5: `user_labels` table, `inferred_pairs` table, `context_score` on
-  `account_scores` and `amplification_events`, `original_post_text` on events
-- NLI cross-encoder model: `nli-deberta-v3-xsmall` (quantized ONNX, ~87MB)
-  for scoring text pairs against hostility hypotheses
-- Blended scoring formula: 60% toxicity + 40% NLI context score when pair
-  data available; falls back to original formula when no pairs exist
-- Benign gate bypass: accounts with `context_score >= 0.5` skip the benign
-  gate (catches concern trolls who look benign in isolation)
-- Database trait: 7 new methods for labels, inferred pairs, accuracy metrics
-- Staging environment: `staging` branch deploys to Railway staging
-  (`charcoal-web-staging.up.railway.app`), separate Postgres + volume
-- Design spec: `docs/superpowers/specs/2026-03-19-contextual-scoring-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-03-19-contextual-scoring-impl.md`
-
-### External contributions
-
-PR #1 by Bobby Grayson ([@notactuallytreyanastasio](https://github.com/notactuallytreyanastasio)):
-- Correctness fixes: evidence threshold, weighted sorting, float comparison
-- Performance: LazyLock regex, spawn_blocking for ONNX inference
-- UTF-8 safety: `truncate_chars()` helper replacing byte-slice truncation
-- 77 integration tests covering pure functions and composition chains
-- Git hooks installer script (`scripts/install-hooks.sh`)
+External contributions: PR #1 by Bobby Grayson
+([@notactuallytreyanastasio](https://github.com/notactuallytreyanastasio)) —
+correctness and UTF-8 safety fixes, the `truncate_chars()` helper, the first
+integration-test suite, and `scripts/install-hooks.sh`.
 
 ## Who am I?
 
@@ -170,33 +91,25 @@ This is a Rust project. Follow idiomatic Rust patterns:
 
 ### Testing
 
-The project has 231 tests across eight categories:
+Tests live in `tests/` (see the filenames — they're named by area) plus inline
+`#[cfg(test)]` modules. `cargo test` runs unit, doc, and integration tests; use
+`cargo test --all-targets` in CI so benches and examples also compile.
 
-- **Unit tests** (`tests/unit_scoring.rs`) — threat tiers, score computation,
-  truncation, boundary conditions
-- **Topic tests** (`tests/unit_topics.rs`) — cosine similarity, keyword
-  weights, TF-IDF invariants, edge cases
-- **Behavioral tests** (`tests/unit_behavioral.rs`) — boost computation,
-  benign gate, quote/reply ratios, pile-on detection, real-world persona
-  scenarios (quote-dunker, supportive ally, pile-on participant, etc.)
-- **Composition tests** (`tests/composition.rs`) — end-to-end pipelines
-  (TF-IDF → fingerprint → overlap → score → tier), report generation,
-  ally/hostile/irrelevant account scenarios
-- **Constellation tests** (`tests/unit_constellation.rs`) — serde
-  deserialization, AT-URI construction, dedup logic
-- **OAuth unit tests** (`tests/unit_oauth.rs`) — DID-aware token roundtrip,
-  verification failures, DID gate checks. Gated on `--features web`.
-- **OAuth integration tests** (`tests/web_oauth.rs`) — OAuth endpoints,
-  auth middleware, callback flow, protected route access control. Gated on
-  `--features web`.
-- **PostgreSQL tests** (`tests/db_postgres.rs`) — integration tests for the
-  Postgres backend, gated on `--features postgres` + `DATABASE_URL` env var
-  (counted separately from the 231 above).
-  8 tests covering scan state, fingerprint, embedding, scores, events, etc.
+**⚠️ Model-gated tests silently skip and still print `ok`.** Every test that
+loads a real ONNX model returns early when the model files aren't found, having
+asserted nothing. Two traps stack here:
 
-Run tests with `cargo test` (includes unit tests, doc tests, and integration
-tests in `tests/`). Use `cargo test --all-targets` in CI to also compile
-benches and examples, ensuring they aren't broken.
+1. **Test binaries never load `.env`** (dotenvy runs in `main.rs` only), so they
+   ignore `CHARCOAL_MODEL_DIR=./models` and look in the platform data dir. Always
+   run: `CHARCOAL_MODEL_DIR=./models cargo test --features web`
+2. **`cargo test | grep "^SKIP"` is a no-op** — libtest discards stderr from
+   *passing* tests, so it returns empty regardless. You must pass
+   `-- --show-output`.
+
+The full check, which should report **zero** skips:
+```
+CHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output 2>&1 | grep -iE "^\s*SKIP"
+```
 
 To run OAuth tests (requires `--features web`):
 ```
@@ -225,32 +138,20 @@ the code, something has gone wrong.
 
 ### Database architecture
 
-The project uses a trait-based dual-backend database layer:
+Trait-based dual backend (`src/db/`): `Database` async trait, `SqliteDatabase`
+(default) and `PgDatabase` (`--features postgres`). Read the trait for the
+current method set — don't trust a list here.
 
-- **`Database` trait** (`src/db/traits.rs`): async trait with 18 user-scoped
-  methods plus `table_count()` and `upsert_user()`. All user-scoped methods
-  take `user_did: &str` as the first data parameter. All pipeline code operates
-  on `Arc<dyn Database>`.
-- **`SqliteDatabase`** (`src/db/sqlite.rs`): wraps `rusqlite::Connection` in
-  `tokio::sync::Mutex`. Default backend, no external dependencies.
-- **`PgDatabase`** (`src/db/postgres.rs`): native async via sqlx. Uses pgvector
-  for 384-dim embeddings, JSONB for structured data. Gated on `postgres` feature.
-- **Feature flags** in `Cargo.toml`: `sqlite` (default), `postgres` (optional).
-  Uses `sqlx-core`/`sqlx-postgres` as split deps to avoid `libsqlite3-sys` link
-  conflict with rusqlite's bundled SQLite.
-- **Runtime selection**: when `DATABASE_URL` env var is set and starts with
-  `postgres://`, the app uses PostgreSQL. Otherwise, SQLite.
-- **Schema version**: v4 (v1: initial, v2: embedding_vector, v3: behavioral_signals,
-  v4: multi-user with `users` table and `user_did` columns).
-- **Migrations**: SQLite uses `src/db/schema.rs`; Postgres uses numbered SQL
-  files in `migrations/postgres/` (4 files) embedded via `include_str!`.
-- **`charcoal migrate`**: one-time data transfer from SQLite→PostgreSQL.
-  Only available with `--features postgres`.
+Non-obvious constraints:
 
-Building with PostgreSQL support:
-```
-cargo build --features postgres
-```
+- **Runtime selection is implicit**: PostgreSQL activates when `DATABASE_URL` is
+  set and starts with `postgres://`. Otherwise SQLite. No flag.
+- **`sqlx-core`/`sqlx-postgres` are split deps on purpose** — pulling in full
+  `sqlx` causes a `libsqlite3-sys` link conflict with rusqlite's bundled SQLite.
+- **Postgres migrations must SELF-RECORD their version**
+  (`INSERT INTO schema_version ... ON CONFLICT DO NOTHING`). The runner does not
+  do it for you; a migration that skips this re-runs forever.
+- Migrations auto-run on `db::open()`, not just `charcoal init`.
 
 ## Domain knowledge you should know
 
@@ -305,8 +206,12 @@ paint us into a corner that makes the future version harder to build.
   trained to reduce bias around identity mentions
 - **Embeddings**: `all-MiniLM-L6-v2` (~90 MB) — 384-dim sentence embeddings for
   semantic topic overlap (captures "fatphobia" ≈ "obesity" without exact keywords)
-- Both run locally via `ort` crate, no rate limits
-- Download both with `charcoal download-model` (one-time, ~216 MB total)
+- **NLI cross-encoder**: `nli-deberta-v3-xsmall` (~284 MB) — contextual hostility.
+  The **fp32** export, not the quantized one: the quantized export computes its
+  activation scale per-tensor at runtime, so batching hypotheses corrupted every
+  row on x86-64 (#231). Do not "optimize" this back to `model_quantized.onnx`.
+- All run locally via `ort` crate, no rate limits
+- Download all with `charcoal download-model` (one-time, ~500 MB total)
 - See `docs/toxicity-alternatives-report.md` for the toxicity model evaluation
 
 ### Constellation backlink index (primary amplification detection)
@@ -377,28 +282,6 @@ so work is never sitting only locally.
 edges, verify the target node ID against the spec before wiring — confirm the
 node number explicitly.
 
-### Available Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/decision` | Manage decision graph - add nodes, link edges, sync |
-| `/recover` | Recover context from decision graph on session start |
-| `/work` | Start a work transaction - creates goal node before implementation |
-| `/document` | Generate comprehensive documentation for a file or directory |
-| `/build-test` | Build the project and run the test suite |
-| `/serve-ui` | Start the decision graph web viewer |
-| `/sync-graph` | Export decision graph to GitHub Pages |
-| `/decision-graph` | Build a decision graph from commit history |
-| `/sync` | Multi-user sync - pull events, rebuild, push |
-
-### Available Skills
-
-| Skill | Purpose |
-|-------|---------|
-| `/pulse` | Map current design as decisions (Now mode) |
-| `/narratives` | Understand how the system evolved (History mode) |
-| `/archaeology` | Transform narratives into queryable graph |
-
 ### The Node Flow Rule - CRITICAL
 
 The canonical flow through the decision graph is:
@@ -438,26 +321,8 @@ AUDIT regularly -> Check for missing connections
 
 ### Document Attachments
 
-Attach files (images, PDFs, diagrams, specs, screenshots) to decision graph nodes for rich context.
-
-```bash
-# Attach a file to a node
-deciduous doc attach <node_id> <file_path>
-deciduous doc attach <node_id> <file_path> -d "Architecture diagram"
-deciduous doc attach <node_id> <file_path> --ai-describe
-
-# List documents
-deciduous doc list              # All documents
-deciduous doc list <node_id>    # Documents for a specific node
-
-# Manage documents
-deciduous doc show <doc_id>     # Show document details
-deciduous doc describe <doc_id> "Updated description"
-deciduous doc describe <doc_id> --ai   # AI-generate description
-deciduous doc open <doc_id>     # Open in default application
-deciduous doc detach <doc_id>   # Soft-delete (recoverable)
-deciduous doc gc                # Remove orphaned files from disk
-```
+Attach files (images, PDFs, diagrams, specs, screenshots) to decision graph nodes
+for rich context — `deciduous doc --help` for the commands.
 
 **When to suggest document attachment:**
 
@@ -527,23 +392,11 @@ Prompts are viewable in the web viewer.
 
 ```bash
 deciduous add goal "Title" -c 90 -p "User's original request"
-deciduous add action "Title" -c 85
+deciduous add action "Title" -c 85 --commit HEAD
 deciduous link FROM TO -r "reason"  # DO THIS IMMEDIATELY!
-deciduous serve   # View live (auto-refreshes every 30s)
-deciduous sync    # Export for static hosting
-
-# Metadata flags
-# -c, --confidence 0-100   Confidence level
-# -p, --prompt "..."       Store the user prompt (use when semantically meaningful)
-# -f, --files "a.rs,b.rs"  Associate files
-# -b, --branch <name>      Git branch (auto-detected)
-# --commit <hash|HEAD>     Link to git commit (use HEAD for current commit)
-# --date "YYYY-MM-DD"      Backdate node (for archaeology)
-
-# Branch filtering
-deciduous nodes --branch main
-deciduous nodes -b feature-auth
 ```
+
+Full flag reference: `deciduous add --help`.
 
 ### CRITICAL: Link Commits to Actions/Outcomes
 
@@ -559,55 +412,15 @@ The `--commit HEAD` flag captures the commit hash and links it to the node. The 
 
 ### Git History & Deployment
 
-```bash
-# Export graph AND git history for web viewer
-deciduous sync
-
-# This creates:
-# - docs/graph-data.json (decision graph)
-# - docs/git-history.json (commit info for linked nodes)
-```
-
-To deploy to GitHub Pages:
-1. `deciduous sync` to export
-2. Push to GitHub
-3. Settings > Pages > Deploy from branch > /docs folder
-
-Your graph will be live at `https://<user>.github.io/<repo>/`
-
-### Branch-Based Grouping
-
-Nodes are auto-tagged with the current git branch. Configure in `.deciduous/config.toml`:
-```toml
-[branch]
-main_branches = ["main", "master"]
-auto_detect = true
-```
+`deciduous sync` exports `docs/graph-data.json` + `docs/git-history.json`, which
+GitHub Pages serves from the `/docs` folder. Nodes are auto-tagged with the
+current git branch (configurable in `.deciduous/config.toml`).
 
 ### Audit Checklist (Before Every Sync)
 
 1. Does every **outcome** link back to what caused it?
 2. Does every **action** link to why you did it?
 3. Any **dangling outcomes** without parents?
-
-### Git Staging Rules - CRITICAL
-
-**NEVER use broad git add commands that stage everything:**
-- ❌ `git add -A` - stages ALL changes including untracked files
-- ❌ `git add .` - stages everything in current directory
-- ❌ `git add -a` or `git commit -am` - auto-stages all tracked changes
-- ❌ `git add *` - glob patterns can catch unintended files
-
-**ALWAYS stage files explicitly by name:**
-- ✅ `git add src/main.rs src/lib.rs`
-- ✅ `git add Cargo.toml Cargo.lock`
-- ✅ `git add .claude/commands/decision.md`
-
-**Why this matters:**
-- Prevents accidentally committing sensitive files (.env, credentials)
-- Prevents committing large binaries or build artifacts
-- Forces you to review exactly what you're committing
-- Catches unintended changes before they enter git history
 
 ### Session Start Checklist
 
@@ -621,18 +434,7 @@ git status                # Current state
 
 ### Multi-User Sync
 
-Sync decisions with teammates via event logs:
-
-```bash
-# Check sync status
-deciduous events status
-
-# Apply teammate events (after git pull)
-deciduous events rebuild
-
-# Compact old events periodically
-deciduous events checkpoint --clear-events
-```
-
-Events auto-emit on add/link/status commands. Git merges event files automatically.
+Decisions sync with teammates via event logs — see `deciduous events --help`.
+Events auto-emit on add/link/status commands; git merges the event files
+automatically.
 <!-- deciduous:end -->

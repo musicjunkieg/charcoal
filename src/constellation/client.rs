@@ -4,6 +4,8 @@
 // of given post URIs. Results are converted into the same AmplificationNotification
 // format used by the notification pipeline, so they can be merged seamlessly.
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use serde::Deserialize;
@@ -41,11 +43,32 @@ pub struct ConstellationClient {
     base_url: String,
 }
 
+/// Per-request ceiling for a Constellation call (#235).
+///
+/// Without this, a stalled `getBacklinks` never returns and permanently
+/// occupies one of the `DISCOVERY_CONCURRENCY` slots; enough of them and
+/// discovery stops making progress with no error to show for it. Generous
+/// because amplification discovery is a batch path, not user-facing — the
+/// point is that a hang is bounded, not that it is fast.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Ceiling for establishing the TCP/TLS connection specifically, so a
+/// black-holed host fails fast instead of burning the full request budget.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 impl ConstellationClient {
     /// Create a new Constellation client pointing at the given base URL.
     pub fn new(base_url: &str) -> Result<Self> {
+        Self::with_timeout(base_url, REQUEST_TIMEOUT)
+    }
+
+    /// As [`new`](Self::new), with an explicit request timeout. Exists so the
+    /// timeout behaviour is testable without a 30-second test.
+    pub fn with_timeout(base_url: &str, request_timeout: Duration) -> Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent("charcoal/0.1 (threat-detection; @chaosgreml.in)")
+            .timeout(request_timeout)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .context("Failed to build HTTP client")?;
 
@@ -276,4 +299,71 @@ pub fn dedup_liker_events(
     }
 
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A stalled Constellation response must terminate, not hang (#235).
+    ///
+    /// Discovery runs `DISCOVERY_CONCURRENCY` requests at a time. Before this,
+    /// the client had no `timeout`, so a server that accepts the connection and
+    /// then never answers would hold its slot for the life of the process.
+    /// Enough such requests and discovery silently stops progressing.
+    #[tokio::test]
+    async fn get_backlinks_times_out_instead_of_hanging() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            // Answer far later than the timeout below — stands in for a stall.
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
+            .mount(&server)
+            .await;
+
+        let client =
+            ConstellationClient::with_timeout(&server.uri(), Duration::from_millis(300)).unwrap();
+
+        let started = std::time::Instant::now();
+        let result = client
+            .get_backlinks(
+                "at://did:plc:x/app.bsky.feed.post/1",
+                "app.bsky.feed.post",
+                10,
+            )
+            .await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            result.is_err(),
+            "a stalled request must surface as an error"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "must give up on its own timeout, took {elapsed:?}"
+        );
+    }
+
+    /// The timeout must not fire on responses that arrive normally.
+    #[tokio::test]
+    async fn get_backlinks_succeeds_well_within_the_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"total":0,"records":[]}"#))
+            .mount(&server)
+            .await;
+
+        let client = ConstellationClient::new(&server.uri()).unwrap();
+        let result = client
+            .get_backlinks(
+                "at://did:plc:x/app.bsky.feed.post/1",
+                "app.bsky.feed.post",
+                10,
+            )
+            .await;
+
+        assert!(result.is_ok(), "a prompt response must still succeed");
+        assert_eq!(result.unwrap().records.len(), 0);
+    }
 }
