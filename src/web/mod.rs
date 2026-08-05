@@ -28,6 +28,7 @@ pub mod auth;
 pub mod handlers;
 pub mod scan_job;
 pub mod test_helpers;
+pub mod typeahead;
 
 // Embed the SvelteKit build output at compile time.
 // web/build/ must exist before `cargo build --features web` runs.
@@ -48,6 +49,12 @@ pub struct AppState {
     pub oauth_tokens: Arc<RwLock<Option<serde_json::Value>>>,
     /// P-256 signing key for JWT client assertions. Generated at startup.
     pub signing_key: atproto_identity::key::KeyData,
+    /// Shared HTTP client for outbound calls made by handlers (#227).
+    /// One client so the connection pool is reused across requests.
+    pub http: reqwest::Client,
+    /// Per-caller rate limiter for the PUBLIC typeahead endpoint (#227).
+    /// Shared so the limit is global to the process, not per-request.
+    pub typeahead_limiter: Arc<typeahead::TypeaheadLimiter>,
 }
 
 /// Start the Axum web server and block until it exits.
@@ -102,6 +109,8 @@ pub async fn run_server(
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
         signing_key,
+        http: reqwest::Client::new(),
+        typeahead_limiter: handlers::typeahead::build_limiter(),
     };
 
     let app = build_router(state);
@@ -162,7 +171,12 @@ pub(crate) fn build_router(state: AppState) -> Router {
         )
         .route("/health", get(health))
         .route("/api/auth/initiate", post(handlers::oauth::initiate))
-        .route("/api/auth/callback", get(handlers::oauth::callback));
+        .route("/api/auth/callback", get(handlers::oauth::callback))
+        // PUBLIC by necessity — the login screen is pre-auth, so the typeahead
+        // backing it cannot sit behind require_auth. Guarded instead by query
+        // validation, a per-caller rate limit, and an upstream timeout; see
+        // handlers/typeahead.rs.
+        .route("/api/typeahead", get(handlers::typeahead::suggest));
 
     Router::new()
         .merge(protected_api)

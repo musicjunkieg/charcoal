@@ -8,12 +8,13 @@
 // data is isolated.
 
 use anyhow::Result;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    ThreatTier, ToxicPost, UserLabel, UserRow,
 };
+use super::traits::ScanSkip;
 
 // --- Users ---
 
@@ -206,7 +207,14 @@ pub fn get_ranked_threats(
         // Recalculate tier from stored score so threshold changes
         // take effect without rescanning.
         let threat_score: Option<f64> = row.get(4)?;
-        let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+        // Preserve a stored NotAssessed tier (#222) instead of recomputing —
+        // a NotAssessed row has a NULL score, which would otherwise resolve
+        // to no tier at all (or "Low" for a real 0.0 score).
+        let stored_tier: Option<String> = row.get(5)?;
+        let threat_tier = match stored_tier.as_deref() {
+            Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+            _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+        };
         Ok(AccountScore {
             did: row.get(0)?,
             handle: row.get(1)?,
@@ -257,6 +265,31 @@ pub fn is_score_stale(
             Ok(stale)
         }
     }
+}
+
+/// Return the DIDs the user has scored within the last `max_age_days` — i.e.
+/// the accounts a per-candidate `is_score_stale` check would call *fresh*
+/// (row exists AND `scored_at >= now - max_age_days`).
+///
+/// Discovery loops fetch this set once and test membership in memory instead
+/// of issuing one `is_score_stale` round-trip per candidate (#213). The cutoff
+/// MUST match `is_score_stale` exactly, or candidates get silently re-scored or
+/// skipped; `fresh_set_is_exactly_the_non_stale_dids` guards that.
+pub fn get_fresh_scored_dids(
+    conn: &Connection,
+    user_did: &str,
+    max_age_days: i64,
+) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT did FROM account_scores
+         WHERE user_did = ?1 AND datetime(scored_at) >= datetime('now', ?2)",
+    )?;
+    let dids = stmt
+        .query_map(params![user_did, format!("-{max_age_days} days")], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(dids)
 }
 
 // --- Amplification events ---
@@ -323,19 +356,85 @@ pub fn insert_amplification_event(
     Ok(conn.last_insert_rowid())
 }
 
+/// Insert many amplification events in one transaction, batched into
+/// multi-row `INSERT` statements.
+///
+/// SQLite binds a maximum of 999 parameters per statement on older builds and
+/// each row uses 9, so rows are chunked at 100 (999/9 = 111, minus headroom).
+/// All chunks share one transaction, so the batch is atomic and ids ascend in
+/// slice order.
+pub fn insert_amplification_events_batch(
+    conn: &Connection,
+    user_did: &str,
+    events: &[NewAmplificationEvent],
+) -> Result<usize> {
+    if events.is_empty() {
+        return Ok(0);
+    }
+
+    const ROWS_PER_STATEMENT: usize = 100;
+    const COLS: usize = 9;
+
+    let tx = conn.unchecked_transaction()?;
+    let mut inserted = 0usize;
+
+    for chunk in events.chunks(ROWS_PER_STATEMENT) {
+        // Build "(?1,?2,...,?9),(?10,...)" with 1-based positional parameters.
+        let placeholders: Vec<String> = (0..chunk.len())
+            .map(|row| {
+                let base = row * COLS;
+                let slots: Vec<String> = (1..=COLS).map(|c| format!("?{}", base + c)).collect();
+                format!("({})", slots.join(","))
+            })
+            .collect();
+
+        let sql = format!(
+            "INSERT INTO amplification_events
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                 amplifier_post_uri, amplifier_text, original_post_text, context_score)
+             VALUES {}",
+            placeholders.join(",")
+        );
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(chunk.len() * COLS);
+        for e in chunk {
+            params.push(Box::new(user_did.to_string()));
+            params.push(Box::new(e.event_type.clone()));
+            params.push(Box::new(e.amplifier_did.clone()));
+            params.push(Box::new(e.amplifier_handle.clone()));
+            params.push(Box::new(e.original_post_uri.clone()));
+            params.push(Box::new(e.amplifier_post_uri.clone()));
+            params.push(Box::new(e.amplifier_text.clone()));
+            params.push(Box::new(e.original_post_text.clone()));
+            params.push(Box::new(e.context_score));
+        }
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        inserted += tx.execute(&sql, param_refs.as_slice())?;
+    }
+
+    tx.commit()?;
+    Ok(inserted)
+}
+
 /// Get recent amplification events for a specific user.
 pub fn get_recent_events(
     conn: &Connection,
     user_did: &str,
     limit: u32,
 ) -> Result<Vec<AmplificationEvent>> {
+    // Batched inserts (insert_amplification_events_batch) give every row in a
+    // batch the SAME detected_at timestamp, so `ORDER BY detected_at DESC`
+    // alone leaves same-batch rows in an arbitrary order. `id DESC` breaks the
+    // tie deterministically — ids ascend in insertion order, so this keeps
+    // "newest first" stable within a batch, not just across batches.
     let mut stmt = conn.prepare(
         "SELECT id, event_type, amplifier_did, amplifier_handle, original_post_uri,
                 amplifier_post_uri, amplifier_text, detected_at, followers_fetched, followers_scored,
                 original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1
-         ORDER BY detected_at DESC
+         ORDER BY detected_at DESC, id DESC
          LIMIT ?2",
     )?;
 
@@ -399,7 +498,7 @@ pub fn get_events_by_amplifier(
                 followers_scored, original_post_text, context_score
          FROM amplification_events
          WHERE user_did = ?1 AND amplifier_did = ?2
-         ORDER BY detected_at DESC",
+         ORDER BY detected_at DESC, id DESC",
     )?;
     let rows = stmt.query_map(params![user_did, amplifier_did], |row| {
         Ok(AmplificationEvent {
@@ -476,7 +575,13 @@ pub fn get_account_by_handle(
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_str(&top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = row.get(4)?;
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = row.get(5)?;
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             Ok(AccountScore {
                 did: row.get(0)?,
                 handle: row.get(1)?,
@@ -518,7 +623,13 @@ pub fn get_account_by_did(
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_str(&top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = row.get(4)?;
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = row.get(5)?;
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             Ok(AccountScore {
                 did: row.get(0)?,
                 handle: row.get(1)?,
@@ -607,7 +718,13 @@ pub fn get_unlabeled_accounts(
         let top_toxic_posts: Vec<ToxicPost> =
             serde_json::from_str(&top_posts_json).unwrap_or_default();
         let threat_score: Option<f64> = row.get(4)?;
-        let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+        // Preserve a stored NotAssessed tier (#222) instead of recomputing
+        // from the (NULL) score.
+        let stored_tier: Option<String> = row.get(5)?;
+        let threat_tier = match stored_tier.as_deref() {
+            Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+            _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+        };
         Ok(AccountScore {
             did: row.get(0)?,
             handle: row.get(1)?,
@@ -817,31 +934,62 @@ pub fn has_fingerprint(conn: &Connection, user_did: &str) -> Result<bool> {
 
 /// Delete all data for a user (cascade across all user-scoped tables).
 pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
-    conn.execute(
+    // One transaction for the whole sequence, matching the Postgres backend.
+    // Without it, a failure partway through leaves the account half-deleted —
+    // e.g. `scan_skips` cleared while the `users` row survives, or the reverse:
+    // the account gone but its scanned-account DIDs and error text still on
+    // disk. For a deletion path the partial outcome is the dangerous one, so it
+    // has to be all-or-nothing.
+    //
+    // `unchecked_transaction` because this takes `&Connection`; rusqlite's
+    // `transaction()` needs `&mut`, which would ripple through every caller for
+    // no behavioural gain.
+    let tx = conn.unchecked_transaction()?;
+
+    // Staging tables first (#208) — they have no FK to the data tables, but
+    // clearing them up front keeps the delete in dependency order and ensures
+    // a user's queued classification work doesn't outlive the account itself.
+    tx.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    // #234: scan_skips holds the user's DID, the DIDs of accounts scanned on
+    // their behalf, and raw error text. It is user-scoped like everything else
+    // here and must not outlive the account.
+    tx.execute(
+        "DELETE FROM scan_skips WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM user_labels WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM amplification_events WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM account_scores WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM scan_state WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM topic_fingerprint WHERE user_did = ?1",
         params![user_did],
     )?;
-    conn.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
+    tx.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -863,8 +1011,340 @@ pub fn get_all_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<Stri
     Ok(dids)
 }
 
-// rusqlite's optional() helper — converts "no rows" into None
-use rusqlite::OptionalExtension;
+// --- Classification staging (#208) ---
+
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
+
+/// Enqueue a batch of classifier work-queue rows for a user.
+///
+/// Uses UPSERT so Phase A is idempotent — the same `(user_did, account_did,
+/// post_uri)` triple can be written twice and will result in a single row.
+/// All fields (including pre-filled clean-pass verdicts) are written.
+pub fn enqueue_classifications(conn: &Connection, user_did: &str, rows: &[QueueRow]) -> Result<()> {
+    // Batch all inserts inside one transaction and one prepared statement to
+    // avoid re-acquiring the Mutex for every row.
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO classification_queue
+                 (user_did, account_did, post_uri, text, context_text,
+                  post_kind, onnx_score, status,
+                  toxic_token, confidence, model_id, policy_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(user_did, account_did, post_uri) DO UPDATE SET
+                 text           = excluded.text,
+                 context_text   = excluded.context_text,
+                 post_kind      = excluded.post_kind,
+                 onnx_score     = excluded.onnx_score,
+                 status         = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.status
+                                       ELSE excluded.status END,
+                 toxic_token    = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.toxic_token
+                                       ELSE excluded.toxic_token END,
+                 confidence     = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.confidence
+                                       ELSE excluded.confidence END,
+                 model_id       = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.model_id
+                                       ELSE excluded.model_id END,
+                 policy_version = CASE WHEN classification_queue.status = 'done'
+                                       THEN classification_queue.policy_version
+                                       ELSE excluded.policy_version END",
+        )?;
+        for row in rows {
+            let toxic_token_int: Option<i64> = row.toxic_token.map(|b| if b { 1 } else { 0 });
+            let confidence_real: Option<f64> = row.confidence.map(f64::from);
+            stmt.execute(params![
+                user_did,
+                row.account_did,
+                row.post_uri,
+                row.text,
+                row.context_text,
+                row.post_kind,
+                row.onnx_score,
+                row.status,
+                toxic_token_int,
+                confidence_real,
+                row.model_id,
+                row.policy_version,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Stash a serialised `AccountInput` blob for an account (UPSERT).
+pub fn stash_account_input(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+    payload_json: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO scan_account_input (user_did, account_did, payload_json)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(user_did, account_did) DO UPDATE SET payload_json = excluded.payload_json",
+        params![user_did, account_did, payload_json],
+    )?;
+    Ok(())
+}
+
+/// Fetch up to `limit` pending queue rows for a user.
+pub fn fetch_pending_classifications(
+    conn: &Connection,
+    user_did: &str,
+    limit: i64,
+) -> Result<Vec<QueueRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT account_did, post_uri, text, context_text, post_kind,
+                onnx_score, status, toxic_token, confidence, model_id, policy_version
+         FROM classification_queue
+         WHERE user_did = ?1 AND status = 'pending'
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![user_did, limit], map_queue_row)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Record a batch of completed classifier verdicts.
+///
+/// Updates each matching row to `status='done'` and fills in all verdict
+/// fields.  All updates are batched inside a single transaction.
+pub fn record_classification_verdicts(
+    conn: &Connection,
+    user_did: &str,
+    verdicts: &[VerdictRow],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE classification_queue
+             SET status = 'done',
+                 toxic_token    = ?1,
+                 confidence     = ?2,
+                 model_id       = ?3,
+                 policy_version = ?4
+             WHERE user_did = ?5 AND account_did = ?6 AND post_uri = ?7",
+        )?;
+        for v in verdicts {
+            let toxic_token_int: i64 = if v.toxic_token { 1 } else { 0 };
+            let confidence_real: f64 = f64::from(v.confidence);
+            stmt.execute(params![
+                toxic_token_int,
+                confidence_real,
+                v.model_id,
+                v.policy_version,
+                user_did,
+                v.account_did,
+                v.post_uri,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// List distinct `account_did` values in the classification queue for a user.
+pub fn list_scan_accounts(conn: &Connection, user_did: &str) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT account_did FROM classification_queue WHERE user_did = ?1")?;
+    let dids = stmt
+        .query_map(params![user_did], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<String>, _>>()?;
+    Ok(dids)
+}
+
+/// Fetch all queue rows (any status) for a specific account.
+pub fn fetch_account_verdicts(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+) -> Result<Vec<QueueRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT account_did, post_uri, text, context_text, post_kind,
+                onnx_score, status, toxic_token, confidence, model_id, policy_version
+         FROM classification_queue
+         WHERE user_did = ?1 AND account_did = ?2",
+    )?;
+    let rows = stmt.query_map(params![user_did, account_did], map_queue_row)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+/// Retrieve the stashed `AccountInput` JSON blob for an account, if any.
+pub fn fetch_account_input(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+) -> Result<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT payload_json FROM scan_account_input WHERE user_did = ?1 AND account_did = ?2",
+    )?;
+    let result = stmt
+        .query_row(params![user_did, account_did], |row| row.get(0))
+        .optional()?;
+    Ok(result)
+}
+
+/// Count rows with `status='pending'` in the classification queue for a user.
+pub fn count_pending_classifications(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM classification_queue WHERE user_did = ?1 AND status = 'pending'",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Delete all staging data for a user from `classification_queue` and
+/// `scan_account_input`.  Does NOT touch `scan_state`.
+pub fn clear_scan_staging(conn: &Connection, user_did: &str) -> Result<()> {
+    // Both deletes in one transaction so a crash can't leave half-cleared
+    // staging (mirrors the batched-write pattern used elsewhere in this file).
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Delete the staging data for a single account from `classification_queue` and
+/// `scan_account_input`.  Does NOT touch `scan_state`.
+pub fn clear_account_staging(conn: &Connection, user_did: &str, account_did: &str) -> Result<()> {
+    // Both deletes in one transaction so a crash can't leave half-cleared
+    // staging (mirrors the batched-write pattern used elsewhere in this file).
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM classification_queue WHERE user_did = ?1 AND account_did = ?2",
+        params![user_did, account_did],
+    )?;
+    tx.execute(
+        "DELETE FROM scan_account_input WHERE user_did = ?1 AND account_did = ?2",
+        params![user_did, account_did],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+// ── shared row-mapper ─────────────────────────────────────────────────────────
+
+/// Map a `classification_queue` SELECT row into a `QueueRow`.
+///
+/// Expected column order (0-indexed):
+///   0  account_did, 1  post_uri,    2  text,          3  context_text,
+///   4  post_kind,   5  onnx_score,  6  status,
+///   7  toxic_token (INTEGER nullable), 8  confidence (REAL nullable),
+///   9  model_id,    10 policy_version
+fn map_queue_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRow> {
+    let toxic_int: Option<i64> = row.get(7)?;
+    let confidence_real: Option<f64> = row.get(8)?;
+    Ok(QueueRow {
+        account_did: row.get(0)?,
+        post_uri: row.get(1)?,
+        text: row.get(2)?,
+        context_text: row.get(3)?,
+        post_kind: row.get(4)?,
+        onnx_score: row.get(5)?,
+        status: row.get(6)?,
+        toxic_token: toxic_int.map(|i| i != 0),
+        confidence: confidence_real.map(|f| f as f32),
+        model_id: row.get(9)?,
+        policy_version: row.get(10)?,
+    })
+}
+
+// ── scan_skips (#226) ────────────────────────────────────────────────────────
+//
+// A skipped account is a real gap in a scan's coverage. Before this table the
+// only evidence was a WARN log line, and Railway drops log messages by RATE
+// (not severity) once a replica exceeds 500/sec — so those counts were a floor,
+// not a total. See #220 for the diagnosis this would have made trivial.
+
+/// Record (or update) one skipped account.
+///
+/// Upserts on (user_did, account_did, phase): a re-gather that fails again
+/// refreshes the row instead of adding one, so the count keeps meaning
+/// "accounts missing from this scan".
+pub fn record_scan_skip(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+    phase: &str,
+    error: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO scan_skips (user_did, account_did, phase, error, skipped_at)
+         VALUES (?1, ?2, ?3, ?4, datetime('now'))
+         ON CONFLICT(user_did, account_did, phase) DO UPDATE SET
+             error = excluded.error,
+             skipped_at = excluded.skipped_at",
+        params![user_did, account_did, phase, error],
+    )?;
+    Ok(())
+}
+
+/// Number of accounts skipped in the current scan for a user.
+pub fn count_scan_skips(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM scan_skips WHERE user_did = ?1",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Count accounts whose `threat_tier` is `'NotAssessed'` for a user (#222).
+///
+/// `get_ranked_threats` filters on `threat_score >= ?`, which always excludes
+/// NULL-score NotAssessed rows, so this can't be derived from that result
+/// set — it needs its own query.
+pub fn count_not_assessed(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed'",
+        params![user_did],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// All skips recorded for a user, newest first.
+pub fn list_scan_skips(conn: &Connection, user_did: &str) -> Result<Vec<ScanSkip>> {
+    let mut stmt = conn.prepare(
+        "SELECT account_did, phase, error, skipped_at
+         FROM scan_skips WHERE user_did = ?1
+         ORDER BY skipped_at DESC, account_did ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![user_did], |row| {
+            Ok(ScanSkip {
+                account_did: row.get(0)?,
+                phase: row.get(1)?,
+                error: row.get(2)?,
+                skipped_at: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Delete a user's recorded skips. Called at gather entry so the count always
+/// describes the current scan.
+pub fn clear_scan_skips(conn: &Connection, user_did: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM scan_skips WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -990,6 +1470,67 @@ mod tests {
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].handle, "test.bsky.social");
         assert_eq!(ranked[0].threat_score, Some(65.0));
+    }
+
+    /// #222: a NotAssessed row (NULL score, tier "NotAssessed") must survive
+    /// the read path's tier-recompute unchanged — it must never be recomputed
+    /// to "Low" the way a real NULL/0.0 score would be.
+    #[test]
+    fn not_assessed_row_survives_read_recompute() {
+        let conn = test_db();
+
+        let score = AccountScore {
+            did: "did:plc:notassessed".to_string(),
+            handle: "unassessed.bsky.social".to_string(),
+            toxicity_score: None,
+            topic_overlap: None,
+            threat_score: None,
+            threat_tier: Some(ThreatTier::NotAssessed.as_str().to_string()),
+            posts_analyzed: 5,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        upsert_account_score(&conn, TEST_USER, &score).unwrap();
+
+        // The write path must store SQL NULL, not coerce None to 0.0.
+        let stored_score: Option<f64> = conn
+            .query_row(
+                "SELECT threat_score FROM account_scores WHERE user_did = ?1 AND did = ?2",
+                params![TEST_USER, "did:plc:notassessed"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored_score, None,
+            "threat_score must persist as NULL, not 0.0"
+        );
+
+        // get_account_by_did recomputes the tier from the stored score on
+        // every read; it must preserve a stored NotAssessed tier instead.
+        let fetched = get_account_by_did(&conn, TEST_USER, "did:plc:notassessed")
+            .unwrap()
+            .expect("account should be found");
+        assert_eq!(fetched.threat_score, None);
+        assert_eq!(
+            fetched.threat_tier.as_deref(),
+            Some(ThreatTier::NotAssessed.as_str()),
+            "NotAssessed tier must not be recomputed to Low"
+        );
+        assert_ne!(fetched.threat_tier.as_deref(), Some("Low"));
+
+        // Same guarantee via the handle lookup.
+        let fetched_by_handle = get_account_by_handle(&conn, TEST_USER, "unassessed.bsky.social")
+            .unwrap()
+            .expect("account should be found by handle");
+        assert_eq!(
+            fetched_by_handle.threat_tier.as_deref(),
+            Some(ThreatTier::NotAssessed.as_str())
+        );
     }
 
     #[test]

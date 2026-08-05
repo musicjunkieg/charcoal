@@ -7,3 +7,4 @@ pub mod labels;
 pub mod oauth;
 pub mod scan;
 pub mod status;
+pub mod typeahead;

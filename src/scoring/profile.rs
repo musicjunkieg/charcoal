@@ -9,12 +9,12 @@
 // 6. Returns a complete AccountScore ready for storage
 
 use anyhow::Result;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, FingerprintQuality, Post};
 use crate::bluesky::relationships::GraphDistance;
-use crate::db::models::{AccountScore, ToxicPost};
+use crate::db::models::{AccountScore, ThreatTier, ToxicPost};
 use crate::scoring::behavioral;
 use crate::scoring::nli::NliScorer;
 use crate::scoring::threat::{self, ThreatWeights};
@@ -23,7 +23,58 @@ use crate::topics::fingerprint::TopicFingerprint;
 use crate::topics::overlap;
 use crate::topics::tfidf::TfIdfExtractor;
 use crate::topics::traits::TopicExtractor;
-use crate::toxicity::traits::ToxicityScorer;
+use crate::toxicity::traits::{BinaryVerdict, ToxicityScorer};
+
+/// Result of the Stage 1 quick check.
+///
+/// Stage 1 fetches a small (25-post) sample and decides whether the account is
+/// obviously a non-threat (too few posts to score, or clean-and-irrelevant). In
+/// those cases it produces a terminal [`AccountScore`] and the full pipeline is
+/// skipped. Otherwise it signals `Proceed`, carrying any Stage-1-computed value
+/// the caller may want for logging.
+///
+/// Note: the only Stage-1 value carried forward is `stage1_overlap` (the cheap
+/// TF-IDF overlap against the 25-post sample). The Stage 2 path deliberately
+/// recomputes overlap and fingerprint quality from the larger 50-post sample —
+/// it does **not** reuse Stage 1's values for the scoring math — so `Proceed`
+/// only needs to surface `stage1_overlap` for diagnostics, not for correctness.
+pub enum Stage1Outcome {
+    /// Account fully scored at Stage 1 — return this score, skip Stage 2.
+    /// Boxed because `AccountScore` is large relative to the `Proceed` variant.
+    Terminal(Box<AccountScore>),
+    /// Account survived the early-exit gate — run the full Stage 2 pipeline.
+    Proceed {
+        /// Cheap TF-IDF overlap from the 25-post sample (`None` if extraction
+        /// failed). Carried for diagnostics; Stage 2 recomputes its own overlap.
+        stage1_overlap: Option<f64>,
+    },
+}
+
+/// Build the terminal `AccountScore` for an account whose posts our English-only
+/// models cannot assess (#222). Shared by the Stage-1 and both Stage-2 seams.
+pub(crate) fn not_assessed_score(
+    did: &str,
+    handle: &str,
+    posts_analyzed: u32,
+    graph_distance: Option<GraphDistance>,
+) -> AccountScore {
+    AccountScore {
+        did: did.to_string(),
+        handle: handle.to_string(),
+        toxicity_score: None,
+        topic_overlap: None,
+        threat_score: None,
+        threat_tier: Some(ThreatTier::NotAssessed.as_str().to_string()),
+        posts_analyzed,
+        top_toxic_posts: vec![],
+        scored_at: String::new(),
+        behavioral_signals: None,
+        context_score: None,
+        graph_distance: graph_distance.map(|d| d.as_str().to_string()),
+        fingerprint_quality: None,
+        scoring_confidence: None,
+    }
+}
 
 /// Build a complete threat profile for a single account.
 ///
@@ -58,13 +109,152 @@ pub async fn build_profile(
     // This catches ~50-60% of sweep accounts with minimal cost.
     let stage1_sample = posts::fetch_posts_with_replies(client, target_handle, 25).await?;
 
+    let stage1_overlap = match stage1_outcome(
+        &stage1_sample,
+        scorer,
+        target_handle,
+        target_did,
+        protected_fingerprint,
+        weights,
+        graph_distance,
+    )
+    .await?
+    {
+        Stage1Outcome::Terminal(score) => return Ok(*score),
+        Stage1Outcome::Proceed { stage1_overlap } => stage1_overlap,
+    };
+
+    // ── Stage 2: Full pipeline with 50 posts ──
+    // Account wasn't clean enough for early exit — run the full analysis.
+    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
+
+    // #222: partition before classification so unassessable posts never reach the
+    // ONNX gate / CoPE-B, and a now-unassessable-dominant account abstains.
+    let (sample, dropped) = crate::scoring::language::partition_assessable(&sample);
+    if crate::scoring::language::coverage_gate(sample.total_posts, dropped)
+        == crate::scoring::language::CoverageOutcome::NotAssessed
+    {
+        return Ok(not_assessed_score(
+            target_did,
+            target_handle,
+            (sample.total_posts + dropped) as u32,
+            graph_distance,
+        ));
+    }
+
+    // All posts go to toxicity scoring, with per-post context for replies.
+    // Originals and quotes are scored solo; replies are scored as a parent/reply
+    // pair so the conversation-scoped Zentropi labeler can correctly evaluate
+    // whether the reply is hostile toward the parent's author.
+    let all_post_texts: Vec<String> = sample
+        .originals
+        .iter()
+        .map(|p| p.text.clone())
+        .chain(sample.replies.iter().map(|r| r.post.text.clone()))
+        .chain(sample.quotes.iter().map(|p| p.text.clone()))
+        .collect();
+
+    let parent_uris: Vec<String> = sample
+        .replies
+        .iter()
+        .map(|r| r.parent_uri.clone())
+        .collect();
+    let parent_texts = posts::fetch_parent_posts(client, &parent_uris).await?;
+
+    // contexts[i] aligns with all_post_texts[i]: parent text for replies, None otherwise.
+    let mut contexts: Vec<Option<String>> = Vec::with_capacity(all_post_texts.len());
+    contexts.extend(std::iter::repeat_n(None, sample.originals.len()));
+    for r in &sample.replies {
+        contexts.push(parent_texts.get(&r.parent_uri).cloned());
+    }
+    contexts.extend(std::iter::repeat_n(None, sample.quotes.len()));
+
+    // Step 3: Two-stage classification — ONNX clean-pass + Zentropi binary verdict.
+    // Each verdict carries the binary `is_toxic` flag plus the underlying ONNX
+    // score (for evidence sorting and audit).
+    let verdicts = scorer
+        .classify_batch_with_contexts(&all_post_texts, &contexts)
+        .await?;
+
+    // Precompute the pile-on flag from the caller-supplied set, matching the
+    // `AccountInput` blob design — `score_from_sample` takes the bare bool.
+    let pile_on = pile_on_dids.contains(target_did);
+
+    score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        // build_profile is the monolithic (non-decoupled) path — it has no
+        // Phase-A precompute, so it embeds at score time exactly as before.
+        None,
+        median_engagement,
+        pile_on,
+        nli_scorer,
+        protected_posts_with_embeddings,
+        direct_pairs,
+        data_dir,
+        graph_distance,
+        target_handle,
+        target_did,
+        stage1_overlap,
+    )
+    .await
+}
+
+/// Stage 1 quick check — decide whether to early-exit or proceed to Stage 2.
+///
+/// Operates on an already-fetched 25-post sample (it does **not** fetch). Runs
+/// the ONNX clean-pass filter over first-person posts plus a cheap TF-IDF
+/// overlap, then applies [`should_early_exit_stage1`]. Returns
+/// [`Stage1Outcome::Terminal`] with a fully-built terminal `AccountScore` for
+/// the two non-threat cases (`< 5` posts → "Insufficient Data"; clean and
+/// topically irrelevant → early-exit "Low"), or [`Stage1Outcome::Proceed`] when
+/// the account warrants the full pipeline.
+#[allow(clippy::too_many_arguments)]
+pub async fn stage1_outcome(
+    stage1_sample: &posts::PostSample,
+    scorer: &dyn ToxicityScorer,
+    target_handle: &str,
+    target_did: &str,
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    graph_distance: Option<GraphDistance>,
+) -> Result<Stage1Outcome> {
+    // #222: drop posts our English-only models cannot assess, and decide whether
+    // the account is scoreable, unassessable, or genuinely sparse — BEFORE the
+    // ONNX clean-pass, so a non-English account can't early-exit to Low.
+    let (assessable_sample, dropped) =
+        crate::scoring::language::partition_assessable(stage1_sample);
+    match crate::scoring::language::coverage_gate(assessable_sample.total_posts, dropped) {
+        crate::scoring::language::CoverageOutcome::NotAssessed => {
+            return Ok(Stage1Outcome::Terminal(Box::new(not_assessed_score(
+                target_did,
+                target_handle,
+                (assessable_sample.total_posts + dropped) as u32,
+                graph_distance,
+            ))));
+        }
+        crate::scoring::language::CoverageOutcome::InsufficientData => {
+            // Falls through to the existing <5 terminal below (sparse account).
+        }
+        crate::scoring::language::CoverageOutcome::Score => {}
+    }
+
+    // From here down, operate on the assessable-only sample.
+    let stage1_sample = &assessable_sample;
+
     if stage1_sample.total_posts < 5 {
         info!(
             handle = target_handle,
             post_count = stage1_sample.total_posts,
             "Insufficient posts for reliable scoring"
         );
-        return Ok(AccountScore {
+        return Ok(Stage1Outcome::Terminal(Box::new(AccountScore {
             did: target_did.to_string(),
             handle: target_handle.to_string(),
             toxicity_score: None,
@@ -82,7 +272,7 @@ pub async fn build_profile(
             graph_distance: graph_distance.map(|d| d.as_str().to_string()),
             fingerprint_quality: None,
             scoring_confidence: None,
-        });
+        })));
     }
 
     // Quick ONNX scores for clean-pass check.
@@ -162,7 +352,7 @@ pub async fn build_profile(
             stage1_sample.replies.len() + stage1_sample.quotes.len(),
         );
 
-        return Ok(AccountScore {
+        return Ok(Stage1Outcome::Terminal(Box::new(AccountScore {
             did: target_did.to_string(),
             handle: target_handle.to_string(),
             toxicity_score: Some(0.0),
@@ -179,24 +369,43 @@ pub async fn build_profile(
             graph_distance: graph_distance.map(|d| d.as_str().to_string()),
             fingerprint_quality: Some(fp_quality.as_str().to_string()),
             scoring_confidence: Some("low".to_string()),
-        });
+        })));
     }
 
-    // ── Stage 2: Full pipeline with 50 posts ──
-    // Account wasn't clean enough for early exit — run the full analysis.
-    let sample = posts::fetch_posts_with_replies(client, target_handle, 50).await?;
+    Ok(Stage1Outcome::Proceed { stage1_overlap })
+}
 
-    // Step 2: Determine fingerprint quality and select posts for fingerprinting
-    let fp_quality = FingerprintQuality::from_counts(
-        sample.originals.len(),
-        sample.replies.len() + sample.quotes.len(),
-    );
-
-    // Fingerprinting uses originals when available (chosen topics, not inherited)
-    let fingerprint_posts: Vec<String> = if sample.originals.len() >= 15 {
+/// Score an account from an already-fetched Stage 2 sample and its classifier
+/// verdicts — the full pipeline *after* `classify_batch_with_contexts`.
+///
+/// This function does **not** fetch and does **not** call the classifier. It
+/// takes the 50-post `stage2_sample`, the flattened `all_post_texts` (originals
+/// ++ reply texts ++ quotes, in that order), the per-post `contexts` (parent
+/// text for replies, `None` otherwise), and the aligned `verdicts`, then runs:
+/// reply-weighted toxicity → topic overlap → behavioral signals → context/NLI
+/// two-pass gate → graph distance → tier → final `AccountScore`.
+///
+/// `pile_on` is the precomputed `pile_on_dids.contains(target_did)` bool (the
+/// caller owns the set). `stage1_overlap` is accepted for parity with the
+/// staged-scan blob design but is not used by the scoring math — overlap and
+/// fingerprint quality are recomputed here from the 50-post sample, identically
+/// to the original monolithic `build_profile`.
+/// Select the posts used to build an account's topic fingerprint / target
+/// embedding from its Stage-2 `PostSample`.
+///
+/// Prefers originals (chosen topics, not inherited) when there are enough of
+/// them (≥ 15); otherwise falls back to all posts — originals ++ reply texts
+/// ++ quote texts, in that order.
+///
+/// This is the single source of truth for the selection. Phase C
+/// (`score_from_sample`) uses it to build the fingerprint, and Phase A
+/// (`gather`) uses it to feed the embedder when it precomputes the target
+/// vector, so the two phases can never diverge on which posts represent the
+/// account (#213).
+pub fn select_fingerprint_posts(sample: &posts::PostSample) -> Vec<String> {
+    if sample.originals.len() >= 15 {
         sample.originals.iter().map(|p| p.text.clone()).collect()
     } else {
-        // Fall back to all posts for fingerprinting
         sample
             .originals
             .iter()
@@ -204,19 +413,49 @@ pub async fn build_profile(
             .chain(sample.replies.iter().map(|r| r.post.text.clone()))
             .chain(sample.quotes.iter().map(|p| p.text.clone()))
             .collect()
-    };
+    }
+}
 
-    // All posts go to toxicity scoring, with per-post context for replies.
-    // Originals and quotes are scored solo; replies are scored as a parent/reply
-    // pair so the conversation-scoped Zentropi labeler can correctly evaluate
-    // whether the reply is hostile toward the parent's author.
-    let all_post_texts: Vec<String> = sample
-        .originals
-        .iter()
-        .map(|p| p.text.clone())
-        .chain(sample.replies.iter().map(|r| r.post.text.clone()))
-        .chain(sample.quotes.iter().map(|p| p.text.clone()))
-        .collect();
+#[allow(clippy::too_many_arguments)]
+pub async fn score_from_sample(
+    stage2_sample: &posts::PostSample,
+    all_post_texts: &[String],
+    contexts: &[Option<String>],
+    verdicts: &[BinaryVerdict],
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
+    // Target mean embedding precomputed in Phase A (gather), where the ONNX
+    // work overlaps I/O instead of serializing in Phase C. When `Some`, the
+    // overlap step uses it directly and never touches `embedder` — the whole
+    // point of #213. `None` falls back to embedding here (old blobs) or TF-IDF.
+    precomputed_target_embedding: Option<&[f64]>,
+    median_engagement: f64,
+    pile_on: bool,
+    nli_scorer: Option<&NliScorer>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    direct_pairs: Option<&[(String, String)]>,
+    data_dir: Option<&std::path::Path>,
+    graph_distance: Option<GraphDistance>,
+    target_handle: &str,
+    target_did: &str,
+    _stage1_overlap: Option<f64>,
+) -> Result<AccountScore> {
+    let sample = stage2_sample;
+    let _ = contexts; // contexts were consumed by the (already-run) classifier.
+
+    // Step 2: Determine fingerprint quality and select posts for fingerprinting
+    let fp_quality = FingerprintQuality::from_counts(
+        sample.originals.len(),
+        sample.replies.len() + sample.quotes.len(),
+    );
+
+    // Fingerprinting uses originals when available (chosen topics, not inherited).
+    // Extracted into `select_fingerprint_posts` so Phase A (gather) can feed the
+    // embedder EXACTLY these posts when it precomputes the target vector — one
+    // shared selection makes producer/consumer divergence impossible (#213).
+    let fingerprint_posts: Vec<String> = select_fingerprint_posts(sample);
 
     let all_posts_flat: Vec<&Post> = sample
         .originals
@@ -225,34 +464,32 @@ pub async fn build_profile(
         .chain(sample.quotes.iter())
         .collect();
 
-    let parent_uris: Vec<String> = sample
-        .replies
-        .iter()
-        .map(|r| r.parent_uri.clone())
-        .collect();
-    let parent_texts = posts::fetch_parent_posts(client, &parent_uris).await?;
-
-    // contexts[i] aligns with all_post_texts[i]: parent text for replies, None otherwise.
-    let mut contexts: Vec<Option<String>> = Vec::with_capacity(all_post_texts.len());
-    contexts.extend(std::iter::repeat_n(None, sample.originals.len()));
-    for r in &sample.replies {
-        contexts.push(parent_texts.get(&r.parent_uri).cloned());
-    }
-    contexts.extend(std::iter::repeat_n(None, sample.quotes.len()));
-
-    // Step 3: Two-stage classification — ONNX clean-pass + Zentropi binary verdict.
-    // Each verdict carries the binary `is_toxic` flag plus the underlying ONNX
-    // score (for evidence sorting and audit).
-    let verdicts = scorer
-        .classify_batch_with_contexts(&all_post_texts, &contexts)
-        .await?;
-
     // Reply-weighted binary toxicity rate. Replies count 70% (where harassment
     // manifests), originals 30% (where stated views show). Quotes are bucketed
     // with originals — they are first-person commentary, not a reply pair.
     let originals_len = sample.originals.len();
     let replies_len = sample.replies.len();
     let quotes_len = sample.quotes.len();
+
+    // Fail loud on misalignment instead of panicking on an out-of-bounds slice
+    // (or silently mis-scoring). The verdicts and post texts must be 1:1 with
+    // the originals+replies+quotes the sample contains, in that order.
+    let expected_len = originals_len + replies_len + quotes_len;
+    anyhow::ensure!(
+        verdicts.len() == all_post_texts.len(),
+        "Stage-2 misalignment: {} verdicts vs {} post texts",
+        verdicts.len(),
+        all_post_texts.len(),
+    );
+    anyhow::ensure!(
+        verdicts.len() == expected_len,
+        "Stage-2 misalignment: {} verdicts vs {} expected (originals {} + replies {} + quotes {})",
+        verdicts.len(),
+        expected_len,
+        originals_len,
+        replies_len,
+        quotes_len,
+    );
 
     let originals_verdicts = &verdicts[..originals_len];
     let replies_verdicts = &verdicts[originals_len..originals_len + replies_len];
@@ -307,7 +544,16 @@ pub async fn build_profile(
     // Prefer sentence embeddings when available — they capture semantic
     // similarity ("fatphobia" ≈ "obesity") that keyword matching misses.
     // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
-    let topic_overlap = if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
+    let topic_overlap = if let (Some(precomputed), Some(protected_emb)) =
+        (precomputed_target_embedding, protected_embedding)
+    {
+        // Precomputed path (#213): Phase A already embedded `fingerprint_posts`
+        // (the identical selection, via `select_fingerprint_posts`) and averaged
+        // them, so the cosine here is byte-identical to the embed-at-finalize
+        // path below — only the (expensive, mutex-serialized) embedding moved to
+        // Phase A where it overlaps I/O.
+        embeddings::cosine_similarity_embeddings(protected_emb, precomputed)
+    } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
         // Embedding path: embed target's posts, average, compare
         let target_embeddings = emb.embed_batch(&fingerprint_posts).await?;
         let target_mean = embeddings::mean_embedding(&target_embeddings);
@@ -327,7 +573,8 @@ pub async fn build_profile(
     let reply_ratio = sample.reply_ratio;
 
     let avg_engagement = behavioral::compute_avg_engagement_refs(&all_posts_flat);
-    let pile_on = pile_on_dids.contains(target_did);
+    // `pile_on` is supplied precomputed by the caller (the pile-on DID set is
+    // owned upstream, matching the staged-scan blob design).
 
     // Step 5: Compute context score via NLI
     //
@@ -343,12 +590,18 @@ pub async fn build_profile(
                 let mut pair_scores = Vec::new();
                 for (original, response) in pairs {
                     match nli.score_pair(original, response).await {
-                        Ok((score, hypothesis_scores)) => {
+                        Ok(Some((score, hypothesis_scores))) => {
                             pair_scores.push(score);
+                            info!(
+                                target_did = target_did,
+                                target_handle = target_handle,
+                                pair_type = "direct",
+                                hostility_score = format!("{:.3}", score),
+                                "NLI audit"
+                            );
                             if let Some(dir) = data_dir {
-                                crate::scoring::nli_audit::log_nli_audit(
-                                    &crate::scoring::nli_audit::NliAuditEntry {
-                                        timestamp: chrono::Utc::now().to_rfc3339(),
+                                let event = crate::scoring::audit_log::AuditEvent::nli(
+                                    crate::scoring::audit_log::NliFields {
                                         target_did: target_did.to_string(),
                                         target_handle: target_handle.to_string(),
                                         pair_type: "direct".to_string(),
@@ -358,9 +611,28 @@ pub async fn build_profile(
                                         hostility_score: score,
                                         similarity: None,
                                     },
-                                    Some(dir),
                                 );
+                                match crate::scoring::audit_log::AuditWriter::from_env(
+                                    dir,
+                                    crate::scoring::audit_log::EventKind::Nli,
+                                ) {
+                                    Ok(writer) => {
+                                        if let Err(e) = writer.record(event) {
+                                            warn!(error = %e, "Failed to write NLI audit JSONL");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!(error = %e, "Failed to init NLI audit writer");
+                                    }
+                                }
                             }
+                        }
+                        Ok(None) => {
+                            debug!(
+                                target_did = target_did,
+                                pair_type = "direct",
+                                "Skipped NLI pair: unassessable language"
+                            );
                         }
                         Err(e) => {
                             warn!(error = %e, "NLI scoring failed for direct pair");
@@ -374,7 +646,7 @@ pub async fn build_profile(
             if user_posts.is_empty() {
                 None
             } else {
-                match emb.embed_batch(&all_post_texts).await {
+                match emb.embed_batch(all_post_texts).await {
                     Ok(target_embeddings) => {
                         let target_with_emb: Vec<(String, Vec<f64>)> = all_post_texts
                             .iter()
@@ -419,12 +691,18 @@ pub async fn build_profile(
                             }
 
                             match nli.score_pair(original, target_text).await {
-                                Ok((score, hypothesis_scores)) => {
+                                Ok(Some((score, hypothesis_scores))) => {
                                     pair_scores.push(score);
+                                    info!(
+                                        target_did = target_did,
+                                        target_handle = target_handle,
+                                        pair_type = "inferred",
+                                        hostility_score = format!("{:.3}", score),
+                                        "NLI audit"
+                                    );
                                     if let Some(dir) = data_dir {
-                                        crate::scoring::nli_audit::log_nli_audit(
-                                            &crate::scoring::nli_audit::NliAuditEntry {
-                                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                        let event = crate::scoring::audit_log::AuditEvent::nli(
+                                            crate::scoring::audit_log::NliFields {
                                                 target_did: target_did.to_string(),
                                                 target_handle: target_handle.to_string(),
                                                 pair_type: "inferred".to_string(),
@@ -434,9 +712,28 @@ pub async fn build_profile(
                                                 hostility_score: score,
                                                 similarity: Some(*similarity),
                                             },
-                                            Some(dir),
                                         );
+                                        match crate::scoring::audit_log::AuditWriter::from_env(
+                                            dir,
+                                            crate::scoring::audit_log::EventKind::Nli,
+                                        ) {
+                                            Ok(writer) => {
+                                                if let Err(e) = writer.record(event) {
+                                                    warn!(error = %e, "Failed to write NLI audit JSONL");
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!(error = %e, "Failed to init NLI audit writer");
+                                            }
+                                        }
                                     }
+                                }
+                                Ok(None) => {
+                                    debug!(
+                                        target_did = target_did,
+                                        pair_type = "inferred",
+                                        "Skipped NLI pair: unassessable language"
+                                    );
                                 }
                                 Err(e) => {
                                     warn!(error = %e, "NLI scoring failed for inferred pair");

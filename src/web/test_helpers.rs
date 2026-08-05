@@ -42,6 +42,8 @@ pub fn build_test_app_with_db() -> (axum::Router, Arc<dyn crate::db::Database>) 
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
         oauth_tokens: Arc::new(RwLock::new(None)),
         signing_key,
+        http: reqwest::Client::new(),
+        typeahead_limiter: crate::web::handlers::typeahead::build_limiter(),
     };
 
     (build_router(state), db)

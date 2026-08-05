@@ -34,7 +34,34 @@ export interface TierCounts {
 	elevated: number;
 	watch: number;
 	low: number;
+	// Accounts whose posts couldn't be scored — unsupported language (#222
+	// language abstention). Excluded from `total`, so it's a distinct bucket
+	// rather than a threat tier.
+	not_assessed: number;
 	total: number;
+}
+
+// Coarse scan stage from the backend. The setup stages come from the
+// in-memory scan job; gathering/classifying/finalizing are refined from
+// pipeline state while the heavy scoring stage runs.
+export type ScanPhase =
+	| 'idle'
+	| 'starting'
+	| 'loading_models'
+	| 'fingerprint'
+	| 'discovering'
+	| 'scoring'
+	| 'gathering'
+	| 'classifying'
+	| 'finalizing'
+	| 'done'
+	| 'failed';
+
+// Live progress counts; null while a stage hasn't recorded its denominator.
+export interface ScanProgress {
+	candidates_total: number | null;
+	classifications_total: number | null;
+	classifications_done: number | null;
 }
 
 export interface ScanStatus {
@@ -42,6 +69,8 @@ export interface ScanStatus {
 	started_at: string | null;
 	progress_message: string;
 	last_error: string | null;
+	phase: ScanPhase;
+	progress: ScanProgress | null;
 	tier_counts: TierCounts;
 }
 
@@ -67,9 +96,16 @@ export interface EventsResponse {
 	events: AmplificationEvent[];
 }
 
+// Matches the serialized TopicFingerprint returned by GET /api/fingerprint.
+export interface TopicCluster {
+	label: string;
+	keywords: string[];
+	weight: number;
+}
+
 export interface FingerprintResponse {
 	fingerprint: {
-		keywords: Array<{ term: string; weight: number }>;
+		clusters: TopicCluster[];
 		post_count: number;
 	} | null;
 	post_count: number;

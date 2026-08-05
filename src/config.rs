@@ -35,6 +35,13 @@ pub struct Config {
     pub model_dir: PathBuf,
     /// Constellation backlink index URL (primary amplification detection)
     pub constellation_url: String,
+    /// Base URL for the login-screen handle typeahead (#227).
+    ///
+    /// Configurable because the upstream speaks the standard AT Protocol
+    /// lexicon (`app.bsky.actor.searchActorsTypeahead`) rather than anything
+    /// proprietary — so pointing this at https://public.api.bsky.app is a
+    /// working failover with no code change if the default host is down.
+    pub typeahead_url: String,
     /// Zentropi API key for binary toxicity classification
     pub zentropi_api_key: Option<String>,
     /// Zentropi labeler ID (pre-built policy prompt)
@@ -71,9 +78,11 @@ impl Config {
             _ => ScorerBackend::Onnx,
         };
 
-        let model_dir = env::var("CHARCOAL_MODEL_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| crate::toxicity::download::default_model_dir());
+        // Delegates to the shared resolver so a blank/whitespace CHARCOAL_MODEL_DIR
+        // falls back to the platform default here too (#230). The old inline
+        // `PathBuf::from` turned an exported-but-empty value into an empty path,
+        // sending every model lookup to a bare relative name in the cwd.
+        let model_dir = crate::toxicity::download::resolve_model_dir();
 
         #[cfg(feature = "web")]
         let allowed_did = env::var("CHARCOAL_ALLOWED_DID").unwrap_or_default();
@@ -96,6 +105,8 @@ impl Config {
             model_dir,
             constellation_url: env::var("CONSTELLATION_URL")
                 .unwrap_or_else(|_| "https://constellation.microcosm.blue".to_string()),
+            typeahead_url: env::var("CHARCOAL_TYPEAHEAD_URL")
+                .unwrap_or_else(|_| "https://typeahead.waow.tech".to_string()),
             zentropi_api_key: env::var("ZENTROPI_API_KEY").ok(),
             zentropi_labeler_id: env::var("ZENTROPI_LABELER_ID").ok(),
             zentropi_labeler_version_id: env::var("ZENTROPI_LABELER_VERSION_ID").ok(),
@@ -190,6 +201,7 @@ impl Config {
             scorer_backend: ScorerBackend::Onnx,
             model_dir: std::path::PathBuf::from("/tmp/test_models"),
             constellation_url: "https://constellation.microcosm.blue".to_string(),
+            typeahead_url: "https://typeahead.waow.tech".to_string(),
             zentropi_api_key: None,
             zentropi_labeler_id: None,
             zentropi_labeler_version_id: None,

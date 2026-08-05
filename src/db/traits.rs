@@ -12,8 +12,21 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    UserLabel, UserRow,
 };
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
+
+/// One account dropped from a scan, with the reason (#226).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanSkip {
+    pub account_did: String,
+    /// Pipeline phase the skip happened in — "gather", "finalize", …
+    pub phase: String,
+    /// Full anyhow source chain (`{e:#}`), stored verbatim.
+    pub error: String,
+    pub skipped_at: String,
+}
 
 #[async_trait]
 pub trait Database: Send + Sync {
@@ -73,6 +86,13 @@ pub trait Database: Send + Sync {
     /// Check if an account's score is stale for a user (older than the given number of days).
     async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool>;
 
+    /// Return the DIDs scored within the last `max_age_days` — the complement
+    /// of `is_score_stale` over a whole user's scores, in one query. Discovery
+    /// loops fetch this once and test membership in memory instead of one
+    /// `is_score_stale` round-trip per candidate (#213).
+    async fn get_fresh_scored_dids(&self, user_did: &str, max_age_days: i64)
+        -> Result<Vec<String>>;
+
     // --- Amplification events ---
 
     /// Record a new amplification event for a user and return its ID.
@@ -89,6 +109,27 @@ pub trait Database: Send + Sync {
         original_post_text: Option<&str>,
         context_score: Option<f64>,
     ) -> Result<i64>;
+
+    /// Insert many amplification events for a user, collapsing what used to
+    /// be one network round-trip per event (359 events ≈ 2m16s of a 28m scan,
+    /// chainlink #216) into a small, fixed number of round-trips regardless
+    /// of batch size.
+    ///
+    /// Returns the number of rows inserted. Backend behavior differs:
+    /// Postgres uses `UNNEST`, which binds 8 arrays plus a single scalar
+    /// (user_did) and is a genuine single round-trip at any batch size.
+    /// SQLite runs one transaction but chunks
+    /// into multi-row `INSERT`s of 100 rows each (bind-parameter limits), so
+    /// large batches issue multiple statements within that one transaction.
+    ///
+    /// Rows MUST be inserted in slice order so auto-increment ids ascend in
+    /// input order — downstream evidence output and tests depend on it.
+    /// An empty slice is a no-op returning `Ok(0)`.
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize>;
 
     /// Get recent amplification events for a user, ordered by detection time descending.
     async fn get_recent_events(
@@ -201,4 +242,113 @@ pub trait Database: Send + Sync {
 
     /// Get all DIDs that have been scored for a user (for deduplication during discovery).
     async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
+
+    // --- Classification staging (#208) ---
+
+    /// Enqueue a batch of classifier work-queue rows for a user.
+    ///
+    /// Uses UPSERT on `(user_did, account_did, post_uri)` so Phase A is fully
+    /// idempotent — enqueuing the same post twice results in one row.
+    async fn enqueue_classifications(&self, user_did: &str, rows: &[QueueRow]) -> Result<()>;
+
+    /// Stash a serialised `AccountInput` blob for an account.
+    ///
+    /// Uses UPSERT on `(user_did, account_did)` — re-stashing replaces the blob.
+    async fn stash_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        payload_json: &str,
+    ) -> Result<()>;
+
+    /// Fetch up to `limit` pending (status='pending') queue rows for a user.
+    async fn fetch_pending_classifications(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<QueueRow>>;
+
+    /// Record a batch of completed classifier verdicts.
+    ///
+    /// Updates each matching row to `status='done'` and fills in the verdict
+    /// fields. Rows are matched by `(user_did, account_did, post_uri)`.
+    async fn record_classification_verdicts(
+        &self,
+        user_did: &str,
+        verdicts: &[VerdictRow],
+    ) -> Result<()>;
+
+    /// List the distinct `account_did` values present in the classification
+    /// queue for a user.
+    async fn list_scan_accounts(&self, user_did: &str) -> Result<Vec<String>>;
+
+    /// Fetch all queue rows (any status) for a specific account.
+    async fn fetch_account_verdicts(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Vec<QueueRow>>;
+
+    /// Retrieve the stashed `AccountInput` JSON blob for an account, if any.
+    async fn fetch_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Option<String>>;
+
+    /// Count rows with `status='pending'` in the classification queue for a user.
+    async fn count_pending_classifications(&self, user_did: &str) -> Result<i64>;
+
+    /// Delete all staging data for a user from both `classification_queue` and
+    /// `scan_account_input`.  Does NOT touch the `scan_phase` key in
+    /// `scan_state` — that is the orchestrator's responsibility.
+    async fn clear_scan_staging(&self, user_did: &str) -> Result<()>;
+
+    /// Record that an account was dropped from a scan, and why (#226).
+    ///
+    /// A skip is a real gap in a scan's coverage, so it belongs in the database
+    /// rather than only in a log line. Railway drops log messages by rate once
+    /// a replica exceeds 500/sec — WARN included — which made the #220
+    /// skip counts a floor rather than a total.
+    ///
+    /// `error` should be the FULL anyhow chain (`{e:#}`), not just the
+    /// outermost context; the missing cause is what made #220 expensive.
+    ///
+    /// Upserts on (user_did, account_did, phase) so a failing re-gather updates
+    /// rather than duplicating.
+    async fn record_scan_skip(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        phase: &str,
+        error: &str,
+    ) -> Result<()>;
+
+    /// Number of accounts skipped in the current scan. Surfaced on the
+    /// scan-complete log line so `degraded=true` carries a magnitude.
+    async fn count_scan_skips(&self, user_did: &str) -> Result<i64>;
+
+    /// All skips recorded for a user, for diagnosis and reporting.
+    async fn list_scan_skips(&self, user_did: &str) -> Result<Vec<ScanSkip>>;
+
+    /// Drop a user's recorded skips. Called at gather entry so the count always
+    /// describes the CURRENT scan rather than accumulating across every run.
+    async fn clear_scan_skips(&self, user_did: &str) -> Result<()>;
+
+    /// Delete the staging data for a single account from both
+    /// `classification_queue` and `scan_account_input`.  Used by Phase C to
+    /// discard an account whose stashed blob is unreadable or version-stale
+    /// (the deploy-straddle re-gather path) without disturbing other accounts.
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()>;
+
+    // --- Language abstention (#222) ---
+
+    /// Count accounts whose `threat_tier` is `'NotAssessed'` for a user.
+    ///
+    /// `get_ranked_threats` filters on `threat_score >= ?`, which always
+    /// excludes NULL-score NotAssessed rows — so this count cannot be derived
+    /// from the accounts slice the report already has. It must come from its
+    /// own query. Shared by the markdown report and (later) the status
+    /// dashboard.
+    async fn count_not_assessed(&self, user_did: &str) -> Result<i64>;
 }

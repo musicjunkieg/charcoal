@@ -69,6 +69,37 @@ export async function initiateAuth(handle: string): Promise<string> {
 	return data.redirect_url;
 }
 
+export interface HandleSuggestion {
+	did: string;
+	handle: string;
+	display_name?: string;
+	avatar?: string;
+}
+
+/**
+ * Handle suggestions for the login screen (#227).
+ *
+ * Proxied through Charcoal's backend rather than called directly from the
+ * browser, so the typeahead host never sees the user's IP or their
+ * partially-typed handle on a pre-auth screen.
+ *
+ * Never throws: typeahead is an enhancement, and a failing one must not stop
+ * anyone signing in. Errors — including an aborted request — resolve to [].
+ */
+export async function suggestHandles(
+	query: string,
+	signal?: AbortSignal
+): Promise<HandleSuggestion[]> {
+	try {
+		const res = await fetch(`/api/typeahead?q=${encodeURIComponent(query)}`, { signal });
+		if (!res.ok) return [];
+		const data = await res.json();
+		return Array.isArray(data) ? (data as HandleSuggestion[]) : [];
+	} catch {
+		return [];
+	}
+}
+
 export async function logout(): Promise<void> {
 	await fetch('/api/logout', { method: 'POST', credentials: 'include' });
 }

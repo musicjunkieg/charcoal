@@ -15,7 +15,9 @@ tokio = { version = "1", features = ["full"] }
 atrium-api = "0.25.7"
 
 # HTTP client (for public AT Protocol API, Constellation, and Perspective API)
-reqwest = { version = "0.12", features = ["json"] }
+# `stream` lets download_file write model files chunk-by-chunk instead of
+# buffering a whole ~284MB artifact in memory (#233).
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # Database (SQLite — optional, enabled by the `sqlite` default feature)
 rusqlite = { version = "0.38", features = ["bundled"], optional = true }
@@ -34,6 +36,13 @@ dotenvy = "0.15"
 
 # Async trait support (for ToxicityScorer trait with async methods)
 async-trait = "0.1"
+
+# Retry-with-decorrelated-jitter for ToxicityClassifier impls (RunPod/Zentropi).
+# Spreads concurrent retries across the backoff window to avoid thundering-herd
+# against the upstream during transient failures. thiserror gives RunPodError a
+# typed enum so backon's .when() filter matches a variant, not a string message.
+backon = { version = "1", default-features = false, features = ["tokio-sleep"] }
+thiserror = "2"
 
 # ONNX Runtime for local toxicity model inference
 ort = "2.0.0-rc.11"
@@ -142,3 +151,6 @@ optional = true
 
 [dev-dependencies]
 tower = "0.5"
+tempfile = "3"
+serial_test = "3"
+wiremock = "0.6"

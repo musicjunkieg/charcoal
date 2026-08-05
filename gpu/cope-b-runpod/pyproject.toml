@@ -1,0 +1,9 @@
+[project]
+name = "charcoal-cope-b"
+version = "0.1.0"
+description = "Charcoal CoPE-B-A4B classifier service for RunPod"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

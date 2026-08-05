@@ -132,3 +132,138 @@ fn dedup_by_amplifier_post_uri() {
     assert_eq!(merged.len(), 3); // 2 original + 1 new (duplicate dropped)
     assert_eq!(merged[2].amplifier_did, "did:plc:ccc");
 }
+
+// ============================================================
+// Task 2 (#213): the discovery loops parallelize their network fetches, then
+// run a PURE dedup fold over results sorted back into URI order. These tests
+// pin the fold's ordering + dedup so the parallel path is byte-identical to
+// the old serial loop.
+// ============================================================
+
+use charcoal::constellation::client::{dedup_amplification_events, dedup_liker_events};
+
+fn resp(records: Vec<BacklinkRecord>) -> BacklinksResponse {
+    BacklinksResponse {
+        total: Some(records.len() as u64),
+        records,
+        cursor: None,
+    }
+}
+
+fn rec(did: &str, collection: &str, rkey: &str) -> BacklinkRecord {
+    BacklinkRecord {
+        did: did.to_string(),
+        collection: collection.to_string(),
+        rkey: rkey.to_string(),
+    }
+}
+
+#[test]
+fn dedup_amplification_events_preserves_serial_order_and_dedups() {
+    // Two URIs, each with a quote response and a repost response, supplied in
+    // URI order (as buffer_unordered + sort_by_key guarantees). Expected output
+    // order matches the old serial loop: for each URI, quotes then reposts.
+    let uri_a = "at://did:plc:me/app.bsky.feed.post/A".to_string();
+    let uri_b = "at://did:plc:me/app.bsky.feed.post/B".to_string();
+
+    let fetched: Vec<(
+        String,
+        anyhow::Result<BacklinksResponse>,
+        anyhow::Result<BacklinksResponse>,
+    )> = vec![
+        (
+            uri_a.clone(),
+            Ok(resp(vec![rec("did:plc:q1", "app.bsky.feed.post", "qa")])),
+            Ok(resp(vec![rec("did:plc:r1", "app.bsky.feed.repost", "ra")])),
+        ),
+        (
+            uri_b.clone(),
+            // A duplicate of uri_a's quote (same amp_uri) must be dropped.
+            Ok(resp(vec![
+                rec("did:plc:q1", "app.bsky.feed.post", "qa"),
+                rec("did:plc:q2", "app.bsky.feed.post", "qb"),
+            ])),
+            Ok(resp(vec![])),
+        ),
+    ];
+
+    let events = dedup_amplification_events(fetched);
+
+    // Serial order: A-quote, A-repost, B-quote(new only). The B duplicate drops.
+    let uris: Vec<&str> = events
+        .iter()
+        .map(|e| e.amplifier_post_uri.as_str())
+        .collect();
+    assert_eq!(
+        uris,
+        vec![
+            "at://did:plc:q1/app.bsky.feed.post/qa",
+            "at://did:plc:r1/app.bsky.feed.repost/ra",
+            "at://did:plc:q2/app.bsky.feed.post/qb",
+        ]
+    );
+    assert_eq!(events[0].event_type, "quote");
+    assert_eq!(events[1].event_type, "repost");
+    assert_eq!(events[2].event_type, "quote");
+    assert_eq!(events[0].original_post_uri, Some(uri_a));
+    assert_eq!(events[2].original_post_uri, Some(uri_b));
+}
+
+#[test]
+fn dedup_amplification_events_skips_errored_uris_and_keeps_order() {
+    let fetched: Vec<(
+        String,
+        anyhow::Result<BacklinksResponse>,
+        anyhow::Result<BacklinksResponse>,
+    )> = vec![
+        (
+            "at://did:plc:me/app.bsky.feed.post/A".to_string(),
+            Err(anyhow::anyhow!("quote fetch failed")),
+            Ok(resp(vec![rec("did:plc:r1", "app.bsky.feed.repost", "ra")])),
+        ),
+        (
+            "at://did:plc:me/app.bsky.feed.post/B".to_string(),
+            Ok(resp(vec![rec("did:plc:q2", "app.bsky.feed.post", "qb")])),
+            Err(anyhow::anyhow!("repost fetch failed")),
+        ),
+    ];
+
+    let events = dedup_amplification_events(fetched);
+
+    // A's quote errored (skipped), A's repost ok; B's quote ok, B's repost errored.
+    let types: Vec<&str> = events.iter().map(|e| e.event_type.as_str()).collect();
+    assert_eq!(types, vec!["repost", "quote"]);
+}
+
+#[test]
+fn dedup_liker_events_preserves_order_and_dedups_by_did_and_uri() {
+    let uri_a = "at://did:plc:me/app.bsky.feed.post/A".to_string();
+    let uri_b = "at://did:plc:me/app.bsky.feed.post/B".to_string();
+
+    let fetched: Vec<(String, anyhow::Result<BacklinksResponse>)> = vec![
+        (
+            uri_a.clone(),
+            Ok(resp(vec![
+                rec("did:plc:liker1", "app.bsky.feed.like", "l1"),
+                rec("did:plc:liker1", "app.bsky.feed.like", "l2"), // same did+uri → dropped
+            ])),
+        ),
+        (
+            uri_b.clone(),
+            Ok(resp(vec![rec(
+                "did:plc:liker1",
+                "app.bsky.feed.like",
+                "l3",
+            )])), // same did, diff uri → kept
+        ),
+    ];
+
+    let events = dedup_liker_events(fetched);
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].amplifier_did, "did:plc:liker1");
+    assert_eq!(events[0].original_post_uri, Some(uri_a));
+    assert_eq!(events[1].original_post_uri, Some(uri_b));
+    assert!(events.iter().all(|e| e.event_type == "like"));
+    assert!(events.iter().all(|e| e.amplifier_post_uri.is_empty()));
+}

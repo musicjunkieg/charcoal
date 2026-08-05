@@ -1,13 +1,84 @@
 <script lang="ts">
-	import { initiateAuth } from '$lib/api.js';
+	import { initiateAuth, suggestHandles, type HandleSuggestion } from '$lib/api.js';
 
 	let handle = $state('');
 	let isSubmitting = $state(false);
 	let isFocused = $state(false);
 	let errorMessage = $state('');
 
+	// ── handle typeahead (#227) ──
+	// Suggestions are a convenience layered on top of the field: the input stays
+	// fully usable by typing, and every failure path here degrades to "no
+	// suggestions" rather than blocking sign-in.
+	let suggestions = $state<HandleSuggestion[]>([]);
+	let activeIndex = $state(-1);
+	let isOpen = $state(false);
+	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+	let inFlight: AbortController | undefined;
+
+	const DEBOUNCE_MS = 200;
+
+	function closeSuggestions() {
+		isOpen = false;
+		activeIndex = -1;
+	}
+
+	function onInput() {
+		errorMessage = '';
+		clearTimeout(debounceTimer);
+		// Cancel any request already running — otherwise a slow early response
+		// can land after a later one and repopulate the list with stale results.
+		inFlight?.abort();
+
+		const query = handle.trim();
+		if (query.length < 2) {
+			suggestions = [];
+			closeSuggestions();
+			return;
+		}
+
+		debounceTimer = setTimeout(async () => {
+			const controller = new AbortController();
+			inFlight = controller;
+			const results = await suggestHandles(query, controller.signal);
+			// Ignore a response that arrived after the field moved on.
+			if (controller !== inFlight) return;
+			suggestions = results;
+			isOpen = results.length > 0;
+			activeIndex = -1;
+		}, DEBOUNCE_MS);
+	}
+
+	function choose(suggestion: HandleSuggestion) {
+		handle = suggestion.handle;
+		suggestions = [];
+		closeSuggestions();
+	}
+
+	function onKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			closeSuggestions();
+			return;
+		}
+		if (!isOpen || suggestions.length === 0) return;
+
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			activeIndex = (activeIndex + 1) % suggestions.length;
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			activeIndex = activeIndex <= 0 ? suggestions.length - 1 : activeIndex - 1;
+		} else if (e.key === 'Enter' && activeIndex >= 0) {
+			// Only intercept Enter when something is actually highlighted, so
+			// Enter still submits the form in every other case.
+			e.preventDefault();
+			choose(suggestions[activeIndex]);
+		}
+	}
+
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
+		closeSuggestions();
 		if (!handle.trim() || isSubmitting) return;
 
 		isSubmitting = true;
@@ -77,14 +148,62 @@
 									id="handle"
 									name="handle"
 									bind:value={handle}
+									oninput={onInput}
+									onkeydown={onKeydown}
 									onfocus={() => (isFocused = true)}
-									onblur={() => (isFocused = false)}
+									onblur={() => {
+										isFocused = false;
+										closeSuggestions();
+									}}
 									placeholder="yourhandle.bsky.social"
-									autocomplete="username"
+									autocomplete="off"
+									role="combobox"
+									aria-expanded={isOpen}
+									aria-controls="handle-suggestions"
+									aria-autocomplete="list"
+									aria-activedescendant={activeIndex >= 0
+										? `handle-suggestion-${activeIndex}`
+										: undefined}
 									required
 									disabled={isSubmitting}
 								/>
 							</div>
+							{#if isOpen}
+								<ul class="suggestions" id="handle-suggestions" role="listbox">
+									{#each suggestions as suggestion, i (suggestion.did)}
+										<li
+											id="handle-suggestion-{i}"
+											role="option"
+											aria-selected={i === activeIndex}
+											class="suggestion"
+											class:active={i === activeIndex}
+										>
+											<!-- mousedown, not click: blur fires first on click and would
+											     close the list before the selection landed. -->
+											<button
+												type="button"
+												tabindex="-1"
+												onmousedown={(e) => {
+													e.preventDefault();
+													choose(suggestion);
+												}}
+											>
+												{#if suggestion.avatar}
+													<img src={suggestion.avatar} alt="" class="suggestion-avatar" />
+												{:else}
+													<span class="suggestion-avatar placeholder" aria-hidden="true"></span>
+												{/if}
+												<span class="suggestion-text">
+													<span class="suggestion-handle">{suggestion.handle}</span>
+													{#if suggestion.display_name}
+														<span class="suggestion-name">{suggestion.display_name}</span>
+													{/if}
+												</span>
+											</button>
+										</li>
+									{/each}
+								</ul>
+							{/if}
 							{#if errorMessage}
 								<p class="error">{errorMessage}</p>
 							{:else}
@@ -301,7 +420,83 @@
 		font-weight: 300;
 	}
 
-	.field { margin-bottom: 1.5rem; }
+	.field {
+		margin-bottom: 1.5rem;
+		/* Positioning context so the suggestion list overlays the content below
+		   instead of pushing the sign-in button down as you type. */
+		position: relative;
+	}
+
+	.suggestions {
+		position: absolute;
+		z-index: 20;
+		top: calc(100% + 0.35rem);
+		left: 0;
+		right: 0;
+		margin: 0;
+		padding: 0.25rem;
+		list-style: none;
+		max-height: 16rem;
+		overflow-y: auto;
+		background: rgba(12, 10, 9, 0.97);
+		border: 1px solid rgba(168, 162, 158, 0.18);
+		border-radius: 12px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+	}
+
+	.suggestion button {
+		display: flex;
+		align-items: center;
+		gap: 0.625rem;
+		width: 100%;
+		padding: 0.5rem 0.625rem;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.suggestion.active button,
+	.suggestion button:hover {
+		background: rgba(168, 162, 158, 0.12);
+	}
+
+	.suggestion-avatar {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		flex-shrink: 0;
+		object-fit: cover;
+	}
+
+	.suggestion-avatar.placeholder {
+		background: rgba(168, 162, 158, 0.18);
+	}
+
+	.suggestion-text {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.suggestion-handle {
+		font-size: 0.875rem;
+		color: var(--charcoal-100, #e7e5e4);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.suggestion-name {
+		font-size: 0.75rem;
+		color: var(--charcoal-300, #a8a29e);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
 
 	.label {
 		display: block;

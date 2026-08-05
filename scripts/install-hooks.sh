@@ -222,10 +222,22 @@ except Exception:
 # ── 3. Export chainlink issues ───────────────────────────────────────
 echo "📦 Pre-commit: exporting chainlink issues..."
 if (cd "$REPO_ROOT" && chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null); then
-    if _would_clobber ".chainlink/issues-export.json" "issues"; then
-        echo "⚠️  Skipping issues-export.json: fresh export empty or invalid but HEAD has content (worktree may lack .chainlink/issues.db, or the export was truncated/corrupt). Committed version preserved."
+    # The export is a regenerated artifact, and .gitignore lists it. Staging it
+    # anyway kept it tracked, which made every branch integration conflict on
+    # churned JSON (#181). --no-index asks "do the ignore rules cover this?"
+    # rather than "is it tracked?", so the answer stays correct even if the file
+    # ever gets re-added to the index by accident.
+    #
+    # The export runs from $REPO_ROOT (kept from the template hardening on
+    # main): a relative .chainlink path otherwise resolves against the caller's
+    # cwd, which is how stray shadow .chainlink/ directories appear in
+    # subdirectories. No _would_clobber guard here, unlike the graph-data.json
+    # branch below — that guard protects a COMMITTED file from being overwritten
+    # by an empty export, and this file is deliberately not committed (#181).
+    if git check-ignore -q --no-index .chainlink/issues-export.json; then
+        echo "✅ Chainlink issues exported (gitignored — not staged)"
     else
-        git add -f .chainlink/issues-export.json
+        git add .chainlink/issues-export.json
         echo "✅ Chainlink issues exported"
     fi
 else

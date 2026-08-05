@@ -14,9 +14,11 @@ use rusqlite::Connection;
 use tokio::sync::Mutex;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    UserLabel, UserRow,
 };
-use super::traits::Database;
+use super::traits::{Database, ScanSkip};
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
     conn: Mutex<Connection>,
@@ -108,6 +110,15 @@ impl Database for SqliteDatabase {
         super::queries::is_score_stale(&conn, user_did, did, max_age_days)
     }
 
+    async fn get_fresh_scored_dids(
+        &self,
+        user_did: &str,
+        max_age_days: i64,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_fresh_scored_dids(&conn, user_did, max_age_days)
+    }
+
     async fn insert_amplification_event(
         &self,
         user_did: &str,
@@ -133,6 +144,15 @@ impl Database for SqliteDatabase {
             original_post_text,
             context_score,
         )
+    }
+
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        super::queries::insert_amplification_events_batch(&conn, user_did, events)
     }
 
     async fn get_recent_events(
@@ -287,6 +307,110 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::get_all_scored_dids(&conn, user_did)
     }
+
+    // --- Classification staging (#208) ---
+
+    async fn enqueue_classifications(&self, user_did: &str, rows: &[QueueRow]) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::enqueue_classifications(&conn, user_did, rows)
+    }
+
+    async fn stash_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        payload_json: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::stash_account_input(&conn, user_did, account_did, payload_json)
+    }
+
+    async fn fetch_pending_classifications(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<QueueRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::fetch_pending_classifications(&conn, user_did, limit)
+    }
+
+    async fn record_classification_verdicts(
+        &self,
+        user_did: &str,
+        verdicts: &[VerdictRow],
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::record_classification_verdicts(&conn, user_did, verdicts)
+    }
+
+    async fn list_scan_accounts(&self, user_did: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_scan_accounts(&conn, user_did)
+    }
+
+    async fn fetch_account_verdicts(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Vec<QueueRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::fetch_account_verdicts(&conn, user_did, account_did)
+    }
+
+    async fn fetch_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::fetch_account_input(&conn, user_did, account_did)
+    }
+
+    async fn count_pending_classifications(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_pending_classifications(&conn, user_did)
+    }
+
+    async fn clear_scan_staging(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_scan_staging(&conn, user_did)
+    }
+
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_account_staging(&conn, user_did, account_did)
+    }
+
+    async fn record_scan_skip(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        phase: &str,
+        error: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::record_scan_skip(&conn, user_did, account_did, phase, error)
+    }
+
+    async fn count_scan_skips(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_scan_skips(&conn, user_did)
+    }
+
+    async fn list_scan_skips(&self, user_did: &str) -> Result<Vec<ScanSkip>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_scan_skips(&conn, user_did)
+    }
+
+    async fn clear_scan_skips(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::clear_scan_skips(&conn, user_did)
+    }
+
+    async fn count_not_assessed(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_not_assessed(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
@@ -368,6 +492,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_trait_count_not_assessed() {
+        let db = test_db().await;
+
+        // A NotAssessed account (null score — unsupported language, #222).
+        let not_assessed = AccountScore {
+            did: "did:plc:notassessed".to_string(),
+            handle: "unsupported.bsky.social".to_string(),
+            toxicity_score: None,
+            topic_overlap: None,
+            threat_score: None,
+            threat_tier: Some("NotAssessed".to_string()),
+            posts_analyzed: 5,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        // A normally-scored account that must NOT be counted.
+        let normal = AccountScore {
+            did: "did:plc:normal".to_string(),
+            handle: "normal.bsky.social".to_string(),
+            toxicity_score: Some(0.1),
+            topic_overlap: Some(0.1),
+            threat_score: Some(5.0),
+            threat_tier: Some("Low".to_string()),
+            posts_analyzed: 10,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        };
+        db.upsert_account_score(TEST_USER, &not_assessed)
+            .await
+            .unwrap();
+        db.upsert_account_score(TEST_USER, &normal).await.unwrap();
+
+        assert_eq!(db.count_not_assessed(TEST_USER).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
     async fn test_trait_amplification_event() {
         let db = test_db().await;
         let id = db
@@ -394,7 +564,10 @@ mod tests {
     async fn test_trait_table_count() {
         let db = test_db().await;
         let count = db.table_count().await.unwrap();
-        assert_eq!(count, 8);
+        // schema_version, topic_fingerprint, account_scores, amplification_events,
+        // scan_state, users, user_labels, inferred_pairs,
+        // classification_queue, scan_account_input, scan_skips = 11 tables (v10)
+        assert_eq!(count, 11);
     }
 
     #[tokio::test]

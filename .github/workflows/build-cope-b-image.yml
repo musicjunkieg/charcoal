@@ -1,0 +1,75 @@
+name: Build CoPE-B image
+
+on:
+  push:
+    # feat/cope-b-self-host is included temporarily so the image can be built
+    # from the feature branch before the work merges to staging/main (a push
+    # trigger runs the workflow version on the pushed branch; workflow_dispatch
+    # would require the file to already be on the default branch). Drop the
+    # feat/* entry once this lands on staging.
+    branches: [main, staging, feat/cope-b-self-host]
+    paths:
+      - 'gpu/cope-b-runpod/**'
+      - '.github/workflows/build-cope-b-image.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # The model weights (~50 GB) are NOT baked into the image — they live on
+      # a RunPod network volume mounted at runtime (see gpu/cope-b-runpod/README).
+      # So the image is just the vLLM base + app code and builds comfortably on
+      # a stock ubuntu-latest runner; no disk-reclaim step is needed.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive policy version
+        id: policyver
+        run: |
+          short_sha=$(git rev-parse --short HEAD)
+          date=$(date -u +%Y-%m-%d)
+          echo "value=policy-${short_sha}-${date}" >> "$GITHUB_OUTPUT"
+
+      - name: Derive image ref tag
+        id: reftag
+        # Docker tags can't contain '/', so slugify the branch name (e.g.
+        # feat/cope-b-self-host -> feat-cope-b-self-host). GITHUB_REF_NAME is a
+        # built-in env var; read it from env (not ${{ }} interpolation) so the
+        # branch name can never be injected into the shell.
+        run: echo "value=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./gpu/cope-b-runpod
+          file: ./gpu/cope-b-runpod/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ steps.reftag.outputs.value }}
+          build-args: |
+            POLICY_VERSION=${{ steps.policyver.outputs.value }}
+          # Weights are not in the image (network-volume mounted at runtime), so
+          # layers are small and cache well. Reuse the GHA layer cache between
+          # runs — a policy.txt-only edit then rebuilds just the final COPY.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "Built ghcr.io/${{ github.repository_owner }}/charcoal-cope-b:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "Policy version: ${{ steps.policyver.outputs.value }}" >> $GITHUB_STEP_SUMMARY
+          echo "Next: update RunPod endpoint to use this image digest." >> $GITHUB_STEP_SUMMARY

@@ -159,11 +159,104 @@ mod db_tests {
         let users = db.list_users().await.unwrap();
         assert!(users.is_empty());
     }
+
+    /// Deleting an account must take its `scan_skips` rows with it (#234).
+    ///
+    /// Those rows hold the user's DID, the DIDs of accounts scanned on their
+    /// behalf, and raw error text. Charcoal's users are people being harassed;
+    /// "delete my account" has to mean it. `scan_skips` (v10, #226) was the one
+    /// user-scoped table `delete_user_data` never cleared.
+    #[tokio::test]
+    async fn delete_user_data_clears_scan_skips() {
+        let db = setup_db().await;
+        db.upsert_user("did:plc:abc", "alice.bsky.social")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:abc", "did:plc:harasser", "gather", "boom")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.count_scan_skips("did:plc:abc").await.unwrap(),
+            1,
+            "precondition: the skip must exist, or this test cannot fail"
+        );
+
+        db.delete_user_data("did:plc:abc").await.unwrap();
+
+        assert_eq!(
+            db.count_scan_skips("did:plc:abc").await.unwrap(),
+            0,
+            "scan_skips must not survive account deletion"
+        );
+    }
+
+    /// The SQLite deletion sequence must be all-or-nothing.
+    ///
+    /// It was a bare run of independent `conn.execute` calls, so a failure
+    /// partway through left the account half-deleted — the dangerous outcome
+    /// for a deletion path, and asymmetric with the Postgres backend, which was
+    /// already transactional.
+    ///
+    /// Forces a mid-sequence failure by dropping `users` (the last statement
+    /// targets it) and asserts the earlier `scan_skips` delete rolled back.
+    #[tokio::test]
+    async fn delete_user_data_rolls_back_when_a_later_statement_fails() {
+        let conn = Connection::open_in_memory().unwrap();
+        charcoal::db::schema::create_tables(&conn).unwrap();
+        charcoal::db::queries::upsert_user(&conn, "did:plc:abc", "alice.bsky.social").unwrap();
+        charcoal::db::queries::record_scan_skip(
+            &conn,
+            "did:plc:abc",
+            "did:plc:harasser",
+            "gather",
+            "boom",
+        )
+        .unwrap();
+
+        // Make the final `DELETE FROM users` fail mid-sequence.
+        conn.execute("DROP TABLE users", []).unwrap();
+
+        let result = charcoal::db::queries::delete_user_data(&conn, "did:plc:abc");
+        assert!(result.is_err(), "the dropped table must fail the delete");
+
+        assert_eq!(
+            charcoal::db::queries::count_scan_skips(&conn, "did:plc:abc").unwrap(),
+            1,
+            "a failed deletion must roll back — scan_skips should be untouched"
+        );
+    }
+
+    /// Deleting one user must not touch another user's skips.
+    #[tokio::test]
+    async fn delete_user_data_leaves_other_users_scan_skips_intact() {
+        let db = setup_db().await;
+        db.upsert_user("did:plc:abc", "alice.bsky.social")
+            .await
+            .unwrap();
+        db.upsert_user("did:plc:xyz", "bob.bsky.social")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:abc", "did:plc:harasser", "gather", "boom")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:xyz", "did:plc:harasser", "gather", "boom")
+            .await
+            .unwrap();
+
+        db.delete_user_data("did:plc:abc").await.unwrap();
+
+        assert_eq!(db.count_scan_skips("did:plc:abc").await.unwrap(), 0);
+        assert_eq!(
+            db.count_scan_skips("did:plc:xyz").await.unwrap(),
+            1,
+            "deleting one account must not clear another's skips"
+        );
+    }
 }
 
 #[cfg(feature = "web")]
 mod scan_manager_tests {
-    use charcoal::web::scan_job::ScanManager;
+    use charcoal::web::scan_job::{ScanManager, WebScanPhase};
 
     #[test]
     fn test_scan_manager_starts_empty() {
@@ -183,6 +276,42 @@ mod scan_manager_tests {
         let mut mgr = ScanManager::new();
         mgr.try_start_scan("did:plc:abc").unwrap();
         assert!(mgr.try_start_scan("did:plc:def").is_err());
+    }
+
+    #[test]
+    fn test_scan_manager_busy_message_explains_global_gate() {
+        // The gate is global, so the message must not imply the conflict is
+        // the caller's own scan.
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        let msg = mgr.try_start_scan("did:plc:def").unwrap_err();
+        assert!(msg.contains("Another scan is already in progress"), "{msg}");
+        assert!(msg.contains("one at a time"), "{msg}");
+    }
+
+    #[test]
+    fn test_scan_manager_start_sets_starting_phase() {
+        let mut mgr = ScanManager::new();
+        mgr.try_start_scan("did:plc:abc").unwrap();
+        let status = mgr.get_status("did:plc:abc").unwrap();
+        assert_eq!(status.phase, WebScanPhase::Starting);
+    }
+
+    #[test]
+    fn test_web_scan_phase_as_str_is_snake_case() {
+        assert_eq!(WebScanPhase::Idle.as_str(), "idle");
+        assert_eq!(WebScanPhase::Starting.as_str(), "starting");
+        assert_eq!(WebScanPhase::LoadingModels.as_str(), "loading_models");
+        assert_eq!(WebScanPhase::Fingerprint.as_str(), "fingerprint");
+        assert_eq!(WebScanPhase::Discovering.as_str(), "discovering");
+        assert_eq!(WebScanPhase::Scoring.as_str(), "scoring");
+        assert_eq!(WebScanPhase::Done.as_str(), "done");
+        assert_eq!(WebScanPhase::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn test_scan_manager_default_phase_is_idle() {
+        assert_eq!(WebScanPhase::default(), WebScanPhase::Idle);
     }
 
     #[test]

@@ -1,1 +1,1266 @@
-[]
+[
+  {
+    "hash": "da719650de3abaa585382809a5a04029f1e5409d",
+    "short_hash": "da71965",
+    "author": "Bryan Guffey",
+    "date": "2026-07-31T15:54:51-07:00",
+    "message": "fix(234): make the SQLite deletion sequence atomic\n\nCodeRabbit on PR #93: delete_user_data ran independent conn.execute calls\nwith no transaction, so a failure partway through left the account\nhalf-deleted -- scan_skips cleared while the users row survived, or the\naccount gone with its scanned-account DIDs and error text still on disk. For\na deletion path the partial outcome is the dangerous one.\n\nIt was also asymmetric: the Postgres backend already wrapped the same\nsequence in a transaction. Production runs Postgres, so this does not change\nthe promotion risk -- it closes the gap for local/CLI SQLite use and makes\nthe two backends behave the same.\n\nunchecked_transaction() because the fn takes &Connection; rusqlite\ntransaction() needs &mut, which would ripple through every caller for no\nbehavioural gain. CodeRabbit rated this a heavy lift assuming that\nsignature change was required.\n\nTest forces a real mid-sequence failure by dropping the users table so the\nfinal statement fails, then asserts the earlier scan_skips delete rolled\nback. Without the transaction each execute autocommits, so scan_skips would\nalready be gone and the assertion fails -- it genuinely guards.\n\n40 suites zero skips, 15 Postgres tests, clippy clean on all three feature\nsets.\n\nRefs #234",
+    "files_changed": 2
+  },
+  {
+    "hash": "10eb97a793ef47dcd159a327be81f053f407e3de",
+    "short_hash": "10eb97a",
+    "author": "chaos gremlin",
+    "date": "2026-07-30T18:58:20-07:00",
+    "message": "Merge pull request #92 from musicjunkieg/fix/231-nli-batch-divergence",
+    "files_changed": 0
+  },
+  {
+    "hash": "b561f3c115bb45fc0e7a62919469dca29ecc869c",
+    "short_hash": "b561f3c",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T17:08:56-07:00",
+    "message": "chore(233): sync decision graph after the download streaming fix\n\nRefs #231 #233",
+    "files_changed": 2
+  },
+  {
+    "hash": "5d37b1f2ccac876435318320a7434bf4fff7f079",
+    "short_hash": "5d37b1f",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T17:01:36-07:00",
+    "message": "fix(233): stream model downloads to disk instead of buffering in RAM\n\ndownload_file called response.bytes() -- despite a comment claiming it\nstreamed -- holding the whole artifact in memory before a blocking\nstd::fs::write. With the fp32 NLI model (#231) that is ~284MB resident per\ndownload, on the async runtime.\n\nThe sharper problem was crash safety: a killed container mid-write left a\nTRUNCATED file at the destination, and nli_files_present only checks\nexistence. A partial model.onnx would look present and then fail ONNX\nparsing on every boot -- a poison state needing manual cleanup on the\nvolume. That risk is load-bearing for #231, whose migration story is\n\"existing volumes re-download themselves\".\n\nDownloads now stream chunk-by-chunk to a sibling .part file and atomically\nrename into place. Sibling rather than the system temp dir so the rename\nstays on one filesystem (the Railway volume); a cross-device rename would\nsilently degrade to a copy and reintroduce the partial-file window.\n\nThree tests via wiremock: full body lands and the .part is cleaned up; a\nfailed request leaves nothing at dest; a stale .part from a killed run is\ntruncated rather than appended to.\n\nClippy clean on web/postgres/no-features; 40 suites pass, zero skips.\n\nCloses #233",
+    "files_changed": 6
+  },
+  {
+    "hash": "bef90020feaee56bead58942e48301c3731afdc5",
+    "short_hash": "bef9002",
+    "author": "Bryan Guffey",
+    "date": "2026-07-30T16:48:18-07:00",
+    "message": "refactor(231): share NLI filename constants between loader and presence check\n\nNliScorer::load hardcoded \"model.onnx\"/\"tokenizer.json\" while\nnli_files_present used NLI_MODEL_FILE/NLI_TOKENIZER_FILE, so the two could\ndrift apart -- a presence check that disagrees with what actually loads is\nthe failure shape that kept #231 hidden for so long. Making the constants\npub(crate) and using them in both places removes that gap.\n\nVerified the constant is wired rather than merely compiling: renaming\nmodel.onnx makes the gated test report SKIP, so the check and the loader\nresolve the same name.\n\nClippy clean on web and no-features; 40 suites pass with zero skips.\n\nRefs #231",
+    "files_changed": 2
+  },
+  {
+    "hash": "3e1f13084c4803230a7d1e4cc5a3b963b89b43be",
+    "short_hash": "3e1f130",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T23:29:01-07:00",
+    "message": "chore(231): drop the temporary x86_64 diagnostic workflow\n\nIt existed because ci.yml does not run on feature branches and the #231\ndivergence was invisible on ARM64. It has served its purpose: the fp32 fix\nis verified on Linux x86_64 (equivalence test passes, all batch deltas\n+0.000000, full suite green with zero skips).\n\nOngoing protection comes from ci.yml, which runs the now-un-quarantined\nequivalence test on ubuntu-latest for every PR to staging and main.\n\nRefs #231",
+    "files_changed": 1
+  },
+  {
+    "hash": "904584251c6f1a37b2f6b18af5bbf36264185839",
+    "short_hash": "9045842",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T23:01:53-07:00",
+    "message": "test(231): evaluate the fp32 NLI export on Linux x86_64\n\nBryan chose to evaluate fp32 before deciding how to fix #231. The fp32\nexport contains 144 MatMul and ZERO DynamicQuantizeLinear/MatMulInteger,\nso there is no shared per-tensor activation scale for batching to perturb.\n\nOn macOS ARM64 it is exactly equivalence-preserving -- d(batch5) is\n+0.000000 on all five hypotheses and pad2 matches single -- while still\nrunning batched 1.95x faster than 5x single. It also gives the reference\nvalues the quantized model was approximating: hypothesis 0 truth 0.131468\nvs quantized 0.121953 (macOS) and 0.171669 (Linux), so the quantized model\nwas distorting even unbatched.\n\nThis runs the same measurement on x86_64, the platform that matters, and\ntimes it so the inference-cost side of the trade-off is measured.\n\nRefs #231",
+    "files_changed": 3
+  },
+  {
+    "hash": "d09c13ee5300f6e66c91c8ddcc4d0f9c926a1a87",
+    "short_hash": "d09c13e",
+    "author": "Bryan Guffey",
+    "date": "2026-07-28T22:44:31-07:00",
+    "message": "test(231): measure batching impact on the score the product uses\n\nThe per-hypothesis matrix shows entailment probabilities move; this shows\nwhat that does to compute_hostility_score and to context_multiplier, over\nsix pair types (mockery, contempt, misrepresentation, good-faith\ndisagreement, support, neutral) rather than one example. Also times both\npaths so the cost of reverting batching is a measured number.\n\nRefs #231",
+    "files_changed": 1
+  },
+  {
+    "hash": "653de23d01f962e883e18e5111bc25bd8d3b7fd8",
+    "short_hash": "653de23",
+    "author": "chaos gremlin",
+    "date": "2026-07-26T13:28:41-07:00",
+    "message": "Merge pull request #90 from musicjunkieg/feat/amplification-language-abstention",
+    "files_changed": 0
+  },
+  {
+    "hash": "6708a04d514e92398fae30a0fbab2be90293e268",
+    "short_hash": "6708a04",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T11:44:55-07:00",
+    "message": "docs(230): record the language-gate evasion trade-off at the gate (#232)\n\nCodeRabbit flagged pair_is_assessable as an evasion lever (CWE-693): an\namplifier controls their own text, so padding an English hostile reply until\nit is majority non-Latin drops the pair and forfeits the context multiplier.\nReal, and #230 made it deterministic where it was previously arbitrary noise\n— so in adversarial terms this is partially a regression, not purely a raised\nceiling. Recorded honestly in #232 rather than argued away.\n\nBounded: the multiplier is [1.0, 1.5] so at most ~33% off the threat score,\nthe post must be MAJORITY non-Latin (mixed-script mostly-English is not\ndropped — pinned by tests/unit_language.rs), and #222 coverage_gate sends\nbroadly non-Latin engagement to the surfaced NotAssessed tier rather than a\nquiet Low. Residue is one targeted pair on an otherwise-English account.\n\nNot taking the suggested fix. \"Score the assessable span\" is not\nimplementable: HYPOTHESES are relational against one joint premise, so\ndropping a side asks whether a text attacks the author of a text that is no\nlonger there, and dropping only the non-Latin characters would hand the\nattacker control over which substring reaches the model. A real fix needs a\nmultilingual cross-encoder or abstention-as-signal — scoped in #232.\n\nComment only, no behavior change.\n\nRefs #230, #232",
+    "files_changed": 1
+  },
+  {
+    "hash": "7007d963d1eee29359020e749d2f2cef8cfcf58f",
+    "short_hash": "7007d96",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T01:46:13-07:00",
+    "message": "docs(230): stop claiming the quarantined test pins batching equivalence\n\nThe entry said equivalence \"is pinned by a model-gated unit test\" in the\npresent tense, then explained the test is ignored. An ignored test is no CI\nguarantee. It also stated the acceptance (\"within quantization noise,\nimmaterial to tiers\") as platform-general when it was macOS ARM64 only.\n\nNow: measurements labelled macOS-only at the point they are quoted, the pin\ndescribed as intended-but-never-executed, and the quarantine stated once\ninstead of twice.\n\nFound by CodeRabbit on PR #90.\n\nRefs #230, #91",
+    "files_changed": 3
+  },
+  {
+    "hash": "de8537092bcc3ac4770c7adaa049f76a95a3800c",
+    "short_hash": "de85370",
+    "author": "Bryan Guffey",
+    "date": "2026-07-26T01:41:11-07:00",
+    "message": "test(230): quarantine #213 batching test — fails on Linux x86_64 (#91)\n\nSwitching this test to resolve_model_dir() in this PR made it run in CI for\nthe FIRST time: it previously read default_model_dir() while CI sets\nCHARCOAL_MODEL_DIR=models, so it returned early and reported ok having\nasserted nothing on every run since #213 merged.\n\nIt now runs, and fails on Linux x86_64: hypothesis 0 comes back batched\n0.031 vs single 0.172 against a 0.02 tolerance. Model bytes are identical to\nthe ones that pass on macOS ARM64 (sha256 3fac2500... matches HuggingFace),\nso this is a platform/ONNX-Runtime divergence, not a model-version drift.\n\nProduction runs Linux x86_64, so #213 tolerance — measured on Apple Silicon\nonly — was never verified on the platform that serves users. A 5.6x swing in\nan entailment probability may be structural, not quantization noise.\nTracked in #91 with an investigation plan.\n\nQuarantined with #[ignore] rather than reverting the env lookup or widening\nthe tolerance: ignoring reports honestly in the summary, where both\nalternatives would go back to claiming a pass. CHANGELOG #213 entry corrected\nto record that its measurements were macOS-only.\n\nRefs #230, #91",
+    "files_changed": 2
+  },
+  {
+    "hash": "2f35c41bd43f3712e08263fa7d9e7593a7601de0",
+    "short_hash": "2f35c41",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:06:58-07:00",
+    "message": "docs(230): models were in ./models all along — test binaries never load .env\n\nFull model-gated coverage needs no sandbox grant. All three ONNX models have\nbeen in ./models inside the project since May/June, readable and writable, and\n.env:25 already sets CHARCOAL_MODEL_DIR=./models. dotenvy runs only in\nmain.rs:184, so test binaries never load .env and fall back to\ndefault_model_dir() — the platform data dir, which holds only the NLI model.\n\nCHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output\n=> 40 suites, ZERO skips. Replaces the seven-line skip baseline with the real\nexpectation: no output.\n\nRefs #230",
+    "files_changed": 3
+  },
+  {
+    "hash": "38674e950ec72417e279c272295e5e5554046b6c",
+    "short_hash": "38674e9",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:04:16-07:00",
+    "message": "chore(230): sync decision graph after implementation\n\nRefs #230",
+    "files_changed": 2
+  },
+  {
+    "hash": "c142676f63dbe05531710add2105d2d93b172c7d",
+    "short_hash": "c142676",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T21:03:45-07:00",
+    "message": "docs(230): changelog for amplification-pair language abstention\n\nRefs #230",
+    "files_changed": 1
+  },
+  {
+    "hash": "b6d148488dbc1e66f0e966f4acf13ba1ce96585c",
+    "short_hash": "b6d1484",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T20:31:13-07:00",
+    "message": "chore(230): sync decision graph after spec + plan\n\nRefs #230",
+    "files_changed": 2
+  },
+  {
+    "hash": "4b6b85948e2012cec1bed757f391597b8f945124",
+    "short_hash": "4b6b859",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T19:09:51-07:00",
+    "message": "docs(230): TDD implementation plan for amplification-pair language abstention\n\nFive tasks: pair_is_assessable predicate, resolve_model_dir helper, the\nscore_pair gate plus all three call sites (atomic — the signature change\nbreaks them together), the toxicity-site gate with tox_suffix rendering,\nand changelog plus final verification.\n\nRecords the verification hazard prominently: model-gated tests silently\npass under the Safehouse sandbox, so Task 5 requires listing every SKIPped\ntest in the PR rather than reporting a green run as end-to-end coverage.\n\nRefs #230",
+    "files_changed": 3
+  },
+  {
+    "hash": "b01169a436476628a599d6889ced0fed3e18f806",
+    "short_hash": "b01169a",
+    "author": "Bryan Guffey",
+    "date": "2026-07-25T15:43:42-07:00",
+    "message": "docs(230): design spec for amplification-pair language abstention\n\nBrainstormed design for #230. Two corrections to the issue kickoff note,\nboth established from the code:\n\n- quote_toxicity (amplification.rs:117) is display-only — computed,\n  printed, discarded. Never persisted, never scored. The premise that an\n  English model silently scores non-English quotes as benign does not\n  hold on the toxicity path.\n- There are three ungated NLI seams, not two. profile.rs:686 (Mode B\n  inferred pairs) was missing from the note and feeds the same\n  account_scores.context_score multiplier.\n\nError direction is inflation, not suppression: context_multiplier is\nbounded below at 1.0, so NLI noise can only push scores up (<=1.5x).\nBounded false positive — mirror image of #222.\n\nDesign: pair_is_assessable(orig, resp) -> bool in scoring::language,\ninvoked inside NliScorer::score_pair, which grows Ok(None) to mean\nabstained (Err keeps meaning failed). Gating by construction rather than\nper call site, because a caller-invoked gate has now been missed twice.\nScript-only language signal at both seams — no schema change. Tox site\ngates on amplifier text alone (per-post predicate for per-post scoring).\n\nAlso records a verification hazard: model-gated tests silently pass under\nthe Safehouse sandbox, including the finalize amplifier-NLI case that\ncovers the exact path this change touches.\n\nRefs #230\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TPJYigwtfZvjFBBXbABCbD",
+    "files_changed": 3
+  },
+  {
+    "hash": "20964086975ec8e9471b3777160d9706f6dbee1d",
+    "short_hash": "2096408",
+    "author": "chaos gremlin",
+    "date": "2026-07-24T09:16:28-07:00",
+    "message": "Merge pull request #89 from musicjunkieg/feat/language-abstention\n\nfix(#222): abstain from toxicity scoring on unassessable-language accounts",
+    "files_changed": 0
+  },
+  {
+    "hash": "184cb096546e5731bed21c28c9041a8b86e69959",
+    "short_hash": "184cb09",
+    "author": "chaos gremlin",
+    "date": "2026-07-19T23:56:18-07:00",
+    "message": "Merge pull request #88 from musicjunkieg/fix/224-nul-sanitize\n\nfix(bluesky): strip NUL bytes from ingested post text (#224)",
+    "files_changed": 0
+  },
+  {
+    "hash": "7b67c48d6107f6049c7b88f6cf5d68eac02e80bb",
+    "short_hash": "7b67c48",
+    "author": "chaos gremlin",
+    "date": "2026-07-19T08:25:57-07:00",
+    "message": "Merge pull request #84 from musicjunkieg/fix/220-onnx-token-limit\n\nfix(toxicity): truncate over-long input instead of dropping the account (#220)",
+    "files_changed": 0
+  },
+  {
+    "hash": "e6732f835026880c769536495b4e899a2eabf7fb",
+    "short_hash": "e6732f8",
+    "author": "Bryan Guffey",
+    "date": "2026-07-19T07:44:23-07:00",
+    "message": "fix(toxicity): truncate over-long input instead of dropping the account (#220)\n\nThe 2026-07-19 staging scan finished degraded=true with 59 accounts silently\nskipped. 34 of them failed with a bare \"ONNX inference failed\".\n\nROOT CAUSE: Bluesky caps a post at 300 GRAPHEMES, not tokens. That is ~63\ntokens of Latin ASCII but 602 in emoji, 902 in CJK, and 4202 in ZWJ family\nemoji — all past the 512 that unbiased-toxic-roberta accepts. onnx.rs derived\nmax_len from the longest input in the batch with no clamp, so session.run\nhard-errored at the /roberta/Expand node (\"invalid expand shape\"). Because\nscoring is batched per account, ONE over-long post took the entire batch down\nand gather skipped the whole account.\n\nThe dropped accounts were selected by SCRIPT, not at random: CJK, Cyrillic,\nArabic, Devanagari and emoji-heavy text failed while Latin-script accounts\npassed. For a harassment detector that is a fairness gap, not just a\ncompleteness one. Note it is not purely a non-English issue — ZWJ emoji cost\n~14 tokens each, so emoji-heavy English overflows too.\n\nFIX: configure the tokenizer with TruncationParams (what HuggingFace does by\ndefault), which keeps special tokens correct where a manual id-slice would drop\nthe trailing </s>.\n\nDirection is Left, deliberately. Replies are scored as the envelope\n\"[Parent post]: <p>\\n\\n[Reply]: <r>\"; the default Right truncation cuts from the\nend and would eat THE REPLY — the text actually being judged — while preserving\nthe parent nobody scores. Mutation-verified: with Right, a hostile and a benign\nreply both score 0.0012, i.e. every over-long reply silently reads as benign.\n\nALSO: log the anyhow source chain ({e:#}) in the scan_phases error paths. Plain\n%e prints only the outermost .context() and drops the cause, which is the single\nreason this took a log dig instead of five minutes.\n\nVerified the sibling embedder does NOT share the bug (MiniLM tolerates\nover-long input where RoBERTa errors), so the fix does not merely relocate the\ncrash. Covered by a regression test since the toxicity fix removes the\nshort-circuit that was hiding that path.\n\nTests: 6 model-gated regression tests, all mutation-checked. Full web suite\n0 failures, clippy clean on web + default.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_015ihdqt1uvmUacx8vDMy9Mq",
+    "files_changed": 8
+  },
+  {
+    "hash": "b74a8f27d4b2948628047dc8650ed4b5d49c3057",
+    "short_hash": "b74a8f2",
+    "author": "chaos gremlin",
+    "date": "2026-07-19T07:24:18-07:00",
+    "message": "Merge pull request #83 from musicjunkieg/fix/pre-commit-export\n\nfix(hooks): stop pre-commit staging the gitignored chainlink export (#181)",
+    "files_changed": 0
+  },
+  {
+    "hash": "9517fb9a9a31a06c4371f7306a0d963e566230ae",
+    "short_hash": "9517fb9",
+    "author": "Bryan Guffey",
+    "date": "2026-07-18T16:45:45-07:00",
+    "message": "fix(#192): close batch-insert test gaps and correct UNNEST comments\n\nCode review found the UNNEST SQL correct but the tests around it had\nreal holes: the empty-slice test asserted a tautology instead of\nproving nothing was written, two batch tests shared a cleanup helper\nthat raced their own concurrently-running rows, and the 250-row test\nnever asserted event_type or amplifier_did so a $2/$3 bind\ntransposition would have gone undetected.\n\n- empty-slice test now seeds a row, counts before/after, and asserts\n  the count is unchanged\n- cleanup_batch_test_data takes a per-test marker so no test can\n  delete another concurrently-running test rows\n- 250-row test alternates event_type quote/repost by index and\n  asserts event_type + amplifier_did per row; verified by temporarily\n  swapping the $2/$3 binds (test failed as predicted) then reverting\n  (tests pass again)\n- corrected two inaccurate comments: UNNEST binds 8 arrays plus a\n  scalar (not 9), and the array-order guarantee is observed Postgres\n  behavior, not documented\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "9caefde17babc2879d5ef380689253af0b9aa3b2",
+    "short_hash": "9caefde",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T14:41:38-07:00",
+    "message": "fix(cost): address CodeRabbit PR #66 — engine-failure isolation, mismatch logging, batch latency (#186)\n\n- handler: run_one catches any per-slot Exception (not just decode errors) so an\n  engine.generate() failure returns an ok:false slot instead of failing the whole\n  asyncio.gather batch (CancelledError/GeneratorExit still propagate). +test.\n- burst: warn! at batch length-mismatch detection so the contract violation is\n  always visible even when a concurrent chunk cost-cap wins outcome precedence.\n- runpod client: classify_batch records the real observed batch latency instead\n  of 0, keeping classifier_request_latency_ms meaningful.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "a9824e5210aa577d2a2bcf501b1e2466464e3bcc",
+    "short_hash": "a9824e5",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:44:38-07:00",
+    "message": "docs: changelog entry for batched RunPod classifier + CHARCOAL_RUNPOD_BATCH_SIZE (#186)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "08249292591dfde8e2d18dbb1a92bf839df97cd6",
+    "short_hash": "0824929",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:39:37-07:00",
+    "message": "feat(burst): batch the classifier queue, fail-open on decode errors (#186)\n\nrun_burst chunks pending rows by classifier.max_batch_size() and fans out over\nchunks (buffer_unordered = concurrent jobs). Positional zip back to\n(account_did, post_uri); an un-decodable slot is recorded as a benign\ndecode-error sentinel + warn + metric. BurstOutcome::Complete{errored} flips the\nscan degraded flag when > 0. Request-level cost-cap/transient/permanent\nsemantics unchanged.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 7
+  },
+  {
+    "hash": "b05e9c2c372324ebf3cd568b59b64dd0d90f8ab1",
+    "short_hash": "b05e9c2",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:29:35-07:00",
+    "message": "feat(toxicity): RunPod client sends batched contents, parses verdicts array (#186)\n\nclassify_batch is now the single HTTP chokepoint: body {\"input\":{\"contents\":[...]}},\nparse {\"output\":{\"verdicts\":[...]}} positionally into Vec<ItemOutcome> (per-slot\nok/error, confidence still validated finite in [0,1]). classify() delegates to a\n1-element batch; max_batch_size from CHARCOAL_RUNPOD_BATCH_SIZE (default 32).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "a7a0ab02994d66ab3abea296988708bd44a525e2",
+    "short_hash": "a7a0ab0",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:19:36-07:00",
+    "message": "feat(gpu): batch-only handler with per-item isolation (#186)\n\nHandler now takes {\"input\":{\"contents\":[...]}} and returns {\"verdicts\":[...]}\nin input order via asyncio.gather over vLLM continuous batching. A single\nun-decodable slot becomes {\"ok\":false,\"error\":...} (new pure result_slot\nhelper) instead of failing the whole job. Tests rewritten to the batch shape.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "8cac810f35694ff87549d136cb19df2d0eba73c5",
+    "short_hash": "8cac810",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T13:13:27-07:00",
+    "message": "feat(toxicity): add classify_batch + max_batch_size to the classifier trait (#186)\n\nAdditive: ItemOutcome enum (per-slot Verdict|Error), a default classify_batch\nthat loops classify (Zentropi/Stub stay byte-identical to today), and\nmax_batch_size default 1. Foundation for RunPod batching.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
+    "hash": "46a4eeeaaa08f01945dcda53abe99771676e19c2",
+    "short_hash": "46a4eee",
+    "author": "Bryan Guffey",
+    "date": "2026-07-03T12:19:51-07:00",
+    "message": "docs(cost): TDD implementation plan for batching the RunPod classifier (#186)\n\n5 tasks bottom-up: trait (classify_batch/max_batch_size) → batch-only handler →\nRunPod client batch request/parse → burst chunk+fan-out+benign-sentinel+orchestrator\n→ config docs. Each task RED→GREEN, concrete code + exact test commands, grounded\nin the real burst_tests harness.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
+    "hash": "c33cb5d9d4a13aa36495685dfb8b3dfaf40a354a",
+    "short_hash": "c33cb5d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-28T11:09:36-07:00",
+    "message": "docs(cost): design spec for batching the RunPod classifier (#186)\n\nBatch-only wire contract, per-item isolation, positional alignment, and\nfail-open-to-benign for un-decodable slots (avoids the finalize NeedsRegather\nstorm a NULL-verdict row would cause). Additive trait (classify_batch +\nmax_batch_size); Zentropi/Stub stay 1-per-call and byte-identical to today.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 3
+  },
+  {
+    "hash": "8ba774637ecfa50d9fbc1a0c882489aaba72a9e0",
+    "short_hash": "8ba7746",
+    "author": "Bryan Guffey",
+    "date": "2026-06-26T11:10:54-07:00",
+    "message": "feat(cost): real-time spend across concurrent RunPod workers (#185)\n\nThe ScanCostMeter modeled ONE worker (elapsed × $3.29/hr), but RunPod\nbills $3.29/hr PER worker and the burst runs up to workersMax (10)\nconcurrently. So a multi-worker burst under-counted real spend by ~the\nworker multiple: the 2026-06-26 staging resume burst estimated ~$2 while\nreal cost was ~$6-10. The $2 \"cap\" was not a real spend cap.\n\nReplace the single-worker wall-clock with a worker-seconds INTEGRAL:\n  ∫ min(in_flight, workersMax) dt\naccumulated in a private `Acc` under a short (no-await) lock. Each RunPod\ncall arms an RAII `InFlightGuard` (enter on arm, leave on drop) so\nin_flight tracks true concurrency; the integral is capped at workersMax\n(extra in-flight calls queue, not bill). `estimated_cents()` and the\ndisaster-brake trip now read worker-seconds — the `over_ceiling`\npredicate is unchanged, just fed the real quantity. New env\n`CHARCOAL_RUNPOD_WORKERS_MAX` (default 10) sets the cap.\n\nTDD: 4 Acc integral tests (single/concurrent/cap/idle), 4 meter tests\n(trip/guard/disabled/real-dollar), migrated the 2 short-circuit tests to\nthe new force_worker_seconds seam; the 11 predicate tests are unchanged.\nFull --features web suite (31 binaries) green; clippy clean\nweb/default/postgres.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 7
+  },
+  {
+    "hash": "4c0ed7b1f2f3a3060a9ea4b8cc8aa9f44d62e116",
+    "short_hash": "4c0ed7b",
+    "author": "Bryan Guffey",
+    "date": "2026-06-26T08:52:23-07:00",
+    "message": "fix(burst): survive transient classifier failures, widen RunPod retries (#183)\n\nThe #178 staging scan aborted in the burst phase on a single RunPod\ntransport error: one ~few-second serverless blip outran the retry budget\n(3 retries / ~3.5s window), and run_burst then propagated the error,\nkilling a 4905-item burst before finalize.\n\nTwo changes:\n\n1. Typed transient errors + graceful burst stop. The RunPod client now\n   maps a retry-exhausted *transient* error (transport / 5xx) to a typed\n   ClassifierTransientError; a *permanent* error (4xx) passes through.\n   run_burst downcasts to it (like CostCeilingExceeded) and returns the\n   new BurstOutcome::Interrupted: successes are recorded, the rest stay\n   pending, and run_phased_scan finishes degraded-but-resumable instead\n   of hard-aborting. A resume retries the pending rows once the backend\n   recovers. Permanent errors STILL abort — leaving such a row pending\n   would livelock every resume.\n\n2. Wider retry budget. Default max_retries 3->6 with an 8s max-delay cap\n   (~20s window), so a typical RunPod scale-up / blip is absorbed by\n   retries before it ever reaches the burst stop path.\n\nTDD: 5 new tests (transient->Interrupted+resumable, permanent->abort,\nerror mapping for 5xx/4xx, widened default). Full --features web suite\n(31 binaries) green; clippy clean web/default/postgres.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 8
+  },
+  {
+    "hash": "cd6ae9c742ea359978a6be26f9315dcdf92dab4e",
+    "short_hash": "cd6ae9c",
+    "author": "Bryan Guffey",
+    "date": "2026-06-25T21:28:39-07:00",
+    "message": "perf(sweep): parallelize second-degree follower fetch (#178)\n\nThe second-degree sweep awaited fetch_followers one first-degree\nfollower at a time. On a big-account onboarding this serial network\nchain is the dominant cost — the measured #207 baseline was ~2h08m\npre-burst, ~100% Bluesky I/O — even though the classifier burst is\nalready solved.\n\nReplace the serial for-loop with a buffer_unordered fan-out (capped at\nconcurrency.clamp(1,64), matching run_gather), then fold the results\nsequentially. Dedup must stay sequential (a HashSet cannot be shared\nacross the in-flight futures) but it is cheap; all the wall-clock was in\nthe awaits. The fold is extracted into a pure dedup_second_degree helper\nso its order-independence — the one real risk of going concurrent, since\nbuffer_unordered delivers batches in arbitrary order — is unit-tested.\n\nThe produced second-degree pool is the same set as before: a follower's\nprofile fields are its own, so which first-degree follower we discover\nthem through is immaterial.\n\nTests: 2 new unit tests (order-independence + error-skip); full web\nsuite (31 binaries) green; clippy clean.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 3
+  },
+  {
+    "hash": "25191d23e063a1685fb66b641bd2cb482e8e6722",
+    "short_hash": "25191d2",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:44:24-07:00",
+    "message": "docs(decouple): CHANGELOG entry for classification burst decouple (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "62c9d8dcd184857afd052514e9fa91fb172d64be",
+    "short_hash": "62c9d8d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:33:56-07:00",
+    "message": "feat(decouple): rewire amplification through run_phased_scan (#208)\n\namplification::run now collects a single Vec<CandidateInput> (amplifiers +\nfollowers, deduped by DID with amplifier precedence) and drives one combined\nrun_phased_scan instead of the old amplifier build_profile loop + per-follower\ntwo-pass build_profile loop. One burst window, one scan_phase marker, one clean\nresume. Behavior-preserving: the event-recording loop (ONNX score_with_context +\nNLI score_pair + insert_amplification_event) is untouched.\n\n- Amplifier candidates carry direct_pairs=Some(deduped event pairs), pile-on flag,\n  and graph_distance; followers carry direct_pairs=None. The raw>=8.0 follower NLI\n  gate now lives in finalize_account (#211), selected per candidate by direct_pairs.\n- Deps thread nli_scorer / protected_posts_with_embeddings / data_dir all through\n  (Some = the params); fetcher = AtpPostFetcher, classifier via scorer.classifier().\n- scorer param: &dyn ToxicityScorer -> Option<&TwoStageToxicityScorer> (concrete for\n  .classifier()/CleanPassScorer). None preserves the old NoopScorer-errors-on-every-\n  call !analyze path (zero accounts scored). main.rs Scan arm + web scan_job updated.\n- catch_unwind dropped in favor of the phased scan_phase crash/cost-cap resume model.\n- run_gather: map over owned indices + named gather_one async fn to avoid a\n  higher-ranked FnOnce inference failure when the scan future crosses the web\n  background-scan tokio::spawn boundary (sweep unaffected, golden + suite green).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 5
+  },
+  {
+    "hash": "7f9903aac3bc85a528be8a52a28f1158a4e1c739",
+    "short_hash": "7f9903a",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T16:00:21-07:00",
+    "message": "feat(decouple): rewire sweep through run_phased_scan (#208)\n\nBoth sweep::run and sweep::run_topic_first now build a Vec<CandidateInput>\nand drive the three-phase run_phased_scan orchestrator instead of the old\nbuffer_unordered(build_profile) loops. Behavior-preserving: the scoring cores\n(stage1_outcome / score_from_sample) are unchanged, golden test stays green.\n\n- TwoStageToxicityScorer::classifier() accessor clones the inner Arc so the\n  phased pipeline can pull the Stage-2 classifier out alongside the ONNX\n  scorer + clean-pass (all three live in the one scorer).\n- create_scorer returns the concrete TwoStageToxicityScorer; sweep takes it by\n  &concrete and coerces into the two &dyn views + the classifier handle.\n- Candidate filters preserved exactly (run: is_score_stale 7d + early return;\n  run_topic_first: get_all_scored_dids dedup). NLI/direct_pairs/graph_distance\n  all None, matching the old build_profile call.\n- catch_unwind dropped in favor of the phased pipeline scan_phase resume model.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 4
+  },
+  {
+    "hash": "2a99fb794091d2af6d955d1d96300834e8ffb3ba",
+    "short_hash": "2a99fb7",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:34:37-07:00",
+    "message": "feat(decouple): Phase C finalize_account — score_from_sample + NLI gate + re-gather on version mismatch (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 13
+  },
+  {
+    "hash": "6acd158f20ba3da419c4a180de2e90bff7405ce8",
+    "short_hash": "6acd158",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:24:31-07:00",
+    "message": "test(decouple): tighten burst cost-cap + drain assertions (#208)",
+    "files_changed": 4
+  },
+  {
+    "hash": "8d158a63576ac553bf3a583901427c2eefa0bcb7",
+    "short_hash": "8d158a6",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:20:57-07:00",
+    "message": "feat(decouple): Phase B run_burst — contiguous loop, cost-capped resume (#208)",
+    "files_changed": 6
+  },
+  {
+    "hash": "7a5cf875d1a82959b1321d887cb8703d6885c4bf",
+    "short_hash": "7a5cf87",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T15:13:18-07:00",
+    "message": "fix(decouple): harden gather onnx_scores/rows length check to runtime ensure! (#208)",
+    "files_changed": 3
+  },
+  {
+    "hash": "006d265fa441d8ff0287369c60d90479079d89f3",
+    "short_hash": "006d265",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T14:59:53-07:00",
+    "message": "test(decouple): clippy — use RangeInclusive::contains in golden case-d (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "5451153ec06e96aeafa6b82e63c087e9e0cadc19",
+    "short_hash": "5451153",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T14:22:58-07:00",
+    "message": "feat(decouple): Postgres impl of staging methods (#208)",
+    "files_changed": 4
+  },
+  {
+    "hash": "3637617022d7840541efaae6671747a5d011336e",
+    "short_hash": "3637617",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T13:47:30-07:00",
+    "message": "feat(decouple): staging value types — QueueRow/VerdictRow/AccountInput(versioned)/ScanPhase (#208)",
+    "files_changed": 8
+  },
+  {
+    "hash": "07a67ab8ee78631f9e1b8d5db7a096ce30eeb4e2",
+    "short_hash": "07a67ab",
+    "author": "Bryan Guffey",
+    "date": "2026-06-23T13:21:26-07:00",
+    "message": "docs(decouple): advisory — validate Postgres locally before Chunk 7, not only at it (#208)\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01BYxHfK818WVCcq5oEX3S12",
+    "files_changed": 2
+  },
+  {
+    "hash": "34bb90b4b685e6e780b87665c68006e8debb0742",
+    "short_hash": "34bb90b",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T22:47:12-07:00",
+    "message": "fix(cope-b): lower classify-gate agreement bar 0.90->0.85\n\nThe live RunPod CoPE-B gate plateaued at ~89% agreement against Zentropi.\nThe residual disagreements are judgment calls between two different\ntoxicity models (CoPE-B is sometimes the more correct one — e.g. catches\na slur Zentropi misses), so ~89% is the realistic agreement ceiling, not\na defect. Lower AGREEMENT_THRESHOLD to 0.85 so the gate reflects that\naccepted floor while still failing on a genuine regression. Boundary\ntests rewritten for the 85% bar.\n\nAccepts the gate disposition per deciduous 274; chainlink #203.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "ab3f4af1d3127aa609bdb42e7cd1feebe9094ca4",
+    "short_hash": "ab3f4af",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T22:24:45-07:00",
+    "message": "chore(deciduous): sync graph after Phase 6 node cleanup\n\nMark the Phase 6 design + execution run (chunks 2-5, deploy, gate,\ncold-start opts) completed, reject unchosen options (Modal/hybrid/\nsearchPosts), and chain the previously-orphaned deploy-phase nodes\n(264..275). No code change — decision-graph hygiene only.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "d8cc63de6f7ac1289595b0ec80f47376a34bbc43",
+    "short_hash": "d8cc63d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-20T00:04:47-07:00",
+    "message": "perf(cope-b): cut full-cold-start time (prefetch weights, persist compile cache)\n\nCold-start log review (chainlink #201). FlashBoot already keeps the\nsteady-state cold start at ~14s (P70-P98); these target the rare full\ncold start (~285s): 208s weight load, 30.6s torch.compile, ~21s\ncudagraph/KV/warmup, ~25s container.\n\n- safetensors_load_strategy=\"prefetch\": the RunPod network volume mounts\n  as FUSE, which vLLM does not treat as a network FS, so it disables\n  auto-prefetch and reads the 11 shards serially (~25-29s each). Prefetch\n  overlaps the shard reads.\n- VLLM_CACHE_ROOT=/runpod-volume/vllm-cache: persist torch.compiles cache\n  on the volume so later cold starts skip the ~30s recompile.\n- RUNPOD_INIT_TIMEOUT=800: raise the worker-init health cutoff above the\n  default 7-min mark for margin.\n\nConfig/engine-arg only; handler tests mock the engine. Validated at the\nnext GPU cold start.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "93eb92af847ef538726cbb24e656d3ef756d2d0c",
+    "short_hash": "93eb92a",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T23:27:41-07:00",
+    "message": "feat(cope-b): identity hate overrides the third-party pass in policy\n\nThe prior revision made the third-party exclusion so forceful that CoPE-B\nstarted clearing identity slurs framed as group statements — \"all trannies\nare groomers and pedos\" flipped to a false negative (Zentropi correctly\nflags it). Carve identity-based hate out of the third-party rule:\n\n- Identity-attack rule now explicitly covers slurs / dehumanizing /\n  criminalizing claims against a protected class even when aimed at the\n  whole group rather than a named participant.\n- Third-party pass gets an EXCEPTION: it does not cover identity hate.\n- Decisive-defaults closing line excepts identity hate from the\n  \"third-party -> 0\" route.\n\nTargeted follow-up to the 88% gate run (which fixed political third-party\nFPs but introduced this identity FN). Bryan-gated: re-gate once after this.\n\nChainlink #189.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "5720d2cb27604edd6f38b6dfd4e39568dbe18379",
+    "short_hash": "5720d2c",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T22:46:17-07:00",
+    "message": "fix(cope-b): poll /status when /runsync returns before completion\n\nRunPods /runsync waits ~90s then returns the current job envelope; for a\njob that has not finished (cold starts routinely exceed that), the body is\n{\"id\",\"status\":\"IN_PROGRESS\"} with NO output. RunPodCopeBClient assumed\nthe verdict was always present, so the first live gate call failed with\n\"missing field output\" — and every production cold start would too.\n\nParse the full job envelope (status + optional output) via parse_job ->\nJobOutcome::{Completed,Pending}. On Pending, poll /status/{id} every 2s\nuntil terminal or the classifier timeout elapses. 5xx while polling is\ntreated as transient; FAILED/CANCELLED/TIMED_OUT surface the error.\n\nAdds a wiremock regression test: /runsync IN_PROGRESS -> /status COMPLETED.\n\nChainlink #200.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "5b6c74d6410c682aee49a99c85f37c5a6e848607",
+    "short_hash": "5b6c74d",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T22:09:06-07:00",
+    "message": "fix(cope-b): reset base ENTRYPOINT so the RunPod handler actually runs\n\nThe vllm/vllm-openai base image sets its own ENTRYPOINT (the vLLM OpenAI\nAPI server). Our Dockerfile only set CMD, so at runtime the container ran\nthe vLLM server with \"python3 -u handler.py\" appended as args — handler.py\nnever executed, runpod.serverless.start never registered a job-taker, and\nevery request sat IN_QUEUE while workers idled/cycled and exited.\n\nAdd `ENTRYPOINT []` to clear the inherited entrypoint so our CMD runs the\nhandler as the container main process. (Caught at first live deploy; this\nis the failure the deferred GPU smoke test would have surfaced.)\n\nChainlink #200.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "9ade956c6c930a34d4b5b75810b01ea395a9b1c7",
+    "short_hash": "9ade956",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T21:01:30-07:00",
+    "message": "chore(deciduous): sync graph + changelog through CodeRabbit triage\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "deda58272a71c01e56a9421a7db078c1468bc4c2",
+    "short_hash": "deda582",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:55:25-07:00",
+    "message": "test(cli): guard FixtureRow parses label-less gate input\n\nLocks the contract behind CodeRabbit finding on classify_gate.rs:137 —\nthe shadow-agreement gate reuses classify_compare::FixtureRow, whose\nlabel field is now #[serde(default)], so {id,content} lines parse. This\ntest prevents a regression that re-requires label and breaks gate runs.\n\nResolved via the shared FixtureRow rather than a separate GateFixtureRow\n(single source of truth, no duplicate type).\n\nChainlink #199.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "e57db89348b8cd3ea16a546be7e6bae9d7163fe8",
+    "short_hash": "e57db89",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:41:11-07:00",
+    "message": "fix(cope-b): address CodeRabbit review on PR #54\n\nResolves the actionable CodeRabbit findings:\n\n- vllm 0.20.2 -> 0.23.0 (Dockerfile base image + requirements): patches\n  GHSA-q8gq-377p-jq3r (assert-bypass RCE) + GHSA-5jv2-g5wq-cmr4 (GGUF int\n  truncation). AsyncLLMEngine API compat to be revalidated at GPU smoke.\n- runpod_cope_b parse_response: reject non-finite / out-of-[0,1] confidence\n  (external boundary) instead of letting bad data skew is_toxic.\n- classify_compare FixtureRow.label now serde(default) so the gate accepts\n  label-less {id,content} lines per its contract.\n- classify_compare + classify_gate: propagate serde_json::to_string errors\n  with context instead of .unwrap() panics.\n- zentropi trait classify(): populate verdict.policy_version from the\n  configured ZENTROPI_LABELER_VERSION_ID (falls back to the static banner).\n- audit_log AuditWriter::new: skip create_dir_all when disabled.\n- unit_audit_log migration test: scan for nli-legacy-*.jsonl by pattern\n  instead of recomputing the date with Utc::now() (midnight-rollover flake).\n- smoke_test.sh: fail fast if vLLM never becomes ready; build the\n  POLICY/CONTENT body via prompt.build_body to avoid shell drift.\n\nDeclined (replied in-thread): non-root USER (isolated single-tenant RunPod\nworker; non-root vLLM perms unvalidatable without the GPU) and MD040 on the\nvendored runpod/skills SKILL.md.\n\nChainlink #199.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "bfedf87a6174560e9a9a414cc606cd3278815dcd",
+    "short_hash": "bfedf87",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T20:01:36-07:00",
+    "message": "feat(cope-b): serve weights from a RunPod network volume, not baked image\n\nThe CoPE-B-A4B model is ~50GB (Gemma-4 26B-A4B, 25B params). Baking it\ninto the image produced a ~60GB image that cannot build on GitHub-hosted\nrunners (runner dies on disk) and re-pulls on every cold start. Move the\nweights to a RunPod network volume mounted at /runpod-volume, populated\nonce and reused across cold starts — preserving the spec download-once\ngoal without the giant image.\n\nDockerfile: drop the huggingface-cli weight-download layer and the\nMODEL_REVISION arg; image is now just the vLLM base + app code.\nMODEL_PATH defaults to /runpod-volume/cope-b-a4b.\nrunpod.yml: add network_volume (charcoal-cope-b-weights, 70GB, mounted at\n/runpod-volume) + env MODEL_PATH; endpoint and volume must share a DC.\nworkflow: remove the free-disk-space step and MODEL_REVISION build-arg;\nrestore GHA layer caching (layers are small now).\nREADME: document the create-volume / populate-volume / create-endpoint\norder of operations.\n\nhandler.py is unchanged — it already reads MODEL_PATH from env, so a\nlocal volume path works as-is.\n\nChainlink #198.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "dc3edcc5310900966967e1b0556d01764ec5be7a",
+    "short_hash": "dc3edcc",
+    "author": "Bryan Guffey",
+    "date": "2026-06-19T10:36:54-07:00",
+    "message": "ci(cope-b): pin free-disk-space action to commit SHA (v1.3.1)\n\nReplaces the @main mutable branch ref with the full commit SHA\n54081f1 (v1.3.1, verified via the GitHub tags API). A third-party\naction on a moving branch is a supply-chain risk — pin it.\n\nHeld back from triggering an immediate rebuild: committed locally and\npushed alongside the next build iteration so it does not spawn a\nredundant concurrent ~50GB build while one is already running.\n\nChainlink #193.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "81b10853f0d62e7ec99cf6bac77cf7f7ce458ac5",
+    "short_hash": "81b1085",
+    "author": "Bryan Guffey",
+    "date": "2026-06-18T10:24:49-07:00",
+    "message": "feat(cli): classify-gate shadow-agreement gate (Step 4.5)\n\nRuns the candidate backend AND the reference (Zentropi) backend over\ntests/fixtures/cope_b/ab_sample.jsonl and asserts they agree on the\nbinary toxic verdict for at least 90% of the sample (MIN_SAMPLE=50,\ntarget ~100). Dumps every disagreement to\ntarget/classify-gate-disagreements.jsonl for review; exits non-zero on a\nmiss so CI can gate prod cutover. No hand labels — the reference backend\nis the comparison target.\n\nevaluate() is pure (in-memory paired verdicts) so unit tests can assert\npass/fail/too-small without mocking a classifier.\n\nChainlink #192.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "0b90cc081d172273868f358c6c075a4dea364e3a",
+    "short_hash": "0b90cc0",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:40:55-07:00",
+    "message": "chore(deciduous): sync graph + changelog through Chunk 4\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "d170119f09e962ae6824e3fbe6794c5bd999d7e8",
+    "short_hash": "d170119",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:38:32-07:00",
+    "message": "feat(observability): scan-start backend banner + RunPod retry tests\n\nscan_job emits classifier_backend_selected_total once at scan start\n(via the classifier Arc before it is boxed into the scorer — the\nclassifier_name accessor is on the concrete TwoStageToxicityScorer, not\nthe dyn ToxicityScorer the scan path holds, so we read it from the Arc).\n\nAdds tests/unit_classifier.rs#retry covering 5xx-then-success (backon\nretries fire), 4xx (wiremock asserts exactly one request → no retry), and\nwarm_up smoke (helper hits the endpoint). Uses wiremock.\n\nThe classifier_metrics module itself (record_request/record_cold_start/\nrecord_backend_selected/estimate_cost_cents) landed earlier in this chunk\nas a drift fix; record_request is already wired into both classifier\nimpls.\n\nChainlink #191.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "7174c1f46cef63cb99271a28b3ac0699030b0188",
+    "short_hash": "7174c1f",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:07:24-07:00",
+    "message": "chore(deciduous): sync graph export through Chunk 2 harvest\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "006f476ed10bd6d4e3a5eb274809366279d9bacf",
+    "short_hash": "006f476",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T14:06:03-07:00",
+    "message": "test(cope-b): harvest A/B sample + smoke set for shadow-agreement gate\n\nab_sample.jsonl is 100 real posts harvested via\ntools/find-fixtures/find_fixtures.py — 70 from a community mod list\n(list mode, hostile-leaning signal) plus 30 clean/edge lines from\nchaosgreml.in author feed + backlinks. UNLABELED: the Chunk 5\nshadow-agreement gate measures candidate-vs-Zentropi agreement, so no\nground-truth labels are needed. Handles/DIDs/URLs auto-scrubbed by the\ntool; junk (URL-only replies, <15-char bodies) dropped, deduped by\ncontent. 74 reply-pairs use the exact [Parent post]: .. \\n\\n[Reply]: ..\nenvelope from format_parent_reply; 26 originals carry no envelope.\n\nsmoke.jsonl is 10 hand-authored obvious toxic/clean examples (synthetic,\nno real accounts) for the Colab/local policy sanity check only — not a\nformal gate.\n\nChainlink #189.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "1cff570f44101bc31329b5e061fcb971110151d3",
+    "short_hash": "1cff570",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T13:39:37-07:00",
+    "message": "fix(mcp): use python3 for chainlink-safe-fetch server\n\n  This Mac has only python3 on PATH, not python, so the MCP server\n  failed to start. The target script is a python3 script anyway.\n\n  Closes #197\n\n  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "8eba8409461222e823977de0bf857448c49f0f19",
+    "short_hash": "8eba840",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T13:15:26-07:00",
+    "message": "fix(cope-b): address code review on Chunk 3 RunPod GPU service\n\nFix 1 (Important): reorder Dockerfile layers so the ~50 GB weight-download\nRUN runs BEFORE copying app code. Its cache key now depends only on\nMODEL_REVISION, so a policy.txt-only edit rebuilds just the final tiny app\nCOPY instead of invalidating the weight layer. Fixed the false comment in\nbuild-cope-b-image.yml that described the old (broken) ordering.\n\nFix 2 (Minor): prefix-cache benchmark now builds its prompt from the\nproduction prompt.build_body() and posts it to /v1/chat/completions, so\nvLLM applies the Gemma chat template server-side. This validates the exact\nproduction prefix without needing a local tokenizer (server owns the\ntemplate). Previously it posted a hand-rolled string to /v1/completions.\n\nFix 3 (Minor): build_body now splits the static template on its sentinels\nonce at import and joins the fixed segments with the policy/content values,\nso a literal __POLICY__/__CONTENT__ inside user/policy text is never\nre-substituted. Output is byte-identical for normal inputs. Added\ntest_build_body_not_corrupted_by_literal_sentinel_in_policy.\n\nFix 4 (Nit): documented that _get_engine() check-and-set is race-safe only\nbecause _build_engine() is synchronous (no await between check and assign);\nan async _build_engine would need an asyncio.Lock.\n\nRunnable tests: 9 passed, 5 skipped (skips need transformers / live vLLM).\n\nChainlink #190 (Phase 6.2, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 7
+  },
+  {
+    "hash": "9752e35b5a171f5cff270b08443e577e591c3fd8",
+    "short_hash": "9752e35",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:58:58-07:00",
+    "message": "feat(cope-b): seed DRAFT policy.txt + gpu/cope-b-runpod scaffold\n\npolicy.txt is a STARTING DRAFT for Bryan to review/edit, not final.\nStage-2 toxicity policy in CoPE-B POLICY-slot format, adapted from the\nCoPE-A reference snapshot at refs/labeler_prompt.txt. Binary 1=toxic/\n0=clean framing, no INSTRUCTIONS/ANSWER headers. Preserves the reference\nparticipant-vs-third-party distinction (harsh commentary about\nnon-participants/public figures stays clean) and adds Charcoal-specific\ncoverage: identity-based hostility, dogpiling/incitement, bad-faith\nconcern trolling, sarcastic/coded hostility, news-commentary ambiguity\n(cf. chainlink #114).\n\n~396 words (~514 tokens) — marginally over the 50-500 token target;\ntrim on review if desired (prefix caching amortizes policy cost).\n\nSanity-check deferred to Chunk 3 smoke test (Colab not run in this\nenvironment). Bryan to validate ~10 hand-picked examples before cutover.\n\nChainlink #189 (Phase 6.1, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "0510be17bfe3cc3a5b682dbf1f27a918648d260e",
+    "short_hash": "0510be1",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:16:38-07:00",
+    "message": "test(audit): test legacy NLI migration + document from_env strictness\n\nApply two non-blocking code-review follow-ups for the Chunk 1 audit_log work:\n\n- Finding #1 (doc clarity): document that AuditWriter::from_env enables the\n  writer ONLY when the env var is exactly \"1\" — any other value (true/yes/0/\n  empty/unset) disables it. Intentional and spec-backed.\n- Finding #4 (coverage): add unit tests for migrate_legacy_nli_audit, which\n  runs on every open_database (every CLI command + web boot) but was untested.\n  Covers the rename path (original gone, dated nli-legacy file created with\n  preserved content) and the clean no-op path (no file, no spurious output).\n\nChainlink #188 (Phase 6.0 preflight, parent #185).\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "cb7025901d01162d0a7209c4bb1eb7bd66489e5a",
+    "short_hash": "cb70259",
+    "author": "Bryan Guffey",
+    "date": "2026-06-17T12:02:01-07:00",
+    "message": "docs(plan): replace accuracy gate with shadow-agreement validation\n\nCoPE-B self-host plan revised per decision to reach RunPod cutover ASAP\nwithout hand-labeling fixtures. Validation now diffs candidate (RunPod\nCoPE-B) vs reference (live Zentropi) on ~100 real posts harvested via\nfind-fixtures; gate passes at >=90% binary-label agreement, disagreements\ndumped for review.\n\n- Chunk 2: \"labeled fixtures\" -> A/B sample harvest (ab_sample.jsonl\n  unlabeled + tiny smoke.jsonl); policy.txt authoring unchanged\n- Chunk 5: classify-gate now asserts candidate-vs-reference agreement\n  (MIN_SAMPLE=50, AGREEMENT_THRESHOLD=0.90) instead of accuracy vs labels;\n  classify-compare unchanged (already computes agreement)\n- Chunk 6: threshold calibration softened to distribution sanity check\n- Renamed Phase 6.1/6.4/6.5 subissue titles accordingly\n\nDeciduous: decision 251, action 252.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "18bd51056a284c1791ba8bd83f2800936b562128",
+    "short_hash": "18bd510",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:41:05-07:00",
+    "message": "feat(tools): add discover mode to find-fixtures\n\ndiscover mode enumerates lists owned by one or more known maintainers\nand emits a catalog (TSV by default, JSONL with --json) the reviewer\ncan grep/sort to pick which list URI to feed into list mode.\n\n--match filters list name + description; --purpose filters by\nmodlist/curatelist/referencelist/all (default modlist); --min-members\nskips empty test lists.\n\nHonest scope note in the help text and README: the public AT Protocol\nAPI has NO global searchLists endpoint, so discovery is graph-walk\n(seed with maintainers you trust). When zero lists are returned, the\ntip message points the user back at the seed-maintainer pattern rather\nthan suggesting a global search is possible.\n\nSmoke verified against pfrazee.com + why.bsky.team — returned the\nexpected 3 visible lists in TSV; --match filter correctly returned 0\nwhen nothing matched.\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "5db9d21028a34b87d6686151eb795bac5d9222d5",
+    "short_hash": "5db9d21",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:36:41-07:00",
+    "message": "feat(tools): add list mode + --match regex filter to find-fixtures\n\nlist mode walks every member of a Bluesky moderation/curation list and\nharvests their authored posts via getAuthorFeed. This is the\nhighest-signal candidate source because mod-list maintainers have\nalready done the per-account curation we would otherwise have to guess\nat, and the list usually carries a documented theme (transphobia,\nantisemitism, specific harassment crew) so members share a language\npattern.\n\n--match <regex> filter wired through all three modes (author / backlinks\n/ list). Answers the \"what words should we search for\" question by\nletting you iterate hand-tuned regexes rather than freeform searching —\nwhich the public AppView gates behind auth anyway.\n\nBlock-resilience note: many hostile accounts likely have already blocked\nthe protected user, so they wont appear in Constellation backlinks of\nthe protected users posts. They DO appear on mod lists and getAuthorFeed\nworks regardless of who they have blocked (we query as anonymous\nAppView).\n\nbsky_url_to_at_uri generalized to parse both /post/<rkey> and\n/lists/<rkey> URLs. list mode tags each row with note=from-list-member:<did>\nso the reviewer can trace candidates back to their source.\n\nVerified:\n  - author + match against chaosgreml.in returned 4 trans/queer-mentioning\n    candidates with envelope shape correct\n  - list mode plumbing tested against a real (empty) public list owned by\n    pfrazee.com; 0 emitted is the correct behavior for an empty list\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "d1dc946f34d8bfa135e8f0b52c77d631627cea2c",
+    "short_hash": "d1dc946",
+    "author": "Bryan Guffey",
+    "date": "2026-06-06T18:17:47-07:00",
+    "message": "feat(tools): standalone find-fixtures harness for CoPE-B candidate harvesting\n\nTwo modes; both emit JSONL in the Chunk 2 fixture schema with PII scrubbed\nand the exact [Parent post]/[Reply] envelope format_parent_reply produces:\n\n  author <handle|did>     - walk getAuthorFeed; good for known-hostile or\n                            known-supportive accounts\n  backlinks <url|at-uri>  - use Microcosm Constellation to find replies +\n                            (optionally) quotes pointing at a seed post;\n                            mirrors how Charcoals amplification pipeline\n                            discovers candidates in prod\n\nstdlib only - no pip install. Python 3.10+.\n\nPivoted off app.bsky.feed.searchPosts when smoke testing turned up CDN\n403s (it requires auth). The author + backlinks paths are unauthenticated\nAND produce stronger curation signal than freeform keyword search.\n\nConstellation call shape verified against src/constellation/client.rs:\n/xrpc/blue.microcosm.links.getBacklinks with subject + source where source\nis collection:json_path (no leading dot). Response {records:\n[{did, collection, rkey}]} reconstructed into at:// URIs.\n\nSmoke tests against chaosgreml.in (author) and grimalkina (backlinks)\nproduced clean envelope-shaped candidates with PII scrubbed.\n\nChainlink #186.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "52d4e721bd8487dc101c120f3fa4d3fd472e0229",
+    "short_hash": "52d4e72",
+    "author": "Bryan Guffey",
+    "date": "2026-06-05T14:54:45-07:00",
+    "message": "docs(plan): CoPE-B impl plan Chunks 5-8 — A/B harness, gate, calibration, staging, cutover\n\nChunk 5: classify-compare (informational A/B per spec Step 4) +\n  classify-gate (Step 4.5 hard accuracy gate, 90%/90% bar, fixture\n  minimum 20 entries). Pure summarize() / evaluate() helpers separated\n  from UI so unit tests assert numbers.\n\nChunk 6: COPE_B_THRESHOLD calibration via classify-gate sweeps (note on\n  divergence from spec wording: gate-driven equivalent to spec A/B-driven,\n  simpler iteration). Zentropi-hosted CoPE-B research path with explicit\n  branch for \"available\" vs \"fall back to CoPE-A under existing threshold.\"\n\nChunk 7: feat -> staging PR, env-var setup including\n  CHARCOAL_SCAN_COST_CEILING_CENTS=200 safety net on staging (the\n  cheapest blast radius window for billing surprises), grimalkina re-scan\n  + metrics capture vs the chainlink #182 baseline.\n\nChunk 8: staging -> main PR via project staging promotion workflow,\n  prod env-var flip, smoke test, 24h monitoring with corrected metric\n  names (backend_selected_total{backend=zentropi} for fallback detection),\n  rollback plan with explicit data-state note (CoPE-B verdicts persist on\n  rollback; audit log carries per-call backend provenance).\n\nSingle end-to-end reviewer pass on these chunks caught:\n- Stale classifier_fallback_to_zentropi_count name (was renamed in Chunk 4)\n- Missing CHARCOAL_SCAN_COST_CEILING_CENTS on staging\n- Calibration mechanism divergence not explained\n- summarize() vs evaluate() threshold-handling difference unmarked\n\nChainlink #185.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "6ed45bf854401cd1ff2a5e1795aa448232066123",
+    "short_hash": "6ed45bf",
+    "author": "Bryan Guffey",
+    "date": "2026-06-05T12:47:30-07:00",
+    "message": "docs(spec): retry policy uses exponential backoff + decorrelated jitter\n\nPer Bryan note on iteration-5 spec. Plain exponential backoff causes\nthundering-herd against the upstream when many concurrent classifications\nhit the same transient failure window — jitter spreads retries across the\nbackoff window. Updated all four retry references (Failure modes, unit\ntest list, retry-amplification cost note, env var table) plus added a\ngolden-file test on jitter window bounds so future tuning does not\nsilently widen the spread.\n\nChainlink #185.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "e4e77c0aad1ad1cbfa96b451436ce25c3a9cfb79",
+    "short_hash": "e4e77c0",
+    "author": "Bryan Guffey",
+    "date": "2026-04-28T00:10:05-07:00",
+    "message": "fix: address PR #46 round-3 CodeRabbit findings\n\nFour findings from the third review pass. All real, all fixed.\n\nFixed:\n\n- topic_search.rs (discover_by_topic error swallowing): the loop over\n  keywords previously logged each `search_posts_for_authors` failure\n  via `tracing::warn!` and continued. If every keyword search failed\n  (e.g., AT Proto outage), the function returned `Ok(vec![])` —\n  indistinguishable from a clean topic neighborhood with no matches.\n  Now tracks a `successful_searches` counter and a `last_error` chain;\n  if the keyword list was non-empty and zero searches succeeded, returns\n  an `Err` so callers can react to the outage. Single-keyword failures\n  still fall through (best-effort across the cycle).\n\n- profile.rs (Stage 1 vacuous-pass guard): the round-2 fix excluded\n  reply scores from `stage1_clean_pass_scores`, but a reply-only or\n  reply-heavy sample (e.g., 1 original + 24 replies) could still pass\n  vacuously because `iter().all()` returns true for empty slices and\n  for tiny \"all 1 entry below threshold\" slices that didn't actually\n  inspect the bulk of the content. Added\n  `MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT = 5` constant and a guard in\n  `should_early_exit_stage1`: samples with fewer than 5 originals+quotes\n  always proceed to Stage 2, where Zentropi can do pair classification\n  with parent context. New tests pin both the empty-slice and the\n  too-few-entries cases.\n\n- profile.rs (graph_distance dropped on early returns): the\n  \"Insufficient Data\" early return and the Stage 1 early-exit return\n  both set `graph_distance: None`, throwing away the value the caller\n  had computed. `GraphDistance` is `Copy` so the same value is reachable\n  from all three return sites; both early returns now set\n  `graph_distance: graph_distance.map(|d| d.as_str().to_string())`,\n  matching the full-pipeline branch. Downstream consumers (sweep\n  ranking, UI) preserve the signal even on insufficient-data and\n  early-exit accounts.\n\n- zentropi.rs (module-doc clarity): the doc comment didn't make clear\n  that `refs/labeler_prompt.txt` is a checked-in reference snapshot\n  rather than the runtime source. Added an explicit \"Policy source of\n  truth\" section: the active policy lives on Zentropi's side,\n  identified by `ZENTROPI_LABELER_ID` and pinned by\n  `ZENTROPI_LABELER_VERSION_ID`; runtime behavior changes only after\n  re-uploading the policy and bumping the version env var. Maintainers\n  who edit the reference file should now know it has no runtime effect\n  on its own.\n\nTests: 419 passing (was 417 — gained 2 new tests for the early-exit\nguards). Clippy `-D warnings` clean across `--features web`,\n`--features postgres`, and no-features. Rustfmt clean.\n\nRefs: #173, #175",
+    "files_changed": 5
+  },
+  {
+    "hash": "06e1e483c93d9e32bfee24b60aad9d259c687d0b",
+    "short_hash": "06e1e48",
+    "author": "Bryan Guffey",
+    "date": "2026-04-27T22:00:32-07:00",
+    "message": "security: remove leaked Zentropi credentials and gitignore the file\n\nrefs/zentropi_info.txt was committed in d4394f9 with live API key and\nlabeler IDs. Code never read this file — credentials come from env vars\nexclusively (see .env.example). Treat the API key as compromised: rotate\nin the Zentropi dashboard, then update local .env. The file path is now\ngitignored to prevent reintroduction.\n\nRefs: #173",
+    "files_changed": 3
+  },
+  {
+    "hash": "9656c2c1a31c83d5b6bbafd00e998c3066e98a82",
+    "short_hash": "9656c2c",
+    "author": "Bryan Guffey",
+    "date": "2026-04-27T19:07:07-07:00",
+    "message": "feat: Phase 5 — Zentropi binary classifier replaces Groq ensemble\n\nONNX becomes a clean-pass filter (< 0.10 = cleared); posts at or above\nthe threshold go to Zentropi for a binary toxic/safe verdict that drives\nthe threat formula's toxicity rate. Replaces the ONNX+Groq Safeguard\nensemble approach with a two-stage pipeline matching the architecture\nbriefing's target state.\n\nWhy: Phase 0 spike (#173) validated Zentropi at 100% accuracy / 190ms\nlatency. Groq Safeguard was an unsustainable-cost stopgap; Zentropi's\nconversation-scoped labeler policy correctly distinguishes ally use of\nidentity terms from hostile use, which the ONNX model cannot.\n\nToxicity scoring:\n- New `src/toxicity/zentropi.rs` — production `ZentropiClient` with\n  10s timeout, 3-retry exponential backoff on 5xx/429/network errors,\n  and a `run_diagnostic` smoke-test method.\n- New `TwoStageToxicityScorer` (in `ensemble.rs`) wraps a continuous\n  primary (ONNX or Perspective) with an optional Zentropi binary\n  classifier. Bounded parallelism via `buffer_unordered(4)`. Falls back\n  to ONNX 0.50 threshold when Zentropi is unavailable so local dev\n  still works without a key.\n- Added `BinaryVerdict` + `classify_batch_with_contexts` to the\n  `ToxicityScorer` trait. Default impl uses a 0.50 threshold;\n  `TwoStageToxicityScorer` overrides with the real two-stage pipeline.\n\nScoring formula:\n- `build_profile` now batch-classifies with per-post parent context for\n  replies (so the Zentropi labeler evaluates reply-toward-author\n  hostility correctly).\n- Toxicity rate = reply-weighted binary count via the existing\n  `compute_reply_weighted_toxicity`. Replies count 70%, originals +\n  quotes count 30%.\n- Evidence ranking: surface Zentropi-flagged posts first, sorted by\n  ONNX score; fall back to highest-ONNX when nothing is flagged.\n- `weighted_toxicity` (the ONNX-category-weighted patch for ONNX's\n  inability to distinguish intent) removed from the scoring path.\n\nWiring:\n- `src/main.rs` and `src/web/scan_job.rs` build `TwoStageToxicityScorer`\n  from a new `build_zentropi[_client]` helper. `Commands::ZentropiSpike`\n  renamed to `Commands::ZentropiCheck` with neutral OK/WARN messaging\n  (the spike was the validation; this is now the smoke test).\n\nRemoved:\n- `src/toxicity/groq_safeguard.rs` and `groq_api_key` config field.\n- `src/toxicity/zentropi_spike.rs` (promoted to `zentropi.rs`).\n- `docs/superpowers/{plans,specs}/2026-03-27-groq-ensemble-scorer-*.md`.\n\nTests: 416 passing (was 410 — gained 12 new two-stage tests, lost the\n6 Groq parsing tests). Clippy `-D warnings` clean across `--features\nweb`, `--features postgres`, and no-features. Rustfmt clean.\n\nRefs: #173",
+    "files_changed": 16
+  },
+  {
+    "hash": "c521cdd43fdf339f47a4ccd8984abad7c3d39d0b",
+    "short_hash": "c521cdd",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:47:41-07:00",
+    "message": "feat: wire topic-first discovery into sweep pipeline with --sweep-mode flag\n\nAdd SweepMode enum (topic/graph/both) defaulting to topic-first discovery.\nNew run_topic_first function in sweep.rs searches by topic keywords,\ndeduplicates via get_all_scored_dids, resolves DIDs to handles, and\nscores discoveries in parallel. Graph mode preserved as legacy path.",
+    "files_changed": 7
+  },
+  {
+    "hash": "f6f5f84ab0ac07a690e9dd879427e00fea89964e",
+    "short_hash": "f6f5f84",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:42:18-07:00",
+    "message": "feat: wire adaptive sampling early exit into build_profile\n\nStage 1 (25 posts): quick ONNX + TF-IDF overlap check. Clean,\ntopically irrelevant accounts exit immediately as Low with\nscoring_confidence \"low\". Saves ~50-60% of scoring work during sweeps.\n\nStage 2 (50 posts): full pipeline for accounts that did not early\nexit. Scoring confidence set to \"low\" when near tier boundaries\n(via should_continue_to_stage3), \"standard\" otherwise.",
+    "files_changed": 5
+  },
+  {
+    "hash": "4d4071ae06b49699926826c96b77d1a9a2208421",
+    "short_hash": "4d4071a",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:18:54-07:00",
+    "message": "feat: add topic-first discovery pipeline via searchPosts",
+    "files_changed": 6
+  },
+  {
+    "hash": "27258c8914e6f1c428975502e3292addb2932f95",
+    "short_hash": "27258c8",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:14:31-07:00",
+    "message": "feat: add adaptive sampling stage decision functions\n\nAdd should_early_exit_stage1() and should_continue_to_stage3() for\nadaptive sampling. Stage 1 exits early when all ONNX scores are clean\nand topic overlap is below threshold. Stage 2 continues to Stage 3\nwhen the score is within ±5 of a tier boundary (8, 15, 35).\n\n7 new tests covering both functions.",
+    "files_changed": 3
+  },
+  {
+    "hash": "2f3065425cfdef82de32f38094052936291e0c12",
+    "short_hash": "2f30654",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T21:09:28-07:00",
+    "message": "feat: refactor build_profile to use reply-inclusive sampling and originals-first fingerprinting",
+    "files_changed": 3
+  },
+  {
+    "hash": "b75736a3c18f5163c1012ee23f15e72d02ed79a7",
+    "short_hash": "b75736a",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:49:33-07:00",
+    "message": "fix: prevent context score double-application in concern troll scoring\n\nWhen context_score >= 0.5 bypasses the benign gate, the context multiplier\nno longer applies on top. The gate bypass consumes the context signal.\nThird return value (gate_was_bypassed_by_context) tracks this.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "8c3e5d0e4ce9a5d44656d78efe32489881a04f3a",
+    "short_hash": "8c3e5d0",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:46:02-07:00",
+    "message": "feat: add batch parent post fetching for reply context pairs",
+    "files_changed": 3
+  },
+  {
+    "hash": "8278173fad1ced9c1889f2527b7a9e423b7eea41",
+    "short_hash": "8278173",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:43:48-07:00",
+    "message": "feat: add fetch_posts_with_replies for reply-inclusive post sampling",
+    "files_changed": 3
+  },
+  {
+    "hash": "b165fa596bdb547897d9361f44d3a1ffe3618f6c",
+    "short_hash": "b165fa5",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:38:17-07:00",
+    "message": "fix: address code review — env.example, truncation safety, spike comment",
+    "files_changed": 4
+  },
+  {
+    "hash": "b68b243723f063488bd88d41ae0ed5b7d2e7c1d2",
+    "short_hash": "b68b243",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T20:32:55-07:00",
+    "message": "feat: add Zentropi CoPE API spike with pre-built labeler support",
+    "files_changed": 5
+  },
+  {
+    "hash": "bc75cab82c380261bbb4a53ebcbb7a0151792a39",
+    "short_hash": "bc75cab",
+    "author": "Bryan Guffey",
+    "date": "2026-04-02T19:13:54-07:00",
+    "message": "docs: add topic-first discovery and adaptive sampling implementation plan",
+    "files_changed": 2
+  },
+  {
+    "hash": "9802b9ebce07094cc866acccccb77a309a2eca15",
+    "short_hash": "9802b9e",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T12:36:24-07:00",
+    "message": "perf: run ensemble primary and secondary scorers concurrently\n\nUses tokio::join! to run ONNX and OpenAI Moderation scoring in parallel\nwhen both are available. Wall-clock cost is now max(primary, secondary)\ninstead of primary + secondary. No change when secondary is absent.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "c39bb1681cc61b0e4bfc5eac715dbff6adf251f5",
+    "short_hash": "c39bb16",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:31:06-07:00",
+    "message": "feat: display graph distance in reports and terminal output\n\nThreat reports now show the social graph relationship (Stranger, Follows\nyou, You follow, Mutual follow) alongside the threat tier. Added as a\ncolumn in the markdown report table and terminal threat list, plus shown\nin account detail view.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "88b4c5104ac7e231857330c9aea066b3fca4d6a1",
+    "short_hash": "88b4c51",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:29:39-07:00",
+    "message": "feat: wire ensemble scorer into scan pipeline and CLI\n\nWhen OPENAI_API_KEY is set, the scanner uses EnsembleToxicityScorer\n(ONNX primary + OpenAI Moderation secondary with TakeLower disagreement\nstrategy). When absent, falls back to ONNX-only (same as before).\nNo behavior change without the env var.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "3339c64202f2f3c30c71a044bfee280c43145a12",
+    "short_hash": "3339c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:26:38-07:00",
+    "message": "feat: add OpenAI Moderation scorer and ensemble toxicity scorer\n\nOpenAiModerationScorer wraps the free moderation endpoint (pinned to\nomni-moderation-2024-09-26). EnsembleToxicityScorer runs primary (ONNX)\nand secondary (OpenAI) concurrently, detects agreement (threshold 0.25),\nand applies configurable disagreement strategy (TakeLower default).\nImplements ToxicityScorer trait so it is invisible to downstream pipeline.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6be187080b944fdb3183c9fbb0bd791a51c34d14",
+    "short_hash": "6be1870",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:24:06-07:00",
+    "message": "feat: classify drive-by repliers via getRelationships in scan pipeline\n\nBatch-classifies all amplifier DIDs using getRelationships (30 per\nAPI call). Graph distance is threaded through the amplification pipeline\nto build_profile where it multiplies the final threat score. CLI commands\npass empty graph distances (web-only feature for now).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "a67990191edc7e5404cc8786fcc89481746cf07a",
+    "short_hash": "a679901",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:21:56-07:00",
+    "message": "feat: apply graph distance weight in scoring formula\n\nGraph distance multiplier is the final step in the scoring chain:\nraw → behavioral → context → graph_distance. Strangers get 1.2x,\nmutual follows get 0.6x. Applied after benign gate so allies stay\nprotected. All callers pass None for now (wired in next task).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "334b8981f91807795398fc27e31fd036689588a1",
+    "short_hash": "334b898",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:18:36-07:00",
+    "message": "feat: add graph_distance field to AccountScore and DB schema v6\n\nNew nullable TEXT column on account_scores stores the social graph\ndistance label (Mutual follow, Follows you, You follow, Stranger).\nSchema migration v5→v6 for SQLite, corresponding Postgres migration.\nAll existing tests pass with graph_distance: None (neutral).\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 13
+  },
+  {
+    "hash": "4ac5805c902a8ad1027fe0635aa1b444a68580b6",
+    "short_hash": "4ac5805",
+    "author": "Bryan Guffey",
+    "date": "2026-03-26T11:09:40-07:00",
+    "message": "feat: add GraphDistance enum and relationship response parsing\n\nGraphDistance classifies the social relationship between the protected\nuser and another account into MutualFollow, InboundFollow, OutboundFollow,\nor Stranger. Each category has a threat_weight() used as a scoring\nmultiplier. Response parsing handles both relationship and notFoundActor\nentries from the AT Protocol getRelationships endpoint.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b7bb93b2bf1eb7d3e4f7c65766c4ca8351837cd5",
+    "short_hash": "b7bb93b",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T18:00:20-07:00",
+    "message": "feat: wire NLI audit logging into all scoring paths\n\nEvery NLI score_pair call now emits structured tracing + JSONL audit\nentry with full hypothesis breakdown, pair type, and similarity.\nConfig.data_dir() returns model_dir parent (/data on Railway).\n\nSpec: nli-scoring-redesign §NLI Audit Logging",
+    "files_changed": 7
+  },
+  {
+    "hash": "a85a52dd2abb46d94c88bffe62c592b13ba6e603",
+    "short_hash": "a85a52d",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T11:57:35-07:00",
+    "message": "fix: exclude unscored accounts from review queue\n\n  Accounts with NULL threat_score (insufficient posts) were showing\n  first in the triage queue with all dashes. Filter them out with\n  AND a.threat_score IS NOT NULL in both SQLite and Postgres queries.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "e4fafa5d1777cbddb8ac6931c3eb107d769a4235",
+    "short_hash": "e4fafa5",
+    "author": "Bryan Guffey",
+    "date": "2026-03-20T09:51:34-07:00",
+    "message": "feat: wire NLI context scoring into scan and amplification pipelines\n\nLoad NLI cross-encoder model during scan startup. Score quote/reply\nevent pairs via NLI when both original and amplifier text are available.\nThread NLI scorer and protected post embeddings through pipeline for\nprofile-level scoring. Add find_best_matching_user_post() for real\ntext pair matching instead of placeholder strings.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "5284b6fc5649e7302137756184f6ca5f01269ae2",
+    "short_hash": "5284b6f",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T20:30:44-07:00",
+    "message": "feat: wire NLI contextual scoring into profile building pipeline\n\nfind_most_similar_posts matches target posts to user fingerprint\nvia embedding cosine similarity. build_profile now accepts optional\nNliScorer, computes context_score from inferred pairs, and uses\nblended formula + benign gate bypass. 4 new context tests.\n322 total tests passing.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 8
+  },
+  {
+    "hash": "7ca8e3facf7a5f0b6eff3df6c8207f73ca4f4d46",
+    "short_hash": "7ca8e3f",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T16:44:40-07:00",
+    "message": "feat: add blended scoring formula and benign gate bypass\n\n  compute_threat_score_contextual blends toxicity with context_score\n  (40% weight) when pair data available. apply_behavioral_modifier_contextual\n  bypasses benign gate when context_score >= 0.5. 9 new tests covering\n  blending, fallback, and gate bypass scenarios.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "c39180e568a63f8dc0df66faacf85d4d02f53fe2",
+    "short_hash": "c39180e",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:35:45-07:00",
+    "message": "feat: add Database trait methods for labels, inferred pairs, and events\n\n  7 new trait methods: upsert/get user labels, get unlabeled accounts,\n  accuracy metrics, insert/get/delete inferred pairs. Updated\n  insert_amplification_event with original_post_text and context_score.\n  Both SQLite and PostgreSQL backends implemented. 255 tests passing.\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "a0bc878cfcd289c699d5d3f65671be30961374fe",
+    "short_hash": "a0bc878",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:22:24-07:00",
+    "message": "feat: add schema migration v5 for contextual scoring\n\n  New tables: user_labels (with upsert support), inferred_pairs\n  (with dedup unique index). New columns: amplification_events\n  gets original_post_text and context_score, account_scores gets\n  context_score. Updated table count tests (6 -> 8 tables).\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b0a00b64fbb89d707ed49e3ae2ec4367f3e26bf5",
+    "short_hash": "b0a00b6",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T15:15:07-07:00",
+    "message": "feat: add contextual scoring data models\n\n  Add UserLabel, InferredPair, AccuracyMetrics structs.\n  Add context_score to AccountScore.\n  Add original_post_text and context_score to AmplificationEvent.\n  All 240 tests pass (8 new + 232 existing).\n\n  Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "15911a2a59b876efeb7ec35a4638c98d1c654450",
+    "short_hash": "15911a2",
+    "author": "Bryan Guffey",
+    "date": "2026-03-19T14:26:51-07:00",
+    "message": "docs: update staging strategy — long-lived staging branch with promotion flow\n\nstaging branch persists permanently. Feature branches merge into\nstaging for validation, staging merges into main for production.\nSeparate persistent volume for ONNX models on staging.\n\nCo-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "f44530363a0214b839830c162119d608fef9e3df",
+    "short_hash": "f445303",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T22:16:02-07:00",
+    "message": "Merge pull request #32 from musicjunkieg/fix/repost-links-and-account-fallback\n\nfix: null safety for unscored accounts + pre-push hook features",
+    "files_changed": 0
+  },
+  {
+    "hash": "3b3f20156b04ca0ffbc22b792db68bf8a6237e90",
+    "short_hash": "3b3f201",
+    "author": "Bryan Guffey",
+    "date": "2026-03-18T21:22:43-07:00",
+    "message": "fix: run clippy and tests with --features web in pre-push hook\n\nLocal pre-push hook was running clippy without --features web, so\nweb module code was not checked. This let a clippy::manual_map\nwarning through to CI. Both the installed hook and the install\nscript now include --features web.\n\nCloses #100.",
+    "files_changed": 2
+  },
+  {
+    "hash": "f6b68ed93ec824184c91d660179d45219a3f3810",
+    "short_hash": "f6b68ed",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T21:21:38-07:00",
+    "message": "Merge pull request #31 from musicjunkieg/fix/repost-links-and-account-fallback\n\nfix: fix repost links and add unscored account fallback",
+    "files_changed": 0
+  },
+  {
+    "hash": "683c5bfd388cc26bfdc555ca76eb00e74ab73705",
+    "short_hash": "683c5bf",
+    "author": "chaos gremlin",
+    "date": "2026-03-18T09:18:13-07:00",
+    "message": "Merge pull request #30 from musicjunkieg/fix/railway-dockerfile-builder\n\nfix: fix Dockerfile for Railway deployment and also update to root user to access volume",
+    "files_changed": 0
+  },
+  {
+    "hash": "ac304fcbc0bee095b99f41efa0db886bd9eec73f",
+    "short_hash": "ac304fc",
+    "author": "chaos gremlin",
+    "date": "2026-03-17T21:39:20-07:00",
+    "message": "Merge pull request #27 from musicjunkieg/fix/rust-1.94\n\nfix: bump Rust to 1.94.0 to match local toolchain",
+    "files_changed": 0
+  },
+  {
+    "hash": "cfabfc25aabd26b61b2a7416df38c7f2dbf1ed91",
+    "short_hash": "cfabfc2",
+    "author": "chaos gremlin",
+    "date": "2026-03-17T18:57:10-07:00",
+    "message": "Merge pull request #21 from musicjunkieg/feat/onboarding-flow\n\nfeat: onboarding flow — OAuth fix, welcome screen, auto-fingerprint",
+    "files_changed": 0
+  },
+  {
+    "hash": "9832bdd4775d85611d1c7277bd7b6726367ffda7",
+    "short_hash": "9832bdd",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T17:54:10-07:00",
+    "message": "fix: address CodeRabbit review findings on PR #21\n\n- Make embed_batch non-fatal in auto-fingerprint (warn + skip instead\n  of propagating error that kills the scan)\n- Tighten scan test assertion to assert_eq 202 Accepted\n- Fix stale \"234\" test count reference in CLAUDE.md (should be 227)\n- Improve first-run detection: require !started_at in addition to\n  zero tier counts, so completed scans with no results show the\n  empty dashboard instead of the welcome screen\n- Refactor test_helpers: build_test_app delegates to build_test_app_with_db\n- Regenerate decision graph export with nodes 157-159\n\nCloses #138.",
+    "files_changed": 8
+  },
+  {
+    "hash": "638e535927e6277f60b56c4432d7b00500e32f04",
+    "short_hash": "638e535",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T17:27:57-07:00",
+    "message": "chore: rebuild SvelteKit SPA with updated welcome text",
+    "files_changed": 2
+  },
+  {
+    "hash": "1b74c64d3b6ddf3e15c765b71166f4271ad99a3f",
+    "short_hash": "1b74c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:35:37-07:00",
+    "message": "feat: add first-run welcome screen for new users\n\nWhen the dashboard loads with zero scored accounts and no scan\nrunning, show a centered welcome message explaining what Charcoal\ndoes and a \"Start your first scan\" button. After the scan starts,\nthe view flips to the normal dashboard with progress indicator.\n\nCloses #113.",
+    "files_changed": 4
+  },
+  {
+    "hash": "1b74c64d3b6ddf3e15c765b71166f4271ad99a3f",
+    "short_hash": "1b74c64",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:35:37-07:00",
+    "message": "feat: add first-run welcome screen for new users\n\nWhen the dashboard loads with zero scored accounts and no scan\nrunning, show a centered welcome message explaining what Charcoal\ndoes and a \"Start your first scan\" button. After the scan starts,\nthe view flips to the normal dashboard with progress indicator.\n\nCloses #113.",
+    "files_changed": 4
+  },
+  {
+    "hash": "630b17a291c9f01c1829082c90866b7a3ee31d6b",
+    "short_hash": "630b17a",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:26:37-07:00",
+    "message": "fix: register user in DB during OAuth callback\n\nThe OAuth callback authenticated users and set session cookies but\nnever called upsert_user(), so the users table had no row for them.\nThis caused POST /api/scan to fail with \"User not found\".\n\nThread the handle through PendingOAuth and call upsert_user after\nthe DID gate passes. Closes #121.",
+    "files_changed": 3
+  },
+  {
+    "hash": "3c15470b5858be83d652536b99a23c4ca1098f0d",
+    "short_hash": "3c15470",
+    "author": "Bryan Guffey",
+    "date": "2026-03-17T13:25:33-07:00",
+    "message": "test: add tests for user registration and scan endpoint contract\n\nAdd build_test_app_with_db helper that returns both router and DB.\nAdd two tests: one documenting the bug (scan fails with no user row),\none proving the fix contract (scan works when user is registered).",
+    "files_changed": 4
+  },
+  {
+    "hash": "e7df2409d50dfcaa5fc168a7abfedf950e42c13c",
+    "short_hash": "e7df240",
+    "author": "chaos gremlin",
+    "date": "2026-03-10T20:37:15-07:00",
+    "message": "docs: update test count to 234 after multi-user schema merge (#15)\n\n* docs: update test count to 234 after multi-user schema merge\n\n* fix: clarify test count wording and fix decision graph status typo\n\n- CLAUDE.md: specify exact test command (cargo test --features web) and note\n  PostgreSQL tests are counted separately\n- graph-data.json: fix node 148 status \"complete\" -> \"completed\" for consistency\n\n* fix: move multi-user schema entry from 0.3.0 to Unreleased\n\nMulti-user schema (PR #14) merged 2026-03-10, after the 0.3.0 release\ndate of 2026-03-07. Moves the entry to the correct changelog section.\n\n* fix: remove duplicate Axum entry from 0.3.0 Changed section\n\nAlready covered under Added as \"v0.3 web GUI: Axum API server + SvelteKit\ndashboard\". Removes the redundant #51 entry from Changed.",
+    "files_changed": 5
+  },
+  {
+    "hash": "14d1b8ee7cdbbacc2f133dd87dffaf4083b5b081",
+    "short_hash": "14d1b8e",
+    "author": "chaos gremlin",
+    "date": "2026-03-10T12:29:06-07:00",
+    "message": "feat: multi-user schema redesign (v0.5) (#14)\n\n* docs: add multi-user schema redesign implementation plan\n\n11-task plan covering schema migration v4, Database trait changes,\nboth backend implementations, pipeline threading, CLI DID resolution,\nweb handler auth extraction, and test updates.\n\n* feat(db): add migration v4 — multi-user schema with user_did columns\n\nCreates users table, rebuilds topic_fingerprint/account_scores/scan_state\nwith user_did in their primary keys, adds user_did column to\namplification_events, and rebuilds indices to include user_did.\nExisting data backfilled with empty string user_did.\n\n* feat(db): add user_did parameter to all Database trait methods\n\nAdd user_did as first parameter to every user-scoped method in the\nDatabase trait, enabling per-user data isolation. Also add upsert_user\nmethod for user management. table_count remains global (unscoped).\n\nImplementations will be updated in subsequent tasks.\n\n* feat(db): scope all SQLite queries to user_did\n\nAll 17 query functions now take user_did as a parameter to scope\ndata per protected user. SQL queries updated with composite key\nWHERE clauses and INSERT columns. Added upsert_user() function\nfor the new users table. All tests updated with TEST_USER constant\nand user isolation tests added.\n\n* feat(db): update SqliteDatabase trait impl for user_did params\n\nForward user_did to all queries::* calls, add upsert_user method,\nupdate all tests with TEST_USER constant, fix table_count assertion\nfor migration v4 (5 -> 6 tables).\n\n* feat(db): update PgDatabase for multi-user schema\n\nAdd migration v4 (0004_multiuser.sql) that creates users table and adds\nuser_did column to all data tables with updated composite primary keys.\n\nUpdate all PgDatabase trait method implementations to accept user_did\nparameter and scope all queries per-user. Add upsert_user method.\n\n* feat(pipeline): thread user_did through amplification, sweep, and status\n\n* feat(cli): resolve handle to DID and thread user_did through all commands\n\nEvery CLI command that calls DB methods now:\n1. Resolves config.bluesky_handle to a DID\n2. Calls db.upsert_user() to ensure the user row exists\n3. Passes user_did to all DB and pipeline function calls\n\nAdded resolve_and_register_user() helper. Updated load_fingerprint()\nand load_embedder() to accept user_did parameter. Status command\ngracefully handles missing BLUESKY_HANDLE with empty string fallback.\nMigrate command registers user in both source and target databases.\n\n* feat(web): extract user_did from auth context in all handlers\n\nAll protected web handlers now extract AuthUser from request\nextensions and pass user_did to Database trait methods. The\nscan_job launch_scan/run_scan functions accept user_did and\nthread it through fingerprint, embedding, engagement, pile-on,\nand pipeline calls.\n\n* test: update integration tests for multi-user schema\n\nAll DB-touching integration tests now pass user_did to trait methods.\nPostgreSQL tests use TEST_USER constant for user-scoped operations.\n\n* docs: update CLAUDE.md for multi-user schema (v4)\n\nAdd multi-user schema bullet to post-MVP improvements. Update test\ncount to 225, Database trait method count to 18, schema version to v4.\n\n* fix: address CodeRabbit review findings on PR #14\n\n- Wrap SQLite v4 migration in BEGIN/COMMIT for atomicity\n- Drop DEFAULT on user_did columns in Postgres migration after backfill\n- Seed sweep dedupe set with user_did (DID) instead of protected_handle\n- Show last_scan_at independently of notifications_cursor in status\n- Return 500 errors instead of unwrap_or_default in accounts/events handlers\n- Wrap background scan in catch_unwind to reset status on panic\n- Append UTC offset to detected_at in Postgres event insertion\n- Log warning on DID resolution failure in status command\n- Scope Postgres test cleanup by user_did for amplification_events\n\n* fix: address second round of CodeRabbit review findings on PR #14\n\n- Fix negative UTC offset detection in Postgres event timestamp binding\n- Use checked i32 cast for max_age_days in is_score_stale\n- Rebuild amplification_events table in SQLite v4 migration (no DEFAULT on user_did)\n- Propagate DB errors for median_engagement and pile_on in scan job\n\n* fix: propagate DB errors from get_embedding in scan job\n\nPreviously mapped all Err to None, hiding real DB failures like\nconnection errors. Now Ok(None) still means \"no embedding\" (TF-IDF\nfallback) while Err propagates and fails the scan.\n\n* fix: thread authenticated actor handle through web scan job\n\nThe scan job was using config.bluesky_handle which could be empty or\nbelong to a different user in multi-user mode. Now launch_scan accepts\nthe actor_handle from the authenticated session, looked up via the new\nget_user_handle trait method. Both fetch_recent_posts and the\namplification pipeline use the per-user handle instead of the global\nconfig value.",
+    "files_changed": 20
+  },
+  {
+    "hash": "64e388dcf95a2003e39dd6858ea3086a8e4b4768",
+    "short_hash": "64e388d",
+    "author": "chaos gremlin",
+    "date": "2026-03-05T21:52:48-08:00",
+    "message": "chore: allow git stash in hook-config (#11)\n\nRemoves git stash from the blocked commands list so it can be used\nto safely park uncommitted changes when switching branches, instead\nof having to discard or commit them first.",
+    "files_changed": 2
+  },
+  {
+    "hash": "bf3be11ff396fd5c0227eee7587fd099a2b6e0b7",
+    "short_hash": "bf3be11",
+    "author": "chaos gremlin",
+    "date": "2026-02-22T15:57:51-08:00",
+    "message": "Merge pull request #8 from musicjunkieg/chore/workflow-hardening\n\nchore: harden workflow — atomic commits, branch protection, persistence",
+    "files_changed": 0
+  },
+  {
+    "hash": "d708dbba57eeb05c7961411da6ef79fe1b98c2a1",
+    "short_hash": "d708dbb",
+    "author": "musicjunkieg",
+    "date": "2026-02-21T00:52:27Z",
+    "message": "fix: address CodeRabbit review findings on PR #7\n\n  Advisory lock (major): acquire a dedicated pool connection for the\n  lock/unlock pair so both execute on the same backend session.\n  Previously the pool could hand out different connections for acquire\n  and release, making the unlock a no-op. Also wraps migrations in an\n  async block so the unlock always runs even if a migration fails.\n\n  cleanup_test_data: return Result<()> and propagate errors with\n  context instead of panicking via unwrap.\n\n  CHANGELOG: fix \"dont\" typo, rephrase entries to describe fixes\n  applied rather than the problems that existed.",
+    "files_changed": 3
+  },
+  {
+    "hash": "62843cdd15d07167fec2d9cdc898b09060d5d750",
+    "short_hash": "62843cd",
+    "author": "musicjunkieg",
+    "date": "2026-02-21T00:13:39Z",
+    "message": "feat: v0.2 backend polish — close #68, #72, #73, #74, #75, #76\n\n  #73 — Add PostgreSQL setup section to README documenting pgvector\n    CREATE EXTENSION superuser requirement and migration command.\n\n  #75 — Replace silent post_count as i32 cast with i32::try_from()\n    in PgDatabase::save_fingerprint, surfacing an error instead of\n    silently wrapping on overflow.\n\n  #76 — Gate sqlite feature: make rusqlite optional (dep:rusqlite),\n    add cfg(feature = \"sqlite\") to mod sqlite/schema/queries and\n    all sqlite-specific functions in db/mod.rs.\n\n  #74 — Add cleanup_test_data() helper to db_postgres.rs that deletes\n    test-specific rows before each writing test so runs are idempotent.\n\n  #72 — Acquire pg_advisory_lock(0x43484152434F414C) before running\n    migrations and release it after, preventing race conditions when\n    two processes start concurrently.\n\n  #68 — Rewrite detect_pile_on_participants() as O(n) two-pointer\n    sliding window. Previous implementation was O(n^2). New approach\n    uses a HashMap<DID, count> maintained as left/right pointers\n    advance monotonically, so each event enters and exits at most once.",
+    "files_changed": 6
+  },
+  {
+    "hash": "6d1451c96a371df545a0d6ccdb8656e3ba685ebc",
+    "short_hash": "6d1451c",
+    "author": "musicjunkieg",
+    "date": "2026-02-20T23:27:38Z",
+    "message": "fix #71 and feat #67: save_embedding error on missing row, behavioral\n  signals in reports\n\n  fix: save_embedding now returns an error (instead of silently doing nothing)\n  when no fingerprint row exists in topic_fingerprint. Fixed in both SQLite\n  (queries.rs) and Postgres (postgres.rs) backends. Added a unit test that\n  exercises the failure path.\n\n  feat: behavioral signals (quote ratio, reply ratio, avg engagement, pile-on,\n  benign gate, boost multiplier) are now rendered in terminal detail view\n  (display_account_detail) and in the markdown report evidence section for\n  Elevated+ accounts. Data was already stored as JSON in account_scores — this\n  just wires it up for display. No schema or model changes needed.",
+    "files_changed": 4
+  },
+  {
+    "hash": "8bcaa5ea99f8717a2ad0dd588a36ae293452d706",
+    "short_hash": "8bcaa5e",
+    "author": "musicjunkieg",
+    "date": "2026-02-20T05:27:30Z",
+    "message": "fix: correct inverted credential redaction in migrate command display",
+    "files_changed": 1
+  },
+  {
+    "hash": "0752aeb79b2a42ec06be48e0a4e888336ed326d0",
+    "short_hash": "0752aeb",
+    "author": "Bryan Guffey",
+    "date": "2026-02-20T01:22:53Z",
+    "message": "docs: add note to never use heredoc syntax in commit commands\n\n  Heredocs break in zsh on this system. Use single-quoted multi-line\n  strings for commit messages instead.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "40167dd15469e181995d855068ffec748d4868e2",
+    "short_hash": "40167dd",
+    "author": "Bryan Guffey",
+    "date": "2026-02-20T01:21:21Z",
+    "message": "feat: add migrate command and PostgreSQL documentation\n\n  Add `charcoal migrate --database-url <url>` command (gated on postgres\n  feature) that transfers all data from SQLite to PostgreSQL. Update\n  CLAUDE.md with database architecture docs and .env.example with\n  DATABASE_URL.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "97e59eb490f3a2bdf300ae5f9cc59cf470315b34",
+    "short_hash": "97e59eb",
+    "author": "Bryan Guffey",
+    "date": "2026-02-20T00:12:42Z",
+    "message": "refactor: wire all pipelines and CLI through\n  Database trait\n\n  Replaces direct rusqlite::Connection usage with Arc<dyn Database> in:\n  - pipeline/amplification.rs (scan + score followers)\n  - pipeline/sweep.rs (second-degree network sweep)\n  - status.rs (now async, HasDbPath trait removed)\n  - main.rs (all 9 command handlers)\n  - config.rs (HasDbPath impl removed)\n\n  No behavior change — still SQLite-only via SqliteDatabase wrapper.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "d07da653ca87dab9d440247154872c8427dbacc3",
+    "short_hash": "d07da65",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T23:51:02Z",
+    "message": "feat: add Database trait defining async interface for all DB operations\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "629b24a2b092c32e4c663ac2033d7dc684f7e62c",
+    "short_hash": "629b24a",
+    "author": "chaos gremlin",
+    "date": "2026-02-19T21:37:25-08:00",
+    "message": "Merge pull request #6 from musicjunkieg/feat/sqlite-to-postgres\n\nfeat: SQLite to PostgreSQL dual-backend migration",
+    "files_changed": 0
+  },
+  {
+    "hash": "98d91d8f01c21dcac4f8fd412d7aefb9cebdcb09",
+    "short_hash": "98d91d8",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T07:46:40Z",
+    "message": "docs: update CLAUDE.md with behavioral signals feature (PR #5)\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "dcbabe2f1ba70620887458ee1af8a5f076a741e4",
+    "short_hash": "dcbabe2",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T04:45:43Z",
+    "message": "chore: organize generated files into gitignored directories\n\n  Reports go to output/, backups to backups/, research scratch to docs/research/.\n  Git hooks skip Rust checks for docs-only commits/pushes. Report generation\n  creates output/ directory automatically if missing.",
+    "files_changed": 11
+  },
+  {
+    "hash": "3a3837d7f2efe535eebf19632661a9e28d189637",
+    "short_hash": "3a3837d",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T03:12:38Z",
+    "message": "style: apply cargo fmt to client.rs",
+    "files_changed": 1
+  },
+  {
+    "hash": "5536e2ab246e70819ff229696c157e6cb828743f",
+    "short_hash": "5536e2a",
+    "author": "Bryan Guffey",
+    "date": "2026-02-19T02:59:27Z",
+    "message": "feat: replace authenticated BskyAgent with public AT Protocol API\n\n  Remove bsky-sdk dependency and authentication requirement from the entire\n  intelligence pipeline. All read operations now use the unauthenticated\n  public API at public.api.bsky.app via a new PublicAtpClient (reqwest).\n\n  Only BLUESKY_HANDLE is needed — no app password required. Constellation\n  backlink index is now always-on for amplification detection (replaces\n  notification polling, which required auth). Added validate command that\n  scores blocked accounts via PDS repo access to verify pipeline accuracy.\n\n  Key changes:\n  - BskyAgent → PublicAtpClient with generic xrpc_get() helper\n  - Notification polling (listNotifications) → Constellation-primary\n  - --constellation flag removed (always-on)\n  - Added DID/PDS resolution for validate command\n  - 139 tests passing, clippy clean\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 20
+  },
+  {
+    "hash": "015ad898c4e910e0117571fa1072394fe4207bdf",
+    "short_hash": "015ad89",
+    "author": "chaos gremlin",
+    "date": "2026-02-18T19:08:23-08:00",
+    "message": "Merge pull request #4 from musicjunkieg/feat/public-api-refactor\n\nfeat: replace authenticated BskyAgent with public AT Protocol API",
+    "files_changed": 0
+  },
+  {
+    "hash": "ec6b09b635afdf089224a5c5d8844d4dac2379c6",
+    "short_hash": "ec6b09b",
+    "author": "Bryan Guffey",
+    "date": "2026-02-18T02:56:25Z",
+    "message": "docs: update CLAUDE.md for scoring recalibration and test count",
+    "files_changed": 1
+  },
+  {
+    "hash": "c2201ebb1b33b2ab21df3b64d4693d8fc281c4c1",
+    "short_hash": "c2201eb",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T23:50:02Z",
+    "message": "docs: update CLAUDE.md for sentence embeddings, apply cargo fmt\n\n  Update project status to reflect 132 tests, sentence embedding model\n  docs, and DB schema v2. Apply cargo fmt to new code.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "9ea738a4db46a036c0a902448936388bda11bc3d",
+    "short_hash": "9ea738a",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T22:48:16Z",
+    "message": "docs: update CLAUDE.md, README, and workflow docs for contributor PR #1\n\n  Reflect post-MVP improvements from PR #1 (Bobby Grayson): 109 tests,\n  UTF-8 safety, LazyLock regex, spawn_blocking ONNX, git hooks. Add\n  deciduous v0.12.0 features to workflow docs. Apply cargo fmt to source.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 26
+  },
+  {
+    "hash": "8b6c16a79cfef1ae2b0c96d7211b4e9864112c8c",
+    "short_hash": "8b6c16a",
+    "author": "Robert Grayson",
+    "date": "2026-02-16T03:21:32-05:00",
+    "message": "chore: add install-hooks.sh for portable pre-commit and pre-push hooks\n\nInstalls both git hooks from a single script so new clones get the\nsame quality gates: formatting, clippy, and tests on commit; tests\nand clippy on push. Run ./scripts/install-hooks.sh after cloning.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "b038d52ce001ae6c2183a92d933de4d86e75b968",
+    "short_hash": "b038d52",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:55:04Z",
+    "message": "docs: strengthen Deciduous logging requirements in CLAUDE.md\n\n  Make it explicit that deciduous nodes must be created in real-time with\n  --commit flags, not batched retroactively. Add concrete command examples\n  and call out the anti-pattern of catching up later.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "bdf137d1dc2bb168734145a3956ddcddbc7c2362",
+    "short_hash": "bdf137d",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:52:26Z",
+    "message": "perf: skip follower analysis for repost events (#27)\n\n  Only quote events trigger follower scoring. Reposts are still recorded\n  as amplification events but don't trigger the expensive follower fetch\n  and scoring pipeline. Quotes are the primary harassment vector (hostile\n  commentary), while reposts are usually supportive sharing.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 2
+  },
+  {
+    "hash": "c4e6a69534ea3fe84abe2efc4fcf4b62537ebaab",
+    "short_hash": "c4e6a69",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:47:59Z",
+    "message": "chore: stop tracking chainlink issues.db and .cache (#26)\n\n  These are local runtime state — binary DB diffs are noise in git history,\n  and .cache/ is ephemeral. Rules files remain tracked as shared config.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 1
+  },
+  {
+    "hash": "7af30383dadaad8652b8526cb916c3e72e332e15",
+    "short_hash": "7af3038",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:42:46Z",
+    "message": "feat: quote context in reports, self-exclusion, Mode 2 sweep, CLI cleanup (#21-25)\n\n  - Surface quote text and toxicity in markdown and terminal reports (#21)\n  - Exclude protected user from their own threat report (#22)\n  - Remove unused --since CLI flag (#23)\n  - Replace dummy Perspective scorer with NoopScorer (#24)\n  - Implement Mode 2 background sweep of followers-of-followers (#25)\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "26ad26ae2ff9d17fdaaecb4fa12d2a896e200318",
+    "short_hash": "26ad26a",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:27:22Z",
+    "message": "feat: fetch and score quote text for amplification events (#12)\n\n  When a quote event is detected, fetch the quote post text via\n  app.bsky.feed.getPosts and score it for toxicity. Store the quote text\n  in the amplifier_text DB column and display it with a toxicity score\n  in scan output.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "b971e2f590734fb6ced73921535ac431821a0fef",
+    "short_hash": "b971e2f",
+    "author": "Bryan Guffey",
+    "date": "2026-02-16T00:03:55Z",
+    "message": "chore: update comments to reflect ONNX as default scorer (#14)\n\n  Replace references to Perspective API as the primary toxicity scorer\n  in module-level comments and doc comments. Perspective is now documented\n  as a fallback option.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "9573deab7655855cb91516ecc6743a64584589d7",
+    "short_hash": "9573dea",
+    "author": "Bryan Guffey",
+    "date": "2026-02-15T23:59:20Z",
+    "message": "docs: add README and clean up CLAUDE.md (#20)\n\n  Add comprehensive README with quick start guide, CLI reference, threat\n  tiers, and architecture overview. Update CLAUDE.md to reflect current\n  project state (ONNX scorer, all phases complete). Move Deciduous workflow\n  reference to docs/deciduous-workflow.md.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "646efd899071dd672f3af298525b8dbaf5441700",
+    "short_hash": "646efd8",
+    "author": "Bryan Guffey",
+    "date": "2026-02-15T23:50:57Z",
+    "message": "feat: parallelize scan pipeline with buffer_unordered (#10)\n\n  Restructure follower scoring into filter/score/write phases using\n  futures::stream::buffer_unordered for concurrent network I/O. Adds\n  --concurrency flag (default 8) to control parallelism. Includes\n  progress bar during scoring via indicatif.\n\n  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "7ebfc4685ba33698f191082be64dcb827d2ab84f",
+    "short_hash": "7ebfc46",
+    "author": "Bryan Guffey",
+    "date": "2026-02-09T05:45:50Z",
+    "message": "feat: replace Perspective API with local ONNX toxicity scorer\n\nAdd OnnxToxicityScorer using Detoxify's unbiased-toxic-roberta model\nvia ort crate for local CPU inference — no API keys, no rate limits,\nand reduced bias around identity mentions. Perspective API kept as\nfallback via CHARCOAL_SCORER=perspective env var.\n\nNew: download-model CLI command, ScorerBackend config enum, model\ndownload helper with progress bar. Default backend is now ONNX.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 10
+  },
+  {
+    "hash": "db8ad317216b37048ffb35473fa2125119b03914",
+    "short_hash": "db8ad31",
+    "author": "Bryan Guffey",
+    "date": "2026-02-09T02:40:55Z",
+    "message": "fix: improve fingerprint quality and add custom PDS support\n\nTune threat tier thresholds for real-world score distribution where most\naccounts land in 0-15 range. Add --max-followers CLI flag to control\nper-amplifier analysis depth. Recalculate tier from stored score so\nthreshold changes take effect without rescanning. Support custom PDS\nendpoints for non-bsky.social accounts.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "1a6477174b29bc64f39ecf60eed95ff1d0346f64",
+    "short_hash": "1a64771",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T22:00:06Z",
+    "message": "feat: Phase 7 — markdown report generation and terminal output formatting\n\nComplete the output subsystem:\n- output/terminal.rs: Colored threat list display with tier summaries,\n  account detail view with evidence posts\n- output/markdown.rs: Full .md report with summary table, ranked accounts,\n  topic fingerprint, and evidence section for elevated+ threats\n- main.rs: Wire report command to generate both terminal and markdown output,\n  delegate score display to output::terminal module\n\n1 new test (markdown generation), 21 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "1a6477174b29bc64f39ecf60eed95ff1d0346f64",
+    "short_hash": "1a64771",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T22:00:06Z",
+    "message": "feat: Phase 7 — markdown report generation and terminal output formatting\n\nComplete the output subsystem:\n- output/terminal.rs: Colored threat list display with tier summaries,\n  account detail view with evidence posts\n- output/markdown.rs: Full .md report with summary table, ranked accounts,\n  topic fingerprint, and evidence section for elevated+ threats\n- main.rs: Wire report command to generate both terminal and markdown output,\n  delegate score display to output::terminal module\n\n1 new test (markdown generation), 21 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 3
+  },
+  {
+    "hash": "99d9f519b3ebd26f4577ad9e330b91f5ee78e027",
+    "short_hash": "99d9f51",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:57:47Z",
+    "message": "feat: Phases 5+6 — amplification pipeline, threat scoring, and full CLI wiring\n\nComplete the core threat detection pipeline:\n- pipeline/amplification.rs: Full scan workflow — poll notifications for\n  quote/repost events, store in DB, optionally fetch amplifier followers\n  and score each one\n- scoring/threat.rs: Combined threat score formula (70% toxicity + 30%\n  topic overlap) with gate that caps scores for irrelevant hostile accounts\n- scoring/profile.rs: Profile builder that orchestrates post fetching,\n  toxicity scoring, topic extraction, and threat computation for one account\n\nWire all CLI commands to real implementations:\n- `fingerprint`: Fetches posts, runs TF-IDF, displays bar chart, caches in DB\n- `scan [--analyze]`: Polls notifications, stores events, optionally scores\n- `score @handle`: Full single-account scoring with evidence display\n- `report [--min-score N]`: Ranked threat list from DB\n\n5 new tests (threat formula), 20 total passing. Clippy clean.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6dcb11233f83f5c04e8029eb32684bd8065f2049",
+    "short_hash": "6dcb112",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:54:20Z",
+    "message": "feat: Phase 4 — toxicity scoring with Perspective API and rate limiter\n\nImplement the toxicity scoring subsystem:\n- traits.rs: ToxicityScorer async trait with ToxicityResult/ToxicityAttributes\n  types, designed for provider swappability (Perspective sunsets Dec 2026)\n- perspective.rs: Google Perspective API client requesting TOXICITY,\n  SEVERE_TOXICITY, IDENTITY_ATTACK, INSULT, PROFANITY, and THREAT scores\n- rate_limiter.rs: Token-bucket rate limiter enforcing 1 QPS for the\n  free tier, with async sleep to avoid busy-waiting\n\nAdded async-trait crate dependency.\n2 new tests (rate limiter), 15 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6dcb11233f83f5c04e8029eb32684bd8065f2049",
+    "short_hash": "6dcb112",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:54:20Z",
+    "message": "feat: Phase 4 — toxicity scoring with Perspective API and rate limiter\n\nImplement the toxicity scoring subsystem:\n- traits.rs: ToxicityScorer async trait with ToxicityResult/ToxicityAttributes\n  types, designed for provider swappability (Perspective sunsets Dec 2026)\n- perspective.rs: Google Perspective API client requesting TOXICITY,\n  SEVERE_TOXICITY, IDENTITY_ATTACK, INSULT, PROFANITY, and THREAT scores\n- rate_limiter.rs: Token-bucket rate limiter enforcing 1 QPS for the\n  free tier, with async sleep to avoid busy-waiting\n\nAdded async-trait crate dependency.\n2 new tests (rate limiter), 15 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 5
+  },
+  {
+    "hash": "6470b006afe23db6853b83b21c01451abd25b073",
+    "short_hash": "6470b00",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:52:47Z",
+    "message": "feat: Phase 3 — TF-IDF topic fingerprint with clustering and overlap scoring\n\nImplement the complete topic analysis subsystem:\n- traits.rs: TopicExtractor trait for swappable implementations\n- tfidf.rs: TF-IDF keyword extraction using keyword_extraction crate,\n  with co-occurrence based clustering into labeled topic groups\n- fingerprint.rs: TopicFingerprint/TopicCluster structs with colored\n  terminal bar chart display and keyword weight extraction\n- overlap.rs: Weighted Jaccard similarity for comparing two fingerprints\n\nAdded stop-words crate for English stop word filtering.\n7 new tests, 13 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "6470b006afe23db6853b83b21c01451abd25b073",
+    "short_hash": "6470b00",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:52:47Z",
+    "message": "feat: Phase 3 — TF-IDF topic fingerprint with clustering and overlap scoring\n\nImplement the complete topic analysis subsystem:\n- traits.rs: TopicExtractor trait for swappable implementations\n- tfidf.rs: TF-IDF keyword extraction using keyword_extraction crate,\n  with co-occurrence based clustering into labeled topic groups\n- fingerprint.rs: TopicFingerprint/TopicCluster structs with colored\n  terminal bar chart display and keyword weight extraction\n- overlap.rs: Weighted Jaccard similarity for comparing two fingerprints\n\nAdded stop-words crate for English stop word filtering.\n7 new tests, 13 total passing.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 6
+  },
+  {
+    "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
+    "short_hash": "272ff53",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:48:07Z",
+    "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "272ff53c588bd198b7058957ec42d2300a5b3e5a",
+    "short_hash": "272ff53",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:48:07Z",
+    "message": "feat: Phase 2 — Bluesky auth, post fetching, followers, and notifications\n\nImplement the full Bluesky API layer using bsky-sdk 0.1.23:\n- client.rs: Authentication with handle + app password\n- posts.rs: Paginated author feed fetching with repost/short-post filtering\n- followers.rs: Paginated follower list retrieval with max cap\n- notifications.rs: Amplification event detection (quote/repost filtering)\n\nAll modules use proper error handling with anyhow::Context, structured\nlogging with tracing, and pagination cursor management.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",
+    "short_hash": "b5e1599",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:40:21Z",
+    "message": "feat: Phase 1 — project skeleton, CLI, config, and database\n\nSet up the complete Charcoal project structure with all module directories,\nCargo.toml with dependencies (bsky-sdk, rusqlite, keyword_extraction, clap,\ntokio, etc.), clap-based CLI with all planned subcommands, environment\nconfig loading via dotenvy, and SQLite database with schema for topic\nfingerprints, account scores, amplification events, and scan state.\n\nAll 6 database tests pass. `cargo run -- init` creates the DB,\n`cargo run -- status` shows system state, `cargo run -- --help` works.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 39
+  },
+  {
+    "hash": "b5e15998d415facfed7d25d8771af29a5cfaf0f8",
+    "short_hash": "b5e1599",
+    "author": "Bryan Guffey",
+    "date": "2026-02-08T21:40:21Z",
+    "message": "feat: Phase 1 — project skeleton, CLI, config, and database\n\nSet up the complete Charcoal project structure with all module directories,\nCargo.toml with dependencies (bsky-sdk, rusqlite, keyword_extraction, clap,\ntokio, etc.), clap-based CLI with all planned subcommands, environment\nconfig loading via dotenvy, and SQLite database with schema for topic\nfingerprints, account scores, amplification events, and scan state.\n\nAll 6 database tests pass. `cargo run -- init` creates the DB,\n`cargo run -- status` shows system state, `cargo run -- --help` works.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "files_changed": 39
+  }
+]

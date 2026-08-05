@@ -18,10 +18,11 @@ use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, ThreatTier, ToxicPost,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
+    ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::Database;
+use super::traits::{Database, ScanSkip};
+use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
 pub type PgPool = Pool<Postgres>;
@@ -126,6 +127,14 @@ impl PgDatabase {
                 (
                     8,
                     include_str!("../../migrations/postgres/0008_fingerprint_scoring.sql"),
+                ),
+                (
+                    9,
+                    include_str!("../../migrations/postgres/0009_classification_staging.sql"),
+                ),
+                (
+                    10,
+                    include_str!("../../migrations/postgres/0010_scan_skips.sql"),
                 ),
             ];
 
@@ -385,9 +394,15 @@ impl Database for PgDatabase {
                 serde_json::from_value(top_posts_json).unwrap_or_default();
 
             // Recalculate tier from stored score so threshold changes
-            // take effect without rescanning.
+            // take effect without rescanning — unless the stored tier is
+            // NotAssessed (#222), which must survive unchanged since its
+            // NULL score would otherwise resolve to no tier at all.
             let threat_score: Option<f64> = row.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            let stored_tier: Option<String> = row.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
 
             let behavioral_signals: Option<serde_json::Value> = row.get(9);
 
@@ -430,6 +445,24 @@ impl Database for PgDatabase {
         }
     }
 
+    async fn get_fresh_scored_dids(
+        &self,
+        user_did: &str,
+        max_age_days: i64,
+    ) -> Result<Vec<String>> {
+        // Same cutoff as is_score_stale (make_interval + bound i32), inverted:
+        // fresh = scored_at >= NOW() - interval.
+        let rows = sqlx_core::query::query(
+            "SELECT did FROM account_scores
+             WHERE user_did = $1 AND scored_at >= NOW() - make_interval(days => $2)",
+        )
+        .bind(user_did)
+        .bind(i32::try_from(max_age_days).context("max_age_days exceeds i32 range")?)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get::<String, _>(0)).collect())
+    }
+
     async fn insert_amplification_event(
         &self,
         user_did: &str,
@@ -463,6 +496,79 @@ impl Database for PgDatabase {
         Ok(row.get::<i64, _>(0))
     }
 
+    async fn insert_amplification_events_batch(
+        &self,
+        user_did: &str,
+        events: &[NewAmplificationEvent],
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        // UNNEST binds 8 arrays plus $1 (user_did, a single scalar broadcast
+        // by the SELECT to every row) regardless of row count, so this is one
+        // round-trip for any batch size and never approaches Postgres's
+        // 65535-parameter statement cap.
+        //
+        // `WITH ORDINALITY` + `ORDER BY ord` is load-bearing, not decorative.
+        // Postgres does NOT guarantee row order for INSERT ... SELECT without
+        // an explicit ORDER BY — the planner is free to reorder. Our contract
+        // requires serial ids to ascend in slice order, so we cannot rely on
+        // the observed behavior that UNNEST happens to emit in array order.
+        // WITH ORDINALITY numbers the elements at their source, and ordering
+        // by that number makes the guarantee explicit instead of incidental.
+        let event_types: Vec<String> = events.iter().map(|e| e.event_type.clone()).collect();
+        let amplifier_dids: Vec<String> = events.iter().map(|e| e.amplifier_did.clone()).collect();
+        let amplifier_handles: Vec<String> =
+            events.iter().map(|e| e.amplifier_handle.clone()).collect();
+        let original_post_uris: Vec<String> =
+            events.iter().map(|e| e.original_post_uri.clone()).collect();
+        let amplifier_post_uris: Vec<Option<String>> = events
+            .iter()
+            .map(|e| e.amplifier_post_uri.clone())
+            .collect();
+        let amplifier_texts: Vec<Option<String>> =
+            events.iter().map(|e| e.amplifier_text.clone()).collect();
+        let original_post_texts: Vec<Option<String>> = events
+            .iter()
+            .map(|e| e.original_post_text.clone())
+            .collect();
+        let context_scores: Vec<Option<f64>> = events.iter().map(|e| e.context_score).collect();
+
+        // All eight arrays carry explicit ::text[]/::float8[] casts so
+        // Postgres can type UNNEST's output columns without inspecting
+        // values. That's required for context_score in particular — an
+        // all-NULL array has no inferable element type, and Postgres
+        // rejects it without the explicit ::float8[] cast.
+        let result = sqlx_core::query::query(
+            "INSERT INTO amplification_events
+                (user_did, event_type, amplifier_did, amplifier_handle, original_post_uri,
+                 amplifier_post_uri, amplifier_text, original_post_text, context_score)
+             SELECT $1, t.event_type, t.amplifier_did, t.amplifier_handle, t.original_post_uri,
+                    t.amplifier_post_uri, t.amplifier_text, t.original_post_text, t.context_score
+             FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[],
+                         $6::text[], $7::text[], $8::text[], $9::float8[])
+                  WITH ORDINALITY
+                  AS t(event_type, amplifier_did, amplifier_handle, original_post_uri,
+                       amplifier_post_uri, amplifier_text, original_post_text, context_score,
+                       ord)
+             ORDER BY t.ord",
+        )
+        .bind(user_did)
+        .bind(&event_types)
+        .bind(&amplifier_dids)
+        .bind(&amplifier_handles)
+        .bind(&original_post_uris)
+        .bind(&amplifier_post_uris)
+        .bind(&amplifier_texts)
+        .bind(&original_post_texts)
+        .bind(&context_scores)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() as usize)
+    }
+
     async fn get_recent_events(
         &self,
         user_did: &str,
@@ -479,7 +585,7 @@ impl Database for PgDatabase {
                     original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1
-             ORDER BY detected_at DESC
+             ORDER BY detected_at DESC, id DESC
              LIMIT $2",
         )
         .bind(user_did)
@@ -546,7 +652,7 @@ impl Database for PgDatabase {
                     followers_fetched, followers_scored, original_post_text, context_score
              FROM amplification_events
              WHERE user_did = $1 AND amplifier_did = $2
-             ORDER BY detected_at DESC",
+             ORDER BY detected_at DESC, id DESC",
         )
         .bind(user_did)
         .bind(amplifier_did)
@@ -673,7 +779,13 @@ impl Database for PgDatabase {
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_value(top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = r.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = r.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             let behavioral_signals: Option<serde_json::Value> = r.get(9);
             AccountScore {
                 did: r.get(0),
@@ -715,7 +827,13 @@ impl Database for PgDatabase {
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_value(top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = r.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = r.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             let behavioral_signals: Option<serde_json::Value> = r.get(9);
             AccountScore {
                 did: r.get(0),
@@ -807,7 +925,13 @@ impl Database for PgDatabase {
             let top_toxic_posts: Vec<ToxicPost> =
                 serde_json::from_value(top_posts_json).unwrap_or_default();
             let threat_score: Option<f64> = row.get(4);
-            let threat_tier = threat_score.map(|s| ThreatTier::from_score(s).to_string());
+            // Preserve a stored NotAssessed tier (#222) instead of
+            // recomputing from the (NULL) score.
+            let stored_tier: Option<String> = row.get(5);
+            let threat_tier = match stored_tier.as_deref() {
+                Some(s) if s == ThreatTier::NotAssessed.as_str() => Some(s.to_string()),
+                _ => threat_score.map(|s| ThreatTier::from_score(s).to_string()),
+            };
             let behavioral_signals: Option<serde_json::Value> = row.get(9);
 
             accounts.push(AccountScore {
@@ -1013,6 +1137,23 @@ impl Database for PgDatabase {
         // can't leave the user's data half-deleted. Delete in dependency
         // order to avoid FK issues if constraints are added later.
         let mut tx = self.pool.begin().await?;
+        // Staging tables first (#208) — a user's queued classification work
+        // must not outlive the account itself.
+        sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM scan_account_input WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        // #234: scan_skips holds the user's DID, the DIDs of accounts scanned
+        // on their behalf, and raw error text. It is user-scoped like
+        // everything else here and must not outlive the account.
+        sqlx_core::query::query("DELETE FROM scan_skips WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         sqlx_core::query::query("DELETE FROM inferred_pairs WHERE user_did = $1")
             .bind(user_did)
             .execute(&mut *tx)
@@ -1060,5 +1201,314 @@ impl Database for PgDatabase {
             .await?;
         let dids = rows.iter().map(|row| row.get::<String, _>("did")).collect();
         Ok(dids)
+    }
+
+    // --- Classification staging (#208) ---
+
+    async fn enqueue_classifications(&self, user_did: &str, rows: &[QueueRow]) -> Result<()> {
+        // Batch all inserts inside a single transaction to avoid per-row
+        // connection churn and ensure atomicity across the whole batch.
+        let mut tx = self.pool.begin().await?;
+        for row in rows {
+            sqlx_core::query::query(
+                "INSERT INTO classification_queue
+                     (user_did, account_did, post_uri, text, context_text,
+                      post_kind, onnx_score, status,
+                      toxic_token, confidence, model_id, policy_version)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 ON CONFLICT (user_did, account_did, post_uri) DO UPDATE SET
+                     text           = EXCLUDED.text,
+                     context_text   = EXCLUDED.context_text,
+                     post_kind      = EXCLUDED.post_kind,
+                     onnx_score     = EXCLUDED.onnx_score,
+                     status         = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.status
+                                           ELSE EXCLUDED.status END,
+                     toxic_token    = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.toxic_token
+                                           ELSE EXCLUDED.toxic_token END,
+                     confidence     = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.confidence
+                                           ELSE EXCLUDED.confidence END,
+                     model_id       = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.model_id
+                                           ELSE EXCLUDED.model_id END,
+                     policy_version = CASE WHEN classification_queue.status = 'done'
+                                           THEN classification_queue.policy_version
+                                           ELSE EXCLUDED.policy_version END",
+            )
+            .bind(user_did)
+            .bind(&row.account_did)
+            .bind(&row.post_uri)
+            .bind(&row.text)
+            .bind(&row.context_text)
+            .bind(&row.post_kind)
+            .bind(row.onnx_score)
+            .bind(&row.status)
+            .bind(row.toxic_token)
+            .bind(row.confidence)
+            .bind(&row.model_id)
+            .bind(&row.policy_version)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn stash_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        payload_json: &str,
+    ) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO scan_account_input (user_did, account_did, payload_json)
+             VALUES ($1, $2, $3::jsonb)
+             ON CONFLICT (user_did, account_did) DO UPDATE SET payload_json = EXCLUDED.payload_json",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn fetch_pending_classifications(
+        &self,
+        user_did: &str,
+        limit: i64,
+    ) -> Result<Vec<QueueRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT account_did, post_uri, text, context_text, post_kind,
+                    onnx_score, status, toxic_token, confidence, model_id, policy_version
+             FROM classification_queue
+             WHERE user_did = $1 AND status = 'pending'
+             LIMIT $2",
+        )
+        .bind(user_did)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(pg_map_queue_row).collect())
+    }
+
+    async fn record_classification_verdicts(
+        &self,
+        user_did: &str,
+        verdicts: &[VerdictRow],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for v in verdicts {
+            sqlx_core::query::query(
+                "UPDATE classification_queue
+                 SET status = 'done',
+                     toxic_token    = $1,
+                     confidence     = $2,
+                     model_id       = $3,
+                     policy_version = $4
+                 WHERE user_did = $5 AND account_did = $6 AND post_uri = $7",
+            )
+            .bind(v.toxic_token)
+            .bind(v.confidence)
+            .bind(&v.model_id)
+            .bind(&v.policy_version)
+            .bind(user_did)
+            .bind(&v.account_did)
+            .bind(&v.post_uri)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn list_scan_accounts(&self, user_did: &str) -> Result<Vec<String>> {
+        let rows = sqlx_core::query::query(
+            "SELECT DISTINCT account_did FROM classification_queue WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get::<String, _>(0)).collect())
+    }
+
+    async fn fetch_account_verdicts(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Vec<QueueRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT account_did, post_uri, text, context_text, post_kind,
+                    onnx_score, status, toxic_token, confidence, model_id, policy_version
+             FROM classification_queue
+             WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(pg_map_queue_row).collect())
+    }
+
+    async fn fetch_account_input(
+        &self,
+        user_did: &str,
+        account_did: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx_core::query::query(
+            "SELECT payload_json::text FROM scan_account_input
+             WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.get::<String, _>(0)))
+    }
+
+    async fn count_pending_classifications(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*)::bigint FROM classification_queue
+             WHERE user_did = $1 AND status = 'pending'",
+        )
+        .bind(user_did)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn clear_scan_staging(&self, user_did: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM scan_account_input WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn clear_account_staging(&self, user_did: &str, account_did: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx_core::query::query(
+            "DELETE FROM classification_queue WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .execute(&mut *tx)
+        .await?;
+        sqlx_core::query::query(
+            "DELETE FROM scan_account_input WHERE user_did = $1 AND account_did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn record_scan_skip(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        phase: &str,
+        error: &str,
+    ) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO scan_skips (user_did, account_did, phase, error, skipped_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (user_did, account_did, phase) DO UPDATE SET
+                 error = EXCLUDED.error,
+                 skipped_at = EXCLUDED.skipped_at",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .bind(phase)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn count_scan_skips(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query("SELECT COUNT(*) FROM scan_skips WHERE user_did = $1")
+            .bind(user_did)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn list_scan_skips(&self, user_did: &str) -> Result<Vec<ScanSkip>> {
+        let rows = sqlx_core::query::query(
+            "SELECT account_did, phase, error, skipped_at
+             FROM scan_skips WHERE user_did = $1
+             ORDER BY skipped_at DESC, account_did ASC",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ScanSkip {
+                account_did: row.get::<String, _>(0),
+                phase: row.get::<String, _>(1),
+                error: row.get::<String, _>(2),
+                // TIMESTAMPTZ here vs TEXT in SQLite — normalise to a string so
+                // the trait surface is identical across backends.
+                skipped_at: row.get::<chrono::DateTime<chrono::Utc>, _>(3).to_rfc3339(),
+            })
+            .collect())
+    }
+
+    async fn clear_scan_skips(&self, user_did: &str) -> Result<()> {
+        sqlx_core::query::query("DELETE FROM scan_skips WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn count_not_assessed(&self, user_did: &str) -> Result<i64> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = $1 AND threat_tier = 'NotAssessed'",
+        )
+        .bind(user_did)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+}
+
+// ── shared row-mapper ─────────────────────────────────────────────────────────
+
+/// Map a `classification_queue` SELECT row into a `QueueRow` for the Postgres backend.
+///
+/// Expected column order (0-indexed):
+///   0  account_did, 1  post_uri,    2  text,          3  context_text,
+///   4  post_kind,   5  onnx_score,  6  status,
+///   7  toxic_token (BOOLEAN nullable), 8  confidence (REAL nullable),
+///   9  model_id,    10 policy_version
+fn pg_map_queue_row(row: &sqlx_postgres::PgRow) -> QueueRow {
+    QueueRow {
+        account_did: row.get(0),
+        post_uri: row.get(1),
+        text: row.get(2),
+        context_text: row.get(3),
+        post_kind: row.get(4),
+        onnx_score: row.get(5),
+        status: row.get(6),
+        toxic_token: row.get::<Option<bool>, _>(7),
+        confidence: row.get::<Option<f32>, _>(8),
+        model_id: row.get(9),
+        policy_version: row.get(10),
     }
 }

@@ -1,8 +1,9 @@
 // Model download helper for ONNX models.
 //
-// Downloads two models from HuggingFace:
+// Downloads three models from HuggingFace:
 // 1. Detoxify unbiased-toxic-roberta — toxicity scoring (~126MB)
 // 2. all-MiniLM-L6-v2 — sentence embeddings for topic overlap (~90MB)
+// 3. nli-deberta-v3-xsmall — contextual hostility, fp32 export (~284MB, #231)
 //
 // Files are stored in a platform-appropriate directory
 // (~/.local/share/charcoal/models/ on Linux) so they persist across runs.
@@ -10,7 +11,9 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 /// HuggingFace repo for the toxicity model.
@@ -32,6 +35,29 @@ const TOXICITY_TOKENIZER_FILE: &str = "tokenizer.json";
 const EMBEDDING_MODEL_FILE: &str = "onnx/model.onnx";
 const EMBEDDING_TOKENIZER_FILE: &str = "tokenizer.json";
 
+/// Files for the NLI cross-encoder model (stored in a subdirectory).
+///
+/// This is the fp32 export, NOT `model_quantized.onnx` (#231). The quantized
+/// export is *dynamically* quantized: `DynamicQuantizeLinear` derives one
+/// per-tensor activation scale at runtime from the min/max of the whole
+/// `[batch, seq, hidden]` tensor. Batching hypotheses with different content
+/// therefore changes the scale and shifts every row's result — including rows
+/// that were never padded — and on x86-64 without VNNI the `u8s8 MatMulInteger`
+/// path amplifies that ~20x over ARM. Measured on Linux x86_64, it drove one
+/// mocking reply's contextual hostility from 0.132 to 0.000.
+///
+/// The fp32 export has no quantization ops, so batching is exact on both
+/// platforms and the scores are finally reproducible between a dev Mac and
+/// production. It costs 284MB instead of 87MB, and is still faster per pair
+/// than the alternative fix of abandoning batching.
+///
+/// `pub(crate)` so `NliScorer::load` opens exactly what `nli_files_present`
+/// checks for. Duplicating these literals would let the presence check and the
+/// loader drift apart — the failure shape that kept #231 hidden.
+pub(crate) const NLI_MODEL_FILE: &str = "model.onnx";
+const NLI_MODEL_REMOTE_PATH: &str = "onnx/model.onnx";
+pub(crate) const NLI_TOKENIZER_FILE: &str = "tokenizer.json";
+
 /// Returns the default directory for storing model files.
 /// Uses the platform data directory: ~/.local/share/charcoal/models/ on Linux.
 pub fn default_model_dir() -> PathBuf {
@@ -39,6 +65,25 @@ pub fn default_model_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("charcoal")
         .join("models")
+}
+
+/// Resolve the model directory from an explicit override, falling back to the
+/// platform default. A blank override is treated as unset — an exported-but-
+/// empty `CHARCOAL_MODEL_DIR` must not send every lookup to the filesystem root.
+///
+/// Takes the override as a parameter rather than reading the environment so it
+/// stays pure and testable: `std::env::set_var` races Rust's parallel test
+/// threads.
+pub fn resolve_model_dir_from(override_dir: Option<String>) -> PathBuf {
+    override_dir
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_model_dir)
+}
+
+/// [`resolve_model_dir_from`] reading `CHARCOAL_MODEL_DIR`.
+pub fn resolve_model_dir() -> PathBuf {
+    resolve_model_dir_from(std::env::var("CHARCOAL_MODEL_DIR").ok())
 }
 
 /// Subdirectory within model_dir for the sentence embedding model.
@@ -63,9 +108,13 @@ pub fn nli_model_dir(base: &Path) -> PathBuf {
 }
 
 /// Check whether both required NLI model files exist.
+///
+/// Deployments that predate #231 have the old `model_quantized.onnx` on their
+/// volume; this reports absent for them, so `download_model` fetches the fp32
+/// export and the switch happens without manual intervention.
 pub fn nli_files_present(dir: &Path) -> bool {
     let nli_dir = nli_model_dir(dir);
-    nli_dir.join("model_quantized.onnx").exists() && nli_dir.join("tokenizer.json").exists()
+    nli_dir.join(NLI_MODEL_FILE).exists() && nli_dir.join(NLI_TOKENIZER_FILE).exists()
 }
 
 /// Download all ONNX models (toxicity + embedding).
@@ -157,32 +206,43 @@ pub async fn download_model(dir: &Path) -> Result<()> {
         )
     })?;
 
-    let nli_tokenizer_path = nli_dir.join("tokenizer.json");
+    let nli_tokenizer_path = nli_dir.join(NLI_TOKENIZER_FILE);
     if nli_tokenizer_path.exists() {
         info!("NLI tokenizer already exists, skipping");
-        println!("  tokenizer.json (already exists)");
+        println!("  {} (already exists)", NLI_TOKENIZER_FILE);
     } else {
-        println!("  Downloading tokenizer.json...");
+        println!("  Downloading {}...", NLI_TOKENIZER_FILE);
         download_file(
-            &format!("{}/tokenizer.json", NLI_HF_URL),
+            &format!("{}/{}", NLI_HF_URL, NLI_TOKENIZER_FILE),
             &nli_tokenizer_path,
             false,
         )
         .await?;
     }
 
-    let nli_model_path = nli_dir.join("model_quantized.onnx");
+    let nli_model_path = nli_dir.join(NLI_MODEL_FILE);
     if nli_model_path.exists() {
         info!("NLI model already exists, skipping");
-        println!("  model_quantized.onnx (already exists)");
+        println!("  {} (already exists)", NLI_MODEL_FILE);
     } else {
-        println!("  Downloading model_quantized.onnx (~87 MB)...");
+        println!("  Downloading {} (~284 MB)...", NLI_MODEL_FILE);
         download_file(
-            &format!("{}/onnx/model_quantized.onnx", NLI_HF_URL),
+            &format!("{}/{}", NLI_HF_URL, NLI_MODEL_REMOTE_PATH),
             &nli_model_path,
             true,
         )
         .await?;
+    }
+
+    // Reclaim the pre-#231 quantized export if it is still sitting on the
+    // volume; nothing loads it any more and it is 87MB.
+    let stale_quantized = nli_dir.join("model_quantized.onnx");
+    if stale_quantized.exists() {
+        match std::fs::remove_file(&stale_quantized) {
+            Ok(()) => println!("  removed superseded model_quantized.onnx (#231)"),
+            // Best-effort cleanup: a read-only volume must not fail the download.
+            Err(e) => info!("Could not remove stale quantized NLI model: {}", e),
+        }
     }
 
     Ok(())
@@ -229,17 +289,50 @@ async fn download_file(url: &str, dest: &Path, show_progress: bool) -> Result<()
         None
     };
 
-    // Stream the response body to disk
-    let bytes = response
-        .bytes()
-        .await
-        .context("Failed to read response body")?;
+    // Stream the body to a sibling `.part` file, then rename into place.
+    //
+    // Buffering the whole response first would hold ~284MB of model in memory
+    // (#233) and, worse, a crash or a killed container mid-write would leave a
+    // TRUNCATED file at `dest`. `nli_files_present` only checks existence, so a
+    // truncated model.onnx would look present and then fail ONNX parsing on
+    // every boot — a poison state needing manual cleanup on the volume.
+    //
+    // The temp file is a sibling rather than something under the system temp
+    // dir so the rename stays on one filesystem (the Railway volume) and is
+    // therefore atomic. `rename(2)` does not fall back to copying across
+    // filesystems — it fails with `EXDEV` — so staging in the temp dir would
+    // break the download outright wherever /tmp and the volume are separate
+    // mounts, which on Railway they are.
+    let part_path = dest.with_extension("part");
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
 
-    if let Some(ref pb) = pb {
-        pb.set_position(bytes.len() as u64);
+    {
+        let mut file = tokio::fs::File::create(&part_path)
+            .await
+            .with_context(|| format!("Failed to create {}", part_path.display()))?;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Failed to read response chunk")?;
+            file.write_all(&chunk)
+                .await
+                .with_context(|| format!("Failed to write {}", part_path.display()))?;
+
+            downloaded += chunk.len() as u64;
+            if let Some(ref pb) = pb {
+                pb.set_position(downloaded);
+            }
+        }
+
+        // Flush before the rename so the renamed file is complete.
+        file.flush()
+            .await
+            .with_context(|| format!("Failed to flush {}", part_path.display()))?;
     }
 
-    std::fs::write(dest, &bytes).with_context(|| format!("Failed to write {}", dest.display()))?;
+    tokio::fs::rename(&part_path, dest)
+        .await
+        .with_context(|| format!("Failed to move {} into place", part_path.display()))?;
 
     if let Some(pb) = pb {
         pb.finish_and_clear();
@@ -294,5 +387,102 @@ mod tests {
 
         // Cleanup
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // --- download_file streaming + atomic rename (#233) ---
+
+    /// The happy path must land the complete body at `dest` and clean up the
+    /// `.part` scratch file. A leftover `.part` would waste a model-sized chunk
+    /// of the Railway volume on every download.
+    #[tokio::test]
+    async fn download_file_writes_full_body_and_removes_the_part_file() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Larger than one network chunk, so this genuinely exercises the loop.
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/model.onnx"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("model.onnx");
+
+        download_file(&format!("{}/model.onnx", server.uri()), &dest, false)
+            .await
+            .expect("download should succeed");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body, "body must land intact");
+        assert!(
+            !dest.with_extension("part").exists(),
+            "the .part scratch file must not survive a successful download"
+        );
+    }
+
+    /// A failed download must not leave anything at `dest`. This is the point
+    /// of the rename: `nli_files_present` only checks existence, so a truncated
+    /// model.onnx would look present and then fail ONNX parsing on every boot.
+    #[tokio::test]
+    async fn download_file_leaves_no_artifact_at_dest_when_the_request_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/model.onnx"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("model.onnx");
+
+        let result = download_file(&format!("{}/model.onnx", server.uri()), &dest, false).await;
+
+        assert!(result.is_err(), "a 500 must surface as an error");
+        assert!(
+            !dest.exists(),
+            "a failed download must not leave a file at dest"
+        );
+    }
+
+    /// A `.part` left behind by a previously killed download must be truncated,
+    /// not appended to. Appending would silently produce a corrupt model that
+    /// still passes the existence check.
+    #[tokio::test]
+    async fn download_file_truncates_a_stale_part_file_rather_than_appending() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let body = b"fresh model bytes".to_vec();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/model.onnx"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("model.onnx");
+        std::fs::write(
+            dest.with_extension("part"),
+            b"leftover garbage from a killed run",
+        )
+        .unwrap();
+
+        download_file(&format!("{}/model.onnx", server.uri()), &dest, false)
+            .await
+            .expect("download should succeed");
+
+        assert_eq!(
+            std::fs::read(&dest).unwrap(),
+            body,
+            "stale .part content must be truncated, not prepended to the new body"
+        );
     }
 }

@@ -1,0 +1,97 @@
+//! NUL sanitisation for ingested post text (#224, found during the #220 dig).
+//!
+//! One account on the 2026-07-19 staging scan failed with:
+//!
+//!     error returned from database: unsupported Unicode escape sequence
+//!
+//! Cause: a post containing a NUL byte. serde_json serialises it as `\u0000`,
+//! and PostgreSQL rejects that in JSONB — `top_toxic_posts` and `payload_json`
+//! are both JSONB. Postgres TEXT columns cannot hold NUL either, so
+//! `classification_queue.text` is exposed on the same input.
+//!
+//! Sanitising at INGESTION rather than at the write boundary is deliberate:
+//! doing it per-backend would let SQLite and Postgres store different text for
+//! the same post, so the two backends would score identically-fetched content
+//! differently. The NUL is stripped once, where the text enters the system.
+//!
+//! Scope is deliberately narrow — ONLY NUL. Other C0 controls are legal in
+//! both JSON and Postgres text, and stripping them would silently alter the
+//! text the toxicity model sees for no correctness gain.
+
+use charcoal::bluesky::posts::sanitize_post_text;
+
+#[test]
+fn ordinary_text_is_untouched() {
+    let text = "just a normal post about rust and gardening";
+    assert_eq!(sanitize_post_text(text), text);
+}
+
+#[test]
+fn strips_a_nul_byte() {
+    assert_eq!(sanitize_post_text("before\u{0}after"), "beforeafter");
+}
+
+#[test]
+fn strips_nuls_at_every_position() {
+    assert_eq!(sanitize_post_text("\u{0}leading"), "leading");
+    assert_eq!(sanitize_post_text("trailing\u{0}"), "trailing");
+    assert_eq!(sanitize_post_text("a\u{0}b\u{0}c\u{0}"), "abc");
+}
+
+#[test]
+fn a_string_of_only_nuls_becomes_empty() {
+    assert_eq!(sanitize_post_text("\u{0}\u{0}\u{0}"), "");
+}
+
+#[test]
+fn empty_input_stays_empty() {
+    assert_eq!(sanitize_post_text(""), "");
+}
+
+#[test]
+fn non_latin_and_emoji_survive_intact() {
+    // The #220 population was Thai-dominant. Mangling this text while fixing a
+    // different bug would quietly re-create the same class of harm: accounts
+    // scored on corrupted content.
+    for text in [
+        "หลังภัยพิบัติ 2011 Tohoku earthquake",
+        "오늘만 제 파서를 세 번 고쳤어요",
+        "漢字とひらがな",
+        "👩‍👩‍👧‍👦 family emoji with ZWJ",
+        "Ошибка в коде",
+    ] {
+        assert_eq!(
+            sanitize_post_text(text),
+            text,
+            "sanitisation must not alter {text:?}"
+        );
+    }
+}
+
+#[test]
+fn other_control_characters_are_preserved() {
+    // Newlines and tabs are ordinary post content — the reply envelope is built
+    // with "\n\n", so stripping newlines would corrupt the scored text.
+    let text = "line one\nline two\ttabbed\r\nwindows";
+    assert_eq!(sanitize_post_text(text), text);
+}
+
+#[test]
+fn nul_removal_survives_json_roundtrip_into_a_jsonb_shaped_value() {
+    // The actual failure mode: serde_json emits \u0000, Postgres JSONB refuses
+    // it. Assert the sanitised text produces JSON with no such escape.
+    let raw = "toxic\u{0}payload";
+    let json = serde_json::to_string(&sanitize_post_text(raw)).unwrap();
+    assert!(
+        !json.contains("\\u0000"),
+        "serialised text still carries a NUL escape: {json}"
+    );
+
+    // And confirm the precondition — that unsanitised text WOULD have produced
+    // it — so this guard is demonstrably necessary.
+    let unsanitised = serde_json::to_string(raw).unwrap();
+    assert!(
+        unsanitised.contains("\\u0000"),
+        "precondition: raw text was expected to serialise a NUL escape"
+    );
+}

@@ -9,14 +9,11 @@
 // 5. Stores the results for the threat report
 
 use anyhow::Result;
-use futures::stream::{self, StreamExt};
-use futures::FutureExt;
-use indicatif::{ProgressBar, ProgressStyle};
-use std::panic::AssertUnwindSafe;
+use futures::StreamExt;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::bluesky::amplification::AmplificationNotification;
 use crate::bluesky::client::PublicAtpClient;
@@ -24,22 +21,53 @@ use crate::bluesky::followers;
 use crate::bluesky::posts;
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
+use crate::pipeline::scan_phases::burst;
+use crate::scoring::language::{assess_language, Assessability};
+// `TwoStageToxicityScorer` impls both `ToxicityScorer` and `CleanPassScorer`
+// (the gather seam). The phased pipeline needs both views plus the classifier,
+// so amplification takes the concrete scorer and coerces it into the two `&dyn`
+// views — same pattern as the sweep rewire (Task 6.2).
+use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
+use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
 use crate::scoring::nli::NliScorer;
-use crate::scoring::profile;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
+use crate::toxicity::ensemble::TwoStageToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
+
+/// Render the toxicity suffix for an amplification-event progress line.
+///
+/// Three states, deliberately distinguishable in output (#230):
+/// - scored                   → `" [tox: 0.42]"`
+/// - not scored, assessable   → `""` (no `--analyze`; nothing to report)
+/// - not scored, unassessable → `" [tox: n/a — language]"`
+///
+/// The third case previously printed `[tox: 0.00]`, which read as "we checked
+/// and it was benign" when the truth was "an English-only model was handed text
+/// it cannot read".
+fn tox_suffix(quote_toxicity: Option<f64>, assessable: bool) -> String {
+    match (quote_toxicity, assessable) {
+        (Some(t), _) => format!(" [tox: {:.2}]", t),
+        (None, true) => String::new(),
+        (None, false) => " [tox: n/a — language]".to_string(),
+    }
+}
 
 /// Run the amplification detection pipeline.
 ///
 /// Processes pre-fetched amplification events (from Constellation backlinks),
-/// fetches amplifier followers, and scores them. Returns the number of events
-/// processed and accounts scored.
+/// fetches amplifier followers, and scores them. Returns
+/// `(events_processed, accounts_scored, degraded)` — `degraded` is true when the
+/// scan is incomplete: either the cost ceiling was hit, or one or more accounts
+/// were skipped due to fetch/score errors. Re-run to resume.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     client: &PublicAtpClient,
-    scorer: &dyn ToxicityScorer,
+    // `None` when scanning without `--analyze`: the old NoopScorer always errored
+    // on every call, so no accounts were scored. We preserve that by skipping the
+    // phased scoring path entirely when there is no real scorer.
+    scorer: Option<&TwoStageToxicityScorer>,
     db: &Arc<dyn Database>,
     user_did: &str,
     protected_fingerprint: &TopicFingerprint,
@@ -58,7 +86,7 @@ pub async fn run(
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     data_dir: Option<&std::path::Path>,
     graph_distances: &HashMap<String, GraphDistance>,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, bool)> {
     info!(
         total_events = events.len(),
         "Processing amplification events"
@@ -72,11 +100,25 @@ pub async fn run(
     )
     .await?;
 
-    // Store each event in the database, fetching quote text when available.
-    // Look up original post text from the cache for all event types.
+    // Build the full set of rows first, then write them in one batched call.
+    //
+    // This loop used to insert per event, which cost one DB round-trip each —
+    // 359 events ≈ 2m16s of a 28m scan (#216). The per-event work below is
+    // unchanged; only the write is deferred. The loop stays sequential on
+    // purpose: the `fetch_post_text` call is gated on quote/reply, so only a
+    // handful of events do network work, and going concurrent here would
+    // reorder the evidence output below for no meaningful gain.
+    let mut pending_events: Vec<crate::db::models::NewAmplificationEvent> =
+        Vec::with_capacity(events.len());
+
     for event in &events {
         let mut amplifier_text: Option<String> = None;
         let mut quote_toxicity: Option<f64> = None;
+        // Defaults to true so events with no fetched text — reposts, likes, and
+        // fetch failures — render exactly as they did before. The language
+        // marker is reserved for text we actually looked at and declined to
+        // score.
+        let mut amplifier_assessable = true;
 
         // Look up the original (protected user's) post text from the cache
         // (resolved before scoring so the ensemble scorer can use it as context)
@@ -86,17 +128,40 @@ pub async fn run(
             .and_then(|uri| original_text_cache.get(uri))
             .map(|s| s.as_str());
 
-        // For quote and reply events, fetch the amplifier's text and score it
-        if (event.event_type == "quote" || event.event_type == "reply") && analyze_followers {
+        // For quote and reply events, fetch the amplifier's text UNCONDITIONALLY
+        // so it is persisted as event evidence (via the batched
+        // `insert_amplification_events_batch` write) even on a non-`--analyze`
+        // scan. Only the SCORING of that text is gated on a real scorer being
+        // present.
+        if event.event_type == "quote" || event.event_type == "reply" {
             match posts::fetch_post_text(client, &event.amplifier_post_uri).await {
                 Ok(Some(text)) => {
-                    match scorer.score_with_context(&text, original_post_text).await {
-                        Ok(result) => {
-                            quote_toxicity = Some(result.toxicity);
+                    // #230: never hand non-English text to the English-only
+                    // toxicity models. Skipping the call rather than scoring and
+                    // discarding also avoids a Zentropi/RunPod round-trip per
+                    // non-English quote.
+                    //
+                    // Gated on the amplifier text ALONE, not the pair: this
+                    // scores one post with the other as context, so it takes the
+                    // per-post predicate. The NLI seams take the pair predicate.
+                    amplifier_assessable = assess_language(&text, &[]) == Assessability::Assessable;
+                    if amplifier_assessable {
+                        // Score only when a real scorer is present (i.e. `--analyze`).
+                        if let Some(scorer) = scorer {
+                            match scorer.score_with_context(&text, original_post_text).await {
+                                Ok(result) => {
+                                    quote_toxicity = Some(result.toxicity);
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to score amplifier text");
+                                }
+                            }
                         }
-                        Err(e) => {
-                            warn!(error = %e, "Failed to score amplifier text");
-                        }
+                    } else {
+                        debug!(
+                            uri = event.amplifier_post_uri,
+                            "Skipped toxicity scoring: unassessable language"
+                        );
                     }
                     amplifier_text = Some(text);
                 }
@@ -116,16 +181,15 @@ pub async fn run(
         let context_score = match (nli_scorer, amplifier_text.as_deref(), original_post_text) {
             (Some(nli), Some(amp_text), Some(orig_text)) => {
                 match nli.score_pair(orig_text, amp_text).await {
-                    Ok((score, hypothesis_scores)) => {
+                    Ok(Some((score, hypothesis_scores))) => {
                         info!(
                             handle = event.amplifier_handle,
                             context_score = format!("{:.3}", score),
                             "NLI scored event pair"
                         );
                         if let Some(dir) = data_dir {
-                            crate::scoring::nli_audit::log_nli_audit(
-                                &crate::scoring::nli_audit::NliAuditEntry {
-                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                            let audit_event = crate::scoring::audit_log::AuditEvent::nli(
+                                crate::scoring::audit_log::NliFields {
                                     target_did: event.amplifier_did.clone(),
                                     target_handle: event.amplifier_handle.clone(),
                                     pair_type: "direct".to_string(),
@@ -135,10 +199,29 @@ pub async fn run(
                                     hostility_score: score,
                                     similarity: None,
                                 },
-                                Some(dir),
                             );
+                            match crate::scoring::audit_log::AuditWriter::from_env(
+                                dir,
+                                crate::scoring::audit_log::EventKind::Nli,
+                            ) {
+                                Ok(writer) => {
+                                    if let Err(e) = writer.record(audit_event) {
+                                        warn!(error = %e, "Failed to write NLI audit JSONL");
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Failed to init NLI audit writer");
+                                }
+                            }
                         }
                         Some(score)
+                    }
+                    Ok(None) => {
+                        debug!(
+                            handle = event.amplifier_handle,
+                            "Skipped NLI for event pair: unassessable language"
+                        );
+                        None
                     }
                     Err(e) => {
                         warn!(error = %e, "NLI scoring failed for event pair");
@@ -149,18 +232,19 @@ pub async fn run(
             _ => None,
         };
 
-        db.insert_amplification_event(
-            user_did,
-            &event.event_type,
-            &event.amplifier_did,
-            &event.amplifier_handle,
-            event.original_post_uri.as_deref().unwrap_or("unknown"),
-            Some(&event.amplifier_post_uri),
-            amplifier_text.as_deref(),
-            original_post_text,
+        pending_events.push(crate::db::models::NewAmplificationEvent {
+            event_type: event.event_type.clone(),
+            amplifier_did: event.amplifier_did.clone(),
+            amplifier_handle: event.amplifier_handle.clone(),
+            original_post_uri: event
+                .original_post_uri
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            amplifier_post_uri: Some(event.amplifier_post_uri.clone()),
+            amplifier_text: amplifier_text.clone(),
+            original_post_text: original_post_text.map(|s| s.to_string()),
             context_score,
-        )
-        .await?;
+        });
 
         let event_label = match event.event_type.as_str() {
             "quote" => "Quote",
@@ -169,53 +253,95 @@ pub async fn run(
             "reply" => "Reply",
             other => other,
         };
-        println!(
+        crate::progress!(
             "  {} by @{} ({})",
-            event_label, event.amplifier_handle, event.indexed_at,
+            event_label,
+            event.amplifier_handle,
+            event.indexed_at,
         );
         if let Some(ref text) = amplifier_text {
             let preview = crate::output::truncate_chars(text, 120);
-            let tox_str = quote_toxicity
-                .map(|t| format!(" [tox: {:.2}]", t))
-                .unwrap_or_default();
-            println!("    \"{}\"{}", preview, tox_str);
+            let tox_str = tox_suffix(quote_toxicity, amplifier_assessable);
+            crate::progress!("    \"{}\"{}", preview, tox_str);
         }
     }
 
-    // Phase B: Score amplifiers via build_profile() with direct NLI pairs.
+    // This write is deliberately all-or-nothing: the old per-event loop
+    // committed incrementally, so a crash at event k left 0..k persisted.
+    // That departs from the crash-resilient/incremental-write design CLAUDE.md
+    // calls for elsewhere, but per #184 a resumed scan re-runs amplification
+    // collection from scratch — a partial write is never resumed from, only
+    // re-collected and re-inserted as duplicates. All-or-nothing is strictly
+    // better for idempotency here, not merely an acceptable trade-off.
+    let inserted = db
+        .insert_amplification_events_batch(user_did, &pending_events)
+        .await?;
+    info!(
+        events = inserted,
+        "Recorded amplification events in one batch"
+    );
+
+    // Phase B: Score amplifiers and (optionally) their followers via the
+    // three-phase `run_phased_scan` orchestrator (#208).
     //
-    // Collect unique amplifier DIDs and their text pairs from stored events,
-    // then run full profile builds. This gives each amplifier a threat tier
-    // informed by their actual interactions with the protected user.
-    let mut accounts_scored = 0;
-    {
-        let mut amplifier_handles: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+    // Both the old amplifier-scoring loop and the old per-follower two-pass
+    // `build_profile` loop are replaced by a single candidate set fed through
+    // one combined phased scan — one burst window, one `scan_phase` marker, one
+    // clean resume point. The two-pass NLI gate the followers used to run
+    // inline (raw>=8.0 → re-score with NLI) now lives in `finalize_account`,
+    // selected per candidate by `direct_pairs`: amplifiers carry
+    // `direct_pairs=Some(...)` (always NLI), followers carry `direct_pairs=None`
+    // (NLI gated at raw>=8.0). The event-recording loop above is unchanged —
+    // it is the Phase-A-time ONNX/NLI step and does not involve the classifier.
+    //
+    // Dedup precedence: an account that is both an amplifier and a follower is
+    // scored ONCE as an amplifier (matching the old order, where amplifiers
+    // were scored first and the follower `is_score_stale` check then skipped the
+    // re-score). We key the candidate set on DID and never overwrite an
+    // amplifier entry with a follower one.
+    let mut candidates: Vec<CandidateInput> = Vec::new();
+    let mut seen_dids: HashSet<String> = HashSet::new();
 
-        for event in &events {
-            amplifier_handles
-                .entry(event.amplifier_did.clone())
-                .or_insert_with(|| event.amplifier_handle.clone());
-        }
+    // Fetch the fresh-scored DID set ONCE for both the amplifier and follower
+    // staleness gates below, instead of an is_score_stale round-trip per
+    // candidate (#213). Scores aren't written until Phase C, so the set is
+    // stable across both loops. Empty-on-error → everything treated stale,
+    // matching the old per-call `.unwrap_or(true)`.
+    let fresh_scored: HashSet<String> = db
+        .get_fresh_scored_dids(user_did, 7)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
-        let amplifier_count = amplifier_handles.len();
-        if amplifier_count > 0 {
-            println!("\nScoring {} amplifiers…", amplifier_count);
+    // ── Amplifier candidates ──
+    let mut amplifier_handles: HashMap<String, String> = HashMap::new();
+    for event in &events {
+        amplifier_handles
+            .entry(event.amplifier_did.clone())
+            .or_insert_with(|| event.amplifier_handle.clone());
+    }
 
-            for (did, handle) in &amplifier_handles {
-                if handle == protected_handle {
-                    continue;
-                }
-                if !db.is_score_stale(user_did, did, 7).await.unwrap_or(true) {
-                    continue;
-                }
+    let amplifier_count = amplifier_handles.len();
+    if amplifier_count > 0 {
+        crate::progress!("\nScoring {} amplifiers…", amplifier_count);
 
-                // Gather direct text pairs from stored events, deduplicating
-                // across scans (the same event can be recorded multiple times)
-                let mut seen_pairs: std::collections::HashSet<(String, String)> =
-                    std::collections::HashSet::new();
-                let mut pairs: Vec<(String, String)> = Vec::new();
-                if let Ok(db_events) = db.get_events_by_amplifier(user_did, did).await {
+        for (did, handle) in &amplifier_handles {
+            // Skip the protected user themselves. Match on BOTH handle and DID:
+            // handles can change, so the DID is the stable identity check.
+            if handle == protected_handle || did == user_did {
+                continue;
+            }
+            if fresh_scored.contains(did) {
+                continue;
+            }
+
+            // Gather direct text pairs from stored events, deduplicating
+            // across scans (the same event can be recorded multiple times)
+            let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            match db.get_events_by_amplifier(user_did, did).await {
+                Ok(db_events) => {
                     for ev in db_events {
                         if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
                         {
@@ -228,48 +354,31 @@ pub async fn run(
                         }
                     }
                 }
-
-                match profile::build_profile(
-                    client,
-                    scorer,
-                    handle,
-                    did,
-                    protected_fingerprint,
-                    weights,
-                    embedder,
-                    protected_embedding,
-                    median_engagement,
-                    pile_on_dids,
-                    nli_scorer,
-                    None, // No inferred pairs — using direct pairs
-                    Some(&pairs),
-                    data_dir,
-                    graph_distances.get(did).copied(),
-                )
-                .await
-                {
-                    Ok(score) => {
-                        db.upsert_account_score(user_did, &score).await?;
-                        accounts_scored += 1;
-                        println!(
-                            "  @{}: {} (context: {})",
-                            handle,
-                            score.threat_tier.as_deref().unwrap_or("?"),
-                            score
-                                .context_score
-                                .map(|s| format!("{:.2}", s))
-                                .unwrap_or_else(|| "n/a".to_string())
-                        );
-                    }
-                    Err(e) => {
-                        warn!(handle = handle.as_str(), error = %e, "Failed to score amplifier");
-                    }
+                // Continue on error (matching prior behaviour) but make the
+                // dropped pairs visible instead of swallowing the failure.
+                Err(e) => {
+                    warn!(
+                        amplifier_did = %did,
+                        error = %e,
+                        "Failed to load stored events for amplifier; direct NLI pairs dropped"
+                    );
                 }
+            }
+
+            if seen_dids.insert(did.clone()) {
+                candidates.push(CandidateInput {
+                    account_did: did.clone(),
+                    account_handle: handle.clone(),
+                    is_pile_on: pile_on_dids.contains(did),
+                    direct_pairs: Some(pairs),
+                    graph_distance: graph_distances.get(did).copied(),
+                });
             }
         }
     }
 
-    // If --analyze flag is set, score the followers of each quote/reply amplifier.
+    // ── Follower candidates (only when --analyze is set) ──
+    //
     // Quotes and replies are direct hostile engagement vectors that warrant
     // follower analysis. Reposts and likes are recorded but don't trigger
     // follower analysis — reposts are usually supportive sharing, and likes
@@ -286,7 +395,7 @@ pub async fn run(
                 skipped = skipped_count,
                 "Skipping follower analysis for reposts/likes"
             );
-            println!(
+            crate::progress!(
                 "  Skipping {} reposts/likes (follower analysis is quote/reply-only)",
                 skipped_count
             );
@@ -296,142 +405,91 @@ pub async fn run(
             info!("No quote/reply events to analyze");
         }
 
+        // Deduplicate amplifiers by handle first: multiple quote/reply events can
+        // share one amplifier, and we only need that amplifier's follower list
+        // once. Deduping cuts redundant concurrent fetches — and the rate-limit
+        // risk that comes with firing the same request many times at once.
+        // First-occurrence (event) order is preserved.
+        let mut unique_amplifiers: Vec<String> = Vec::new();
+        let mut seen_amplifiers: HashSet<String> = HashSet::new();
         for event in &scorable_events {
-            println!("\nFetching followers of @{}...", event.amplifier_handle);
+            if seen_amplifiers.insert(event.amplifier_handle.clone()) {
+                unique_amplifiers.push(event.amplifier_handle.clone());
+            }
+        }
 
-            match followers::fetch_followers(
-                client,
-                &event.amplifier_handle,
-                max_followers_per_amplifier,
-            )
-            .await
-            {
+        // Fetch each unique amplifier's followers concurrently, then process the
+        // results sequentially. Same #207 rationale as the sweep (`sweep.rs`): the
+        // serial network awaits were the dominant cost. The per-follower staleness
+        // check is a fast local DB query and the seen-DID dedup mutates shared
+        // state, so the processing loop stays sequential — only the network
+        // fan-out is parallelized. Carry the original index and sort the results
+        // back into it: `buffer_unordered` yields in completion (network-timing)
+        // order, so sorting restores deterministic, event-order candidate building
+        // and stable logs. Index by `usize` (not `&unique_amplifiers` items) so
+        // the mapped future carries no higher-ranked borrow — the same reason
+        // `run_gather` indexes by usize across the web `tokio::spawn` boundary.
+        let mut fetch_results: Vec<(usize, String, Result<Vec<followers::Follower>>)> =
+            futures::stream::iter(0..unique_amplifiers.len())
+                .map(|i| {
+                    let handle = unique_amplifiers[i].clone();
+                    async move {
+                        let result = followers::fetch_followers(
+                            client,
+                            &handle,
+                            max_followers_per_amplifier,
+                        )
+                        .await;
+                        (i, handle, result)
+                    }
+                })
+                .buffer_unordered(concurrency.clamp(1, 64))
+                .collect()
+                .await;
+        fetch_results.sort_by_key(|(i, _, _)| *i);
+
+        for (_, amplifier_handle, result) in fetch_results {
+            match result {
                 Ok(follower_list) => {
-                    // Phase 1: Filter — find followers with stale scores (DB reads on main task)
-                    // Also exclude the protected user from their own threat report
-                    let mut stale_followers = Vec::new();
+                    // Filter — find followers with stale scores. Exclude the
+                    // protected user from their own threat report, and skip any
+                    // DID already queued (amplifier entries take precedence).
+                    // Dedup runs here, after all fetches complete, so the shared
+                    // `seen_dids`/`candidates` have a single sequential mutator —
+                    // the result is the same set regardless of fetch arrival order.
+                    let mut added = 0usize;
                     for f in follower_list
                         .iter()
-                        .filter(|f| f.handle != protected_handle)
+                        // Exclude the protected user by both handle and DID —
+                        // handles can change, so the DID is the stable identity
+                        // check (mirrors the amplifier-path exclusion above).
+                        .filter(|f| f.handle != protected_handle && f.did != user_did)
                     {
-                        if db.is_score_stale(user_did, &f.did, 7).await.unwrap_or(true) {
-                            // Clone to produce an owned Vec<Follower> — required for
-                            // the async move closure in the scoring stream to be
-                            // 'static-compatible when called from tokio::spawn.
-                            stale_followers.push(f.clone());
+                        if fresh_scored.contains(&f.did) {
+                            continue;
+                        }
+                        if seen_dids.insert(f.did.clone()) {
+                            candidates.push(CandidateInput {
+                                account_did: f.did.clone(),
+                                account_handle: f.handle.clone(),
+                                is_pile_on: pile_on_dids.contains(&f.did),
+                                direct_pairs: None,
+                                graph_distance: None,
+                            });
+                            added += 1;
                         }
                     }
 
-                    println!(
-                        "  Found {} followers, {} need scoring ({} concurrent)...",
+                    crate::progress!(
+                        "  @{amplifier_handle}: {} followers, {} need scoring ({} concurrent)...",
                         follower_list.len(),
-                        stale_followers.len(),
+                        added,
                         concurrency,
                     );
-
-                    if stale_followers.is_empty() {
-                        continue;
-                    }
-
-                    let pb = ProgressBar::new(stale_followers.len() as u64);
-                    pb.set_style(
-                        ProgressStyle::default_bar()
-                            .template("  Scoring [{bar:30}] {pos}/{len} ({eta})")
-                            .unwrap(),
-                    );
-
-                    // Phase 2: Two-pass scoring in parallel
-                    // Pass 1: score without NLI (fast). If raw_score >= 8.0 (Watch threshold),
-                    // pass 2 re-scores with NLI inferred pairs. Falls back to pass 1 on panic.
-                    let nli_ref = nli_scorer;
-                    let ppwe_ref = protected_posts_with_embeddings;
-
-                    let mut stream = stream::iter(stale_followers.into_iter().map(|follower| {
-                        let handle_for_panic = follower.handle.clone();
-                        async move {
-                            // Pass 1: score without NLI (fast)
-                            let result = AssertUnwindSafe(profile::build_profile(
-                                client,
-                                scorer,
-                                &follower.handle,
-                                &follower.did,
-                                protected_fingerprint,
-                                weights,
-                                embedder,
-                                protected_embedding,
-                                median_engagement,
-                                pile_on_dids,
-                                None, // No NLI in pass 1
-                                None, // No protected post embeddings
-                                None, // No direct pairs
-                                None, // No audit logging in pass 1
-                                None, // No graph distance for followers
-                            ))
-                            .catch_unwind()
-                            .await
-                            .unwrap_or_else(|_| {
-                                Err(anyhow::anyhow!("Panic while scoring @{}", handle_for_panic))
-                            });
-
-                            match result {
-                                Ok(ref score)
-                                    if score.threat_score.unwrap_or(0.0) >= 8.0
-                                        && nli_ref.is_some()
-                                        && ppwe_ref.is_some() =>
-                                {
-                                    // Pass 2: above Watch threshold — re-score with NLI
-                                    info!(
-                                        handle = follower.handle.as_str(),
-                                        raw_score =
-                                            format!("{:.1}", score.threat_score.unwrap_or(0.0)),
-                                        "Follower above Watch threshold, running NLI"
-                                    );
-                                    AssertUnwindSafe(profile::build_profile(
-                                        client,
-                                        scorer,
-                                        &follower.handle,
-                                        &follower.did,
-                                        protected_fingerprint,
-                                        weights,
-                                        embedder,
-                                        protected_embedding,
-                                        median_engagement,
-                                        pile_on_dids,
-                                        nli_ref,  // NLI enabled
-                                        ppwe_ref, // Inferred pairs
-                                        None,     // No direct pairs
-                                        data_dir, // Audit logging
-                                        None,     // No graph distance for followers
-                                    ))
-                                    .catch_unwind()
-                                    .await
-                                    .unwrap_or(result) // Fall back to pass 1 on panic
-                                }
-                                other => other,
-                            }
-                        }
-                    }))
-                    .buffer_unordered(concurrency);
-
-                    // Phase 3: Write results to DB incrementally as they arrive
-                    while let Some(result) = stream.next().await {
-                        match result {
-                            Ok(score) => {
-                                db.upsert_account_score(user_did, &score).await?;
-                                accounts_scored += 1;
-                            }
-                            Err(e) => {
-                                warn!(error = %e, "Failed to score follower, skipping");
-                            }
-                        }
-                        pb.inc(1);
-                    }
-
-                    pb.finish_and_clear();
                 }
                 Err(e) => {
                     warn!(
-                        handle = event.amplifier_handle,
+                        handle = amplifier_handle,
                         error = %e,
                         "Failed to fetch followers, skipping"
                     );
@@ -440,5 +498,86 @@ pub async fn run(
         }
     }
 
-    Ok((events.len(), accounts_scored))
+    // ── Run the combined phased scan over amplifier + follower candidates ──
+    //
+    // Resilience note: the old per-account scoring wrapped each `build_profile`
+    // in `catch_unwind` to isolate a per-account panic. The phased pipeline's
+    // model is different (and stronger): a crash or cost-cap mid-run is
+    // recoverable by re-running, which resumes from the DB-staged `scan_phase`
+    // marker rather than re-scoring everything — the intended #208 architecture.
+    let (accounts_scored, degraded) = match scorer {
+        // No real scorer (scan without `--analyze`): the old NoopScorer errored
+        // on every `build_profile`, so no accounts were ever scored. Preserve
+        // that by skipping the phased scan entirely.
+        None => (0, false),
+        Some(_) if candidates.is_empty() => (0, false),
+        Some(scorer) => {
+            // Record how many accounts are queued for scoring so GET
+            // /api/status can show a denominator while the phased scan runs.
+            // This is the earliest point the number exists — the candidate set
+            // is only complete after follower expansion above.
+            db.set_scan_state(user_did, "candidates_total", &candidates.len().to_string())
+                .await?;
+
+            let fetcher = AtpPostFetcher { client };
+            let classifier = scorer.classifier();
+
+            let deps = PhasedScanDeps {
+                fetcher: &fetcher,
+                scorer: scorer as &dyn ToxicityScorer,
+                clean_pass: scorer as &dyn CleanPassScorer,
+                classifier: &classifier,
+                protected_fingerprint,
+                weights,
+                embedder,
+                protected_embedding,
+                // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
+                // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
+                // the NLI scorer and protected-post embeddings are threaded through
+                // for the follower path.
+                nli_scorer,
+                protected_posts_with_embeddings,
+                data_dir,
+                median_engagement,
+                gather_concurrency: concurrency,
+                burst_concurrency: burst::burst_concurrency(),
+                burst_batch: burst::burst_batch(),
+            };
+
+            let summary = run_phased_scan(db, user_did, &candidates, &deps).await?;
+            (summary.accounts_scored, summary.degraded)
+        }
+    };
+
+    Ok((events.len(), accounts_scored, degraded))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tox_suffix;
+
+    #[test]
+    fn scored_text_renders_the_score() {
+        assert_eq!(tox_suffix(Some(0.42), true), " [tox: 0.42]");
+    }
+
+    #[test]
+    fn unscored_assessable_text_renders_nothing() {
+        // No `--analyze`: there was no scorer, so there is nothing to say.
+        assert_eq!(tox_suffix(None, true), "");
+    }
+
+    #[test]
+    fn unassessable_text_renders_the_language_marker() {
+        // Distinguishable from both "[tox: 0.00]" (a real benign score) and ""
+        // (not scored at all) — the reader can tell we looked and declined.
+        assert_eq!(tox_suffix(None, false), " [tox: n/a — language]");
+    }
+
+    #[test]
+    fn a_real_score_wins_over_the_assessable_flag() {
+        // Defensive: if a score somehow exists, show it rather than claiming
+        // we abstained.
+        assert_eq!(tox_suffix(Some(0.0), false), " [tox: 0.00]");
+    }
 }

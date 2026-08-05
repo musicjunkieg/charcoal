@@ -37,6 +37,24 @@ impl GraphDistance {
         }
     }
 
+    /// Parse a `GraphDistance` back from its `as_str()` label. Returns `None`
+    /// for unrecognised values. Used by Phase C to reconstruct the distance from
+    /// the string stashed in the `AccountInput` blob.
+    ///
+    /// Named `from_str` for symmetry with `as_str`; it returns `Option` rather
+    /// than the `Result` that the `std::str::FromStr` trait requires, so it is
+    /// deliberately an inherent method, not a trait impl.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "Mutual follow" => Some(GraphDistance::MutualFollow),
+            "Follows you" => Some(GraphDistance::InboundFollow),
+            "You follow" => Some(GraphDistance::OutboundFollow),
+            "Stranger" => Some(GraphDistance::Stranger),
+            _ => None,
+        }
+    }
+
     /// Threat weight multiplier applied to the final score.
     ///
     /// Strangers get amplified (more suspicious — no social connection to

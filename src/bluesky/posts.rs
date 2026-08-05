@@ -13,7 +13,54 @@ use tracing::{debug, info, warn};
 use super::client::PublicAtpClient;
 
 /// A simplified post — just the fields Charcoal needs for analysis.
-#[derive(Debug, Clone)]
+/// Strip NUL bytes from ingested post text (#224).
+///
+/// A post containing a NUL killed one account's gather on the 2026-07-19
+/// staging scan with `unsupported Unicode escape sequence`. serde_json
+/// serialises NUL as `\u0000`, which PostgreSQL rejects in JSONB — and
+/// `top_toxic_posts` and `payload_json` are both JSONB. Postgres TEXT columns
+/// cannot hold a NUL either, so `classification_queue.text` fails on the same
+/// input.
+///
+/// Applied HERE, at ingestion, rather than at the database write boundary:
+/// sanitising per-backend would let SQLite and Postgres hold different text for
+/// the same post, so two backends would score identically-fetched content
+/// differently. Strip it once, where the text enters the system.
+///
+/// Deliberately narrow — ONLY NUL. Other C0 controls are legal in both JSON and
+/// Postgres text, and newlines in particular are load-bearing (the reply
+/// envelope is built with "\n\n"), so removing more would silently change the
+/// text the toxicity model scores.
+pub fn sanitize_post_text(text: &str) -> String {
+    if text.contains('\0') {
+        text.replace('\0', "")
+    } else {
+        // Overwhelmingly the common case — avoid reallocating for every post.
+        text.to_string()
+    }
+}
+
+/// Extract primary language tags from a decoded post record's `langs`.
+/// Region/script subtags are stripped and tags lowercased ("en-US" → "en").
+fn extract_langs(record: &atrium_api::app::bsky::feed::post::Record) -> Vec<String> {
+    record
+        .data
+        .langs
+        .as_ref()
+        .map(|langs| {
+            langs
+                .iter()
+                .filter_map(|l| {
+                    l.as_ref()
+                        .language()
+                        .map(|p| p.as_str().to_ascii_lowercase())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Post {
     pub uri: String,
     pub text: String,
@@ -23,10 +70,15 @@ pub struct Post {
     pub quote_count: i64,
     /// Whether this post is a quote-post (embeds another post).
     pub is_quote: bool,
+    /// Declared post languages (`app.bsky.feed.post.langs`), primary tags only,
+    /// region/script subtags stripped and lowercased ("en-US" → "en"). Empty
+    /// when the client omitted the field (~6% of posts). Used by the #222
+    /// language-assessability gate.
+    pub langs: Vec<String>,
 }
 
 /// A reply post with its parent URI for context pair formation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReplyPost {
     pub post: Post,
     /// AT URI of the post being replied to (for fetching parent text)
@@ -40,7 +92,7 @@ pub struct ReplyPost {
 /// - Topic fingerprinting: originals (chosen topics, not inherited from arguments)
 /// - Toxicity scoring: all posts, with replies weighted 70%
 /// - Context pairs: replies with parent URIs for NLI/Zentropi pair scoring
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostSample {
     /// Original posts (not replies, not quotes)
     pub originals: Vec<Post>,
@@ -138,14 +190,16 @@ pub async fn fetch_recent_posts(
 
             let post_view = &feed_item.post;
 
-            // Decode the record to get the post text.
-            // The record field is an untyped IPLD value — we deserialize it
-            // into the typed post::Record to access the text.
-            let text = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+            // Decode the record once to get both text and declared languages.
+            let record = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
                 post_view.record.clone(),
             )
-            .map(|record| record.data.text.clone())
-            .unwrap_or_default();
+            .ok();
+            let text = record
+                .as_ref()
+                .map(|r| sanitize_post_text(&r.data.text))
+                .unwrap_or_default();
+            let langs = record.as_ref().map(extract_langs).unwrap_or_default();
 
             // Skip empty posts and very short posts (likely just links/images).
             // Use char count, not byte length — a 5-char emoji sequence can be 20 bytes.
@@ -175,6 +229,7 @@ pub async fn fetch_recent_posts(
                 repost_count: post_view.repost_count.unwrap_or(0),
                 quote_count: post_view.quote_count.unwrap_or(0),
                 is_quote,
+                langs,
             });
 
             if posts.len() >= max_posts {
@@ -262,7 +317,8 @@ pub async fn fetch_posts_with_replies(
                 Err(_) => continue,
             };
 
-            let text = record.data.text.clone();
+            let text = sanitize_post_text(&record.data.text);
+            let langs = extract_langs(&record);
 
             // Skip empty posts and very short posts (likely just links/images).
             if text.chars().count() < 15 {
@@ -289,6 +345,7 @@ pub async fn fetch_posts_with_replies(
                 repost_count: post_view.repost_count.unwrap_or(0),
                 quote_count: post_view.quote_count.unwrap_or(0),
                 is_quote,
+                langs,
             };
 
             total_collected += 1;
@@ -382,7 +439,7 @@ pub async fn fetch_post_text(client: &PublicAtpClient, uri: &str) -> Result<Opti
     let text = output.posts.first().and_then(|post_view| {
         atrium_api::app::bsky::feed::post::Record::try_from_unknown(post_view.record.clone())
             .ok()
-            .map(|record| record.data.text.clone())
+            .map(|record| sanitize_post_text(&record.data.text))
     });
 
     Ok(text)
@@ -428,7 +485,7 @@ pub async fn fetch_parent_posts(
                     if let Ok(record) = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
                         post_view.record.clone(),
                     ) {
-                        result.insert(post_view.uri.clone(), record.data.text.clone());
+                        result.insert(post_view.uri.clone(), sanitize_post_text(&record.data.text));
                     }
                 }
             }
@@ -490,4 +547,55 @@ pub async fn fetch_reply_ratio(client: &PublicAtpClient, handle: &str) -> Result
     );
 
     Ok((reply_count, total))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_langs;
+    use atrium_api::app::bsky::feed::post::{Record, RecordData};
+    use atrium_api::types::string::{Datetime, Language};
+    use std::str::FromStr;
+
+    /// Builds a minimal decoded post record carrying the given `langs`.
+    /// Only `created_at`/`text` are otherwise required by `RecordData`.
+    fn record_with_langs(langs: Option<Vec<Language>>) -> Record {
+        RecordData {
+            created_at: Datetime::now(),
+            embed: None,
+            entities: None,
+            facets: None,
+            labels: None,
+            langs,
+            reply: None,
+            tags: None,
+            text: "test post".to_string(),
+        }
+        .into()
+    }
+
+    /// #222 — the test this replaces (`extract_langs_strips_region_and_lowercases`
+    /// in tests/unit_language.rs) never called `extract_langs`; it fed
+    /// `assess_language` an already-normalized "en" tag, so the normalization
+    /// logic itself had no regression coverage. This exercises `extract_langs`
+    /// directly against region-tagged, mixed-case input straight from the
+    /// decoded atrium record — the actual code path `fetch_recent_posts` and
+    /// `fetch_posts_with_replies` run.
+    #[test]
+    fn extract_langs_strips_region_and_lowercases() {
+        let record = record_with_langs(Some(vec![
+            Language::from_str("en-US").unwrap(),
+            Language::from_str("ZH-Hans").unwrap(),
+        ]));
+
+        assert_eq!(
+            extract_langs(&record),
+            vec!["en".to_string(), "zh".to_string()]
+        );
+    }
+
+    #[test]
+    fn extract_langs_none_is_empty() {
+        let record = record_with_langs(None);
+        assert_eq!(extract_langs(&record), Vec::<String>::new());
+    }
 }

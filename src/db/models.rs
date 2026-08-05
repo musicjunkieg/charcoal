@@ -143,6 +143,10 @@ pub enum ThreatTier {
     Watch,
     Elevated,
     High,
+    /// Outside the ordered Low→High scale. The account's posts were in a
+    /// language our English-only models cannot assess, so no score was produced
+    /// (#222). Constructed only at the coverage gate, never from a score.
+    NotAssessed,
 }
 
 impl ThreatTier {
@@ -152,6 +156,9 @@ impl ThreatTier {
     /// overlap amplifies toxicity. A score of 35+ requires meaningful
     /// toxicity combined with topic proximity — the core threat signal.
     /// Low-toxicity accounts stay low regardless of topic overlap.
+    ///
+    /// Never returns `NotAssessed`; that tier is set at the coverage gate, not
+    /// derived from a score.
     pub fn from_score(score: f64) -> Self {
         match score {
             s if s >= 35.0 => ThreatTier::High,
@@ -167,6 +174,7 @@ impl ThreatTier {
             ThreatTier::Watch => "Watch",
             ThreatTier::Elevated => "Elevated",
             ThreatTier::High => "High",
+            ThreatTier::NotAssessed => "NotAssessed",
         }
     }
 }
@@ -175,4 +183,23 @@ impl std::fmt::Display for ThreatTier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
+}
+
+/// An amplification event that has not been written to the database yet.
+///
+/// Owned rather than borrowed because the amplification pipeline builds these
+/// across `.await` points while iterating borrowed events — owned fields keep
+/// the payload `'static` and sidestep the borrow tangle. `detected_at` is
+/// deliberately absent: the database default stamps it, matching the
+/// single-row `insert_amplification_event` path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewAmplificationEvent {
+    pub event_type: String,
+    pub amplifier_did: String,
+    pub amplifier_handle: String,
+    pub original_post_uri: String,
+    pub amplifier_post_uri: Option<String>,
+    pub amplifier_text: Option<String>,
+    pub original_post_text: Option<String>,
+    pub context_score: Option<f64>,
 }
