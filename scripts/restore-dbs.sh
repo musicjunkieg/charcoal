@@ -22,7 +22,7 @@ if ! command -v aws &>/dev/null; then
     exit 1
 fi
 
-# Load .env safely — handles quoted values, export prefixes, and special chars
+# Load .env safely — handles quoted values, export prefixes, special chars.
 # Does NOT execute the file as bash; parses key=value line by line.
 _load_env() {
     local line key value
