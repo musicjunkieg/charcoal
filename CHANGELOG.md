@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Gate `delete_user` on the durable `scan_queue` row rather than the
+  process-local `ScanManager` (#278). The old guard only knew about scans *this
+  process* launched, so it missed a user who was merely queued, one running on
+  another replica, and anything surviving a restart — every other admission
+  decision had already moved to the queue row and this one was left behind. A
+  database error in the new lookup is a `500` rather than an implicit yes:
+  the guard it replaced was an in-memory read that could not fail, so treating
+  "we cannot tell" as "go ahead" would delete a user out from under a live
+  scan, which is the one thing the check exists to prevent.
 - **`POST /api/scan` queues instead of refusing (#257).** Scans were globally
   single-flight — one per *server* — so a second user got
   `409 "Another scan is already in progress on this server"`. With open signup
