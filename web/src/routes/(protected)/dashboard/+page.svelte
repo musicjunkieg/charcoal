@@ -1,4 +1,8 @@
 <script lang="ts">
+	// Design tokens (#250): imported explicitly rather than relying on a child
+	// component to have pulled them in, so the var() references below resolve
+	// on their own terms.
+	import '$lib/website/styles/tokens.css';
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -12,7 +16,7 @@
 	} from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import { TIER_DESCRIPTIONS } from '$lib/tiers.js';
-	import { dashboardView } from '$lib/dashboard-state.js';
+	import { dashboardView, isQueued } from '$lib/dashboard-state.js';
 	import { topKeywords } from '$lib/fingerprint-keywords.js';
 	import { pollActions } from '$lib/poll-actions.js';
 	import ScanProgress from '$lib/components/ScanProgress.svelte';
@@ -228,7 +232,14 @@
 		</div>
 
 		<div class="scan-area">
-			{#if status?.scan_running}
+			{#if status && isQueued(status)}
+				<!-- Queued is not scanning (#257). No spinner: nothing has started
+				     yet, and a moving one here would say otherwise. -->
+				<div class="scan-queued">
+					<span class="queued-dot" aria-hidden="true"></span>
+					<span>Queued</span>
+				</div>
+			{:else if status?.scan_running}
 				<div class="scan-running">
 					<div class="spinner"></div>
 					<span>Scanning…</span>
@@ -568,6 +579,25 @@
 		gap: 0.625rem;
 		color: #c9956c;
 		font-size: 0.875rem;
+	}
+
+	/* Waiting for a slot, not working (#257): the same layout as .scan-running
+	   but a still dot instead of the spinner, and colors.body-text rather than
+	   the copper the live states use. */
+	.scan-queued {
+		display: flex;
+		align-items: center;
+		gap: 0.625rem;
+		color: var(--charcoal-400);
+		font-size: 0.875rem;
+	}
+
+	.queued-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--charcoal-400);
+		flex-shrink: 0;
 	}
 
 	.scan-error {

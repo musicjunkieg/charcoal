@@ -46,6 +46,8 @@ export interface TierCounts {
 // pipeline state while the heavy scoring stage runs.
 export type ScanPhase =
 	| 'idle'
+	// Enqueued, waiting for a free scan slot — nothing is running yet (#257).
+	| 'queued'
 	| 'starting'
 	| 'loading_models'
 	| 'fingerprint'
@@ -64,6 +66,15 @@ export interface ScanProgress {
 	classifications_done: number | null;
 }
 
+// Where the user sits in the scan queue. `eta_seconds` is a rolling median of
+// recent completed scans and is null when there is nothing to median from —
+// an absent estimate, never a fabricated one (#257).
+export interface QueuePosition {
+	position: number;
+	eta_seconds: number | null;
+	enqueued_at: string;
+}
+
 export interface ScanStatus {
 	scan_running: boolean;
 	started_at: string | null;
@@ -72,6 +83,8 @@ export interface ScanStatus {
 	phase: ScanPhase;
 	progress: ScanProgress | null;
 	tier_counts: TierCounts;
+	/** Present only while queued (#257); the server omits it otherwise. */
+	queue?: QueuePosition;
 }
 
 export interface AmplificationEvent {
