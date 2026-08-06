@@ -1,5 +1,13 @@
 [
   {
+    "hash": "a80350b7190522ecc6fd9e819fe831e1578508e4",
+    "short_hash": "a80350b",
+    "author": "Bryan Guffey",
+    "date": "2026-07-31T22:17:44-07:00",
+    "message": "chore(239): integrate main into staging to unblock the promotion\n\nPR #63 (staging -> main) was mergeStateStatus=DIRTY: main carried the\ntemplate-backfill commits #70-#75 that never reached staging, and both\nbranches had edited the same files.\n\nTouches ONLY tooling and docs -- no Rust, Cargo, migrations, or web files --\nso the promotion gains no application-code risk from this.\n\nFour conflicts, resolved:\n\n.gitignore -- kept staging entries. main restructured this file and does NOT\ncover models/, .worktrees/, .superpowers/ or /docs/research/. Dropping\nmodels/ alone would have risked committing ~500MB of ONNX artifacts. main\nside of the second hunk was empty, so nothing was lost; main .gitignore.local\nconvention came through the auto-merge intact.\n\n.chainlink/issues-export.json -- modify/delete, kept staging deletion. The\nfile was deliberately untracked in #60/#181 because tracking a regenerated\nartifact made every branch integration conflict on churned JSON.\n\nscripts/install-hooks.sh -- conflict of intent. staging (#181) skips staging\nthe export when gitignored; main force-adds it with git add -f. Kept the\nstaging behaviour since we just deleted the tracked file, but ADOPTED main\n(cd \"$REPO_ROOT\" && ...) wrapper, which fixes the stray-shadow-.chainlink cwd\nbug. No _would_clobber guard on this branch -- that guard protects a\nCOMMITTED file from an empty export, and this file is deliberately not\ncommitted. _would_clobber stays in use for docs/graph-data.json.\n\ndocs/git-history.json -- generated; regenerated with deciduous sync rather\nthan hand-merged. Both graph artifacts validated as parseable JSON.\n\nCLAUDE.md auto-merged, but the merge silently dropped staging EnterWorktree\nban. Checked rather than assumed: main did not lose it by accident, it\ndeliberately REVERSES it (\"that turned out to be stale after the mid-2026\nupgrade\"). Bryan confirmed main wins, so the auto-merge result stands.\nVerified the ban is not left contradicting anywhere else -- neither the\nglobal CLAUDE.md nor the session memory carries it.\n\ninstall-hooks.sh syntax-checked; settings.json and both graph JSONs parse.\n\nRefs #239",
+    "files_changed": 0
+  },
+  {
     "hash": "da719650de3abaa585382809a5a04029f1e5409d",
     "short_hash": "da71965",
     "author": "Bryan Guffey",

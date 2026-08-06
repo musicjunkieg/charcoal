@@ -4575,6 +4575,61 @@
       "created_at": "2026-07-31T17:30:18.631985-07:00",
       "updated_at": "2026-07-31T17:30:18.651679-07:00",
       "metadata_json": "{\"branch\":\"fix/promotion-preflight\",\"commit\":\"da71965\",\"confidence\":92}"
+    },
+    {
+      "id": 423,
+      "change_id": "14e5e486-103b-4d7b-a56c-14d3e795de7e",
+      "node_type": "action",
+      "title": "Execute the staging->main production promotion runbook: PR #93 (preflight), PR #94 (main->staging integration), PR #63 (promotion)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-04T22:07:16.560339-07:00",
+      "updated_at": "2026-08-04T22:07:16.598054-07:00",
+      "metadata_json": "{\"branch\":\"chore/integrate-main-into-staging\",\"commit\":\"a80350b\",\"confidence\":92}"
+    },
+    {
+      "id": 424,
+      "change_id": "34e28f54-bacd-4ceb-bfea-6632f9819dfb",
+      "node_type": "outcome",
+      "title": "PRODUCTION PROMOTION LIVE (main ea1c177, Railway deploy 51a589db SUCCESS). Verified: /health 200; schema_version now 1..10 with classification_queue + scan_account_input + scan_skips all present in the prod Postgres; fp32 NLI model (284MB) downloaded to /data/models; 'removed superseded model_quantized.onnx (#231)' logged; ZERO errors or panics on boot; CHARCOAL_CLASSIFIER=zentropi confirmed set. OUTSTANDING: a real scan is the only check that exercises NliScorer::load and the classifier wiring - health cannot catch a misconfigured classifier because build_from_env runs per scan",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-04T22:07:16.583990-07:00",
+      "updated_at": "2026-08-04T22:07:16.604633-07:00",
+      "metadata_json": "{\"branch\":\"chore/integrate-main-into-staging\",\"commit\":\"a80350b\",\"confidence\":90}"
+    },
+    {
+      "id": 425,
+      "change_id": "3493662d-ee62-4755-87ed-553e803f0eaf",
+      "node_type": "action",
+      "title": "#196 prod cutover: flip production to self-hosted CoPE-B on RunPod. Copied RUNPOD_API_KEY (via --stdin, never printed; sha256 verified identical to staging, len 50) + RUNPOD_ENDPOINT_URL + CHARCOAL_SCAN_COST_CEILING_CENTS=200 mirroring staging, then CHARCOAL_CLASSIFIER=zentropi -> runpod",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-04T22:25:25.540230-07:00",
+      "updated_at": "2026-08-04T22:25:25.576582-07:00",
+      "metadata_json": "{\"branch\":\"chore/integrate-main-into-staging\",\"commit\":\"a80350b\",\"confidence\":90}"
+    },
+    {
+      "id": 426,
+      "change_id": "e4da1e51-6ba1-4e49-9d06-983340742b06",
+      "node_type": "outcome",
+      "title": "Prod is on RunPod CoPE-B. Deploy 5b302927 SUCCESS, /health 200, zero boot errors. Pre-cutover check per Bryan's own #205 clarification PASSED: endpoint f39lf61pc762a8 has 37452 completed jobs / 3 failed, 10 ready workers, 0 throttled, and TWO arch pools (ADA_80_PRO + HOPPER_141 = the H200 fallback #205 asked for). Deliberately did NOT copy CHARCOAL_AUDIT_CLASSIFIER=1 - it writes a JSONL row per classification and is a staging diagnostic. UNVERIFIED until a real scan: backend routing (build_from_env runs per scan, not at boot)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-04T22:25:25.556562-07:00",
+      "updated_at": "2026-08-04T22:25:25.582600-07:00",
+      "metadata_json": "{\"branch\":\"chore/integrate-main-into-staging\",\"commit\":\"a80350b\",\"confidence\":88}"
+    },
+    {
+      "id": 427,
+      "change_id": "d06cb9fb-fd2c-4253-a366-d642393225e3",
+      "node_type": "outcome",
+      "title": "PROD SCAN VERIFIED END-TO-END on RunPod CoPE-B (2026-08-06, ~22min: 00:16:31 start, 00:37:07 done). backend='runpod-cope-b' in classifier_metrics = #196 cutover PROVEN on real traffic. Burst: 395 pending drained, outcome=complete, errored=0, 12697 classifications done, NO cost cap at the $2 ceiling. FINALIZE RAN THE fp32 NLI: 9 accounts got non-zero context_score (min .0006 max .3266 avg .0678) - the last unverified piece of #231, since NliScorer::load is lazy and neither /health nor a clean deploy could prove it. NotAssessed=39 = #222/#230 language abstention live in prod. accounts_scored=595 (Low 466, InsufficientData 88, NotAssessed 39, Elevated 2). degraded=true explained ENTIRELY by 1 benign skip (deleted profile, 400 'Profile not found') - summary.degraded |= gathered.skipped at mod.rs:196 means ANY skip flips it. No panics, no NeedsRegather (#236 did not fire). Cold start cost ~56s queue delay on first requests then settled to ~800ms",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-05T17:59:46.065807-07:00",
+      "updated_at": "2026-08-05T17:59:46.081402-07:00",
+      "metadata_json": "{\"branch\":\"chore/integrate-main-into-staging\",\"commit\":\"a80350b\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -9054,6 +9109,61 @@
       "weight": 1.0,
       "rationale": "Review-response outcome",
       "created_at": "2026-07-31T17:30:18.642540-07:00"
+    },
+    {
+      "id": 417,
+      "from_node_id": 418,
+      "to_node_id": 423,
+      "from_change_id": "db1d2636-448d-427c-824f-82d65894afe2",
+      "to_change_id": "14e5e486-103b-4d7b-a56c-14d3e795de7e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Runbook execution",
+      "created_at": "2026-08-04T22:07:16.568974-07:00"
+    },
+    {
+      "id": 418,
+      "from_node_id": 423,
+      "to_node_id": 424,
+      "from_change_id": "14e5e486-103b-4d7b-a56c-14d3e795de7e",
+      "to_change_id": "34e28f54-bacd-4ceb-bfea-6632f9819dfb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Deploy verification",
+      "created_at": "2026-08-04T22:07:16.591380-07:00"
+    },
+    {
+      "id": 419,
+      "from_node_id": 424,
+      "to_node_id": 425,
+      "from_change_id": "34e28f54-bacd-4ceb-bfea-6632f9819dfb",
+      "to_change_id": "3493662d-ee62-4755-87ed-553e803f0eaf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bryan: prod should run the self-hosted CoPE-B he built, not hosted Zentropi",
+      "created_at": "2026-08-04T22:25:25.564039-07:00"
+    },
+    {
+      "id": 420,
+      "from_node_id": 425,
+      "to_node_id": 426,
+      "from_change_id": "3493662d-ee62-4755-87ed-553e803f0eaf",
+      "to_change_id": "e4da1e51-6ba1-4e49-9d06-983340742b06",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Cutover result",
+      "created_at": "2026-08-04T22:25:25.570623-07:00"
+    },
+    {
+      "id": 421,
+      "from_node_id": 426,
+      "to_node_id": 427,
+      "from_change_id": "e4da1e51-6ba1-4e49-9d06-983340742b06",
+      "to_change_id": "d06cb9fb-fd2c-4253-a366-d642393225e3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "First real prod scan after the promotion + RunPod cutover",
+      "created_at": "2026-08-05T17:59:46.075022-07:00"
     }
   ],
   "documents": [

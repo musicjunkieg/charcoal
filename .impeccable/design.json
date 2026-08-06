@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-05T00:00:00.000Z",
+  "title": "Design System: Charcoal",
+  "extensions": {
+    "colorMeta": {
+      "reading-copper": {
+        "role": "primary",
+        "displayName": "Reading Copper",
+        "canonical": "#c9956c",
+        "tonalRamp": ["#2b1c12", "#452d1d", "#603f29", "#7d5537", "#9a6c47", "#b5825a", "#c9956c", "#e5c3a6"]
+      },
+      "alert-amber": {
+        "role": "primary",
+        "displayName": "Alert Amber",
+        "canonical": "#f59e0b",
+        "tonalRamp": ["#2b1c02", "#452d03", "#6b4405", "#925c07", "#b87309", "#d97706", "#f59e0b", "#fcd9a0"]
+      },
+      "night-ground": {
+        "role": "neutral",
+        "displayName": "Night Ground",
+        "canonical": "#0c0a09",
+        "tonalRamp": ["#0c0a09", "#1c1917", "#292524", "#44403c", "#57534e", "#78716c", "#a8a29e", "#d6d3d1"]
+      },
+      "instrument-cream": {
+        "role": "neutral",
+        "displayName": "Instrument Cream",
+        "canonical": "#fef3c7",
+        "tonalRamp": ["#3d3311", "#5c4d1a", "#7a6722", "#99812b", "#b89b33", "#e0cf7d", "#fef3c7", "#fffbeb"]
+      },
+      "tier-high": {
+        "role": "tertiary",
+        "displayName": "Tier High",
+        "canonical": "#fca5a5",
+        "tonalRamp": ["#3d1616", "#5c2121", "#7a2c2c", "#993737", "#c25858", "#e08383", "#fca5a5", "#fdd5d5"]
+      },
+      "tier-elevated": {
+        "role": "tertiary",
+        "displayName": "Tier Elevated",
+        "canonical": "#fdba74",
+        "tonalRamp": ["#3d2712", "#5c3b1b", "#7a4f24", "#99632d", "#c2854a", "#e0a163", "#fdba74", "#fedcba"]
+      },
+      "tier-watch": {
+        "role": "tertiary",
+        "displayName": "Tier Watch",
+        "canonical": "#fcd34d",
+        "tonalRamp": ["#3d3110", "#5c4a18", "#7a6320", "#997c28", "#c2a03c", "#e0ba45", "#fcd34d", "#fde9a6"]
+      },
+      "tier-low": {
+        "role": "tertiary",
+        "displayName": "Tier Low",
+        "canonical": "#a8a29e",
+        "tonalRamp": ["#1c1917", "#292524", "#44403c", "#57534e", "#78716c", "#8f8985", "#a8a29e", "#d6d3d1"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Hero titles only. Libre Baskerville, fluid clamp." },
+      "headline": { "displayName": "Headline", "purpose": "Section titles." },
+      "title": { "displayName": "Title", "purpose": "Card titles and panel headers." },
+      "body": { "displayName": "Body", "purpose": "All running text. Weight 300 for descriptions, 400 default." },
+      "label": { "displayName": "Label", "purpose": "Uppercase form labels, 0.03em tracking." },
+      "eyebrow": { "displayName": "Eyebrow", "purpose": "Section kickers in copper, 0.15em tracking, uppercase." }
+    },
+    "shadows": [
+      { "name": "featured-glow", "value": "0 0 0 1px rgba(0,0,0,0.25), 0 20px 50px -10px rgba(0,0,0,0.5), 0 0 80px -20px rgba(201,149,108,0.3)", "purpose": "Copper halo under featured and CTA cards. Atmosphere, not rank." },
+      { "name": "hover-lift", "value": "0 20px 40px -10px rgba(0,0,0,0.4)", "purpose": "Paired with translateY(-2px..-4px) on interactive surfaces." },
+      { "name": "action-rest", "value": "0 4px 20px -4px rgba(245,158,11,0.4)", "purpose": "Primary CTA at rest." },
+      { "name": "action-hover", "value": "0 8px 30px -4px rgba(245,158,11,0.5)", "purpose": "Primary CTA on hover." },
+      { "name": "focus-ring", "value": "0 0 0 3px rgba(201,149,108,0.15)", "purpose": "Input focus. A ring, not a flash." }
+    ],
+    "motion": [
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Entrances, transforms, card hovers." },
+      { "name": "ease-in-out", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Subtle color and border hover transitions." },
+      { "name": "emerge", "value": "opacity 0->1, translateY(24px..40px)->0 over 1s..1.2s ease-out-expo", "purpose": "Above-fold entrance. Stagger children 0.05s-0.1s, fill backwards when delayed." },
+      { "name": "scroll-reveal", "value": "opacity 0->1, translateY(60px)->0 over 0.8s ease-out-expo", "purpose": "Below-fold sections via IntersectionObserver at threshold 0.15, rootMargin 0px 0px -50px 0px." },
+      { "name": "drift", "value": "25s-30s ease-in-out infinite, translate +/-30-40px with scale 0.95-1.05", "purpose": "Ambient background orbs. Must stay barely perceptible." },
+      { "name": "ring-pulse", "value": "4s-5s cycle, scale 1 -> 1.02-1.03, opacity +0.2, rings staggered 0.3-0.5s", "purpose": "Brand mark ambient life." }
+    ],
+    "breakpoints": [
+      { "name": "md", "value": "768px" },
+      { "name": "sm", "value": "480px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The amber-to-copper call to action. The one place ground color becomes foreground.",
+      "html": "<button class=\"ds-btn-primary\">Start a scan</button>",
+      "css": ".ds-btn-primary { font-family: Outfit, system-ui, sans-serif; font-size: 1.0625rem; font-weight: 500; color: #0c0a09; background: linear-gradient(135deg, #f59e0b 0%, #c9956c 100%); border: none; border-radius: 12px; padding: 1rem 2rem; cursor: pointer; box-shadow: 0 4px 20px -4px rgba(245,158,11,0.4); transition: all 0.4s cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { transform: translateY(-3px); box-shadow: 0 8px 30px -4px rgba(245,158,11,0.5); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(201,149,108,0.4); } .ds-btn-primary:active { transform: translateY(0); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action. Transparent until touched.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { font-family: Outfit, system-ui, sans-serif; font-size: 0.9375rem; font-weight: 500; color: #d6d3d1; background: transparent; border: 1px solid rgba(168,162,158,0.2); border-radius: 8px; padding: 0.625rem 1.25rem; cursor: pointer; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-btn-ghost:hover { color: #fffbeb; border-color: rgba(201,149,108,0.4); background: rgba(201,149,108,0.1); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(201,149,108,0.15); }"
+    },
+    {
+      "name": "Standard Card",
+      "kind": "card",
+      "refersTo": "card-standard",
+      "description": "The default surface. Flat at rest, lifts when touched.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Amplification detected</h3><p class=\"ds-card-body\">Three accounts quoted your post in the last day.</p></div>",
+      "css": ".ds-card { background: linear-gradient(145deg, rgba(41,37,36,0.4) 0%, rgba(28,25,23,0.5) 100%); border: 1px solid rgba(168,162,158,0.08); border-radius: 16px; padding: 2rem; transition: all 0.4s cubic-bezier(0.16,1,0.3,1); } .ds-card:hover { border-color: rgba(201,149,108,0.2); transform: translateY(-2px); box-shadow: 0 20px 40px -10px rgba(0,0,0,0.4); } .ds-card-title { font-family: 'Libre Baskerville', Georgia, serif; font-weight: 400; font-size: 1.25rem; line-height: 1.3; color: #fffbeb; margin: 0 0 0.5rem; } .ds-card-body { font-family: Outfit, system-ui, sans-serif; font-weight: 300; font-size: 1rem; line-height: 1.65; color: #a8a29e; margin: 0; }"
+    },
+    {
+      "name": "Featured Card",
+      "kind": "card",
+      "refersTo": "card-featured",
+      "description": "The highest-rank surface. Tone ranks it; the copper glow is atmosphere.",
+      "html": "<div class=\"ds-card-featured\"><h3 class=\"ds-card-featured-title\">Keeping watch</h3><p class=\"ds-card-featured-body\">Charcoal scores accounts before they reach you.</p></div>",
+      "css": ".ds-card-featured { background: linear-gradient(145deg, rgba(41,37,36,0.7) 0%, rgba(28,25,23,0.8) 100%); border: 1px solid rgba(168,162,158,0.15); border-radius: 24px; padding: 3rem; box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 20px 50px -10px rgba(0,0,0,0.5), 0 0 80px -20px rgba(201,149,108,0.3); } .ds-card-featured-title { font-family: 'Libre Baskerville', Georgia, serif; font-weight: 400; font-size: clamp(1.75rem, 4vw, 2.5rem); line-height: 1.1; color: #fffbeb; margin: 0 0 0.75rem; } .ds-card-featured-body { font-family: Outfit, system-ui, sans-serif; font-weight: 300; font-size: 1.125rem; line-height: 1.65; color: #a8a29e; margin: 0; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Container-wrapped field with a copper focus ring and an @ prefix that warms on focus.",
+      "html": "<label class=\"ds-input-label\" for=\"ds-handle\">Bluesky handle</label><div class=\"ds-input-wrap\"><span class=\"ds-input-prefix\">@</span><input class=\"ds-input\" id=\"ds-handle\" type=\"text\" placeholder=\"yourname.bsky.social\" /></div>",
+      "css": ".ds-input-label { display: block; font-family: Outfit, system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; color: #d6d3d1; letter-spacing: 0.03em; text-transform: uppercase; margin-bottom: 0.625rem; } .ds-input-wrap { display: flex; align-items: center; background: rgba(12,10,9,0.6); border: 1px solid rgba(168,162,158,0.15); border-radius: 12px; padding: 0 1rem; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-input-wrap:focus-within { border-color: #c9956c; background: rgba(12,10,9,0.8); box-shadow: 0 0 0 3px rgba(201,149,108,0.15); } .ds-input-prefix { font-family: Outfit, system-ui, sans-serif; font-size: 1rem; color: #78716c; transition: color 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-input-wrap:focus-within .ds-input-prefix { color: #c9956c; } .ds-input { flex: 1; border: none; background: transparent; padding: 1rem 0 1rem 0.25rem; font-family: Outfit, system-ui, sans-serif; font-size: 1rem; font-weight: 400; color: #fef3c7; outline: none; } .ds-input::placeholder { color: #57534e; }"
+    },
+    {
+      "name": "Threat Tier Chip",
+      "kind": "chip",
+      "refersTo": "tier-chip-high",
+      "description": "Signature component. Severity lives here and nowhere else, always desaturated.",
+      "html": "<span class=\"ds-tier ds-tier-high\">High</span> <span class=\"ds-tier ds-tier-elevated\">Elevated</span> <span class=\"ds-tier ds-tier-watch\">Watch</span> <span class=\"ds-tier ds-tier-low\">Low</span>",
+      "css": ".ds-tier { display: inline-block; font-family: Outfit, system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.03em; color: #0c0a09; border-radius: 8px; padding: 0.25rem 0.625rem; } .ds-tier-high { background: #fca5a5; } .ds-tier-elevated { background: #fdba74; } .ds-tier-watch { background: #fcd34d; } .ds-tier-low { background: #a8a29e; }"
+    },
+    {
+      "name": "Abstention Chip",
+      "kind": "chip",
+      "refersTo": "tier-chip-abstained",
+      "description": "No reading was taken. Deliberately outside the tier scale — outlined, never filled. Target state; not yet implemented.",
+      "html": "<span class=\"ds-tier-abstained\">Not assessed</span>",
+      "css": ".ds-tier-abstained { display: inline-block; font-family: Outfit, system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.03em; color: #78716c; background: transparent; border: 1px dashed rgba(168,162,158,0.35); border-radius: 8px; padding: 0.25rem 0.625rem; }"
+    },
+    {
+      "name": "Brand Mark",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Concentric rings reading as absorption and as a sweep. Rings pulse, core breathes.",
+      "html": "<span class=\"ds-mark\"><svg viewBox=\"0 0 64 64\" fill=\"none\" aria-hidden=\"true\"><circle cx=\"32\" cy=\"32\" r=\"30\" stroke=\"currentColor\" stroke-width=\"1\" opacity=\"0.15\"/><circle cx=\"32\" cy=\"32\" r=\"26\" stroke=\"currentColor\" stroke-width=\"1\" opacity=\"0.25\"/><circle cx=\"32\" cy=\"32\" r=\"22\" stroke=\"currentColor\" stroke-width=\"1.5\" opacity=\"0.35\"/><circle cx=\"32\" cy=\"32\" r=\"18\" stroke=\"currentColor\" stroke-width=\"1.5\" opacity=\"0.5\"/><circle cx=\"32\" cy=\"32\" r=\"14\" stroke=\"currentColor\" stroke-width=\"2\" opacity=\"0.7\"/><circle cx=\"32\" cy=\"32\" r=\"6\" fill=\"currentColor\"/></svg></span>",
+      "css": ".ds-mark { display: inline-block; width: 72px; height: 72px; color: #c9956c; } .ds-mark svg { width: 100%; height: 100%; } @media (prefers-reduced-motion: reduce) { .ds-mark svg circle { animation: none; } }"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Fixed over a gradient fade rather than a solid bar, so the ground stays continuous.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main\"><a class=\"ds-nav-brand\" href=\"/\" aria-label=\"Charcoal home\"><svg viewBox=\"0 0 64 64\" fill=\"none\" aria-hidden=\"true\"><circle cx=\"32\" cy=\"32\" r=\"26\" stroke=\"currentColor\" stroke-width=\"1\" opacity=\"0.35\"/><circle cx=\"32\" cy=\"32\" r=\"14\" stroke=\"currentColor\" stroke-width=\"2\" opacity=\"0.7\"/><circle cx=\"32\" cy=\"32\" r=\"6\" fill=\"currentColor\"/></svg></a><a class=\"ds-nav-link\" href=\"#how\">How it works</a><a class=\"ds-nav-link\" href=\"#signin\">Sign in</a></nav>",
+      "css": ".ds-nav { display: flex; align-items: center; gap: 2rem; padding: 1.5rem 2rem; background: linear-gradient(to bottom, rgba(12,10,9,0.8) 0%, transparent 100%); } .ds-nav-brand { display: inline-block; width: 36px; height: 36px; color: #c9956c; margin-right: auto; } .ds-nav-brand svg { width: 100%; height: 100%; } .ds-nav-link { font-family: Outfit, system-ui, sans-serif; font-size: 0.9375rem; font-weight: 500; color: #d6d3d1; text-decoration: none; transition: color 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-nav-link:hover { color: #fffbeb; } .ds-nav-link:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(201,149,108,0.15); border-radius: 4px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Hearth Watch",
+    "overview": "Someone is awake, watching the door, and the fire is still lit. Charcoal names accounts likely to harass the person using it — subject matter that pulls hard toward the security-console idiom of neon-on-black, red alert bars and dense telemetry. This system refuses that pull deliberately. The ground is a warm near-black, the text is cream rather than white, the accents are copper and amber, and the threat tiers are desaturated so that even a High finding is legible rather than alarming.\n\nThe warmth is not decoration; it is the argument. The product name evokes activated charcoal absorbing toxins, and the concentric-ring mark reads as absorption and as a sweep at once. What remains after the harmful content is filtered is supposed to feel like calm, so the interface behaves like a lit room rather than an operations center. Depth is atmospheric and layered — a base gradient, warmth radials, and slow drifting orbs, all of it barely perceptible and none of it competing with the reading.\n\nComponents behave as calm instruments: precise, unhurried, responsive without demanding. The interface never raises its voice, even when the finding is High. That restraint is what makes the findings credible — a system that shouts about everything cannot be trusted when something is genuinely wrong.",
+    "keyCharacteristics": [
+      "Warm near-black ground (#0c0a09); never pure black, never pure white text",
+      "Serif display (Libre Baskerville) against geometric sans body (Outfit)",
+      "Copper as the single recurring accent; amber reserved for action",
+      "Desaturated threat tiers — soft red, not alarm red",
+      "Atmosphere from layered gradients and 25–30s ambient drift, never from chrome",
+      "Motion that reveals, never bounces; prefers-reduced-motion honored throughout"
+    ],
+    "rules": [
+      { "name": "The No-Pure Rule", "body": "Never #fff for text and never #000 for background. Cream (#fffbeb / #fef3c7) and Night Ground (#0c0a09) are the extremes. Pure values break the warmth that the entire identity rests on.", "section": "colors" },
+      { "name": "The Copper-Is-Not-Status Rule", "body": "Copper marks identity and attention. Amber marks action. Neither ever encodes severity — severity belongs exclusively to the tier scale. A copper badge implying danger is a defect.", "section": "colors" },
+      { "name": "The Indoor Voice Rule", "body": "Threat tiers stay desaturated at all times. A High finding is #fca5a5, not #ef4444. The system reports; it does not shout. Saturating a tier to increase urgency is the single fastest way to make this product feel like the thing it was built not to be.", "section": "colors" },
+      { "name": "The Border Rule", "body": "Borders are rgba(168, 162, 158, …) at 0.08–0.2 opacity at rest, shifting toward rgba(201, 149, 108, 0.2–0.4) on hover. Borders are how surfaces separate; contrast is not.", "section": "colors" },
+      { "name": "The Serif-Heads-Only Rule", "body": "Libre Baskerville is for headings, section titles, quotes, and the brand name. It never sets body copy, navigation, buttons, or form fields. Outfit never sets a heading.", "section": "typography" },
+      { "name": "The Italic Accent Rule", "body": "The emphasized word in a hero heading takes font-style: italic and Reading Copper. One word per heading — the device stops working the moment it repeats.", "section": "typography" },
+      { "name": "The Tone-Ranks Rule", "body": "If a surface needs to read as more important, raise its background and border opacity — do not give it a shadow. Shadows that encode rank collide with shadows that encode state, and the interface stops being readable at a glance.", "section": "elevation" },
+      { "name": "The Barely-There Rule", "body": "Background warmth exists to create atmosphere, never to attract attention. If a reviewer notices the orbs before the content, the layer is too strong.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use Cream for text and Night Ground for backgrounds. The No-Pure Rule is absolute.",
+      "Do keep severity in the tier chip and nowhere else. Copper is identity, amber is action.",
+      "Do rank surfaces with tone — background and border opacity — and reserve shadow for interaction.",
+      "Do set every heading in Libre Baskerville and everything else in Outfit.",
+      "Do ship prefers-reduced-motion handling with any animated surface. It is mandatory, not a nicety, for an audience often reading this while distressed.",
+      "Do render abstention outside the tier scale, as an outlined chip.",
+      "Do mark every decorative layer aria-hidden=\"true\"."
+    ],
+    "donts": [
+      "Don't saturate a threat tier to convey urgency. The Indoor Voice Rule is the difference between this product and the console it refuses to be.",
+      "Don't build anything that reads as a security operations console (neon-on-black, red alert banners, monospace-everything, telemetry chrome), a generic SaaS dashboard (white cards, Inter everywhere, blue primary, purple gradient hero), clinical or medical (cool grays, hard edges, chart-first), or a playful consumer app (bounce easing, mascots, confetti, emoji-as-status). All four are confirmed anti-references.",
+      "Don't use amber outside a call to action, or copper to indicate state.",
+      "Don't give a surface a resting shadow to make it feel important.",
+      "Don't let the ambient background become noticeable.",
+      "Don't repeat the italic copper accent more than once per heading.",
+      "Don't square a corner. Nothing in this system has a hard 90-degree edge."
+    ]
+  }
+}
