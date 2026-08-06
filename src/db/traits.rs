@@ -28,6 +28,20 @@ pub struct ScanSkip {
     pub skipped_at: String,
 }
 
+/// A user's position in the scan queue (#257).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanQueueEntry {
+    pub user_did: String,
+    /// "queued" | "running" | "done" | "failed"
+    pub status: String,
+    /// 1-based position among queued rows; 0 when running or finished.
+    pub position: i64,
+    /// position x rolling median scan duration. None until enough scans have
+    /// finished to have a median.
+    pub eta_seconds: Option<i64>,
+    pub enqueued_at: String,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -351,4 +365,28 @@ pub trait Database: Send + Sync {
     /// own query. Shared by the markdown report and (later) the status
     /// dashboard.
     async fn count_not_assessed(&self, user_did: &str) -> Result<i64>;
+
+    // --- Scan admission queue (#257) ---
+
+    /// Add a user to the scan queue. Idempotent — a second call while queued or
+    /// running is a no-op, so a double-click cannot double-book.
+    async fn enqueue_scan(&self, user_did: &str) -> Result<()>;
+
+    /// Claim the oldest queued scan if fewer than `limit` are running.
+    /// Returns the claimed user_did, or None when at capacity or empty.
+    /// `lease_secs` sets how long the claim is valid before it can be reclaimed.
+    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<String>>;
+
+    /// Extend a running scan's lease. Called periodically while it runs.
+    async fn heartbeat_scan(&self, user_did: &str, lease_secs: i64) -> Result<()>;
+
+    /// Mark a scan done (error None) or failed (error Some), releasing its slot.
+    async fn finish_queued_scan(&self, user_did: &str, error: Option<&str>) -> Result<()>;
+
+    /// Return running rows whose lease has lapsed to 'queued'. Called at boot.
+    /// Returns how many were reclaimed.
+    async fn reclaim_expired_scans(&self) -> Result<usize>;
+
+    /// A user's queue entry with position and ETA, or None if not queued.
+    async fn scan_queue_entry(&self, user_did: &str) -> Result<Option<ScanQueueEntry>>;
 }

@@ -852,3 +852,111 @@ async fn test_pg_delete_user_data_clears_scan_skips() {
         "scan_skips must not survive account deletion on Postgres"
     );
 }
+
+// --- scan_queue (#257) ---
+//
+// Unlike every other table in this file, `scan_queue` position/count queries
+// are deliberately GLOBAL — that's what "queue position" means. Every other
+// test in this file scopes its assertions to its own user_did, which is
+// enough isolation when tests run in parallel (the default). These three
+// cannot: `test_pg_enqueue_is_idempotent`'s position assertion counts every
+// currently-queued row in the table, so a `queued` row left mid-flight by
+// `test_pg_claim_respects_the_concurrency_cap` (its cap-3 refusal is a queued
+// row until that test's own cleanup runs) can inflate it. Observed directly:
+// running with the default parallel harness failed ~1 run in 3 with
+// `left: 2, right: 1` on the position assertion. Individually, or under
+// `--test-threads=1` on a clean table, all three pass every time — so the
+// queue logic itself is correct; only cross-test scheduling was at fault.
+// Serializing just these three (not the whole suite) with a static mutex
+// fixes it without slowing down every other test in this file.
+fn scan_queue_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Admission must never exceed the cap, even when two admitters claim at once.
+/// This is the guarantee FOR UPDATE SKIP LOCKED exists to provide, and the
+/// reason the queue lives in the database rather than in a process-local bool.
+#[tokio::test]
+async fn test_pg_claim_respects_the_concurrency_cap() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const A: &str = "did:plc:pgtest_q_aaaaaaaaaaaaa";
+    const B: &str = "did:plc:pgtest_q_bbbbbbbbbbbbb";
+    const C: &str = "did:plc:pgtest_q_ccccccccccccc";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    for d in [A, B, C] {
+        db.delete_user_data(d).await.unwrap();
+        db.upsert_user(d, "q.bsky.social").await.unwrap();
+        db.enqueue_scan(d).await.unwrap();
+    }
+
+    // Cap of 2: two claims succeed, the third is refused.
+    let first = db.claim_next_scan(2, 120).await.unwrap();
+    let second = db.claim_next_scan(2, 120).await.unwrap();
+    let third = db.claim_next_scan(2, 120).await.unwrap();
+
+    assert!(first.is_some(), "first claim must succeed");
+    assert!(second.is_some(), "second claim must succeed");
+    assert!(third.is_none(), "third claim must be refused at cap 2");
+
+    for d in [A, B, C] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
+/// Enqueue is keyed by user_did, so a double-click cannot double-book.
+#[tokio::test]
+async fn test_pg_enqueue_is_idempotent() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_ddddddddddddd";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+
+    db.enqueue_scan(U).await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+
+    let entry = db.scan_queue_entry(U).await.unwrap().expect("queued");
+    assert_eq!(entry.status, "queued");
+    assert_eq!(entry.position, 1, "one row, so position 1 — not two rows");
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A scan orphaned by a redeploy must return to the queue, not vanish.
+/// Combined with #208's scan_phase the reclaimed scan resumes rather than
+/// restarting, so nobody re-pays for completed work.
+#[tokio::test]
+async fn test_pg_expired_lease_is_reclaimed() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_eeeeeeeeeeeee";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+
+    // Claim with a lease that has already expired.
+    let claimed = db.claim_next_scan(2, -1).await.unwrap();
+    assert_eq!(claimed.as_deref(), Some(U));
+
+    let reclaimed = db.reclaim_expired_scans().await.unwrap();
+    assert_eq!(reclaimed, 1, "the expired running row must be re-queued");
+
+    let entry = db.scan_queue_entry(U).await.unwrap().expect("present");
+    assert_eq!(entry.status, "queued", "reclaimed back to queued");
+
+    db.delete_user_data(U).await.unwrap();
+}

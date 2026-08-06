@@ -360,6 +360,33 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // v11 — scan_queue: durable scan admission (#257).
+    //
+    // Mirrors migrations/postgres/0011_scan_queue.sql. SQLite stores timestamps
+    // as TEXT where Postgres uses TIMESTAMPTZ.
+    //
+    // The SQLite implementation is deliberately minimal — single process, no
+    // SKIP LOCKED needed — because #263 will delete this backend entirely.
+    // Written to be removed, not maintained.
+    run_migration(conn, 11, |c| {
+        c.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS scan_queue (
+                user_did        TEXT    NOT NULL PRIMARY KEY,
+                status          TEXT    NOT NULL,
+                enqueued_at     TEXT    NOT NULL,
+                started_at      TEXT,
+                finished_at     TEXT,
+                lease_expires   TEXT,
+                last_error      TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scan_queue_status_enqueued
+                ON scan_queue (status, enqueued_at);
+            ",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -416,8 +443,8 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips = 11 tables
-        assert_eq!(count, 11i64);
+        // scan_skips, scan_queue = 12 tables
+        assert_eq!(count, 12i64);
     }
 
     #[test]
@@ -489,7 +516,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 
     #[test]
@@ -591,8 +618,8 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips = 11 tables
-        assert_eq!(count, 11i64);
+        // scan_skips, scan_queue = 12 tables
+        assert_eq!(count, 12i64);
 
         // Verify schema_version includes v4 through v10
         let versions: Vec<i64> = conn
@@ -602,6 +629,6 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     }
 }

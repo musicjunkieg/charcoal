@@ -1,5 +1,13 @@
 [
   {
+    "hash": "eb57b589db3f0c165ca94b86c2affdca2a1f6445",
+    "short_hash": "eb57b58",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T00:05:20-07:00",
+    "message": "feat(257): load ONNX models once at boot into AppState\n\nModels loaded per scan so they were not held while idle. Since #231 moved\nNLI to the fp32 export that is ~500MB per concurrent scan against a\n1.11GB production peak, which is what makes concurrency unsafe rather\nthan merely untidy — the global scan gate was implicitly protecting\nmemory, not just leftover from single-user days.\n\nScanModels holds all three behind Arc; scans clone handles. Their\nexisting Arc<Mutex<Session>> is untouched: this changes ownership and\nlifetime, not concurrency semantics.\n\nFail-fast at boot rather than degrading per scan. The per-scan path\ndegraded when a model was absent; at boot that would hide a broken model\nvolume behind a green healthcheck.\n\nAccepted cost: prod idles ~0.776GB today and ~1.28GB after, raising the\nmetered RAM floor (#188) even on days nobody scans.\n\nAdded a blanket impl<T: ToxicityScorer + ?Sized> ToxicityScorer for\nArc<T> (src/toxicity/traits.rs) so a shared Arc<OnnxToxicityScorer> can\nbe boxed as Box<dyn ToxicityScorer> for TwoStageToxicityScorer::new\nwithout a second load or touching that constructor signature.\n\ntest_helpers.rs: AppState::models is non-optional per the task interface,\nbut tests must not require the ~500MB model volume to construct an\nAppState. build_test_app[_with_db] now return Option, gated behind a\nOnceLock-cached model load (mirrors the nli_files_present skip-gate used\nelsewhere in the suite); callers in tests/web_labels.rs and\ntests/web_oauth.rs pattern-match and skip with an eprintln SKIP: message\nwhen absent.\n\nRefs #257 #52\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 10
+  },
+  {
     "hash": "f14554eea453af7b0a55404604d5ed1086858316",
     "short_hash": "f14554e",
     "author": "Bryan Guffey",

@@ -14,7 +14,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::ScanSkip;
+use super::traits::{ScanQueueEntry, ScanSkip};
 
 // --- Users ---
 
@@ -964,6 +964,12 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
         "DELETE FROM scan_skips WHERE user_did = ?1",
         params![user_did],
     )?;
+    // #257: scan_queue holds the user's admission state; a queued or running
+    // row must not outlive the account.
+    tx.execute(
+        "DELETE FROM scan_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
     tx.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],
@@ -1344,6 +1350,179 @@ pub fn clear_scan_skips(conn: &Connection, user_did: &str) -> Result<()> {
         params![user_did],
     )?;
     Ok(())
+}
+
+// --- Scan admission queue (#257) ---
+//
+// SQLite is single process, so a write transaction is enough to serialize
+// admission — no `FOR UPDATE SKIP LOCKED` needed the way Postgres uses it.
+// This mirrors PgDatabase's semantics in src/db/postgres.rs, kept minimal
+// because #263 deletes this backend entirely. Written to be removed, not
+// maintained.
+
+/// Add a user to the scan queue. Idempotent — a second call while queued or
+/// running is a no-op; a finished ('done'/'failed') row is reset so the user
+/// can scan again. Mirrors PgDatabase::enqueue_scan.
+pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at)
+         VALUES (?1, 'queued', ?2)
+         ON CONFLICT(user_did) DO UPDATE SET
+             status = 'queued', enqueued_at = ?2,
+             started_at = NULL, finished_at = NULL,
+             lease_expires = NULL, last_error = NULL
+         WHERE status IN ('done', 'failed')",
+        params![user_did, now],
+    )?;
+    Ok(())
+}
+
+/// Claim the oldest queued scan if fewer than `limit` are running.
+/// Mirrors PgDatabase::claim_next_scan.
+pub fn claim_next_scan(conn: &Connection, limit: usize, lease_secs: i64) -> Result<Option<String>> {
+    // `unchecked_transaction` because this takes `&Connection`, matching the
+    // rest of this module (see delete_user_data above for why).
+    let tx = conn.unchecked_transaction()?;
+
+    let running: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM scan_queue WHERE status = 'running'",
+        [],
+        |row| row.get(0),
+    )?;
+    if running >= limit as i64 {
+        tx.commit()?;
+        return Ok(None);
+    }
+
+    let did: Option<String> = tx
+        .query_row(
+            "SELECT user_did FROM scan_queue
+             WHERE status = 'queued'
+             ORDER BY enqueued_at
+             LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(did) = did else {
+        tx.commit()?;
+        return Ok(None);
+    };
+
+    let started_at = chrono::Utc::now();
+    let lease_expires = started_at + chrono::Duration::seconds(lease_secs);
+    tx.execute(
+        "UPDATE scan_queue
+         SET status = 'running', started_at = ?2, lease_expires = ?3
+         WHERE user_did = ?1",
+        params![did, started_at.to_rfc3339(), lease_expires.to_rfc3339()],
+    )?;
+
+    tx.commit()?;
+    Ok(Some(did))
+}
+
+/// Extend a running scan's lease. Mirrors PgDatabase::heartbeat_scan.
+pub fn heartbeat_scan(conn: &Connection, user_did: &str, lease_secs: i64) -> Result<()> {
+    let lease_expires = chrono::Utc::now() + chrono::Duration::seconds(lease_secs);
+    conn.execute(
+        "UPDATE scan_queue SET lease_expires = ?2
+         WHERE user_did = ?1 AND status = 'running'",
+        params![user_did, lease_expires.to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+/// Mark a scan done (error None) or failed (error Some), releasing its slot.
+/// Mirrors PgDatabase::finish_queued_scan.
+pub fn finish_queued_scan(conn: &Connection, user_did: &str, error: Option<&str>) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let status = if error.is_none() { "done" } else { "failed" };
+    conn.execute(
+        "UPDATE scan_queue
+         SET status = ?2, finished_at = ?3, lease_expires = NULL, last_error = ?4
+         WHERE user_did = ?1",
+        params![user_did, status, now, error],
+    )?;
+    Ok(())
+}
+
+/// Return running rows whose lease has lapsed to 'queued'. Timestamps are
+/// RFC3339 in UTC, so lexicographic comparison is correct. Mirrors
+/// PgDatabase::reclaim_expired_scans.
+pub fn reclaim_expired_scans(conn: &Connection) -> Result<usize> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = conn.execute(
+        "UPDATE scan_queue
+         SET status = 'queued', started_at = NULL, lease_expires = NULL
+         WHERE status = 'running' AND lease_expires < ?1",
+        params![now],
+    )?;
+    Ok(changed)
+}
+
+/// A user's queue entry with position and ETA, or None if not queued.
+/// Mirrors PgDatabase::scan_queue_entry.
+pub fn scan_queue_entry(conn: &Connection, user_did: &str) -> Result<Option<ScanQueueEntry>> {
+    let row: Option<(String, String, i64)> = conn
+        .query_row(
+            "SELECT status, enqueued_at,
+                    (SELECT COUNT(*) FROM scan_queue q2
+                      WHERE q2.status = 'queued' AND q2.enqueued_at <= q.enqueued_at)
+             FROM scan_queue q WHERE user_did = ?1",
+            params![user_did],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+
+    let Some((status, enqueued_at, raw_position)) = row else {
+        return Ok(None);
+    };
+    let position = if status == "queued" { raw_position } else { 0 };
+
+    // Rolling median over the last 20 completed scans. None until any finish,
+    // so ETA is absent rather than fabricated on a fresh install.
+    let mut durations: Vec<i64> = conn
+        .prepare(
+            "SELECT started_at, finished_at FROM scan_queue
+             WHERE status = 'done' AND started_at IS NOT NULL
+             ORDER BY finished_at DESC LIMIT 20",
+        )?
+        .query_map([], |row| {
+            let started_at: String = row.get(0)?;
+            let finished_at: String = row.get(1)?;
+            Ok((started_at, finished_at))
+        })?
+        .filter_map(|r| r.ok())
+        .filter_map(|(s, f)| {
+            let s = chrono::DateTime::parse_from_rfc3339(&s).ok()?;
+            let f = chrono::DateTime::parse_from_rfc3339(&f).ok()?;
+            Some((f - s).num_seconds())
+        })
+        .collect();
+
+    let eta_seconds = if durations.is_empty() {
+        None
+    } else {
+        durations.sort_unstable();
+        let mid = durations.len() / 2;
+        let median = if durations.len().is_multiple_of(2) {
+            (durations[mid - 1] + durations[mid]) as f64 / 2.0
+        } else {
+            durations[mid] as f64
+        };
+        Some((median * position as f64) as i64)
+    };
+
+    Ok(Some(ScanQueueEntry {
+        user_did: user_did.to_string(),
+        status,
+        position,
+        eta_seconds,
+        enqueued_at,
+    }))
 }
 
 #[cfg(test)]

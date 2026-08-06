@@ -4707,6 +4707,39 @@
       "created_at": "2026-08-05T23:45:28.454241-07:00",
       "updated_at": "2026-08-05T23:45:28.454241-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"f14554e\",\"confidence\":90}"
+    },
+    {
+      "id": 435,
+      "change_id": "e33f7786-65f7-4b4b-a581-d755211a7ce9",
+      "node_type": "action",
+      "title": "Execute the #257 scan-admission plan via subagent-driven development: 7 tasks, fresh implementer + independent reviewer each, ledger-tracked",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T00:14:10.148492-07:00",
+      "updated_at": "2026-08-06T00:14:10.201902-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"eb57b58\",\"confidence\":90}"
+    },
+    {
+      "id": 436,
+      "change_id": "3ac59516-1986-4729-9d65-15bafbb7e384",
+      "node_type": "outcome",
+      "title": "Tasks 1-3 landed and reviewed clean. T1 #182 backoff (29df5bd): typed XrpcAttemptError, 429/5xx/transport retryable, other 4xx permanent; red state verified. T2 #264 timing (e1d4fa3+f14554e): review caught a CRITICAL gap IN MY PLAN — Step 6 timed only the Stage-2 clean pass, missing stage1_outcome's scorer.score_batch which runs ONNX for EVERY account, so inference_pct undercounted in the direction that makes concurrency look safe. Bryan ruled fix; separate stage1_onnx_ms bucket added, timer narrowed to the score_batch call only. T3 models-to-AppState (eb57b58): blanket Arc<T> ToxicityScorer impl verified to preserve dispatch exactly",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T00:14:10.164492-07:00",
+      "updated_at": "2026-08-06T00:14:10.208585-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"eb57b58\",\"confidence\":92}"
+    },
+    {
+      "id": 437,
+      "change_id": "cb4f8084-c726-4693-95bd-d78a9b7e2ada",
+      "node_type": "observation",
+      "title": "Fail-fast at boot removes MORE than the spec's rationale described. The spec justified it as 'a server that cannot score is not usefully up', but embedding_files_present and nli_files_present guarded real DEGRADED modes (TF-IDF-only topic overlap / context scoring disabled) — the server could score, just worse. Those modes are now boot-fatal. Approved and deliberate, low practical risk since prod auto-downloads all three, but the rationale and the consequence are not the same thing",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T00:14:10.176532-07:00",
+      "updated_at": "2026-08-06T00:14:10.176532-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":88}"
     }
   ],
   "edges": [
@@ -9296,6 +9329,39 @@
       "weight": 1.0,
       "rationale": "Result of wiring the Stage-1 inference timer",
       "created_at": "2026-08-05T23:45:30.824620-07:00"
+    },
+    {
+      "id": 427,
+      "from_node_id": 429,
+      "to_node_id": 435,
+      "from_change_id": "c25f9854-1a85-4396-8b70-8d30e38d3318",
+      "to_change_id": "e33f7786-65f7-4b4b-a581-d755211a7ce9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Executing the approved plan",
+      "created_at": "2026-08-06T00:14:10.183645-07:00"
+    },
+    {
+      "id": 428,
+      "from_node_id": 435,
+      "to_node_id": 436,
+      "from_change_id": "e33f7786-65f7-4b4b-a581-d755211a7ce9",
+      "to_change_id": "3ac59516-1986-4729-9d65-15bafbb7e384",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task results",
+      "created_at": "2026-08-06T00:14:10.189614-07:00"
+    },
+    {
+      "id": 429,
+      "from_node_id": 436,
+      "to_node_id": 437,
+      "from_change_id": "3ac59516-1986-4729-9d65-15bafbb7e384",
+      "to_change_id": "cb4f8084-c726-4693-95bd-d78a9b7e2ada",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Behaviour change surfaced during T3 review",
+      "created_at": "2026-08-06T00:14:10.195906-07:00"
     }
   ],
   "documents": [

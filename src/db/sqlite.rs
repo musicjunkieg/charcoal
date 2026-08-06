@@ -17,7 +17,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     UserLabel, UserRow,
 };
-use super::traits::{Database, ScanSkip};
+use super::traits::{Database, ScanQueueEntry, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
@@ -411,6 +411,38 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::count_not_assessed(&conn, user_did)
     }
+
+    // --- Scan admission queue (#257) ---
+
+    async fn enqueue_scan(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::enqueue_scan(&conn, user_did)
+    }
+
+    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::claim_next_scan(&conn, limit, lease_secs)
+    }
+
+    async fn heartbeat_scan(&self, user_did: &str, lease_secs: i64) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::heartbeat_scan(&conn, user_did, lease_secs)
+    }
+
+    async fn finish_queued_scan(&self, user_did: &str, error: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::finish_queued_scan(&conn, user_did, error)
+    }
+
+    async fn reclaim_expired_scans(&self) -> Result<usize> {
+        let conn = self.conn.lock().await;
+        super::queries::reclaim_expired_scans(&conn)
+    }
+
+    async fn scan_queue_entry(&self, user_did: &str) -> Result<Option<ScanQueueEntry>> {
+        let conn = self.conn.lock().await;
+        super::queries::scan_queue_entry(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
@@ -566,8 +598,9 @@ mod tests {
         let count = db.table_count().await.unwrap();
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
-        // classification_queue, scan_account_input, scan_skips = 11 tables (v10)
-        assert_eq!(count, 11);
+        // classification_queue, scan_account_input, scan_skips,
+        // scan_queue = 12 tables (v11)
+        assert_eq!(count, 12);
     }
 
     #[tokio::test]

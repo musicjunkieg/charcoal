@@ -21,7 +21,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{Database, ScanSkip};
+use super::traits::{Database, ScanQueueEntry, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
@@ -135,6 +135,10 @@ impl PgDatabase {
                 (
                     10,
                     include_str!("../../migrations/postgres/0010_scan_skips.sql"),
+                ),
+                (
+                    11,
+                    include_str!("../../migrations/postgres/0011_scan_queue.sql"),
                 ),
             ];
 
@@ -1154,6 +1158,12 @@ impl Database for PgDatabase {
             .bind(user_did)
             .execute(&mut *tx)
             .await?;
+        // #257: scan_queue holds the user's admission state; a queued or
+        // running row must not outlive the account.
+        sqlx_core::query::query("DELETE FROM scan_queue WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         sqlx_core::query::query("DELETE FROM inferred_pairs WHERE user_did = $1")
             .bind(user_did)
             .execute(&mut *tx)
@@ -1485,6 +1495,150 @@ impl Database for PgDatabase {
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))
+    }
+
+    // --- Scan admission queue (#257) ---
+
+    async fn enqueue_scan(&self, user_did: &str) -> Result<()> {
+        // ON CONFLICT DO NOTHING when already queued or running; a finished row
+        // is reset so a user can scan again.
+        sqlx_core::query::query(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at)
+             VALUES ($1, 'queued', NOW())
+             ON CONFLICT (user_did) DO UPDATE
+               SET status = 'queued', enqueued_at = NOW(),
+                   started_at = NULL, finished_at = NULL,
+                   lease_expires = NULL, last_error = NULL
+             WHERE scan_queue.status IN ('done', 'failed')",
+        )
+        .bind(user_did)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<String>> {
+        let mut tx = self.pool.begin().await?;
+
+        let running: i64 =
+            sqlx_core::query::query("SELECT COUNT(*) FROM scan_queue WHERE status = 'running'")
+                .fetch_one(&mut *tx)
+                .await?
+                .get(0);
+        if running >= limit as i64 {
+            tx.commit().await?;
+            return Ok(None);
+        }
+
+        // SKIP LOCKED so two admitters (or two replicas) never claim the same
+        // row, and neither blocks waiting for the other.
+        let row = sqlx_core::query::query(
+            "SELECT user_did FROM scan_queue
+             WHERE status = 'queued'
+             ORDER BY enqueued_at
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED",
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(row) = row else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        let did: String = row.get(0);
+
+        sqlx_core::query::query(
+            "UPDATE scan_queue
+             SET status = 'running', started_at = NOW(),
+                 lease_expires = NOW() + make_interval(secs => $2)
+             WHERE user_did = $1",
+        )
+        .bind(&did)
+        .bind(lease_secs as f64)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(Some(did))
+    }
+
+    async fn heartbeat_scan(&self, user_did: &str, lease_secs: i64) -> Result<()> {
+        sqlx_core::query::query(
+            "UPDATE scan_queue
+             SET lease_expires = NOW() + make_interval(secs => $2)
+             WHERE user_did = $1 AND status = 'running'",
+        )
+        .bind(user_did)
+        .bind(lease_secs as f64)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn finish_queued_scan(&self, user_did: &str, error: Option<&str>) -> Result<()> {
+        sqlx_core::query::query(
+            "UPDATE scan_queue
+             SET status = CASE WHEN $2::TEXT IS NULL THEN 'done' ELSE 'failed' END,
+                 finished_at = NOW(), lease_expires = NULL, last_error = $2
+             WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn reclaim_expired_scans(&self) -> Result<usize> {
+        let result = sqlx_core::query::query(
+            "UPDATE scan_queue
+             SET status = 'queued', started_at = NULL, lease_expires = NULL
+             WHERE status = 'running' AND lease_expires < NOW()",
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as usize)
+    }
+
+    async fn scan_queue_entry(&self, user_did: &str) -> Result<Option<ScanQueueEntry>> {
+        let row = sqlx_core::query::query(
+            "SELECT status, enqueued_at::TEXT,
+                    (SELECT COUNT(*) FROM scan_queue q2
+                      WHERE q2.status = 'queued'
+                        AND q2.enqueued_at <= q.enqueued_at) AS position
+             FROM scan_queue q WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else { return Ok(None) };
+        let status: String = row.get(0);
+        let enqueued_at: String = row.get(1);
+        let position: i64 = if status == "queued" { row.get(2) } else { 0 };
+
+        // Rolling median over the last 20 completed scans. NULL until any
+        // finish, so ETA is absent rather than fabricated on a fresh install.
+        let median: Option<f64> = sqlx_core::query::query(
+            "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (
+                 ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))
+             )
+             FROM (SELECT started_at, finished_at FROM scan_queue
+                   WHERE status = 'done' AND started_at IS NOT NULL
+                   ORDER BY finished_at DESC LIMIT 20) recent",
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .get(0);
+
+        Ok(Some(ScanQueueEntry {
+            user_did: user_did.to_string(),
+            status,
+            position,
+            eta_seconds: median.map(|m| (m * position as f64) as i64),
+            enqueued_at,
+        }))
     }
 }
 
