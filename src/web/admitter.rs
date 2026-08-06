@@ -5,16 +5,14 @@
 // and holds across replicas: anything that wants a scan to start enqueues and
 // wakes the admitter.
 //
-// The TARGET state is that this is the only thing which turns a queued row into
-// a running scan, because a second admission path bypasses the cap the claim
-// enforces. It is not the state of the tree yet: `POST /api/scan`
-// (`handlers/scan.rs`) and the admin trigger (`handlers/admin.rs`) still call
-// `launch_scan(..., None)` directly, so their scans never touch `scan_queue`,
-// are invisible to `claim_next_scan`'s running count, and can push real
-// concurrency past `CHARCOAL_SCAN_CONCURRENCY`. Converting them — and deleting
-// `ScanManager::try_start_scan` with them — is the next step of #257.
+// This is the ONLY thing that turns a queued row into a running scan. `POST
+// /api/scan` and the admin trigger both enqueue and wake it; neither can start
+// a scan itself, because a second admission path is a second way past the cap
+// the claim enforces. `launch_scan` is `pub(crate)` and demands a `QueueSlot`
+// so that stays true by construction.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -88,6 +86,74 @@ impl ClaimStatus {
     }
 }
 
+/// Which users have a scan pipeline actually executing in THIS process (#273).
+///
+/// The database cannot answer this. `reclaim_expired_scans` re-queues a row
+/// whose lease lapsed and `claim_next_scan` takes the oldest queued row — which,
+/// on the same admitter pass, is usually the row just re-queued. Without this
+/// registry the admitter would then start a SECOND `run_scan` for a user whose
+/// first pipeline is still running: two writers of the same `scan_state` resume
+/// markers (#208), two drains of `classification_queue` against RunPod where the
+/// $2 ceiling is per-scan, and real concurrency above
+/// `CHARCOAL_SCAN_CONCURRENCY`.
+///
+/// Deliberately NOT `ScanManager`: the zombie's status entry still says
+/// "running" on purpose, so consulting it would refuse the successor forever
+/// rather than only while the predecessor is genuinely alive. This tracks the
+/// live pipeline, and `run_under_slot` clears it on every exit.
+#[derive(Default)]
+pub struct LiveScans {
+    inner: Mutex<HashSet<String>>,
+}
+
+impl LiveScans {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// Register `user_did` as executing here, or return `None` because it
+    /// already is.
+    pub fn try_register(self: &Arc<Self>, user_did: &str) -> Option<LiveScanGuard> {
+        let mut live = self.inner.lock().expect("live scan registry lock");
+        if !live.insert(user_did.to_string()) {
+            return None;
+        }
+        Some(LiveScanGuard {
+            registry: Arc::clone(self),
+            user_did: user_did.to_string(),
+        })
+    }
+
+    #[cfg(test)]
+    fn is_live(&self, user_did: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("live scan registry lock")
+            .contains(user_did)
+    }
+}
+
+/// Proof that a scan is the one executing for its user, released on drop.
+///
+/// A guard rather than a pair of calls because "cleared on EVERY exit" is the
+/// whole property: success, error, caught panic, lease loss, and a dropped task
+/// all have to free the registration, and `Drop` is the only thing that covers
+/// all five without a reviewer having to check each path.
+pub struct LiveScanGuard {
+    registry: Arc<LiveScans>,
+    user_did: String,
+}
+
+impl Drop for LiveScanGuard {
+    fn drop(&mut self) {
+        self.registry
+            .inner
+            .lock()
+            .expect("live scan registry lock")
+            .remove(&self.user_did);
+    }
+}
+
 /// What the admitter does with a claim it has won.
 ///
 /// A seam, not an abstraction for its own sake: the production implementation
@@ -98,7 +164,10 @@ impl ClaimStatus {
 pub trait ScanLauncher: Send + Sync {
     /// Start the scan for an already-claimed user. Returning `Err` makes the
     /// admitter release the slot immediately.
-    async fn launch(&self, claim: &ScanClaim) -> anyhow::Result<()>;
+    ///
+    /// `live` must be held for as long as the pipeline runs — the implementation
+    /// hands it to `run_under_slot`, which drops it on every exit.
+    async fn launch(&self, claim: &ScanClaim, live: LiveScanGuard) -> anyhow::Result<()>;
 }
 
 /// Mark a claimed scan finished, releasing its slot.
@@ -245,8 +314,12 @@ async fn log_admission_stall(db: &Arc<dyn Database>, cap: usize) {
     match stall_kind(depth, cap) {
         // Saying anything here would bury the two below.
         Stall::Idle => {}
+        // INFO, not WARN (#275). This fires on every 30s tick for as long as any
+        // backlog exists — ~120 lines an hour — and under open signup a standing
+        // backlog IS the steady state, not an incident. At WARN it teaches an
+        // operator to filter WARN, which costs them the two below that matter.
         Stall::AtCapacity => {
-            warn!(
+            info!(
                 queued = depth.queued,
                 running = depth.running,
                 cap,
@@ -274,13 +347,38 @@ async fn log_admission_stall(db: &Arc<dyn Database>, cap: usize) {
 /// The loop matters: a single claim per pass would admit one scan and then
 /// wait for the next wake, so a server that comes up with a full queue would
 /// fill its slots one tick at a time.
-async fn admit_ready(db: &Arc<dyn Database>, launcher: &dyn ScanLauncher, cap: usize) -> usize {
+async fn admit_ready(
+    db: &Arc<dyn Database>,
+    launcher: &dyn ScanLauncher,
+    cap: usize,
+    live: &Arc<LiveScans>,
+) -> usize {
     let mut admitted = 0;
     loop {
         match db.claim_next_scan(cap, LEASE_SECS).await {
             Ok(Some(claim)) => {
+                // Winning the claim is not enough (#273). The reclaim that runs
+                // immediately before this pass re-queues rows whose lease
+                // lapsed, and the oldest queued row is then usually one whose
+                // pipeline is still executing right here. Launching it would
+                // double-run the same user.
+                let Some(guard) = live.try_register(&claim.user_did) else {
+                    let detail = "a scan for this user is still executing in this \
+                                  process — refusing to start a second one; re-run \
+                                  once it finishes"
+                        .to_string();
+                    warn!(user_did = %claim.user_did, "{detail}");
+                    // Free the slot immediately. Leaving the row running would
+                    // hold a slot with nothing heartbeating it, and marking it
+                    // failed (rather than re-queuing) is what stops this pass
+                    // from claiming the very same row again on the next
+                    // iteration.
+                    release_and_log(db, &claim.user_did, &claim.claim_id, Some(&detail)).await;
+                    continue;
+                };
+
                 info!(user_did = %claim.user_did, cap, "admitting queued scan");
-                match launcher.launch(&claim).await {
+                match launcher.launch(&claim, guard).await {
                     Ok(()) => admitted += 1,
                     Err(e) => {
                         let detail = format!("{e:#}");
@@ -315,6 +413,7 @@ async fn admit_ready(db: &Arc<dyn Database>, launcher: &dyn ScanLauncher, cap: u
 async fn run_admitter(
     db: Arc<dyn Database>,
     launcher: Arc<dyn ScanLauncher>,
+    live: Arc<LiveScans>,
     mut wake_rx: mpsc::Receiver<()>,
     tick: Duration,
     cap: fn() -> usize,
@@ -331,17 +430,21 @@ async fn run_admitter(
         // to 2 hours, so a redeploy landing mid-scan is ordinary — at cap 2,
         // two of them wedge admission permanently, and silently.
         //
-        // Reclaiming in-process is safe precisely because the fencing token
-        // exists: if this reclaims a row whose worker is alive but starved, that
-        // worker's next beat returns `Lost` and it abandons rather than
-        // double-running.
+        // Reclaiming in-process is safe precisely because of two things: the
+        // fencing token (a reclaimed worker's next beat returns `Lost` and it
+        // abandons) AND the `LiveScans` registry below. The token alone is not
+        // enough — this reclaim and the claim that follows happen in the same
+        // pass with no delay, so a successor can start long before the
+        // predecessor's next beat, and if the lease lapsed BECAUSE
+        // `heartbeat_scan` was erroring, `heartbeat_until_lost` retries through
+        // `Err` and may never notice at all (#273).
         match db.reclaim_expired_scans().await {
             Ok(0) => {}
             Ok(n) => info!(reclaimed = n, "re-queued scans whose lease had lapsed"),
             Err(e) => error!(error = %format!("{e:#}"), "lease reclaim failed"),
         }
 
-        admit_ready(&db, launcher.as_ref(), cap()).await;
+        admit_ready(&db, launcher.as_ref(), cap(), &live).await;
 
         tokio::select! {
             // `Some(())`, not `_`: a closed channel makes `recv()` return
@@ -363,7 +466,7 @@ struct AppStateLauncher {
 
 #[async_trait::async_trait]
 impl ScanLauncher for AppStateLauncher {
-    async fn launch(&self, claim: &ScanClaim) -> anyhow::Result<()> {
+    async fn launch(&self, claim: &ScanClaim, live: LiveScanGuard) -> anyhow::Result<()> {
         let handle = self
             .state
             .db
@@ -371,27 +474,23 @@ impl ScanLauncher for AppStateLauncher {
             .await?
             .ok_or_else(|| anyhow::anyhow!("user not found — they must re-authenticate"))?;
 
-        // Register the scan as running WITHOUT the process-global gate: the
-        // cap has already been enforced by claim_next_scan, and re-checking
-        // `any_running` here would refuse every scan past the first that the
-        // queue just legitimately admitted.
+        // Stamp the status entry with THIS claim, which revokes write access
+        // from any predecessor still executing for the same user (#274).
         self.state
             .scan_manager
             .write()
             .await
-            .begin_admitted_scan(&claim.user_did);
+            .begin_admitted_scan(&claim.user_did, &claim.claim_id);
 
         crate::web::scan_job::launch_scan(
-            self.state.config.clone(),
-            self.state.db.clone(),
-            self.state.models.clone(),
-            self.state.scan_manager.clone(),
+            &self.state,
             claim.user_did.clone(),
             handle,
-            Some(crate::web::scan_job::QueueSlot {
+            crate::web::scan_job::QueueSlot {
                 claim_id: claim.claim_id.clone(),
                 wake: self.wake.clone(),
-            }),
+            },
+            live,
         );
         Ok(())
     }
@@ -402,6 +501,7 @@ impl ScanLauncher for AppStateLauncher {
 pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
     let (tx, rx) = mpsc::channel::<()>(32);
     let db = state.db.clone();
+    let live = LiveScans::new();
     let launcher = Arc::new(AppStateLauncher {
         state,
         wake: tx.clone(),
@@ -414,7 +514,7 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
     // bigger question (a panicking loop that respawns can hot-loop) and is left
     // for the supervision work; being loud is the part that matters now.
     tokio::spawn(async move {
-        let admitter = tokio::spawn(run_admitter(db, launcher, rx, TICK, scan_concurrency));
+        let admitter = tokio::spawn(run_admitter(db, launcher, live, rx, TICK, scan_concurrency));
         match admitter.await {
             Ok(()) => error!(
                 "the scan admitter loop returned, which it never should — NO queued \
@@ -452,6 +552,13 @@ mod admitter_tests {
         launched: Mutex<Vec<String>>,
         fail_dids: Vec<String>,
         notify: Option<mpsc::Sender<String>>,
+        /// Guards parked here instead of dropped, standing in for a pipeline
+        /// that is still executing. Nothing else models "the predecessor has
+        /// not exited yet", which is the whole of #273.
+        held: Mutex<Vec<LiveScanGuard>>,
+        /// Fencing tokens handed out, so a test can age a lease the same way
+        /// the real heartbeat would.
+        claim_ids: Mutex<Vec<String>>,
     }
 
     impl RecordingLauncher {
@@ -460,6 +567,8 @@ mod admitter_tests {
                 launched: Mutex::new(Vec::new()),
                 fail_dids: Vec::new(),
                 notify: None,
+                held: Mutex::new(Vec::new()),
+                claim_ids: Mutex::new(Vec::new()),
             }
         }
 
@@ -480,11 +589,23 @@ mod admitter_tests {
         fn launched(&self) -> Vec<String> {
             self.launched.lock().expect("launched lock").clone()
         }
+
+        fn claim_ids(&self) -> Vec<String> {
+            self.claim_ids.lock().expect("claim_ids lock").clone()
+        }
     }
 
     #[async_trait::async_trait]
     impl ScanLauncher for RecordingLauncher {
-        async fn launch(&self, claim: &ScanClaim) -> anyhow::Result<()> {
+        async fn launch(&self, claim: &ScanClaim, live: LiveScanGuard) -> anyhow::Result<()> {
+            // Park the guard: a real scan holds it for the 22 minutes to 2
+            // hours the pipeline runs, and dropping it here would make every
+            // test look like a pipeline that had already exited.
+            self.held.lock().expect("held lock").push(live);
+            self.claim_ids
+                .lock()
+                .expect("claim_ids lock")
+                .push(claim.claim_id.clone());
             self.launched
                 .lock()
                 .expect("launched lock")
@@ -523,7 +644,8 @@ mod admitter_tests {
         }
 
         let launcher = RecordingLauncher::new();
-        let admitted = admit_ready(&db, &launcher, 2).await;
+        let live = LiveScans::new();
+        let admitted = admit_ready(&db, &launcher, 2, &live).await;
 
         assert_eq!(admitted, 2, "a single pass must fill the cap");
         assert_eq!(launcher.launched().len(), 2);
@@ -552,7 +674,8 @@ mod admitter_tests {
         let launcher = RecordingLauncher::failing(&["did:plc:bad"]);
         // Cap of 1: the good user can only start if the bad one's slot was
         // actually released, not merely abandoned.
-        admit_ready(&db, &launcher, 1).await;
+        let live = LiveScans::new();
+        admit_ready(&db, &launcher, 1, &live).await;
 
         assert_eq!(
             status_of(&db, "did:plc:bad").await,
@@ -563,6 +686,82 @@ mod admitter_tests {
             status_of(&db, "did:plc:good").await,
             "running",
             "the next user must get the freed slot in the same pass"
+        );
+    }
+
+    /// #273 — the reclaim-then-admit double-run.
+    ///
+    /// `run_admitter` reclaims and admits in the SAME pass with no delay
+    /// between them, so the row reclaim just re-queued is the very row
+    /// `claim_next_scan` hands back — for a user whose pipeline is still
+    /// executing. Two pipelines then write the same `scan_state` resume markers
+    /// and both drain `classification_queue` against RunPod, where the $2
+    /// ceiling is per scan and therefore paid twice.
+    ///
+    /// The predecessor is modelled by the launcher PARKING its guard: nothing
+    /// has exited, exactly as in production where the zombie only notices on
+    /// its next beat — and, if the lease lapsed because `heartbeat_scan` was
+    /// the thing erroring, possibly never.
+    ///
+    /// Note what this must NOT be fixed with: the zombie's `ScanManager` entry
+    /// deliberately still says "running", so a guard keyed on that would refuse
+    /// the successor forever rather than only while the predecessor is alive.
+    #[tokio::test]
+    async fn a_reclaimed_row_does_not_start_a_second_pipeline_for_a_live_user() {
+        let db = test_db();
+        let live = LiveScans::new();
+        let launcher = RecordingLauncher::new();
+
+        // Pass 1: the user is admitted and their pipeline starts.
+        db.enqueue_scan("did:plc:live").await.expect("enqueue");
+        assert_eq!(admit_ready(&db, &launcher, 1, &live).await, 1);
+        let claim_id = launcher.claim_ids().pop().expect("pass 1 minted a claim");
+
+        // Its lease lapses — a negative heartbeat is the same UPDATE the real
+        // one runs, backdated. The pipeline itself keeps going: this is the
+        // case where `heartbeat_scan` is what is failing, so nothing tells it.
+        assert!(db
+            .heartbeat_scan("did:plc:live", &claim_id, -1)
+            .await
+            .expect("heartbeat query"));
+
+        // The reclaim then re-queues the row, precisely as `run_admitter` does
+        // at the top of every pass, immediately before it admits.
+        assert_eq!(db.reclaim_expired_scans().await.expect("reclaim"), 1);
+
+        // Pass 2, same process, pipeline still executing.
+        admit_ready(&db, &launcher, 1, &live).await;
+
+        assert_eq!(
+            launcher.launched(),
+            vec!["did:plc:live".to_string()],
+            "the reclaimed row must NOT start a second pipeline while the first \
+             is still executing in this process"
+        );
+        assert_eq!(
+            status_of(&db, "did:plc:live").await,
+            "failed",
+            "the refused claim must free its slot rather than hold one nothing \
+             is heartbeating"
+        );
+    }
+
+    /// The registration must be released on every exit, or a user who scans
+    /// once can never scan again in this process lifetime.
+    #[tokio::test]
+    async fn a_finished_pipeline_frees_its_registration() {
+        let live = LiveScans::new();
+        let guard = live.try_register("did:plc:x").expect("first registration");
+        assert!(live.is_live("did:plc:x"));
+        assert!(
+            live.try_register("did:plc:x").is_none(),
+            "a live user must not register twice"
+        );
+        drop(guard);
+        assert!(!live.is_live("did:plc:x"));
+        assert!(
+            live.try_register("did:plc:x").is_some(),
+            "once the pipeline exits the user must be admissible again"
         );
     }
 
@@ -662,6 +861,7 @@ mod admitter_tests {
         let handle = tokio::spawn(run_admitter(
             db.clone(),
             launcher.clone(),
+            LiveScans::new(),
             wake_rx,
             Duration::from_secs(600),
             || 1,
@@ -732,6 +932,7 @@ mod admitter_tests {
         let handle = tokio::spawn(run_admitter(
             db.clone(),
             launcher.clone(),
+            LiveScans::new(),
             wake_rx,
             Duration::from_millis(50),
             || 1,
@@ -761,6 +962,7 @@ mod admitter_tests {
         let handle = tokio::spawn(run_admitter(
             db.clone(),
             launcher.clone(),
+            LiveScans::new(),
             wake_rx,
             Duration::from_secs(600),
             || 1,

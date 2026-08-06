@@ -6,7 +6,11 @@
 // that cost linear in concurrent scans (~500MB each since #231's fp32 NLI
 // export), so they stay resident instead.
 //
-// Only one scan can run at a time; POST /api/scan returns 409 if one is already active.
+// Scans are admitted through the `scan_queue` (#257), never started inline:
+// POST /api/scan enqueues and returns 202 with a queue position, and the
+// background admitter claims rows while the running count is under
+// CHARCOAL_SCAN_CONCURRENCY. Nothing in this module can start a scan without a
+// `QueueSlot`, which is what keeps the cap honest.
 
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
@@ -64,11 +68,27 @@ impl ScanModels {
     }
 }
 
-/// Manages per-user scan status with a global one-at-a-time gate.
+/// Per-user scan status, as the process sees it.
+///
+/// Admission is NOT decided here — that is the `scan_queue`'s job (#257).
+/// There used to be an `any_running` bool acting as a process-global
+/// one-at-a-time gate; it is gone, because with the queue as the admission
+/// authority a process-local bool can only disagree with it. (It disagreed in
+/// two directions: it refused an admin trigger whenever any admitted scan ran,
+/// and the first of two concurrent scans to finish cleared it globally,
+/// admitting an extra scan outside the cap.)
+///
+/// Every write to a user's status is fenced by the `claim_id` that owns the
+/// entry (#274). A worker whose lease lapsed keeps running until its next
+/// heartbeat notices — possibly never, if `heartbeat_scan` is the thing that is
+/// erroring — and in that window it would otherwise write `Done`, `Failed`, and
+/// every progress message straight over the entry of the successor that took
+/// its slot. `begin_admitted_scan` is what revokes the zombie's write access:
+/// it stamps the entry with the new claim, and every stale write is then a
+/// no-op.
 pub struct ScanManager {
     statuses: HashMap<String, ScanStatus>,
     fingerprint_building: HashSet<String>,
-    any_running: bool,
 }
 
 impl Default for ScanManager {
@@ -82,20 +102,16 @@ impl ScanManager {
         Self {
             statuses: HashMap::new(),
             fingerprint_building: HashSet::new(),
-            any_running: false,
         }
     }
 
-    /// Register a scan the admission queue has already approved (#257).
+    /// Register a scan the admission queue has approved, taking ownership of
+    /// this user's status entry for `claim_id` (#257, #274).
     ///
-    /// Deliberately skips the `any_running` gate: `claim_next_scan` enforced
-    /// the concurrency cap in the database before this was reached, so
-    /// re-checking a process-local bool here would refuse every concurrent
-    /// scan the queue just legitimately admitted. The bool is still set so the
-    /// legacy `POST /api/scan` path (which the next step of #257 replaces with
-    /// an enqueue) keeps seeing a scan in flight rather than racing one.
-    pub fn begin_admitted_scan(&mut self, user_did: &str) {
-        self.any_running = true;
+    /// Overwriting any previous entry is the point: the previous claim, if
+    /// still executing somewhere, has been superseded and must stop writing
+    /// here.
+    pub fn begin_admitted_scan(&mut self, user_did: &str, claim_id: &str) {
         self.statuses.insert(
             user_did.to_string(),
             ScanStatus {
@@ -104,55 +120,43 @@ impl ScanManager {
                 progress_message: "Starting scan...".to_string(),
                 last_error: None,
                 phase: WebScanPhase::Starting,
+                claim_id: claim_id.to_string(),
             },
         );
-    }
-
-    /// Atomically check the global gate and start a scan.
-    pub fn try_start_scan(&mut self, user_did: &str) -> Result<(), String> {
-        if self.any_running {
-            // Scans are gated globally, not per-user — the conflict may be
-            // another user's scan, so the message shouldn't imply it's theirs.
-            return Err(
-                "Another scan is already in progress on this server — scans run \
-                 one at a time. Try again in a few minutes."
-                    .to_string(),
-            );
-        }
-        self.any_running = true;
-        self.statuses.insert(
-            user_did.to_string(),
-            ScanStatus {
-                running: true,
-                started_at: Some(chrono::Utc::now().to_rfc3339()),
-                progress_message: "Starting scan...".to_string(),
-                last_error: None,
-                phase: WebScanPhase::Starting,
-            },
-        );
-        Ok(())
-    }
-
-    pub fn finish_scan(&mut self, user_did: &str) {
-        self.any_running = false;
-        if let Some(status) = self.statuses.get_mut(user_did) {
-            status.running = false;
-        }
     }
 
     pub fn get_status(&self, user_did: &str) -> Option<&ScanStatus> {
         self.statuses.get(user_did)
     }
 
-    pub fn get_status_mut(&mut self, user_did: &str) -> Option<&mut ScanStatus> {
-        self.statuses.get_mut(user_did)
+    /// Whether `claim_id` still owns this user's status entry.
+    pub fn owns(&self, user_did: &str, claim_id: &str) -> bool {
+        self.statuses
+            .get(user_did)
+            .is_some_and(|s| s.claim_id == claim_id)
     }
 
-    pub fn is_any_running(&self) -> bool {
-        self.any_running
+    /// Mutate a user's status, but only while `claim_id` owns it (#274).
+    ///
+    /// Returns false when the write was refused — either the user has no entry,
+    /// or a successor claim took the slot and this worker is a zombie. Callers
+    /// that care (the terminal write) can log it; `set_progress` does not, since
+    /// a superseded scan producing progress is expected until it notices.
+    pub fn update_owned(
+        &mut self,
+        user_did: &str,
+        claim_id: &str,
+        f: impl FnOnce(&mut ScanStatus),
+    ) -> bool {
+        match self.statuses.get_mut(user_did) {
+            Some(status) if status.claim_id == claim_id => {
+                f(status);
+                true
+            }
+            _ => false,
+        }
     }
 
-    #[allow(dead_code)]
     pub fn is_scan_running_for(&self, user_did: &str) -> bool {
         self.statuses.get(user_did).is_some_and(|s| s.running)
     }
@@ -181,6 +185,10 @@ pub enum WebScanPhase {
     /// No scan has run in this process lifetime.
     #[default]
     Idle,
+    /// Enqueued, waiting for a slot (#257). Never written by the pipeline —
+    /// GET /api/status derives it from the user's `scan_queue` row, which is
+    /// the only thing that knows about a scan that has not started yet.
+    Queued,
     Starting,
     LoadingModels,
     Fingerprint,
@@ -195,6 +203,7 @@ impl WebScanPhase {
     pub fn as_str(&self) -> &'static str {
         match self {
             WebScanPhase::Idle => "idle",
+            WebScanPhase::Queued => "queued",
             WebScanPhase::Starting => "starting",
             WebScanPhase::LoadingModels => "loading_models",
             WebScanPhase::Fingerprint => "fingerprint",
@@ -219,29 +228,41 @@ pub struct ScanStatus {
     pub last_error: Option<String>,
     /// Which coarse stage the scan is in.
     pub phase: WebScanPhase,
+    /// The `scan_queue` claim that owns this entry (#274). Only the worker
+    /// holding this fencing token may write to the status; see
+    /// `ScanManager::update_owned`.
+    pub claim_id: String,
 }
 
 use tokio::sync::RwLock;
 
 /// Update the live phase + progress message for a user's scan.
-/// Takes the write lock briefly; a no-op if the user has no status entry.
+///
+/// Takes the write lock briefly. A no-op when `claim_id` no longer owns the
+/// entry — a superseded worker keeps producing progress until its heartbeat
+/// notices, and every one of those writes would otherwise land in the
+/// successor's entry (#274).
 async fn set_progress(
     scan_manager: &Arc<RwLock<ScanManager>>,
     user_did: &str,
+    claim_id: &str,
     phase: WebScanPhase,
     message: &str,
 ) {
-    let mut mgr = scan_manager.write().await;
-    if let Some(s) = mgr.get_status_mut(user_did) {
-        s.phase = phase;
-        s.progress_message = message.to_string();
-    }
+    scan_manager
+        .write()
+        .await
+        .update_owned(user_did, claim_id, |s| {
+            s.phase = phase;
+            s.progress_message = message.to_string();
+        });
 }
 
 /// The `scan_queue` slot a scan is running under (#257).
 ///
-/// `None` at the call sites that still start a scan directly; the admitter
-/// always supplies one.
+/// Not optional: every scan runs under a slot now, which is what makes
+/// `CHARCOAL_SCAN_CONCURRENCY` an actual cap rather than a cap on one of
+/// several admission paths.
 pub struct QueueSlot {
     /// Fencing token from `claim_next_scan`. Required to heartbeat or release
     /// the row, so a worker whose lease lapsed cannot touch its successor's.
@@ -291,14 +312,17 @@ fn classify(finished: std::thread::Result<anyhow::Result<()>>) -> (SlotExit, Opt
 /// — the `select!` between scan and heartbeat, the abort-on-finish, the
 /// release, the wake — is exactly where the binding constraint lives.
 ///
-/// `slot` is `None` for the call sites that still start a scan directly; they
-/// get the panic-catching and the status write but no lease.
+/// `live` is the in-process registration for this user (#273). Held for exactly
+/// as long as the pipeline is executing and dropped on every exit, so the
+/// admitter can tell "this user's row is queued again" from "this user's
+/// pipeline is still running in this process".
 pub async fn run_under_slot<F>(
     scan: F,
     db: Arc<dyn Database>,
     scan_manager: Arc<RwLock<ScanManager>>,
     user_did: String,
-    slot: Option<QueueSlot>,
+    slot: QueueSlot,
+    live: crate::web::admitter::LiveScanGuard,
     heartbeat_interval: std::time::Duration,
 ) -> SlotExit
 where
@@ -307,58 +331,52 @@ where
     let scan = AssertUnwindSafe(scan).catch_unwind();
     tokio::pin!(scan);
 
-    let (exit, error_text) = match &slot {
-        None => classify(scan.await),
-        Some(slot) => {
-            // Hold the lease for as long as the scan runs. If the heartbeat
-            // ever reports the claim lost, this worker has been superseded:
-            // another process reclaimed the row and may already be scanning
-            // this user, so the scan is abandoned rather than left burning GPU
-            // budget on a slot it no longer owns.
-            let mut heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
-                db.clone(),
-                user_did.clone(),
-                slot.claim_id.clone(),
-                heartbeat_interval,
-            ));
+    // Hold the lease for as long as the scan runs. If the heartbeat ever
+    // reports the claim lost, this worker has been superseded: another process
+    // reclaimed the row and may already be scanning this user, so the scan is
+    // abandoned rather than left burning GPU budget on a slot it no longer owns.
+    let mut heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
+        db.clone(),
+        user_did.clone(),
+        slot.claim_id.clone(),
+        heartbeat_interval,
+    ));
 
-            loop {
-                tokio::select! {
-                    finished = &mut scan => {
-                        heartbeat.abort();
-                        break classify(finished);
-                    }
-                    // Match the JOIN result, don't just observe that the task
-                    // ended: a `JoinError` is the heartbeat TASK dying, not the
-                    // lease lapsing. Treating the two alike would abort a
-                    // two-hour scan and report "the slot was reassigned" when
-                    // in fact this worker still holds it.
-                    beat = &mut heartbeat => match beat {
-                        // heartbeat_until_lost only ever returns because the
-                        // claim is gone.
-                        Ok(_lost) => break (
-                            SlotExit::Abandoned,
-                            Some("scan lease lapsed — the queue slot was reassigned".to_string()),
-                        ),
-                        Err(e) => {
-                            error!(
-                                user_did,
-                                error = %e,
-                                "the heartbeat task died — restarting it; the scan keeps \
-                                 running and still holds its slot"
-                            );
-                            // Respawning cannot hot-loop: heartbeat_until_lost
-                            // sleeps a full interval before it can fail again.
-                            heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
-                                db.clone(),
-                                user_did.clone(),
-                                slot.claim_id.clone(),
-                                heartbeat_interval,
-                            ));
-                        }
-                    },
-                }
+    let (exit, error_text) = loop {
+        tokio::select! {
+            finished = &mut scan => {
+                heartbeat.abort();
+                break classify(finished);
             }
+            // Match the JOIN result, don't just observe that the task
+            // ended: a `JoinError` is the heartbeat TASK dying, not the
+            // lease lapsing. Treating the two alike would abort a
+            // two-hour scan and report "the slot was reassigned" when
+            // in fact this worker still holds it.
+            beat = &mut heartbeat => match beat {
+                // heartbeat_until_lost only ever returns because the
+                // claim is gone.
+                Ok(_lost) => break (
+                    SlotExit::Abandoned,
+                    Some("scan lease lapsed — the queue slot was reassigned".to_string()),
+                ),
+                Err(e) => {
+                    error!(
+                        user_did,
+                        error = %e,
+                        "the heartbeat task died — restarting it; the scan keeps \
+                         running and still holds its slot"
+                    );
+                    // Respawning cannot hot-loop: heartbeat_until_lost
+                    // sleeps a full interval before it can fail again.
+                    heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
+                        db.clone(),
+                        user_did.clone(),
+                        slot.claim_id.clone(),
+                        heartbeat_interval,
+                    ));
+                }
+            },
         }
     };
 
@@ -366,32 +384,42 @@ where
         // run_scan already wrote its own terminal status (Done, or Failed with
         // the pipeline's own error) before returning.
         SlotExit::Completed => {}
+        // Both of these — and the abandonment below — are fenced by the claim
+        // (#274). If a successor already took this user's slot, `update_owned`
+        // refuses the write rather than reporting the successor's live scan as
+        // this worker's failure.
         SlotExit::Failed | SlotExit::Panicked => {
             let detail = error_text.clone().unwrap_or_default();
             error!(error = %detail, "Background scan failed");
-            let mut mgr = scan_manager.write().await;
-            mgr.finish_scan(&user_did);
-            if let Some(status) = mgr.get_status_mut(&user_did) {
-                status.last_error = Some(detail);
-                status.progress_message = "Scan failed — see server logs".to_string();
-                status.phase = WebScanPhase::Failed;
-            }
+            scan_manager
+                .write()
+                .await
+                .update_owned(&user_did, &slot.claim_id, |status| {
+                    status.running = false;
+                    status.last_error = Some(detail);
+                    status.progress_message = "Scan failed — see server logs".to_string();
+                    status.phase = WebScanPhase::Failed;
+                });
         }
         SlotExit::Abandoned => {
-            // Deliberately NOT touching the ScanManager. The lease lapsed, the
-            // row was reclaimed, and a successor may already have called
-            // `begin_admitted_scan` for this same user — writing `Failed` here
-            // would overwrite that live entry and make /api/status report a
-            // running scan as failed. The successor owns the user's status now.
-            //
-            // The cost of being conservative: if no successor has started yet,
-            // the user's status keeps saying "running" until one does. A stale
-            // label beats clobbering a live scan.
             warn!(
                 user_did,
-                "scan abandoned — its lease lapsed and the slot was reassigned; \
-                 leaving the status entry to whoever holds the slot now"
+                "scan abandoned — its lease lapsed and the slot was reassigned"
             );
+            // Recorded only if no successor has claimed the entry yet. When one
+            // has, this is a no-op and the successor keeps its own live status;
+            // when one has not, the user learns their scan stopped instead of
+            // watching a "running" label that will never change.
+            scan_manager
+                .write()
+                .await
+                .update_owned(&user_did, &slot.claim_id, |status| {
+                    status.running = false;
+                    status.last_error = error_text.clone();
+                    status.progress_message =
+                        "Scan stopped — its slot was reassigned. Re-run to resume.".to_string();
+                    status.phase = WebScanPhase::Failed;
+                });
         }
     }
 
@@ -400,39 +428,46 @@ where
     // admitted scan cannot observe this user mid-transition. On abandonment the
     // release is a no-op by construction: the fencing token no longer matches,
     // so `release_and_log` reports Lost and changes nothing.
-    if let Some(slot) = &slot {
-        crate::web::admitter::release_and_log(
-            &db,
-            &user_did,
-            &slot.claim_id,
-            error_text.as_deref(),
-        )
+    crate::web::admitter::release_and_log(&db, &user_did, &slot.claim_id, error_text.as_deref())
         .await;
-        // try_send, not send: a full channel already has a wake pending, so
-        // dropping this one loses nothing, and a closed channel only means the
-        // admitter is gone (shutdown). Neither is worth blocking on.
-        let _ = slot.wake.try_send(());
-    }
+
+    // Free the in-process registration only after the row is released, so no
+    // admitter can register this user while the row still holds a slot (#273).
+    // Explicit rather than implicit: the ordering is the point.
+    drop(live);
+
+    // try_send, not send: a full channel already has a wake pending, so
+    // dropping this one loses nothing, and a closed channel only means the
+    // admitter is gone (shutdown). Neither is worth blocking on.
+    let _ = slot.wake.try_send(());
 
     exit
 }
 
 /// Launch the scan pipeline in a background tokio task.
 /// Returns immediately. Callers poll `scan_manager` to track progress.
-pub fn launch_scan(
-    config: Arc<Config>,
-    db: Arc<dyn Database>,
-    models: Arc<ScanModels>,
-    scan_manager: Arc<RwLock<ScanManager>>,
+///
+/// `pub(crate)` and slot-mandatory on purpose (#257): the admitter is the only
+/// caller, because a second admission path is a second way past the concurrency
+/// cap. There is no `None` to pass any more.
+pub(crate) fn launch_scan(
+    state: &crate::web::AppState,
     user_did: String,
     actor_handle: String,
-    slot: Option<QueueSlot>,
+    slot: QueueSlot,
+    live: crate::web::admitter::LiveScanGuard,
 ) {
+    let config = state.config.clone();
+    let db = state.db.clone();
+    let models = state.models.clone();
+    let scan_manager = state.scan_manager.clone();
+
     tokio::spawn(async move {
         // Borrowed by the scan future, so they stay put while `user_did` moves
         // into run_under_slot.
         let did = user_did.clone();
         let handle = actor_handle;
+        let claim_id = slot.claim_id.clone();
         let scan = run_scan(
             config,
             db.clone(),
@@ -440,6 +475,7 @@ pub fn launch_scan(
             scan_manager.clone(),
             &did,
             &handle,
+            &claim_id,
         );
 
         run_under_slot(
@@ -448,6 +484,7 @@ pub fn launch_scan(
             scan_manager,
             user_did,
             slot,
+            live,
             crate::web::admitter::HEARTBEAT_INTERVAL,
         )
         .await;
@@ -518,6 +555,66 @@ pub async fn build_user_fingerprint(
     Ok(())
 }
 
+/// Write the pipeline's terminal status, fenced by the claim that owns the
+/// entry (#274).
+///
+/// Split out of `run_scan` because this is the write that made #274 bite: it
+/// happens INSIDE the scan future, before `run_under_slot` ever gets to
+/// classify the exit, so a zombie whose pipeline finishes inside the window had
+/// already stamped `Done` over its successor's live entry by the time the
+/// `Completed` arm ran and (correctly) did nothing. Being a free function it is
+/// also testable without ~500MB of ONNX models.
+async fn record_scan_outcome(
+    scan_manager: &Arc<RwLock<ScanManager>>,
+    user_did: &str,
+    claim_id: &str,
+    result: &anyhow::Result<(usize, usize, bool)>,
+) {
+    let written = scan_manager
+        .write()
+        .await
+        .update_owned(user_did, claim_id, |s| {
+            s.running = false;
+            match result {
+                Ok((events, accounts, degraded)) => {
+                    s.last_error = None;
+                    s.phase = WebScanPhase::Done;
+                    s.progress_message = if *degraded {
+                        format!(
+                            "Completed (incomplete — cost-capped or accounts skipped, \
+                             re-run to resume): {events} events, {accounts} accounts scored"
+                        )
+                    } else {
+                        format!("Completed: {events} events, {accounts} accounts scored")
+                    };
+                }
+                Err(e) => {
+                    s.last_error = Some(e.to_string());
+                    s.phase = WebScanPhase::Failed;
+                    s.progress_message =
+                        "Scan encountered an error — partial results may have been saved"
+                            .to_string();
+                }
+            }
+        });
+
+    match result {
+        Ok((events, accounts, degraded)) => {
+            info!(events, accounts, degraded, "Background scan completed")
+        }
+        Err(e) => error!(error = %e, "Pipeline error"),
+    }
+
+    if !written {
+        warn!(
+            user_did,
+            "scan finished but its claim no longer owns the status entry — a \
+             successor took this user's slot, so the result was not reported \
+             over theirs"
+        );
+    }
+}
+
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
@@ -525,11 +622,13 @@ async fn run_scan(
     scan_manager: Arc<RwLock<ScanManager>>,
     user_did: &str,
     actor_handle: &str,
+    claim_id: &str,
 ) -> anyhow::Result<()> {
     // Phase 1: toxicity scorer — loaded once at boot (#257), shared via Arc::clone.
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::LoadingModels,
         "Loading toxicity model…",
     )
@@ -565,6 +664,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::LoadingModels,
         "Loading embedding model…",
     )
@@ -576,6 +676,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::LoadingModels,
         "Loading NLI model…",
     )
@@ -590,6 +691,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::Fingerprint,
         "Loading topic fingerprint…",
     )
@@ -605,6 +707,7 @@ async fn run_scan(
             set_progress(
                 &scan_manager,
                 user_did,
+                claim_id,
                 WebScanPhase::Fingerprint,
                 "Building your topic fingerprint from recent posts…",
             )
@@ -655,6 +758,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::Discovering,
         "Fetching amplification events…",
     )
@@ -679,6 +783,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::Discovering,
         "Detecting likes via Constellation…",
     )
@@ -694,6 +799,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::Discovering,
         "Detecting drive-by replies…",
     )
@@ -789,6 +895,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::Discovering,
         &format!("Scoring followers of {amplifier_count} amplifiers…"),
     )
@@ -823,6 +930,7 @@ async fn run_scan(
     set_progress(
         &scan_manager,
         user_did,
+        claim_id,
         WebScanPhase::Scoring,
         "Scoring candidate accounts…",
     )
@@ -853,35 +961,7 @@ async fn run_scan(
     )
     .await;
 
-    let mut mgr = scan_manager.write().await;
-    mgr.finish_scan(user_did);
-
-    match result {
-        Ok((events, accounts, degraded)) => {
-            info!(events, accounts, degraded, "Background scan completed");
-            if let Some(s) = mgr.get_status_mut(user_did) {
-                s.last_error = None;
-                s.phase = WebScanPhase::Done;
-                s.progress_message = if degraded {
-                    format!(
-                        "Completed (incomplete — cost-capped or accounts skipped, \
-                         re-run to resume): {events} events, {accounts} accounts scored"
-                    )
-                } else {
-                    format!("Completed: {events} events, {accounts} accounts scored")
-                };
-            }
-        }
-        Err(e) => {
-            error!(error = %e, "Pipeline error");
-            if let Some(s) = mgr.get_status_mut(user_did) {
-                s.last_error = Some(e.to_string());
-                s.phase = WebScanPhase::Failed;
-                s.progress_message =
-                    "Scan encountered an error — partial results may have been saved".to_string();
-            }
-        }
-    }
+    record_scan_outcome(&scan_manager, user_did, claim_id, &result).await;
 
     Ok(())
 }
@@ -900,9 +980,12 @@ mod slot_lifecycle_tests {
 
     use crate::db::schema::create_tables;
     use crate::db::sqlite::SqliteDatabase;
-    use crate::web::admitter::LEASE_SECS;
+    use crate::web::admitter::{LiveScans, LEASE_SECS};
 
     const DID: &str = "did:plc:slot";
+    /// The claim the tests' ScanManager entry belongs to, unless a test is
+    /// deliberately playing a superseded worker.
+    const CLAIM: &str = "claim-under-test";
 
     fn test_db() -> Arc<dyn Database> {
         let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
@@ -920,7 +1003,9 @@ mod slot_lifecycle_tests {
 
     /// Enqueue and claim `DID`, returning the slot plus the wake receiver so a
     /// test can assert the admitter was pinged.
-    async fn held_slot(db: &Arc<dyn Database>) -> (QueueSlot, tokio::sync::mpsc::Receiver<()>) {
+    async fn held_slot(
+        db: &Arc<dyn Database>,
+    ) -> (QueueSlot, String, tokio::sync::mpsc::Receiver<()>) {
         db.enqueue_scan(DID).await.expect("enqueue");
         let claim = db
             .claim_next_scan(1, LEASE_SECS)
@@ -928,19 +1013,28 @@ mod slot_lifecycle_tests {
             .expect("claim")
             .expect("a queued row exists");
         let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let claim_id = claim.claim_id.clone();
         (
             QueueSlot {
                 claim_id: claim.claim_id,
                 wake: tx,
             },
+            claim_id,
             rx,
         )
     }
 
-    fn manager_with_running_scan() -> Arc<RwLock<ScanManager>> {
+    fn manager_with_running_scan(claim_id: &str) -> Arc<RwLock<ScanManager>> {
         let mut mgr = ScanManager::new();
-        mgr.begin_admitted_scan(DID);
+        mgr.begin_admitted_scan(DID, claim_id);
         Arc::new(RwLock::new(mgr))
+    }
+
+    /// A registration for DID, as the admitter would have handed the pipeline.
+    fn live_guard() -> crate::web::admitter::LiveScanGuard {
+        LiveScans::new()
+            .try_register(DID)
+            .expect("a fresh registry always registers")
     }
 
     /// Exit 1 of 4 — Ok. The row goes to 'done' and the admitter is woken so the
@@ -948,15 +1042,16 @@ mod slot_lifecycle_tests {
     #[tokio::test]
     async fn a_successful_scan_releases_its_slot() {
         let db = test_db();
-        let (slot, mut wake_rx) = held_slot(&db).await;
-        let mgr = manager_with_running_scan();
+        let (slot, claim_id, mut wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan(&claim_id);
 
         let exit = run_under_slot(
             async { Ok(()) },
             db.clone(),
             mgr.clone(),
             DID.to_string(),
-            Some(slot),
+            slot,
+            live_guard(),
             Duration::from_millis(10),
         )
         .await;
@@ -975,15 +1070,16 @@ mod slot_lifecycle_tests {
     #[tokio::test]
     async fn a_failed_scan_releases_its_slot() {
         let db = test_db();
-        let (slot, mut wake_rx) = held_slot(&db).await;
-        let mgr = manager_with_running_scan();
+        let (slot, claim_id, mut wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan(&claim_id);
 
         let exit = run_under_slot(
             async { Err(anyhow::anyhow!("pipeline exploded")) },
             db.clone(),
             mgr.clone(),
             DID.to_string(),
-            Some(slot),
+            slot,
+            live_guard(),
             Duration::from_millis(10),
         )
         .await;
@@ -1011,15 +1107,16 @@ mod slot_lifecycle_tests {
     #[tokio::test]
     async fn a_panicking_scan_releases_its_slot() {
         let db = test_db();
-        let (slot, mut wake_rx) = held_slot(&db).await;
-        let mgr = manager_with_running_scan();
+        let (slot, claim_id, mut wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan(&claim_id);
 
         let exit = run_under_slot(
             async { panic!("boom inside the pipeline") },
             db.clone(),
             mgr.clone(),
             DID.to_string(),
-            Some(slot),
+            slot,
+            live_guard(),
             Duration::from_millis(10),
         )
         .await;
@@ -1059,8 +1156,9 @@ mod slot_lifecycle_tests {
             .expect("the reclaimed row is queued again");
         assert_ne!(zombie.claim_id, successor.claim_id);
 
-        // The successor has registered its own running scan for this user.
-        let mgr = manager_with_running_scan();
+        // The successor has registered its own running scan for this user,
+        // which is what revokes the zombie's write access (#274).
+        let mgr = manager_with_running_scan(&successor.claim_id);
         let (wake_tx, _wake_rx) = tokio::sync::mpsc::channel(4);
 
         // A scan future that never finishes: only the heartbeat can end this.
@@ -1071,10 +1169,11 @@ mod slot_lifecycle_tests {
                 db.clone(),
                 mgr.clone(),
                 DID.to_string(),
-                Some(QueueSlot {
+                QueueSlot {
                     claim_id: zombie.claim_id,
                     wake: wake_tx,
-                }),
+                },
+                live_guard(),
                 Duration::from_millis(10),
             ),
         )
@@ -1100,6 +1199,101 @@ mod slot_lifecycle_tests {
             "the zombie must not overwrite the successor's phase with Failed"
         );
         assert!(status.last_error.is_none());
+    }
+
+    /// #274 — the write `run_under_slot` never sees.
+    ///
+    /// The abandonment arm above only covers a zombie that is still hanging.
+    /// A zombie whose pipeline COMPLETES inside the window writes its own
+    /// terminal status from inside `run_scan`, long before `run_under_slot`
+    /// classifies the exit — and then the `Completed` arm correctly does
+    /// nothing, because the damage is already done. Same for every
+    /// `set_progress` call in that window.
+    ///
+    /// So the fence has to be on the writes themselves, not on an exit arm.
+    #[tokio::test]
+    async fn a_zombie_cannot_write_its_own_outcome_over_the_successor() {
+        let mgr = Arc::new(RwLock::new(ScanManager::new()));
+        // The zombie was admitted first...
+        mgr.write().await.begin_admitted_scan(DID, "zombie-claim");
+        // ...then its lease lapsed and a successor took the slot.
+        mgr.write()
+            .await
+            .begin_admitted_scan(DID, "successor-claim");
+
+        // The zombie's pipeline is oblivious and keeps reporting.
+        set_progress(
+            &mgr,
+            DID,
+            "zombie-claim",
+            WebScanPhase::Scoring,
+            "zombie progress",
+        )
+        .await;
+        // Then it finishes successfully — the exact case `SlotExit::Completed`
+        // cannot defend against.
+        record_scan_outcome(&mgr, DID, "zombie-claim", &Ok((7, 42, false))).await;
+
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status entry");
+        assert!(
+            status.running,
+            "the zombie must not mark the successor's live scan finished"
+        );
+        assert_eq!(
+            status.phase,
+            WebScanPhase::Starting,
+            "the zombie's Done must not land on the successor's entry"
+        );
+        assert_eq!(
+            status.progress_message, "Starting scan...",
+            "the zombie's progress must not land on the successor's entry"
+        );
+    }
+
+    /// The other half of #274: the fence must not be so tight that a scan
+    /// cannot report its own result. Same writes, still the owner.
+    #[tokio::test]
+    async fn the_owning_claim_still_writes_its_outcome() {
+        let mgr = Arc::new(RwLock::new(ScanManager::new()));
+        mgr.write().await.begin_admitted_scan(DID, CLAIM);
+
+        set_progress(&mgr, DID, CLAIM, WebScanPhase::Scoring, "scoring…").await;
+        assert_eq!(
+            mgr.read().await.get_status(DID).expect("entry").phase,
+            WebScanPhase::Scoring
+        );
+
+        record_scan_outcome(&mgr, DID, CLAIM, &Ok((7, 42, false))).await;
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status entry");
+        assert!(!status.running);
+        assert_eq!(status.phase, WebScanPhase::Done);
+        assert!(status.progress_message.contains("42 accounts scored"));
+    }
+
+    /// A pipeline error from the owning claim still reaches the user.
+    #[tokio::test]
+    async fn the_owning_claim_reports_a_pipeline_error() {
+        let mgr = Arc::new(RwLock::new(ScanManager::new()));
+        mgr.write().await.begin_admitted_scan(DID, CLAIM);
+
+        record_scan_outcome(
+            &mgr,
+            DID,
+            CLAIM,
+            &Err(anyhow::anyhow!("constellation unreachable")),
+        )
+        .await;
+
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status entry");
+        assert!(!status.running);
+        assert_eq!(status.phase, WebScanPhase::Failed);
+        assert!(status
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.contains("constellation unreachable")));
     }
 }
 

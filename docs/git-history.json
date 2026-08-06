@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3195c387c18a2e36deab8c74681c6ea4b771ad7a",
+    "short_hash": "3195c38",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T06:44:40-07:00",
+    "message": "docs(257): record Task 5 approval and pin #273/#274 as Task 6 blockers\n\nThe Task 5 re-review approved the admitter but surfaced two Importants\nthat are dormant only because nothing enqueues yet. Task 6 wiring enqueue\nis precisely what makes them live, so they are pinned to that task rather\nthan filed as follow-ups.\n\n#273: the admitter reclaims and admits in the same pass, so the row it\njust re-queued is usually the one it immediately claims -- starting a\nsecond pipeline for a user whose first is still running. Two pipelines\nshare scan_state resume markers and both drain classification_queue\nagainst RunPod, where the $2 ceiling is per-scan and so is paid twice.\n\n#274: run_scan writes terminal status before run_under_slot classifies\nthe exit, so a zombie finishing inside the window writes Done over the\nsuccessor live entry.\n\nRefs #257, #273, #274, #275\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
     "hash": "2c4d7fe9fe75897e61493cfd57cba6dba69ad7fe",
     "short_hash": "2c4d7fe",
     "author": "Bryan Guffey",

@@ -179,7 +179,14 @@ pub async fn pre_seed_user(
     ))
 }
 
-/// POST /api/admin/users/{did}/scan — trigger a scan for a specific user.
+/// POST /api/admin/users/{did}/scan — queue a scan for a specific user.
+///
+/// Enqueues exactly like `POST /api/scan` does, per Bryan's ruling on #257.
+/// This used to call `launch_scan` directly, which never touched `scan_queue`
+/// and was therefore invisible to `claim_next_scan`'s running count — real
+/// concurrency would have been `CHARCOAL_SCAN_CONCURRENCY + admin scans`, and
+/// the GPU spend with it. Admin gives up starting immediately; there is one
+/// admission path and the cap holds absolutely.
 pub async fn trigger_admin_scan(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -191,7 +198,10 @@ pub async fn trigger_admin_scan(
             Json(serde_json::json!({"error": "Admin required"})),
         ));
     }
-    let handle = state
+    // Existence check only — the admitter looks the handle up again when it
+    // claims the row. Checking here turns "this DID was never registered" into
+    // a 404 now rather than a failed queue row later.
+    state
         .db
         .get_user_handle(&target_did)
         .await
@@ -208,36 +218,42 @@ pub async fn trigger_admin_scan(
             )
         })?;
 
-    {
-        let mut mgr = state.scan_manager.write().await;
-        mgr.try_start_scan(&target_did).map_err(|msg| {
-            (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": msg})),
-            )
-        })?;
+    state.db.enqueue_scan(&target_did).await.map_err(|e| {
+        tracing::error!(error = %format!("{e:#}"), "admin enqueue failed");
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "Could not queue the scan"})),
+        )
+    })?;
+
+    if let Some(wake) = &state.scan_wake {
+        let _ = wake.try_send(());
     }
 
     tracing::info!(
         admin_did = %auth.did,
         target_did = %target_did,
-        "Admin triggered scan"
+        "Admin queued scan"
     );
 
-    scan_job::launch_scan(
-        state.config.clone(),
-        state.db.clone(),
-        state.models.clone(),
-        state.scan_manager.clone(),
-        target_did.clone(),
-        handle,
-        // Admin-triggered scans bypass the queue, so there is no slot (#257).
-        None,
-    );
+    let entry = state
+        .db
+        .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
+        .await
+        .ok()
+        .flatten();
+    let (status, position, eta) = entry
+        .map(|e| (e.status, e.position, e.eta_seconds))
+        .unwrap_or_else(|| ("queued".to_string(), 0, None));
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(serde_json::json!({"message": "Scan started", "user_did": target_did})),
+        Json(serde_json::json!({
+            "status": status,
+            "position": position,
+            "eta_seconds": eta,
+            "user_did": target_did,
+        })),
     ))
 }
 

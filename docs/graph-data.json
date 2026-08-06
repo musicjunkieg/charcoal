@@ -4872,6 +4872,17 @@
       "created_at": "2026-08-06T06:34:09.778378-07:00",
       "updated_at": "2026-08-06T06:34:21.291002-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"2c4d7fe\",\"confidence\":90,\"prompt\":\"C2 test seen RED against the boot-only reclaim (10.02s timeout: \\\"a lease that lapses AFTER boot must still be reclaimed\\\") and GREEN after (1.02s). Abandonment test negative-controlled by folding Abandoned back into the Failed arm -> \\\"the zombie must not mark the successor's scan finished\\\". Release negative-controlled by disabling release_and_log -> 3 of 4 slot tests red on row status. HEARTBEAT_INTERVAL 40s->30s (LEASE_SECS/4) because the comments claimed three beats of slack and there were two, and slack became load-bearing once a lapsed lease is acted on within a tick. 713 web / 626 postgres tests, 0 skips, clippy clean on web/postgres/no-features.\"}"
+    },
+    {
+      "id": 450,
+      "change_id": "b1e37e12-dc74-487a-baa3-799b7ed15286",
+      "node_type": "action",
+      "title": "Task 6: POST /api/scan enqueues instead of refusing; fix #273/#274/#275 before turning the queue on",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T07:10:09.171166-07:00",
+      "updated_at": "2026-08-06T07:10:09.171166-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"3195c38\",\"confidence\":90,\"files\":[\"src/web/scan_job.rs\",\"src/web/admitter.rs\",\"src/web/handlers/scan.rs\",\"src/web/handlers/admin.rs\",\"src/web/handlers/status.rs\",\"src/web/test_helpers.rs\",\"tests/web_scan_queue.rs\",\"tests/unit_admin.rs\"]}"
     }
   ],
   "edges": [
@@ -9626,6 +9637,28 @@
       "weight": 1.0,
       "rationale": "Implementation outcome",
       "created_at": "2026-08-06T06:34:16.799611-07:00"
+    },
+    {
+      "id": 442,
+      "from_node_id": 447,
+      "to_node_id": 450,
+      "from_change_id": "0f360536-52f2-4386-8bd2-43364a31c123",
+      "to_change_id": "b1e37e12-dc74-487a-baa3-799b7ed15286",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 closes both uncapped admission paths the Task 5 review flagged",
+      "created_at": "2026-08-06T07:10:15.093015-07:00"
+    },
+    {
+      "id": 443,
+      "from_node_id": 449,
+      "to_node_id": 450,
+      "from_change_id": "396f8ac4-0547-471b-be12-5dcf77c6d8bc",
+      "to_change_id": "b1e37e12-dc74-487a-baa3-799b7ed15286",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 fix wave left #273/#274 live; Task 6 is what makes them bite",
+      "created_at": "2026-08-06T07:10:15.100892-07:00"
     }
   ],
   "documents": [

@@ -1,67 +1,81 @@
-// POST /api/scan — trigger a background scan.
+// POST /api/scan — put the caller in the scan queue.
 //
-// Returns 202 Accepted if the scan starts.
-// Returns 409 Conflict if a scan is already running.
+// Returns 202 Accepted with the caller's position and ETA. It no longer starts
+// anything: the background admitter (src/web/admitter.rs) claims queued rows
+// while the running count is under CHARCOAL_SCAN_CONCURRENCY, which is the only
+// way the cap can hold across replicas and across a redeploy.
 //
-// The scan pipeline runs in a background tokio task — callers poll
-// GET /api/status to track progress.
+// This used to return 409 "Another scan is already in progress on this server"
+// whenever any scan anywhere was running (#257). With open signup (#256) and
+// scans that take 22 minutes to 2 hours, that was the second user's entire
+// experience of Charcoal, all day.
+//
+// Callers poll GET /api/status, which reports the queue position while waiting
+// and the live pipeline phase once the scan starts.
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 
-use crate::web::scan_job::launch_scan;
 use crate::web::{api_error, AppState, AuthUser};
 
-/// POST /api/scan — start a background threat scan.
+/// POST /api/scan — queue a background threat scan for the caller.
 pub async fn trigger_scan(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> impl IntoResponse {
-    let mut mgr = state.scan_manager.write().await;
-    if let Err(msg) = mgr.try_start_scan(&auth.did) {
-        return (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": msg })),
-        )
-            .into_response();
-    }
-    drop(mgr); // Release lock before spawning
-
-    // Look up the authenticated user's handle for the scan pipeline.
-    let actor_handle = match state.db.get_user_handle(&auth.did).await {
-        Ok(Some(handle)) => handle,
+    // Checked up front rather than left to the admitter: the admitter's only
+    // recourse for an unknown user is to mark the row failed, which tells the
+    // user "your scan failed" when the real answer is "re-authenticate".
+    match state.db.get_user_handle(&auth.did).await {
+        Ok(Some(_)) => {}
         Ok(None) => {
-            // Roll back the scan state since we can't proceed
-            state.scan_manager.write().await.finish_scan(&auth.did);
             return api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "User not found — re-authenticate",
-            );
+            )
         }
         Err(e) => {
-            state.scan_manager.write().await.finish_scan(&auth.did);
-            tracing::error!(error = %e, "DB error looking up user handle");
+            tracing::error!(error = %format!("{e:#}"), "DB error looking up user handle");
             return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
         }
-    };
+    }
 
-    launch_scan(
-        state.config.clone(),
-        state.db.clone(),
-        state.models.clone(),
-        state.scan_manager.clone(),
-        auth.did,
-        actor_handle,
-        // Not admitted through the scan_queue — this path still starts scans
-        // directly, so there is no slot to heartbeat or release (#257).
-        None,
-    );
+    // Idempotent by construction: `enqueue_scan` is a no-op while the user is
+    // queued or running (user_did is the primary key), so a double-click
+    // returns the current position instead of booking a second scan.
+    if let Err(e) = state.db.enqueue_scan(&auth.did).await {
+        tracing::error!(error = %format!("{e:#}"), "enqueue failed");
+        return api_error(StatusCode::SERVICE_UNAVAILABLE, "Could not queue the scan");
+    }
+
+    // Wake the admitter so a free slot is taken now, not on the next 30s tick.
+    if let Some(wake) = &state.scan_wake {
+        let _ = wake.try_send(());
+    }
+
+    let entry = state
+        .db
+        .scan_queue_entry(&auth.did, crate::web::admitter::scan_concurrency())
+        .await
+        .ok()
+        .flatten();
+
+    // The row's own status, not a hardcoded "queued": a user who already had a
+    // scan running gets a no-op enqueue, and telling them "queued, position 0"
+    // would be a lie about the scan they are watching.
+    let (status, position, eta) = entry
+        .map(|e| (e.status, e.position, e.eta_seconds))
+        .unwrap_or_else(|| ("queued".to_string(), 0, None));
 
     (
         StatusCode::ACCEPTED,
-        Json(serde_json::json!({ "message": "Scan started" })),
+        Json(serde_json::json!({
+            "status": status,
+            "position": position,
+            "eta_seconds": eta,
+        })),
     )
         .into_response()
 }

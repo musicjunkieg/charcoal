@@ -56,10 +56,24 @@ fn test_models() -> Option<Arc<ScanModels>> {
 /// Returns `None` when the ONNX model files aren't present locally (see
 /// `test_models`); callers should skip cleanly rather than unwrap.
 pub fn build_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
+    build_app(TEST_DID)
+}
+
+/// Build a test app with OPEN access — `CHARCOAL_ALLOWED_DID` empty, which is
+/// how production runs since the open-signup ruling on #256.
+///
+/// Needed because the default helper pins `allowed_did` to `TEST_DID`, so a
+/// second user is rejected by `require_auth` before any handler runs — and
+/// "what happens to the SECOND user" is the entire subject of #257.
+pub fn build_open_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
+    build_app("")
+}
+
+fn build_app(allowed_did: &str) -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
     let models = test_models()?;
 
     let config = Config {
-        allowed_did: TEST_DID.to_string(),
+        allowed_did: allowed_did.to_string(),
         oauth_client_id: TEST_CLIENT_ID.to_string(),
         session_secret: TEST_SECRET.to_string(),
         ..Config::test_defaults()

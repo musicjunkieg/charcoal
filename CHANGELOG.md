@@ -7,6 +7,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`POST /api/scan` queues instead of refusing (#257).** Scans were globally
+  single-flight — one per *server* — so a second user got
+  `409 "Another scan is already in progress on this server"`. With open signup
+  (#256) and scans that run 22 minutes to 2 hours, that was the second user's
+  entire experience of Charcoal, all day. Both trigger endpoints now enqueue and
+  return `202` with a queue position and ETA; the background admitter is the one
+  and only thing that starts a scan, under `CHARCOAL_SCAN_CONCURRENCY`. The
+  admin trigger enqueues like everyone else rather than jumping the queue — one
+  admission path, so the cap (and the GPU spend behind it) holds absolutely.
+  `GET /api/status` now prefers the durable `scan_queue` row over the
+  process-local `ScanManager`, gaining a `queued` phase and a `queue` block that
+  is omitted entirely when the user is not waiting. The process-global
+  `any_running` flag is deleted: with the queue as the admission authority it
+  could only disagree with it, and it disagreed in both directions — refusing
+  admin triggers whenever any admitted scan ran, and letting an extra scan past
+  the cap when the first of two concurrent scans cleared it globally.
+- Refuse to start a second pipeline for a user whose first is still executing
+  (#273). `run_admitter` reclaims lapsed leases and admits in the *same* pass
+  with no delay between them, and `claim_next_scan` takes the oldest queued row
+  — which is very often the row the reclaim just re-queued, for a user whose
+  pipeline is still running. Two pipelines then wrote the same `scan_state`
+  resume markers (#208) and both drained `classification_queue` against RunPod,
+  where the `$2` cost ceiling is *per scan* and was therefore paid twice, with
+  real concurrency exceeding the cap. The fencing token alone did not cover
+  this: the successor starts long before the predecessor's next beat, and if the
+  lease lapsed *because* `heartbeat_scan` was erroring, `heartbeat_until_lost`
+  retries through `Err` and may never notice. Admission now also consults an
+  in-process registry of live claims, released on every exit by a guard. It is
+  deliberately not keyed on `ScanManager`, whose entry still says "running" on
+  purpose — that guard would refuse the successor forever.
+- Fence every scan-status write on the claim that owns it (#274). `run_scan`
+  writes its terminal status from *inside* the scan future, before
+  `run_under_slot` ever classifies the exit, so a superseded worker whose
+  pipeline finished inside the window had already stamped `Done` over its
+  successor's live entry by the time the `Completed` arm ran and correctly did
+  nothing; every `set_progress` call in that window landed there too. A previous
+  fix covered only the `Abandoned` exit arm, which is the one path that write
+  never takes. Ownership now lives on the status entry itself and a stale write
+  is a no-op, which also lets the abandonment path report honestly instead of
+  leaving a "running" label that would never change.
+- Drop the `AtCapacity` admission log from WARN to INFO (#275). It fires on
+  every 30s tick for as long as any backlog exists — ~120 lines an hour — and
+  under open signup a standing backlog is the expected steady state, not an
+  incident. At WARN it trains an operator to filter WARN, which costs them the
+  `Wedged` ERROR that actually means something.
 - Clear `scan_skips` when an account is deleted (#234). `delete_user_data`
   cleared every user-scoped table except `scan_skips` (added in v10, #226), so a
   deleted account left behind the user's DID, the DIDs of accounts scanned on
