@@ -1460,9 +1460,45 @@ Refs #257'
 
 ### Task 6: API — enqueue instead of refuse
 
+> **⚠️ SCOPE EXPANDED 2026-08-06 — Bryan's ruling + Task 5 review finding I1.**
+>
+> **1. The admin-triggered scan must enqueue like everyone else.**
+> `src/web/handlers/admin.rs:227` calls `launch_scan(..., None)`, which never
+> touches `scan_queue` and is therefore invisible to `claim_next_scan`'s
+> running count. It is currently gated only by `try_start_scan` — the same
+> `any_running` gate this task removes — so **as originally written, Task 6
+> would ship an uncapped admission path**: real concurrency would become
+> `CHARCOAL_SCAN_CONCURRENCY + admin scans`. Asked whether admin should
+> enqueue, jump the queue while still counting, or be a true uncapped
+> override, Bryan chose **enqueue like everyone else**: one admission path,
+> the cap holds absolutely, GPU spend stays bounded. Admin gives up
+> start-immediately in exchange.
+>
+> **2. Deleting `try_start_scan` from `handlers/scan.rs` is NOT sufficient.**
+> Task 5's implementer assumed the `any_running` flag becomes moot once this
+> task lands. It does not — as originally written this task removes the gate
+> from `scan.rs` only, leaving the field live, still set by
+> `begin_admitted_scan` (`scan_job.rs:98`) and still cleared *unconditionally*
+> by `finish_scan` (`scan_job.rs:137`) on the success path. Two real
+> consequences: an admin trigger gets a spurious 409 saying "scans run one at
+> a time" whenever any admitted scan runs, and with two admitted scans the
+> first to finish clears the flag globally while the second still runs,
+> admitting an extra scan outside the cap. **Delete the `any_running` field
+> and reduce or remove `try_start_scan`** once the queue is the admission
+> authority.
+>
+> **3. After this task there must be ZERO `launch_scan(..., None)` call
+> sites.** Make the slot parameter non-optional, or make `launch_scan`
+> `pub(crate)` and reachable only from the admitter. Nothing currently forces
+> that cleanup, and `Option<QueueSlot>` makes "uncapped" easy to pass.
+>
+> **4. Stale doc:** `src/web/scan_job.rs:9` still says "Only one scan can run
+> at a time; POST /api/scan returns 409 if one is already active."
+
 **Files:**
-- Modify: `src/web/scan_job.rs` (`WebScanPhase::Queued`)
+- Modify: `src/web/scan_job.rs` (`WebScanPhase::Queued`, delete `any_running`)
 - Modify: `src/web/handlers/scan.rs`
+- Modify: `src/web/handlers/admin.rs` — enqueue, per Bryan's ruling above
 - Modify: `src/web/handlers/status.rs`
 - Test: `tests/web_scan_queue.rs` (create)
 

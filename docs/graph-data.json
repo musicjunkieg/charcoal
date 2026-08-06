@@ -4850,6 +4850,28 @@
       "created_at": "2026-08-06T01:58:09.164898-07:00",
       "updated_at": "2026-08-06T01:58:09.164898-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":85}"
+    },
+    {
+      "id": 448,
+      "change_id": "0318ea8f-f91f-4c1d-8115-4716ebf11ee1",
+      "node_type": "action",
+      "title": "Task 5 fix wave: reclaim lapsed leases on every admitter pass, extract run_under_slot, and make a wedged queue visible",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T06:34:05.130623-07:00",
+      "updated_at": "2026-08-06T06:34:21.285056-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"2c4d7fe\",\"confidence\":90,\"files\":[\"src/web/admitter.rs\",\"src/web/scan_job.rs\",\"src/db/traits.rs\",\"src/db/queries.rs\",\"src/db/sqlite.rs\",\"src/db/postgres.rs\",\"tests/db_postgres.rs\"]}"
+    },
+    {
+      "id": 449,
+      "change_id": "396f8ac4-0547-471b-be12-5dcf77c6d8bc",
+      "node_type": "outcome",
+      "title": "Fix wave landed (2c4d7fe): reclaim runs every pass, slot lifecycle has coverage, wedged queue logs at ERROR",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T06:34:09.778378-07:00",
+      "updated_at": "2026-08-06T06:34:21.291002-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"2c4d7fe\",\"confidence\":90,\"prompt\":\"C2 test seen RED against the boot-only reclaim (10.02s timeout: \\\"a lease that lapses AFTER boot must still be reclaimed\\\") and GREEN after (1.02s). Abandonment test negative-controlled by folding Abandoned back into the Failed arm -> \\\"the zombie must not mark the successor's scan finished\\\". Release negative-controlled by disabling release_and_log -> 3 of 4 slot tests red on row status. HEARTBEAT_INTERVAL 40s->30s (LEASE_SECS/4) because the comments claimed three beats of slack and there were two, and slack became load-bearing once a lapsed lease is acted on within a tick. 713 web / 626 postgres tests, 0 skips, clippy clean on web/postgres/no-features.\"}"
     }
   ],
   "edges": [
@@ -9582,6 +9604,28 @@
       "weight": 1.0,
       "rationale": "Gap observed while implementing the admitter",
       "created_at": "2026-08-06T01:58:12.244191-07:00"
+    },
+    {
+      "id": 440,
+      "from_node_id": 446,
+      "to_node_id": 448,
+      "from_change_id": "71f1c1d9-785c-414b-9155-fc583a149cb9",
+      "to_change_id": "0318ea8f-f91f-4c1d-8115-4716ebf11ee1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review of 11af1c3 found the boot-only reclaim leaks a slot per redeploy",
+      "created_at": "2026-08-06T06:34:09.763380-07:00"
+    },
+    {
+      "id": 441,
+      "from_node_id": 448,
+      "to_node_id": 449,
+      "from_change_id": "0318ea8f-f91f-4c1d-8115-4716ebf11ee1",
+      "to_change_id": "396f8ac4-0547-471b-be12-5dcf77c6d8bc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-06T06:34:16.799611-07:00"
     }
   ],
   "documents": [

@@ -108,8 +108,13 @@ asserted nothing. Two traps stack here:
 
 The full check, which should report **zero** skips:
 ```
-CHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output 2>&1 | grep -iE "^\s*SKIP"
+CHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output 2>&1 | grep -E "^\s*SKIP:"
 ```
+
+Note the trailing colon and the **absence of `-i`**. This check used to read
+`grep -iE "^\s*SKIP"`, which false-positives on any test whose *name* begins
+with "skip" — `skips_are_scoped_per_user` and friends match it, so a clean run
+reports skips that do not exist. Match the `SKIP:` sentinel exactly.
 
 To run OAuth tests (requires `--features web`):
 ```
