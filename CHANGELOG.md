@@ -80,6 +80,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of a misleading `[tox: 0.00]`.
 
 ### Changed
+- Audit the authed app surfaces against DESIGN.md (#246)
+- Integrate main into staging: template backfill commits #70-#75 conflict, blocking the promotion PR #63 (#239)
 - Verify danabra.mov re-scan 2026-07-20 (post-#224) (#229)
 - Railway drops scan logs at 500/sec — observability gap during scans (#226)
 - Diagnose degraded=true on the 8174-account staging scan (2026-07-19) (#220)

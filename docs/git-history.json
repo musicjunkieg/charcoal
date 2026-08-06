@@ -1,5 +1,13 @@
 [
   {
+    "hash": "efc2293d9042fcdaf5b3eaac33820f55cf414578",
+    "short_hash": "efc2293",
+    "author": "Bryan Guffey",
+    "date": "2026-08-05T19:36:00-07:00",
+    "message": "docs(243): correct the tier badge — it is colored text, not a filled chip\n\nCaught by the audit (#246) reading the implementation instead of the doc I\nhad just written.\n\naccounts/+page.svelte:155 renders the tier as an inline color on a span, and\n.tier-badge is only font-weight + font-size. There is no fill, border or\nradius anywhere in it. DESIGN.md described \"a filled chip in the tier's color\nwith dark text\", and the sidecar shipped a ds-tier snippet with a background\nand 8px radius — a component that exists nowhere in the product. The live\npanel would have rendered it as though it were real.\n\nCorrected in three places: the Components section, the frontmatter tokens\n(tier-chip-* -> tier-badge-*, now transparent background with the tier as\ntextColor), and the sidecar HTML/CSS.\n\nAlso sharpened two things while in there:\n\n- Added the measured contrast for tier text on the ground (10.41 / 11.71 /\n  13.70 / 7.83:1), which is the evidence that the desaturation costs nothing\n  in legibility — the strongest argument for The Indoor Voice Rule.\n\n- The abstention target now stays inside the text idiom (Muted with a dashed\n  underline) rather than introducing a filled chip the system does not\n  otherwise use, and the implementation-gap note names the actual mechanism:\n  the ?? fallback is Low's exact color, so abstention is not unstyled, it is\n  disguised as a genuine Low verdict.\n\nRefs #243 #245 #246",
+    "files_changed": 2
+  },
+  {
     "hash": "a80350b7190522ecc6fd9e819fe831e1578508e4",
     "short_hash": "a80350b",
     "author": "Bryan Guffey",
