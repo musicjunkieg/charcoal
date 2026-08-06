@@ -2011,4 +2011,309 @@ mod tests {
         let median = get_median_engagement(&conn, TEST_USER).unwrap();
         assert!((median - 20.0).abs() < f64::EPSILON);
     }
+
+    // --- Scan admission queue (#257 / #270) ---
+    //
+    // A reviewer hand-verified these behaviors against the SQLite backend by
+    // executing the statements directly and found no divergence from
+    // Postgres (which has coverage in tests/db_postgres.rs). These tests
+    // close the regression gap: nothing previously caught this backend
+    // drifting from that behavior.
+
+    const QUEUE_USER_A: &str = "did:plc:queuea0000000000000a";
+    const QUEUE_USER_B: &str = "did:plc:queueb0000000000000b";
+    const QUEUE_USER_C: &str = "did:plc:queuec0000000000000c";
+
+    /// A double-click enqueue must not send the user to the back of the
+    /// FIFO. `user_did` is the primary key, so a second `enqueue_scan` call
+    /// always leaves exactly one row — asserting the row count cannot catch
+    /// the `WHERE status IN ('done','failed')` guard being deleted. The
+    /// timestamp is the only thing that can.
+    #[test]
+    fn enqueue_is_idempotent_and_preserves_position() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let first = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+
+        // A real gap so a reset enqueued_at would be visibly different.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let second = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+
+        assert_eq!(second.status, "queued");
+        assert_eq!(second.position, 1, "one row — not two");
+        assert_eq!(
+            second.enqueued_at, first.enqueued_at,
+            "a re-enqueue while still queued must not move the user's place in line"
+        );
+    }
+
+    #[test]
+    fn claim_mints_a_token_and_persists_running_status() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().expect("claim");
+        assert_eq!(claim.user_did, QUEUE_USER_A);
+        assert_eq!(claim.claim_id.len(), 32, "claim_id: {}", claim.claim_id);
+        assert!(
+            claim
+                .claim_id
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "claim_id must be lowercase hex: {}",
+            claim.claim_id
+        );
+
+        // Read back directly rather than trusting the return value.
+        let (status, stored_claim_id): (String, String) = conn
+            .query_row(
+                "SELECT status, claim_id FROM scan_queue WHERE user_did = ?1",
+                params![QUEUE_USER_A],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "running");
+        assert_eq!(stored_claim_id, claim.claim_id);
+    }
+
+    /// A worker whose lease lapsed must not be able to free or extend the
+    /// slot that was handed to someone else — the claim_id fencing token
+    /// exists for exactly this.
+    #[test]
+    fn stale_claim_cannot_heartbeat_or_finish() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+
+        // Worker A claims with an already-expired lease, gets reclaimed, and
+        // worker B claims the freed row — the sequence a redeploy produces.
+        let a = claim_next_scan(&conn, 2, -1).unwrap().expect("A claims");
+        assert_eq!(reclaim_expired_scans(&conn).unwrap(), 1);
+        let b = claim_next_scan(&conn, 2, 120).unwrap().expect("B claims");
+        assert_ne!(a.claim_id, b.claim_id, "the reclaim must invalidate A");
+
+        assert!(
+            !heartbeat_scan(&conn, QUEUE_USER_A, &a.claim_id, 120).unwrap(),
+            "a stale claim must not extend the new owner's lease"
+        );
+        assert!(
+            !finish_queued_scan(&conn, QUEUE_USER_A, &a.claim_id, None).unwrap(),
+            "a stale claim must not finish the new owner's scan"
+        );
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "running",
+            "the row must still belong to B"
+        );
+
+        // B, holding the live token, succeeds on both surfaces.
+        assert!(heartbeat_scan(&conn, QUEUE_USER_A, &b.claim_id, 120).unwrap());
+        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &b.claim_id, None).unwrap());
+    }
+
+    #[test]
+    fn double_finish_returns_false_second_time() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap());
+        assert!(
+            !finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap(),
+            "the row is no longer running, so a second finish must be a no-op"
+        );
+    }
+
+    #[test]
+    fn re_enqueue_after_done_resets_the_row() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+        let done_at = scan_queue_entry(&conn, QUEUE_USER_A, 1)
+            .unwrap()
+            .unwrap()
+            .enqueued_at;
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+
+        let entry = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+        assert_eq!(entry.status, "queued");
+        assert_ne!(
+            entry.enqueued_at, done_at,
+            "re-enqueue after done must set a fresh timestamp"
+        );
+
+        let claim_id: Option<String> = conn
+            .query_row(
+                "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+                params![QUEUE_USER_A],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim_id, None, "claim_id must be cleared on re-enqueue");
+    }
+
+    /// A running row with a NULL lease is otherwise unrecoverable — nothing
+    /// would ever reclaim it and the slot stays occupied forever.
+    #[test]
+    fn null_lease_is_reclaimed() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+
+        // The state a crash between claim and heartbeat can leave behind.
+        conn.execute(
+            "UPDATE scan_queue SET lease_expires = NULL WHERE user_did = ?1",
+            params![QUEUE_USER_A],
+        )
+        .unwrap();
+
+        assert_eq!(
+            reclaim_expired_scans(&conn).unwrap(),
+            1,
+            "a running row with a NULL lease must be reclaimed, not stranded"
+        );
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "queued"
+        );
+    }
+
+    #[test]
+    fn expired_lease_is_reclaimed_and_invalidates_the_claim_id() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, -1).unwrap().unwrap();
+
+        assert_eq!(reclaim_expired_scans(&conn).unwrap(), 1);
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "queued"
+        );
+
+        let claim_id: Option<String> = conn
+            .query_row(
+                "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+                params![QUEUE_USER_A],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            claim_id, None,
+            "reclaim must null the claim_id so the previous holder is invalidated"
+        );
+        // The old token no longer holds anything, on either surface.
+        assert!(!heartbeat_scan(&conn, QUEUE_USER_A, &claim.claim_id, 120).unwrap());
+    }
+
+    #[test]
+    fn cap_respected_returns_none() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+
+        assert!(claim_next_scan(&conn, 1, 120).unwrap().is_some());
+        assert!(
+            claim_next_scan(&conn, 1, 120).unwrap().is_none(),
+            "cap of 1 already met — a second claim must be refused even though a queued row remains"
+        );
+    }
+
+    #[test]
+    fn claims_come_back_in_fifo_order() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_C).unwrap();
+
+        let first = claim_next_scan(&conn, 3, 120).unwrap().unwrap();
+        let second = claim_next_scan(&conn, 3, 120).unwrap().unwrap();
+        let third = claim_next_scan(&conn, 3, 120).unwrap().unwrap();
+
+        assert_eq!(
+            first.user_did, QUEUE_USER_A,
+            "oldest enqueued must claim first"
+        );
+        assert_eq!(second.user_did, QUEUE_USER_B, "second-oldest claims second");
+        assert_eq!(third.user_did, QUEUE_USER_C, "youngest claims last");
+    }
+
+    #[test]
+    fn position_counts_queued_rows_ahead() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_C).unwrap();
+
+        let entry_b = scan_queue_entry(&conn, QUEUE_USER_B, 10).unwrap().unwrap();
+        assert_eq!(entry_b.position, 2, "A and B are queued at-or-ahead of B");
+        let entry_c = scan_queue_entry(&conn, QUEUE_USER_C, 10).unwrap().unwrap();
+        assert_eq!(entry_c.position, 3);
+    }
+
+    /// `eta_seconds` is None for TWO independent reasons — a non-'queued'
+    /// status, and no median yet. Testing the status gate while no median
+    /// exists would pass for the wrong reason, so this seeds a finished scan
+    /// first to guarantee a median, then checks a *running* row still gets
+    /// None.
+    #[test]
+    fn eta_is_none_for_non_queued_status_even_with_a_median_available() {
+        let conn = test_db();
+
+        // Seed a finished scan so a median exists.
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+
+        // A running row, with the median now available, must still report
+        // no ETA — a running scan's remaining time is unknown.
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        let running = scan_queue_entry(&conn, QUEUE_USER_B, 1).unwrap().unwrap();
+        assert_eq!(running.status, "running");
+        assert_eq!(
+            running.eta_seconds, None,
+            "a running scan's remaining time is unknown, so this must be None — not Some(0)"
+        );
+    }
+
+    #[test]
+    fn eta_is_none_when_no_median_exists_yet() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let entry = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+        assert_eq!(entry.status, "queued");
+        assert_eq!(
+            entry.eta_seconds, None,
+            "no scan has ever finished, so there is no median to compute an ETA from"
+        );
+    }
+
+    #[test]
+    fn delete_user_data_clears_scan_queue() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        assert!(scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().is_some());
+
+        delete_user_data(&conn, QUEUE_USER_A).unwrap();
+
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap(),
+            None,
+            "scan_queue row must not survive delete_user_data"
+        );
+    }
 }

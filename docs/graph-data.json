@@ -4692,9 +4692,9 @@
       "node_type": "action",
       "title": "Fix #264 critical review finding: Stage-1 score_batch inference time was uncounted, biasing inference_pct low",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-05T23:45:22.999468-07:00",
-      "updated_at": "2026-08-05T23:45:22.999468-07:00",
+      "updated_at": "2026-08-06T01:19:27.060373-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"f14554e\",\"confidence\":90,\"files\":[\"src/scoring/profile.rs\",\"src/pipeline/scan_phases/gather.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/unit_scan_phases.rs\"]}"
     },
     {
@@ -4703,9 +4703,9 @@
       "node_type": "outcome",
       "title": "GatherTiming gains stage1_onnx_ms bucket; stage1_outcome_timed narrows the timer to just scorer.score_batch (excludes language gate, TF-IDF, early-exit check); inference_pct sums both buckets. New wiring test proven to fail when the timer line is removed. 679 tests pass, 0 SKIP:, clippy clean both feature sets",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-05T23:45:28.454241-07:00",
-      "updated_at": "2026-08-05T23:45:28.454241-07:00",
+      "updated_at": "2026-08-06T01:19:27.067163-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"f14554e\",\"confidence\":90}"
     },
     {
@@ -4747,9 +4747,9 @@
       "node_type": "action",
       "title": "Task 4: scan_queue table + Database methods (schema v11)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T00:31:22.466958-07:00",
-      "updated_at": "2026-08-06T00:31:22.466958-07:00",
+      "updated_at": "2026-08-06T01:19:27.073773-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"7e8ec24\",\"confidence\":90,\"files\":[\"migrations/postgres/0011_scan_queue.sql\",\"src/db/schema.rs\",\"src/db/traits.rs\",\"src/db/postgres.rs\",\"src/db/queries.rs\",\"src/db/sqlite.rs\",\"tests/db_postgres.rs\"]}"
     },
     {
@@ -4758,10 +4758,54 @@
       "node_type": "outcome",
       "title": "scan_queue foundation done: Postgres migration v11 self-records version, SQLite mirror, both backends implement enqueue/claim/heartbeat/finish/reclaim/entry. Postgres suite green x6 (incl. negative-controlled cap test), clippy clean web+postgres, full web suite 153/153 zero SKIP. Found+fixed real cross-test flakiness: scan_queue position/count is genuinely global (not user-scoped), so the 3 new tests raced under default parallel harness (~1/3 runs failed) until serialized behind a static mutex.",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T00:31:27.632443-07:00",
-      "updated_at": "2026-08-06T00:31:27.632443-07:00",
+      "updated_at": "2026-08-06T01:19:27.079757-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"7e8ec24\",\"confidence\":92}"
+    },
+    {
+      "id": 440,
+      "change_id": "be79c9dd-53f8-48a4-a1b9-e23402daddc9",
+      "node_type": "observation",
+      "title": "Task 4 review found the cap test could not catch the bug it named: 3 sequential awaits on one connection never contend, so FOR UPDATE SKIP LOCKED never ran against a contested row. The implementation shipped a cap that did not hold — READ COMMITTED count + SKIP LOCKED hands two admitters DIFFERENT rows, which is exactly why it cannot enforce a cap. A concurrency test that has never been seen red is worthless",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T01:09:31.873709-07:00",
+      "updated_at": "2026-08-06T01:09:55.697456-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":95}"
+    },
+    {
+      "id": 441,
+      "change_id": "fac75991-ea84-474b-8618-fee2dbd8c6c9",
+      "node_type": "action",
+      "title": "Task 4 fix wave: advisory-lock the admission cap, add claim_id fencing token, correct the ETA, and fix 12 review findings",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T01:09:37.366363-07:00",
+      "updated_at": "2026-08-06T01:09:55.684770-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"26b1830\",\"confidence\":92,\"files\":[\"src/db/postgres.rs\",\"src/db/queries.rs\",\"src/db/traits.rs\",\"src/db/sqlite.rs\",\"src/db/schema.rs\",\"migrations/postgres/0011_scan_queue.sql\",\"tests/db_postgres.rs\"]}"
+    },
+    {
+      "id": 442,
+      "change_id": "958b1f26-1f94-49db-a2fb-2dfb4b56c181",
+      "node_type": "outcome",
+      "title": "Cap now holds under concurrency (26b1830). New JoinSet test seen RED 3/3 (got 2 at cap 1) before pg_advisory_xact_lock, GREEN 3/3 after. SQLite determined NOT vulnerable in-process (single Mutex<Connection> held across the call) but hardened to BEGIN IMMEDIATE since WAL + BEGIN DEFERRED could over-admit across processes. claim_id fencing token generated DB-side (gen_random_uuid / randomblob) so no new Rust dep; heartbeat+finish now guard on status='running' AND claim_id and return bool. ETA gated on queued and divided by the cap. v11 migrations amended in place, no v12. Postgres all-targets green (27 binaries, db_postgres 18->25 tests, 5 consecutive clean runs), web suite 683 passed 0 SKIP, clippy clean postgres/web/no-features. Both new guards negative-controlled. Also fixed 2 PRE-EXISTING harness bugs the new tests surfaced: cleanup_test_data raced test_pg_scan_state_roundtrip, and the scan_queue group could not recover from a panic (one orphaned running row failed 9 tests)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T01:09:51.066261-07:00",
+      "updated_at": "2026-08-06T01:09:55.691041-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"26b1830\",\"confidence\":93}"
+    },
+    {
+      "id": 443,
+      "change_id": "4a292d53-b31c-490b-8d55-d40f2964e47e",
+      "node_type": "outcome",
+      "title": "Task 4 re-review APPROVED (spec compliance yes, quality Approved, zero Critical). Reviewer independently executed the SQLite statements against sqlite 3.53.3 and read rusqlite 0.38 source rather than trusting the report. Confirmed: advisory lock is the FIRST statement in the txn and being txn-scoped releases only after the claiming UPDATE commits, so the next admitter counts the new row; JoinSet test asserts granted == CAP not <= CAP so it cannot pass vacuously; claim_id threaded end-to-end incl. reclaim and re-enqueue NULLing it; eta_seconds is ONE shared fn in traits.rs so backend drift is structurally impossible. Two corrections to the fix wave's own claims: BEGIN IMMEDIATE was right but its comment overstates the bug (WAL + DEFERRED would raise SQLITE_BUSY_SNAPSHOT at the write, i.e. fail LOUDLY, not over-admit silently), and no busy_timeout is set so contention is a hard error with no backoff. Residual: SQLite has ZERO coverage for all six methods (hand-verified no live divergence, but nothing in CI catches a regression, and Task 5 wires this backend up); Result<bool> from heartbeat/finish is silently droppable so the whole fencing property rests on Task 5 remembering to check it",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T01:19:41.033237-07:00",
+      "updated_at": "2026-08-06T01:19:41.033237-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"26b1830\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -9406,6 +9450,50 @@
       "weight": 1.0,
       "rationale": "Implementation produced this outcome",
       "created_at": "2026-08-06T00:31:29.622705-07:00"
+    },
+    {
+      "id": 432,
+      "from_node_id": 439,
+      "to_node_id": 440,
+      "from_change_id": "be1c36ab-ac3d-40f8-b3b1-dbee0a5a5613",
+      "to_change_id": "be79c9dd-53f8-48a4-a1b9-e23402daddc9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review of the Task 4 outcome found the cap was not actually enforced",
+      "created_at": "2026-08-06T01:09:41.194364-07:00"
+    },
+    {
+      "id": 433,
+      "from_node_id": 440,
+      "to_node_id": 441,
+      "from_change_id": "be79c9dd-53f8-48a4-a1b9-e23402daddc9",
+      "to_change_id": "fac75991-ea84-474b-8618-fee2dbd8c6c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "The finding drove the fix wave",
+      "created_at": "2026-08-06T01:09:41.200740-07:00"
+    },
+    {
+      "id": 434,
+      "from_node_id": 441,
+      "to_node_id": 442,
+      "from_change_id": "fac75991-ea84-474b-8618-fee2dbd8c6c9",
+      "to_change_id": "958b1f26-1f94-49db-a2fb-2dfb4b56c181",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the fix wave",
+      "created_at": "2026-08-06T01:09:55.677138-07:00"
+    },
+    {
+      "id": 435,
+      "from_node_id": 442,
+      "to_node_id": 443,
+      "from_change_id": "958b1f26-1f94-49db-a2fb-2dfb4b56c181",
+      "to_change_id": "4a292d53-b31c-490b-8d55-d40f2964e47e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review verified the fix wave in code, not from the report",
+      "created_at": "2026-08-06T01:19:44.701979-07:00"
     }
   ],
   "documents": [
