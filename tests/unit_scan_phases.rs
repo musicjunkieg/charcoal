@@ -1211,6 +1211,132 @@ mod gather_tests {
             "no AccountInput blob should be stashed when the account abstains"
         );
     }
+
+    // ── #264: prove gather_account's timing WIRING, not just the arithmetic ──
+    //
+    // `GatherTiming::add`/`inference_pct` are unit-tested directly in
+    // `gather.rs`, but nothing before this proved the timers are actually
+    // wired into `gather_account` — a dropped or misplaced `Instant::now()`
+    // call would still pass every other test in this suite silently, since
+    // none of them assert on the returned `GatherTiming` at all.
+    //
+    // Test doubles sleep a few ms so the recorded time is unambiguously
+    // non-zero rather than a coin-flip on `Instant::elapsed()` rounding to 0.
+
+    struct DelayedFetcher {
+        sample: PostSample,
+        parents: HashMap<String, String>,
+    }
+
+    #[async_trait]
+    impl PostFetcher for DelayedFetcher {
+        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            Ok(self.sample.clone())
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            Ok(self.parents.clone())
+        }
+    }
+
+    // Non-clean fixed scorer that sleeps — used as the Stage-1 ONNX scorer,
+    // so `stage1_onnx_ms` (the exact `scorer.score_batch` call this task
+    // wires up) has measurable, non-zero time.
+    struct DelayedScorer(f64);
+
+    #[async_trait]
+    impl ToxicityScorer for DelayedScorer {
+        async fn score_text(&self, _text: &str) -> Result<ToxicityResult> {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            Ok(ToxicityResult {
+                toxicity: self.0,
+                attributes: Default::default(),
+            })
+        }
+    }
+
+    struct DelayedCleanPass(f64);
+
+    #[async_trait]
+    impl CleanPassScorer for DelayedCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            Ok(vec![self.0; texts.len()])
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_account_populates_all_timing_buckets_when_reaching_stage_2() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // Enough posts to clear the Stage-1 minimum; a non-clean Stage-1 score
+        // (0.9) forces `Proceed` so Stage 2's clean pass also runs and both
+        // inference buckets get exercised in one call.
+        let originals: Vec<_> = (0..20)
+            .map(|i| make_post(&format!("at://p/{i}"), "supernova remnants and pulsars"))
+            .collect();
+        let total = originals.len();
+        let sample = PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: total,
+        };
+
+        let fetcher = DelayedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        let scorer = DelayedScorer(0.9);
+        let clean = DelayedCleanPass(0.9);
+
+        let (outcome, timing) = gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .expect("gather_account should not error");
+
+        assert_eq!(
+            outcome,
+            charcoal::pipeline::scan_phases::gather::GatherOutcome::Enqueued,
+            "non-clean Stage-1 scores must proceed to Stage 2"
+        );
+
+        assert!(
+            timing.fetch_ms > 0,
+            "fetch_ms must record the DelayedFetcher round trips, got {}",
+            timing.fetch_ms
+        );
+        assert!(
+            timing.stage1_onnx_ms > 0,
+            "stage1_onnx_ms must record Stage 1's scorer.score_batch call, got {}",
+            timing.stage1_onnx_ms
+        );
+        assert!(
+            timing.clean_pass_ms > 0,
+            "clean_pass_ms must record Stage 2's onnx_clean_pass call, got {}",
+            timing.clean_pass_ms
+        );
+        assert!(
+            timing.total_ms >= timing.fetch_ms + timing.stage1_onnx_ms + timing.clean_pass_ms,
+            "total_ms ({}) must cover at least the sum of the measured buckets \
+             (fetch {} + stage1_onnx {} + clean_pass {})",
+            timing.total_ms,
+            timing.fetch_ms,
+            timing.stage1_onnx_ms,
+            timing.clean_pass_ms
+        );
+    }
 }
 
 // ── Phase C: finalize_account tests ─────────────────────────────────────────

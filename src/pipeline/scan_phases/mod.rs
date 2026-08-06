@@ -454,6 +454,7 @@ async fn run_gather(
         phase = "gather",
         fetch_ms = sweep.timing.fetch_ms,
         clean_pass_ms = sweep.timing.clean_pass_ms,
+        stage1_onnx_ms = sweep.timing.stage1_onnx_ms,
         total_ms = sweep.timing.total_ms,
         inference_pct = sweep.timing.inference_pct(),
         "Phase A timing split (#264)"

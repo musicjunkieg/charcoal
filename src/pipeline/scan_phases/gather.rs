@@ -28,7 +28,7 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, PostSample};
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
-use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome, Stage1Outcome};
+use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome_timed, Stage1Outcome};
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::{mean_embedding, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
@@ -50,8 +50,17 @@ pub struct GatherTiming {
     /// Time in `fetch_sample` / `fetch_parent_posts` — the getAuthorFeed and
     /// getPosts round trips.
     pub fetch_ms: u64,
-    /// Time in `onnx_clean_pass`.
+    /// Time in `onnx_clean_pass` (Stage 2's clean/survivor split). Only
+    /// accrues for accounts that reach Stage 2 (`Stage1Outcome::Proceed`).
     pub clean_pass_ms: u64,
+    /// Time in Stage 1's `scorer.score_batch` call (inside `stage1_outcome`).
+    /// Runs for EVERY account that reaches the inference call (i.e. every
+    /// account with >= 5 posts that passes the language coverage gate),
+    /// including the majority that terminate at Stage 1 and never touch
+    /// `clean_pass_ms` at all. Kept separate from `clean_pass_ms` rather than
+    /// folded in — the two answer different questions: Stage 1 runs for
+    /// (nearly) every account, Stage 2 only for survivors (#264 review fix).
+    pub stage1_onnx_ms: u64,
     /// Wall clock for the whole account, including work in neither bucket.
     pub total_ms: u64,
 }
@@ -61,6 +70,7 @@ impl GatherTiming {
     pub fn add(&mut self, other: &GatherTiming) {
         self.fetch_ms += other.fetch_ms;
         self.clean_pass_ms += other.clean_pass_ms;
+        self.stage1_onnx_ms += other.stage1_onnx_ms;
         self.total_ms += other.total_ms;
     }
 
@@ -69,11 +79,16 @@ impl GatherTiming {
     /// This is the number that decides the #257 concurrency default: under
     /// ~10% and concurrency 2 should approach 2x; at 30%+ the shared model
     /// mutex is the ceiling and the lever is a session pool instead.
+    ///
+    /// Sums BOTH inference sites — Stage 1's `score_batch` and Stage 2's
+    /// `onnx_clean_pass` — since both contend on the same ONNX model mutex.
+    /// Reporting only one would systematically under-report inference share
+    /// (the bug this field fixes).
     pub fn inference_pct(&self) -> u64 {
         if self.total_ms == 0 {
             return 0;
         }
-        self.clean_pass_ms * 100 / self.total_ms
+        (self.clean_pass_ms + self.stage1_onnx_ms) * 100 / self.total_ms
     }
 }
 
@@ -284,7 +299,7 @@ pub async fn gather_account(
         r
     };
 
-    match stage1_outcome(
+    match stage1_outcome_timed(
         &stage1_sample,
         scorer,
         inputs.account_handle,
@@ -292,6 +307,7 @@ pub async fn gather_account(
         inputs.protected_fingerprint,
         inputs.weights,
         inputs.graph_distance,
+        &mut timing.stage1_onnx_ms,
     )
     .await?
     {
@@ -576,30 +592,37 @@ mod timing_tests {
         total.add(&GatherTiming {
             fetch_ms: 1000,
             clean_pass_ms: 200,
+            stage1_onnx_ms: 50,
             total_ms: 1300,
         });
         total.add(&GatherTiming {
             fetch_ms: 500,
             clean_pass_ms: 100,
+            stage1_onnx_ms: 30,
             total_ms: 700,
         });
 
         assert_eq!(total.fetch_ms, 1500);
         assert_eq!(total.clean_pass_ms, 300);
+        assert_eq!(total.stage1_onnx_ms, 80);
         assert_eq!(total.total_ms, 2000);
     }
 
     /// The number that decides the #257 concurrency default is the inference
     /// share. Under ~10% means concurrency 2 approaches 2x; 30%+ means the
-    /// shared mutex is the ceiling.
+    /// shared mutex is the ceiling. Must count BOTH inference sites — Stage
+    /// 1's `score_batch` and Stage 2's `onnx_clean_pass` — since a report that
+    /// only summed one would systematically under-report inference share
+    /// (the #264 review bug this test guards against).
     #[test]
     fn inference_share_is_reported_as_a_percentage() {
         let t = GatherTiming {
-            fetch_ms: 900,
+            fetch_ms: 850,
             clean_pass_ms: 100,
+            stage1_onnx_ms: 50,
             total_ms: 1000,
         };
-        assert_eq!(t.inference_pct(), 10);
+        assert_eq!(t.inference_pct(), 15);
     }
 
     /// A scan that gathered nothing must not divide by zero.

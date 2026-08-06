@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e1d4fa33c1feec2ee31e0f7566e1931fc259947a",
+    "short_hash": "e1d4fa3",
+    "author": "Bryan Guffey",
+    "date": "2026-08-05T23:06:51-07:00",
+    "message": "perf(264): record Phase A fetch vs clean-pass split\n\nThe #257 concurrency default rested on an estimate. An earlier draft of\nthe spec claimed Phase A was \"~100% Bluesky I/O\"; tracing the call sites\nshowed gather.rs runs the ONNX clean pass in the same phase, so two\nconcurrent scans contend on the shared model mutex by an unmeasured\namount.\n\ngather_account now returns GatherTiming alongside its outcome, and Phase\nA logs the aggregate with inference_pct. Under ~10% means concurrency 2\nshould approach 2x; 30%+ means the mutex is the ceiling and the lever is\na session pool rather than more concurrency.\n\nMirrors the delayTime/executionTime split from #61 that made the burst\nphase tunable.\n\nAlso updates tests/unit_scan_phases.rs call sites for the new\nResult<(GatherOutcome, GatherTiming)> return type — not listed in the\ntask brief, found by full-tree grep + compiler errors.\n\nCloses #264",
+    "files_changed": 3
+  },
+  {
     "hash": "efc2293d9042fcdaf5b3eaac33820f55cf414578",
     "short_hash": "efc2293",
     "author": "Bryan Guffey",

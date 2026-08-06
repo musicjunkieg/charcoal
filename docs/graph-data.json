@@ -4652,6 +4652,39 @@
       "created_at": "2026-08-05T19:36:18.503127-07:00",
       "updated_at": "2026-08-05T19:36:18.524217-07:00",
       "metadata_json": "{\"branch\":\"docs/impeccable-product-design-records\",\"commit\":\"efc2293\",\"confidence\":90}"
+    },
+    {
+      "id": 430,
+      "change_id": "f78ca9e9-2752-4269-9fe4-d43432ee0f6f",
+      "node_type": "goal",
+      "title": "Instrument Phase A: record fetch_ms vs clean_pass_ms per account (#264)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-05T23:07:24.374775-07:00",
+      "updated_at": "2026-08-05T23:07:57.426985-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"prompt\":\"You are implementing Task 2 of an implementation plan for the Charcoal project (a Bluesky threat-detection tool, Rust). Work in /Users/bryan.guffey/Code/charcoal, on branch feat/257-scan-admission (already checked out).\\n\\nWHERE THIS FITS: A later task will run 2 scans concurrently, sharing one set of ONNX models behind a mutex. Whether that actually doubles throughput depends on how much of the scan's gather phase is network wait versus local model inference -- and nobody has measured it. Your task adds that measurement. The number it produces decides a configuration default in a later task, so the split has to be real, not estimated.\\n\\nCONTROLLER DECISIONS that override the brief:\\n1. DO NOT create a branch. Run chainlink session work 264 but not the checkout.\\n2. IMPLEMENT STEPS 1 THROUGH 9 ONLY. Step 10 requires deploying to Railway staging and reading production logs and must not be attempted.\\n\\nSCOPE WARNING: Step 6 changes gather_account's return type from Result<GatherOutcome> to Result<(GatherOutcome, GatherTiming)>. That ripples to every call site -- the brief names two but all must be found via full-tree search, not just trust the list. gather_account has MULTIPLE early-return paths; every one must set timing.total_ms and return the tuple.\"}"
+    },
+    {
+      "id": 431,
+      "change_id": "eeb17f9f-fff7-453e-85c9-12f06cb07b71",
+      "node_type": "action",
+      "title": "Add GatherTiming struct + wire fetch/clean-pass timing through gather_account and Phase A aggregation/log",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-05T23:07:37.926194-07:00",
+      "updated_at": "2026-08-05T23:07:57.433406-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"e1d4fa3\",\"confidence\":90,\"files\":[\"src/pipeline/scan_phases/gather.rs src/pipeline/scan_phases/mod.rs tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 432,
+      "change_id": "3f34f460-b411-436d-abc2-cb75d60d8a69",
+      "node_type": "outcome",
+      "title": "gather_account returns (GatherOutcome, GatherTiming); all 3 success-path returns set total_ms; the one non-tuple gather_account error path (all-posts-unscoreable bail!) is unaffected since it returns Err, not the tuple. 10 call sites found tree-wide (7 in tests/unit_scan_phases.rs, 2 in mod.rs, 0 others) vs the 2 named in the brief. Recovery path (recover_account_inner) intentionally discards timing -- only the main run_gather sweep feeds the logged aggregate. Build clean on --features web and no-features, clippy clean both, fmt clean, full suite 40 binaries all ok 0 SKIP (678 tests total incl. 3 new).",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-05T23:07:43.234256-07:00",
+      "updated_at": "2026-08-05T23:07:57.439970-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"e1d4fa3\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -9197,6 +9230,28 @@
       "weight": 1.0,
       "rationale": "Result of the init/document/audit sequence",
       "created_at": "2026-08-05T19:36:18.511192-07:00"
+    },
+    {
+      "id": 423,
+      "from_node_id": 430,
+      "to_node_id": 431,
+      "from_change_id": "f78ca9e9-2752-4269-9fe4-d43432ee0f6f",
+      "to_change_id": "eeb17f9f-fff7-453e-85c9-12f06cb07b71",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of the #264 instrumentation goal",
+      "created_at": "2026-08-05T23:07:46.390517-07:00"
+    },
+    {
+      "id": 424,
+      "from_node_id": 431,
+      "to_node_id": 432,
+      "from_change_id": "eeb17f9f-fff7-453e-85c9-12f06cb07b71",
+      "to_change_id": "3f34f460-b411-436d-abc2-cb75d60d8a69",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of wiring GatherTiming through gather_account and Phase A",
+      "created_at": "2026-08-05T23:07:46.396902-07:00"
     }
   ],
   "documents": [
