@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2e5030b6f6eaac5e055c0d04d5a044ef916c5059",
+    "short_hash": "2e5030b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T01:31:48-07:00",
+    "message": "docs(257): correct the spec claim that SKIP LOCKED enforced the cap\n\nThe spec asserted \"concurrent enqueue never admits past the limit — the\nSKIP LOCKED guarantee\" and called the design multi-replica-correct. Both\nwere wrong, and Task 4 shipped the defect they described. SKIP LOCKED is\na safe-dequeue idiom; it says nothing about HOW MANY rows get dequeued.\nThe unlocked COUNT(*) in front of it is the real gate, and at READ\nCOMMITTED two admitters pass it together — then SKIP LOCKED hands them\ndifferent rows, so the cap breaks cleanly instead of loudly. Reproduced\nat cap 1: running_after = 2. The cap is now held by pg_advisory_xact_lock\ntaken before the count.\n\nAlso records that the testing section needed a genuinely concurrent\nclaim test — sequential awaits on one connection never contend a row, so\nthe original passed against an implementation that over-admits.\n\nTask 4 and Task 5 plan sections now carry warnings that their listings\nare superseded: signatures changed to carry a claim/fencing token.\n\nSeparately, CLAUDE.md documented a Postgres test command that cannot\nwork — postgres://charcoal:charcoal@localhost fails with\nFATAL: role \"charcoal\" does not exist, because a Homebrew install\ncreates a superuser named after the OS account. Every agent following\nthose instructions hits it (#272).\n\nRefs #257, #272\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "26b1830aaff6a9cf1bf8184b5c0a86c87ac4ac3f",
     "short_hash": "26b1830",
     "author": "Bryan Guffey",

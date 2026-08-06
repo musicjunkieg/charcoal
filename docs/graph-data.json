@@ -4806,6 +4806,28 @@
       "created_at": "2026-08-06T01:19:41.033237-07:00",
       "updated_at": "2026-08-06T01:19:41.033237-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"26b1830\",\"confidence\":92}"
+    },
+    {
+      "id": 444,
+      "change_id": "bd2b1f18-4cb2-49fe-9774-0fc0804a4d2e",
+      "node_type": "outcome",
+      "title": "Task 4b: SQLite scan_queue coverage landed (27d7992). 13 tests in src/db/queries.rs cover all six methods on the DEFAULT backend, which had zero. Controller finished it after the implementer stalled TWICE on the same task (backgrounded the suite and yielded, both times) - verified in foreground instead: 28 lib tests pass, clippy clean, fmt applied. NEGATIVE CONTROL run by controller: replacing WHERE status IN (done,failed) with WHERE 1=1 fails enqueue_is_idempotent_and_preserves_position on the TIMESTAMP (left .029330 vs right .001164). Row count could never catch it since user_did is the PK. The two ETA cases are deliberately SPLIT because both the status gate and the median branch return None - a single test would pass for the wrong reason, which is the exact defect the Task 4 re-review found in the Postgres suite. Also committed 2e5030b correcting the spec's false claim that SKIP LOCKED enforced the cap, and CLAUDE.md's Postgres test command that fails with role charcoal does not exist (#272)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T01:32:03.345010-07:00",
+      "updated_at": "2026-08-06T01:32:03.345010-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"2e5030b\",\"confidence\":90}"
+    },
+    {
+      "id": 445,
+      "change_id": "a40ccf49-3b23-4799-bc99-7f589c93fd1e",
+      "node_type": "action",
+      "title": "Task 5: admitter loop — background task claims queued scans under the cap, heartbeats the lease, and releases the slot on every exit",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T01:36:53.707215-07:00",
+      "updated_at": "2026-08-06T01:36:53.707215-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"2e5030b\",\"confidence\":85,\"files\":[\"src/web/admitter.rs\",\"src/web/mod.rs\",\"src/web/scan_job.rs\"]}"
     }
   ],
   "edges": [
@@ -9494,6 +9516,28 @@
       "weight": 1.0,
       "rationale": "Re-review verified the fix wave in code, not from the report",
       "created_at": "2026-08-06T01:19:44.701979-07:00"
+    },
+    {
+      "id": 436,
+      "from_node_id": 443,
+      "to_node_id": 444,
+      "from_change_id": "4a292d53-b31c-490b-8d55-d40f2964e47e",
+      "to_change_id": "bd2b1f18-4cb2-49fe-9774-0fc0804a4d2e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review's one Important finding drove the SQLite coverage task",
+      "created_at": "2026-08-06T01:32:03.353419-07:00"
+    },
+    {
+      "id": 437,
+      "from_node_id": 435,
+      "to_node_id": 445,
+      "from_change_id": "e33f7786-65f7-4b4b-a581-d755211a7ce9",
+      "to_change_id": "a40ccf49-3b23-4799-bc99-7f589c93fd1e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 of the 7-task #257 scan-admission plan",
+      "created_at": "2026-08-06T01:36:57.186330-07:00"
     }
   ],
   "documents": [

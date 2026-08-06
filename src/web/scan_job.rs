@@ -86,6 +86,28 @@ impl ScanManager {
         }
     }
 
+    /// Register a scan the admission queue has already approved (#257).
+    ///
+    /// Deliberately skips the `any_running` gate: `claim_next_scan` enforced
+    /// the concurrency cap in the database before this was reached, so
+    /// re-checking a process-local bool here would refuse every concurrent
+    /// scan the queue just legitimately admitted. The bool is still set so the
+    /// legacy `POST /api/scan` path (which the next step of #257 replaces with
+    /// an enqueue) keeps seeing a scan in flight rather than racing one.
+    pub fn begin_admitted_scan(&mut self, user_did: &str) {
+        self.any_running = true;
+        self.statuses.insert(
+            user_did.to_string(),
+            ScanStatus {
+                running: true,
+                started_at: Some(chrono::Utc::now().to_rfc3339()),
+                progress_message: "Starting scan...".to_string(),
+                last_error: None,
+                phase: WebScanPhase::Starting,
+            },
+        );
+    }
+
     /// Atomically check the global gate and start a scan.
     pub fn try_start_scan(&mut self, user_did: &str) -> Result<(), String> {
         if self.any_running {
@@ -216,6 +238,19 @@ async fn set_progress(
     }
 }
 
+/// The `scan_queue` slot a scan is running under (#257).
+///
+/// `None` at the call sites that still start a scan directly; the admitter
+/// always supplies one.
+pub struct QueueSlot {
+    /// Fencing token from `claim_next_scan`. Required to heartbeat or release
+    /// the row, so a worker whose lease lapsed cannot touch its successor's.
+    pub claim_id: String,
+    /// Wake channel for the admitter — pinged the moment this scan finishes so
+    /// the next queued user starts immediately rather than on the 30s tick.
+    pub wake: tokio::sync::mpsc::Sender<()>,
+}
+
 /// Launch the scan pipeline in a background tokio task.
 /// Returns immediately. Callers poll `scan_manager` to track progress.
 pub fn launch_scan(
@@ -225,20 +260,51 @@ pub fn launch_scan(
     scan_manager: Arc<RwLock<ScanManager>>,
     user_did: String,
     actor_handle: String,
+    slot: Option<QueueSlot>,
 ) {
     tokio::spawn(async move {
-        let result = AssertUnwindSafe(run_scan(
+        let scan = AssertUnwindSafe(run_scan(
             config,
-            db,
+            db.clone(),
             models,
             scan_manager.clone(),
             &user_did,
             &actor_handle,
         ))
-        .catch_unwind()
-        .await
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")));
-        if let Err(e) = result {
+        .catch_unwind();
+
+        let result = match &slot {
+            None => scan
+                .await
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked"))),
+            Some(slot) => {
+                // Hold the lease for as long as the scan runs. If the heartbeat
+                // ever reports the claim lost, this worker has been superseded:
+                // another process reclaimed the row and may already be scanning
+                // this user, so the scan is abandoned rather than left burning
+                // GPU budget on a slot it no longer owns.
+                let mut heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
+                    db.clone(),
+                    user_did.clone(),
+                    slot.claim_id.clone(),
+                    crate::web::admitter::HEARTBEAT_INTERVAL,
+                ));
+
+                tokio::select! {
+                    finished = scan => {
+                        heartbeat.abort();
+                        finished.unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")))
+                    }
+                    _ = &mut heartbeat => Err(anyhow::anyhow!(
+                        "scan lease lapsed — the queue slot was reassigned, abandoning"
+                    )),
+                }
+            }
+        };
+
+        let error_text = result.as_ref().err().map(|e| format!("{e:#}"));
+
+        if let Err(e) = &result {
             error!(error = %e, "Background scan failed");
             let mut mgr = scan_manager.write().await;
             mgr.finish_scan(&user_did);
@@ -247,6 +313,23 @@ pub fn launch_scan(
                 status.progress_message = "Scan failed — see server logs".to_string();
                 status.phase = WebScanPhase::Failed;
             }
+        }
+
+        // Release the queue slot on every exit — success, error, caught panic,
+        // and abandonment all land here. Done after the status update so the
+        // next admitted scan cannot observe this user mid-transition.
+        if let Some(slot) = &slot {
+            crate::web::admitter::release_and_log(
+                &db,
+                &user_did,
+                &slot.claim_id,
+                error_text.as_deref(),
+            )
+            .await;
+            // try_send, not send: a full channel already has a wake pending, so
+            // dropping this one loses nothing, and a closed channel only means
+            // the admitter is gone (shutdown). Neither is worth blocking on.
+            let _ = slot.wake.try_send(());
         }
     });
 }

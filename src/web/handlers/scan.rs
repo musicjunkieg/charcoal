@@ -54,6 +54,9 @@ pub async fn trigger_scan(
         state.scan_manager.clone(),
         auth.did,
         actor_handle,
+        // Not admitted through the scan_queue — this path still starts scans
+        // directly, so there is no slot to heartbeat or release (#257).
+        None,
     );
 
     (

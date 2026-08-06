@@ -24,6 +24,7 @@ use tracing::info;
 use crate::config::Config;
 use crate::db::Database;
 
+pub mod admitter;
 pub mod auth;
 pub mod handlers;
 pub mod scan_job;
@@ -57,6 +58,12 @@ pub struct AppState {
     pub typeahead_limiter: Arc<typeahead::TypeaheadLimiter>,
     /// ONNX models, loaded once at boot and shared by every scan (#257).
     pub models: Arc<scan_job::ScanModels>,
+    /// Wake channel for the background admitter (#257). Send `()` after an
+    /// enqueue so a free slot is taken now rather than on the next 30s tick.
+    ///
+    /// `Option` because `test_helpers` builds an `AppState` with no admitter
+    /// behind it — a test that never enqueues has nothing to wake.
+    pub scan_wake: Option<tokio::sync::mpsc::Sender<()>>,
 }
 
 /// Start the Axum web server and block until it exits.
@@ -123,6 +130,16 @@ pub async fn run_server(
         http: reqwest::Client::new(),
         typeahead_limiter: handlers::typeahead::build_limiter(),
         models,
+        scan_wake: None,
+    };
+
+    // One admitter per process. It owns launching scans from here on: it
+    // reclaims rows orphaned by the previous deploy, then claims while the
+    // running count is under CHARCOAL_SCAN_CONCURRENCY.
+    let scan_wake = admitter::spawn_admitter(state.clone());
+    let state = AppState {
+        scan_wake: Some(scan_wake),
+        ..state
     };
 
     let app = build_router(state);

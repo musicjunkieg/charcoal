@@ -231,6 +231,8 @@ pub async fn trigger_admin_scan(
         state.scan_manager.clone(),
         target_did.clone(),
         handle,
+        // Admin-triggered scans bypass the queue, so there is no slot (#257).
+        None,
     );
 
     Ok((

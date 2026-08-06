@@ -83,6 +83,8 @@ pub fn build_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db::Data
         http: reqwest::Client::new(),
         typeahead_limiter: crate::web::handlers::typeahead::build_limiter(),
         models,
+        // No admitter behind a test AppState — nothing to wake.
+        scan_wake: None,
     };
 
     Some((build_router(state), db))
