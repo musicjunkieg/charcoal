@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8b8dc31a158cf6f306d7ef92be16b6dc79670887",
+    "short_hash": "8b8dc31",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T10:24:48-07:00",
+    "message": "feat(257): tell a queued user they are waiting, not scanning\n\nGET /api/status has served a `queued` phase and a `queue` block since Task 6,\nbut the SPA had no such phase: `phaseToStepIndex` clamped it to 0, so a user\nwaiting for a free slot watched \"Reading your posts\" spin with a live elapsed\ntimer while nothing at all was running. The one screen that exists to tell\nsomeone whether they are safe was telling them work was underway when it was\nnot.\n\nScanProgress now renders a distinct waiting state for `queued` — no checklist,\nno progress bar, no counters, no spinner — with the position and, when there\nis one, the estimate: \"You're 3rd in line - about 70 minutes\". The estimate is\nomitted rather than defaulted when eta_seconds is null (no completed scan to\ntake a median from), and the copy says so out loud instead of inventing a\nnumber. `phaseToStepIndex('queued')` returns -1 for the same reason: no step\nhas started.\n\nThe dashboard header drops its \"Scanning...\" spinner for a still \"Queued\"\nmarker on the same grounds.\n\nAccessibility, both in the launch set for this component:\n\n- #248: the step spinner and the bar transition are now gated behind\n  prefers-reduced-motion. The waiting state adds no motion at all.\n- #249: elapsed, progress message, expectation and pending-step text were\n  2.3-3.6:1 on this panel and now use colors.body-text (6.9:1); the new\n  waiting copy is body-text and body-text-bright (6.9:1 and 11.7:1). Step\n  state is carried by icon and weight rather than by fading text below AA.\n- The position line is the only aria-live region and is polite, so a 5s poll\n  re-announces the position and not the whole panel.\n\nStyling comes from tokens.css via var(), which #250 found was imported\nnowhere; both edited files now import it rather than adding more literal hex.\n\nRefs #257, #248, #249, #250",
+    "files_changed": 7
+  },
+  {
     "hash": "385c3f33aea01cd708c5de2141990329cda61a88",
     "short_hash": "385c3f3",
     "author": "Bryan Guffey",

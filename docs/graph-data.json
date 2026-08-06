@@ -4894,6 +4894,28 @@
       "created_at": "2026-08-06T07:12:20.346306-07:00",
       "updated_at": "2026-08-06T07:12:27.012991-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"385c3f3\",\"confidence\":90}"
+    },
+    {
+      "id": 452,
+      "change_id": "1983a0c3-4533-4543-8fcc-187a0059d944",
+      "node_type": "action",
+      "title": "Task 7: SPA renders the queued phase as an honest wait, plus #248/#249 in the same component",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T10:24:58.426590-07:00",
+      "updated_at": "2026-08-06T10:25:40.196577-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"8b8dc31\",\"confidence\":90,\"files\":[\"web/src/lib/types.ts\",\"web/src/lib/scan-steps.ts\",\"web/src/lib/dashboard-state.ts\",\"web/src/lib/components/ScanProgress.svelte\",\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
+    },
+    {
+      "id": 454,
+      "change_id": "c42fab62-6377-4b21-a4ce-7fe67da9a42e",
+      "node_type": "outcome",
+      "title": "Task 7 landed (8b8dc31): the SPA stops claiming progress it is not making. ScanPhase gains 'queued' and phaseToStepIndex('queued') returns -1 instead of clamping to 0, which had lit 'Reading your posts' with a ticking elapsed timer over a server doing nothing. ScanProgress renders a separate waiting branch - no checklist, no bar, no counters, no spinner - and queueMessage() prints the position plus a hedged estimate, OMITTING the estimate when eta_seconds is null (no completed scan to median) rather than defaulting one. Verified with a throwaway SSR render harness (vitest + vite-plugin-svelte, deleted after use): the queued body contains no 'progressbar', no 'step-spinner', no step labels, and exactly ONE aria-live=polite, on the position line; the running branch still renders the bar, so the not.toContain assertions cannot pass vacuously. 36 vitest logic tests (10 new) and 725 Rust tests pass, 0 SKIP. Same component: #248 gates the step spinner and bar transition behind prefers-reduced-motion (the waiting state adds no motion at all), #249 lifts four rules that were 2.3-3.6:1 on this panel to 6.9:1 with step state carried by icon and weight instead of faded text, and #250 shrinks by two files since both now import tokens.css, which nothing imported before",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T10:25:35.555271-07:00",
+      "updated_at": "2026-08-06T10:25:40.203762-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"8b8dc31\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -9681,6 +9703,28 @@
       "weight": 1.0,
       "rationale": "Implementation outcome",
       "created_at": "2026-08-06T07:12:26.999733-07:00"
+    },
+    {
+      "id": 445,
+      "from_node_id": 435,
+      "to_node_id": 452,
+      "from_change_id": "e33f7786-65f7-4b4b-a581-d755211a7ce9",
+      "to_change_id": "1983a0c3-4533-4543-8fcc-187a0059d944",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 7, the last task of the #257 plan",
+      "created_at": "2026-08-06T10:25:02.840949-07:00"
+    },
+    {
+      "id": 447,
+      "from_node_id": 452,
+      "to_node_id": 454,
+      "from_change_id": "1983a0c3-4533-4543-8fcc-187a0059d944",
+      "to_change_id": "c42fab62-6377-4b21-a4ce-7fe67da9a42e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation result",
+      "created_at": "2026-08-06T10:25:40.189781-07:00"
     }
   ],
   "documents": [
