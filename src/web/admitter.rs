@@ -943,14 +943,23 @@ mod admitter_tests {
     /// (`claim_next_scan` returns `Ok(None)`, indistinguishable from an empty
     /// queue).
     ///
-    /// The lease here is one second: valid at boot, lapsed by the second pass.
+    /// The lease is three seconds: comfortably valid at boot, lapsed well
+    /// before the timeout below.
+    ///
+    /// The margin is the test. At one second — and a 50ms tick — a `tokio::spawn`
+    /// delayed past that second lets the *boot* pass do the reclaiming, at which
+    /// point this silently degenerates into `boot_reclaims_before_the_first_claim`
+    /// and passes without ever exercising the every-pass reclaim it exists to
+    /// protect. Three seconds is far more spawn latency than any loaded CI box
+    /// imposes, and the assertion immediately after the spawn makes the
+    /// degeneration loud rather than silent if a future edit narrows it again.
     #[tokio::test]
     async fn a_lease_that_lapses_after_boot_is_still_reclaimed() {
         let db = test_db();
         db.enqueue_scan("did:plc:redeploy").await.expect("enqueue");
         // Positive lease — NOT the already-expired `-1` the boot test uses.
         // This row is legitimately held when the admitter starts.
-        db.claim_next_scan(1, 1).await.expect("claim").expect("row");
+        db.claim_next_scan(1, 3).await.expect("claim").expect("row");
 
         let (notify_tx, mut notify_rx) = mpsc::channel(4);
         let launcher = Arc::new(RecordingLauncher::notifying(notify_tx));
@@ -966,7 +975,17 @@ mod admitter_tests {
             || 1,
         ));
 
-        let launched = tokio::time::timeout(Duration::from_secs(10), notify_rx.recv())
+        // The boot pass has to find this row legitimately held and leave it
+        // alone; if it reclaimed here, everything below would be testing the
+        // boot reclaim instead of the per-pass one.
+        assert_eq!(
+            status_of(&db, "did:plc:redeploy").await,
+            "running",
+            "the lease must still be live when the admitter boots, or this test \
+             is silently the boot-reclaim test"
+        );
+
+        let launched = tokio::time::timeout(Duration::from_secs(20), notify_rx.recv())
             .await
             .expect(
                 "a lease that lapses AFTER boot must still be reclaimed — the reclaim \

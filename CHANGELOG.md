@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Retry public Bluesky reads on 429 and 5xx (#182). Every read through
+  `PublicAtpClient` now makes up to 4 attempts, backing off exponentially from
+  250ms to 8s with jitter. A typed `XrpcAttemptError` decides what is
+  retryable rather than string-matching an `anyhow` chain: transport failures,
+  429 and 5xx back off, while other 4xx and deserialization failures return on
+  the first attempt instead of being retried into a guaranteed-identical
+  answer. Discovery had been capped at ~8 in-flight requests explicitly "until
+  #182 lands"; scan concurrency (#257) pushes in-flight requests past that
+  ceiling, and with no backoff a rate-limited read surfaced as a plain fetch
+  failure — which #236 shows can cost an entire account.
 - Gate `delete_user` on the durable `scan_queue` row rather than the
   process-local `ScanManager` (#278). The old guard only knew about scans *this
   process* launched, so it missed a user who was merely queued, one running on
@@ -134,9 +144,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of a misleading `[tox: 0.00]`.
 
 ### Changed
+- Load the three ONNX models once at boot into shared state instead of per
+  scan, and refuse to start the server when any of them is missing (#257).
+  Concurrent scans would each pay ~500MB otherwise — the fp32 NLI export (#231)
+  is 284MB of it — which is what made concurrency a memory problem rather than
+  merely an untidy one. Two operational consequences to know before deploying:
+  **the server now fails to boot on a broken model volume** rather than
+  degrading scan by scan, so a bad volume surfaces as a failed deploy instead of
+  as user-visible scan failures hours later; and **idle memory rises from
+  ~0.78GB to ~1.28GB**, which Railway meters continuously (#188) even on days
+  nobody scans.
 - Cover the six `scan_queue` methods on SQLite, which is the default backend and had none. Closes a regression gap rather than a bug — a reviewer hand-verified no divergence from Postgres exists today, but the #257 fix wave had changed SQLite's transaction behaviour to `BEGIN IMMEDIATE`, added `UPDATE .. RETURNING`, and added the `claim_id` fencing guard, none of it exercised. The two ETA cases are split deliberately: both the status gate and the median branch return `None`, so a single test would pass for the wrong reason (#270)
-- Audit the authed app surfaces against DESIGN.md (#246)
-- Integrate main into staging: template backfill commits #70-#75 conflict, blocking the promotion PR #63 (#239)
 - Verify danabra.mov re-scan 2026-07-20 (post-#224) (#229)
 - Railway drops scan logs at 500/sec — observability gap during scans (#226)
 - Diagnose degraded=true on the 8174-account staging scan (2026-07-19) (#220)
@@ -144,7 +162,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Batch the 5 NLI hypotheses into one padded `[5, max_len]` forward pass instead of 5 sequential single-item inferences — ~5× fewer NLI ONNX runs, biggest in the amplification event loop (NLI per event). NOTE: the quantized `nli-deberta-v3-xsmall` export is not perfectly padding-invariant, so batching shifts `context_score` by a small, systematic amount — **measured on macOS ARM64 only** (≈0.006 on the final hostility, ≈0.002–0.008 per hypothesis), and accepted *on that platform* as within the model's own quantization noise and immaterial to threat tiers (bands 8/15/35). A model-gated unit test at a 0.02 tolerance was intended to pin the batch-vs-single equivalence, but it never actually executed in CI (it read `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR`), so **nothing has ever enforced this bound** (#213). **CORRECTION (#231):** on Linux x86_64 — the platform production runs on — the same model bytes diverge by **0.14** on hypothesis 0 (batched 0.031 vs single 0.172), far outside that tolerance. The equivalence claim was therefore never verified where it matters. **RESOLVED (#231):** the cause was the quantized export's runtime per-tensor activation scale, not padding; the fp32 export makes batching exact on both platforms, and the equivalence test is un-quarantined at a `1e-4` tolerance. The batching speedup here was also overstated — measured 1.69x, not ~5x (#213)
 
 ### Added
-- Launch gate: CHARCOAL_ALLOWED_DID is all-or-nothing, no staged rollout (#262)
+- Phase A now logs where its time actually goes — Bluesky fetch vs the Stage-1
+  ONNX pass vs the Stage-2 clean pass, with an `inference_pct` (#264). The #257
+  concurrency default rested on an estimate that Phase A was "~100% Bluesky
+  I/O"; it is not, because `gather.rs` runs ONNX inference in the same phase, on
+  the shared model mutex. Stage 1 and Stage 2 are separate buckets on purpose —
+  Stage 1 runs for every account, Stage 2 only for survivors, so folding them
+  together would blur two different questions. This is the number that decides
+  whether raising `CHARCOAL_SCAN_CONCURRENCY` helps: under ~10% inference,
+  concurrency 2 should approach 2x; at 30%+ the mutex is the ceiling and the
+  lever is a session pool instead of more concurrency.
 - Add handle typeahead to the login screen (proxied via backend) (#227)
 - Onboarding scan progress + live threat visibility in web UI (#1)
 - Batched RunPod classifier — the burst phase now sends **N post texts per `/runsync` request** instead of one, so vLLM's continuous batching (`max_num_seqs=32`) does the on-GPU parallelism and the queue-bound warm-idle waste (RunPod `delayTime` ~3-4s vs `executionTime` ~0.13s) collapses toward the compute floor — targeting ~$1/onboarding vs the prior ~$6-10. Handler and Rust client are batch-only (`{"input":{"contents":[…]}}` → `{"output":{"verdicts":[…]}}`); a post that fails to decode is recorded as an explicit benign `decode-error` sentinel (fail-open, logged + metered + scan `degraded`) rather than failing the batch or livelocking resume. Additive `classify_batch`/`max_batch_size` on the classifier trait keep Zentropi 1-per-call. New env: `CHARCOAL_RUNPOD_BATCH_SIZE` — texts per RunPod request (default 32 = handler `max_num_seqs`, clamped 1–128); in-flight texts ≈ `CHARCOAL_BURST_CONCURRENCY` × this (#186)

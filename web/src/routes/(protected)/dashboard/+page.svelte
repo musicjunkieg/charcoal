@@ -222,7 +222,13 @@
 	<div class="page-header">
 		<div>
 			<h1 class="page-title">Threat Intelligence</h1>
-			{#if status?.scan_running && status.started_at}
+			<!-- Queued is not scanning (#257), and `started_at` is the process-local
+			     ScanManager's, which is never cleared when a scan finishes. Without
+			     the isQueued gate a repeat user waiting for a slot reads "Scan in
+			     progress — 47m 12s", ticking, counted from their PREVIOUS scan, and
+			     directly above a panel telling them their scan hasn't started. They
+			     fall through to "Last scan: …", which is what that timestamp is. -->
+			{#if status && !isQueued(status) && status.scan_running && status.started_at}
 				<p class="page-subtitle scan-in-progress">
 					Scan in progress — {elapsedTime(status.started_at)}
 				</p>

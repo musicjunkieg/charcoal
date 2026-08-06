@@ -381,8 +381,7 @@ where
     };
 
     match exit {
-        // run_scan already wrote its own terminal status (Done, or Failed with
-        // the pipeline's own error) before returning.
+        // run_scan already wrote `Done` from inside the scan future.
         SlotExit::Completed => {}
         // Both of these — and the abandonment below — are fenced by the claim
         // (#274). If a successor already took this user's slot, `update_owned`
@@ -397,7 +396,16 @@ where
                 .update_owned(&user_did, &slot.claim_id, |status| {
                     status.running = false;
                     status.last_error = Some(detail);
-                    status.progress_message = "Scan failed — see server logs".to_string();
+                    // Keep a message the scan future already wrote for itself.
+                    // A pipeline error now reaches this arm (it used to be
+                    // swallowed into `Completed`), and `record_scan_outcome`
+                    // says something more useful about it than this generic
+                    // line does — notably that partial results were saved.
+                    // Setup errors and panics never get that far, so they still
+                    // need a message from here.
+                    if status.phase != WebScanPhase::Failed {
+                        status.progress_message = "Scan failed — see server logs".to_string();
+                    }
                     status.phase = WebScanPhase::Failed;
                 });
         }
@@ -620,6 +628,30 @@ async fn record_scan_outcome(
              over theirs"
         );
     }
+}
+
+/// End the scan future: record the pipeline's terminal status, then hand the
+/// pipeline's own `Result` back to `run_under_slot` as the future's result.
+///
+/// The two halves have to happen together and in this order, which is the whole
+/// reason this is one function rather than two statements at the end of
+/// `run_scan`. `record_scan_outcome` is the *in-process* write (what the browser
+/// polls); the returned `Result` is what `run_under_slot` classifies into a
+/// `SlotExit`, and therefore what lands in the durable `scan_queue` row. Drop
+/// the second half — as `run_scan` originally did by returning `Ok(())`
+/// unconditionally — and a scan that errored two minutes in is stored as a
+/// two-minute *successful* scan, which `scan_queue_entry` then folds into the
+/// median it quotes every queued user as their ETA.
+async fn finish_scan(
+    scan_manager: &Arc<RwLock<ScanManager>>,
+    user_did: &str,
+    claim_id: &str,
+    result: anyhow::Result<(usize, usize, bool)>,
+) -> anyhow::Result<()> {
+    record_scan_outcome(scan_manager, user_did, claim_id, &result).await;
+    // Discard only the success tuple — `record_scan_outcome` has already
+    // rendered it into the user-visible message. The `Err` must survive.
+    result.map(|_| ())
 }
 
 async fn run_scan(
@@ -968,9 +1000,7 @@ async fn run_scan(
     )
     .await;
 
-    record_scan_outcome(&scan_manager, user_did, claim_id, &result).await;
-
-    Ok(())
+    finish_scan(&scan_manager, user_did, claim_id, result).await
 }
 
 /// The slot lifecycle: every exit from `run_under_slot` must free the row it
@@ -1301,6 +1331,125 @@ mod slot_lifecycle_tests {
             .last_error
             .as_deref()
             .is_some_and(|e| e.contains("constellation unreachable")));
+    }
+
+    /// The pipeline's error has to *leave* the scan future, not merely be
+    /// recorded in memory on the way out.
+    ///
+    /// Every other failure test in this module hands `run_under_slot` a
+    /// hand-written `async { Err(...) }` — a shape the most consequential
+    /// production failure never produced. `run_scan` returned `Ok(())`
+    /// unconditionally after `record_scan_outcome`, so `SlotExit::Failed` was
+    /// only ever reachable from the `?`s in the model/classifier/fingerprint
+    /// setup above the pipeline. A pipeline that died mid-burst exited
+    /// `Completed` and was written to `scan_queue` as `status='done'` with a
+    /// NULL error.
+    ///
+    /// Driving the real tail of `run_scan` is what closes that gap, so this
+    /// composes `finish_scan` exactly as `run_scan` does rather than faking
+    /// its result.
+    #[tokio::test]
+    async fn a_pipeline_error_is_recorded_as_failed_not_done() {
+        let db = test_db();
+        let (slot, claim_id, _wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan(&claim_id);
+
+        let exit = run_under_slot(
+            finish_scan(
+                &mgr,
+                DID,
+                &claim_id,
+                Err(anyhow::anyhow!("constellation unreachable mid-burst")),
+            ),
+            db.clone(),
+            mgr.clone(),
+            DID.to_string(),
+            slot,
+            live_guard(),
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert_eq!(
+            exit,
+            SlotExit::Failed,
+            "a pipeline error must classify as Failed — Completed is the exit \
+             that records a clean 'done'"
+        );
+        assert_eq!(
+            status_of(&db, DID).await,
+            "failed",
+            "an operator reading scan_queue must not see a clean 'done' for a \
+             scan that died mid-burst"
+        );
+
+        {
+            let mgr = mgr.read().await;
+            let status = mgr.get_status(DID).expect("status entry");
+            assert!(!status.running);
+            assert_eq!(status.phase, WebScanPhase::Failed);
+            assert!(status
+                .last_error
+                .as_deref()
+                .is_some_and(|e| e.contains("constellation unreachable mid-burst")));
+            // The pipeline knows partial results were saved; the generic
+            // "see server logs" line in the `Failed` arm does not, and must not
+            // overwrite it now that a pipeline error reaches that arm.
+            assert!(
+                status.progress_message.contains("partial results"),
+                "the pipeline's own terminal message must survive: {}",
+                status.progress_message
+            );
+        }
+
+        // The consequence that matters. `scan_queue_entry` medians
+        // `finished_at - started_at` over `status='done'` rows to quote every
+        // queued user an ETA. A scan that errored seconds in, filed as 'done',
+        // is a seconds-long *successful* scan in that median — so the next
+        // user is promised almost no wait for what is really an hour.
+        db.enqueue_scan("did:plc:next-in-line")
+            .await
+            .expect("enqueue");
+        let waiting = db
+            .scan_queue_entry("did:plc:next-in-line", 1)
+            .await
+            .expect("queue entry query")
+            .expect("row exists");
+        assert_eq!(waiting.status, "queued");
+        assert_eq!(
+            waiting.eta_seconds, None,
+            "no scan has ever COMPLETED, so there is no median to quote — a \
+             failed scan counted as 'done' would fabricate one"
+        );
+    }
+
+    /// The other half of the propagation fix: a pipeline that succeeded still
+    /// ends `done`, so "propagate the error" cannot degenerate into "always
+    /// report failure".
+    #[tokio::test]
+    async fn a_successful_pipeline_is_still_recorded_as_done() {
+        let db = test_db();
+        let (slot, claim_id, _wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan(&claim_id);
+
+        let exit = run_under_slot(
+            finish_scan(&mgr, DID, &claim_id, Ok((7, 42, false))),
+            db.clone(),
+            mgr.clone(),
+            DID.to_string(),
+            slot,
+            live_guard(),
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert_eq!(exit, SlotExit::Completed);
+        assert_eq!(status_of(&db, DID).await, "done");
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status entry");
+        assert_eq!(status.phase, WebScanPhase::Done);
+        assert!(status.last_error.is_none());
+        assert!(status.progress_message.contains("42 accounts scored"));
     }
 }
 
