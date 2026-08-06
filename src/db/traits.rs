@@ -36,10 +36,87 @@ pub struct ScanQueueEntry {
     pub status: String,
     /// 1-based position among queued rows; 0 when running or finished.
     pub position: i64,
-    /// position x rolling median scan duration. None until enough scans have
-    /// finished to have a median.
+    /// `ceil(position / concurrency_limit) x rolling median scan duration` —
+    /// the cap divides the wait, so a plain `position x median` overstates it
+    /// by up to the cap factor. None while the status is anything but
+    /// "queued" (a running scan's remaining time is unknown, not zero) and
+    /// None until enough scans have finished to have a median.
     pub eta_seconds: Option<i64>,
     pub enqueued_at: String,
+}
+
+/// Shared ETA formula for `ScanQueueEntry::eta_seconds` (#257).
+///
+/// Lives here rather than in either backend so the two cannot drift.
+///
+/// - Only a "queued" row has a meaningful ETA. A *running* scan's remaining
+///   time is unknown, and `position` is forced to 0 for non-queued rows, so
+///   computing anyway would report `Some(0)` — telling a user watching their
+///   own running scan "0 seconds remaining".
+/// - `concurrency_limit` scans drain in parallel, so the wait is
+///   `ceil(position / limit)` batches, not `position` of them. Charcoal scans
+///   run 22 minutes to 2 hours, so at cap 2 the uncorrected formula tells a
+///   position-4 user roughly twice their real wait.
+pub(crate) fn eta_seconds(
+    status: &str,
+    position: i64,
+    concurrency_limit: usize,
+    median_secs: Option<f64>,
+) -> Option<i64> {
+    if status != "queued" {
+        return None;
+    }
+    let median = median_secs?;
+    // A cap of 0 admits nothing, so there is no ETA to give.
+    let limit = i64::try_from(concurrency_limit).unwrap_or(i64::MAX).max(0);
+    if limit == 0 {
+        return None;
+    }
+    // Manual ceiling division: i64::div_ceil is still unstable. position is a
+    // COUNT(*) so it is never negative.
+    let batches = (position.max(0) + limit - 1) / limit;
+    Some((median * batches as f64) as i64)
+}
+
+#[cfg(test)]
+mod eta_tests {
+    use super::eta_seconds;
+
+    #[test]
+    fn only_queued_rows_get_an_eta() {
+        // position is forced to 0 for non-queued rows, so without the status
+        // gate these would all report Some(0) — "0 seconds remaining".
+        for status in ["running", "done", "failed"] {
+            assert_eq!(eta_seconds(status, 0, 2, Some(600.0)), None, "{status}");
+        }
+    }
+
+    #[test]
+    fn the_cap_divides_the_wait() {
+        assert_eq!(eta_seconds("queued", 4, 1, Some(600.0)), Some(2400));
+        assert_eq!(eta_seconds("queued", 4, 2, Some(600.0)), Some(1200));
+        // Ceiling, not floor: position 4 at cap 3 is still two batches.
+        assert_eq!(eta_seconds("queued", 4, 3, Some(600.0)), Some(1200));
+        assert_eq!(eta_seconds("queued", 4, 4, Some(600.0)), Some(600));
+    }
+
+    #[test]
+    fn no_median_and_no_capacity_mean_no_eta() {
+        assert_eq!(eta_seconds("queued", 3, 2, None), None);
+        assert_eq!(eta_seconds("queued", 3, 0, Some(600.0)), None);
+    }
+}
+
+/// A successful claim on a queued scan (#257).
+///
+/// `claim_id` is a fencing token minted by the claim. `heartbeat_scan` and
+/// `finish_queued_scan` require it, so a worker whose lease lapsed — its row
+/// already reclaimed and handed to someone else — cannot free or extend the
+/// new owner's slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanClaim {
+    pub user_did: String,
+    pub claim_id: String,
 }
 
 #[async_trait]
@@ -373,20 +450,40 @@ pub trait Database: Send + Sync {
     async fn enqueue_scan(&self, user_did: &str) -> Result<()>;
 
     /// Claim the oldest queued scan if fewer than `limit` are running.
-    /// Returns the claimed user_did, or None when at capacity or empty.
-    /// `lease_secs` sets how long the claim is valid before it can be reclaimed.
-    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<String>>;
+    /// Returns the claim (user_did plus fencing token), or None when at
+    /// capacity or empty. `lease_secs` sets how long the claim is valid before
+    /// it can be reclaimed.
+    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>>;
 
     /// Extend a running scan's lease. Called periodically while it runs.
-    async fn heartbeat_scan(&self, user_did: &str, lease_secs: i64) -> Result<()>;
+    /// Returns false when `claim_id` no longer owns the row — the lease lapsed
+    /// and someone else holds the slot, so the caller should stop.
+    async fn heartbeat_scan(&self, user_did: &str, claim_id: &str, lease_secs: i64)
+        -> Result<bool>;
 
     /// Mark a scan done (error None) or failed (error Some), releasing its slot.
-    async fn finish_queued_scan(&self, user_did: &str, error: Option<&str>) -> Result<()>;
+    /// Returns false when the row is not running under `claim_id`, in which
+    /// case nothing was changed.
+    async fn finish_queued_scan(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        error: Option<&str>,
+    ) -> Result<bool>;
 
     /// Return running rows whose lease has lapsed to 'queued'. Called at boot.
     /// Returns how many were reclaimed.
     async fn reclaim_expired_scans(&self) -> Result<usize>;
 
-    /// A user's queue entry with position and ETA, or None if not queued.
-    async fn scan_queue_entry(&self, user_did: &str) -> Result<Option<ScanQueueEntry>>;
+    /// A user's queue entry, or None if the user has never been enqueued.
+    /// A row in any status ("queued", "running", "done", "failed") returns
+    /// Some; only the absence of a row returns None.
+    ///
+    /// `concurrency_limit` is the admission cap, needed because the ETA
+    /// depends on how many scans run at once — see `ScanQueueEntry::eta_seconds`.
+    async fn scan_queue_entry(
+        &self,
+        user_did: &str,
+        concurrency_limit: usize,
+    ) -> Result<Option<ScanQueueEntry>>;
 }

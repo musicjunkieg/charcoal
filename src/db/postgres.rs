@@ -21,11 +21,27 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{Database, ScanQueueEntry, ScanSkip};
+use super::traits::{eta_seconds, Database, ScanClaim, ScanQueueEntry, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
 pub type PgPool = Pool<Postgres>;
+
+/// Advisory-lock key that serializes scan admission (#257).
+///
+/// The pool runs at READ COMMITTED, so `SELECT COUNT(*) WHERE status='running'`
+/// takes no lock and sees only rows committed before the statement began. Two
+/// admitters therefore both read the same pre-claim count, both pass the cap
+/// guard, and `FOR UPDATE SKIP LOCKED` hands them *different* rows — so it
+/// cannot enforce the cap; it only stops double-claiming one row. Taking a
+/// transaction-scoped advisory lock before the count makes admission
+/// single-file, which is what the cap actually requires.
+///
+/// The value is arbitrary but must be identical in every admitter, so it lives
+/// here as a constant rather than inline. Nothing else in this codebase takes a
+/// Postgres advisory lock, so there is no collision to avoid; the digits are a
+/// mnemonic for "charcoal #257 scan queue".
+const SCAN_ADMISSION_ADVISORY_LOCK_KEY: i64 = 0x0000_0257_5CA4_0001;
 
 pub struct PgDatabase {
     pool: PgPool,
@@ -1500,15 +1516,20 @@ impl Database for PgDatabase {
     // --- Scan admission queue (#257) ---
 
     async fn enqueue_scan(&self, user_did: &str) -> Result<()> {
-        // ON CONFLICT DO NOTHING when already queued or running; a finished row
-        // is reset so a user can scan again.
+        // The ON CONFLICT DO UPDATE ... WHERE only fires for a finished row, so
+        // a re-enqueue after 'done'/'failed' resets the row and starts a fresh
+        // wait. While 'queued' or 'running' the WHERE excludes the row and the
+        // update is skipped entirely, leaving enqueued_at untouched — that is
+        // what stops a double-click from sending the user to the back of the
+        // queue.
         sqlx_core::query::query(
             "INSERT INTO scan_queue (user_did, status, enqueued_at)
              VALUES ($1, 'queued', NOW())
              ON CONFLICT (user_did) DO UPDATE
                SET status = 'queued', enqueued_at = NOW(),
                    started_at = NULL, finished_at = NULL,
-                   lease_expires = NULL, last_error = NULL
+                   lease_expires = NULL, last_error = NULL,
+                   claim_id = NULL
              WHERE scan_queue.status IN ('done', 'failed')",
         )
         .bind(user_did)
@@ -1517,8 +1538,17 @@ impl Database for PgDatabase {
         Ok(())
     }
 
-    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<String>> {
+    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
         let mut tx = self.pool.begin().await?;
+
+        // Serialize admitters before the count — see
+        // SCAN_ADMISSION_ADVISORY_LOCK_KEY for why the count alone races.
+        // Transaction-scoped, so it releases on commit/rollback automatically
+        // and blocks nothing except another admitter.
+        sqlx_core::query::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(SCAN_ADMISSION_ADVISORY_LOCK_KEY)
+            .execute(&mut *tx)
+            .await?;
 
         let running: i64 =
             sqlx_core::query::query("SELECT COUNT(*) FROM scan_queue WHERE status = 'running'")
@@ -1548,62 +1578,95 @@ impl Database for PgDatabase {
         };
         let did: String = row.get(0);
 
-        sqlx_core::query::query(
+        // gen_random_uuid() is core Postgres from 13 on, so the fencing token
+        // costs no extension and no round-trip.
+        let claim_row = sqlx_core::query::query(
             "UPDATE scan_queue
              SET status = 'running', started_at = NOW(),
-                 lease_expires = NOW() + make_interval(secs => $2)
-             WHERE user_did = $1",
+                 lease_expires = NOW() + make_interval(secs => $2),
+                 claim_id = gen_random_uuid()::TEXT
+             WHERE user_did = $1
+             RETURNING claim_id",
         )
         .bind(&did)
         .bind(lease_secs as f64)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
+        let claim_id: String = claim_row.get(0);
 
         tx.commit().await?;
-        Ok(Some(did))
+        Ok(Some(ScanClaim {
+            user_did: did,
+            claim_id,
+        }))
     }
 
-    async fn heartbeat_scan(&self, user_did: &str, lease_secs: i64) -> Result<()> {
-        sqlx_core::query::query(
+    async fn heartbeat_scan(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        lease_secs: i64,
+    ) -> Result<bool> {
+        let result = sqlx_core::query::query(
             "UPDATE scan_queue
-             SET lease_expires = NOW() + make_interval(secs => $2)
-             WHERE user_did = $1 AND status = 'running'",
+             SET lease_expires = NOW() + make_interval(secs => $3)
+             WHERE user_did = $1 AND status = 'running' AND claim_id = $2",
         )
         .bind(user_did)
+        .bind(claim_id)
         .bind(lease_secs as f64)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
-    async fn finish_queued_scan(&self, user_did: &str, error: Option<&str>) -> Result<()> {
-        sqlx_core::query::query(
+    async fn finish_queued_scan(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        error: Option<&str>,
+    ) -> Result<bool> {
+        // status = 'running' AND claim_id together are what make this safe: a
+        // worker whose lease lapsed has had its row reclaimed and re-claimed
+        // under a new claim_id, so its late finish matches nothing instead of
+        // stomping the new owner's running row to 'done' and freeing a slot
+        // that is still occupied.
+        let result = sqlx_core::query::query(
             "UPDATE scan_queue
-             SET status = CASE WHEN $2::TEXT IS NULL THEN 'done' ELSE 'failed' END,
-                 finished_at = NOW(), lease_expires = NULL, last_error = $2
-             WHERE user_did = $1",
+             SET status = CASE WHEN $3::TEXT IS NULL THEN 'done' ELSE 'failed' END,
+                 finished_at = NOW(), lease_expires = NULL, last_error = $3
+             WHERE user_did = $1 AND status = 'running' AND claim_id = $2",
         )
         .bind(user_did)
+        .bind(claim_id)
         .bind(error)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn reclaim_expired_scans(&self) -> Result<usize> {
+        // A NULL lease on a running row is unrecoverable otherwise — nothing
+        // would ever reclaim it and the slot would stay occupied forever.
         let result = sqlx_core::query::query(
             "UPDATE scan_queue
-             SET status = 'queued', started_at = NULL, lease_expires = NULL
-             WHERE status = 'running' AND lease_expires < NOW()",
+             SET status = 'queued', started_at = NULL, lease_expires = NULL,
+                 claim_id = NULL
+             WHERE status = 'running'
+               AND (lease_expires IS NULL OR lease_expires < NOW())",
         )
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() as usize)
     }
 
-    async fn scan_queue_entry(&self, user_did: &str) -> Result<Option<ScanQueueEntry>> {
+    async fn scan_queue_entry(
+        &self,
+        user_did: &str,
+        concurrency_limit: usize,
+    ) -> Result<Option<ScanQueueEntry>> {
         let row = sqlx_core::query::query(
-            "SELECT status, enqueued_at::TEXT,
+            "SELECT status, enqueued_at,
                     (SELECT COUNT(*) FROM scan_queue q2
                       WHERE q2.status = 'queued'
                         AND q2.enqueued_at <= q.enqueued_at) AS position
@@ -1615,7 +1678,12 @@ impl Database for PgDatabase {
 
         let Some(row) = row else { return Ok(None) };
         let status: String = row.get(0);
-        let enqueued_at: String = row.get(1);
+        // TIMESTAMPTZ here vs TEXT in SQLite. `::TEXT` would render
+        // "2026-08-06 00:36:25.231997-07" — a different separator and offset
+        // format from SQLite's RFC3339, varying with the connection's TimeZone
+        // and rejected by DateTime::parse_from_rfc3339. Normalise the way
+        // list_scan_skips above does.
+        let enqueued_at: String = row.get::<chrono::DateTime<chrono::Utc>, _>(1).to_rfc3339();
         let position: i64 = if status == "queued" { row.get(2) } else { 0 };
 
         // Rolling median over the last 20 completed scans. NULL until any
@@ -1632,11 +1700,13 @@ impl Database for PgDatabase {
         .await?
         .get(0);
 
+        let eta_seconds = eta_seconds(&status, position, concurrency_limit, median);
+
         Ok(Some(ScanQueueEntry {
             user_did: user_did.to_string(),
             status,
             position,
-            eta_seconds: median.map(|m| (m * position as f64) as i64),
+            eta_seconds,
             enqueued_at,
         }))
     }

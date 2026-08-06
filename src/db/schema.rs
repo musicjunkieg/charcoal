@@ -368,6 +368,9 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // The SQLite implementation is deliberately minimal — single process, no
     // SKIP LOCKED needed — because #263 will delete this backend entirely.
     // Written to be removed, not maintained.
+    //
+    // claim_id is the fencing token; see migrations/postgres/0011_scan_queue.sql
+    // for why it exists.
     run_migration(conn, 11, |c| {
         c.execute_batch(
             "
@@ -378,7 +381,8 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
                 started_at      TEXT,
                 finished_at     TEXT,
                 lease_expires   TEXT,
-                last_error      TEXT
+                last_error      TEXT,
+                claim_id        TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_scan_queue_status_enqueued
@@ -508,7 +512,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v10
+        // Verify schema_version has all versions through v11
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -621,7 +625,7 @@ mod tests {
         // scan_skips, scan_queue = 12 tables
         assert_eq!(count, 12i64);
 
-        // Verify schema_version includes v4 through v10
+        // Verify schema_version includes v4 through v11
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()

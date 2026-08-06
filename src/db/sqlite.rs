@@ -17,7 +17,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     UserLabel, UserRow,
 };
-use super::traits::{Database, ScanQueueEntry, ScanSkip};
+use super::traits::{Database, ScanClaim, ScanQueueEntry, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
@@ -419,19 +419,32 @@ impl Database for SqliteDatabase {
         super::queries::enqueue_scan(&conn, user_did)
     }
 
-    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<String>> {
+    async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
+        // The guard is held for the whole call, which is what makes in-process
+        // admission single-file here — see the note in queries.rs on why this
+        // backend needs no advisory lock.
         let conn = self.conn.lock().await;
         super::queries::claim_next_scan(&conn, limit, lease_secs)
     }
 
-    async fn heartbeat_scan(&self, user_did: &str, lease_secs: i64) -> Result<()> {
+    async fn heartbeat_scan(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        lease_secs: i64,
+    ) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::heartbeat_scan(&conn, user_did, lease_secs)
+        super::queries::heartbeat_scan(&conn, user_did, claim_id, lease_secs)
     }
 
-    async fn finish_queued_scan(&self, user_did: &str, error: Option<&str>) -> Result<()> {
+    async fn finish_queued_scan(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        error: Option<&str>,
+    ) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::finish_queued_scan(&conn, user_did, error)
+        super::queries::finish_queued_scan(&conn, user_did, claim_id, error)
     }
 
     async fn reclaim_expired_scans(&self) -> Result<usize> {
@@ -439,9 +452,13 @@ impl Database for SqliteDatabase {
         super::queries::reclaim_expired_scans(&conn)
     }
 
-    async fn scan_queue_entry(&self, user_did: &str) -> Result<Option<ScanQueueEntry>> {
+    async fn scan_queue_entry(
+        &self,
+        user_did: &str,
+        concurrency_limit: usize,
+    ) -> Result<Option<ScanQueueEntry>> {
         let conn = self.conn.lock().await;
-        super::queries::scan_queue_entry(&conn, user_did)
+        super::queries::scan_queue_entry(&conn, user_did, concurrency_limit)
     }
 }
 

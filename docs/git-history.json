@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7e8ec24629ad134df9c2bb56a01c8b88ebbeaebe",
+    "short_hash": "7e8ec24",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T00:31:09-07:00",
+    "message": "feat(257): scan_queue table and Database methods (schema v11)\n\nReplaces ScanManager any_running bool with a durable queue. Admission\nbecomes \"how many rows are running?\" — which survives a redeploy, is\ncorrect with more than one replica, and makes position and ETA real\nrather than guessed.\n\nuser_did as PK makes enqueue idempotent, so a double-click cannot\ndouble-book. lease_expires is what makes the deploy cadence safe: a\nkilled scan lapses and is re-queued at boot, and #208 scan_phase means it\nresumes rather than restarts.\n\nPostgres claims with FOR UPDATE SKIP LOCKED so two admitters never take\nthe same row. SQLite uses a write transaction — single process, no\nSKIP LOCKED needed — and is deliberately minimal because #263 deletes\nthat backend.\n\nCap test negative-controlled: with the guard widened it fails on the\nthird claim, so it is measuring the cap rather than passing vacuously.\n\nAlso: delete_user_data (both backends) now clears scan_queue rows, and\ntable_count fixtures updated from 11 to 12 for the new table. The three\nnew Postgres tests are serialized behind a static mutex in the test file\n— unlike every other table here, scan queue position/count is genuinely\nglobal rather than user-scoped, so under the default parallel test\nharness one test could observe another's in-flight queued row. Confirmed\nby direct reproduction (~1 failure in 3 runs before the fix, 6/6 clean\nafter) rather than assumed.\n\nRefs #257",
+    "files_changed": 9
+  },
+  {
     "hash": "eb57b589db3f0c165ca94b86c2affdca2a1f6445",
     "short_hash": "eb57b58",
     "author": "Bryan Guffey",
