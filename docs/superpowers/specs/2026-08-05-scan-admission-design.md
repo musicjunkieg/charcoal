@@ -179,7 +179,9 @@ It also is not only a multi-replica concern. A single replica over-admits too, a
 
 ## API and UX
 
-`POST /api/scan` stops returning "server busy". `409` survives only for *"you already have a scan queued or running"*.
+`POST /api/scan` stops returning "server busy".
+
+**Correction (2026-08-06, Task 6).** An earlier draft of this line said *"`409` survives only for 'you already have a scan queued or running'"*, which contradicted two other statements in this same spec: the idempotency rationale above ("a double-click cannot double-book") and the error table's *"PK conflict → returns current position, no second row"*. The implemented behavior follows those two: **the endpoint never returns 409.** A repeat request from a user who is already queued or running is idempotent — `202` with their current position and ETA. That is both friendlier for the double-click case the table describes and the only reading consistent with `user_did` being the primary key.
 
 `GET /api/status` gains a queue block, and `WebScanPhase` gains a `Queued` variant:
 

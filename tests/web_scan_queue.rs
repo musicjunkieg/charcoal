@@ -94,6 +94,13 @@ async fn a_second_user_is_queued_not_refused() {
 /// A double-click must not book a second scan or produce an error. `user_did`
 /// is the queue's primary key, so the enqueue is a no-op and the caller just
 /// learns where they already are.
+///
+/// Ordering is A, B, A-again — not A, A, B. With A the only row queued when B
+/// arrives, B lands at position 2 whether or not the repeated A request reset
+/// `enqueued_at`, so that ordering cannot tell an idempotent re-post from one
+/// that silently re-queued A behind B. Posting A a second time AFTER B is
+/// queued is the case that actually discriminates: if the repeat pushed A's
+/// `enqueued_at` forward, A would move to position 2 and B to position 1.
 #[tokio::test]
 async fn a_repeated_request_is_idempotent() {
     let Some((app, db)) = build_open_test_app_with_db() else {
@@ -104,15 +111,19 @@ async fn a_repeated_request_is_idempotent() {
     db.upsert_user(USER_B, "b.bsky.social").await.expect("user");
 
     let (_, first) = post_scan(&app, USER_A).await;
+    let (_, b) = post_scan(&app, USER_B).await;
     let (status, second) = post_scan(&app, USER_A).await;
 
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(first["position"], second["position"]);
 
-    // The second user is still position 2 — the double-click did not push them
-    // back behind a duplicate row.
-    let (_, b) = post_scan(&app, USER_B).await;
-    assert_eq!(b["position"], 2);
+    // A is still position 1 and B is still position 2 — the double-click did
+    // not push A back behind B's row.
+    assert_eq!(
+        second["position"], 1,
+        "A must stay at the front of the queue"
+    );
+    assert_eq!(b["position"], 2, "B must not be displaced by A's repeat");
 }
 
 /// GET /api/status must report the wait, since that is all a queued user has

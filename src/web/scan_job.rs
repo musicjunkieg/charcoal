@@ -423,6 +423,18 @@ where
         }
     }
 
+    // Free the in-process registration BEFORE the row is released.
+    //
+    // A row that still holds a slot is `running`, which `claim_next_scan` never
+    // selects — so a registration held while the row is still ours is never a
+    // hazard in either order. The hazard is on the other side: after
+    // `release_and_log` returns, the row can be re-enqueued and reclaimed by a
+    // concurrent admitter pass immediately, and if `live` were still held at
+    // that instant, `try_register` would spuriously refuse the very scan that
+    // is supposed to start. Dropping first closes that window instead of
+    // opening it.
+    drop(live);
+
     // Release the queue slot on every exit — success, error, caught panic, and
     // abandonment all land here. Done after the status update so the next
     // admitted scan cannot observe this user mid-transition. On abandonment the
@@ -430,11 +442,6 @@ where
     // so `release_and_log` reports Lost and changes nothing.
     crate::web::admitter::release_and_log(&db, &user_did, &slot.claim_id, error_text.as_deref())
         .await;
-
-    // Free the in-process registration only after the row is released, so no
-    // admitter can register this user while the row still holds a slot (#273).
-    // Explicit rather than implicit: the ordering is the point.
-    drop(live);
 
     // try_send, not send: a full channel already has a wake pending, so
     // dropping this one loses nothing, and a closed channel only means the

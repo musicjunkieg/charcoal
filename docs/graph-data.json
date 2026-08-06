@@ -4879,10 +4879,21 @@
       "node_type": "action",
       "title": "Task 6: POST /api/scan enqueues instead of refusing; fix #273/#274/#275 before turning the queue on",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T07:10:09.171166-07:00",
-      "updated_at": "2026-08-06T07:10:09.171166-07:00",
+      "updated_at": "2026-08-06T07:12:27.006090-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"3195c38\",\"confidence\":90,\"files\":[\"src/web/scan_job.rs\",\"src/web/admitter.rs\",\"src/web/handlers/scan.rs\",\"src/web/handlers/admin.rs\",\"src/web/handlers/status.rs\",\"src/web/test_helpers.rs\",\"tests/web_scan_queue.rs\",\"tests/unit_admin.rs\"]}"
+    },
+    {
+      "id": 451,
+      "change_id": "b0bc82be-927e-4264-af9a-45acef99645f",
+      "node_type": "outcome",
+      "title": "Task 6 landed (385c3f3): enqueue live, #273/#274/#275 fixed, all three seen RED first",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T07:12:20.346306-07:00",
+      "updated_at": "2026-08-06T07:12:27.012991-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"385c3f3\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -9659,6 +9670,17 @@
       "weight": 1.0,
       "rationale": "Task 5 fix wave left #273/#274 live; Task 6 is what makes them bite",
       "created_at": "2026-08-06T07:10:15.100892-07:00"
+    },
+    {
+      "id": 444,
+      "from_node_id": 450,
+      "to_node_id": 451,
+      "from_change_id": "b1e37e12-dc74-487a-baa3-799b7ed15286",
+      "to_change_id": "b0bc82be-927e-4264-af9a-45acef99645f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-06T07:12:26.999733-07:00"
     }
   ],
   "documents": [

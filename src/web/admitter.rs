@@ -10,6 +10,12 @@
 // a scan itself, because a second admission path is a second way past the cap
 // the claim enforces. `launch_scan` is `pub(crate)` and demands a `QueueSlot`
 // so that stays true by construction.
+//
+// The cap itself holds across replicas by the argument above. #273 — never
+// double-running the SAME claimed row — does NOT: its only defense besides the
+// `LiveScans` registry below is the fencing token, and the registry itself is
+// process-local (see its docstring). Charcoal runs one Railway replica today,
+// so this gap is a recorded launch-set assumption (#277), not a fixed one.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -101,6 +107,17 @@ impl ClaimStatus {
 /// "running" on purpose, so consulting it would refuse the successor forever
 /// rather than only while the predecessor is genuinely alive. This tracks the
 /// live pipeline, and `run_under_slot` clears it on every exit.
+///
+/// **This registry is process-scoped, and that limits what it protects (#277).**
+/// It only ever SUBTRACTS from admission — refusing a claim `claim_next_scan`
+/// already won — so the concurrency CAP still holds across replicas regardless.
+/// But #273 itself, the double-run this exists to prevent, does NOT hold across
+/// replicas: replica B's admitter can claim a row whose pipeline is live on
+/// replica A, B's registry knows nothing about it (empty, in a different
+/// process), and the double-run proceeds. The only defense left in that case is
+/// the fencing token — and the token alone is already argued above to be
+/// insufficient on its own. Charcoal runs a single Railway replica today, so
+/// this is a recorded launch-set assumption, not a fixed gap.
 #[derive(Default)]
 pub struct LiveScans {
     inner: Mutex<HashSet<String>>,
@@ -114,7 +131,15 @@ impl LiveScans {
     /// Register `user_did` as executing here, or return `None` because it
     /// already is.
     pub fn try_register(self: &Arc<Self>, user_did: &str) -> Option<LiveScanGuard> {
-        let mut live = self.inner.lock().expect("live scan registry lock");
+        // A `HashSet<String>` has no invariant a panicking holder could have
+        // left broken mid-update — recovering the poisoned lock is strictly
+        // better than propagating the panic into `admit_ready`, which would
+        // kill `run_admitter` and wedge admission for every queued scan until
+        // the process restarts.
+        let mut live = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !live.insert(user_did.to_string()) {
             return None;
         }
@@ -128,7 +153,7 @@ impl LiveScans {
     fn is_live(&self, user_did: &str) -> bool {
         self.inner
             .lock()
-            .expect("live scan registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains(user_did)
     }
 }
@@ -146,10 +171,13 @@ pub struct LiveScanGuard {
 
 impl Drop for LiveScanGuard {
     fn drop(&mut self) {
+        // Recover rather than panic (see `try_register`): a poisoned lock here
+        // is no reason to lose the registration cleanup that lets this user's
+        // next scan be admitted.
         self.registry
             .inner
             .lock()
-            .expect("live scan registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&self.user_did);
     }
 }

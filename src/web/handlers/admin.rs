@@ -289,12 +289,37 @@ pub async fn delete_user(
         ));
     }
 
-    {
-        let mgr = state.scan_manager.read().await;
-        if mgr.is_scan_running_for(&target_did) {
+    // Gate on the durable `scan_queue` row, not `ScanManager::is_scan_running_for`
+    // (#278). The in-process status map only knows about scans THIS process
+    // launched, so it misses a row that is merely queued, one running on
+    // another replica, and anything left over a restart. `delete_user_data`
+    // already clears `scan_queue` below, so nothing is orphaned either way —
+    // this just makes the guard as durable as the rest of #257's admission
+    // path instead of trusting a process-local view.
+    //
+    // A DB error here must NOT fall through to the delete. The guard it
+    // replaced was an in-memory read that could not fail, so `if let Ok(..)`
+    // would have quietly turned "we cannot tell" into "go ahead" — deleting a
+    // user out from under a live scan is exactly what this check exists to
+    // prevent, so an unreadable queue is a 500, not an implicit yes.
+    let queue_entry = state
+        .db
+        .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
+        .await
+        .map_err(|e| {
+            tracing::error!(target_did = %target_did, error = %e, "delete_user: scan_queue lookup failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+    if let Some(entry) = queue_entry {
+        if matches!(entry.status.as_str(), "queued" | "running") {
             return Err((
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": "Cannot delete user with running scan"})),
+                Json(
+                    serde_json::json!({"error": "Cannot delete user with queued or running scan"}),
+                ),
             ));
         }
     }
