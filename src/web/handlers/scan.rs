@@ -50,6 +50,7 @@ pub async fn trigger_scan(
     launch_scan(
         state.config.clone(),
         state.db.clone(),
+        state.models.clone(),
         state.scan_manager.clone(),
         auth.did,
         actor_handle,

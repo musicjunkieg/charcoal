@@ -4685,6 +4685,28 @@
       "created_at": "2026-08-05T23:07:43.234256-07:00",
       "updated_at": "2026-08-05T23:07:57.439970-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"e1d4fa3\",\"confidence\":92}"
+    },
+    {
+      "id": 433,
+      "change_id": "69120f49-d034-4a37-bf6e-095536a666d4",
+      "node_type": "action",
+      "title": "Fix #264 critical review finding: Stage-1 score_batch inference time was uncounted, biasing inference_pct low",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-05T23:45:22.999468-07:00",
+      "updated_at": "2026-08-05T23:45:22.999468-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"f14554e\",\"confidence\":90,\"files\":[\"src/scoring/profile.rs\",\"src/pipeline/scan_phases/gather.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 434,
+      "change_id": "31e823bf-39fa-4d82-89ec-17c5d2c4b902",
+      "node_type": "outcome",
+      "title": "GatherTiming gains stage1_onnx_ms bucket; stage1_outcome_timed narrows the timer to just scorer.score_batch (excludes language gate, TF-IDF, early-exit check); inference_pct sums both buckets. New wiring test proven to fail when the timer line is removed. 679 tests pass, 0 SKIP:, clippy clean both feature sets",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-05T23:45:28.454241-07:00",
+      "updated_at": "2026-08-05T23:45:28.454241-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"f14554e\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -9252,6 +9274,28 @@
       "weight": 1.0,
       "rationale": "Result of wiring GatherTiming through gather_account and Phase A",
       "created_at": "2026-08-05T23:07:46.396902-07:00"
+    },
+    {
+      "id": 425,
+      "from_node_id": 430,
+      "to_node_id": 433,
+      "from_change_id": "f78ca9e9-2752-4269-9fe4-d43432ee0f6f",
+      "to_change_id": "69120f49-d034-4a37-bf6e-095536a666d4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Critical review finding on the #264 instrumentation goal — Stage-1 inference call was missed",
+      "created_at": "2026-08-05T23:45:25.066094-07:00"
+    },
+    {
+      "id": 426,
+      "from_node_id": 433,
+      "to_node_id": 434,
+      "from_change_id": "69120f49-d034-4a37-bf6e-095536a666d4",
+      "to_change_id": "31e823bf-39fa-4d82-89ec-17c5d2c4b902",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of wiring the Stage-1 inference timer",
+      "created_at": "2026-08-05T23:45:30.824620-07:00"
     }
   ],
   "documents": [

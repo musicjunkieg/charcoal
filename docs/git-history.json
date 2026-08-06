@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f14554eea453af7b0a55404604d5ed1086858316",
+    "short_hash": "f14554e",
+    "author": "Bryan Guffey",
+    "date": "2026-08-05T23:45:04-07:00",
+    "message": "fix(264): capture Stage-1 ONNX inference time in Phase A timing split\n\nPhase A timing (#264, e1d4fa3) missed the Stage-1 score_batch call in\nstage1_outcome — real ONNX inference that runs for every account before\nthe Stage-2 clean pass, on the same model mutex. That made clean_pass_ms\nand inference_pct systematically undercount inference share for the\n#257 concurrency decision, biasing it toward looking safer to raise\nconcurrency than it actually is.\n\nAdds GatherTiming.stage1_onnx_ms as a third, separately-visible bucket\n(Stage 1 runs for every account; Stage 2 only for survivors, so folding\nthem together would blur two different questions). inference_pct() now\nsums both buckets. stage1_outcome gains a stage1_outcome_timed sibling\nthat narrows the timer to just the scorer.score_batch(...) call --\nnone of stage1_outcome's non-inference work (language coverage gate,\n<5-posts check, TF-IDF extraction, early-exit comparison) is included.\nstage1_outcome itself is unchanged for its other callers.\n\nAdds a wiring test (gather_account_populates_all_timing_buckets_when_reaching_stage_2)\nusing delayed test doubles, since no prior test asserted gather_account\nactually produces non-zero timings -- only that the GatherTiming struct\narithmetic works in isolation.",
+    "files_changed": 6
+  },
+  {
     "hash": "e1d4fa33c1feec2ee31e0f7566e1931fc259947a",
     "short_hash": "e1d4fa3",
     "author": "Bryan Guffey",

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -55,6 +55,8 @@ pub struct AppState {
     /// Per-caller rate limiter for the PUBLIC typeahead endpoint (#227).
     /// Shared so the limit is global to the process, not per-request.
     pub typeahead_limiter: Arc<typeahead::TypeaheadLimiter>,
+    /// ONNX models, loaded once at boot and shared by every scan (#257).
+    pub models: Arc<scan_job::ScanModels>,
 }
 
 /// Start the Axum web server and block until it exits.
@@ -102,6 +104,15 @@ pub async fn run_server(
     };
     info!("Derived stable P-256 signing key for OAuth client assertions");
 
+    // Load models before binding the port. Fail-fast: a server that cannot
+    // score is not usefully up, and this surfaces a broken model volume as a
+    // failed deploy rather than as scans that fail one by one later.
+    let models = Arc::new(
+        scan_job::ScanModels::load(&config.model_dir)
+            .context("model load failed at boot — the server will not start")?,
+    );
+    info!("Loaded ONNX models (toxicity + embedding + NLI) into shared state");
+
     let state = AppState {
         db,
         config: Arc::new(config),
@@ -111,6 +122,7 @@ pub async fn run_server(
         signing_key,
         http: reqwest::Client::new(),
         typeahead_limiter: handlers::typeahead::build_limiter(),
+        models,
     };
 
     let app = build_router(state);

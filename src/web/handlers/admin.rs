@@ -227,6 +227,7 @@ pub async fn trigger_admin_scan(
     scan_job::launch_scan(
         state.config.clone(),
         state.db.clone(),
+        state.models.clone(),
         state.scan_manager.clone(),
         target_did.clone(),
         handle,

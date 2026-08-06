@@ -1,7 +1,10 @@
 // Background scan job — runs the full scan pipeline when triggered via POST /api/scan.
 //
-// The scan loads the toxicity scorer and embedder fresh each time it runs,
-// so startup stays fast and the scorer isn't held in memory while idle.
+// The three ONNX models (toxicity, embedding, NLI) are loaded once at boot into
+// `AppState::models` and shared by every scan via `Arc::clone` (#257). They used
+// to load per scan so they weren't held in memory while idle; concurrency makes
+// that cost linear in concurrent scans (~500MB each since #231's fp32 NLI
+// export), so they stay resident instead.
 //
 // Only one scan can run at a time; POST /api/scan returns 409 if one is already active.
 
@@ -9,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
+use anyhow::Context;
 use futures::{FutureExt, StreamExt};
 use tracing::{error, info, warn};
 
@@ -18,11 +22,47 @@ use crate::db::Database;
 use crate::scoring::behavioral::detect_pile_on_participants;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::fingerprint::TopicFingerprint;
-use crate::toxicity::download::{
-    embedding_files_present, embedding_model_dir, model_files_present, nli_files_present,
-};
+use crate::toxicity::download::{embedding_files_present, embedding_model_dir};
 use crate::toxicity::onnx::OnnxToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
+
+/// The three ONNX models a scan needs, loaded once and shared.
+///
+/// These used to load per scan so they were not held while idle. Concurrency
+/// (#257) makes that cost linear in concurrent scans — ~500MB each since #231
+/// moved NLI to the fp32 export — so they move to `AppState` and stay resident.
+/// Accepted trade: production idles ~0.776GB today and ~1.28GB after, which
+/// raises the metered RAM floor (#188) even on days nobody scans.
+pub struct ScanModels {
+    pub toxicity: Arc<OnnxToxicityScorer>,
+    pub embedder: Arc<crate::topics::embeddings::SentenceEmbedder>,
+    pub nli: Arc<crate::scoring::nli::NliScorer>,
+}
+
+impl ScanModels {
+    /// Load all three models from `model_dir`.
+    ///
+    /// Fails hard rather than degrading: a server that cannot score is not
+    /// usefully up, and production auto-downloads missing models before this
+    /// point. The per-scan path used to degrade when a model was absent; at
+    /// boot that would hide a broken deploy behind a green healthcheck.
+    pub fn load(model_dir: &std::path::Path) -> anyhow::Result<Self> {
+        let toxicity = OnnxToxicityScorer::load(model_dir)
+            .context("failed to load the toxicity model at boot")?;
+        let embedder = crate::topics::embeddings::SentenceEmbedder::load(
+            &crate::toxicity::download::embedding_model_dir(model_dir),
+        )
+        .context("failed to load the embedding model at boot")?;
+        let nli = crate::scoring::nli::NliScorer::load(model_dir)
+            .context("failed to load the NLI model at boot")?;
+
+        Ok(Self {
+            toxicity: Arc::new(toxicity),
+            embedder: Arc::new(embedder),
+            nli: Arc::new(nli),
+        })
+    }
+}
 
 /// Manages per-user scan status with a global one-at-a-time gate.
 pub struct ScanManager {
@@ -181,6 +221,7 @@ async fn set_progress(
 pub fn launch_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
     scan_manager: Arc<RwLock<ScanManager>>,
     user_did: String,
     actor_handle: String,
@@ -189,6 +230,7 @@ pub fn launch_scan(
         let result = AssertUnwindSafe(run_scan(
             config,
             db,
+            models,
             scan_manager.clone(),
             &user_did,
             &actor_handle,
@@ -276,11 +318,12 @@ pub async fn build_user_fingerprint(
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
     scan_manager: Arc<RwLock<ScanManager>>,
     user_did: &str,
     actor_handle: &str,
 ) -> anyhow::Result<()> {
-    // Phase 1: load toxicity scorer
+    // Phase 1: toxicity scorer — loaded once at boot (#257), shared via Arc::clone.
     set_progress(
         &scan_manager,
         user_did,
@@ -289,17 +332,7 @@ async fn run_scan(
     )
     .await;
 
-    let primary_scorer: Box<dyn ToxicityScorer> = if model_files_present(&config.model_dir) {
-        let model_dir = config.model_dir.clone();
-        // OnnxToxicityScorer::load is synchronous blocking I/O — offload to avoid
-        // stalling the async runtime while the model is read from disk.
-        let loaded = tokio::task::spawn_blocking(move || OnnxToxicityScorer::load(&model_dir))
-            .await
-            .map_err(|e| anyhow::anyhow!("spawn_blocking panicked loading ONNX model: {e}"))??;
-        Box::new(loaded)
-    } else {
-        anyhow::bail!("ONNX model files not found. Run `charcoal download-model` first.");
-    };
+    let primary_scorer: Box<dyn ToxicityScorer> = Box::new(Arc::clone(&models.toxicity));
 
     // Wrap in the two-stage scorer. ONNX runs as a clean-pass filter
     // (< 0.10 = cleared); posts at or above the threshold are sent to the
@@ -320,10 +353,12 @@ async fn run_scan(
     // its `CleanPassScorer` impl, both of which a `dyn ToxicityScorer` erases.
     let scorer = crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, classifier);
 
-    // Phase 2: load embedding model (optional — falls back to TF-IDF)
+    // Phase 2: embedding model — loaded once at boot, shared via Arc::clone.
     //
-    // Loaded early so it can be reused for both auto-fingerprint embedding
-    // (if needed) and amplifier scoring in the pipeline.
+    // Kept `Option`-shaped downstream (always `Some` now that boot fail-fast
+    // guarantees presence — #257) so the pipeline signature and the
+    // `embedder.is_some()` / `as_deref()` call sites below didn't need to
+    // change shape.
     set_progress(
         &scan_manager,
         user_did,
@@ -332,33 +367,9 @@ async fn run_scan(
     )
     .await;
 
-    let embed_dir = embedding_model_dir(&config.model_dir);
-    let embedder = if embedding_files_present(&config.model_dir) {
-        // SentenceEmbedder::load is synchronous blocking I/O — offload to avoid
-        // stalling the async runtime while the model is read from disk.
-        match tokio::task::spawn_blocking(move || {
-            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
-        })
-        .await
-        {
-            Ok(Ok(e)) => {
-                info!("Embedding model loaded");
-                Some(e)
-            }
-            Ok(Err(e)) => {
-                warn!(error = %e, "Embedding model failed to load, using TF-IDF fallback");
-                None
-            }
-            Err(e) => {
-                warn!(error = %e, "spawn_blocking panicked loading embedder, using TF-IDF fallback");
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let embedder = Some(Arc::clone(&models.embedder));
 
-    // Phase 2b: load NLI model (optional — falls back gracefully if unavailable)
+    // Phase 2b: NLI model — loaded once at boot, shared via Arc::clone.
     set_progress(
         &scan_manager,
         user_did,
@@ -367,28 +378,7 @@ async fn run_scan(
     )
     .await;
 
-    let nli_scorer = if nli_files_present(&config.model_dir) {
-        let model_dir = config.model_dir.clone();
-        match tokio::task::spawn_blocking(move || crate::scoring::nli::NliScorer::load(&model_dir))
-            .await
-        {
-            Ok(Ok(scorer)) => {
-                info!("NLI cross-encoder model loaded");
-                Some(scorer)
-            }
-            Ok(Err(e)) => {
-                warn!(error = %e, "NLI model failed to load, context scoring disabled");
-                None
-            }
-            Err(e) => {
-                warn!(error = %e, "spawn_blocking panicked loading NLI model");
-                None
-            }
-        }
-    } else {
-        info!("NLI model not found, context scoring disabled");
-        None
-    };
+    let nli_scorer = Some(Arc::clone(&models.nli));
 
     // Phase 3: load or build topic fingerprint
     //
@@ -647,13 +637,13 @@ async fn run_scan(
         true, // analyze_followers
         50,   // max_followers_per_amplifier
         8,    // concurrency
-        embedder.as_ref(),
+        embedder.as_deref(),
         protected_embedding.as_deref(),
         events,
         median_engagement,
         &pile_on_dids,
         &original_text_cache,
-        nli_scorer.as_ref(),
+        nli_scorer.as_deref(),
         protected_posts_with_embeddings.as_deref(),
         Some(config.data_dir()),
         &graph_distances,
@@ -691,4 +681,33 @@ async fn run_scan(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod model_sharing_tests {
+    use super::*;
+
+    /// Two scans must share one model instance, not load their own. This is the
+    /// memory precondition for concurrency: per-scan loading costs ~500MB each
+    /// (284 fp32 NLI + 126 toxicity + 90 embedding) against a 1.11GB prod peak.
+    #[test]
+    fn scan_models_are_shared_by_arc_not_cloned() {
+        let base = crate::toxicity::download::resolve_model_dir();
+        if !crate::toxicity::download::nli_files_present(&base) {
+            eprintln!("SKIP: models not present at {}", base.display());
+            return;
+        }
+        let models = Arc::new(ScanModels::load(&base).expect("load models"));
+        let a = Arc::clone(&models);
+        let b = Arc::clone(&models);
+
+        // Same allocation behind both handles — a clone would be a second load.
+        assert!(
+            Arc::ptr_eq(&a.nli, &b.nli),
+            "concurrent scans must share one NLI instance"
+        );
+        assert!(Arc::ptr_eq(&a.toxicity, &b.toxicity));
+        assert!(Arc::ptr_eq(&a.embedder, &b.embedder));
+        assert_eq!(Arc::strong_count(&models), 3, "models + a + b");
+    }
 }
