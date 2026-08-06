@@ -21,7 +21,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{eta_seconds, Database, ScanClaim, ScanQueueEntry, ScanSkip};
+use super::traits::{eta_seconds, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
@@ -1658,6 +1658,22 @@ impl Database for PgDatabase {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() as usize)
+    }
+
+    async fn scan_queue_depth(&self) -> Result<ScanQueueDepth> {
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*) FILTER (WHERE status = 'queued'),
+                    COUNT(*) FILTER (WHERE status = 'running')
+             FROM scan_queue",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        let queued: i64 = row.get(0);
+        let running: i64 = row.get(1);
+        Ok(ScanQueueDepth {
+            queued: queued as usize,
+            running: running as usize,
+        })
     }
 
     async fn scan_queue_entry(

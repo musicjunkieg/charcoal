@@ -251,6 +251,172 @@ pub struct QueueSlot {
     pub wake: tokio::sync::mpsc::Sender<()>,
 }
 
+/// How a scan running under a queue slot ended.
+///
+/// Named rather than inferred from a `Result` because the four exits are the
+/// whole point of `run_under_slot` and each one has to be independently
+/// assertable — "every exit path releases the slot" is not a property a test
+/// can check if the test cannot say which exit it took.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotExit {
+    /// The scan future returned `Ok`.
+    Completed,
+    /// The scan future returned `Err`.
+    Failed,
+    /// The scan future panicked; the unwind was caught.
+    Panicked,
+    /// The lease lapsed mid-scan. The slot belongs to a successor now, so the
+    /// scan future was dropped and nothing of this worker's was written.
+    Abandoned,
+}
+
+/// Classify how the (unwind-caught) scan future finished, with the text to
+/// record against the queue row.
+fn classify(finished: std::thread::Result<anyhow::Result<()>>) -> (SlotExit, Option<String>) {
+    match finished {
+        Ok(Ok(())) => (SlotExit::Completed, None),
+        Ok(Err(e)) => (SlotExit::Failed, Some(format!("{e:#}"))),
+        Err(_) => (
+            SlotExit::Panicked,
+            Some("Background scan panicked".to_string()),
+        ),
+    }
+}
+
+/// Run a scan under its `scan_queue` slot, releasing the slot on every exit.
+///
+/// Split out of `launch_scan` so it can be driven by a dummy future: the real
+/// pipeline needs ~500MB of ONNX models, which would make every test of this
+/// composition model-gated (and therefore silently skippable). The composition
+/// — the `select!` between scan and heartbeat, the abort-on-finish, the
+/// release, the wake — is exactly where the binding constraint lives.
+///
+/// `slot` is `None` for the call sites that still start a scan directly; they
+/// get the panic-catching and the status write but no lease.
+pub async fn run_under_slot<F>(
+    scan: F,
+    db: Arc<dyn Database>,
+    scan_manager: Arc<RwLock<ScanManager>>,
+    user_did: String,
+    slot: Option<QueueSlot>,
+    heartbeat_interval: std::time::Duration,
+) -> SlotExit
+where
+    F: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let scan = AssertUnwindSafe(scan).catch_unwind();
+    tokio::pin!(scan);
+
+    let (exit, error_text) = match &slot {
+        None => classify(scan.await),
+        Some(slot) => {
+            // Hold the lease for as long as the scan runs. If the heartbeat
+            // ever reports the claim lost, this worker has been superseded:
+            // another process reclaimed the row and may already be scanning
+            // this user, so the scan is abandoned rather than left burning GPU
+            // budget on a slot it no longer owns.
+            let mut heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
+                db.clone(),
+                user_did.clone(),
+                slot.claim_id.clone(),
+                heartbeat_interval,
+            ));
+
+            loop {
+                tokio::select! {
+                    finished = &mut scan => {
+                        heartbeat.abort();
+                        break classify(finished);
+                    }
+                    // Match the JOIN result, don't just observe that the task
+                    // ended: a `JoinError` is the heartbeat TASK dying, not the
+                    // lease lapsing. Treating the two alike would abort a
+                    // two-hour scan and report "the slot was reassigned" when
+                    // in fact this worker still holds it.
+                    beat = &mut heartbeat => match beat {
+                        // heartbeat_until_lost only ever returns because the
+                        // claim is gone.
+                        Ok(_lost) => break (
+                            SlotExit::Abandoned,
+                            Some("scan lease lapsed — the queue slot was reassigned".to_string()),
+                        ),
+                        Err(e) => {
+                            error!(
+                                user_did,
+                                error = %e,
+                                "the heartbeat task died — restarting it; the scan keeps \
+                                 running and still holds its slot"
+                            );
+                            // Respawning cannot hot-loop: heartbeat_until_lost
+                            // sleeps a full interval before it can fail again.
+                            heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
+                                db.clone(),
+                                user_did.clone(),
+                                slot.claim_id.clone(),
+                                heartbeat_interval,
+                            ));
+                        }
+                    },
+                }
+            }
+        }
+    };
+
+    match exit {
+        // run_scan already wrote its own terminal status (Done, or Failed with
+        // the pipeline's own error) before returning.
+        SlotExit::Completed => {}
+        SlotExit::Failed | SlotExit::Panicked => {
+            let detail = error_text.clone().unwrap_or_default();
+            error!(error = %detail, "Background scan failed");
+            let mut mgr = scan_manager.write().await;
+            mgr.finish_scan(&user_did);
+            if let Some(status) = mgr.get_status_mut(&user_did) {
+                status.last_error = Some(detail);
+                status.progress_message = "Scan failed — see server logs".to_string();
+                status.phase = WebScanPhase::Failed;
+            }
+        }
+        SlotExit::Abandoned => {
+            // Deliberately NOT touching the ScanManager. The lease lapsed, the
+            // row was reclaimed, and a successor may already have called
+            // `begin_admitted_scan` for this same user — writing `Failed` here
+            // would overwrite that live entry and make /api/status report a
+            // running scan as failed. The successor owns the user's status now.
+            //
+            // The cost of being conservative: if no successor has started yet,
+            // the user's status keeps saying "running" until one does. A stale
+            // label beats clobbering a live scan.
+            warn!(
+                user_did,
+                "scan abandoned — its lease lapsed and the slot was reassigned; \
+                 leaving the status entry to whoever holds the slot now"
+            );
+        }
+    }
+
+    // Release the queue slot on every exit — success, error, caught panic, and
+    // abandonment all land here. Done after the status update so the next
+    // admitted scan cannot observe this user mid-transition. On abandonment the
+    // release is a no-op by construction: the fencing token no longer matches,
+    // so `release_and_log` reports Lost and changes nothing.
+    if let Some(slot) = &slot {
+        crate::web::admitter::release_and_log(
+            &db,
+            &user_did,
+            &slot.claim_id,
+            error_text.as_deref(),
+        )
+        .await;
+        // try_send, not send: a full channel already has a wake pending, so
+        // dropping this one loses nothing, and a closed channel only means the
+        // admitter is gone (shutdown). Neither is worth blocking on.
+        let _ = slot.wake.try_send(());
+    }
+
+    exit
+}
+
 /// Launch the scan pipeline in a background tokio task.
 /// Returns immediately. Callers poll `scan_manager` to track progress.
 pub fn launch_scan(
@@ -263,74 +429,28 @@ pub fn launch_scan(
     slot: Option<QueueSlot>,
 ) {
     tokio::spawn(async move {
-        let scan = AssertUnwindSafe(run_scan(
+        // Borrowed by the scan future, so they stay put while `user_did` moves
+        // into run_under_slot.
+        let did = user_did.clone();
+        let handle = actor_handle;
+        let scan = run_scan(
             config,
             db.clone(),
             models,
             scan_manager.clone(),
-            &user_did,
-            &actor_handle,
-        ))
-        .catch_unwind();
+            &did,
+            &handle,
+        );
 
-        let result = match &slot {
-            None => scan
-                .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked"))),
-            Some(slot) => {
-                // Hold the lease for as long as the scan runs. If the heartbeat
-                // ever reports the claim lost, this worker has been superseded:
-                // another process reclaimed the row and may already be scanning
-                // this user, so the scan is abandoned rather than left burning
-                // GPU budget on a slot it no longer owns.
-                let mut heartbeat = tokio::spawn(crate::web::admitter::heartbeat_until_lost(
-                    db.clone(),
-                    user_did.clone(),
-                    slot.claim_id.clone(),
-                    crate::web::admitter::HEARTBEAT_INTERVAL,
-                ));
-
-                tokio::select! {
-                    finished = scan => {
-                        heartbeat.abort();
-                        finished.unwrap_or_else(|_| Err(anyhow::anyhow!("Background scan panicked")))
-                    }
-                    _ = &mut heartbeat => Err(anyhow::anyhow!(
-                        "scan lease lapsed — the queue slot was reassigned, abandoning"
-                    )),
-                }
-            }
-        };
-
-        let error_text = result.as_ref().err().map(|e| format!("{e:#}"));
-
-        if let Err(e) = &result {
-            error!(error = %e, "Background scan failed");
-            let mut mgr = scan_manager.write().await;
-            mgr.finish_scan(&user_did);
-            if let Some(status) = mgr.get_status_mut(&user_did) {
-                status.last_error = Some(e.to_string());
-                status.progress_message = "Scan failed — see server logs".to_string();
-                status.phase = WebScanPhase::Failed;
-            }
-        }
-
-        // Release the queue slot on every exit — success, error, caught panic,
-        // and abandonment all land here. Done after the status update so the
-        // next admitted scan cannot observe this user mid-transition.
-        if let Some(slot) = &slot {
-            crate::web::admitter::release_and_log(
-                &db,
-                &user_did,
-                &slot.claim_id,
-                error_text.as_deref(),
-            )
-            .await;
-            // try_send, not send: a full channel already has a wake pending, so
-            // dropping this one loses nothing, and a closed channel only means
-            // the admitter is gone (shutdown). Neither is worth blocking on.
-            let _ = slot.wake.try_send(());
-        }
+        run_under_slot(
+            scan,
+            db,
+            scan_manager,
+            user_did,
+            slot,
+            crate::web::admitter::HEARTBEAT_INTERVAL,
+        )
+        .await;
     });
 }
 
@@ -764,6 +884,223 @@ async fn run_scan(
     }
 
     Ok(())
+}
+
+/// The slot lifecycle: every exit from `run_under_slot` must free the row it
+/// claimed, and none of them may stomp a successor's state.
+///
+/// Driven by dummy futures against in-memory SQLite, so none of it is
+/// model-gated — the composition these cover is the whole reason the fencing
+/// token exists, and a model-gated test of it would silently skip.
+#[cfg(test)]
+mod slot_lifecycle_tests {
+    use super::*;
+
+    use std::time::Duration;
+
+    use crate::db::schema::create_tables;
+    use crate::db::sqlite::SqliteDatabase;
+    use crate::web::admitter::LEASE_SECS;
+
+    const DID: &str = "did:plc:slot";
+
+    fn test_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+        create_tables(&conn).expect("schema");
+        Arc::new(SqliteDatabase::new(conn))
+    }
+
+    async fn status_of(db: &Arc<dyn Database>, did: &str) -> String {
+        db.scan_queue_entry(did, 1)
+            .await
+            .expect("queue entry query")
+            .expect("row exists")
+            .status
+    }
+
+    /// Enqueue and claim `DID`, returning the slot plus the wake receiver so a
+    /// test can assert the admitter was pinged.
+    async fn held_slot(db: &Arc<dyn Database>) -> (QueueSlot, tokio::sync::mpsc::Receiver<()>) {
+        db.enqueue_scan(DID).await.expect("enqueue");
+        let claim = db
+            .claim_next_scan(1, LEASE_SECS)
+            .await
+            .expect("claim")
+            .expect("a queued row exists");
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        (
+            QueueSlot {
+                claim_id: claim.claim_id,
+                wake: tx,
+            },
+            rx,
+        )
+    }
+
+    fn manager_with_running_scan() -> Arc<RwLock<ScanManager>> {
+        let mut mgr = ScanManager::new();
+        mgr.begin_admitted_scan(DID);
+        Arc::new(RwLock::new(mgr))
+    }
+
+    /// Exit 1 of 4 — Ok. The row goes to 'done' and the admitter is woken so the
+    /// next queued user starts now rather than on the tick.
+    #[tokio::test]
+    async fn a_successful_scan_releases_its_slot() {
+        let db = test_db();
+        let (slot, mut wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan();
+
+        let exit = run_under_slot(
+            async { Ok(()) },
+            db.clone(),
+            mgr.clone(),
+            DID.to_string(),
+            Some(slot),
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert_eq!(exit, SlotExit::Completed);
+        assert_eq!(status_of(&db, DID).await, "done", "the slot must be freed");
+        assert!(
+            wake_rx.try_recv().is_ok(),
+            "finishing must wake the admitter, not leave the next user for the tick"
+        );
+    }
+
+    /// Exit 2 of 4 — Err. The slot is freed too (holding it until the lease
+    /// lapses would throttle the server for two minutes over one failure), and
+    /// the failure is recorded in both the row and the status.
+    #[tokio::test]
+    async fn a_failed_scan_releases_its_slot() {
+        let db = test_db();
+        let (slot, mut wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan();
+
+        let exit = run_under_slot(
+            async { Err(anyhow::anyhow!("pipeline exploded")) },
+            db.clone(),
+            mgr.clone(),
+            DID.to_string(),
+            Some(slot),
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert_eq!(exit, SlotExit::Failed);
+        assert_eq!(status_of(&db, DID).await, "failed");
+        assert!(
+            wake_rx.try_recv().is_ok(),
+            "a failure must wake the admitter"
+        );
+
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status entry");
+        assert!(!status.running);
+        assert_eq!(status.phase, WebScanPhase::Failed);
+        assert!(status
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.contains("pipeline exploded")));
+    }
+
+    /// Exit 3 of 4 — panic. The unwind must be caught rather than killing the
+    /// task before the release: an uncaught panic leaks the slot until the
+    /// lease lapses.
+    #[tokio::test]
+    async fn a_panicking_scan_releases_its_slot() {
+        let db = test_db();
+        let (slot, mut wake_rx) = held_slot(&db).await;
+        let mgr = manager_with_running_scan();
+
+        let exit = run_under_slot(
+            async { panic!("boom inside the pipeline") },
+            db.clone(),
+            mgr.clone(),
+            DID.to_string(),
+            Some(slot),
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert_eq!(exit, SlotExit::Panicked);
+        assert_eq!(status_of(&db, DID).await, "failed");
+        assert!(wake_rx.try_recv().is_ok(), "a panic must wake the admitter");
+        assert_eq!(
+            mgr.read().await.get_status(DID).expect("status").phase,
+            WebScanPhase::Failed
+        );
+    }
+
+    /// Exit 4 of 4 — the lease is lost mid-scan.
+    ///
+    /// The zombie must abandon a scan that would otherwise never end, and must
+    /// leave BOTH the successor's queue row and the successor's status entry
+    /// alone. Writing `Failed` here is what would make /api/status report a
+    /// running scan as failed.
+    #[tokio::test]
+    async fn a_lost_lease_abandons_without_clobbering_the_successor() {
+        let db = test_db();
+
+        // Zombie claims with an already-expired lease; the row is reclaimed and
+        // re-claimed, so the zombie's token no longer owns it.
+        db.enqueue_scan(DID).await.expect("enqueue");
+        let zombie = db
+            .claim_next_scan(1, -1)
+            .await
+            .expect("claim")
+            .expect("a queued row exists");
+        assert_eq!(db.reclaim_expired_scans().await.expect("reclaim"), 1);
+        let successor = db
+            .claim_next_scan(1, LEASE_SECS)
+            .await
+            .expect("claim")
+            .expect("the reclaimed row is queued again");
+        assert_ne!(zombie.claim_id, successor.claim_id);
+
+        // The successor has registered its own running scan for this user.
+        let mgr = manager_with_running_scan();
+        let (wake_tx, _wake_rx) = tokio::sync::mpsc::channel(4);
+
+        // A scan future that never finishes: only the heartbeat can end this.
+        let exit = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_under_slot(
+                std::future::pending::<anyhow::Result<()>>(),
+                db.clone(),
+                mgr.clone(),
+                DID.to_string(),
+                Some(QueueSlot {
+                    claim_id: zombie.claim_id,
+                    wake: wake_tx,
+                }),
+                Duration::from_millis(10),
+            ),
+        )
+        .await
+        .expect("a lost lease must end the scan on its own");
+
+        assert_eq!(exit, SlotExit::Abandoned);
+        assert_eq!(
+            status_of(&db, DID).await,
+            "running",
+            "the successor's row must be untouched"
+        );
+
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status entry");
+        assert!(
+            status.running,
+            "the zombie must not mark the successor's scan finished"
+        );
+        assert_eq!(
+            status.phase,
+            WebScanPhase::Starting,
+            "the zombie must not overwrite the successor's phase with Failed"
+        );
+        assert!(status.last_error.is_none());
+    }
 }
 
 #[cfg(test)]

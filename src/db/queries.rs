@@ -14,7 +14,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{ScanClaim, ScanQueueEntry, ScanSkip};
+use super::traits::{ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
 
 // --- Users ---
 
@@ -1499,6 +1499,22 @@ pub fn reclaim_expired_scans(conn: &Connection) -> Result<usize> {
     Ok(changed)
 }
 
+/// Count queued and running rows in one round-trip.
+/// Mirrors PgDatabase::scan_queue_depth.
+pub fn scan_queue_depth(conn: &Connection) -> Result<ScanQueueDepth> {
+    let (queued, running): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*) FILTER (WHERE status = 'queued'),
+                COUNT(*) FILTER (WHERE status = 'running')
+         FROM scan_queue",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(ScanQueueDepth {
+        queued: queued as usize,
+        running: running as usize,
+    })
+}
+
 /// A user's queue entry with position and ETA, or None if the user has never
 /// been enqueued. Mirrors PgDatabase::scan_queue_entry.
 pub fn scan_queue_entry(
@@ -2111,6 +2127,53 @@ mod tests {
         // B, holding the live token, succeeds on both surfaces.
         assert!(heartbeat_scan(&conn, QUEUE_USER_A, &b.claim_id, 120).unwrap());
         assert!(finish_queued_scan(&conn, QUEUE_USER_A, &b.claim_id, None).unwrap());
+    }
+
+    /// The admitter's only way to tell an idle queue from a wedged one —
+    /// `claim_next_scan` returns `None` for both.
+    #[test]
+    fn depth_counts_queued_and_running_separately() {
+        let conn = test_db();
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 0,
+                running: 0
+            },
+            "an empty table must report zero, not fail"
+        );
+
+        for did in [QUEUE_USER_A, QUEUE_USER_B, QUEUE_USER_C] {
+            enqueue_scan(&conn, did).unwrap();
+        }
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 3,
+                running: 0
+            }
+        );
+
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().expect("claim");
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 2,
+                running: 1
+            },
+            "a claim must move the row from queued to running, not double-count it"
+        );
+
+        // Finished rows are neither waiting nor holding a slot.
+        finish_queued_scan(&conn, &claim.user_did, &claim.claim_id, None).unwrap();
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 2,
+                running: 0
+            },
+            "a finished row must not keep counting against the cap"
+        );
     }
 
     #[test]

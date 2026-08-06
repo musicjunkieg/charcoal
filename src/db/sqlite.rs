@@ -17,7 +17,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     UserLabel, UserRow,
 };
-use super::traits::{Database, ScanClaim, ScanQueueEntry, ScanSkip};
+use super::traits::{Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
@@ -450,6 +450,11 @@ impl Database for SqliteDatabase {
     async fn reclaim_expired_scans(&self) -> Result<usize> {
         let conn = self.conn.lock().await;
         super::queries::reclaim_expired_scans(&conn)
+    }
+
+    async fn scan_queue_depth(&self) -> Result<ScanQueueDepth> {
+        let conn = self.conn.lock().await;
+        super::queries::scan_queue_depth(&conn)
     }
 
     async fn scan_queue_entry(

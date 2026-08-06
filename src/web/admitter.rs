@@ -1,11 +1,18 @@
 // Background admitter: claims queued scans while under the concurrency cap.
 //
-// One of these runs per process. It is the ONLY thing that turns a queued row
-// into a running scan — admission is a database question (`claim_next_scan`),
-// not a process-local bool, so it survives a redeploy and holds across
-// replicas. Anything that wants a scan to start enqueues and wakes the
-// admitter; nothing else may launch, because a second admission path would
-// bypass the cap the claim enforces.
+// One of these runs per process. Admission is a database question
+// (`claim_next_scan`), not a process-local bool, so the cap survives a redeploy
+// and holds across replicas: anything that wants a scan to start enqueues and
+// wakes the admitter.
+//
+// The TARGET state is that this is the only thing which turns a queued row into
+// a running scan, because a second admission path bypasses the cap the claim
+// enforces. It is not the state of the tree yet: `POST /api/scan`
+// (`handlers/scan.rs`) and the admin trigger (`handlers/admin.rs`) still call
+// `launch_scan(..., None)` directly, so their scans never touch `scan_queue`,
+// are invisible to `claim_next_scan`'s running count, and can push real
+// concurrency past `CHARCOAL_SCAN_CONCURRENCY`. Converting them — and deleting
+// `ScanManager::try_start_scan` with them — is the next step of #257.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,18 +20,29 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use crate::db::traits::ScanClaim;
+use crate::db::traits::{ScanClaim, ScanQueueDepth};
 use crate::db::Database;
 use crate::web::AppState;
 
-/// How long a claimed scan's lease is valid. The scan heartbeats at a third of
-/// this, so it takes three consecutive missed beats before another process
-/// considers it dead.
+/// How long a claimed scan's lease is valid. Once it lapses any admitter may
+/// reclaim the row and hand the slot to someone else, so a running scan has to
+/// keep extending it.
 pub const LEASE_SECS: i64 = 120;
 
-/// How often a running scan extends its lease. A third of `LEASE_SECS` so two
-/// consecutive misses (a GC pause, a DB blip) are survivable.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(LEASE_SECS as u64 / 3);
+/// How often a running scan extends its lease.
+///
+/// A QUARTER of `LEASE_SECS`, not a third. At a third the beats land at T+40
+/// and T+80 and the next one races the T+120 expiry, so the real slack was two
+/// beats even though the comment here claimed three. A quarter puts beats at
+/// T+30 / T+60 / T+90: two consecutive misses (a GC pause, a DB blip) still
+/// leave a full interval of margin before the lease lapses.
+///
+/// That margin is load-bearing now that the reclaim runs on every admitter pass
+/// rather than only at boot — a lapsed lease is noticed within a tick and the
+/// row really is handed to a successor, where before it was quietly ignored
+/// until the next restart. One extra `UPDATE` every 30 seconds per running scan
+/// is a cheap price for not abandoning a two-hour scan over two blips.
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(LEASE_SECS as u64 / 4);
 
 /// Backstop tick. Enqueue and completion both wake the admitter directly; this
 /// only covers a missed wake.
@@ -152,9 +170,10 @@ async fn beat(
 /// continuing would spend GPU budget on work nobody is waiting for and
 /// (worse) run a second scan for the same user concurrently.
 ///
-/// A transient database error is NOT a lost claim: the lease has two more
-/// beats of slack by construction, so it logs and keeps beating rather than
-/// abandoning a two-hour scan over one failed round-trip.
+/// A transient database error is NOT a lost claim: `HEARTBEAT_INTERVAL` is a
+/// quarter of the lease, so two more beats fit before it lapses. It logs and
+/// keeps beating rather than abandoning a two-hour scan over one failed
+/// round-trip.
 pub async fn heartbeat_until_lost(
     db: Arc<dyn Database>,
     user_did: String,
@@ -179,6 +198,72 @@ pub async fn heartbeat_until_lost(
                     "heartbeat failed — retrying, the lease still has slack"
                 );
             }
+        }
+    }
+}
+
+/// Why a pass stopped claiming. `claim_next_scan` answers all three with the
+/// same `Ok(None)`, which is what makes a wedged queue look exactly like an
+/// idle one: no errors, no warnings, scans simply never start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stall {
+    /// Nothing was waiting. The overwhelmingly common case.
+    Idle,
+    /// Work is waiting and every slot is legitimately busy. Expected
+    /// backpressure — scans run 22 minutes to 2 hours.
+    AtCapacity,
+    /// Work is waiting, the server is UNDER its cap, and still nothing could be
+    /// claimed. An invariant violation: the reclaim runs on every pass now, so
+    /// a row holding a slot under the cap should already have been re-queued.
+    Wedged,
+}
+
+fn stall_kind(depth: ScanQueueDepth, cap: usize) -> Stall {
+    if depth.queued == 0 {
+        Stall::Idle
+    } else if depth.running >= cap {
+        Stall::AtCapacity
+    } else {
+        Stall::Wedged
+    }
+}
+
+/// Say out loud why a pass stopped claiming, so a stuck queue is greppable.
+async fn log_admission_stall(db: &Arc<dyn Database>, cap: usize) {
+    let depth = match db.scan_queue_depth().await {
+        Ok(depth) => depth,
+        Err(e) => {
+            warn!(
+                error = %format!("{e:#}"),
+                "could not read the scan queue depth — cannot tell an idle queue \
+                 from a wedged one"
+            );
+            return;
+        }
+    };
+
+    match stall_kind(depth, cap) {
+        // Saying anything here would bury the two below.
+        Stall::Idle => {}
+        Stall::AtCapacity => {
+            warn!(
+                queued = depth.queued,
+                running = depth.running,
+                cap,
+                "scans are waiting because the server is at its concurrency cap — \
+                 they start as slots free"
+            );
+        }
+        Stall::Wedged => {
+            error!(
+                queued = depth.queued,
+                running = depth.running,
+                cap,
+                "scan admission is WEDGED: rows are queued and the server is under \
+                 its cap, yet nothing could be claimed. A running row is holding a \
+                 slot without being reclaimable — check scan_queue for rows whose \
+                 lease_expires is in the future but whose worker is gone"
+            );
         }
     }
 }
@@ -211,8 +296,12 @@ async fn admit_ready(db: &Arc<dyn Database>, launcher: &dyn ScanLauncher, cap: u
                     }
                 }
             }
-            // At capacity, or nothing queued.
-            Ok(None) => break,
+            // At capacity, or nothing queued — the two are indistinguishable
+            // here, which is exactly why the next line exists.
+            Ok(None) => {
+                log_admission_stall(db, cap).await;
+                break;
+            }
             Err(e) => {
                 error!(error = %format!("{e:#}"), "claim failed");
                 break;
@@ -230,21 +319,36 @@ async fn run_admitter(
     tick: Duration,
     cap: fn() -> usize,
 ) {
-    // Reclaim first: any row still 'running' at boot belongs to a scan this
-    // process did not start, so its lease is stale by definition. Skipping this
-    // would leave those slots occupied forever — with the cap at 2, two
-    // orphaned rows deadlock the server.
-    match db.reclaim_expired_scans().await {
-        Ok(0) => {}
-        Ok(n) => info!(reclaimed = n, "re-queued scans orphaned by a restart"),
-        Err(e) => error!(error = %format!("{e:#}"), "lease reclaim failed at boot"),
-    }
-
     loop {
+        // Reclaim on EVERY pass, not just at boot.
+        //
+        // A boot-only reclaim leaks a slot per redeploy. Railway starts the new
+        // container while the old one is still serving and still heartbeating,
+        // so the new admitter's boot pass sees leases with up to LEASE_SECS
+        // remaining and correctly reclaims nothing. The old container is then
+        // stopped; its running rows freeze with a live lease that lapses a
+        // minute or two later, with no one left watching. Scans run 22 minutes
+        // to 2 hours, so a redeploy landing mid-scan is ordinary — at cap 2,
+        // two of them wedge admission permanently, and silently.
+        //
+        // Reclaiming in-process is safe precisely because the fencing token
+        // exists: if this reclaims a row whose worker is alive but starved, that
+        // worker's next beat returns `Lost` and it abandons rather than
+        // double-running.
+        match db.reclaim_expired_scans().await {
+            Ok(0) => {}
+            Ok(n) => info!(reclaimed = n, "re-queued scans whose lease had lapsed"),
+            Err(e) => error!(error = %format!("{e:#}"), "lease reclaim failed"),
+        }
+
         admit_ready(&db, launcher.as_ref(), cap()).await;
 
         tokio::select! {
-            _ = wake_rx.recv() => {}
+            // `Some(())`, not `_`: a closed channel makes `recv()` return
+            // `None` immediately and forever, so a bare `_` would complete this
+            // branch instantly and spin the loop at 100% CPU. An unmatched
+            // pattern disables the branch instead, leaving the tick.
+            Some(()) = wake_rx.recv() => {}
             _ = tokio::time::sleep(tick) => {}
         }
     }
@@ -303,7 +407,26 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
         wake: tx.clone(),
     });
 
-    tokio::spawn(run_admitter(db, launcher, rx, TICK, scan_concurrency));
+    // Supervised only to the extent of saying something. `run_admitter` loops
+    // forever, so the join resolving at all means the task panicked — and a
+    // dropped JoinHandle would turn that into one default tokio stderr line
+    // followed by scans silently never starting again. Restarting it is a
+    // bigger question (a panicking loop that respawns can hot-loop) and is left
+    // for the supervision work; being loud is the part that matters now.
+    tokio::spawn(async move {
+        let admitter = tokio::spawn(run_admitter(db, launcher, rx, TICK, scan_concurrency));
+        match admitter.await {
+            Ok(()) => error!(
+                "the scan admitter loop returned, which it never should — NO queued \
+                 scan will start until this process restarts"
+            ),
+            Err(e) => error!(
+                error = %e,
+                "the scan admitter task died — NO queued scan will start until this \
+                 process restarts"
+            ),
+        }
+    });
 
     tx
 }
@@ -367,7 +490,12 @@ mod admitter_tests {
                 .expect("launched lock")
                 .push(claim.user_did.clone());
             if let Some(tx) = &self.notify {
-                let _ = tx.send(claim.user_did.clone()).await;
+                // Not `let _ =`: a full or closed notify channel is a broken
+                // test, and swallowing it turns that into a confusing timeout
+                // in whichever assertion was waiting on the message.
+                tx.send(claim.user_did.clone())
+                    .await
+                    .expect("notify channel must accept the launch record");
             }
             if self.fail_dids.contains(&claim.user_did) {
                 anyhow::bail!("launch failed for {}", claim.user_did);
@@ -544,6 +672,79 @@ mod admitter_tests {
             .expect("the orphaned row must be reclaimed and admitted at boot")
             .expect("launcher notified");
         assert_eq!(launched, "did:plc:orphan");
+        handle.abort();
+    }
+
+    /// A wedged queue must be distinguishable from an idle one. Before this,
+    /// both produced silence and "scans just stopped" was the only symptom.
+    #[test]
+    fn a_stall_under_the_cap_is_a_wedge_not_backpressure() {
+        let d = |queued, running| ScanQueueDepth { queued, running };
+
+        assert_eq!(stall_kind(d(0, 0), 2), Stall::Idle);
+        assert_eq!(
+            stall_kind(d(0, 2), 2),
+            Stall::Idle,
+            "a full server with nothing waiting is not a problem"
+        );
+        assert_eq!(
+            stall_kind(d(3, 2), 2),
+            Stall::AtCapacity,
+            "waiting while every slot is busy is expected backpressure"
+        );
+        assert_eq!(
+            stall_kind(d(3, 1), 2),
+            Stall::Wedged,
+            "queued work plus a free slot plus nothing claimed is the wedge"
+        );
+        assert_eq!(
+            stall_kind(d(1, 0), 1),
+            Stall::Wedged,
+            "the cap-1 case: one waiting, nothing running, nothing claimed"
+        );
+    }
+
+    /// The redeploy case, and the one a boot-only reclaim cannot handle.
+    ///
+    /// Railway starts the new container while the old one is still serving and
+    /// still heartbeating, so the new admitter's BOOT reclaim correctly finds
+    /// nothing — the lease is live. The old container is then stopped, its
+    /// running row freezes with a lease that lapses seconds later, and nobody
+    /// is left to reclaim it. Unless the reclaim runs on every pass, that slot
+    /// is occupied for the rest of the process's life and the wedge is silent
+    /// (`claim_next_scan` returns `Ok(None)`, indistinguishable from an empty
+    /// queue).
+    ///
+    /// The lease here is one second: valid at boot, lapsed by the second pass.
+    #[tokio::test]
+    async fn a_lease_that_lapses_after_boot_is_still_reclaimed() {
+        let db = test_db();
+        db.enqueue_scan("did:plc:redeploy").await.expect("enqueue");
+        // Positive lease — NOT the already-expired `-1` the boot test uses.
+        // This row is legitimately held when the admitter starts.
+        db.claim_next_scan(1, 1).await.expect("claim").expect("row");
+
+        let (notify_tx, mut notify_rx) = mpsc::channel(4);
+        let launcher = Arc::new(RecordingLauncher::notifying(notify_tx));
+        // Held for the whole test so the wake channel never closes.
+        let (_wake_tx, wake_rx) = mpsc::channel(4);
+
+        let handle = tokio::spawn(run_admitter(
+            db.clone(),
+            launcher.clone(),
+            wake_rx,
+            Duration::from_millis(50),
+            || 1,
+        ));
+
+        let launched = tokio::time::timeout(Duration::from_secs(10), notify_rx.recv())
+            .await
+            .expect(
+                "a lease that lapses AFTER boot must still be reclaimed — the reclaim \
+                 has to run on every pass, not only before the first claim",
+            )
+            .expect("launcher notified");
+        assert_eq!(launched, "did:plc:redeploy");
         handle.abort();
     }
 

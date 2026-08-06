@@ -1,5 +1,13 @@
 [
   {
+    "hash": "11af1c3ad2f58a5eac41aad977e7805904acdaf0",
+    "short_hash": "11af1c3",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T01:57:37-07:00",
+    "message": "feat(257): admitter loop claims queued scans under a cap\n\nOne background task per process, and the only thing that turns a queued\nrow into a running scan. Wakes on enqueue, on completion, and on a 30s\nbackstop tick; claims while running < CHARCOAL_SCAN_CONCURRENCY (default\n2, clamped 1..8).\n\nReclaims at boot before its first claim: any row still running when this\nprocess starts belongs to a scan it did not start, so the lease is stale\nby definition. Without it two orphaned rows deadlock a cap-2 server.\n\nThe fencing bool is now unignorable. heartbeat_scan and\nfinish_queued_scan return a bare Result<bool> whose bool nothing marks,\nso the whole I2 property could be dropped by writing `.await?;`. Both are\nwrapped in #[must_use] ClaimStatus, and every outcome is handled\ndistinctly: released, superseded (leave the successor alone, do not\nretry), or the DB was unreachable (the slot stays held until the lease\nreclaim frees it). A lost heartbeat abandons the scan rather than burning\nGPU budget on a slot another worker now owns.\n\nA scan that fails to launch releases its slot immediately rather than\nholding it until the lease lapses — otherwise one bad row throttles the\nwhole server for two minutes.\n\nConfig is defensive: zero or garbage falls back to 2 rather than\ndisabling admission, which would silently stop every scan.\n\nlaunch_scan gains an Option<QueueSlot>; the two direct callers pass None\nuntil #257 Task 6 moves POST /api/scan to an enqueue. Admission logic is\ntested against a ScanLauncher seam so it does not need the 500MB model\nvolume — 5 of the 6 behavioural tests were observed red first, and the\nsixth (wake-not-tick) was negative-controlled.\n\nRefs #257",
+    "files_changed": 8
+  },
+  {
     "hash": "2e5030b6f6eaac5e055c0d04d5a044ef916c5059",
     "short_hash": "2e5030b",
     "author": "Bryan Guffey",

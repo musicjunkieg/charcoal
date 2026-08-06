@@ -4828,6 +4828,28 @@
       "created_at": "2026-08-06T01:36:53.707215-07:00",
       "updated_at": "2026-08-06T01:36:53.707215-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"2e5030b\",\"confidence\":85,\"files\":[\"src/web/admitter.rs\",\"src/web/mod.rs\",\"src/web/scan_job.rs\"]}"
+    },
+    {
+      "id": 446,
+      "change_id": "71f1c1d9-785c-414b-9155-fc583a149cb9",
+      "node_type": "outcome",
+      "title": "Admitter loop landed (11af1c3). Boot reclaim -> claim-until-cap -> launch, with the fencing bool wrapped in #[must_use] ClaimStatus so it cannot be dropped. 10 tests in src/web/admitter.rs; 5 of 6 behavioural tests seen RED against deliberately naive impls before the fix, the 6th negative-controlled. Admission logic tested through a ScanLauncher seam so it needs no ONNX models. 706 web tests / 624 postgres tests pass, 0 skips, clippy clean on web/postgres/no-features",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T01:58:03.349128-07:00",
+      "updated_at": "2026-08-06T01:58:03.349128-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"11af1c3\",\"confidence\":90}"
+    },
+    {
+      "id": 447,
+      "change_id": "0f360536-52f2-4386-8bd2-43364a31c123",
+      "node_type": "observation",
+      "title": "Two scan paths now bypass the scan_queue cap entirely: POST /api/scan (handlers/scan.rs) and the admin trigger (handlers/admin.rs) both still call launch_scan with slot=None, so those scans are invisible to claim_next_scan's running count and can push real concurrency past CHARCOAL_SCAN_CONCURRENCY. Task 6 closes the first; the admin trigger is in NO task's file list and would remain an uncapped path after the plan completes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T01:58:09.164898-07:00",
+      "updated_at": "2026-08-06T01:58:09.164898-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -9538,6 +9560,28 @@
       "weight": 1.0,
       "rationale": "Task 5 of the 7-task #257 scan-admission plan",
       "created_at": "2026-08-06T01:36:57.186330-07:00"
+    },
+    {
+      "id": 438,
+      "from_node_id": 445,
+      "to_node_id": 446,
+      "from_change_id": "a40ccf49-3b23-4799-bc99-7f589c93fd1e",
+      "to_change_id": "71f1c1d9-785c-414b-9155-fc583a149cb9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-06T01:58:09.154277-07:00"
+    },
+    {
+      "id": 439,
+      "from_node_id": 446,
+      "to_node_id": 447,
+      "from_change_id": "71f1c1d9-785c-414b-9155-fc583a149cb9",
+      "to_change_id": "0f360536-52f2-4386-8bd2-43364a31c123",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Gap observed while implementing the admitter",
+      "created_at": "2026-08-06T01:58:12.244191-07:00"
     }
   ],
   "documents": [

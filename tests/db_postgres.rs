@@ -1103,6 +1103,66 @@ async fn test_pg_enqueued_at_is_rfc3339() {
     db.delete_user_data(U).await.unwrap();
 }
 
+/// The admitter cannot tell an idle queue from a wedged one without this —
+/// `claim_next_scan` returns None for both. Postgres side of the parity with
+/// `queries::tests::depth_counts_queued_and_running_separately`.
+///
+/// The counts are whole-table, so this belongs to the serialized scan_queue
+/// group and asserts DELTAS rather than absolutes: another suite's leftover row
+/// would otherwise make it flap.
+#[tokio::test]
+async fn test_pg_scan_queue_depth_counts_queued_and_running() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const A: &str = "did:plc:pgtest_q_nnnnnnnnnnnnn";
+    const B: &str = "did:plc:pgtest_q_ooooooooooooo";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let before = db.scan_queue_depth().await.unwrap();
+
+    for d in [A, B] {
+        db.delete_user_data(d).await.unwrap();
+        db.upsert_user(d, "q.bsky.social").await.unwrap();
+        db.enqueue_scan(d).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let queued = db.scan_queue_depth().await.unwrap();
+    assert_eq!(queued.queued, before.queued + 2, "two rows now waiting");
+    assert_eq!(queued.running, before.running, "nothing claimed yet");
+
+    let claim = db
+        .claim_next_scan(before.running + 1, 120)
+        .await
+        .unwrap()
+        .expect("a queued row exists");
+    let claimed = db.scan_queue_depth().await.unwrap();
+    assert_eq!(
+        (claimed.queued, claimed.running),
+        (before.queued + 1, before.running + 1),
+        "a claim must move the row from queued to running, not double-count it"
+    );
+
+    // Finished rows are neither waiting nor holding a slot.
+    db.finish_queued_scan(&claim.user_did, &claim.claim_id, None)
+        .await
+        .unwrap();
+    let finished = db.scan_queue_depth().await.unwrap();
+    assert_eq!(
+        (finished.queued, finished.running),
+        (before.queued + 1, before.running),
+        "a finished row must not keep counting against the cap"
+    );
+
+    for d in [A, B] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
 /// The cap must hold when admitters run at the SAME TIME, which is the only
 /// scenario that matters — a sequential run never contends and so never
 /// exercises the locking at all.

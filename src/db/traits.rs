@@ -119,6 +119,20 @@ pub struct ScanClaim {
     pub claim_id: String,
 }
 
+/// How many rows are waiting versus occupying a slot (#257).
+///
+/// `claim_next_scan` answers "the queue is empty" and "every slot is taken"
+/// with the same `Ok(None)`, so the admitter cannot tell an idle server from a
+/// wedged one without counting for itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScanQueueDepth {
+    /// Rows waiting for a slot.
+    pub queued: usize,
+    /// Rows holding a slot. Counts every `running` row regardless of lease, so
+    /// it matches what `claim_next_scan` compares against the cap.
+    pub running: usize,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -471,9 +485,14 @@ pub trait Database: Send + Sync {
         error: Option<&str>,
     ) -> Result<bool>;
 
-    /// Return running rows whose lease has lapsed to 'queued'. Called at boot.
-    /// Returns how many were reclaimed.
+    /// Return running rows whose lease has lapsed to 'queued'. Called on every
+    /// admitter pass, not only at boot — a lease that lapses after boot has no
+    /// other backstop. Returns how many were reclaimed.
     async fn reclaim_expired_scans(&self) -> Result<usize>;
+
+    /// Count queued and running rows, so the admitter can tell "nothing to do"
+    /// from "at capacity" from "wedged".
+    async fn scan_queue_depth(&self) -> Result<ScanQueueDepth>;
 
     /// A user's queue entry, or None if the user has never been enqueued.
     /// A row in any status ("queued", "running", "done", "failed") returns
