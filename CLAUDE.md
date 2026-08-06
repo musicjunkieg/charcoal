@@ -118,9 +118,16 @@ cargo test --features web --test unit_oauth --test web_oauth
 
 To run PostgreSQL integration tests against a live instance:
 ```
-DATABASE_URL=postgres://charcoal:charcoal@localhost/charcoal_test \
+DATABASE_URL=postgres://$USER@localhost/charcoal_test \
   cargo test --all-targets --features postgres
 ```
+
+⚠️ **This used to read `postgres://charcoal:charcoal@localhost/...`, which
+fails on a Homebrew Postgres install** — `brew services` creates a superuser
+role named after your OS account and no `charcoal` role, so that URL dies with
+`FATAL: role "charcoal" does not exist` (#272). Use `$USER` as above, or create
+the role once with `createuser -s charcoal`. If the database is missing,
+`createdb charcoal_test` first.
 
 ### Git hooks
 

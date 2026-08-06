@@ -152,11 +152,17 @@ on boot
 
 Claiming uses `FOR UPDATE SKIP LOCKED` on Postgres — the standard safe-dequeue idiom. SQLite has no equivalent, so its implementation claims inside a write transaction, which is sufficient because SQLite is the single-process local and CLI backend.
 
+**Correction (2026-08-06, Task 4 review).** `SKIP LOCKED` alone does **not** enforce the cap, and an earlier draft of this section wrongly implied it did. The claim reads `COUNT(*) WHERE status='running'` to check the limit, that count takes no lock, and the pool runs at READ COMMITTED — so two admitters both read the pre-claim count, both pass the guard, and both admit. `SKIP LOCKED` guarantees they take *different rows*, which is precisely why it cannot bound the total: it makes the over-admission clean rather than preventing it. Reproduced against a live instance at cap 1 — both sessions saw `running_seen = 0` and `running_after` ended at 2.
+
+The cap is therefore enforced by a **transaction-level advisory lock** (`pg_advisory_xact_lock`) taken before the count, which serializes admitters against each other and nothing else. `SKIP LOCKED` stays — redundant but harmless. `SERIALIZABLE` would also work but pushes retry handling onto every caller.
+
 **#263 will delete the SQLite implementation.** Bryan's decision (2026-08-05): *"at this point we should just rip out SQLite — we're never going back."* This design deliberately does **not** block on that. #257 is a launch blocker; #263 is cleanup, and it forces every contributor to run Postgres locally. The SQLite queue implementation here is intentionally minimal — no `SKIP LOCKED`, no multi-consumer concerns — because it is expected to be deleted rather than maintained.
 
 ### A property worth naming
 
-Because admission is arbitrated by the database rather than a process-local bool, this design is **correct with more than one replica**. That is not a goal, but it means scaling out later does not require redesigning admission.
+Because admission is arbitrated by the database rather than a process-local bool, this design is **correct with more than one replica** — but only with the advisory lock above. Without it the property is claimed and not held, which is exactly the trap Task 4 fell into. That correctness is not a goal in itself; it means scaling out later does not require redesigning admission.
+
+It also is not only a multi-replica concern. A single replica over-admits too, as soon as two callers claim concurrently — the admitter loop and any start-now path — because sqlx hands each task its own pooled connection.
 
 ## Error handling
 
@@ -197,7 +203,14 @@ Following the project's TDD mandate: tests first, and a test that cannot fail is
 - lease-expiry predicate
 
 **Postgres integration** (production runs Postgres; a SQLite-only test proves nothing about the deployed path)
-- concurrent enqueue never admits past the limit — the `SKIP LOCKED` guarantee
+- concurrent enqueue never admits past the limit — and this test must be
+  **genuinely concurrent** (`tokio::join!` / `JoinSet` of N > cap claims,
+  each on its own pooled connection), then assert
+  `COUNT(*) WHERE status='running' <= cap`. Sequential `.await`s on one
+  connection never contend a row, so `SKIP LOCKED` never executes and the
+  test passes against an implementation that over-admits. This is not
+  hypothetical: the Task 4 cap test was written that way and missed the
+  defect above. Write it, watch it fail, then fix.
 - idempotent enqueue leaves exactly one row
 - boot reclaim moves expired `running` rows to `queued`
 - a reclaimed scan resumes from `scan_phase` rather than restarting

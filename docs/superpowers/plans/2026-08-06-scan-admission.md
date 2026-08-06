@@ -743,6 +743,36 @@ Refs #257 #52'
 
 ### Task 4: `scan_queue` table and Database trait methods (schema v11)
 
+> **⚠️ THIS TASK'S CODE AS WRITTEN BELOW IS DEFECTIVE. Superseded 2026-08-06.**
+>
+> Task 4 shipped as `7e8ec24` and its review found two Criticals that are
+> defects in **this plan**, not in the implementation — the implementer
+> transcribed Step 7 faithfully. A fix commit follows `7e8ec24`; read the
+> code on the branch, not the listings below.
+>
+> 1. **Step 7's `claim_next_scan` cannot enforce the cap.** The
+>    `COUNT(*) WHERE status='running'` takes no lock and the pool is READ
+>    COMMITTED, so two admitters both read the pre-claim count, both pass
+>    the guard, and both admit. `FOR UPDATE SKIP LOCKED` hands them
+>    *different rows* — which is why it cannot bound the total. Reproduced
+>    at cap 1: `running_after = 2`. Fixed with `pg_advisory_xact_lock`
+>    before the count. See the spec's "Dual backend" section.
+> 2. **Step 2's cap test cannot catch that.** Three sequential `.await`s on
+>    one connection never contend a row. Step 10's negative control passed
+>    and proved only that the guard *expression* was live — not the
+>    guarantee the test's own doc comment claims. The replacement is a
+>    genuinely concurrent `JoinSet` test, written red first.
+>
+> Also corrected in the fix commit: `enqueued_at` rendered
+> backend-inconsistently (`::TEXT` vs `to_rfc3339`, and the Postgres form
+> varies with connection `TimeZone` and is rejected by
+> `parse_from_rfc3339`); `finish_queued_scan`/`heartbeat_scan` lacked a
+> status guard and a fencing token, so a zombie worker whose lease lapsed
+> could stomp its successor's row; `eta_seconds` returned `Some(0)` rather
+> than `None` for a running scan and ignored the cap in its arithmetic.
+>
+> **Task 5 consumes these signatures — see the note at Task 5.**
+
 **Files:**
 - Create: `migrations/postgres/0011_scan_queue.sql`
 - Modify: `src/db/schema.rs`, `src/db/traits.rs`, `src/db/postgres.rs`, `src/db/queries.rs`, `src/db/sqlite.rs`
@@ -1189,6 +1219,15 @@ Refs #257'
 ---
 
 ### Task 5: The admitter loop
+
+> **⚠️ Signatures below are STALE. Read the trait on the branch.**
+> Task 4's fix commit changed `claim_next_scan`, `heartbeat_scan`, and
+> `finish_queued_scan` — they now carry a claim/fencing token so a worker
+> whose lease lapsed cannot release or extend its successor's slot. The
+> loop's `match state.db.claim_next_scan(...)` and the
+> `finish_queued_scan` / heartbeat calls in the listings below predate
+> that change. Take the real signatures from `src/db/traits.rs` on
+> `feat/257-scan-admission`; the control flow shown here is still correct.
 
 **Files:**
 - Create: `src/web/admitter.rs`
