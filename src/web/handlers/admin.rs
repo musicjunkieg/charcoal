@@ -236,15 +236,29 @@ pub async fn trigger_admin_scan(
         "Admin queued scan"
     );
 
-    let entry = state
+    // Same shape as POST /api/scan, deliberately: the enqueue succeeded so this
+    // stays 202, but a failed read-back reports `position: null` rather than 0.
+    // 0 is what a *running* scan legitimately reports, so reusing it here would
+    // hide a database error behind a plausible-looking answer.
+    let entry = match state
         .db
         .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
         .await
-        .ok()
-        .flatten();
-    let (status, position, eta) = entry
-        .map(|e| (e.status, e.position, e.eta_seconds))
-        .unwrap_or_else(|| ("queued".to_string(), 0, None));
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(
+                target_did = %target_did,
+                error = %format!("{e:#}"),
+                "admin queued the scan but could not read back its queue entry"
+            );
+            None
+        }
+    };
+    let (status, position, eta) = match entry {
+        Some(e) => (e.status, Some(e.position), e.eta_seconds),
+        None => ("queued".to_string(), None, None),
+    };
 
     Ok((
         StatusCode::ACCEPTED,

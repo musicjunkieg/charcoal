@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Add schema **v12**, which backfills `scan_queue.claim_id` (#257). v11 was
+  amended in place to add the fencing token while #257 was still on its branch —
+  reasonable, since v11 had never shipped, but not sufficient: a database created
+  from the *pre-amendment* v11 has a `scan_queue` with no `claim_id` **and**
+  version 11 already recorded, so both migration runners skip 0011 entirely and
+  the column is never added. Every claim, heartbeat and finish then fails with a
+  missing-column error. Amending 0011 cannot reach those databases; only a new
+  version can. No deployed environment is affected (staging and production both
+  stopped at v10 with no `scan_queue` table) — the exposed population is
+  developer machines that ran this branch mid-stream. The migration is a clean
+  no-op on a fresh database, where v11 already creates the column.
+- Report a failed queue read-back as `position: null` rather than `0` on both
+  scan-trigger endpoints (#257). The enqueue still succeeds and the answer is
+  still `202`, but `0` is a *real* position — it is what a `running` scan
+  reports — so falling back to it made "the database read failed" indistinguish-
+  able from "your scan is already running", with the error discarded on top. The
+  error is now logged and the unknown case is a value no successful read ever
+  produces. Same silent-failure shape already fixed in `delete_user` (#278).
 - Retry public Bluesky reads on 429 and 5xx (#182). Every read through
   `PublicAtpClient` now makes up to 4 attempts, backing off exponentially from
   250ms to 8s with jitter. A typed `XrpcAttemptError` decides what is

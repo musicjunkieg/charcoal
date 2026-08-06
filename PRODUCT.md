@@ -54,6 +54,13 @@ not truthfully make. All four were confirmed as load-bearing:
   fingerprint, discovers amplification events, gathers candidate accounts, and
   scores them. A recent production scan took ~22 minutes for 595 accounts.
   Progress must be legible while it runs.
+- A requested scan does not necessarily start immediately. Scans are admitted
+  from a queue under a concurrency cap, so a user may be **waiting** before any
+  work begins — a real, user-visible state with a queue position and an ETA, not
+  a loading spinner. Waiting must be described as waiting; a queued user is not
+  being scanned yet, and telling them otherwise makes the first minutes of the
+  product a lie. Design and onboarding cannot assume every requested scan begins
+  on request.
 - Scans are phased (collect → burst → score) and resumable across crashes and
   cost stops, so a user may return to a run in progress.
 - Results are reviewed in a **triage queue** as well as browsed as an account
@@ -98,8 +105,14 @@ Constraints and open decisions:
 - Name: **Charcoal**. Domain: charcoal.watch.
 - A companion publication exists at https://charcoal.leaflet.pub, linked from
   the landing page.
-- No logo, wordmark, color palette, or typographic system has been declared
-  binding. None was volunteered during init.
+- No logo, wordmark, color palette, or typographic system was volunteered during
+  init — none of it came from a brand the product arrived with.
+- The binding design system is now **[DESIGN.md](DESIGN.md)** and its sidecar
+  `.impeccable/design.json`, which declare the color system, type ramp, and
+  component contracts. They were derived from the shipped interface rather than
+  handed down at init, which is why the provenance above still matters: DESIGN.md
+  documents what Charcoal became, and it is the source to change when the visual
+  system changes.
 
 ## Evidence on Hand
 

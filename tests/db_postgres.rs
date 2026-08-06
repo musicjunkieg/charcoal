@@ -1291,7 +1291,11 @@ async fn test_pg_expired_lease_is_reclaimed() {
 async fn test_pg_null_lease_is_reclaimed() {
     let _guard = scan_queue_test_lock().lock().await;
 
-    const U: &str = "did:plc:pgtest_q_nnnnnnnnnnnnn";
+    // DIDs are unique per test in this module even though the lock plus
+    // `reset_scan_queue_fixtures` serialize the group. Sharing them made
+    // isolation depend on that serialization holding, and made a panic
+    // mid-test impossible to attribute to one test's rows.
+    const U: &str = "did:plc:pgtest_q_ttttttttttttt";
     let Some(url) = database_url() else {
         return;
     };
@@ -1337,7 +1341,8 @@ async fn test_pg_eta_accounts_for_the_concurrency_cap() {
     let _guard = scan_queue_test_lock().lock().await;
 
     // One finished scan of a known duration gives a deterministic median.
-    const DONE: &str = "did:plc:pgtest_q_ooooooooooooo";
+    // Unique to this test — see the note in test_pg_null_lease_is_reclaimed.
+    const DONE: &str = "did:plc:pgtest_q_uuuuuuuuuuuuu";
     // Four queued rows so the last one sits at position 4.
     const QUEUED: [&str; 4] = [
         "did:plc:pgtest_q_ppppppppppppp",

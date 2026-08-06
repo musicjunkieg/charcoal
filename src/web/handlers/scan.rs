@@ -55,19 +55,35 @@ pub async fn trigger_scan(
         let _ = wake.try_send(());
     }
 
-    let entry = state
+    // The enqueue already succeeded, so the answer is still 202 — but a failed
+    // read of the row must not be dressed up as a real one. `position: 0` is a
+    // genuine value (it is what a *running* scan reports), so falling back to it
+    // would make "we could not read the queue" indistinguishable from "your scan
+    // is already running", with the error thrown away on top. Log it and send
+    // `position: null` instead, which no successful read ever produces.
+    let entry = match state
         .db
         .scan_queue_entry(&auth.did, crate::web::admitter::scan_concurrency())
         .await
-        .ok()
-        .flatten();
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(
+                did = %auth.did,
+                error = %format!("{e:#}"),
+                "queued the scan but could not read back its queue entry"
+            );
+            None
+        }
+    };
 
     // The row's own status, not a hardcoded "queued": a user who already had a
     // scan running gets a no-op enqueue, and telling them "queued, position 0"
     // would be a lie about the scan they are watching.
-    let (status, position, eta) = entry
-        .map(|e| (e.status, e.position, e.eta_seconds))
-        .unwrap_or_else(|| ("queued".to_string(), 0, None));
+    let (status, position, eta) = match entry {
+        Some(e) => (e.status, Some(e.position), e.eta_seconds),
+        None => ("queued".to_string(), None, None),
+    };
 
     (
         StatusCode::ACCEPTED,

@@ -4971,6 +4971,28 @@
       "created_at": "2026-08-06T10:57:54.992146-07:00",
       "updated_at": "2026-08-06T10:57:54.992146-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"files\":[\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 460,
+      "change_id": "63f45f6c-92f2-44aa-b84f-20b0e90baeb7",
+      "node_type": "outcome",
+      "title": "All four review findings cleared; 727 web + 626 postgres tests pass with zero skips",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T10:59:06.060336-07:00",
+      "updated_at": "2026-08-06T10:59:06.060336-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"fd5ed15\",\"confidence\":95}"
+    },
+    {
+      "id": 461,
+      "change_id": "190a5880-a3e5-4154-9be0-7320bd794deb",
+      "node_type": "observation",
+      "title": "I1 red-then-green: new test failed with left=Completed right=Failed; its ETA assertion independently failed with Some(0) vs None, proving the poisoned median was real",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T10:59:06.095958-07:00",
+      "updated_at": "2026-08-06T10:59:06.095958-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -9824,6 +9846,50 @@
       "weight": 1.0,
       "rationale": "Final-review finding fix",
       "created_at": "2026-08-06T10:57:55.018199-07:00"
+    },
+    {
+      "id": 452,
+      "from_node_id": 456,
+      "to_node_id": 460,
+      "from_change_id": "9342c46b-bd75-42af-9674-85626fad1f58",
+      "to_change_id": "63f45f6c-92f2-44aa-b84f-20b0e90baeb7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified by the fix commit",
+      "created_at": "2026-08-06T10:59:06.068290-07:00"
+    },
+    {
+      "id": 453,
+      "from_node_id": 457,
+      "to_node_id": 460,
+      "from_change_id": "5f17d52d-2e80-4333-b9f3-e6f938643308",
+      "to_change_id": "63f45f6c-92f2-44aa-b84f-20b0e90baeb7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified by the fix commit",
+      "created_at": "2026-08-06T10:59:06.074102-07:00"
+    },
+    {
+      "id": 454,
+      "from_node_id": 458,
+      "to_node_id": 460,
+      "from_change_id": "1e75002e-5513-4442-8744-faaafce420cb",
+      "to_change_id": "63f45f6c-92f2-44aa-b84f-20b0e90baeb7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified by the fix commit",
+      "created_at": "2026-08-06T10:59:06.079792-07:00"
+    },
+    {
+      "id": 455,
+      "from_node_id": 459,
+      "to_node_id": 460,
+      "from_change_id": "0e17ea1a-aa40-4a07-8af5-7e82f0ca7253",
+      "to_change_id": "63f45f6c-92f2-44aa-b84f-20b0e90baeb7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified by the fix commit",
+      "created_at": "2026-08-06T10:59:06.086579-07:00"
     }
   ],
   "documents": [
