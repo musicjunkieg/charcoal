@@ -778,7 +778,7 @@ mod gather_tests {
         .await;
 
         // Before #221 this was Err and the account vanished from the scan.
-        let outcome = outcome.expect("one unscoreable post must not fail the account");
+        let (outcome, _timing) = outcome.expect("one unscoreable post must not fail the account");
         assert_eq!(
             outcome,
             charcoal::pipeline::scan_phases::gather::GatherOutcome::Enqueued,
@@ -1166,7 +1166,7 @@ mod gather_tests {
         let scorer = FixedScorer(0.0);
         let clean = FixedCleanPass(0.0);
 
-        let outcome = gather_account(
+        let (outcome, _timing) = gather_account(
             &db,
             TEST_USER,
             &fetcher,

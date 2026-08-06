@@ -41,7 +41,9 @@ use crate::toxicity::traits::ToxicityScorer;
 
 use burst::{run_burst, BurstOutcome};
 use finalize::{finalize_account, FinalizeOutcome};
-use gather::{gather_account, CleanPassScorer, GatherInputs, GatherOutcome, PostFetcher};
+use gather::{
+    gather_account, CleanPassScorer, GatherInputs, GatherOutcome, GatherTiming, PostFetcher,
+};
 use staging::ScanPhase;
 
 /// One candidate account to scan, with the per-account inputs the orchestrator
@@ -327,6 +329,10 @@ struct GatherSweep {
     /// True if at least one account's gather failed and was skipped — the scan
     /// is then incomplete and the caller should mark the summary `degraded`.
     skipped: bool,
+    /// Aggregate fetch-vs-clean-pass split across every account gathered in
+    /// this sweep (#264). Accounts that errored contribute nothing — their
+    /// timing was never returned.
+    timing: GatherTiming,
 }
 
 /// Extract a human-readable message from a panic payload.
@@ -406,8 +412,13 @@ async fn run_gather(
     let mut sweep = GatherSweep::default();
     while let Some((account_did, result)) = results.next().await {
         match result {
-            Ok(GatherOutcome::Terminal) => sweep.terminal_scored += 1,
-            Ok(GatherOutcome::Enqueued) => {}
+            Ok((GatherOutcome::Terminal, timing)) => {
+                sweep.terminal_scored += 1;
+                sweep.timing.add(&timing);
+            }
+            Ok((GatherOutcome::Enqueued, timing)) => {
+                sweep.timing.add(&timing);
+            }
             Err(e) => {
                 sweep.skipped = true;
                 // `{e:#}` (alternate Display) walks the anyhow source chain; plain
@@ -438,6 +449,16 @@ async fn run_gather(
             }
         }
     }
+
+    info!(
+        phase = "gather",
+        fetch_ms = sweep.timing.fetch_ms,
+        clean_pass_ms = sweep.timing.clean_pass_ms,
+        total_ms = sweep.timing.total_ms,
+        inference_pct = sweep.timing.inference_pct(),
+        "Phase A timing split (#264)"
+    );
+
     Ok(sweep)
 }
 
@@ -452,7 +473,7 @@ async fn gather_one(
     user_did: &str,
     candidate: &CandidateInput,
     deps: &PhasedScanDeps<'_>,
-) -> Result<GatherOutcome> {
+) -> Result<(GatherOutcome, GatherTiming)> {
     let inputs = gather_inputs(candidate, deps);
     gather_account(
         db,
@@ -568,6 +589,10 @@ async fn recover_account_inner(
     db.clear_account_staging(user_did, account_did).await?;
 
     let inputs = gather_inputs(candidate, deps);
+    // Timing is discarded here: this is the Phase C re-gather recovery path,
+    // not the main Phase A sweep `run_gather` instruments and logs (#264). A
+    // rare per-account retry contributing to the scan-wide split would skew
+    // it without changing the concurrency-default conclusion it exists for.
     if matches!(
         gather_account(
             db,
@@ -577,7 +602,8 @@ async fn recover_account_inner(
             deps.clean_pass,
             &inputs,
         )
-        .await?,
+        .await?
+        .0,
         GatherOutcome::Terminal
     ) {
         // Re-gather hit a terminal Stage-1 outcome: the score was written by
