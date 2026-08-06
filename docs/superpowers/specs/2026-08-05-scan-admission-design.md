@@ -57,9 +57,13 @@ So the global gate is not only a leftover — it is implicitly protecting memory
 
 `ort` 2.0.0-rc.11 takes `&mut self` on both `Session::run` and `Session::run_async`, which is why all three scorers already hold `Arc<Mutex<Session>>`. There is no safe path to parallel inference on one session. `Session` is `unsafe impl Send + Sync`, so ORT's C-level session is genuinely thread-safe and the restriction is the Rust binding being conservative — but working around a binding's safety contract with `unsafe` is not something this design does.
 
-It does not matter, because **scans are network-bound, not inference-bound.** #207 measures Phase A as ~100% Bluesky I/O (amplification ~37m + sweep ~10m + gather ~80m). Two concurrent scans spend nearly all their time waiting on Bluesky, so a shared inference mutex is rarely contended.
+It matters less than it would elsewhere, because **Phase A is dominated by network wait.** #207 breaks the pre-burst window down as amplification ~37m + sweep ~10m + gather ~80m, and gather runs 8 accounts in flight (`scan_job.rs:649` → `gather_concurrency` → `buffer_unordered(8)` at `mod.rs:400`). Per candidate account that is a 25-post Stage-1 `getAuthorFeed` sample (`gather.rs:239`), a 50-post sample if the account does not early-exit (`:262`), and a batched `getPosts` for reply parents — each a cursor-paginated round trip to `public.api.bsky.app`.
 
-This is what makes the design cheap: sharing one model instance buys the memory headroom, and the concurrency that matters happens in the I/O.
+**Phase A is not purely I/O, and an earlier draft of this spec wrongly said it was.** `gather.rs:107/141/153/161/177` run the local ONNX clean pass over each account's sample inside the same phase. So gather is fetch *and* inference, and two concurrent scans **will** contend on the shared inference mutex — the contention is real, not theoretical.
+
+The design still holds: the majority of per-account time is the round trip, so throughput should improve meaningfully. But it will be **less than a clean 2×**, and the shape of that curve is unmeasured. This is also why the default is 2 rather than 3 — with a serialized clean pass, each additional concurrent scan buys progressively less.
+
+Sharing one model instance buys the memory headroom; the concurrency that matters happens in the network wait that surrounds the inference.
 
 ## Dependencies
 
@@ -204,9 +208,26 @@ Following the project's TDD mandate: tests first, and a test that cannot fail is
 **Negative control**
 - with the cap set to 1, assert a second scan does *not* start; with the cap at 2, assert it does. A queue test that passes at every cap value is measuring nothing.
 
+## Measurement task (do this first)
+
+The concurrency default rests on an estimate, not data. Before tuning it, instrument Phase A to record the split it depends on.
+
+**Instrument `gather_account` to emit, per account:**
+
+- `fetch_ms` — time in `fetch_sample` / `fetch_parent_posts` (the `getAuthorFeed` and `getPosts` round trips)
+- `clean_pass_ms` — time in `onnx_clean_pass`
+- `total_ms`
+
+Aggregate per scan and log once at Phase A completion, alongside the existing phase banner. This follows #61's precedent of a latency split (RunPod `delayTime` vs `executionTime`), which is what made the burst phase tunable.
+
+**What it answers.** If `clean_pass_ms` is under ~10% of `total_ms`, concurrency 2 should approach 2× and 3 is worth trying. If it is 30%+, the shared mutex is the ceiling and raising concurrency past 2 buys little — in which case the real lever is a session pool for the toxicity model specifically, or moving the clean pass out of gather.
+
+**Do it before the queue lands, not after.** It is a handful of `Instant::now()` calls and one log line, it needs no queue, and it can run on the existing single-flight path — so the number is available when the concurrency default is chosen rather than being guessed and revisited. Tracked as #264.
+
 ## Open questions
 
-None blocking. Two settled during design and recorded here so they are not silently revisited:
+None blocking. Three settled during design and recorded here so they are not silently revisited:
 
 - **Fail-fast on model load** rather than degrade — approved 2026-08-05.
-- **Default concurrency 2**, not 3 — conservative given the memory floor and the Bluesky pressure #182 addresses. Raise it after #182 lands and the 16-request behaviour is observed in staging.
+- **Default concurrency 2**, not 3 — conservative given the memory floor, the Bluesky pressure #182 addresses, and the unmeasured mutex contention above. Revisit once #264 reports the fetch/inference split.
+- **Phase A is a mixed workload**, not pure I/O. Corrected 2026-08-05 after tracing the call sites; the original claim came from taking #207's title at face value.
