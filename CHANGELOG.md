@@ -162,6 +162,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of a misleading `[tox: 0.00]`.
 
 ### Changed
+- Animate the classification progress bar with `transform: scaleX()` instead of
+  `width` (#280). Transitioning `width` relayouts on every frame of the 0.5s
+  animation; `transform` is composited. The gradient is unaffected — it spans
+  the element either way, so compressing it by scale matches compressing it by
+  width — and the only real difference is that `scaleX` squashes the 3px radius
+  horizontally on the growing edge, which is sub-pixel on a 6px-tall bar.
 - Load the three ONNX models once at boot into shared state instead of per
   scan, and refuse to start the server when any of them is missing (#257).
   Concurrent scans would each pay ~500MB otherwise — the fp32 NLI export (#231)
