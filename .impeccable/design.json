@@ -123,20 +123,20 @@
       "css": ".ds-input-label { display: block; font-family: Outfit, system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; color: #d6d3d1; letter-spacing: 0.03em; text-transform: uppercase; margin-bottom: 0.625rem; } .ds-input-wrap { display: flex; align-items: center; background: rgba(12,10,9,0.6); border: 1px solid rgba(168,162,158,0.15); border-radius: 12px; padding: 0 1rem; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-input-wrap:focus-within { border-color: #c9956c; background: rgba(12,10,9,0.8); box-shadow: 0 0 0 3px rgba(201,149,108,0.15); } .ds-input-prefix { font-family: Outfit, system-ui, sans-serif; font-size: 1rem; color: #78716c; transition: color 0.3s cubic-bezier(0.4,0,0.2,1); } .ds-input-wrap:focus-within .ds-input-prefix { color: #c9956c; } .ds-input { flex: 1; border: none; background: transparent; padding: 1rem 0 1rem 0.25rem; font-family: Outfit, system-ui, sans-serif; font-size: 1rem; font-weight: 400; color: #fef3c7; outline: none; } .ds-input::placeholder { color: #57534e; }"
     },
     {
-      "name": "Threat Tier Chip",
+      "name": "Threat Tier Badge",
       "kind": "chip",
-      "refersTo": "tier-chip-high",
-      "description": "Signature component. Severity lives here and nowhere else, always desaturated.",
+      "refersTo": "tier-badge-high",
+      "description": "Signature component. Colored TEXT, not a filled chip — no fill, border or radius. Severity lives here and nowhere else, always desaturated. Measures 7.8-13.7:1 on the ground.",
       "html": "<span class=\"ds-tier ds-tier-high\">High</span> <span class=\"ds-tier ds-tier-elevated\">Elevated</span> <span class=\"ds-tier ds-tier-watch\">Watch</span> <span class=\"ds-tier ds-tier-low\">Low</span>",
-      "css": ".ds-tier { display: inline-block; font-family: Outfit, system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.03em; color: #0c0a09; border-radius: 8px; padding: 0.25rem 0.625rem; } .ds-tier-high { background: #fca5a5; } .ds-tier-elevated { background: #fdba74; } .ds-tier-watch { background: #fcd34d; } .ds-tier-low { background: #a8a29e; }"
+      "css": ".ds-tier { font-family: Outfit, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; margin-right: 0.75rem; } .ds-tier-high { color: #fca5a5; } .ds-tier-elevated { color: #fdba74; } .ds-tier-watch { color: #fcd34d; } .ds-tier-low { color: #a8a29e; }"
     },
     {
-      "name": "Abstention Chip",
+      "name": "Abstention Badge",
       "kind": "chip",
-      "refersTo": "tier-chip-abstained",
-      "description": "No reading was taken. Deliberately outside the tier scale — outlined, never filled. Target state; not yet implemented.",
+      "refersTo": "tier-badge-abstained",
+      "description": "No reading was taken. Deliberately outside the tier scale, but staying in the text idiom — Muted with a dashed underline, never a filled chip. TARGET STATE: today a null tier renders in Low's exact color (#245).",
       "html": "<span class=\"ds-tier-abstained\">Not assessed</span>",
-      "css": ".ds-tier-abstained { display: inline-block; font-family: Outfit, system-ui, sans-serif; font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.03em; color: #78716c; background: transparent; border: 1px dashed rgba(168,162,158,0.35); border-radius: 8px; padding: 0.25rem 0.625rem; }"
+      "css": ".ds-tier-abstained { font-family: Outfit, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; color: #78716c; text-decoration: underline dashed rgba(168,162,158,0.45); text-underline-offset: 4px; }"
     },
     {
       "name": "Brand Mark",

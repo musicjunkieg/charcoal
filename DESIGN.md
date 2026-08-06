@@ -98,16 +98,14 @@ components:
   input-field-focus:
     backgroundColor: "rgba(12, 10, 9, 0.8)"
     textColor: "{colors.instrument-cream}"
-  tier-chip-high:
-    backgroundColor: "{colors.tier-high}"
-    textColor: "{colors.night-ground}"
-    rounded: "{rounded.sm}"
-    padding: "0.25rem 0.625rem"
-  tier-chip-abstained:
+  tier-badge-high:
+    backgroundColor: "transparent"
+    textColor: "{colors.tier-high}"
+    typography: "{typography.label}"
+  tier-badge-abstained:
     backgroundColor: "transparent"
     textColor: "{colors.muted}"
-    rounded: "{rounded.sm}"
-    padding: "0.25rem 0.625rem"
+    typography: "{typography.label}"
 ---
 
 # Design System: Charcoal
@@ -347,21 +345,27 @@ at weight 500 in Body Text Bright, going Lit Cream on hover over `0.3s`. The
 32–36px ring mark anchors the left. Semantic `<nav>`, with `aria-label` on the
 logo link.
 
-### Threat Tier Chip (signature)
-The component that carries the product's entire tone. A filled chip in the
-tier's color with dark text, `8px` radius, small and quiet.
+### Threat Tier Badge (signature)
+The component that carries the product's entire tone. Not a chip — **colored
+text**: the tier name set in its own color at weight 500, `0.875rem`, with no
+fill, border, or radius. Quiet by construction.
 
 Severity is encoded **only** here, and only in these four desaturated values:
-High `#fca5a5`, Elevated `#fdba74`, Watch `#fcd34d`, Low `#a8a29e`.
+High `#fca5a5`, Elevated `#fdba74`, Watch `#fcd34d`, Low `#a8a29e`. As text on
+the ground these measure 10.41 / 11.71 / 13.70 / 7.83:1 — the restraint costs
+nothing in legibility.
 
 **Abstention is not a tier.** `NotAssessed` and `Insufficient Data` mean no
-reading was taken — they must render *visibly outside the scale*: an outlined,
-unfilled chip in Muted, so it cannot be mistaken at a glance for a low score.
+reading was taken. They must render *visibly outside the scale* — the intended
+treatment is Muted (`#78716c`) text with a dashed underline or an outlined
+container, staying within the text idiom rather than introducing a filled chip
+that exists nowhere else in the system.
 
-> **Implementation gap.** Today `not_assessed` is counted on the dashboard but
-> carries no dedicated treatment and inherits default styling. PRODUCT.md treats
-> abstention as first-class and explicitly not a variant of Low. The outlined
-> chip above is the intended target, not the current state.
+> **Implementation gap (#245).** Today a null tier renders via
+> `?? '#a8a29e'` — Low's exact color — so abstention is not merely unstyled, it
+> is actively indistinguishable from a genuine Low verdict. PRODUCT.md treats
+> abstention as first-class and explicitly not a variant of Low. The treatment
+> above is the intended target, not the current state.
 
 ### Brand Mark
 Five concentric stroked circles at ascending opacity (0.15 → 0.7) around a
