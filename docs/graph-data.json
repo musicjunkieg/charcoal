@@ -4993,6 +4993,28 @@
       "created_at": "2026-08-06T10:59:06.095958-07:00",
       "updated_at": "2026-08-06T10:59:06.095958-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":95}"
+    },
+    {
+      "id": 462,
+      "change_id": "a0b47f22-f52c-41ed-9a01-b0d0943a8e08",
+      "node_type": "action",
+      "title": "Fix CodeRabbit PR #96 round 1: schema v12 backfills scan_queue.claim_id",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T13:13:50.198144-07:00",
+      "updated_at": "2026-08-06T13:13:50.198144-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"316cde8\",\"confidence\":92,\"files\":[\"migrations/postgres/0012_scan_queue_claim_id.sql\",\"src/db/schema.rs\",\"src/db/postgres.rs\",\"src/web/handlers/scan.rs\",\"src/web/handlers/admin.rs\"]}"
+    },
+    {
+      "id": 463,
+      "change_id": "d26e48db-9f8b-4257-9f12-162db626997b",
+      "node_type": "outcome",
+      "title": "Schema v12 verified in BOTH directions on BOTH backends; 730 web + 26 Postgres tests pass, zero skips, clippy clean x3",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T13:13:56.920002-07:00",
+      "updated_at": "2026-08-06T13:13:56.920002-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"316cde8\",\"confidence\":93}"
     }
   ],
   "edges": [
@@ -9890,6 +9912,28 @@
       "weight": 1.0,
       "rationale": "Verified by the fix commit",
       "created_at": "2026-08-06T10:59:06.086579-07:00"
+    },
+    {
+      "id": 456,
+      "from_node_id": 455,
+      "to_node_id": 462,
+      "from_change_id": "f127196d-4599-4c25-a0fd-063466eab6f0",
+      "to_change_id": "a0b47f22-f52c-41ed-9a01-b0d0943a8e08",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit round 1 on PR #96 is the next review gate after the four final-review findings cleared",
+      "created_at": "2026-08-06T13:13:56.904111-07:00"
+    },
+    {
+      "id": 457,
+      "from_node_id": 462,
+      "to_node_id": 463,
+      "from_change_id": "a0b47f22-f52c-41ed-9a01-b0d0943a8e08",
+      "to_change_id": "d26e48db-9f8b-4257-9f12-162db626997b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verification result of the v12 migration and the five other review fixes",
+      "created_at": "2026-08-06T13:14:00.373886-07:00"
     }
   ],
   "documents": [

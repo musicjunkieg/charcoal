@@ -99,7 +99,10 @@
 						aria-valuemax={100}
 						aria-label="{clsDone} of {clsTotal} posts classified"
 					>
-						<div class="bar-fill" style="width: {barPercent}%"></div>
+						<!-- scaleX, not width: animating width relayouts every frame of
+						     the transition. transform-origin is the left edge so the bar
+						     grows rightward the way width did. -->
+						<div class="bar-fill" style="transform: scaleX({barPercent / 100})"></div>
 					</div>
 					<span class="bar-text">{clsDone} of {clsTotal} posts classified</span>
 				</div>
@@ -237,10 +240,18 @@
 	}
 
 	.bar-fill {
+		/* Full width, scaled down — so the transition drives `transform`, which
+		   the compositor handles, instead of `width`, which relayouts on every
+		   frame. The gradient looks the same either way: it spans the element,
+		   so compressing it by scale matches compressing it by width. The one
+		   real difference is that scaleX squashes this radius horizontally on
+		   the growing edge — sub-pixel on a 6px bar. */
+		width: 100%;
 		height: 100%;
 		background: linear-gradient(90deg, var(--amber-500) 0%, var(--copper) 100%);
 		border-radius: 3px;
-		transition: width 0.5s ease;
+		transform-origin: left;
+		transition: transform 0.5s ease;
 	}
 
 	.bar-text {
