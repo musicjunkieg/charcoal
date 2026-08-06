@@ -1494,6 +1494,37 @@ Refs #257'
 >
 > **4. Stale doc:** `src/web/scan_job.rs:9` still says "Only one scan can run
 > at a time; POST /api/scan returns 409 if one is already active."
+>
+> **5. TWO HARD BLOCKERS INHERITED FROM TASK 5 — #273 and #274.** Both are
+> dormant only because nothing enqueues yet. **Wiring enqueue in this task is
+> exactly what makes them live**, so they must be fixed here, not after.
+>
+> - **#273 — two pipelines for the same user.** `run_admitter` reclaims and
+>   then admits in the SAME pass, so the row it just re-queued is usually the
+>   one it immediately claims — starting a second `run_scan` for a user whose
+>   first is still running. The zombie notices only on its next beat, and if
+>   the lease lapsed *because* `heartbeat_scan` was erroring, possibly never.
+>   That means two pipelines writing the same `scan_state` resume markers, and
+>   two draining `classification_queue` against RunPod — where the `$2` ceiling
+>   is per-scan, so it is paid twice. **Do not "fix" this by checking
+>   `ScanManager`**: the zombie's entry deliberately still says running, so
+>   that guard refuses the successor forever. Use an in-process registry of
+>   live claims keyed on `user_did`, cleared by `run_under_slot` on every exit.
+> - **#274 — the zombie still clobbers the successor's status.** `run_scan`
+>   writes terminal status itself (`scan_job.rs:855-882`) *before*
+>   `run_under_slot` classifies the exit, so a zombie that finishes inside the
+>   window writes `Done` over the successor's live entry and the `Completed`
+>   arm does nothing. `set_progress` has the same hole. Make the status writes
+>   claim-aware rather than special-casing an exit arm.
+> - **#275 (do it here, it is two lines):** `AtCapacity` logs WARN every 30s
+>   tick while any backlog exists. With open signup a standing backlog is the
+>   steady state; leave `Wedged` at ERROR as the alarm and drop this to INFO
+>   or transition-only.
+>
+> **6. Make `/api/status` prefer the `scan_queue` row over `ScanManager`.**
+> `scan_queue_entry` already returns status, position, and ETA. This is also
+> the clean answer to the stale-"running" label left by an abandoned scan — it
+> dissolves the problem instead of managing it.
 
 **Files:**
 - Modify: `src/web/scan_job.rs` (`WebScanPhase::Queued`, delete `any_running`)
