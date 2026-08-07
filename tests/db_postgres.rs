@@ -33,13 +33,12 @@ async fn cleanup_test_data(url: &str) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("cleanup: failed to connect: {e}"))?;
 
-    // Delete test-specific scan_state keys (scoped by user_did)
-    sqlx_core::query::query(
-        "DELETE FROM scan_state WHERE user_did = 'did:plc:pgtest_user000000000000' AND key = 'test_cursor'",
-    )
-    .execute(&pool)
-    .await
-    .map_err(|e| anyhow::anyhow!("cleanup: scan_state delete failed: {e}"))?;
+    // NOTE: the `test_cursor` scan_state key is deliberately NOT cleaned here.
+    // Six tests call this helper concurrently, but only
+    // `test_pg_scan_state_roundtrip` writes that key — so deleting it from the
+    // shared helper meant any of the other five could wipe the row out from
+    // under that test between its write and its read (observed as
+    // `left: None, right: Some("def456")`). It cleans up its own key instead.
 
     // Delete test-specific account scores (scoped by user_did)
     sqlx_core::query::query(
@@ -851,4 +850,660 @@ async fn test_pg_delete_user_data_clears_scan_skips() {
         0,
         "scan_skips must not survive account deletion on Postgres"
     );
+}
+
+// --- scan_queue (#257) ---
+//
+// Unlike every other table in this file, `scan_queue` position/count queries
+// are deliberately GLOBAL — that's what "queue position" means. Every other
+// test in this file scopes its assertions to its own user_did, which is
+// enough isolation when tests run in parallel (the default). These three
+// cannot: `test_pg_enqueue_is_idempotent`'s position assertion counts every
+// currently-queued row in the table, so a `queued` row left mid-flight by
+// `test_pg_claim_respects_the_concurrency_cap` (its cap-3 refusal is a queued
+// row until that test's own cleanup runs) can inflate it. Observed directly:
+// running with the default parallel harness failed ~1 run in 3 with
+// `left: 2, right: 1` on the position assertion. Individually, or under
+// `--test-threads=1` on a clean table, all three pass every time — so the
+// queue logic itself is correct; only cross-test scheduling was at fault.
+// Serializing them (not the whole suite) with a static mutex fixes it without
+// slowing down every other test in this file.
+fn scan_queue_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Every DID used by the scan_queue tests, so they can be cleared wholesale.
+const SCAN_QUEUE_DID_PREFIX: &str = "did:plc:pgtest_q_%";
+
+/// Clear the whole scan_queue fixture set before a test runs.
+///
+/// Per-test `delete_user_data` is not enough here: cap, position, and median
+/// are whole-table figures, so ONE row left behind by a panicking test — a
+/// `running` row in particular — occupies a slot and fails every later test in
+/// this group. That cascade is exactly what happened when negative controls
+/// were run against these tests. The prefix belongs solely to this group, and
+/// the group is serialized by `scan_queue_test_lock`, so this is safe.
+async fn reset_scan_queue_fixtures(url: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM scan_queue WHERE user_did LIKE $1")
+        .bind(SCAN_QUEUE_DID_PREFIX)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// Admission must never exceed the cap, and claims must come back in FIFO
+/// order — `ORDER BY enqueued_at` is the whole reason position means anything.
+///
+/// This test is SEQUENTIAL by construction, so it exercises the cap guard and
+/// the ordering but NOT the concurrent case; see
+/// `test_pg_concurrent_claims_never_exceed_the_cap` for that.
+#[tokio::test]
+async fn test_pg_claim_respects_the_concurrency_cap() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const A: &str = "did:plc:pgtest_q_aaaaaaaaaaaaa";
+    const B: &str = "did:plc:pgtest_q_bbbbbbbbbbbbb";
+    const C: &str = "did:plc:pgtest_q_ccccccccccccc";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    for d in [A, B, C] {
+        db.delete_user_data(d).await.unwrap();
+        db.upsert_user(d, "q.bsky.social").await.unwrap();
+        db.enqueue_scan(d).await.unwrap();
+        // NOW() has microsecond resolution but the three enqueues are fast
+        // enough to land in the same tick on some machines; a real gap makes
+        // the FIFO assertion below deterministic.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    // Cap of 2: two claims succeed, the third is refused.
+    let first = db.claim_next_scan(2, 120).await.unwrap();
+    let second = db.claim_next_scan(2, 120).await.unwrap();
+    let third = db.claim_next_scan(2, 120).await.unwrap();
+
+    assert_eq!(
+        first.as_ref().map(|c| c.user_did.as_str()),
+        Some(A),
+        "FIFO: the oldest enqueued row must be claimed first"
+    );
+    assert_eq!(
+        second.as_ref().map(|c| c.user_did.as_str()),
+        Some(B),
+        "FIFO: the second-oldest row must be claimed second"
+    );
+    assert!(third.is_none(), "third claim must be refused at cap 2");
+
+    // Each claim mints its own fencing token.
+    assert_ne!(
+        first.as_ref().unwrap().claim_id,
+        second.as_ref().unwrap().claim_id,
+        "each claim must get a distinct claim_id"
+    );
+
+    for d in [A, B, C] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
+/// A worker whose lease lapsed must not be able to free or extend the slot
+/// that was handed to someone else. This is what the claim_id fencing token
+/// exists for: without it, a zombie's `finish_queued_scan` stomps the new
+/// owner's running row to 'done' and over-admits the next claim.
+#[tokio::test]
+async fn test_pg_stale_claim_cannot_finish_or_heartbeat() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_jjjjjjjjjjjjj";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+
+    // Worker A claims with an already-expired lease, then the row is reclaimed
+    // and worker B claims it — exactly the sequence a redeploy produces.
+    let a = db.claim_next_scan(2, -1).await.unwrap().expect("A claims");
+    assert_eq!(db.reclaim_expired_scans().await.unwrap(), 1);
+    let b = db.claim_next_scan(2, 120).await.unwrap().expect("B claims");
+    assert_eq!(b.user_did, U);
+    assert_ne!(a.claim_id, b.claim_id, "the reclaim must invalidate A");
+
+    // Zombie A must be rejected on both surfaces.
+    assert!(
+        !db.heartbeat_scan(U, &a.claim_id, 120).await.unwrap(),
+        "a stale claim must not extend the new owner's lease"
+    );
+    assert!(
+        !db.finish_queued_scan(U, &a.claim_id, None).await.unwrap(),
+        "a stale claim must not finish the new owner's scan"
+    );
+    assert_eq!(
+        db.scan_queue_entry(U, 1).await.unwrap().unwrap().status,
+        "running",
+        "the row must still belong to B"
+    );
+
+    // B, holding the live token, succeeds.
+    assert!(db.heartbeat_scan(U, &b.claim_id, 120).await.unwrap());
+    assert!(db.finish_queued_scan(U, &b.claim_id, None).await.unwrap());
+    assert_eq!(
+        db.scan_queue_entry(U, 1).await.unwrap().unwrap().status,
+        "done"
+    );
+
+    // A finished scan releases its slot and can be re-enqueued.
+    db.enqueue_scan(U).await.unwrap();
+    let entry = db.scan_queue_entry(U, 1).await.unwrap().expect("re-queued");
+    assert_eq!(entry.status, "queued", "a done scan can be requeued");
+    assert_eq!(entry.position, 1);
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// `finish_queued_scan` on a failure records the error and the 'failed' status.
+#[tokio::test]
+async fn test_pg_finish_records_failure() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kkkkkkkkkkkkk";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, Some("boom"))
+        .await
+        .unwrap());
+
+    let entry = db.scan_queue_entry(U, 1).await.unwrap().expect("present");
+    assert_eq!(entry.status, "failed");
+    assert_eq!(
+        entry.eta_seconds, None,
+        "a finished scan has no ETA — not Some(0)"
+    );
+
+    // Finishing twice must be a no-op, not a second state change.
+    assert!(
+        !db.finish_queued_scan(U, &claim.claim_id, None)
+            .await
+            .unwrap(),
+        "the row is no longer running, so finish must not fire again"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A running scan's remaining time is unknown, so `eta_seconds` must be None —
+/// `position` is forced to 0 for non-queued rows, so computing anyway would
+/// tell a user watching their own scan "0 seconds remaining".
+#[tokio::test]
+async fn test_pg_running_scan_has_no_eta() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_lllllllllllll";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+    db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
+
+    let entry = db.scan_queue_entry(U, 1).await.unwrap().expect("present");
+    assert_eq!(entry.status, "running");
+    assert_eq!(entry.position, 0);
+    assert_eq!(
+        entry.eta_seconds, None,
+        "a running scan reports no ETA, not Some(0)"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// The two backends must quote the SAME `eta_seconds` for the same scan
+/// history. They compute the median duration by different routes — Postgres
+/// via `EXTRACT(EPOCH FROM (finished_at - started_at))`, SQLite in Rust — and
+/// the SQLite side used `num_seconds()`, which truncates, while `EXTRACT`
+/// keeps fractional seconds. A user whose deployment moved from SQLite to
+/// Postgres therefore saw the estimate change with no change in history.
+///
+/// Both sides are seeded with the SAME hand-written timestamps rather than
+/// real scans, because a wall-clock duration differs between the two runs and
+/// could not be compared for equality at all. The duration carries a half
+/// second and the queued user sits two batches out, so truncation is visible:
+/// 181s correct, 180s truncated.
+#[tokio::test]
+async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const DONE: &str = "did:plc:pgtest_q_nnnnnnnnnnnnn";
+    const A: &str = "did:plc:pgtest_q_ooooooooooooo";
+    const B: &str = "did:plc:pgtest_q_ppppppppppppp";
+    // A 90.5-second scan: the half second is the whole point.
+    const STARTED: &str = "2026-08-06T00:00:00+00:00";
+    const FINISHED: &str = "2026-08-06T00:01:30.5+00:00";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // --- SQLite side -------------------------------------------------------
+    let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+    charcoal::db::schema::create_tables(&conn).expect("schema");
+    conn.execute(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+         VALUES (?1, 'done', ?2, ?2, ?3)",
+        rusqlite::params![DONE, STARTED, FINISHED],
+    )
+    .expect("seed the completed scan");
+    charcoal::db::queries::enqueue_scan(&conn, A).expect("enqueue A");
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    charcoal::db::queries::enqueue_scan(&conn, B).expect("enqueue B");
+    let sqlite_entry = charcoal::db::queries::scan_queue_entry(&conn, B, 1)
+        .expect("sqlite queue entry")
+        .expect("row exists");
+
+    // --- Postgres side -----------------------------------------------------
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    {
+        use sqlx_core::pool::Pool;
+        use sqlx_postgres::Postgres;
+
+        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+        sqlx_core::query::query(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', $2, $2, $3)",
+        )
+        .bind(DONE)
+        .bind(chrono::DateTime::parse_from_rfc3339(STARTED).unwrap())
+        .bind(chrono::DateTime::parse_from_rfc3339(FINISHED).unwrap())
+        .execute(&pool)
+        .await
+        .expect("seed the completed scan");
+    }
+    db.upsert_user(A, "q.bsky.social").await.unwrap();
+    db.upsert_user(B, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(A).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    db.enqueue_scan(B).await.unwrap();
+    let pg_entry = db
+        .scan_queue_entry(B, 1)
+        .await
+        .unwrap()
+        .expect("row exists");
+
+    // Same position on both, or the ETAs would be comparing different waits.
+    assert_eq!(sqlite_entry.position, 2, "SQLite: B waits behind A");
+    assert_eq!(pg_entry.position, 2, "Postgres: B waits behind A");
+    assert_eq!(
+        sqlite_entry.eta_seconds, pg_entry.eta_seconds,
+        "the backends must quote the same ETA for the same scan history"
+    );
+    assert_eq!(
+        pg_entry.eta_seconds,
+        Some(181),
+        "a 90.5s median over two batches is 181s; 180 means a backend truncated \
+         the half second away"
+    );
+
+    for d in [DONE, A, B] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
+/// enqueued_at must be RFC3339 so both backends parse identically — Postgres's
+/// `::TEXT` rendering ("2026-08-06 00:36:25.231997-07") is not.
+#[tokio::test]
+async fn test_pg_enqueued_at_is_rfc3339() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_mmmmmmmmmmmmm";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+
+    let entry = db.scan_queue_entry(U, 1).await.unwrap().expect("queued");
+    chrono::DateTime::parse_from_rfc3339(&entry.enqueued_at)
+        .unwrap_or_else(|e| panic!("enqueued_at {:?} is not RFC3339: {e}", entry.enqueued_at));
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// The admitter cannot tell an idle queue from a wedged one without this —
+/// `claim_next_scan` returns None for both. Postgres side of the parity with
+/// `queries::tests::depth_counts_queued_and_running_separately`.
+///
+/// The counts are whole-table, so this belongs to the serialized scan_queue
+/// group and asserts DELTAS rather than absolutes: another suite's leftover row
+/// would otherwise make it flap.
+#[tokio::test]
+async fn test_pg_scan_queue_depth_counts_queued_and_running() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const A: &str = "did:plc:pgtest_q_nnnnnnnnnnnnn";
+    const B: &str = "did:plc:pgtest_q_ooooooooooooo";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let before = db.scan_queue_depth().await.unwrap();
+
+    for d in [A, B] {
+        db.delete_user_data(d).await.unwrap();
+        db.upsert_user(d, "q.bsky.social").await.unwrap();
+        db.enqueue_scan(d).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let queued = db.scan_queue_depth().await.unwrap();
+    assert_eq!(queued.queued, before.queued + 2, "two rows now waiting");
+    assert_eq!(queued.running, before.running, "nothing claimed yet");
+
+    let claim = db
+        .claim_next_scan(before.running + 1, 120)
+        .await
+        .unwrap()
+        .expect("a queued row exists");
+    let claimed = db.scan_queue_depth().await.unwrap();
+    assert_eq!(
+        (claimed.queued, claimed.running),
+        (before.queued + 1, before.running + 1),
+        "a claim must move the row from queued to running, not double-count it"
+    );
+
+    // Finished rows are neither waiting nor holding a slot.
+    db.finish_queued_scan(&claim.user_did, &claim.claim_id, None)
+        .await
+        .unwrap();
+    let finished = db.scan_queue_depth().await.unwrap();
+    assert_eq!(
+        (finished.queued, finished.running),
+        (before.queued + 1, before.running),
+        "a finished row must not keep counting against the cap"
+    );
+
+    for d in [A, B] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
+/// The cap must hold when admitters run at the SAME TIME, which is the only
+/// scenario that matters — a sequential run never contends and so never
+/// exercises the locking at all.
+///
+/// N concurrent claimers against N queued rows at cap 1: exactly one may be
+/// granted. Asserting equality rather than `<=` keeps the test from passing
+/// vacuously if nothing is claimable.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_pg_concurrent_claims_never_exceed_the_cap() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const CAP: usize = 1;
+    const DIDS: [&str; 4] = [
+        "did:plc:pgtest_q_fffffffffffff",
+        "did:plc:pgtest_q_ggggggggggggg",
+        "did:plc:pgtest_q_hhhhhhhhhhhhh",
+        "did:plc:pgtest_q_iiiiiiiiiiiii",
+    ];
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    for d in DIDS {
+        db.delete_user_data(d).await.unwrap();
+        db.upsert_user(d, "q.bsky.social").await.unwrap();
+        db.enqueue_scan(d).await.unwrap();
+    }
+
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..DIDS.len() {
+        let db = std::sync::Arc::clone(&db);
+        set.spawn(async move { db.claim_next_scan(CAP, 120).await.unwrap() });
+    }
+
+    let mut granted = 0usize;
+    while let Some(res) = set.join_next().await {
+        if res.unwrap().is_some() {
+            granted += 1;
+        }
+    }
+
+    assert_eq!(
+        granted, CAP,
+        "cap {CAP}: exactly {CAP} concurrent claim(s) may be admitted, got {granted}"
+    );
+
+    for d in DIDS {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
+/// Enqueue is keyed by user_did, so a double-click cannot double-book.
+///
+/// The row count and position alone do NOT test this — user_did is the primary
+/// key, so a second insert can only ever produce one row regardless of the
+/// `WHERE status IN ('done','failed')` guard. What that guard actually buys is
+/// an UNCHANGED `enqueued_at`: without it the second call resets the timestamp
+/// and the double-clicking user is sent to the back of the FIFO. That is the
+/// assertion below.
+#[tokio::test]
+async fn test_pg_enqueue_is_idempotent() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_ddddddddddddd";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+
+    db.enqueue_scan(U).await.unwrap();
+    let first = db.scan_queue_entry(U, 1).await.unwrap().expect("queued");
+
+    // A real gap, so a reset enqueued_at would be visibly different.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    db.enqueue_scan(U).await.unwrap();
+    let second = db.scan_queue_entry(U, 1).await.unwrap().expect("queued");
+
+    assert_eq!(second.status, "queued");
+    assert_eq!(second.position, 1, "one row, so position 1 — not two rows");
+    assert_eq!(
+        second.enqueued_at, first.enqueued_at,
+        "a re-enqueue while still queued must not move the user's place in line"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A scan orphaned by a redeploy must return to the queue, not vanish.
+/// Combined with #208's scan_phase the reclaimed scan resumes rather than
+/// restarting, so nobody re-pays for completed work.
+#[tokio::test]
+async fn test_pg_expired_lease_is_reclaimed() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_eeeeeeeeeeeee";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+
+    // Claim with a lease that has already expired.
+    let claimed = db.claim_next_scan(2, -1).await.unwrap();
+    assert_eq!(claimed.map(|c| c.user_did).as_deref(), Some(U));
+
+    let reclaimed = db.reclaim_expired_scans().await.unwrap();
+    assert_eq!(reclaimed, 1, "the expired running row must be re-queued");
+
+    let entry = db.scan_queue_entry(U, 1).await.unwrap().expect("present");
+    assert_eq!(entry.status, "queued", "reclaimed back to queued");
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A running row whose lease is NULL is otherwise unrecoverable — nothing
+/// would ever reclaim it and the slot stays occupied forever.
+#[tokio::test]
+async fn test_pg_null_lease_is_reclaimed() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    // DIDs are unique per test in this module even though the lock plus
+    // `reset_scan_queue_fixtures` serialize the group. Sharing them made
+    // isolation depend on that serialization holding, and made a panic
+    // mid-test impossible to attribute to one test's rows.
+    const U: &str = "did:plc:pgtest_q_ttttttttttttt";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(U).await.unwrap();
+    db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
+
+    // Null the lease directly — the state a crash between claim and heartbeat
+    // can leave behind.
+    {
+        use sqlx_core::pool::Pool;
+        use sqlx_postgres::Postgres;
+        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+        sqlx_core::query::query("UPDATE scan_queue SET lease_expires = NULL WHERE user_did = $1")
+            .bind(U)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(
+        db.reclaim_expired_scans().await.unwrap(),
+        1,
+        "a running row with a NULL lease must be reclaimed, not stranded"
+    );
+    assert_eq!(
+        db.scan_queue_entry(U, 1).await.unwrap().unwrap().status,
+        "queued"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// The ETA must divide by the concurrency cap: with cap N the expected wait is
+/// about `ceil(position / N)` scan-lengths, not `position` of them. Scans here
+/// run 22 minutes to 2 hours, so ignoring the cap tells a position-4 user at
+/// cap 2 roughly twice their real wait.
+#[tokio::test]
+async fn test_pg_eta_accounts_for_the_concurrency_cap() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    // One finished scan of a known duration gives a deterministic median.
+    // Unique to this test — see the note in test_pg_null_lease_is_reclaimed.
+    const DONE: &str = "did:plc:pgtest_q_uuuuuuuuuuuuu";
+    // Four queued rows so the last one sits at position 4.
+    const QUEUED: [&str; 4] = [
+        "did:plc:pgtest_q_ppppppppppppp",
+        "did:plc:pgtest_q_qqqqqqqqqqqqq",
+        "did:plc:pgtest_q_rrrrrrrrrrrrr",
+        "did:plc:pgtest_q_sssssssssssss",
+    ];
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // The median is a whole-table figure, so this test needs the table to hold
+    // exactly one finished row — its own. `reset_scan_queue_fixtures` above
+    // cleared the group's rows; anything else in scan_queue at this point
+    // belongs to production data in a shared database, which this test cannot
+    // and should not assume away, so it asserts nothing about other users.
+    {
+        use sqlx_core::pool::Pool;
+        use sqlx_postgres::Postgres;
+        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+        db.delete_user_data(DONE).await.unwrap();
+        db.upsert_user(DONE, "q.bsky.social").await.unwrap();
+        // A 'done' row lasting exactly 600s.
+        sqlx_core::query::query(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', NOW(), NOW() - INTERVAL '600 seconds', NOW())",
+        )
+        .bind(DONE)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    for d in QUEUED {
+        db.delete_user_data(d).await.unwrap();
+        db.upsert_user(d, "q.bsky.social").await.unwrap();
+        db.enqueue_scan(d).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let last = QUEUED[3];
+    let at_cap_1 = db.scan_queue_entry(last, 1).await.unwrap().unwrap();
+    assert_eq!(at_cap_1.position, 4);
+    assert_eq!(
+        at_cap_1.eta_seconds,
+        Some(2400),
+        "cap 1: four ahead-or-self x 600s"
+    );
+
+    let at_cap_2 = db.scan_queue_entry(last, 2).await.unwrap().unwrap();
+    assert_eq!(
+        at_cap_2.eta_seconds,
+        Some(1200),
+        "cap 2: ceil(4/2) = 2 batches x 600s — half of the cap-1 figure"
+    );
+
+    let at_cap_3 = db.scan_queue_entry(last, 3).await.unwrap().unwrap();
+    assert_eq!(
+        at_cap_3.eta_seconds,
+        Some(1200),
+        "cap 3: ceil(4/3) = 2 batches — ceiling, not floor"
+    );
+
+    db.delete_user_data(DONE).await.unwrap();
+    for d in QUEUED {
+        db.delete_user_data(d).await.unwrap();
+    }
 }

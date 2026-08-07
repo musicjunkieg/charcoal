@@ -215,6 +215,9 @@ pub async fn build_profile(
 /// the two non-threat cases (`< 5` posts → "Insufficient Data"; clean and
 /// topically irrelevant → early-exit "Low"), or [`Stage1Outcome::Proceed`] when
 /// the account warrants the full pipeline.
+///
+/// Thin wrapper over [`stage1_outcome_timed`] for callers that don't need the
+/// ONNX-inference timing breakdown (#264 only needs this in `gather_account`).
 #[allow(clippy::too_many_arguments)]
 pub async fn stage1_outcome(
     stage1_sample: &posts::PostSample,
@@ -224,6 +227,40 @@ pub async fn stage1_outcome(
     protected_fingerprint: &TopicFingerprint,
     weights: &ThreatWeights,
     graph_distance: Option<GraphDistance>,
+) -> Result<Stage1Outcome> {
+    let mut discard_onnx_ms = 0u64;
+    stage1_outcome_timed(
+        stage1_sample,
+        scorer,
+        target_handle,
+        target_did,
+        protected_fingerprint,
+        weights,
+        graph_distance,
+        &mut discard_onnx_ms,
+    )
+    .await
+}
+
+/// Same as [`stage1_outcome`], but also reports how much of the call was spent
+/// in the Stage-1 ONNX inference call (`scorer.score_batch`) via `onnx_ms`.
+///
+/// `onnx_ms` is incremented (not overwritten) by exactly the wall-clock time of
+/// the `scorer.score_batch(&stage1_texts)` call below — nothing else in this
+/// function's non-inference work (the language-coverage gate, the `< 5` posts
+/// check, TF-IDF extraction, or the early-exit comparison) is included. It
+/// stays at its initial value when Stage 1 terminates before that call is
+/// reached (not-assessed / insufficient-data), since no inference happened.
+#[allow(clippy::too_many_arguments)]
+pub async fn stage1_outcome_timed(
+    stage1_sample: &posts::PostSample,
+    scorer: &dyn ToxicityScorer,
+    target_handle: &str,
+    target_did: &str,
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    graph_distance: Option<GraphDistance>,
+    onnx_ms: &mut u64,
 ) -> Result<Stage1Outcome> {
     // #222: drop posts our English-only models cannot assess, and decide whether
     // the account is scoreable, unassessable, or genuinely sparse — BEFORE the
@@ -291,7 +328,12 @@ pub async fn stage1_outcome(
         .chain(stage1_sample.replies.iter().map(|r| r.post.text.clone()))
         .chain(stage1_sample.quotes.iter().map(|p| p.text.clone()))
         .collect();
-    let stage1_onnx = scorer.score_batch(&stage1_texts).await?;
+    let stage1_onnx = {
+        let t = std::time::Instant::now();
+        let r = scorer.score_batch(&stage1_texts).await?;
+        *onnx_ms += t.elapsed().as_millis() as u64;
+        r
+    };
     let originals_count = stage1_sample.originals.len();
     let quotes_offset = originals_count + stage1_sample.replies.len();
     let stage1_clean_pass_scores: Vec<f64> = stage1_onnx

@@ -261,38 +261,27 @@ mod scan_manager_tests {
     #[test]
     fn test_scan_manager_starts_empty() {
         let mgr = ScanManager::new();
-        assert!(!mgr.is_any_running());
+        assert!(mgr.get_status("did:plc:abc").is_none());
     }
 
+    /// The one-at-a-time gate is gone (#257). Admission is the `scan_queue`'s
+    /// job, so registering a second user here must simply work — a
+    /// process-local refusal would contradict a cap the database already
+    /// enforced, and did: it refused every concurrent scan the queue
+    /// legitimately admitted.
     #[test]
-    fn test_scan_manager_try_start_succeeds() {
+    fn test_scan_manager_tracks_concurrent_scans() {
         let mut mgr = ScanManager::new();
-        assert!(mgr.try_start_scan("did:plc:abc").is_ok());
-        assert!(mgr.is_any_running());
-    }
-
-    #[test]
-    fn test_scan_manager_try_start_rejects_second() {
-        let mut mgr = ScanManager::new();
-        mgr.try_start_scan("did:plc:abc").unwrap();
-        assert!(mgr.try_start_scan("did:plc:def").is_err());
-    }
-
-    #[test]
-    fn test_scan_manager_busy_message_explains_global_gate() {
-        // The gate is global, so the message must not imply the conflict is
-        // the caller's own scan.
-        let mut mgr = ScanManager::new();
-        mgr.try_start_scan("did:plc:abc").unwrap();
-        let msg = mgr.try_start_scan("did:plc:def").unwrap_err();
-        assert!(msg.contains("Another scan is already in progress"), "{msg}");
-        assert!(msg.contains("one at a time"), "{msg}");
+        mgr.begin_admitted_scan("did:plc:abc", "claim-a");
+        mgr.begin_admitted_scan("did:plc:def", "claim-b");
+        assert!(mgr.is_scan_running_for("did:plc:abc"));
+        assert!(mgr.is_scan_running_for("did:plc:def"));
     }
 
     #[test]
     fn test_scan_manager_start_sets_starting_phase() {
         let mut mgr = ScanManager::new();
-        mgr.try_start_scan("did:plc:abc").unwrap();
+        mgr.begin_admitted_scan("did:plc:abc", "claim-a");
         let status = mgr.get_status("did:plc:abc").unwrap();
         assert_eq!(status.phase, WebScanPhase::Starting);
     }
@@ -300,6 +289,7 @@ mod scan_manager_tests {
     #[test]
     fn test_web_scan_phase_as_str_is_snake_case() {
         assert_eq!(WebScanPhase::Idle.as_str(), "idle");
+        assert_eq!(WebScanPhase::Queued.as_str(), "queued");
         assert_eq!(WebScanPhase::Starting.as_str(), "starting");
         assert_eq!(WebScanPhase::LoadingModels.as_str(), "loading_models");
         assert_eq!(WebScanPhase::Fingerprint.as_str(), "fingerprint");
@@ -314,18 +304,36 @@ mod scan_manager_tests {
         assert_eq!(WebScanPhase::default(), WebScanPhase::Idle);
     }
 
+    /// Only the claim that owns an entry may write to it (#274).
     #[test]
-    fn test_scan_manager_finish_allows_next() {
+    fn test_scan_manager_refuses_a_superseded_claims_write() {
         let mut mgr = ScanManager::new();
-        mgr.try_start_scan("did:plc:abc").unwrap();
-        mgr.finish_scan("did:plc:abc");
-        assert!(mgr.try_start_scan("did:plc:def").is_ok());
+        mgr.begin_admitted_scan("did:plc:abc", "claim-a");
+        assert!(mgr.owns("did:plc:abc", "claim-a"));
+
+        // A successor takes the slot.
+        mgr.begin_admitted_scan("did:plc:abc", "claim-b");
+        assert!(!mgr.owns("did:plc:abc", "claim-a"));
+
+        assert!(
+            !mgr.update_owned("did:plc:abc", "claim-a", |s| s.phase = WebScanPhase::Failed),
+            "the superseded claim's write must be refused"
+        );
+        assert_eq!(
+            mgr.get_status("did:plc:abc").unwrap().phase,
+            WebScanPhase::Starting
+        );
+        assert!(mgr.update_owned("did:plc:abc", "claim-b", |s| s.phase = WebScanPhase::Done));
+        assert_eq!(
+            mgr.get_status("did:plc:abc").unwrap().phase,
+            WebScanPhase::Done
+        );
     }
 
     #[test]
     fn test_scan_manager_per_user_status() {
         let mut mgr = ScanManager::new();
-        mgr.try_start_scan("did:plc:abc").unwrap();
+        mgr.begin_admitted_scan("did:plc:abc", "claim-a");
         let status = mgr.get_status("did:plc:abc");
         assert!(status.is_some());
         assert!(status.unwrap().running);

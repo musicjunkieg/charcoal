@@ -16,7 +16,13 @@ export const STEPS: Array<{ label: string; phases: ScanPhase[] }> = [
 // Which checklist step a phase belongs to. Phases outside the running set
 // (idle/done/failed) clamp to the first step rather than -1, which would
 // render every step as already completed.
+//
+// `queued` is the one phase that returns -1 on purpose: the scan has not
+// started, so no step is active and none are done. Clamping it to 0 is what
+// made a waiting user watch "Reading your posts" spin over an idle server
+// (#257).
 export function phaseToStepIndex(phase: ScanPhase): number {
+	if (phase === 'queued') return -1;
 	return Math.max(
 		0,
 		STEPS.findIndex((s) => s.phases.includes(phase))

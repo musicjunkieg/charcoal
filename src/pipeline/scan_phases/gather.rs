@@ -28,7 +28,7 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::posts::{self, PostSample};
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
-use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome, Stage1Outcome};
+use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome_timed, Stage1Outcome};
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::{mean_embedding, SentenceEmbedder};
 use crate::topics::fingerprint::TopicFingerprint;
@@ -38,6 +38,59 @@ use crate::toxicity::ensemble::{TwoStageToxicityScorer, ONNX_CLEAN_THRESHOLD};
 use crate::toxicity::traits::ToxicityScorer;
 
 use super::staging::{AccountInput, QueueRow, ACCOUNT_INPUT_SCHEMA_VERSION};
+
+/// Per-account split of Phase A work (#264).
+///
+/// Phase A is not pure network wait: `onnx_clean_pass` runs here too, so two
+/// concurrent scans (#257) contend on the shared model mutex. This measures by
+/// how much, so the concurrency default is set from data. Mirrors the
+/// delayTime/executionTime split that made the burst phase tunable (#61).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GatherTiming {
+    /// Time in `fetch_sample` / `fetch_parent_posts` — the getAuthorFeed and
+    /// getPosts round trips.
+    pub fetch_ms: u64,
+    /// Time in `onnx_clean_pass` (Stage 2's clean/survivor split). Only
+    /// accrues for accounts that reach Stage 2 (`Stage1Outcome::Proceed`).
+    pub clean_pass_ms: u64,
+    /// Time in Stage 1's `scorer.score_batch` call (inside `stage1_outcome`).
+    /// Runs for EVERY account that reaches the inference call (i.e. every
+    /// account with >= 5 posts that passes the language coverage gate),
+    /// including the majority that terminate at Stage 1 and never touch
+    /// `clean_pass_ms` at all. Kept separate from `clean_pass_ms` rather than
+    /// folded in — the two answer different questions: Stage 1 runs for
+    /// (nearly) every account, Stage 2 only for survivors (#264 review fix).
+    pub stage1_onnx_ms: u64,
+    /// Wall clock for the whole account, including work in neither bucket.
+    pub total_ms: u64,
+}
+
+impl GatherTiming {
+    /// Accumulate another account's timings into this total.
+    pub fn add(&mut self, other: &GatherTiming) {
+        self.fetch_ms += other.fetch_ms;
+        self.clean_pass_ms += other.clean_pass_ms;
+        self.stage1_onnx_ms += other.stage1_onnx_ms;
+        self.total_ms += other.total_ms;
+    }
+
+    /// Inference as a whole-number percentage of total Phase A time.
+    ///
+    /// This is the number that decides the #257 concurrency default: under
+    /// ~10% and concurrency 2 should approach 2x; at 30%+ the shared model
+    /// mutex is the ceiling and the lever is a session pool instead.
+    ///
+    /// Sums BOTH inference sites — Stage 1's `score_batch` and Stage 2's
+    /// `onnx_clean_pass` — since both contend on the same ONNX model mutex.
+    /// Reporting only one would systematically under-report inference share
+    /// (the bug this field fixes).
+    pub fn inference_pct(&self) -> u64 {
+        if self.total_ms == 0 {
+            return 0;
+        }
+        (self.clean_pass_ms + self.stage1_onnx_ms) * 100 / self.total_ms
+    }
+}
 
 /// What `gather_account` did for one account.
 ///
@@ -234,11 +287,19 @@ pub async fn gather_account(
     scorer: &dyn ToxicityScorer,
     clean_pass: &dyn CleanPassScorer,
     inputs: &GatherInputs<'_>,
-) -> Result<GatherOutcome> {
-    // ── Stage 1: quick check with 25 posts ──
-    let stage1_sample = fetcher.fetch_sample(inputs.account_handle, 25).await?;
+) -> Result<(GatherOutcome, GatherTiming)> {
+    let account_start = std::time::Instant::now();
+    let mut timing = GatherTiming::default();
 
-    match stage1_outcome(
+    // ── Stage 1: quick check with 25 posts ──
+    let stage1_sample = {
+        let t = std::time::Instant::now();
+        let r = fetcher.fetch_sample(inputs.account_handle, 25).await?;
+        timing.fetch_ms += t.elapsed().as_millis() as u64;
+        r
+    };
+
+    match stage1_outcome_timed(
         &stage1_sample,
         scorer,
         inputs.account_handle,
@@ -246,6 +307,7 @@ pub async fn gather_account(
         inputs.protected_fingerprint,
         inputs.weights,
         inputs.graph_distance,
+        &mut timing.stage1_onnx_ms,
     )
     .await?
     {
@@ -253,13 +315,19 @@ pub async fn gather_account(
             // Non-threat: finalise directly, enqueue/stash nothing. The score
             // WAS written here, so report Terminal so the orchestrator counts it.
             db.upsert_account_score(user_did, &score).await?;
-            return Ok(GatherOutcome::Terminal);
+            timing.total_ms = account_start.elapsed().as_millis() as u64;
+            return Ok((GatherOutcome::Terminal, timing));
         }
         Stage1Outcome::Proceed { .. } => {}
     }
 
     // ── Stage 2: full I/O with 50 posts (no classification — that's Phase B) ──
-    let sample = fetcher.fetch_sample(inputs.account_handle, 50).await?;
+    let sample = {
+        let t = std::time::Instant::now();
+        let r = fetcher.fetch_sample(inputs.account_handle, 50).await?;
+        timing.fetch_ms += t.elapsed().as_millis() as u64;
+        r
+    };
 
     // #222: partition before building QueueRows so the burst never classifies
     // unassessable text; abstain if the assessable subset is too thin.
@@ -274,7 +342,8 @@ pub async fn gather_account(
             inputs.graph_distance,
         );
         db.upsert_account_score(user_did, &score).await?;
-        return Ok(GatherOutcome::Terminal);
+        timing.total_ms = account_start.elapsed().as_millis() as u64;
+        return Ok((GatherOutcome::Terminal, timing));
     }
 
     let parent_uris: Vec<String> = sample
@@ -282,7 +351,12 @@ pub async fn gather_account(
         .iter()
         .map(|r| r.parent_uri.clone())
         .collect();
-    let parent_texts = fetcher.fetch_parents(&parent_uris).await?;
+    let parent_texts = {
+        let t = std::time::Instant::now();
+        let r = fetcher.fetch_parents(&parent_uris).await?;
+        timing.fetch_ms += t.elapsed().as_millis() as u64;
+        r
+    };
 
     // Build the per-post rows. Order matches `score_from_sample`'s expectation
     // (originals ++ replies ++ quotes) so Phase C can reconstruct verdicts
@@ -339,7 +413,17 @@ pub async fn gather_account(
     // post failed the batch, propagated out of `gather_account`, and cost the
     // account its whole scan. Now a bad post is dropped and its neighbours
     // survive.
-    let onnx_scores = clean_pass_isolated(clean_pass, &envelope_texts).await;
+    //
+    // Timed as a whole (#264): `gather_account` never calls
+    // `clean_pass.onnx_clean_pass` directly — every call goes through this
+    // isolated wrapper, so this is the one call site that represents "clean
+    // pass" time for this account, including any per-post fallback retries.
+    let onnx_scores = {
+        let t = std::time::Instant::now();
+        let r = clean_pass_isolated(clean_pass, &envelope_texts).await;
+        timing.clean_pass_ms += t.elapsed().as_millis() as u64;
+        r
+    };
     debug_assert_eq!(onnx_scores.len(), rows.len());
 
     let total_posts = rows.len();
@@ -428,7 +512,8 @@ pub async fn gather_account(
 
     db.enqueue_classifications(user_did, &rows).await?;
 
-    Ok(GatherOutcome::Enqueued)
+    timing.total_ms = account_start.elapsed().as_millis() as u64;
+    Ok((GatherOutcome::Enqueued, timing))
 }
 
 /// Build a survivor (`pending`) `QueueRow` with verdict fields unset.
@@ -493,4 +578,56 @@ fn fingerprint_quality(counts: &SampleCounts) -> String {
     )
     .as_str()
     .to_string()
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::GatherTiming;
+
+    /// Aggregation must be additive across accounts so the Phase A total is
+    /// the sum of per-account work, not the last account's numbers.
+    #[test]
+    fn gather_timing_accumulates() {
+        let mut total = GatherTiming::default();
+        total.add(&GatherTiming {
+            fetch_ms: 1000,
+            clean_pass_ms: 200,
+            stage1_onnx_ms: 50,
+            total_ms: 1300,
+        });
+        total.add(&GatherTiming {
+            fetch_ms: 500,
+            clean_pass_ms: 100,
+            stage1_onnx_ms: 30,
+            total_ms: 700,
+        });
+
+        assert_eq!(total.fetch_ms, 1500);
+        assert_eq!(total.clean_pass_ms, 300);
+        assert_eq!(total.stage1_onnx_ms, 80);
+        assert_eq!(total.total_ms, 2000);
+    }
+
+    /// The number that decides the #257 concurrency default is the inference
+    /// share. Under ~10% means concurrency 2 approaches 2x; 30%+ means the
+    /// shared mutex is the ceiling. Must count BOTH inference sites — Stage
+    /// 1's `score_batch` and Stage 2's `onnx_clean_pass` — since a report that
+    /// only summed one would systematically under-report inference share
+    /// (the #264 review bug this test guards against).
+    #[test]
+    fn inference_share_is_reported_as_a_percentage() {
+        let t = GatherTiming {
+            fetch_ms: 850,
+            clean_pass_ms: 100,
+            stage1_onnx_ms: 50,
+            total_ms: 1000,
+        };
+        assert_eq!(t.inference_pct(), 15);
+    }
+
+    /// A scan that gathered nothing must not divide by zero.
+    #[test]
+    fn inference_share_of_empty_scan_is_zero() {
+        assert_eq!(GatherTiming::default().inference_pct(), 0);
+    }
 }

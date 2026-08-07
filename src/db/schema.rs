@@ -360,6 +360,78 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // v11 — scan_queue: durable scan admission (#257).
+    //
+    // Mirrors migrations/postgres/0011_scan_queue.sql. SQLite stores timestamps
+    // as TEXT where Postgres uses TIMESTAMPTZ.
+    //
+    // The SQLite implementation is deliberately minimal — single process, no
+    // SKIP LOCKED needed — because #263 will delete this backend entirely.
+    // Written to be removed, not maintained.
+    //
+    // claim_id is the fencing token; see migrations/postgres/0011_scan_queue.sql
+    // for why it exists.
+    run_migration(conn, 11, |c| {
+        c.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS scan_queue (
+                user_did        TEXT    NOT NULL PRIMARY KEY,
+                status          TEXT    NOT NULL,
+                enqueued_at     TEXT    NOT NULL,
+                started_at      TEXT,
+                finished_at     TEXT,
+                lease_expires   TEXT,
+                last_error      TEXT,
+                claim_id        TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_scan_queue_status_enqueued
+                ON scan_queue (status, enqueued_at);
+            ",
+        )
+    })?;
+
+    // v12 — backfill scan_queue.claim_id (#257).
+    //
+    // v11 was amended in place to add `claim_id` while #257 was still on its
+    // branch. A database created from the PRE-amendment v11 has a scan_queue
+    // table with no `claim_id` column and version 11 already recorded, so
+    // `run_migration` skips v11 and the column is never added — every claim,
+    // heartbeat and finish then fails with a missing-column error. Repairing it
+    // inside v11 is impossible: v11 is precisely the migration those databases
+    // no longer run. Only a new version reaches them.
+    //
+    // Mirrors migrations/postgres/0012_scan_queue_claim_id.sql. SQLite has no
+    // `ADD COLUMN IF NOT EXISTS`, so the column is probed first — and the table
+    // itself is probed too, so this stays a no-op rather than an error on any
+    // database that somehow lacks scan_queue.
+    //
+    // On a fresh database v11 runs first and creates the column, so both probes
+    // find it already present and v12 does nothing.
+    run_migration(conn, 12, |c| {
+        let table_exists: bool = c.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master
+             WHERE type = 'table' AND name = 'scan_queue'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !table_exists {
+            return Ok(());
+        }
+
+        let has_claim_id: bool = c.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('scan_queue')
+             WHERE name = 'claim_id'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_claim_id {
+            c.execute_batch("ALTER TABLE scan_queue ADD COLUMN claim_id TEXT;")?;
+        }
+
+        Ok(())
+    })?;
+
     Ok(())
 }
 
@@ -416,8 +488,8 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips = 11 tables
-        assert_eq!(count, 11i64);
+        // scan_skips, scan_queue = 12 tables
+        assert_eq!(count, 12i64);
     }
 
     #[test]
@@ -481,7 +553,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v10
+        // Verify schema_version has all versions through v12
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -489,7 +561,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     }
 
     #[test]
@@ -591,10 +663,10 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips = 11 tables
-        assert_eq!(count, 11i64);
+        // scan_skips, scan_queue = 12 tables
+        assert_eq!(count, 12i64);
 
-        // Verify schema_version includes v4 through v10
+        // Verify schema_version includes v4 through v12
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -602,6 +674,148 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    }
+
+    /// Does `scan_queue` currently have a `claim_id` column?
+    fn has_claim_id(conn: &Connection) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('scan_queue') WHERE name = 'claim_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_migration_v12_is_a_noop_on_a_fresh_database() {
+        // Direction 1: fresh database. v11 creates scan_queue WITH claim_id, so
+        // v12 must find nothing to do and must not error or duplicate a column.
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+
+        assert!(
+            has_claim_id(&conn),
+            "v11 should have created claim_id on a fresh database"
+        );
+
+        // Exactly one claim_id column — an unconditional ALTER would have thrown
+        // rather than produced two, but assert the count so a future "fix" that
+        // swallows the error is still caught.
+        let claim_id_columns: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scan_queue') WHERE name = 'claim_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim_id_columns, 1);
+
+        // And re-running is still clean.
+        create_tables(&conn).unwrap();
+        assert!(has_claim_id(&conn));
+    }
+
+    #[test]
+    fn test_migration_v12_adds_claim_id_to_a_pre_amendment_v11_database() {
+        // Direction 2: the database this migration exists for. Reconstruct the
+        // pre-amendment v11 state by hand — scan_queue with NO claim_id, and
+        // version 11 already recorded so the runner skips v11 — then verify
+        // create_tables repairs it.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE schema_version (
+                version     INTEGER PRIMARY KEY,
+                applied_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE scan_queue (
+                user_did        TEXT    NOT NULL PRIMARY KEY,
+                status          TEXT    NOT NULL,
+                enqueued_at     TEXT    NOT NULL,
+                started_at      TEXT,
+                finished_at     TEXT,
+                lease_expires   TEXT,
+                last_error      TEXT
+            );
+
+            INSERT INTO schema_version (version) VALUES (11);
+            ",
+        )
+        .unwrap();
+
+        // Precondition: this is genuinely the broken shape.
+        assert!(
+            !has_claim_id(&conn),
+            "fixture should start without claim_id — otherwise the test proves nothing"
+        );
+
+        create_tables(&conn).unwrap();
+
+        assert!(
+            has_claim_id(&conn),
+            "v12 should have added claim_id to a pre-amendment v11 database"
+        );
+
+        // The column is usable, not just present.
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at, claim_id)
+             VALUES ('did:plc:v12', 'queued', '2026-08-06T00:00:00Z', 'token-1')",
+            [],
+        )
+        .unwrap();
+        let claim: String = conn
+            .query_row(
+                "SELECT claim_id FROM scan_queue WHERE user_did = 'did:plc:v12'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim, "token-1");
+    }
+
+    #[test]
+    fn test_migration_v12_is_a_noop_when_scan_queue_is_absent() {
+        // Defensive: v11 always runs first in practice, but a v12 that assumed
+        // the table exists would be a boot-time failure rather than a skip.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE schema_version (
+                version     INTEGER PRIMARY KEY,
+                applied_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO schema_version (version)
+                VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11);
+            ",
+        )
+        .unwrap();
+
+        // Every migration but v12 is already recorded, so v12 is the only one
+        // that runs — against a database with no scan_queue table at all.
+        create_tables(&conn).unwrap();
+
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master
+                 WHERE type = 'table' AND name = 'scan_queue'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            !table_exists,
+            "fixture should have no scan_queue — otherwise the absent-table path is untested"
+        );
+
+        let recorded: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM schema_version WHERE version = 12",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(recorded, "v12 should still record itself as applied");
     }
 }

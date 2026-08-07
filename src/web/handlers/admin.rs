@@ -179,7 +179,14 @@ pub async fn pre_seed_user(
     ))
 }
 
-/// POST /api/admin/users/{did}/scan — trigger a scan for a specific user.
+/// POST /api/admin/users/{did}/scan — queue a scan for a specific user.
+///
+/// Enqueues exactly like `POST /api/scan` does, per Bryan's ruling on #257.
+/// This used to call `launch_scan` directly, which never touched `scan_queue`
+/// and was therefore invisible to `claim_next_scan`'s running count — real
+/// concurrency would have been `CHARCOAL_SCAN_CONCURRENCY + admin scans`, and
+/// the GPU spend with it. Admin gives up starting immediately; there is one
+/// admission path and the cap holds absolutely.
 pub async fn trigger_admin_scan(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -191,7 +198,10 @@ pub async fn trigger_admin_scan(
             Json(serde_json::json!({"error": "Admin required"})),
         ));
     }
-    let handle = state
+    // Existence check only — the admitter looks the handle up again when it
+    // claims the row. Checking here turns "this DID was never registered" into
+    // a 404 now rather than a failed queue row later.
+    state
         .db
         .get_user_handle(&target_did)
         .await
@@ -208,33 +218,56 @@ pub async fn trigger_admin_scan(
             )
         })?;
 
-    {
-        let mut mgr = state.scan_manager.write().await;
-        mgr.try_start_scan(&target_did).map_err(|msg| {
-            (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": msg})),
-            )
-        })?;
+    state.db.enqueue_scan(&target_did).await.map_err(|e| {
+        tracing::error!(error = %format!("{e:#}"), "admin enqueue failed");
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "Could not queue the scan"})),
+        )
+    })?;
+
+    if let Some(wake) = &state.scan_wake {
+        let _ = wake.try_send(());
     }
 
     tracing::info!(
         admin_did = %auth.did,
         target_did = %target_did,
-        "Admin triggered scan"
+        "Admin queued scan"
     );
 
-    scan_job::launch_scan(
-        state.config.clone(),
-        state.db.clone(),
-        state.scan_manager.clone(),
-        target_did.clone(),
-        handle,
-    );
+    // Same shape as POST /api/scan, deliberately: the enqueue succeeded so this
+    // stays 202, but a failed read-back reports `position: null` rather than 0.
+    // 0 is what a *running* scan legitimately reports, so reusing it here would
+    // hide a database error behind a plausible-looking answer.
+    let entry = match state
+        .db
+        .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
+        .await
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(
+                target_did = %target_did,
+                error = %format!("{e:#}"),
+                "admin queued the scan but could not read back its queue entry"
+            );
+            None
+        }
+    };
+    let (status, position, eta) = match entry {
+        Some(e) => (e.status, Some(e.position), e.eta_seconds),
+        None => ("queued".to_string(), None, None),
+    };
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(serde_json::json!({"message": "Scan started", "user_did": target_did})),
+        Json(serde_json::json!({
+            "status": status,
+            "position": position,
+            "eta_seconds": eta,
+            "user_did": target_did,
+        })),
     ))
 }
 
@@ -270,12 +303,37 @@ pub async fn delete_user(
         ));
     }
 
-    {
-        let mgr = state.scan_manager.read().await;
-        if mgr.is_scan_running_for(&target_did) {
+    // Gate on the durable `scan_queue` row, not `ScanManager::is_scan_running_for`
+    // (#278). The in-process status map only knows about scans THIS process
+    // launched, so it misses a row that is merely queued, one running on
+    // another replica, and anything left over a restart. `delete_user_data`
+    // already clears `scan_queue` below, so nothing is orphaned either way —
+    // this just makes the guard as durable as the rest of #257's admission
+    // path instead of trusting a process-local view.
+    //
+    // A DB error here must NOT fall through to the delete. The guard it
+    // replaced was an in-memory read that could not fail, so `if let Ok(..)`
+    // would have quietly turned "we cannot tell" into "go ahead" — deleting a
+    // user out from under a live scan is exactly what this check exists to
+    // prevent, so an unreadable queue is a 500, not an implicit yes.
+    let queue_entry = state
+        .db
+        .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
+        .await
+        .map_err(|e| {
+            tracing::error!(target_did = %target_did, error = %e, "delete_user: scan_queue lookup failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+    if let Some(entry) = queue_entry {
+        if matches!(entry.status.as_str(), "queued" | "running") {
             return Err((
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": "Cannot delete user with running scan"})),
+                Json(
+                    serde_json::json!({"error": "Cannot delete user with queued or running scan"}),
+                ),
             ));
         }
     }

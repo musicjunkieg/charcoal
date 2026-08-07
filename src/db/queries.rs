@@ -7,14 +7,14 @@
 // protected user. This enables multi-user support where each user's threat
 // data is isolated.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::ScanSkip;
+use super::traits::{ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
 
 // --- Users ---
 
@@ -964,6 +964,12 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
         "DELETE FROM scan_skips WHERE user_did = ?1",
         params![user_did],
     )?;
+    // #257: scan_queue holds the user's admission state; a queued or running
+    // row must not outlive the account.
+    tx.execute(
+        "DELETE FROM scan_queue WHERE user_did = ?1",
+        params![user_did],
+    )?;
     tx.execute(
         "DELETE FROM inferred_pairs WHERE user_did = ?1",
         params![user_did],
@@ -1344,6 +1350,254 @@ pub fn clear_scan_skips(conn: &Connection, user_did: &str) -> Result<()> {
         params![user_did],
     )?;
     Ok(())
+}
+
+// --- Scan admission queue (#257) ---
+//
+// This mirrors PgDatabase's semantics in src/db/postgres.rs, kept minimal
+// because #263 deletes this backend entirely. Written to be removed, not
+// maintained.
+//
+// On the admission race Postgres needs an advisory lock for: it cannot happen
+// here as wired. `SqliteDatabase` holds one `Mutex<Connection>` and keeps the
+// guard for the whole `claim_next_scan` call, so every admitter in the process
+// is already single-file. Across processes the connection runs in WAL mode
+// (see db::mod), where a DEFERRED transaction's count-then-update *could*
+// over-admit, so the transaction below is BEGIN IMMEDIATE: the second admitter
+// gets SQLITE_BUSY — a loud error — instead of quietly admitting past the cap.
+
+/// Add a user to the scan queue. Idempotent — a second call while queued or
+/// running is a no-op; a finished ('done'/'failed') row is reset so the user
+/// can scan again. Mirrors PgDatabase::enqueue_scan.
+pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at)
+         VALUES (?1, 'queued', ?2)
+         ON CONFLICT(user_did) DO UPDATE SET
+             status = 'queued', enqueued_at = ?2,
+             started_at = NULL, finished_at = NULL,
+             lease_expires = NULL, last_error = NULL,
+             claim_id = NULL
+         WHERE status IN ('done', 'failed')",
+        params![user_did, now],
+    )?;
+    Ok(())
+}
+
+/// Claim the oldest queued scan if fewer than `limit` are running.
+/// Mirrors PgDatabase::claim_next_scan.
+pub fn claim_next_scan(
+    conn: &Connection,
+    limit: usize,
+    lease_secs: i64,
+) -> Result<Option<ScanClaim>> {
+    // `new_unchecked` because this takes `&Connection`, matching the rest of
+    // this module (see delete_user_data above for why). Immediate rather than
+    // the default Deferred so the write lock is taken before the count.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+
+    let running: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM scan_queue WHERE status = 'running'",
+        [],
+        |row| row.get(0),
+    )?;
+    if running >= limit as i64 {
+        tx.commit()?;
+        return Ok(None);
+    }
+
+    let did: Option<String> = tx
+        .query_row(
+            "SELECT user_did FROM scan_queue
+             WHERE status = 'queued'
+             ORDER BY enqueued_at
+             LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    let Some(did) = did else {
+        tx.commit()?;
+        return Ok(None);
+    };
+
+    let started_at = chrono::Utc::now();
+    let lease_expires = started_at + chrono::Duration::seconds(lease_secs);
+    // randomblob(16) is SQLite's built-in CSPRNG — the fencing-token equivalent
+    // of Postgres's gen_random_uuid(), with no new Rust dependency.
+    let claim_id: String = tx.query_row(
+        "UPDATE scan_queue
+         SET status = 'running', started_at = ?2, lease_expires = ?3,
+             claim_id = lower(hex(randomblob(16)))
+         WHERE user_did = ?1
+         RETURNING claim_id",
+        params![did, started_at.to_rfc3339(), lease_expires.to_rfc3339()],
+        |row| row.get(0),
+    )?;
+
+    tx.commit()?;
+    Ok(Some(ScanClaim {
+        user_did: did,
+        claim_id,
+    }))
+}
+
+/// Extend a running scan's lease, only if `claim_id` still owns the row.
+/// Returns false when it does not. Mirrors PgDatabase::heartbeat_scan.
+pub fn heartbeat_scan(
+    conn: &Connection,
+    user_did: &str,
+    claim_id: &str,
+    lease_secs: i64,
+) -> Result<bool> {
+    let lease_expires = chrono::Utc::now() + chrono::Duration::seconds(lease_secs);
+    let changed = conn.execute(
+        "UPDATE scan_queue SET lease_expires = ?3
+         WHERE user_did = ?1 AND status = 'running' AND claim_id = ?2",
+        params![user_did, claim_id, lease_expires.to_rfc3339()],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Mark a scan done (error None) or failed (error Some), releasing its slot.
+/// Only the holder of `claim_id` may do so — see PgDatabase::finish_queued_scan
+/// for why. Returns false when nothing matched. Mirrors
+/// PgDatabase::finish_queued_scan.
+pub fn finish_queued_scan(
+    conn: &Connection,
+    user_did: &str,
+    claim_id: &str,
+    error: Option<&str>,
+) -> Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let status = if error.is_none() { "done" } else { "failed" };
+    let changed = conn.execute(
+        "UPDATE scan_queue
+         SET status = ?3, finished_at = ?4, lease_expires = NULL, last_error = ?5
+         WHERE user_did = ?1 AND status = 'running' AND claim_id = ?2",
+        params![user_did, claim_id, status, now, error],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Return running rows whose lease has lapsed to 'queued'. Timestamps are
+/// RFC3339 in UTC, so lexicographic comparison is correct. A running row with
+/// a NULL lease is reclaimed too — otherwise nothing ever would, and the slot
+/// would stay occupied forever. Mirrors PgDatabase::reclaim_expired_scans.
+pub fn reclaim_expired_scans(conn: &Connection) -> Result<usize> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = conn.execute(
+        "UPDATE scan_queue
+         SET status = 'queued', started_at = NULL, lease_expires = NULL,
+             claim_id = NULL
+         WHERE status = 'running'
+           AND (lease_expires IS NULL OR lease_expires < ?1)",
+        params![now],
+    )?;
+    Ok(changed)
+}
+
+/// Count queued and running rows in one round-trip.
+/// Mirrors PgDatabase::scan_queue_depth.
+pub fn scan_queue_depth(conn: &Connection) -> Result<ScanQueueDepth> {
+    let (queued, running): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*) FILTER (WHERE status = 'queued'),
+                COUNT(*) FILTER (WHERE status = 'running')
+         FROM scan_queue",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(ScanQueueDepth {
+        queued: queued as usize,
+        running: running as usize,
+    })
+}
+
+/// A user's queue entry with position and ETA, or None if the user has never
+/// been enqueued. Mirrors PgDatabase::scan_queue_entry.
+pub fn scan_queue_entry(
+    conn: &Connection,
+    user_did: &str,
+    concurrency_limit: usize,
+) -> Result<Option<ScanQueueEntry>> {
+    let row: Option<(String, String, i64)> = conn
+        .query_row(
+            "SELECT status, enqueued_at,
+                    (SELECT COUNT(*) FROM scan_queue q2
+                      WHERE q2.status = 'queued' AND q2.enqueued_at <= q.enqueued_at)
+             FROM scan_queue q WHERE user_did = ?1",
+            params![user_did],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+
+    let Some((status, enqueued_at, raw_position)) = row else {
+        return Ok(None);
+    };
+    let position = if status == "queued" { raw_position } else { 0 };
+
+    // Rolling median over the last 20 completed scans. None until any finish,
+    // so ETA is absent rather than fabricated on a fresh install.
+    //
+    // Seconds are kept FRACTIONAL, matching the Postgres backend's
+    // `EXTRACT(EPOCH FROM (finished_at - started_at))`. This used to be
+    // `num_seconds()`, which truncates, so the same scan history quoted a
+    // different ETA either side of a backend switch. Truncating is not a
+    // harmless rounding difference once `eta_seconds` multiplies the median by
+    // the batch count: a 90.6s median eight batches out is 724s here and 720s
+    // there. Rounding both would have to throw away precision Postgres already
+    // has, so the SQLite side gains it instead.
+    //
+    // Errors propagate with `?` rather than being dropped by `filter_map(ok)`:
+    // a corrupt row or an unparseable timestamp would otherwise silently shrink
+    // the sample and skew the median instead of surfacing.
+    let mut durations: Vec<f64> = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT started_at, finished_at FROM scan_queue
+         WHERE status = 'done' AND started_at IS NOT NULL
+         ORDER BY finished_at DESC LIMIT 20",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let started_at: String = row.get(0)?;
+        let finished_at: String = row.get(1)?;
+        Ok((started_at, finished_at))
+    })?;
+    for row in rows {
+        let (s, f) = row?;
+        let s = chrono::DateTime::parse_from_rfc3339(&s)
+            .with_context(|| format!("scan_queue.started_at is not RFC3339: {s}"))?;
+        let f = chrono::DateTime::parse_from_rfc3339(&f)
+            .with_context(|| format!("scan_queue.finished_at is not RFC3339: {f}"))?;
+        durations.push((f - s).as_seconds_f64());
+    }
+
+    let median = if durations.is_empty() {
+        None
+    } else {
+        // `total_cmp`, not `partial_cmp().unwrap()`: durations are finite by
+        // construction, but a total order needs no unwrap to say so.
+        durations.sort_by(f64::total_cmp);
+        let mid = durations.len() / 2;
+        // Averaging the two middle values on an even sample is what
+        // PERCENTILE_CONT(0.5) does, so the backends agree here too.
+        Some(if durations.len().is_multiple_of(2) {
+            (durations[mid - 1] + durations[mid]) / 2.0
+        } else {
+            durations[mid]
+        })
+    };
+
+    let eta_seconds = super::traits::eta_seconds(&status, position, concurrency_limit, median);
+
+    Ok(Some(ScanQueueEntry {
+        user_did: user_did.to_string(),
+        status,
+        position,
+        eta_seconds,
+        enqueued_at,
+    }))
 }
 
 #[cfg(test)]
@@ -1785,5 +2039,405 @@ mod tests {
 
         let median = get_median_engagement(&conn, TEST_USER).unwrap();
         assert!((median - 20.0).abs() < f64::EPSILON);
+    }
+
+    // --- Scan admission queue (#257 / #270) ---
+    //
+    // A reviewer hand-verified these behaviors against the SQLite backend by
+    // executing the statements directly and found no divergence from
+    // Postgres (which has coverage in tests/db_postgres.rs). These tests
+    // close the regression gap: nothing previously caught this backend
+    // drifting from that behavior.
+
+    const QUEUE_USER_A: &str = "did:plc:queuea0000000000000a";
+    const QUEUE_USER_B: &str = "did:plc:queueb0000000000000b";
+    const QUEUE_USER_C: &str = "did:plc:queuec0000000000000c";
+
+    /// A double-click enqueue must not send the user to the back of the
+    /// FIFO. `user_did` is the primary key, so a second `enqueue_scan` call
+    /// always leaves exactly one row — asserting the row count cannot catch
+    /// the `WHERE status IN ('done','failed')` guard being deleted. The
+    /// timestamp is the only thing that can.
+    #[test]
+    fn enqueue_is_idempotent_and_preserves_position() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let first = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+
+        // A real gap so a reset enqueued_at would be visibly different.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let second = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+
+        assert_eq!(second.status, "queued");
+        assert_eq!(second.position, 1, "one row — not two");
+        assert_eq!(
+            second.enqueued_at, first.enqueued_at,
+            "a re-enqueue while still queued must not move the user's place in line"
+        );
+    }
+
+    #[test]
+    fn claim_mints_a_token_and_persists_running_status() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().expect("claim");
+        assert_eq!(claim.user_did, QUEUE_USER_A);
+        assert_eq!(claim.claim_id.len(), 32, "claim_id: {}", claim.claim_id);
+        assert!(
+            claim
+                .claim_id
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "claim_id must be lowercase hex: {}",
+            claim.claim_id
+        );
+
+        // Read back directly rather than trusting the return value.
+        let (status, stored_claim_id): (String, String) = conn
+            .query_row(
+                "SELECT status, claim_id FROM scan_queue WHERE user_did = ?1",
+                params![QUEUE_USER_A],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "running");
+        assert_eq!(stored_claim_id, claim.claim_id);
+    }
+
+    /// A worker whose lease lapsed must not be able to free or extend the
+    /// slot that was handed to someone else — the claim_id fencing token
+    /// exists for exactly this.
+    #[test]
+    fn stale_claim_cannot_heartbeat_or_finish() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+
+        // Worker A claims with an already-expired lease, gets reclaimed, and
+        // worker B claims the freed row — the sequence a redeploy produces.
+        let a = claim_next_scan(&conn, 2, -1).unwrap().expect("A claims");
+        assert_eq!(reclaim_expired_scans(&conn).unwrap(), 1);
+        let b = claim_next_scan(&conn, 2, 120).unwrap().expect("B claims");
+        assert_ne!(a.claim_id, b.claim_id, "the reclaim must invalidate A");
+
+        assert!(
+            !heartbeat_scan(&conn, QUEUE_USER_A, &a.claim_id, 120).unwrap(),
+            "a stale claim must not extend the new owner's lease"
+        );
+        assert!(
+            !finish_queued_scan(&conn, QUEUE_USER_A, &a.claim_id, None).unwrap(),
+            "a stale claim must not finish the new owner's scan"
+        );
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "running",
+            "the row must still belong to B"
+        );
+
+        // B, holding the live token, succeeds on both surfaces.
+        assert!(heartbeat_scan(&conn, QUEUE_USER_A, &b.claim_id, 120).unwrap());
+        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &b.claim_id, None).unwrap());
+    }
+
+    /// The admitter's only way to tell an idle queue from a wedged one —
+    /// `claim_next_scan` returns `None` for both.
+    #[test]
+    fn depth_counts_queued_and_running_separately() {
+        let conn = test_db();
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 0,
+                running: 0
+            },
+            "an empty table must report zero, not fail"
+        );
+
+        for did in [QUEUE_USER_A, QUEUE_USER_B, QUEUE_USER_C] {
+            enqueue_scan(&conn, did).unwrap();
+        }
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 3,
+                running: 0
+            }
+        );
+
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().expect("claim");
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 2,
+                running: 1
+            },
+            "a claim must move the row from queued to running, not double-count it"
+        );
+
+        // Finished rows are neither waiting nor holding a slot.
+        finish_queued_scan(&conn, &claim.user_did, &claim.claim_id, None).unwrap();
+        assert_eq!(
+            scan_queue_depth(&conn).unwrap(),
+            ScanQueueDepth {
+                queued: 2,
+                running: 0
+            },
+            "a finished row must not keep counting against the cap"
+        );
+    }
+
+    #[test]
+    fn double_finish_returns_false_second_time() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap());
+        assert!(
+            !finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap(),
+            "the row is no longer running, so a second finish must be a no-op"
+        );
+    }
+
+    #[test]
+    fn re_enqueue_after_done_resets_the_row() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+        let done_at = scan_queue_entry(&conn, QUEUE_USER_A, 1)
+            .unwrap()
+            .unwrap()
+            .enqueued_at;
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+
+        let entry = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+        assert_eq!(entry.status, "queued");
+        assert_ne!(
+            entry.enqueued_at, done_at,
+            "re-enqueue after done must set a fresh timestamp"
+        );
+
+        let claim_id: Option<String> = conn
+            .query_row(
+                "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+                params![QUEUE_USER_A],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(claim_id, None, "claim_id must be cleared on re-enqueue");
+    }
+
+    /// A running row with a NULL lease is otherwise unrecoverable — nothing
+    /// would ever reclaim it and the slot stays occupied forever.
+    #[test]
+    fn null_lease_is_reclaimed() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+
+        // The state a crash between claim and heartbeat can leave behind.
+        conn.execute(
+            "UPDATE scan_queue SET lease_expires = NULL WHERE user_did = ?1",
+            params![QUEUE_USER_A],
+        )
+        .unwrap();
+
+        assert_eq!(
+            reclaim_expired_scans(&conn).unwrap(),
+            1,
+            "a running row with a NULL lease must be reclaimed, not stranded"
+        );
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "queued"
+        );
+    }
+
+    #[test]
+    fn expired_lease_is_reclaimed_and_invalidates_the_claim_id() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, -1).unwrap().unwrap();
+
+        assert_eq!(reclaim_expired_scans(&conn).unwrap(), 1);
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1)
+                .unwrap()
+                .unwrap()
+                .status,
+            "queued"
+        );
+
+        let claim_id: Option<String> = conn
+            .query_row(
+                "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+                params![QUEUE_USER_A],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            claim_id, None,
+            "reclaim must null the claim_id so the previous holder is invalidated"
+        );
+        // The old token no longer holds anything, on either surface.
+        assert!(!heartbeat_scan(&conn, QUEUE_USER_A, &claim.claim_id, 120).unwrap());
+    }
+
+    #[test]
+    fn cap_respected_returns_none() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+
+        assert!(claim_next_scan(&conn, 1, 120).unwrap().is_some());
+        assert!(
+            claim_next_scan(&conn, 1, 120).unwrap().is_none(),
+            "cap of 1 already met — a second claim must be refused even though a queued row remains"
+        );
+    }
+
+    #[test]
+    fn claims_come_back_in_fifo_order() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_C).unwrap();
+
+        let first = claim_next_scan(&conn, 3, 120).unwrap().unwrap();
+        let second = claim_next_scan(&conn, 3, 120).unwrap().unwrap();
+        let third = claim_next_scan(&conn, 3, 120).unwrap().unwrap();
+
+        assert_eq!(
+            first.user_did, QUEUE_USER_A,
+            "oldest enqueued must claim first"
+        );
+        assert_eq!(second.user_did, QUEUE_USER_B, "second-oldest claims second");
+        assert_eq!(third.user_did, QUEUE_USER_C, "youngest claims last");
+    }
+
+    #[test]
+    fn position_counts_queued_rows_ahead() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_C).unwrap();
+
+        let entry_b = scan_queue_entry(&conn, QUEUE_USER_B, 10).unwrap().unwrap();
+        assert_eq!(entry_b.position, 2, "A and B are queued at-or-ahead of B");
+        let entry_c = scan_queue_entry(&conn, QUEUE_USER_C, 10).unwrap().unwrap();
+        assert_eq!(entry_c.position, 3);
+    }
+
+    /// `eta_seconds` is None for TWO independent reasons — a non-'queued'
+    /// status, and no median yet. Testing the status gate while no median
+    /// exists would pass for the wrong reason, so this seeds a finished scan
+    /// first to guarantee a median, then checks a *running* row still gets
+    /// None.
+    #[test]
+    fn eta_is_none_for_non_queued_status_even_with_a_median_available() {
+        let conn = test_db();
+
+        // Seed a finished scan so a median exists.
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+
+        // A running row, with the median now available, must still report
+        // no ETA — a running scan's remaining time is unknown.
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        let running = scan_queue_entry(&conn, QUEUE_USER_B, 1).unwrap().unwrap();
+        assert_eq!(running.status, "running");
+        assert_eq!(
+            running.eta_seconds, None,
+            "a running scan's remaining time is unknown, so this must be None — not Some(0)"
+        );
+    }
+
+    #[test]
+    fn eta_is_none_when_no_median_exists_yet() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let entry = scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().unwrap();
+        assert_eq!(entry.status, "queued");
+        assert_eq!(
+            entry.eta_seconds, None,
+            "no scan has ever finished, so there is no median to compute an ETA from"
+        );
+    }
+
+    /// Fractional seconds in the completed-scan history must survive into the
+    /// median, because the Postgres backend's `EXTRACT(EPOCH FROM ...)` keeps
+    /// them. `num_seconds()` truncated, so the same history quoted a different
+    /// ETA either side of a backend switch.
+    ///
+    /// The position is deliberately 2, not 1: at one batch the multiplication
+    /// hides the difference (90.5 and 90.0 both truncate to 90). At two
+    /// batches the truncating version answers 180 and the correct one 181,
+    /// which is exactly how the divergence reaches a user.
+    ///
+    /// `tests/db_postgres.rs::test_pg_eta_matches_sqlite_for_fractional_durations`
+    /// is the other half of this — it asserts the two backends agree on the
+    /// same history rather than asserting this side in isolation.
+    #[test]
+    fn the_median_keeps_fractional_seconds() {
+        let conn = test_db();
+        seed_completed_scan(&conn, "did:plc:done000000000000000", 90.5);
+
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+
+        let entry = scan_queue_entry(&conn, QUEUE_USER_B, 1).unwrap().unwrap();
+        assert_eq!(entry.position, 2);
+        assert_eq!(
+            entry.eta_seconds,
+            Some(181),
+            "a 90.5s median over two batches is 181s; 180 means the half-second \
+             was truncated away and the backends disagree"
+        );
+    }
+
+    /// Insert a finished `scan_queue` row whose duration is exactly
+    /// `duration_secs`. Written directly rather than via
+    /// `claim_next_scan`/`finish_queued_scan` because those stamp wall-clock
+    /// times, and this needs a sub-second duration it can name.
+    fn seed_completed_scan(conn: &Connection, user_did: &str, duration_secs: f64) {
+        let started = chrono::DateTime::parse_from_rfc3339("2026-08-06T00:00:00+00:00").unwrap();
+        let finished =
+            started + chrono::TimeDelta::nanoseconds((duration_secs * 1e9).round() as i64);
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+             VALUES (?1, 'done', ?2, ?2, ?3)",
+            params![user_did, started.to_rfc3339(), finished.to_rfc3339()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn delete_user_data_clears_scan_queue() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        assert!(scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap().is_some());
+
+        delete_user_data(&conn, QUEUE_USER_A).unwrap();
+
+        assert_eq!(
+            scan_queue_entry(&conn, QUEUE_USER_A, 1).unwrap(),
+            None,
+            "scan_queue row must not survive delete_user_data"
+        );
     }
 }

@@ -108,8 +108,13 @@ asserted nothing. Two traps stack here:
 
 The full check, which should report **zero** skips:
 ```
-CHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output 2>&1 | grep -iE "^\s*SKIP"
+CHARCOAL_MODEL_DIR=./models cargo test --features web -- --show-output 2>&1 | grep -E "^\s*SKIP:"
 ```
+
+Note the trailing colon and the **absence of `-i`**. This check used to read
+`grep -iE "^\s*SKIP"`, which false-positives on any test whose *name* begins
+with "skip" — `skips_are_scoped_per_user` and friends match it, so a clean run
+reports skips that do not exist. Match the `SKIP:` sentinel exactly.
 
 To run OAuth tests (requires `--features web`):
 ```
@@ -118,9 +123,16 @@ cargo test --features web --test unit_oauth --test web_oauth
 
 To run PostgreSQL integration tests against a live instance:
 ```
-DATABASE_URL=postgres://charcoal:charcoal@localhost/charcoal_test \
+DATABASE_URL=postgres://$USER@localhost/charcoal_test \
   cargo test --all-targets --features postgres
 ```
+
+⚠️ **This used to read `postgres://charcoal:charcoal@localhost/...`, which
+fails on a Homebrew Postgres install** — `brew services` creates a superuser
+role named after your OS account and no `charcoal` role, so that URL dies with
+`FATAL: role "charcoal" does not exist` (#272). Use `$USER` as above, or create
+the role once with `createuser -s charcoal`. If the database is missing,
+`createdb charcoal_test` first.
 
 ### Git hooks
 

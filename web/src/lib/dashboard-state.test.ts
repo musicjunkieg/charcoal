@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dashboardView } from './dashboard-state.js';
+import { dashboardView, isQueued, queueMessage } from './dashboard-state.js';
 import type { ScanStatus } from './types.js';
 
 function status(overrides: Partial<ScanStatus>): ScanStatus {
@@ -61,8 +61,81 @@ describe('dashboardView', () => {
 		// get_ranked_threats), so a scan whose entire population came back
 		// not_assessed must not be presented as "nothing to worry about."
 		const counts = { high: 0, elevated: 0, watch: 0, low: 0, not_assessed: 4, total: 0 };
+		expect(dashboardView(status({ tier_counts: counts, started_at: '2026-07-05T12:00:00Z' }))).toBe(
+			'results'
+		);
+	});
+});
+
+describe('queueMessage', () => {
+	it('formats a queue position with an ETA', () => {
+		expect(queueMessage({ position: 3, eta_seconds: 4200, enqueued_at: '' })).toBe(
+			"You're 3rd in line — about 70 minutes"
+		);
+	});
+
+	it('omits the estimate when no scans have finished yet', () => {
+		// eta_seconds is a rolling median of completed scans; with none to
+		// median, the honest answer is silence, not a fabricated number.
+		expect(queueMessage({ position: 1, eta_seconds: null, enqueued_at: '' })).toBe(
+			"You're next in line"
+		);
+	});
+
+	it('says next rather than 1st', () => {
+		expect(queueMessage({ position: 1, eta_seconds: 600, enqueued_at: '' })).toBe(
+			"You're next in line — about 10 minutes"
+		);
+	});
+
+	it('uses the right ordinal suffix, including the teens', () => {
+		const at = (position: number) => queueMessage({ position, eta_seconds: null });
+		expect(at(2)).toBe("You're 2nd in line");
+		expect(at(3)).toBe("You're 3rd in line");
+		expect(at(4)).toBe("You're 4th in line");
+		expect(at(11)).toBe("You're 11th in line");
+		expect(at(12)).toBe("You're 12th in line");
+		expect(at(13)).toBe("You're 13th in line");
+		expect(at(21)).toBe("You're 21st in line");
+		expect(at(22)).toBe("You're 22nd in line");
+		expect(at(101)).toBe("You're 101st in line");
+	});
+
+	it('singularises a one-minute estimate and never rounds down to zero', () => {
+		expect(queueMessage({ position: 2, eta_seconds: 60 })).toBe(
+			"You're 2nd in line — about 1 minute"
+		);
+		// A sub-minute estimate must still read as a wait, not "0 minutes".
+		expect(queueMessage({ position: 2, eta_seconds: 5 })).toBe(
+			"You're 2nd in line — about 1 minute"
+		);
+	});
+
+	it('treats a nonsensical position as next rather than printing "0th"', () => {
+		expect(queueMessage({ position: 0, eta_seconds: null })).toBe("You're next in line");
+	});
+});
+
+describe('isQueued', () => {
+	it('is true only for the queued phase', () => {
+		expect(isQueued(status({ phase: 'queued', scan_running: true }))).toBe(true);
+	});
+
+	it('is false for a scan that is actually running', () => {
+		// Defensive: even if a stale queue block rides along, a running scan is
+		// running — the waiting view must not claim otherwise.
 		expect(
-			dashboardView(status({ tier_counts: counts, started_at: '2026-07-05T12:00:00Z' }))
-		).toBe('results');
+			isQueued(
+				status({
+					phase: 'scoring',
+					scan_running: true,
+					queue: { position: 2, eta_seconds: 600, enqueued_at: '2026-08-06T00:00:00Z' }
+				})
+			)
+		).toBe(false);
+	});
+
+	it('is false when idle', () => {
+		expect(isQueued(status({}))).toBe(false);
 	});
 });
