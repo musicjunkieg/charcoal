@@ -5022,10 +5022,21 @@
       "node_type": "action",
       "title": "Fix CodeRabbit PR #96 round 2: six findings on feat/257-scan-admission",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T20:55:19.403598-07:00",
-      "updated_at": "2026-08-06T20:55:19.403598-07:00",
+      "updated_at": "2026-08-06T21:01:28.005160-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"files\":[\"src/bluesky/client.rs\",\"src/db/queries.rs\",\"src/db/postgres.rs\",\"src/web/scan_job.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/web_scan_queue.rs\",\"tests/db_postgres.rs\",\".impeccable/design.json\"]}"
+    },
+    {
+      "id": 465,
+      "change_id": "7ec5f798-d522-4c62-87c8-7d774740ee41",
+      "node_type": "outcome",
+      "title": "All six round-2 findings cleared and verified RED-first; 734 web + 633 postgres tests pass, zero skips, clippy clean x3",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-06T21:01:27.991128-07:00",
+      "updated_at": "2026-08-06T21:01:28.011972-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"c73ea0b\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -9956,6 +9967,17 @@
       "weight": 1.0,
       "rationale": "Round 2 of the same final-review pass on this branch",
       "created_at": "2026-08-06T20:55:22.276089-07:00"
+    },
+    {
+      "id": 459,
+      "from_node_id": 464,
+      "to_node_id": 465,
+      "from_change_id": "2774b609-d476-47aa-a873-a708146496f2",
+      "to_change_id": "7ec5f798-d522-4c62-87c8-7d774740ee41",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-06T21:01:27.998073-07:00"
     }
   ],
   "documents": [

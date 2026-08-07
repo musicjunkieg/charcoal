@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c73ea0be2a352f38b03f43b072825f05fe0e9120",
+    "short_hash": "c73ea0b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T20:55:45-07:00",
+    "message": "fix(257): clear CodeRabbit PR #96 round-2 findings\n\nSix findings, each with a test that fails without the fix.\n\n- PublicAtpClient had no request timeout. Async reqwest has no default\n  one, so a host that accepts the connection and never answers held a\n  gather task forever; the #182 retries cannot help a request that never\n  returns. Same 30s/10s constants as the Constellation fix (#235), and a\n  regression test that takes the mock full 30s without them.\n- eta_seconds differed between backends: SQLite truncated durations with\n  num_seconds(), Postgres kept fractions via EXTRACT(EPOCH ...). SQLite\n  now keeps the fraction — eta multiplies the median by the batch count,\n  so truncation compounds (90.5s two batches out is 181s, not 180s), and\n  rounding both would discard precision Postgres already has. Added a\n  cross-backend parity test seeded with identical timestamps.\n- A panicking scan recorded a fixed \"Background scan panicked\" with the\n  payload dropped, in both ScanStatus::last_error and the durable\n  scan_queue row. Reuses scan_phases::panic_message, now pub(crate).\n- tests/web_scan_queue.rs returned early when models were absent, so all\n  four passed having asserted nothing. They now fail loudly with the\n  command that fixes the environment. (#269 covers the older tests.)\n- Untrack web/build/index.html (#279) — gitignored but force-added, with\n  the assets it references absent. Inert (CI and Docker rebuild the SPA\n  before any --features web build) but stale. Index only; still on disk\n  for include_dir!.\n- Two .impeccable/design.json examples did not do what they claimed: the\n  brand mark described pulsing rings and a breathing core with no\n  animation defined (so its reduced-motion rule disabled nothing), and\n  the nav described itself as fixed while sitting in normal flow.\n\n734 web tests and 633 postgres tests pass, zero skips; clippy clean on\nweb, postgres, and no-features.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 10
+  },
+  {
     "hash": "316cde8df27a6797031a6377b284e55bb6a5ad2b",
     "short_hash": "316cde8",
     "author": "Bryan Guffey",
