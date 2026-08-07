@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Point the git hooks at the checked-out models (#284). The pre-push hook runs
+  `cargo test` without `CHARCOAL_MODEL_DIR`, and test binaries never load `.env`
+  (dotenvy runs in `main.rs` only) — so once the #257 queue tests started failing
+  loudly instead of passing silently, the hook blocked every push and the
+  variable had to be set by hand. It is now exported when a `models/` directory
+  exists and the caller has not set one.
 - Give `PublicAtpClient` a request timeout — 30s per request, 10s to connect
   (#257). Async `reqwest` has **no** default timeout, so a Bluesky host that
   accepted the connection and then never answered held its gather task forever.
