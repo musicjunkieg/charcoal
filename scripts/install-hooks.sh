@@ -361,6 +361,13 @@ if [ -f "$REPO_ROOT/Cargo.toml" ]; then
             exit 1
         fi
 
+        # ┌─ LOCAL EXCEPTION TO THE TEMPLATE ────────────────────────────────┐
+        # │ This block is charcoal-specific and is NOT in project-template.  │
+        # │ `update-project-from-template` will overwrite it — if a sync     │
+        # │ drops these four lines, `git push` starts failing again with     │
+        # │ model-gated test failures, which is a confusing symptom for a    │
+        # │ missing env var. Re-apply, or upstream it. See #284.             │
+        # └──────────────────────────────────────────────────────────────────┘
         # Point model-gated tests at the checked-out models. Test binaries do
         # not load .env (dotenvy runs in main.rs only), so without this they
         # look in the platform data dir, fail to find the ONNX files, and — now
