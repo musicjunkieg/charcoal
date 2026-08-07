@@ -293,13 +293,22 @@ pub enum SlotExit {
 
 /// Classify how the (unwind-caught) scan future finished, with the text to
 /// record against the queue row.
+///
+/// The panic payload is unwrapped rather than discarded: this text is what
+/// reaches BOTH `ScanStatus::last_error` and the durable `scan_queue` row, so
+/// dropping it left a panicked scan with no recorded cause in either place.
+/// `panic_message` is the pipeline's existing extractor, reused for exactly
+/// the reason it was written.
 fn classify(finished: std::thread::Result<anyhow::Result<()>>) -> (SlotExit, Option<String>) {
     match finished {
         Ok(Ok(())) => (SlotExit::Completed, None),
         Ok(Err(e)) => (SlotExit::Failed, Some(format!("{e:#}"))),
-        Err(_) => (
+        Err(payload) => (
             SlotExit::Panicked,
-            Some("Background scan panicked".to_string()),
+            Some(format!(
+                "Background scan panicked: {}",
+                crate::pipeline::scan_phases::panic_message(&payload)
+            )),
         ),
     }
 }
@@ -1161,9 +1170,45 @@ mod slot_lifecycle_tests {
         assert_eq!(exit, SlotExit::Panicked);
         assert_eq!(status_of(&db, DID).await, "failed");
         assert!(wake_rx.try_recv().is_ok(), "a panic must wake the admitter");
-        assert_eq!(
-            mgr.read().await.get_status(DID).expect("status").phase,
-            WebScanPhase::Failed
+        let mgr = mgr.read().await;
+        let status = mgr.get_status(DID).expect("status");
+        assert_eq!(status.phase, WebScanPhase::Failed);
+        // The payload, not just the fact of a panic. This used to record a
+        // fixed "Background scan panicked" with the payload dropped, so the one
+        // clue about the cause never reached the user or the queue row.
+        assert!(
+            status
+                .last_error
+                .as_deref()
+                .is_some_and(|e| e.contains("boom inside the pipeline")),
+            "the panic message must survive: {:?}",
+            status.last_error
+        );
+    }
+
+    /// Both panic payload shapes must come through, and the same text is what
+    /// `release_and_log` writes to the durable `scan_queue` row — the two sinks
+    /// share `classify`'s second return value, so covering it here covers both.
+    #[test]
+    fn a_panic_payload_becomes_the_recorded_error() {
+        // `panic!("literal")` — a &'static str payload.
+        let literal = std::panic::catch_unwind(|| -> anyhow::Result<()> { panic!("static cause") });
+        let (exit, text) = classify(literal);
+        assert_eq!(exit, SlotExit::Panicked);
+        assert!(
+            text.as_deref().is_some_and(|t| t.contains("static cause")),
+            "{text:?}"
+        );
+
+        // `panic!("{}", …)` and `unwrap()` on an Err — a String payload.
+        let formatted =
+            std::panic::catch_unwind(|| -> anyhow::Result<()> { panic!("formatted {}", "cause") });
+        let (exit, text) = classify(formatted);
+        assert_eq!(exit, SlotExit::Panicked);
+        assert!(
+            text.as_deref()
+                .is_some_and(|t| t.contains("formatted cause")),
+            "{text:?}"
         );
     }
 

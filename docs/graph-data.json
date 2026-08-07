@@ -5015,6 +5015,17 @@
       "created_at": "2026-08-06T13:13:56.920002-07:00",
       "updated_at": "2026-08-06T13:13:56.920002-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"316cde8\",\"confidence\":93}"
+    },
+    {
+      "id": 464,
+      "change_id": "2774b609-d476-47aa-a873-a708146496f2",
+      "node_type": "action",
+      "title": "Fix CodeRabbit PR #96 round 2: six findings on feat/257-scan-admission",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-06T20:55:19.403598-07:00",
+      "updated_at": "2026-08-06T20:55:19.403598-07:00",
+      "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"files\":[\"src/bluesky/client.rs\",\"src/db/queries.rs\",\"src/db/postgres.rs\",\"src/web/scan_job.rs\",\"src/pipeline/scan_phases/mod.rs\",\"tests/web_scan_queue.rs\",\"tests/db_postgres.rs\",\".impeccable/design.json\"]}"
     }
   ],
   "edges": [
@@ -9934,6 +9945,17 @@
       "weight": 1.0,
       "rationale": "Verification result of the v12 migration and the five other review fixes",
       "created_at": "2026-08-06T13:14:00.373886-07:00"
+    },
+    {
+      "id": 458,
+      "from_node_id": 455,
+      "to_node_id": 464,
+      "from_change_id": "f127196d-4599-4c25-a0fd-063466eab6f0",
+      "to_change_id": "2774b609-d476-47aa-a873-a708146496f2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Round 2 of the same final-review pass on this branch",
+      "created_at": "2026-08-06T20:55:22.276089-07:00"
     }
   ],
   "documents": [

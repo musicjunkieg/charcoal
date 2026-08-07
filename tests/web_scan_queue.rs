@@ -17,6 +17,20 @@ use tower::ServiceExt;
 const USER_A: &str = "did:plc:queuetestaaaaaaaaaaaaaaaa";
 const USER_B: &str = "did:plc:queuetestbbbbbbbbbbbbbbbb";
 
+/// Missing models are a broken test environment, not a reason to pass.
+///
+/// These used to `return` early when `build_open_test_app_with_db` found no
+/// models, which reports `ok` having asserted nothing — the failure mode that
+/// already let five tests on this branch claim guarantees they never
+/// exercised. #257 is a launch blocker; a green run that never issued
+/// `POST /api/scan` is worse than a red one. CI downloads the models and sets
+/// `CHARCOAL_MODEL_DIR` (`.github/workflows/ci.yml`), so this only fires on a
+/// local run that forgot to.
+const MODELS_REQUIRED: &str = "ONNX models are required to build the test AppState. Run \
+    `charcoal download-model`, then run the tests with \
+    `CHARCOAL_MODEL_DIR=./models cargo test --features web` — test binaries do \
+    not load .env. These #257 queue-admission tests must never silently pass.";
+
 fn session_cookie(did: &str) -> String {
     format!("{}={}", COOKIE_NAME, create_token(TEST_SECRET, did))
 }
@@ -66,10 +80,7 @@ async fn get_status(app: &axum::Router, did: &str) -> Value {
 /// was the second user's entire experience of Charcoal.
 #[tokio::test]
 async fn a_second_user_is_queued_not_refused() {
-    let Some((app, db)) = build_open_test_app_with_db() else {
-        eprintln!("SKIP: models not present, cannot build test AppState");
-        return;
-    };
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
     db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
     db.upsert_user(USER_B, "b.bsky.social").await.expect("user");
 
@@ -103,10 +114,7 @@ async fn a_second_user_is_queued_not_refused() {
 /// `enqueued_at` forward, A would move to position 2 and B to position 1.
 #[tokio::test]
 async fn a_repeated_request_is_idempotent() {
-    let Some((app, db)) = build_open_test_app_with_db() else {
-        eprintln!("SKIP: models not present, cannot build test AppState");
-        return;
-    };
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
     db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
     db.upsert_user(USER_B, "b.bsky.social").await.expect("user");
 
@@ -131,10 +139,7 @@ async fn a_repeated_request_is_idempotent() {
 /// no change.
 #[tokio::test]
 async fn status_reports_the_queue_position_only_while_queued() {
-    let Some((app, db)) = build_open_test_app_with_db() else {
-        eprintln!("SKIP: models not present, cannot build test AppState");
-        return;
-    };
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
     db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
     db.upsert_user(USER_B, "b.bsky.social").await.expect("user");
 
@@ -178,10 +183,7 @@ async fn status_reports_the_queue_position_only_while_queued() {
 /// replica — must still report it as running rather than idle.
 #[tokio::test]
 async fn status_reports_a_running_row_even_with_no_in_memory_scan() {
-    let Some((app, db)) = build_open_test_app_with_db() else {
-        eprintln!("SKIP: models not present, cannot build test AppState");
-        return;
-    };
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
     db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
 
     post_scan(&app, USER_A).await;

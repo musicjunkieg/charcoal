@@ -1080,6 +1080,98 @@ async fn test_pg_running_scan_has_no_eta() {
     db.delete_user_data(U).await.unwrap();
 }
 
+/// The two backends must quote the SAME `eta_seconds` for the same scan
+/// history. They compute the median duration by different routes — Postgres
+/// via `EXTRACT(EPOCH FROM (finished_at - started_at))`, SQLite in Rust — and
+/// the SQLite side used `num_seconds()`, which truncates, while `EXTRACT`
+/// keeps fractional seconds. A user whose deployment moved from SQLite to
+/// Postgres therefore saw the estimate change with no change in history.
+///
+/// Both sides are seeded with the SAME hand-written timestamps rather than
+/// real scans, because a wall-clock duration differs between the two runs and
+/// could not be compared for equality at all. The duration carries a half
+/// second and the queued user sits two batches out, so truncation is visible:
+/// 181s correct, 180s truncated.
+#[tokio::test]
+async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const DONE: &str = "did:plc:pgtest_q_nnnnnnnnnnnnn";
+    const A: &str = "did:plc:pgtest_q_ooooooooooooo";
+    const B: &str = "did:plc:pgtest_q_ppppppppppppp";
+    // A 90.5-second scan: the half second is the whole point.
+    const STARTED: &str = "2026-08-06T00:00:00+00:00";
+    const FINISHED: &str = "2026-08-06T00:01:30.5+00:00";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // --- SQLite side -------------------------------------------------------
+    let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+    charcoal::db::schema::create_tables(&conn).expect("schema");
+    conn.execute(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+         VALUES (?1, 'done', ?2, ?2, ?3)",
+        rusqlite::params![DONE, STARTED, FINISHED],
+    )
+    .expect("seed the completed scan");
+    charcoal::db::queries::enqueue_scan(&conn, A).expect("enqueue A");
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    charcoal::db::queries::enqueue_scan(&conn, B).expect("enqueue B");
+    let sqlite_entry = charcoal::db::queries::scan_queue_entry(&conn, B, 1)
+        .expect("sqlite queue entry")
+        .expect("row exists");
+
+    // --- Postgres side -----------------------------------------------------
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    {
+        use sqlx_core::pool::Pool;
+        use sqlx_postgres::Postgres;
+
+        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+        sqlx_core::query::query(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', $2, $2, $3)",
+        )
+        .bind(DONE)
+        .bind(chrono::DateTime::parse_from_rfc3339(STARTED).unwrap())
+        .bind(chrono::DateTime::parse_from_rfc3339(FINISHED).unwrap())
+        .execute(&pool)
+        .await
+        .expect("seed the completed scan");
+    }
+    db.upsert_user(A, "q.bsky.social").await.unwrap();
+    db.upsert_user(B, "q.bsky.social").await.unwrap();
+    db.enqueue_scan(A).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    db.enqueue_scan(B).await.unwrap();
+    let pg_entry = db
+        .scan_queue_entry(B, 1)
+        .await
+        .unwrap()
+        .expect("row exists");
+
+    // Same position on both, or the ETAs would be comparing different waits.
+    assert_eq!(sqlite_entry.position, 2, "SQLite: B waits behind A");
+    assert_eq!(pg_entry.position, 2, "Postgres: B waits behind A");
+    assert_eq!(
+        sqlite_entry.eta_seconds, pg_entry.eta_seconds,
+        "the backends must quote the same ETA for the same scan history"
+    );
+    assert_eq!(
+        pg_entry.eta_seconds,
+        Some(181),
+        "a 90.5s median over two batches is 181s; 180 means a backend truncated \
+         the half second away"
+    );
+
+    for d in [DONE, A, B] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
 /// enqueued_at must be RFC3339 so both backends parse identically — Postgres's
 /// `::TEXT` rendering ("2026-08-06 00:36:25.231997-07") is not.
 #[tokio::test]

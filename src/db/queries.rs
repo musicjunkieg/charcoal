@@ -1541,10 +1541,19 @@ pub fn scan_queue_entry(
     // Rolling median over the last 20 completed scans. None until any finish,
     // so ETA is absent rather than fabricated on a fresh install.
     //
+    // Seconds are kept FRACTIONAL, matching the Postgres backend's
+    // `EXTRACT(EPOCH FROM (finished_at - started_at))`. This used to be
+    // `num_seconds()`, which truncates, so the same scan history quoted a
+    // different ETA either side of a backend switch. Truncating is not a
+    // harmless rounding difference once `eta_seconds` multiplies the median by
+    // the batch count: a 90.6s median eight batches out is 724s here and 720s
+    // there. Rounding both would have to throw away precision Postgres already
+    // has, so the SQLite side gains it instead.
+    //
     // Errors propagate with `?` rather than being dropped by `filter_map(ok)`:
     // a corrupt row or an unparseable timestamp would otherwise silently shrink
     // the sample and skew the median instead of surfacing.
-    let mut durations: Vec<i64> = Vec::new();
+    let mut durations: Vec<f64> = Vec::new();
     let mut stmt = conn.prepare(
         "SELECT started_at, finished_at FROM scan_queue
          WHERE status = 'done' AND started_at IS NOT NULL
@@ -1561,18 +1570,22 @@ pub fn scan_queue_entry(
             .with_context(|| format!("scan_queue.started_at is not RFC3339: {s}"))?;
         let f = chrono::DateTime::parse_from_rfc3339(&f)
             .with_context(|| format!("scan_queue.finished_at is not RFC3339: {f}"))?;
-        durations.push((f - s).num_seconds());
+        durations.push((f - s).as_seconds_f64());
     }
 
     let median = if durations.is_empty() {
         None
     } else {
-        durations.sort_unstable();
+        // `total_cmp`, not `partial_cmp().unwrap()`: durations are finite by
+        // construction, but a total order needs no unwrap to say so.
+        durations.sort_by(f64::total_cmp);
         let mid = durations.len() / 2;
+        // Averaging the two middle values on an even sample is what
+        // PERCENTILE_CONT(0.5) does, so the backends agree here too.
         Some(if durations.len().is_multiple_of(2) {
-            (durations[mid - 1] + durations[mid]) as f64 / 2.0
+            (durations[mid - 1] + durations[mid]) / 2.0
         } else {
-            durations[mid] as f64
+            durations[mid]
         })
     };
 
@@ -2363,6 +2376,54 @@ mod tests {
             entry.eta_seconds, None,
             "no scan has ever finished, so there is no median to compute an ETA from"
         );
+    }
+
+    /// Fractional seconds in the completed-scan history must survive into the
+    /// median, because the Postgres backend's `EXTRACT(EPOCH FROM ...)` keeps
+    /// them. `num_seconds()` truncated, so the same history quoted a different
+    /// ETA either side of a backend switch.
+    ///
+    /// The position is deliberately 2, not 1: at one batch the multiplication
+    /// hides the difference (90.5 and 90.0 both truncate to 90). At two
+    /// batches the truncating version answers 180 and the correct one 181,
+    /// which is exactly how the divergence reaches a user.
+    ///
+    /// `tests/db_postgres.rs::test_pg_eta_matches_sqlite_for_fractional_durations`
+    /// is the other half of this — it asserts the two backends agree on the
+    /// same history rather than asserting this side in isolation.
+    #[test]
+    fn the_median_keeps_fractional_seconds() {
+        let conn = test_db();
+        seed_completed_scan(&conn, "did:plc:done000000000000000", 90.5);
+
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+
+        let entry = scan_queue_entry(&conn, QUEUE_USER_B, 1).unwrap().unwrap();
+        assert_eq!(entry.position, 2);
+        assert_eq!(
+            entry.eta_seconds,
+            Some(181),
+            "a 90.5s median over two batches is 181s; 180 means the half-second \
+             was truncated away and the backends disagree"
+        );
+    }
+
+    /// Insert a finished `scan_queue` row whose duration is exactly
+    /// `duration_secs`. Written directly rather than via
+    /// `claim_next_scan`/`finish_queued_scan` because those stamp wall-clock
+    /// times, and this needs a sub-second duration it can name.
+    fn seed_completed_scan(conn: &Connection, user_did: &str, duration_secs: f64) {
+        let started = chrono::DateTime::parse_from_rfc3339("2026-08-06T00:00:00+00:00").unwrap();
+        let finished =
+            started + chrono::TimeDelta::nanoseconds((duration_secs * 1e9).round() as i64);
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+             VALUES (?1, 'done', ?2, ?2, ?3)",
+            params![user_did, started.to_rfc3339(), finished.to_rfc3339()],
+        )
+        .unwrap();
     }
 
     #[test]

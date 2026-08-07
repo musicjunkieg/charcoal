@@ -340,7 +340,12 @@ struct GatherSweep {
 /// Rust panics carry a `Box<dyn Any + Send>`; the most common payloads are
 /// `&'static str` (e.g. `unwrap()`) and `String` (e.g. `panic!("{}", …)`).
 /// Any other payload type is reported as `"<non-string panic>"`.
-fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+///
+/// `pub(crate)` so the web layer's `catch_unwind` around a whole scan
+/// (`web::scan_job::classify`) reuses this rather than duplicating the
+/// downcast — or, as it did, dropping the payload and recording a fixed
+/// string that says nothing about the cause.
+pub(crate) fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         s.to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {

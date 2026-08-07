@@ -27,6 +27,23 @@ const XRPC_MAX_RETRIES: usize = 4;
 const XRPC_MIN_BACKOFF_MS: u64 = 250;
 const XRPC_MAX_BACKOFF_MS: u64 = 8_000;
 
+/// Per-request ceiling for a public API call.
+///
+/// Async reqwest has **no default timeout**, so a server that accepts the
+/// connection and then never answers holds its gather task forever. The
+/// retries above do not help — a request that never returns never becomes an
+/// error to retry. This is the same defect fixed for Constellation in #235;
+/// the same reasoning applies here, and #257's raised scan concurrency makes
+/// a permanently-parked task cost a slot that never comes back.
+///
+/// Generous because gather is a batch path, not user-facing — the point is
+/// that a hang is bounded, not that it is fast.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Ceiling for establishing the TCP/TLS connection specifically, so a
+/// black-holed host fails fast instead of burning the full request budget.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Why an XRPC attempt failed, so the retry filter can be explicit rather than
 /// string-matching an `anyhow` chain.
 #[derive(Debug)]
@@ -65,8 +82,16 @@ impl PublicAtpClient {
     /// Defaults to `https://public.api.bsky.app` — pass a different URL
     /// for testing or alternate PDS instances.
     pub fn new(base_url: &str) -> Result<Self> {
+        Self::with_timeout(base_url, REQUEST_TIMEOUT)
+    }
+
+    /// As [`new`](Self::new), with an explicit request timeout. Exists so the
+    /// timeout behaviour is testable without a 30-second test.
+    pub fn with_timeout(base_url: &str, request_timeout: Duration) -> Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent("charcoal/0.1 (threat-detection; @chaosgreml.in)")
+            .timeout(request_timeout)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .context("Failed to build HTTP client")?;
 
@@ -301,6 +326,63 @@ mod retry_tests {
 
         let client = PublicAtpClient::new(&server.uri()).unwrap();
         let got: Probe = client.xrpc_get("probe.test", &[]).await.unwrap();
+        assert!(got.ok);
+    }
+
+    /// A stalled public-API response must terminate, not hang.
+    ///
+    /// Async reqwest has no default timeout, so before this the client would
+    /// wait forever on a server that accepts the connection and then never
+    /// answers — and the #182 retries above cannot help, because a request
+    /// that never returns never produces an error to retry. Under #257 that
+    /// parks a scan's gather task, and its queue slot, permanently.
+    ///
+    /// The elapsed bound is what discriminates: without a timeout the single
+    /// stalled attempt below alone takes the mock's full 30s. With one, the
+    /// wall clock is the retry budget (5 attempts plus jittered backoff,
+    /// ~4s), not the stall.
+    #[tokio::test]
+    async fn xrpc_get_times_out_instead_of_hanging() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/probe.test"))
+            // Answer far later than the timeout below — stands in for a stall.
+            .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
+            .mount(&server)
+            .await;
+
+        let client =
+            PublicAtpClient::with_timeout(&server.uri(), Duration::from_millis(100)).unwrap();
+
+        let started = std::time::Instant::now();
+        let result = client.xrpc_get::<Probe>("probe.test", &[]).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            result.is_err(),
+            "a stalled request must surface as an error"
+        );
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "must give up on its own timeout, took {elapsed:?}"
+        );
+    }
+
+    /// The timeout must not fire on responses that arrive normally.
+    #[tokio::test]
+    async fn xrpc_get_succeeds_well_within_the_timeout() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/probe.test"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"ok":true}"#))
+            .mount(&server)
+            .await;
+
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+        let got: Probe = client
+            .xrpc_get("probe.test", &[])
+            .await
+            .expect("a prompt response must not be cut short by the timeout");
         assert!(got.ok);
     }
 }

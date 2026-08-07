@@ -7,6 +7,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Give `PublicAtpClient` a request timeout — 30s per request, 10s to connect
+  (#257). Async `reqwest` has **no** default timeout, so a Bluesky host that
+  accepted the connection and then never answered held its gather task forever.
+  The #182 retries above do not help: a request that never returns never
+  becomes an error to retry. This is the same defect already fixed for
+  Constellation in #235, and the same constants; under scan concurrency a
+  permanently-parked task costs a queue slot that never comes back. The
+  regression test asserts a stalled response gives up on its own clock —
+  without the timeout it takes the mock's full 30 seconds.
+- Make `eta_seconds` identical across the two database backends (#257). The
+  SQLite side measured completed scans with `num_seconds()`, which truncates,
+  while Postgres used `EXTRACT(EPOCH FROM ...)`, which keeps fractional
+  seconds — so the same scan history quoted a different wait either side of a
+  backend switch. SQLite now keeps the fraction rather than Postgres losing it:
+  `eta_seconds` multiplies the median by the batch count, so truncation
+  compounds (a 90.5s median two batches out is 181s, not 180s), and rounding
+  both would mean discarding precision Postgres already has. A cross-backend
+  parity test seeds both with the same hand-written timestamps and asserts they
+  answer the same.
+- Record the panic message when a background scan unwinds (#257). The
+  `catch_unwind` around the scan future dropped the payload and stored a fixed
+  `"Background scan panicked"`, and that string is what reaches *both*
+  `ScanStatus::last_error` and the durable `scan_queue` row — so a panicked
+  scan left no clue about its cause in either place. It now reuses
+  `scan_phases::panic_message`, the extractor the gather path already uses for
+  exactly this.
+- Stop the #257 HTTP queue tests from passing when the ONNX models are absent.
+  Each guarded on model availability and returned early, printing a skip line
+  that libtest discards for passing tests — five tests on this branch have
+  already asserted guarantees they never exercised. They now fail loudly with
+  the command that fixes the environment. (The wider cleanup of the older
+  model-gated tests is #269.)
+- Untrack `web/build/index.html` (#279). `web/build` is gitignored, but this
+  one file had been force-added, so it sat in the tree while the twelve hashed
+  assets it references did not. It was inert — CI and the Dockerfile both run
+  `npm run build` before any `--features web` cargo build, so the committed copy
+  was never the one deployed — but it had to be hand-refreshed on every frontend
+  change and misled anyone reading the tree. Removed from the index only; the
+  file stays on disk, where `include_dir!` needs it.
+- Make two `.impeccable/design.json` examples do what they claim. The brand
+  mark's description says the rings pulse and the core breathes, but its CSS
+  defined no animation at all — so the `prefers-reduced-motion` rule was
+  disabling nothing. Both animations are now present (4.5s cycle, rings
+  staggered 0.4s, per DESIGN.md), and the reduced-motion override has something
+  real to turn off. The navigation example described itself as fixed over a
+  gradient fade while sitting in normal flow; it now carries the
+  `position: fixed` / viewport offsets / `z-index: 100` the shipped nav uses.
+  These are copyable reference examples — the point is that they match the
+  system they document.
 - Add schema **v12**, which backfills `scan_queue.claim_id` (#257). v11 was
   amended in place to add the fencing token while #257 was still on its branch —
   reasonable, since v11 had never shipped, but not sufficient: a database created
