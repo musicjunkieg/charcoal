@@ -217,6 +217,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of a misleading `[tox: 0.00]`.
 
 ### Changed
+- Give the R2 backups history, a sanity gate, and a 30-day expiry (#286).
+  Cloudflare R2 does **not** implement bucket versioning — `PutBucketVersioning`,
+  `GetBucketVersioning` and `ListObjectVersions` are all unimplemented — so
+  `s3://charcoal-backups/issues.db` was a single object with no history that
+  every commit overwrote. On 2026-08-07 that came within one commit of being
+  unrecoverable: checking out an old branch that *tracks* `.chainlink/issues.db`
+  destroyed the live database, chainlink silently created an empty one, and a
+  commit in that state would have uploaded it over the only good copy. Since the
+  storage layer offers no versioning, the hook now creates the history itself —
+  each upload also writes `history/<name>-<UTC>.db` — and refuses to upload a
+  database with implausibly few rows, which is the guard that actually blocks
+  that failure. A `expire-backup-history-30d` lifecycle rule expires the
+  `history/` prefix after 30 days; the canonical pair is deliberately outside it.
 - Animate the classification progress bar with `transform: scaleX()` instead of
   `width` (#280). Transitioning `width` relayouts on every frame of the 0.5s
   animation; `transform` is composited. The gradient is unaffected — it spans
