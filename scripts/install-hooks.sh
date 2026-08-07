@@ -276,9 +276,49 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
 
     BACKUP_OK=true
 
+    # ┌─ LOCAL EXCEPTION TO THE TEMPLATE ────────────────────────────────┐
+    # │ Dated history + a sanity gate. NOT in project-template; a sync   │
+    # │ will overwrite this. See #286.                                   │
+    # └──────────────────────────────────────────────────────────────────┘
+    # Cloudflare R2 does NOT implement bucket versioning — PutBucketVersioning,
+    # GetBucketVersioning and ListObjectVersions are all unimplemented in its
+    # S3 API. So `$S3/issues.db` is a single object with no history, and every
+    # commit overwrites it.
+    #
+    # On 2026-08-07 that came within one commit of being unrecoverable: checking
+    # out an old branch that TRACKS .chainlink/issues.db destroyed the live
+    # database, chainlink silently created an empty one, and any commit made in
+    # that state would have uploaded the empty DB over the only good copy.
+    #
+    # Two guards, since R2 gives us neither:
+    #   1. Every upload also writes a dated key, so history exists.
+    #   2. A degenerate DB is not uploaded at all. `sqlite3` is already a
+    #      project dependency; if it is missing we upload anyway rather than
+    #      silently stop backing up.
+    BACKUP_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
+    # Refuse to back up a database with implausibly few rows. Returns 0 (sane)
+    # when sqlite3 is unavailable or the table is unknown — fail open, because
+    # a missed guard is better than a missed backup.
+    backup_row_sanity() {  # $1 = db path, $2 = table, $3 = floor
+        command -v sqlite3 &>/dev/null || return 0
+        local n
+        n=$(sqlite3 "$1" "SELECT COUNT(*) FROM $2;" 2>/dev/null) || return 0
+        [ -z "$n" ] && return 0
+        [ "$n" -ge "$3" ]
+    }
+
     if [ -f "$REPO_ROOT/.chainlink/issues.db" ]; then
-        if aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1; then
-            echo "  ✅ issues.db → $BACKUP_S3_BUCKET"
+        if ! backup_row_sanity "$REPO_ROOT/.chainlink/issues.db" issues 25; then
+            echo "  🛑 issues.db looks EMPTY or reset — refusing to overwrite the backup."
+            echo "     A fresh chainlink DB (numbering restarts at #1) means the live one"
+            echo "     was destroyed. Restore first; uploading now would clobber the copy"
+            echo "     you would restore FROM. See the recovery notes on #286."
+            BACKUP_OK=false
+        elif aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1; then
+            aws s3 cp "$REPO_ROOT/.chainlink/issues.db" \
+                "$S3/history/issues-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1 || true
+            echo "  ✅ issues.db → $BACKUP_S3_BUCKET (+ history/issues-$BACKUP_STAMP.db)"
         else
             echo "  ⚠️  issues.db upload failed (non-blocking)"
             BACKUP_OK=false
@@ -286,8 +326,13 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
     fi
 
     if [ -f "$REPO_ROOT/.deciduous/deciduous.db" ]; then
-        if aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1; then
-            echo "  ✅ deciduous.db → $BACKUP_S3_BUCKET"
+        if ! backup_row_sanity "$REPO_ROOT/.deciduous/deciduous.db" decision_nodes 25; then
+            echo "  🛑 deciduous.db looks EMPTY or reset — refusing to overwrite the backup."
+            BACKUP_OK=false
+        elif aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1; then
+            aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" \
+                "$S3/history/deciduous-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1 || true
+            echo "  ✅ deciduous.db → $BACKUP_S3_BUCKET (+ history/deciduous-$BACKUP_STAMP.db)"
         else
             echo "  ⚠️  deciduous.db upload failed (non-blocking)"
             BACKUP_OK=false
