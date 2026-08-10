@@ -1407,11 +1407,16 @@ pub fn claim_next_scan(
         return Ok(None);
     }
 
+    // `(enqueued_at, user_did)`, not `enqueued_at` alone: RFC3339 TEXT ties
+    // whenever two enqueues land in the same millisecond, and among tied rows
+    // a bare `ORDER BY enqueued_at` falls back to rowid — so the row admitted
+    // here would not be the row `list_scan_queue` displays as next. One total
+    // order for display, position, and admission (#271).
     let did: Option<String> = tx
         .query_row(
             "SELECT user_did FROM scan_queue
              WHERE status = 'queued'
-             ORDER BY enqueued_at
+             ORDER BY enqueued_at, user_did
              LIMIT 1",
             [],
             |row| row.get(0),
@@ -1526,11 +1531,18 @@ pub fn scan_queue_depth(conn: &Connection) -> Result<ScanQueueDepth> {
 /// TEXT timestamps compare lexicographically, and two rows enqueued inside the
 /// same millisecond would otherwise come back in whatever order the scan
 /// happens to produce.
+///
+/// The position predicate uses the SAME pair — `(enqueued_at, user_did) <=
+/// (…)`, a row-value comparison SQLite has supported since 3.15. Counting on
+/// `enqueued_at <=` alone gave every tied row the same number while the
+/// ORDER BY still rendered them 1st, 2nd, 3rd, so three rows each announced
+/// they were "3rd in line" (#271).
 pub fn list_scan_queue(conn: &Connection) -> Result<Vec<ScanQueueRow>> {
     let mut stmt = conn.prepare(
         "SELECT user_did, status, enqueued_at, started_at, finished_at, last_error,
                 (SELECT COUNT(*) FROM scan_queue q2
-                  WHERE q2.status = 'queued' AND q2.enqueued_at <= q.enqueued_at)
+                  WHERE q2.status = 'queued'
+                    AND (q2.enqueued_at, q2.user_did) <= (q.enqueued_at, q.user_did))
          FROM scan_queue q
          ORDER BY q.enqueued_at ASC, q.user_did ASC",
     )?;
@@ -1564,11 +1576,14 @@ pub fn scan_queue_entry(
     user_did: &str,
     concurrency_limit: usize,
 ) -> Result<Option<ScanQueueEntry>> {
+    // Same `(enqueued_at, user_did)` row-value predicate as `list_scan_queue`
+    // and the same total order `claim_next_scan` admits by — see #271.
     let row: Option<(String, String, i64)> = conn
         .query_row(
             "SELECT status, enqueued_at,
                     (SELECT COUNT(*) FROM scan_queue q2
-                      WHERE q2.status = 'queued' AND q2.enqueued_at <= q.enqueued_at)
+                      WHERE q2.status = 'queued'
+                        AND (q2.enqueued_at, q2.user_did) <= (q.enqueued_at, q.user_did))
              FROM scan_queue q WHERE user_did = ?1",
             params![user_did],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -2548,6 +2563,82 @@ mod tests {
             vec![(QUEUE_USER_C, 1), (QUEUE_USER_B, 2), (QUEUE_USER_A, 3)],
             "queued rows are numbered 1..n by enqueued_at; the FIRST-inserted \
              row is last in line here, so a rowid-ordered count would say 1"
+        );
+    }
+
+    /// Seed three rows sharing ONE `enqueued_at`, inserted in reverse
+    /// `user_did` order.
+    ///
+    /// SQLite stores `enqueued_at` as RFC3339 TEXT, so two enqueues inside the
+    /// same millisecond produce the identical string — a real tie, not a
+    /// contrived one. Inserting C, B, A makes rowid order (which an
+    /// unordered SQLite scan returns, and which `ORDER BY enqueued_at` alone
+    /// falls back to among ties) the exact reverse of the expected answer.
+    const TIED_ENQUEUED_AT: &str = "2026-08-09T00:00:01+00:00";
+
+    fn seed_tied_queue(conn: &Connection) {
+        seed_queued_at(conn, QUEUE_USER_C, TIED_ENQUEUED_AT);
+        seed_queued_at(conn, QUEUE_USER_B, TIED_ENQUEUED_AT);
+        seed_queued_at(conn, QUEUE_USER_A, TIED_ENQUEUED_AT);
+    }
+
+    /// `enqueued_at` alone is a PARTIAL order. When rows tie on it, a position
+    /// counted as `enqueued_at <= ` hands every tied row the SAME number while
+    /// the display `ORDER BY` still renders them in a definite sequence — so
+    /// three rows render 1st, 2nd, 3rd and all three claim to be "3rd in line".
+    /// `(enqueued_at, user_did)` is the total order both must use (#271).
+    #[test]
+    fn list_scan_queue_breaks_enqueued_at_ties_by_user_did() {
+        let conn = test_db();
+        seed_tied_queue(&conn);
+
+        let rows = list_scan_queue(&conn).unwrap();
+        let listed: Vec<(&str, i64)> = rows
+            .iter()
+            .map(|r| (r.user_did.as_str(), r.position))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![(QUEUE_USER_A, 1), (QUEUE_USER_B, 2), (QUEUE_USER_C, 3)],
+            "tied rows must get DISTINCT positions, in the order they are \
+             displayed; counting `enqueued_at <=` alone gives all three 3"
+        );
+    }
+
+    /// The per-user column has to agree with the queue panel row-for-row —
+    /// two formulas for one number is how they start disagreeing.
+    #[test]
+    fn scan_queue_entry_breaks_enqueued_at_ties_by_user_did() {
+        let conn = test_db();
+        seed_tied_queue(&conn);
+
+        for (did, expected) in [(QUEUE_USER_A, 1), (QUEUE_USER_B, 2), (QUEUE_USER_C, 3)] {
+            let entry = scan_queue_entry(&conn, did, 1).unwrap().unwrap();
+            assert_eq!(
+                entry.position, expected,
+                "{did} must be told the same position the queue panel shows"
+            );
+        }
+    }
+
+    /// The point of the fix: whoever the dashboard lists first must be
+    /// whoever admission actually takes. With ties broken only for display,
+    /// `claim_next_scan`'s `ORDER BY enqueued_at` falls back to rowid and
+    /// admits the row shown LAST.
+    #[test]
+    fn claim_follows_the_order_the_queue_displays() {
+        let conn = test_db();
+        seed_tied_queue(&conn);
+
+        let displayed_first = list_scan_queue(&conn).unwrap()[0].user_did.clone();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().expect("claim");
+        assert_eq!(
+            claim.user_did, displayed_first,
+            "admission must take the row the dashboard shows as next"
+        );
+        assert_eq!(
+            claim.user_did, QUEUE_USER_A,
+            "the total order is (enqueued_at, user_did), so A goes first"
         );
     }
 

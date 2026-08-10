@@ -89,6 +89,24 @@
 		}
 	}
 
+	/** Longest failure reason rendered inline in the Last Scan cell.
+	 *
+	 *  Whatever the scan pipeline threw ends up here — a RunPod payload or a
+	 *  Postgres message runs to hundreds of characters and would push the
+	 *  table's remaining columns off screen. Only the VISIBLE copy is
+	 *  shortened: the full reason is announced from a visually-hidden span
+	 *  alongside it. It is deliberately not a `title` tooltip, which is
+	 *  unreachable by keyboard and simply absent on touch. */
+	const MAX_INLINE_REASON = 72;
+
+	function truncateReason(reason: string): string {
+		// Errors arrive with newlines and doubled spaces from `{:#}` chains;
+		// collapsing them keeps the cell to one readable phrase.
+		const clean = reason.trim().replace(/\s+/g, ' ');
+		if (clean.length <= MAX_INLINE_REASON) return clean;
+		return `${clean.slice(0, MAX_INLINE_REASON - 1).trimEnd()}…`;
+	}
+
 	function displayHandle(scan: AdminScanRow): string {
 		// An orphaned queue row (user deleted mid-scan) has no handle. Show the
 		// DID tail rather than "unknown" — it is still identifiable, and the
@@ -316,9 +334,17 @@
 											>{scanSummary(user.scan)}</span
 										>
 									{:else if user.scan?.status === 'failed'}
-										<span class="scan-failed" title={user.scan.last_error ?? undefined}
-											>Failed</span
-										>
+										<!-- The visible copy is shortened and hidden from assistive
+										     tech; the .sr-only sibling carries the whole reason. A
+										     `title` tooltip on a non-focusable span reached neither
+										     keyboard nor touch, so the reason was effectively secret. -->
+										<span class="scan-failed" aria-hidden="true">Failed</span>
+										{#if user.scan.last_error}
+											<span class="scan-reason" aria-hidden="true"
+												>{truncateReason(user.scan.last_error)}</span
+											>
+										{/if}
+										<span class="sr-only">{scanSummary(user.scan)}</span>
 										<span class="muted scan-when">{formatDate(user.scan.finished_at)}</span>
 									{:else if user.last_scan_at}
 										<span class="muted">{formatDate(user.last_scan_at)}</span>
@@ -481,9 +507,38 @@
 		color: var(--status-error);
 	}
 
-	.scan-when {
+	/* The failure reason itself, in body-text grey rather than the error red:
+	   "Failed" is the alarm, the reason is prose. --charcoal-400 is the floor
+	   for body text here; --charcoal-500 fails WCAG AA on this ground. */
+	.scan-reason {
+		display: block;
 		font-size: 0.8125rem;
-		margin-left: 0.375rem;
+		color: var(--charcoal-400);
+		/* A stack trace or URL has no spaces to break on, and this column is
+		   9rem wide — without this one row widens the whole table. */
+		overflow-wrap: anywhere;
+	}
+
+	.scan-when {
+		display: block;
+		font-size: 0.8125rem;
+		margin-top: 0.25rem;
+	}
+
+	/* Visually hidden, still announced. The FULL failure reason lives here, so
+	   the inline copy can stay short without the reason becoming unreachable.
+	   The pattern this replaces was a `title` attribute on a non-focusable
+	   span: no keyboard access, nothing at all on touch. */
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	/* Add user form */

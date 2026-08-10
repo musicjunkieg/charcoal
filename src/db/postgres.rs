@@ -1568,10 +1568,16 @@ impl Database for PgDatabase {
 
         // SKIP LOCKED so two admitters (or two replicas) never claim the same
         // row, and neither blocks waiting for the other.
+        //
+        // `(enqueued_at, user_did)`, not `enqueued_at` alone: `enqueue_scan`
+        // stamps NOW(), so two requests inside the same microsecond tie, and
+        // among tied rows a bare ORDER BY admits whichever row the plan
+        // reaches first — not the one `list_scan_queue` displays as next. One
+        // total order for display, position, and admission (#271).
         let row = sqlx_core::query::query(
             "SELECT user_did FROM scan_queue
              WHERE status = 'queued'
-             ORDER BY enqueued_at
+             ORDER BY enqueued_at, user_did
              LIMIT 1
              FOR UPDATE SKIP LOCKED",
         )
@@ -1687,11 +1693,16 @@ impl Database for PgDatabase {
         user_did: &str,
         concurrency_limit: usize,
     ) -> Result<Option<ScanQueueEntry>> {
+        // The `(enqueued_at, user_did)` row-value predicate is the same total
+        // order `list_scan_queue` displays by and `claim_next_scan` admits by
+        // — `enqueued_at` alone ties and hands every tied row one number
+        // (#271).
         let row = sqlx_core::query::query(
             "SELECT status, enqueued_at,
                     (SELECT COUNT(*) FROM scan_queue q2
                       WHERE q2.status = 'queued'
-                        AND q2.enqueued_at <= q.enqueued_at) AS position
+                        AND (q2.enqueued_at, q2.user_did)
+                            <= (q.enqueued_at, q.user_did)) AS position
              FROM scan_queue q WHERE user_did = $1",
         )
         .bind(user_did)
@@ -1734,11 +1745,16 @@ impl Database for PgDatabase {
     }
 
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>> {
+        // Position counts on the SAME `(enqueued_at, user_did)` pair the
+        // ORDER BY sorts on, so a tie renders 1st/2nd/3rd AND numbers 1/2/3.
+        // Counting `enqueued_at <=` alone gave all three the same number
+        // (#271).
         let rows = sqlx_core::query::query(
             "SELECT user_did, status, enqueued_at, started_at, finished_at, last_error,
                     (SELECT COUNT(*) FROM scan_queue q2
                       WHERE q2.status = 'queued'
-                        AND q2.enqueued_at <= q.enqueued_at) AS position
+                        AND (q2.enqueued_at, q2.user_did)
+                            <= (q.enqueued_at, q.user_did)) AS position
              FROM scan_queue q
              ORDER BY q.enqueued_at ASC, q.user_did ASC",
         )
