@@ -1,11 +1,35 @@
 [
   {
+    "hash": "c811f8f0b369da513833a969dd002a0b8e0338e5",
+    "short_hash": "c811f8f",
+    "author": "chaos gremlin",
+    "date": "2026-08-10T15:03:05-07:00",
+    "message": "Merge pull request #98 from musicjunkieg/feat/288-admin-scan-visibility",
+    "files_changed": 0
+  },
+  {
     "hash": "31f21a9a84718d76bf7cae5460f3fc7888afb9fe",
     "short_hash": "31f21a9",
     "author": "Bryan Guffey",
     "date": "2026-08-10T14:41:44-07:00",
     "message": "fix(288): one total order for queue position, display, and admission\n\nCodeRabbit round 1 on PR #98, both findings.\n\nMAJOR (#271). `enqueued_at` alone is a PARTIAL order — SQLite stores it as\nRFC3339 text and Postgres stamps NOW(), so two requests in the same tick tie —\nand the three consumers disagreed about what to do with a tie.\n`list_scan_queue` sorted on (enqueued_at, user_did) but counted position as\n`enqueued_at <=`, so tied rows rendered 1st/2nd/3rd while all of them were\ntold they were 3rd. `scan_queue_entry` repeated the same count.\n`claim_next_scan` ordered on enqueued_at alone, so the row actually admitted\nwas not necessarily the row the dashboard showed as next — the display order\nand the admission order were different orders.\n\nAll five queries across both backends now use (enqueued_at, user_did): a\nrow-value comparison for the two position predicates, the same pair in both\nORDER BYs. Row values rather than an OR expansion so the predicate is visibly\nthe same expression the ORDER BY sorts on — two spellings of one order is how\nthey drift apart again.\n\nFour regression tests, one per backend surface plus the equivalence itself.\nThey seed rows sharing ONE enqueued_at written directly to the table, because\n`enqueue_scan` stamps wall-clock time and its rows cannot tie, and insert them\nin reverse user_did order so rowid/heap order is the exact reverse of the\nexpected answer. Verified red first: all three positions came back 3, and\nadmission took the row displayed LAST. The Postgres claim assertion was never\nreached in that red run, so it got its own negative control — reverting only\nthat ORDER BY makes it fail and nothing else.\n\nMINOR. The admin dashboard carried a failed scan's reason solely in a `title`\nattribute on a non-focusable span: unreachable by keyboard, unannounced by\nscreen readers, absent entirely on touch. The cell now renders the reason\ninline under \"Failed\", shortened to 72 chars so a RunPod payload cannot widen\nthe 9rem column, with the full untruncated phrase in a visually-hidden sibling\nand the visible copy aria-hidden. No new literal colour, font-size, or radius:\n--charcoal-400 (the AA floor for body text here) and 0.8125rem, both already\nin the file.\n\nCloses #271.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
     "files_changed": 5
+  },
+  {
+    "hash": "7f108192b149ccd342a439545d821dd42bd0d9ec",
+    "short_hash": "7f10819",
+    "author": "Bryan Guffey",
+    "date": "2026-08-10T03:18:29-07:00",
+    "message": "fix(288): give the wedged-queue alert a dwell before it fires\n\nRunning this locally is what found it. The bare condition -- queued > 0\nwhile running < cap -- is routinely true during entirely healthy\noperation, so alerting on it instantly would put a red \"scans stopped\nhappening\" banner on the page several times an hour.\n\nTwo ways it goes true without anything being wrong: a row that reaches\nthe table without going through enqueue_scan never fires the try_send\nwake and simply waits for the next tick, and a slot that frees is\nbriefly idle before the next claim commits.\n\nMeasured against a local server with three rows inserted directly:\nbare-condition TRUE at t=0s and t=8s, cleared by t=16s when the tick\nclaimed them. An alert with no dwell fires for that whole window.\n\nTICK is 30s server-side (admitter.rs:53), so the alert now requires the\ncondition to persist past 45s -- margin for a slow claim, without hiding\na real stall for meaningfully longer. The timestamp is captured on the\ntransition into the condition and cleared on the way out, so the dwell\nmeasures the stall itself rather than how long the page happened to be\nopen.\n\nRefs #288, #286",
+    "files_changed": 1
+  },
+  {
+    "hash": "21864440c73fc56ba0e3d83567ff3ba3c936f061",
+    "short_hash": "2186444",
+    "author": "Bryan Guffey",
+    "date": "2026-08-09T23:21:23-07:00",
+    "message": "feat(288): show the scan queue on the admin dashboard\n\nThe admin page could not see the queue. Its only scan column came from\nthe process-local ScanManager, which knows nothing about queued work,\nloses everything on restart, and cannot see another replica -- the view\nevery other admission decision moved off in #257/#278. Since admin\ntriggers now enqueue rather than launch, an admin-triggered scan sat\nqueued and this page showed nothing at all about it.\n\nQueue first: a Scan Queue section is now the first block on the page,\nabove Add Protected User, because \"what is the system doing right now\"\nis the reason to open it. It carries a capacity line sourced from the\ncap, and an ordered list of ACTIVE scans only -- a queue is ordered and\nusually short, so one row per registered user would bury it.\n\nThe users table keeps its Last Scan column but it is status-aware now:\nrunning shows elapsed, queued shows position, failed shows the reason,\nand a user with no queue row at all reads \"Never scanned\" -- a\ndistinction the old column could not draw.\n\nThree states this kind of panel usually gets wrong:\n\n- Idle renders as \"No scans running or queued.\" Plain text, no spinner.\n  Idle is a real answer, not a loading state.\n- Queued is described as WAITING, never as progress. PRODUCT.md makes\n  that rule for the user-facing view; it applies just as much to the\n  operator, who otherwise cannot tell a stalled queue from a busy one.\n- A wedged queue -- rows waiting while a slot is free -- gets a visible\n  alert. That is #286s silent-failure state, and until now it existed\n  only as an ERROR line in a log nobody greps.\n\nAlso fixes the poll, which fired only while a fingerprint was building.\nFingerprints finish in seconds; scans run for hours, so the panel would\nhave rendered once and frozen.\n\nPromotes two colours into tokens.css and DESIGN.md (#255). #f87171 and\n#86efac were already shipped six times each across the authed surfaces\nas bare hex -- the system HAD an error and a success colour, they just\nhad no name, so every file retyped them. Naming them is what let this\nsection use var(--) throughout: it adds no new literal colour, size or\nradius, and the file now imports tokens.css for the first time (#250).\n\nRefs #288, #255, #250, #286",
+    "files_changed": 6
   },
   {
     "hash": "da99f44df647b914fb26222f83abb5d99318a97b",
