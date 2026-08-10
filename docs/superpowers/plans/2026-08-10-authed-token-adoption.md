@@ -542,6 +542,7 @@ The three routes that duplicate `TIER_COLORS`. The dashboard already does this c
 **Files:**
 - Create: `web/src/lib/tier-class.ts`
 - Create: `web/src/lib/tier-class.test.ts`
+- Create: `web/src/lib/website/styles/tiers.css`
 - Modify: `web/src/routes/(protected)/accounts/+page.svelte` (24 hex; `TIER_COLORS` at 13–17, uses at 100 and 155)
 - Modify: `web/src/routes/(protected)/accounts/[handle]/+page.svelte` (30 hex; `TIER_COLORS` at 13–17, use at 108)
 - Modify: `web/src/routes/(protected)/review/+page.svelte` (20 hex; `TIER_COLORS` at 9–13, use at 99)
@@ -640,15 +641,36 @@ Remove the `const TIER_COLORS: Record<string, string> = { ... };` declaration fr
 	import { tierClass } from '$lib/tier-class';
 ```
 
-- [ ] **Step 6: Add the shared tier CSS to each file's `<style>` block**
+- [ ] **Step 6: Create the shared tier stylesheet and import it**
+
+**Bryan's ruling, 2026-08-10:** one global stylesheet, not a copy per component. Duplicating these four rules across four files would re-create in CSS exactly the per-file retyping #250 exists to eliminate.
+
+Create `web/src/lib/website/styles/tiers.css`:
 
 ```css
-	/* Tier colour by class, matching the dashboard's existing pattern. */
-	.tier-high { color: var(--tier-high); }
-	.tier-elevated { color: var(--tier-elevated); }
-	.tier-watch { color: var(--tier-watch); }
-	.tier-low { color: var(--tier-low); }
+/* Threat tier colours.
+ *
+ * Global rather than component-scoped, and deliberately so: four files need
+ * these exact rules, and copying them per component would reproduce the
+ * bypass this whole change is removing. Imported alongside tokens.css.
+ *
+ * Safe to reach only through an interpolated class expression — Svelte stops
+ * pruning class selectors entirely once any dynamic class is present on an
+ * element, verified against the compiler before this was written.
+ */
+.tier-high { color: var(--tier-high); }
+.tier-elevated { color: var(--tier-elevated); }
+.tier-watch { color: var(--tier-watch); }
+.tier-low { color: var(--tier-low); }
 ```
+
+Add to each of the three routes' `<script>` blocks, next to the `tokens.css` import:
+
+```ts
+	import '$lib/website/styles/tiers.css';
+```
+
+**Specificity note.** A Svelte-scoped `.tier-high` carries the scoping class and so has specificity 0-2-0; this global rule is 0-1-0. That is fine where nothing else colours these elements, but it is a genuine behavioural difference the resolved-value diff cannot see — that diff compares declared colours, not cascade outcomes. Task 8 Step 6 drives the running app for exactly this reason.
 
 - [ ] **Step 7: Rewrite the four call sites**
 
@@ -741,7 +763,7 @@ Expected: 5 errors, all pre-existing in `accounts/[handle]`. Not 6.
 - [ ] **Step 13: Commit**
 
 ```bash
-git add web/src/lib/tier-class.ts web/src/lib/tier-class.test.ts "web/src/routes/(protected)/accounts/+page.svelte" "web/src/routes/(protected)/accounts/[handle]/+page.svelte" "web/src/routes/(protected)/review/+page.svelte"
+git add web/src/lib/tier-class.ts web/src/lib/tier-class.test.ts web/src/lib/website/styles/tiers.css "web/src/routes/(protected)/accounts/+page.svelte" "web/src/routes/(protected)/accounts/[handle]/+page.svelte" "web/src/routes/(protected)/review/+page.svelte"
 git commit -m 'refactor(250): tier colour by CSS class, deleting three duplicated maps
 
 TIER_COLORS lived in three routes and again as dashboard CSS. The dashboard
@@ -774,28 +796,26 @@ The largest file: 52 hex literals plus the bulk of the rgba.
 **Files:**
 - Modify: `web/src/routes/(protected)/dashboard/+page.svelte`
 
-- [ ] **Step 1: Replace the tier CSS block at lines 699–714**
+- [ ] **Step 1: Delete the scoped tier rules at lines 699–710 and import the shared sheet**
+
+Per Bryan's ruling in Task 5, the four tier rules live in one global stylesheet. Delete `.tier-high`, `.tier-elevated`, `.tier-watch` and `.tier-low` from this component's `<style>` block entirely, and add to the `<script>` block:
+
+```ts
+	import '$lib/website/styles/tiers.css';
+```
+
+**Keep `.tier-not-assessed` scoped and in this file**, converting only its literal:
 
 ```css
-	.tier-high {
-		color: var(--tier-high);
-	}
-	.tier-elevated {
-		color: var(--tier-elevated);
-	}
-	.tier-watch {
-		color: var(--tier-watch);
-	}
-	.tier-low {
-		color: var(--tier-low);
-	}
 	.tier-not-assessed {
 		color: var(--charcoal-500);
 		cursor: default;
 	}
 ```
 
-`.tier-not-assessed` stays `--charcoal-500` rather than gaining a tier token — abstention is deliberately *outside* the tier scale, which is what #245 is about. Do not fold it in.
+It stays `--charcoal-500` rather than gaining a tier token, and stays out of `tiers.css`, because abstention sits deliberately *outside* the tier scale — that is what #245 is about — and no other file uses it.
+
+**Watch the cascade here.** This file applies tier classes statically (`class="tier-card tier-high"` at line 337) alongside `.tier-card` rules. Moving `.tier-high` from scoped (0-2-0) to global (0-1-0) lowers its specificity, so if any `.tier-card` rule also sets `color`, it may now win where it previously lost. Check the `.tier-card` rules for a `color` declaration before assuming this is inert, and confirm on the running app in Task 8 Step 6 — the resolved-value diff compares declared colours and cannot see a cascade change.
 
 - [ ] **Step 2: Replace the two inline accuracy-stat styles at lines 437 and 441**
 
