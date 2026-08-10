@@ -34,17 +34,52 @@ function channelsToHex(channels) {
 	return '#' + parts.map((n) => n.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Strip `//`-to-end-of-line comments, but only a `//` that occurs outside any
+ * quoted string on that line. A lookbehind on the single preceding character
+ * (checking for ':') is not enough: a protocol-relative URL
+ * (`//cdn.example.com/x`), or any second `//` later on the same line (e.g.
+ * `href="https://example.com/foo//bar"`), starts a false "comment" under
+ * that scheme and silently deletes the rest of the line — including any
+ * colour literal after it. Tracking quote state instead means a `//` inside
+ * `"…"` / `'…'` / `` `…` `` is never treated as a comment, on the first
+ * occurrence or the fifth, while a genuine bare `// comment` still is.
+ * Resets quote state at each newline — deliberately: none of the eight
+ * target files carry a `//` inside a template literal that spans a line
+ * break, and handling that would add complexity for a case that isn't here.
+ */
+function stripLineComments(text) {
+	return text
+		.split('\n')
+		.map((line) => {
+			let quote = null;
+			for (let i = 0; i < line.length; i++) {
+				const ch = line[i];
+				if (quote) {
+					if (ch === '\\') i++; // skip escaped char, including an escaped quote
+					else if (ch === quote) quote = null;
+					continue;
+				}
+				if (ch === '"' || ch === "'" || ch === '`') {
+					quote = ch;
+					continue;
+				}
+				if (ch === '/' && line[i + 1] === '/') return line.slice(0, i);
+			}
+			return line;
+		})
+		.join('\n');
+}
+
 function resolve(text, tokens) {
 	const found = [];
 
 	// Strip comments before scanning. Hex-shaped issue references living only
 	// in comments (`// #257`, `/* #250 */`, `<!-- #257 -->`) are not colours,
-	// and left in place they'd read as spurious literals. Guard the `//` case
-	// on a preceding ':' so it doesn't eat `https://` URLs.
-	const stripped = text
-		.replace(/<!--[\s\S]*?-->/g, '')
-		.replace(/\/\*[\s\S]*?\*\//g, '')
-		.replace(/(?<!:)\/\/.*$/gm, '');
+	// and left in place they'd read as spurious literals.
+	const stripped = stripLineComments(
+		text.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+	);
 
 	// --x is not in tokens.css, but IS set somewhere else in this same file
 	// (a markup `style="--x: …"` attribute, or a CSS rule's own `--x:`
@@ -99,14 +134,31 @@ function resolve(text, tokens) {
 	const bareHex = /(?<!&)#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/g;
 	for (const m of body.matchAll(bareHex)) found.push(normaliseHex(m[0]));
 
+	// Named colour keywords. These are real colour values that the hex scan
+	// above can't see — a later task that drops or rewrites one without
+	// introducing a tracked var() would otherwise show zero diff. Matched
+	// case-insensitively; the lookaround excludes '-' as well as word chars
+	// so `transparent` doesn't fire inside `--bg-transparent-ish`.
+	const namedColour = /(?<![\w-])(transparent|currentColor)(?![\w-])/gi;
+	for (const m of body.matchAll(namedColour)) found.push(m[0].toLowerCase());
+
 	return found;
 }
 
 const tokens = parseTokens(readFileSync(TOKENS_PATH, 'utf8'));
 let total = 0;
+let hadUnresolved = false;
 for (const path of argv.slice(2)) {
 	const colours = resolve(readFileSync(path, 'utf8'), tokens);
 	total += colours.length;
+	if (colours.some((c) => c.startsWith('UNRESOLVED('))) hadUnresolved = true;
 	console.log(`${path}\t${[...colours].sort().join('\n')}`);
 }
 console.log(`TOTAL ${total}`);
+
+// Structural gate: a caller who forgets to grep for UNRESOLVED should still
+// get a hard failure. Full output is already printed above, so the diff
+// use-case (piping stdout into `diff`) is unaffected either way. Uses
+// exitCode rather than exit() so stdout finishes flushing first, and only
+// ever moves the code off its default 0 — a clean run can't end up non-zero.
+if (hadUnresolved) process.exitCode = 1;

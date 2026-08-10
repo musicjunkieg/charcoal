@@ -34,6 +34,10 @@ web/src/routes/(protected)/+layout.svelte	#0c0a09
 #fef3c7
 #fef3c7
 #fffbeb
+currentcolor
+currentcolor
+currentcolor
+currentcolor
 web/src/routes/(protected)/dashboard/+page.svelte	#000000@0.4
 #0c0a09
 #0c0a09@0.6
@@ -109,6 +113,7 @@ web/src/routes/(protected)/dashboard/+page.svelte	#000000@0.4
 #fef3c7
 #fffbeb
 #fffbeb
+transparent
 web/src/routes/(protected)/accounts/+page.svelte	#0c0a09@0.6
 #1c1917@0.6
 #44403c
@@ -149,6 +154,8 @@ web/src/routes/(protected)/accounts/+page.svelte	#0c0a09@0.6
 #fef3c7
 #fef3c7
 #fffbeb
+transparent
+transparent
 web/src/routes/(protected)/accounts/[handle]/+page.svelte	#1c1917@0.4
 #1c1917@0.5
 #1c1917@0.6
@@ -286,6 +293,8 @@ web/src/routes/(protected)/admin/+page.svelte	#0c0a09
 #f87171@0.35
 #fef3c7
 #fffbeb
+transparent
+transparent
 web/src/lib/components/ScanProgress.svelte	#0c0a09@0.6
 #1c1917@0.6
 #44403c
@@ -329,4 +338,5 @@ LOCAL(--tier-border)
 LOCAL(--tier-border)
 LOCAL(--tier-border)
 LOCAL(--tier-color)
-TOTAL 331
+transparent
+TOTAL 341
