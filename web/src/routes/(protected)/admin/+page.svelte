@@ -3,9 +3,11 @@
 	import { goto } from '$app/navigation';
 	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
-	import type { AdminUser } from '$lib/types.js';
+	import '$lib/website/styles/tokens.css';
+	import type { AdminUser, AdminQueue, AdminScanRow } from '$lib/types.js';
 
 	let users = $state<AdminUser[]>([]);
+	let queue = $state<AdminQueue | null>(null);
 	let loading = $state(true);
 	let handle = $state('');
 	let addLoading = $state(false);
@@ -17,11 +19,21 @@
 
 	let anyBuilding = $derived(users.some((u) => u.fingerprint_building));
 	let anyScanning = $derived(scanningDid !== null);
+	let queueActive = $derived((queue?.active.length ?? 0) > 0);
+
+	// Queued rows exist while running is UNDER the cap — nothing is claiming
+	// them. This is #286's wedged state, which until now only ever appeared as
+	// an ERROR line in the server log. "Scans stopped happening" is exactly
+	// what an operator needs to see and will never find by grepping.
+	let wedged = $derived(
+		queue !== null && queue.queued > 0 && queue.running < queue.concurrency_limit
+	);
 
 	async function loadUsers() {
 		try {
 			const res = await getAdminUsers();
 			users = res.users;
+			queue = res.queue;
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
@@ -29,6 +41,42 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	/** Elapsed since an ISO timestamp, as "4h 07m" / "12m 30s" / "45s". */
+	function elapsedSince(iso: string | null): string {
+		if (!iso) return '';
+		const ms = Date.now() - new Date(iso).getTime();
+		if (!Number.isFinite(ms) || ms < 0) return '';
+		const s = Math.floor(ms / 1000);
+		if (s < 60) return `${s}s`;
+		const m = Math.floor(s / 60);
+		if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
+		return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+	}
+
+	/** What a row is doing, in words rather than a status code. A queued row
+	 *  says WAITING — never anything that implies work is underway, which is
+	 *  the product's stated rule for the user-facing view and applies just as
+	 *  much to the operator's. */
+	function scanSummary(scan: AdminScanRow): string {
+		switch (scan.status) {
+			case 'running':
+				return `Scanning — ${elapsedSince(scan.started_at)} elapsed`;
+			case 'queued':
+				return scan.position > 0 ? `Waiting — position ${scan.position}` : 'Waiting to start';
+			case 'failed':
+				return scan.last_error ? `Failed — ${scan.last_error}` : 'Failed';
+			case 'done':
+				return 'Finished';
+		}
+	}
+
+	function displayHandle(scan: AdminScanRow): string {
+		// An orphaned queue row (user deleted mid-scan) has no handle. Show the
+		// DID tail rather than "unknown" — it is still identifiable, and the
+		// row is listed precisely because it should not be hidden.
+		return scan.handle ? `@${scan.handle}` : scan.user_did.slice(-12);
 	}
 
 	async function handleAdd() {
@@ -101,7 +149,11 @@
 	function startPolling() {
 		if (pollTimer) clearInterval(pollTimer);
 		pollTimer = setInterval(() => {
-			if (anyBuilding) {
+			// Also poll while the queue has active work. Without this the panel
+			// would render once and then sit frozen for the two hours a scan
+			// takes — the poll used to fire only for fingerprint builds, which
+			// finish in seconds.
+			if (anyBuilding || queueActive) {
 				loadUsers();
 			}
 		}, 3000);
@@ -125,6 +177,54 @@
 	<div class="page-header">
 		<h1 class="page-title">Admin</h1>
 	</div>
+
+	<!-- Scan queue — first, because "what is the system doing right now" is the
+	     reason to open this page. Adding a user is an occasional action. -->
+	<section class="queue-section">
+		<h2 class="section-title">Scan Queue</h2>
+
+		{#if queue}
+			<p class="queue-capacity">
+				<strong>{queue.running}</strong> of
+				<strong>{queue.concurrency_limit}</strong>
+				{queue.concurrency_limit === 1 ? 'slot' : 'slots'} in use
+				{#if queue.queued > 0}
+					· <strong>{queue.queued}</strong> waiting
+				{/if}
+			</p>
+
+			{#if wedged}
+				<!-- Not decorative. Queued work with a free slot means nothing is
+				     claiming it, which is how a broken queue looks from outside. -->
+				<p class="queue-wedged" role="alert">
+					{queue.queued}
+					{queue.queued === 1 ? 'scan is' : 'scans are'} waiting while
+					{queue.concurrency_limit - queue.running}
+					{queue.concurrency_limit - queue.running === 1 ? 'slot is' : 'slots are'} free.
+					Nothing is claiming them — the admitter may have stopped. Check the server log
+					for a “scan admission is WEDGED” error.
+				</p>
+			{/if}
+
+			{#if queue.active.length === 0}
+				<p class="queue-idle">No scans running or queued.</p>
+			{:else}
+				<ul class="queue-list">
+					{#each queue.active as scan (scan.user_did)}
+						<li class="queue-item">
+							<span class="queue-status queue-status-{scan.status}">
+								{scan.status === 'running' ? 'Running' : 'Waiting'}
+							</span>
+							<span class="queue-handle">{displayHandle(scan)}</span>
+							<span class="queue-detail">{scanSummary(scan)}</span>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		{:else if loading}
+			<div class="loading-state"><div class="spinner"></div></div>
+		{/if}
+	</section>
 
 	<!-- Pre-seed form -->
 	<section class="add-section">
@@ -193,7 +293,24 @@
 										<span class="status-none">--</span>
 									{/if}
 								</td>
-								<td class="col-scan muted">{formatDate(user.last_scan_at)}</td>
+								<td class="col-scan">
+									{#if user.scan && (user.scan.status === 'running' || user.scan.status === 'queued')}
+										<span class="scan-live scan-live-{user.scan.status}"
+											>{scanSummary(user.scan)}</span
+										>
+									{:else if user.scan?.status === 'failed'}
+										<span class="scan-failed" title={user.scan.last_error ?? undefined}
+											>Failed</span
+										>
+										<span class="muted scan-when">{formatDate(user.scan.finished_at)}</span>
+									{:else if user.last_scan_at}
+										<span class="muted">{formatDate(user.last_scan_at)}</span>
+									{:else}
+										<!-- No queue row at all: never enqueued, which the old
+										     dashboard could not distinguish from "not running". -->
+										<span class="status-none">Never scanned</span>
+									{/if}
+								</td>
 								<td class="col-count muted">{user.scored_accounts}</td>
 								<td class="col-actions">
 									<div class="action-btns">
@@ -246,9 +363,110 @@
 	.section-title {
 		font-size: 1rem;
 		font-weight: 500;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		letter-spacing: 0.01em;
 		margin-bottom: 0.875rem;
+	}
+
+	/* ── Scan queue (#288) ───────────────────────────────────────────────
+	   Sizes and radii come from the DESIGN.md ramp (1rem / 0.8125rem;
+	   8px / 12px) and colours from tokens.css, so this section adds no new
+	   literal values — the surrounding file predates that discipline (#250).
+	   --charcoal-400 is the floor for body text here: --charcoal-500 on this
+	   ground fails AA (#249). */
+	.queue-capacity {
+		font-size: 1rem;
+		color: var(--charcoal-300);
+		margin: 0 0 0.75rem;
+	}
+
+	.queue-capacity strong {
+		color: var(--copper);
+		font-weight: 500;
+	}
+
+	.queue-idle {
+		font-size: 0.8125rem;
+		color: var(--charcoal-400);
+		margin: 0;
+	}
+
+	.queue-wedged {
+		font-size: 0.8125rem;
+		color: var(--status-error);
+		background: rgba(248, 113, 113, 0.08);
+		border: 1px solid rgba(248, 113, 113, 0.35);
+		border-radius: 8px;
+		padding: 0.625rem 0.75rem;
+		margin: 0 0 0.75rem;
+		line-height: 1.5;
+	}
+
+	.queue-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+	}
+
+	.queue-item {
+		display: flex;
+		align-items: baseline;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		padding: 0.5rem 0.75rem;
+		background: var(--charcoal-900);
+		border-radius: 8px;
+	}
+
+	/* Status as a word, not a colour alone — colour is never the only carrier. */
+	.queue-status {
+		font-size: 0.8125rem;
+		font-weight: 500;
+		min-width: 4.5rem;
+	}
+
+	.queue-status-running {
+		color: var(--amber-500);
+	}
+
+	.queue-status-queued {
+		color: var(--charcoal-400);
+	}
+
+	.queue-handle {
+		font-size: 0.8125rem;
+		color: var(--charcoal-300);
+	}
+
+	.queue-detail {
+		font-size: 0.8125rem;
+		color: var(--charcoal-400);
+	}
+
+	/* Table cell — live scan state */
+	.scan-live {
+		font-size: 0.8125rem;
+	}
+
+	.scan-live-running {
+		color: var(--amber-500);
+	}
+
+	.scan-live-queued {
+		color: var(--charcoal-400);
+	}
+
+	.scan-failed {
+		font-size: 0.8125rem;
+		color: var(--status-error);
+	}
+
+	.scan-when {
+		font-size: 0.8125rem;
+		margin-left: 0.375rem;
 	}
 
 	/* Add user form */

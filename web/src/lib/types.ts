@@ -159,18 +159,52 @@ export interface ReviewResponse {
 	total: number;
 }
 
+/** A row of `scan_queue` as the admin surface sees it (#288). Durable — it
+ *  survives a restart and sees other replicas, unlike the process-local
+ *  `ScanManager` this replaced. */
+export interface AdminScanRow {
+	user_did: string;
+	/** null when the queue row outlived its user record — an orphaned row,
+	 *  which is deliberately still listed because an operator needs to see it. */
+	handle: string | null;
+	status: 'queued' | 'running' | 'done' | 'failed';
+	/** 1-based among queued rows; 0 for every other status. */
+	position: number;
+	enqueued_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+	last_error: string | null;
+}
+
+export interface AdminQueue {
+	running: number;
+	queued: number;
+	concurrency_limit: number;
+	/** queued + running only, oldest first — the order the queue drains in.
+	 *  Empty array (never null) when nothing is active. */
+	active: AdminScanRow[];
+}
+
 export interface AdminUser {
 	did: string;
 	handle: string;
 	has_fingerprint: boolean;
+	/** Still process-local, and correctly so: a fingerprint build is not a
+	 *  queued job. */
 	fingerprint_building: boolean;
+	/** When the most recent scan STARTED. null while a scan is merely queued —
+	 *  a queued scan has not started. Read `scan.status` for that case. */
 	last_scan_at: string | null;
 	scored_accounts: number;
 	last_login_at: string | null;
+	/** null when the user has never been enqueued — the distinction the old
+	 *  dashboard could not draw. */
+	scan: AdminScanRow | null;
 }
 
 export interface AdminUsersResponse {
 	users: AdminUser[];
+	queue: AdminQueue;
 }
 
 export interface Identity {

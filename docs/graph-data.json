@@ -5037,6 +5037,39 @@
       "created_at": "2026-08-06T21:01:27.991128-07:00",
       "updated_at": "2026-08-06T21:01:28.011972-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"c73ea0b\",\"confidence\":92}"
+    },
+    {
+      "id": 466,
+      "change_id": "c3d62ee4-78a4-4a8b-a1b9-018cba11f611",
+      "node_type": "goal",
+      "title": "#288: point the admin dashboard at the durable scan_queue",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-09T23:08:32.583377-07:00",
+      "updated_at": "2026-08-09T23:08:59.670257-07:00",
+      "metadata_json": "{\"branch\":\"feat/288-admin-scan-visibility\",\"confidence\":90,\"prompt\":\"You are implementing the **backend half** of chainlink issue **#288** in the Charcoal repo (`/Users/bryan.guffey/Code/charcoal`), a Rust service. Branch `feat/288-admin-scan-visibility` is already checked out. Do NOT create a branch. Do NOT touch any `.svelte` file — the UI is a separate slice I am doing myself.\\n\\n## Context\\n\\nCharcoal scans Bluesky accounts for harassment risk. Scans take 22 min – 2 h. Issue #257 (just shipped) replaced a global single-flight gate with a durable `scan_queue` table: N scans run concurrently under `CHARCOAL_SCAN_CONCURRENCY` (default 2) and the rest queue.\\n\\n**The admin dashboard never got the memo.** `src/web/handlers/admin.rs:64` still builds its only scan column from the process-local `ScanManager`:\\n\\n```rust\\nlet last_scan = mgr.get_status(&user.did).and_then(|s| s.started_at.clone());\\n```\\n\\nThat view only knows scans *this process* launched, is lost on restart, is blind to another replica, has no concept of `queued`, and cannot tell a failed scan from one that never ran. Every other admission decision moved to the durable `scan_queue` row in #257/#278; this is the last consumer still on the old view. Since admin triggers now *enqueue* rather than launch, an admin-triggered scan sits `queued` and the dashboard shows nothing at all about it.\\n\\n## What to build\\n\\n### 1. `ScanQueueRow` in `src/db/traits.rs`\\n\\nA row-level view of `scan_queue` for admin display. Fields:\\n\\n```rust\\npub struct ScanQueueRow {\\n    pub user_did: String,\\n    /// \\\"queued\\\" | \\\"running\\\" | \\\"done\\\" | \\\"failed\\\"\\n    pub status: String,\\n    /// 1-based position among queued rows; 0 for any other status.\\n    pub position: i64,\\n    pub enqueued_at: String,\\n    pub started_at: Option<String>,\\n    pub finished_at: Option<String>,\\n    pub last_error: Option<String>,\\n}\\n```\\n\\nAll timestamps **RFC3339**, matching the existing `ScanQueueEntry::enqueued_at`. On Postgres that means `row.get::<chrono::DateTime<chrono::Utc>,_>(n).to_rfc3339()` — **not** `::TEXT`, which renders differently and varies with the connection `TimeZone`. This exact bug was already fixed once on this branch; do not reintroduce it. Precedent: `list_scan_skips` in `src/db/postgres.rs`.\\n\\n### 2. `Database::list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>`\\n\\nReturns **every** `scan_queue` row ordered by `enqueued_at` ascending, with `position` computed the same way `scan_queue_entry` does (`COUNT(*)` of queued rows with `enqueued_at <= mine`, and 0 for non-queued).\\n\\nOne query serving two consumers: the handler filters `queued`/`running` for the queue panel, and builds a DID→row map to enrich the user table. Do not add a second method.\\n\\nImplement in **both** backends — `src/db/queries.rs` + `src/db/sqlite.rs`, and `src/db/postgres.rs`. Behaviour must be identical; that is a binding constraint on this project.\\n\\n### 3. Wire it into `GET /api/admin/users`\\n\\nIn `src/web/handlers/admin.rs::list_users`:\\n\\n- Replace the `ScanManager`-derived `last_scan_at` with data from the queue row. Keep the key name `last_scan_at` if the semantics still fit, or rename if a better one exists — but say which you chose and why, since the SPA reads it.\\n- Add per-user scan fields from the row: status, position, started_at, finished_at, last_error.\\n- Add a top-level `queue` object to the response: `running`, `queued`, and `concurrency_limit` (from `crate::web::admitter::scan_concurrency()`), plus the ordered list of active (`queued` + `running`) rows for the queue panel.\\n- **Keep `fingerprint_building` on the ScanManager** — that is genuinely process-local and correct there. Only the *scan* fields move.\\n- A DB error must not silently degrade to \\\"no scans\\\". Log it and fail the request, consistent with how the rest of that handler treats database errors.\\n\\n## Process rules\\n\\n- TDD is mandatory. Write the failing test, watch it fail, then implement. Cover both backends — SQLite unit tests in `src/db/queries.rs`'s existing `#[cfg(test)]` module, Postgres in `tests/db_postgres.rs`. #270 exists because SQLite coverage was skipped once already.\\n- Assert something that can actually fail. Specifically: ordering and position. A test that only checks `len()` would pass against a broken implementation.\\n- Commit referencing #288.\"}"
+    },
+    {
+      "id": 467,
+      "change_id": "a076808d-36be-4b18-a2fb-2d7fe9a8de41",
+      "node_type": "action",
+      "title": "Backend slice: Database::list_scan_queue on both backends, wired into GET /api/admin/users",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-09T23:09:05.570619-07:00",
+      "updated_at": "2026-08-09T23:09:22.956156-07:00",
+      "metadata_json": "{\"branch\":\"feat/288-admin-scan-visibility\",\"commit\":\"da99f44\",\"confidence\":90,\"files\":[\"src/db/traits.rs\",\"src/db/queries.rs\",\"src/db/sqlite.rs\",\"src/db/postgres.rs\",\"src/web/handlers/admin.rs\",\"src/web/test_helpers.rs\",\"tests/db_postgres.rs\",\"tests/web_admin_scan_visibility.rs\"]}"
+    },
+    {
+      "id": 468,
+      "change_id": "f056beb0-b065-42a0-bed4-3dd392e618aa",
+      "node_type": "outcome",
+      "title": "Backend landed (da99f44). ScanQueueRow + list_scan_queue on SQLite and Postgres with the SAME correlated-COUNT position scan_queue_entry uses; Postgres renders every timestamp via to_rfc3339(), never ::TEXT. GET /api/admin/users now serves per-user scan{status,position,enqueued_at,started_at,finished_at,last_error} (null = never enqueued, the distinction the old view could not draw) plus a queue{running,queued,concurrency_limit,active[]} panel, counts derived from the SAME snapshot as the list so they cannot disagree. last_scan_at KEPT (same meaning, durable source); fingerprint_building deliberately left on ScanManager. DB error 500s rather than degrading to \"nobody has ever scanned\". RED FIRST on all three layers: both backends stubbed to Ok(vec![]) so tests failed on assertions not compile (SQLite 4 failed, Postgres 1 failed), and the handler tests failed against the old code with left=Null right=\"queued\" — the reported bug reproducing. NEGATIVE CONTROL: the first ordering tests seeded via enqueue_scan, whose NOW() stamps make insertion order == enqueued_at order, so they would have passed against a query with NO ORDER BY (SQLite returns rowid order, Postgres heap order); reseeded with timestamps running backwards, then verified by deleting the ORDER BY clause — both backends returned insertion order and both tests caught it. 742 web + 639 postgres tests pass, zero SKIP, clippy clean on web/postgres/no-features.",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-08-09T23:09:16.995988-07:00",
+      "updated_at": "2026-08-09T23:09:22.964118-07:00",
+      "metadata_json": "{\"branch\":\"feat/288-admin-scan-visibility\",\"commit\":\"da99f44\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -9978,6 +10011,28 @@
       "weight": 1.0,
       "rationale": "Implementation outcome",
       "created_at": "2026-08-06T21:01:27.998073-07:00"
+    },
+    {
+      "id": 460,
+      "from_node_id": 466,
+      "to_node_id": 467,
+      "from_change_id": "c3d62ee4-78a4-4a8b-a1b9-018cba11f611",
+      "to_change_id": "a076808d-36be-4b18-a2fb-2d7fe9a8de41",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of the #288 backend slice",
+      "created_at": "2026-08-09T23:09:22.940686-07:00"
+    },
+    {
+      "id": 461,
+      "from_node_id": 467,
+      "to_node_id": 468,
+      "from_change_id": "a076808d-36be-4b18-a2fb-2d7fe9a8de41",
+      "to_change_id": "f056beb0-b065-42a0-bed4-3dd392e618aa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the implementation",
+      "created_at": "2026-08-09T23:09:22.948619-07:00"
     }
   ],
   "documents": [

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "da99f44df647b914fb26222f83abb5d99318a97b",
+    "short_hash": "da99f44",
+    "author": "Bryan Guffey",
+    "date": "2026-08-09T23:07:51-07:00",
+    "message": "fix(288): show the admin dashboard the real scan queue\n\nGET /api/admin/users built its only scan column from the process-local\nScanManager, so it knew only about scans this process launched: empty\nafter a redeploy, blind to a second replica, no concept of \"queued\" — so\nan admin-triggered scan, which since #257 is enqueued rather than\nlaunched, showed nothing at all — and unable to tell a failed scan from\none that never ran. Every other admission decision moved to the durable\nscan_queue row in #257/#278; this was the last consumer left behind.\n\nAdds Database::list_scan_queue, returning every row with the same\ncorrelated-COUNT position that scan_queue_entry computes (two formulas\nfor one number is how the panel and the per-user column start\ndisagreeing). One query serves both consumers: the handler indexes it by\nDID to enrich each user with status, position, started/finished and last\nerror, and filters the queued+running rows into a \"queue\" panel carrying\nthe CHARCOAL_SCAN_CONCURRENCY cap they are measured against.\n\nlast_scan_at keeps its name and its meaning — \"when the most recent scan\nstarted\" — but now comes from the durable row, so it survives a restart.\nfingerprint_building deliberately stays on ScanManager: it tracks a\ntokio::spawn this process owns and has no durable row anywhere. A\ndatabase error fails the request rather than degrading to \"nobody has\never scanned\", because an operator acts on that.\n\nPostgres renders timestamps via to_rfc3339(), never ::TEXT, which varies\nwith the connection TimeZone and is not RFC3339 at all.\n\nTested on both backends per #270. The ordering tests seed timestamps\nrunning BACKWARDS rather than using enqueue_scan, because NOW()-stamped\nrows come back in insertion order anyway — SQLite returns rowid order and\nPostgres heap order for an unordered SELECT, so the obvious version of\nthis test passes against a query with no ORDER BY. Verified by deleting\nthe clause: both backends returned insertion order and both tests caught\nit.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 9
+  },
+  {
     "hash": "c73ea0be2a352f38b03f43b072825f05fe0e9120",
     "short_hash": "c73ea0b",
     "author": "Bryan Guffey",
