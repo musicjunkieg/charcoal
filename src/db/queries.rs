@@ -14,7 +14,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
+use super::traits::{ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip};
 
 // --- Users ---
 
@@ -1515,6 +1515,48 @@ pub fn scan_queue_depth(conn: &Connection) -> Result<ScanQueueDepth> {
     })
 }
 
+/// Every scan_queue row, oldest first. Mirrors PgDatabase::list_scan_queue.
+///
+/// `position` is computed exactly as `scan_queue_entry` computes it — a
+/// correlated COUNT over queued rows enqueued at-or-before this one, forced to
+/// 0 for any non-queued status. Two formulas for one number is how the queue
+/// panel and the per-user column start disagreeing.
+///
+/// `user_did` breaks ties on `enqueued_at` so the order is total: SQLite's
+/// TEXT timestamps compare lexicographically, and two rows enqueued inside the
+/// same millisecond would otherwise come back in whatever order the scan
+/// happens to produce.
+pub fn list_scan_queue(conn: &Connection) -> Result<Vec<ScanQueueRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT user_did, status, enqueued_at, started_at, finished_at, last_error,
+                (SELECT COUNT(*) FROM scan_queue q2
+                  WHERE q2.status = 'queued' AND q2.enqueued_at <= q.enqueued_at)
+         FROM scan_queue q
+         ORDER BY q.enqueued_at ASC, q.user_did ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let status: String = row.get(1)?;
+        let raw_position: i64 = row.get(6)?;
+        Ok(ScanQueueRow {
+            user_did: row.get(0)?,
+            position: if status == "queued" { raw_position } else { 0 },
+            status,
+            enqueued_at: row.get(2)?,
+            started_at: row.get(3)?,
+            finished_at: row.get(4)?,
+            last_error: row.get(5)?,
+        })
+    })?;
+    // Collected with `?` rather than `filter_map(ok)`: a row that fails to map
+    // would otherwise vanish from an operator's view of the queue, which is
+    // the exact blindness #288 is removing.
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// A user's queue entry with position and ETA, or None if the user has never
 /// been enqueued. Mirrors PgDatabase::scan_queue_entry.
 pub fn scan_queue_entry(
@@ -2439,5 +2481,158 @@ mod tests {
             None,
             "scan_queue row must not survive delete_user_data"
         );
+    }
+
+    // ── list_scan_queue (#288) ────────────────────────────────────────────
+
+    /// Insert a queued row with an enqueued_at this test chooses.
+    ///
+    /// `enqueue_scan` stamps wall-clock time, so rows inserted through it come
+    /// out in insertion order *and* in enqueued_at order — a query with no
+    /// ORDER BY at all would satisfy an ordering assertion built that way,
+    /// because SQLite returns rowid order. Naming the timestamps lets the three
+    /// candidate orderings (insertion, alphabetical, enqueued_at) disagree, so
+    /// only the right one passes.
+    fn seed_queued_at(conn: &Connection, user_did: &str, enqueued_at: &str) {
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, enqueued_at)
+             VALUES (?1, 'queued', ?2)",
+            params![user_did, enqueued_at],
+        )
+        .unwrap();
+    }
+
+    /// Seed A, B, C in that order — alphabetical AND insertion order — with
+    /// enqueued_at running backwards, so the correct answer is C, B, A and
+    /// nothing else.
+    fn seed_reverse_chronological_queue(conn: &Connection) {
+        seed_queued_at(conn, QUEUE_USER_A, "2026-08-09T00:00:03+00:00");
+        seed_queued_at(conn, QUEUE_USER_B, "2026-08-09T00:00:02+00:00");
+        seed_queued_at(conn, QUEUE_USER_C, "2026-08-09T00:00:01+00:00");
+    }
+
+    /// The admin dashboard renders this list top-to-bottom as the queue, so
+    /// the ORDER BY is load-bearing, not cosmetic: whoever is listed first is
+    /// who the operator believes runs next. Asserting `len()` alone would pass
+    /// against an unordered query, which is exactly the bug that matters.
+    #[test]
+    fn list_scan_queue_is_ordered_oldest_first() {
+        let conn = test_db();
+        seed_reverse_chronological_queue(&conn);
+
+        let rows = list_scan_queue(&conn).unwrap();
+        let dids: Vec<&str> = rows.iter().map(|r| r.user_did.as_str()).collect();
+        assert_eq!(
+            dids,
+            vec![QUEUE_USER_C, QUEUE_USER_B, QUEUE_USER_A],
+            "rows must come back in enqueued_at order, oldest first — insertion \
+             order and alphabetical order both say A, B, C here"
+        );
+    }
+
+    /// Position is what the dashboard shows as "3rd in line". A row behind
+    /// another queued row is 2, never 1 — and it is numbered by enqueued_at,
+    /// not by whatever order the rows happen to arrive in.
+    #[test]
+    fn list_scan_queue_numbers_queued_rows_from_one() {
+        let conn = test_db();
+        seed_reverse_chronological_queue(&conn);
+
+        let rows = list_scan_queue(&conn).unwrap();
+        let positions: Vec<(&str, i64)> = rows
+            .iter()
+            .map(|r| (r.user_did.as_str(), r.position))
+            .collect();
+        assert_eq!(
+            positions,
+            vec![(QUEUE_USER_C, 1), (QUEUE_USER_B, 2), (QUEUE_USER_A, 3)],
+            "queued rows are numbered 1..n by enqueued_at; the FIRST-inserted \
+             row is last in line here, so a rowid-ordered count would say 1"
+        );
+    }
+
+    /// A running row occupies a slot rather than a place in line, so its
+    /// position is 0 — and, critically, claiming it must RENUMBER everyone
+    /// behind it. If position were computed over all rows regardless of
+    /// status, B would still read 2 after A starts running.
+    #[test]
+    fn list_scan_queue_zeroes_position_for_non_queued_rows() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+
+        let rows = list_scan_queue(&conn).unwrap();
+        let by_did = |did: &str| {
+            rows.iter()
+                .find(|r| r.user_did == did)
+                .unwrap_or_else(|| panic!("{did} must be listed"))
+                .clone()
+        };
+
+        let a = by_did(QUEUE_USER_A);
+        assert_eq!(a.status, "running");
+        assert_eq!(a.position, 0, "a running row holds a slot, not a place");
+        assert!(
+            a.started_at.is_some(),
+            "claiming stamps started_at, and the dashboard reads it"
+        );
+
+        let b = by_did(QUEUE_USER_B);
+        assert_eq!(b.status, "queued");
+        assert_eq!(
+            b.position, 1,
+            "B is now first in line — a position that ignored status would say 2"
+        );
+    }
+
+    /// The whole point of #288: "the last scan failed" and "this user has
+    /// never scanned" were indistinguishable on the old ScanManager-derived
+    /// column. A failed row must carry its error and its finished_at.
+    #[test]
+    fn list_scan_queue_surfaces_failure_details() {
+        let conn = test_db();
+        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
+        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
+        finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &claim.claim_id,
+            Some("gather exploded"),
+        )
+        .unwrap();
+
+        let rows = list_scan_queue(&conn).unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.status, "failed");
+        assert_eq!(row.position, 0);
+        assert_eq!(row.last_error.as_deref(), Some("gather exploded"));
+        assert!(row.started_at.is_some());
+        assert!(
+            row.finished_at.is_some(),
+            "a finished row must carry when it finished"
+        );
+
+        // Every timestamp on this trait is RFC3339 — the SPA parses them and
+        // the Postgres backend must render the same shape.
+        for ts in [
+            Some(row.enqueued_at.clone()),
+            row.started_at.clone(),
+            row.finished_at.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            chrono::DateTime::parse_from_rfc3339(&ts)
+                .unwrap_or_else(|e| panic!("{ts} is not RFC3339: {e}"));
+        }
+    }
+
+    #[test]
+    fn list_scan_queue_is_empty_when_nothing_was_ever_enqueued() {
+        let conn = test_db();
+        assert_eq!(list_scan_queue(&conn).unwrap(), Vec::new());
     }
 }

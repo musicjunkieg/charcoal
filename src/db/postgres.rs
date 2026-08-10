@@ -21,7 +21,9 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{eta_seconds, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
+use super::traits::{
+    eta_seconds, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 /// Type alias for the PostgreSQL connection pool.
@@ -1729,6 +1731,48 @@ impl Database for PgDatabase {
             eta_seconds,
             enqueued_at,
         }))
+    }
+
+    async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT user_did, status, enqueued_at, started_at, finished_at, last_error,
+                    (SELECT COUNT(*) FROM scan_queue q2
+                      WHERE q2.status = 'queued'
+                        AND q2.enqueued_at <= q.enqueued_at) AS position
+             FROM scan_queue q
+             ORDER BY q.enqueued_at ASC, q.user_did ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let status: String = row.get(1);
+                let raw_position: i64 = row.get(6);
+                ScanQueueRow {
+                    user_did: row.get::<String, _>(0),
+                    // Non-queued rows hold a slot or are finished; neither has
+                    // a place in line. Same rule as `scan_queue_entry`.
+                    position: if status == "queued" { raw_position } else { 0 },
+                    status,
+                    // TIMESTAMPTZ here vs TEXT in SQLite. `::TEXT` would
+                    // render "2026-08-06 00:36:25.231997-07" — a different
+                    // separator and offset format, varying with the
+                    // connection's TimeZone and rejected by
+                    // DateTime::parse_from_rfc3339. Normalise the way
+                    // list_scan_skips does.
+                    enqueued_at: row.get::<chrono::DateTime<chrono::Utc>, _>(2).to_rfc3339(),
+                    started_at: row
+                        .get::<Option<chrono::DateTime<chrono::Utc>>, _>(3)
+                        .map(|t| t.to_rfc3339()),
+                    finished_at: row
+                        .get::<Option<chrono::DateTime<chrono::Utc>>, _>(4)
+                        .map(|t| t.to_rfc3339()),
+                    last_error: row.get::<Option<String>, _>(5),
+                }
+            })
+            .collect())
     }
 }
 

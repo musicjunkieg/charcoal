@@ -119,6 +119,26 @@ pub struct ScanClaim {
     pub claim_id: String,
 }
 
+/// One `scan_queue` row, as the admin dashboard needs to display it (#288).
+///
+/// Distinct from `ScanQueueEntry`, which answers "where am *I*?" for one user
+/// and carries an ETA. This is the row-level view: every column an operator
+/// needs to tell a failed scan from one that never ran, with no ETA because
+/// the dashboard shows a table rather than a single user's wait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanQueueRow {
+    pub user_did: String,
+    /// "queued" | "running" | "done" | "failed"
+    pub status: String,
+    /// 1-based position among queued rows; 0 for any other status.
+    pub position: i64,
+    /// RFC3339, like every other timestamp on this trait.
+    pub enqueued_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
 /// How many rows are waiting versus occupying a slot (#257).
 ///
 /// `claim_next_scan` answers "the queue is empty" and "every slot is taken"
@@ -505,4 +525,17 @@ pub trait Database: Send + Sync {
         user_did: &str,
         concurrency_limit: usize,
     ) -> Result<Option<ScanQueueEntry>>;
+
+    /// Every `scan_queue` row, oldest first, for the admin dashboard (#288).
+    ///
+    /// Returns rows in ALL statuses, not just the active ones: the dashboard
+    /// needs `done`/`failed` too, because "this user's last scan failed" and
+    /// "this user has never scanned" are the two states the old
+    /// `ScanManager`-derived column could not tell apart.
+    ///
+    /// One query, two consumers — the handler filters the active rows for the
+    /// queue panel and indexes the whole set by DID to enrich the user table.
+    /// A second, narrower method would be a second snapshot of a table that
+    /// changes under it.
+    async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>;
 }

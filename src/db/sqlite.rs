@@ -17,7 +17,7 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     UserLabel, UserRow,
 };
-use super::traits::{Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanSkip};
+use super::traits::{Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
@@ -464,6 +464,11 @@ impl Database for SqliteDatabase {
     ) -> Result<Option<ScanQueueEntry>> {
         let conn = self.conn.lock().await;
         super::queries::scan_queue_entry(&conn, user_did, concurrency_limit)
+    }
+
+    async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_scan_queue(&conn)
     }
 }
 
