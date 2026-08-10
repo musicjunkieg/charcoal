@@ -69,6 +69,28 @@ Preserve the alpha value exactly. `A` below is whatever alpha the source had.
 | `rgba(253, 186, 116, A)` | `rgb(var(--tier-elevated-rgb) / A)` |
 | `rgba(252, 211, 77, A)` | `rgb(var(--tier-watch-rgb) / A)` |
 
+## The inertness check
+
+Tasks 3–7 each end by proving they changed no colour. **Use exactly this command** — do not filter it with `grep`.
+
+```bash
+node web/scripts/resolve-colors.mjs \
+  "web/src/routes/(protected)/+layout.svelte" \
+  "web/src/routes/(protected)/dashboard/+page.svelte" \
+  "web/src/routes/(protected)/accounts/+page.svelte" \
+  "web/src/routes/(protected)/accounts/[handle]/+page.svelte" \
+  "web/src/routes/(protected)/review/+page.svelte" \
+  "web/src/routes/(protected)/admin/+page.svelte" \
+  web/src/lib/components/ScanProgress.svelte \
+  web/src/lib/components/LabelButtons.svelte \
+  > /tmp/250-check.txt
+diff docs/superpowers/plans/250-baseline.txt /tmp/250-check.txt && echo "INERT"
+```
+
+Expected: `INERT`, with no diff output.
+
+**Why the whole file and not a `grep` for the file you touched.** The script emits one record per file as `path<TAB>colour1\ncolour2\n…`, so a record spans many lines and only its *first* line contains the path. `grep "admin"` therefore returns 1 line out of ~40 and a diff of that compares almost nothing — it prints `INERT` no matter what changed. The baseline is 332 lines; exactly 1 matches `admin`. An earlier draft of this plan used the grep form in every task, which would have made all five checks near-vacuous. Diff the whole file; it is just as cheap and cannot lie.
+
 ### Never substitute
 
 These match a hex-ish pattern but are not colours. Leave them exactly as they are:
@@ -445,10 +467,7 @@ Pass the full file content to `mcp__svelte__svelte-autofixer`. Expected: zero is
 
 - [ ] **Step 4: Verify inert**
 
-```bash
-node web/scripts/resolve-colors.mjs "web/src/routes/(protected)/+layout.svelte" > /tmp/250-layout.txt
-diff <(grep "+layout" docs/superpowers/plans/250-baseline.txt) <(grep "+layout" /tmp/250-layout.txt) && echo "INERT"
-```
+Run **The inertness check** from the top of this plan, verbatim.
 
 Expected: `INERT`, no diff output. If `--copper-glow` shows a delta, the assumption that nothing reads it was wrong — stop and report.
 
@@ -501,14 +520,11 @@ Expected: zero issues each.
 
 - [ ] **Step 4: Verify inert**
 
-```bash
-node web/scripts/resolve-colors.mjs \
-  web/src/lib/components/ScanProgress.svelte \
-  web/src/lib/components/LabelButtons.svelte > /tmp/250-components.txt
-diff <(grep "components/" docs/superpowers/plans/250-baseline.txt) <(grep "components/" /tmp/250-components.txt) && echo "INERT"
-```
+Run **The inertness check** from the top of this plan, verbatim.
 
 Expected: `INERT`.
+
+Note for this task specifically: `LabelButtons.svelte` contributes six `LOCAL(--tier-color)` / `LOCAL(--tier-bg)` / `LOCAL(--tier-border)` entries to the baseline. Those markers must still be present and unchanged afterwards. If you rename one of those local custom properties, the marker changes and the diff will flag it — that is correct behaviour, not a false alarm.
 
 - [ ] **Step 5: Run the existing component tests**
 
@@ -734,13 +750,7 @@ Expected: zero issues each.
 
 - [ ] **Step 10: Verify inert**
 
-```bash
-node web/scripts/resolve-colors.mjs \
-  "web/src/routes/(protected)/accounts/+page.svelte" \
-  "web/src/routes/(protected)/accounts/[handle]/+page.svelte" \
-  "web/src/routes/(protected)/review/+page.svelte" > /tmp/250-tiers.txt
-diff <(grep -E "accounts/|review/" docs/superpowers/plans/250-baseline.txt) <(grep -E "accounts/|review/" /tmp/250-tiers.txt) && echo "INERT"
-```
+Run **The inertness check** from the top of this plan, verbatim.
 
 Expected: `INERT`. The `0.25` alpha assumption from Step 7 is what this catches, along with the abstained-account fallback.
 
@@ -841,12 +851,9 @@ Expected: zero issues.
 
 - [ ] **Step 5: Verify inert**
 
-```bash
-node web/scripts/resolve-colors.mjs "web/src/routes/(protected)/dashboard/+page.svelte" > /tmp/250-dash.txt
-diff <(grep "dashboard/" docs/superpowers/plans/250-baseline.txt) <(grep "dashboard/" /tmp/250-dash.txt) && echo "INERT"
-```
+Run **The inertness check** from the top of this plan, verbatim.
 
-Expected: `INERT`.
+Expected: `INERT`. Remember this check compares *declared* colours and cannot see the scoped-to-global specificity change described in Step 1 — a green result here does not clear that.
 
 - [ ] **Step 6: Commit**
 
@@ -882,10 +889,7 @@ Expected: zero issues.
 
 - [ ] **Step 3: Verify inert**
 
-```bash
-node web/scripts/resolve-colors.mjs "web/src/routes/(protected)/admin/+page.svelte" > /tmp/250-admin.txt
-diff <(grep "admin/" docs/superpowers/plans/250-baseline.txt) <(grep "admin/" /tmp/250-admin.txt) && echo "INERT"
-```
+Run **The inertness check** from the top of this plan, verbatim.
 
 Expected: `INERT`.
 
