@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   position as `enqueued_at <=`, so tied rows rendered 1st, 2nd, 3rd while every
   one of them was told it was 3rd; `scan_queue_entry` repeated the same count;
   and `claim_next_scan` ordered on `enqueued_at` alone, so the row admitted next
-  was not necessarily the row the dashboard showed as next. All five queries
+  was not necessarily the row the dashboard showed as next. All six queries
   across both backends now use `(enqueued_at, user_did)` — a row-value
   comparison for the position counts, the same pair in both `ORDER BY`s. The
   regression tests seed rows sharing one timestamp, which `enqueue_scan`'s

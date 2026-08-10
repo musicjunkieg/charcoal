@@ -1,5 +1,13 @@
 [
   {
+    "hash": "31f21a9a84718d76bf7cae5460f3fc7888afb9fe",
+    "short_hash": "31f21a9",
+    "author": "Bryan Guffey",
+    "date": "2026-08-10T14:41:44-07:00",
+    "message": "fix(288): one total order for queue position, display, and admission\n\nCodeRabbit round 1 on PR #98, both findings.\n\nMAJOR (#271). `enqueued_at` alone is a PARTIAL order — SQLite stores it as\nRFC3339 text and Postgres stamps NOW(), so two requests in the same tick tie —\nand the three consumers disagreed about what to do with a tie.\n`list_scan_queue` sorted on (enqueued_at, user_did) but counted position as\n`enqueued_at <=`, so tied rows rendered 1st/2nd/3rd while all of them were\ntold they were 3rd. `scan_queue_entry` repeated the same count.\n`claim_next_scan` ordered on enqueued_at alone, so the row actually admitted\nwas not necessarily the row the dashboard showed as next — the display order\nand the admission order were different orders.\n\nAll five queries across both backends now use (enqueued_at, user_did): a\nrow-value comparison for the two position predicates, the same pair in both\nORDER BYs. Row values rather than an OR expansion so the predicate is visibly\nthe same expression the ORDER BY sorts on — two spellings of one order is how\nthey drift apart again.\n\nFour regression tests, one per backend surface plus the equivalence itself.\nThey seed rows sharing ONE enqueued_at written directly to the table, because\n`enqueue_scan` stamps wall-clock time and its rows cannot tie, and insert them\nin reverse user_did order so rowid/heap order is the exact reverse of the\nexpected answer. Verified red first: all three positions came back 3, and\nadmission took the row displayed LAST. The Postgres claim assertion was never\nreached in that red run, so it got its own negative control — reverting only\nthat ORDER BY makes it fail and nothing else.\n\nMINOR. The admin dashboard carried a failed scan's reason solely in a `title`\nattribute on a non-focusable span: unreachable by keyboard, unannounced by\nscreen readers, absent entirely on touch. The cell now renders the reason\ninline under \"Failed\", shortened to 72 chars so a RunPod payload cannot widen\nthe 9rem column, with the full untruncated phrase in a visually-hidden sibling\nand the visible copy aria-hidden. No new literal colour, font-size, or radius:\n--charcoal-400 (the AA floor for body text here) and 0.8125rem, both already\nin the file.\n\nCloses #271.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
     "hash": "da99f44df647b914fb26222f83abb5d99318a97b",
     "short_hash": "da99f44",
     "author": "Bryan Guffey",

@@ -5070,6 +5070,28 @@
       "created_at": "2026-08-09T23:09:16.995988-07:00",
       "updated_at": "2026-08-09T23:09:22.964118-07:00",
       "metadata_json": "{\"branch\":\"feat/288-admin-scan-visibility\",\"commit\":\"da99f44\",\"confidence\":95}"
+    },
+    {
+      "id": 469,
+      "change_id": "680ea565-adb0-4c9d-8188-767d4ba451f9",
+      "node_type": "action",
+      "title": "CodeRabbit PR #98 round 1: give the scan queue ONE total order, and put the failure reason where a keyboard can reach it",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-10T14:42:07.334862-07:00",
+      "updated_at": "2026-08-10T14:42:07.334862-07:00",
+      "metadata_json": "{\"branch\":\"feat/288-admin-scan-visibility\",\"commit\":\"31f21a9\",\"confidence\":92,\"files\":[\"src/db/queries.rs\",\"src/db/postgres.rs\",\"tests/db_postgres.rs\",\"web/src/routes/(protected)/admin/+page.svelte\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 470,
+      "change_id": "4eadc92a-24ba-409f-a1f0-316a19b38883",
+      "node_type": "outcome",
+      "title": "Both findings cleared, red-first on every assertion (31f21a9). MAJOR/#271: enqueued_at alone is a PARTIAL order — SQLite stores RFC3339 text, Postgres stamps NOW(), so same-tick requests tie — and the three consumers disagreed about ties. list_scan_queue SORTED on (enqueued_at,user_did) but COUNTED position as enqueued_at<=, so tied rows rendered 1st/2nd/3rd while all three were told 3rd; scan_queue_entry repeated the count; claim_next_scan ordered on enqueued_at alone, so admission took the row displayed LAST. All five queries on both backends now use (enqueued_at,user_did) — ROW-VALUE comparison for the two position predicates rather than an OR expansion, so the predicate is visibly the same expression the ORDER BY sorts on. RED STATE: all three SQLite positions came back 3 not 1/2/3, and the claim test failed left=queuec right=queuea, which isolates the claim ORDER BY because the display order was already correct pre-fix. NEGATIVE CONTROL for the Postgres claim (never reached in red, the position assert aborted first): with the full fix in place, reverting ONLY pg claim_next_scan to ORDER BY enqueued_at fails it left=chrly right=alpha; reverted back, green. Seeding is written directly to the table with one shared literal timestamp, inserted in REVERSE user_did order, because enqueue_scan stamps wall-clock and its rows cannot tie — the trap a previous agent on this branch fell into. MINOR: the failed-scan reason lived only in a title attr on a non-focusable span (no keyboard, no SR, nothing on touch); now inline under Failed, truncated to 72 chars so a RunPod payload cannot widen the 9rem column, with the FULL phrase in an .sr-only sibling and the visible copy aria-hidden. Literal audit before/after: 50 colour occurrences, 22 distinct colours, 6 font-sizes, 4 radii — ALL UNCHANGED, so the impeccable count stays 11; svelte-autofixer returns zero issues. Verified: web suite all ok with ZERO SKIP, postgres --all-targets all ok (db_postgres 29), clippy clean x3, 36 vitest, svelte-check still 5 errors all pre-existing in accounts/[handle], SPA build ok",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-10T14:42:24.774034-07:00",
+      "updated_at": "2026-08-10T14:42:24.774034-07:00",
+      "metadata_json": "{\"branch\":\"feat/288-admin-scan-visibility\",\"commit\":\"31f21a9\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10033,6 +10055,28 @@
       "weight": 1.0,
       "rationale": "Result of the implementation",
       "created_at": "2026-08-09T23:09:22.948619-07:00"
+    },
+    {
+      "id": 462,
+      "from_node_id": 466,
+      "to_node_id": 469,
+      "from_change_id": "c3d62ee4-78a4-4a8b-a1b9-018cba11f611",
+      "to_change_id": "680ea565-adb0-4c9d-8188-767d4ba451f9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit review round on the #288 branch",
+      "created_at": "2026-08-10T14:42:30.320037-07:00"
+    },
+    {
+      "id": 463,
+      "from_node_id": 469,
+      "to_node_id": 470,
+      "from_change_id": "680ea565-adb0-4c9d-8188-767d4ba451f9",
+      "to_change_id": "4eadc92a-24ba-409f-a1f0-316a19b38883",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the fix wave",
+      "created_at": "2026-08-10T14:42:30.329398-07:00"
     }
   ],
   "documents": [
