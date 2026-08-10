@@ -19,6 +19,8 @@ colors:
   tier-elevated: "#fdba74"
   tier-watch: "#fcd34d"
   tier-low: "#a8a29e"
+  status-error: "#f87171"
+  status-ok: "#86efac"
 typography:
   display:
     fontFamily: "Libre Baskerville, Georgia, serif"

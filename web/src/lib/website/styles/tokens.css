@@ -26,6 +26,15 @@
 	--copper: #c9956c;
 	--copper-glow: rgba(201, 149, 108, 0.3);
 
+	/* Status — promoted, not invented (#255). These two values were already
+	   shipped six times each across the authed surfaces (.msg-error,
+	   .msg-success, .status-ready, the dashboard accuracy figure) as bare
+	   hex, so the system already HAD an error and a success colour — they
+	   just had no name, and every file retyped them. Naming them is what
+	   lets those files stop carrying literal hex (#250). */
+	--status-error: #f87171;
+	--status-ok: #86efac;
+
 	/* Typography */
 	--font-display: 'Libre Baskerville', Georgia, serif;
 	--font-body: 'Outfit', system-ui, sans-serif;

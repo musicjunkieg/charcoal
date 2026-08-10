@@ -66,14 +66,31 @@ pub fn build_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db::Data
 /// second user is rejected by `require_auth` before any handler runs — and
 /// "what happens to the SECOND user" is the entire subject of #257.
 pub fn build_open_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
-    build_app("")
+    build_app_with_admins("", "")
+}
+
+/// Build a test app with OPEN access in which `TEST_DID` is an admin.
+///
+/// The admin handlers gate on `AuthUser::is_admin`, which is derived from
+/// `config.admin_dids` — with the default empty list every admin endpoint
+/// answers 403 before its body runs, so no test could reach one.
+pub fn build_admin_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
+    build_app_with_admins("", TEST_DID)
 }
 
 fn build_app(allowed_did: &str) -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
+    build_app_with_admins(allowed_did, "")
+}
+
+fn build_app_with_admins(
+    allowed_did: &str,
+    admin_dids: &str,
+) -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
     let models = test_models()?;
 
     let config = Config {
         allowed_did: allowed_did.to_string(),
+        admin_dids: admin_dids.to_string(),
         oauth_client_id: TEST_CLIENT_ID.to_string(),
         session_secret: TEST_SECRET.to_string(),
         ..Config::test_defaults()

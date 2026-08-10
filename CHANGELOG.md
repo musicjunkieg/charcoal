@@ -7,6 +7,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Give the scan queue ONE total order for display, position, and admission
+  (#271, #288). `enqueued_at` alone is a partial order — SQLite stores it as
+  RFC3339 text and Postgres stamps `NOW()`, so two requests landing in the same
+  tick tie — and the three places that consumed it disagreed about what to do
+  with a tie. `list_scan_queue` sorted on `(enqueued_at, user_did)` but counted
+  position as `enqueued_at <=`, so tied rows rendered 1st, 2nd, 3rd while every
+  one of them was told it was 3rd; `scan_queue_entry` repeated the same count;
+  and `claim_next_scan` ordered on `enqueued_at` alone, so the row admitted next
+  was not necessarily the row the dashboard showed as next. All six queries
+  across both backends now use `(enqueued_at, user_did)` — a row-value
+  comparison for the position counts, the same pair in both `ORDER BY`s. The
+  regression tests seed rows sharing one timestamp, which `enqueue_scan`'s
+  wall-clock stamp cannot produce, and assert distinct positions plus that
+  admission takes the row listed first.
+- Show the reason a scan failed in the admin dashboard's Last Scan cell (#288).
+  It was carried only by a `title` attribute on a non-focusable `<span>` —
+  unreachable by keyboard, unannounced by screen readers, and simply absent on
+  touch, so the failure detail this feature exists to surface was visible to
+  nobody who could not hover. The cell now renders the reason inline, shortened
+  to keep the column narrow, with the full untruncated string in a
+  visually-hidden sibling so assistive tech gets all of it.
+- Show the admin dashboard the real scan queue (#288). `GET /api/admin/users`
+  built its only scan column from the process-local `ScanManager`, so it knew
+  only about scans *this* process launched: the column was empty after a
+  redeploy, blind to a second replica, had no concept of `queued` — meaning an
+  admin-triggered scan, which since #257 is enqueued rather than launched,
+  showed nothing at all — and could not tell a failed scan from one that never
+  ran. Every other admission decision moved to the durable `scan_queue` row in
+  #257/#278; this was the last consumer left behind. A new
+  `Database::list_scan_queue` returns every row with its queue position, and
+  the handler uses that one query twice: to enrich each user with status,
+  position, start, finish and last error, and to render a `queue` panel of the
+  active rows against `CHARCOAL_SCAN_CONCURRENCY`. `fingerprint_building` stays
+  on `ScanManager`, which is the correct scope for it — it tracks a
+  `tokio::spawn` this process owns and has no durable row anywhere. A database
+  error now fails the request rather than degrading to "nobody has ever
+  scanned", because an operator acts on that.
 - Point the git hooks at the checked-out models (#284). The pre-push hook runs
   `cargo test` without `CHARCOAL_MODEL_DIR`, and test binaries never load `.env`
   (dotenvy runs in `main.rs` only) — so once the #257 queue tests started failing

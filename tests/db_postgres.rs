@@ -1507,3 +1507,215 @@ async fn test_pg_eta_accounts_for_the_concurrency_cap() {
         db.delete_user_data(d).await.unwrap();
     }
 }
+
+/// Postgres side of `queries::tests::list_scan_queue_*` (#288).
+///
+/// Ordering, position, and the timestamp FORMAT all have to match SQLite —
+/// the admin dashboard renders whatever this returns, and #270 exists because
+/// one backend was covered and the other was not.
+///
+/// The timestamp assertion is the one that has already bitten this branch
+/// once: `enqueued_at::TEXT` renders "2026-08-06 00:36:25.231997-07", which
+/// is neither RFC3339 nor stable across connection TimeZones.
+#[tokio::test]
+async fn test_pg_list_scan_queue_orders_and_numbers_rows() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    // Unique to this test — colliding with another test's DIDs was a review
+    // finding on #257. Named for INSERTION order, which here is also
+    // alphabetical order and the exact REVERSE of the expected result.
+    const ALPHA: &str = "did:plc:pgtest_q_list288alpha";
+    const BRAVO: &str = "did:plc:pgtest_q_list288bravo";
+    const CHARLIE: &str = "did:plc:pgtest_q_list288chrly";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // Seeded with chosen timestamps running BACKWARDS, not via `enqueue_scan`.
+    // `enqueue_scan` stamps NOW(), so its rows come out in insertion order and
+    // enqueued_at order at once — and an unordered Postgres SELECT returns heap
+    // (insertion) order, so an assertion built that way passes against a query
+    // with no ORDER BY at all. Here insertion and alphabetical order both say
+    // ALPHA, BRAVO, CHARLIE while the only correct answer is the reverse.
+    {
+        use sqlx_core::pool::Pool;
+        use sqlx_postgres::Postgres;
+        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+        for (age_secs, did) in [ALPHA, BRAVO, CHARLIE].iter().enumerate() {
+            db.delete_user_data(did).await.unwrap();
+            db.upsert_user(did, "q.bsky.social").await.unwrap();
+            sqlx_core::query::query(
+                "INSERT INTO scan_queue (user_did, status, enqueued_at)
+                 VALUES ($1, 'queued', NOW() - make_interval(secs => $2))",
+            )
+            .bind(did)
+            .bind(age_secs as f64)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    let rows = db.list_scan_queue().await.unwrap();
+    let dids: Vec<&str> = rows.iter().map(|r| r.user_did.as_str()).collect();
+    assert_eq!(
+        dids,
+        vec![CHARLIE, BRAVO, ALPHA],
+        "rows must come back oldest-first; insertion order and alphabetical \
+         order both say the opposite here"
+    );
+    let positions: Vec<i64> = rows.iter().map(|r| r.position).collect();
+    assert_eq!(
+        positions,
+        vec![1, 2, 3],
+        "queued rows are numbered 1..n by enqueued_at — the row behind the \
+         oldest is 2, not 1"
+    );
+
+    // Every timestamp is RFC3339, matching SQLite's TEXT column.
+    for row in &rows {
+        chrono::DateTime::parse_from_rfc3339(&row.enqueued_at)
+            .unwrap_or_else(|e| panic!("enqueued_at {:?} is not RFC3339: {e}", row.enqueued_at));
+        assert!(
+            row.started_at.is_none() && row.finished_at.is_none() && row.last_error.is_none(),
+            "a queued row has not started, finished, or failed"
+        );
+    }
+
+    // Claiming the oldest must renumber the rest: a running row holds a slot,
+    // not a place in line, so BRAVO becomes position 1.
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claim");
+    assert_eq!(claim.user_did, CHARLIE, "FIFO claims the oldest row");
+    let rows = db.list_scan_queue().await.unwrap();
+    let by_did = |did: &str| {
+        rows.iter()
+            .find(|r| r.user_did == did)
+            .unwrap_or_else(|| panic!("{did} must be listed"))
+            .clone()
+    };
+    let running = by_did(CHARLIE);
+    assert_eq!(running.status, "running");
+    assert_eq!(
+        running.position, 0,
+        "a running row holds a slot, not a place"
+    );
+    let started_at = running.started_at.expect("claiming stamps started_at");
+    chrono::DateTime::parse_from_rfc3339(&started_at)
+        .unwrap_or_else(|e| panic!("started_at {started_at:?} is not RFC3339: {e}"));
+    assert_eq!(
+        by_did(BRAVO).position,
+        1,
+        "BRAVO is now first in line — a position that ignored status would say 2"
+    );
+
+    // A failed scan must be distinguishable from one that never ran, which is
+    // the whole reason #288 exists.
+    db.finish_queued_scan(CHARLIE, &claim.claim_id, Some("gather exploded"))
+        .await
+        .unwrap();
+    let failed = db
+        .list_scan_queue()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.user_did == CHARLIE)
+        .expect("CHARLIE must still be listed after failing");
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.position, 0);
+    assert_eq!(failed.last_error.as_deref(), Some("gather exploded"));
+    let finished_at = failed.finished_at.expect("a failed row records when");
+    chrono::DateTime::parse_from_rfc3339(&finished_at)
+        .unwrap_or_else(|e| panic!("finished_at {finished_at:?} is not RFC3339: {e}"));
+
+    for d in [ALPHA, BRAVO, CHARLIE] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
+
+/// Postgres side of `queries::tests::*_ties_by_user_did` (#271).
+///
+/// `enqueued_at` alone is a PARTIAL order, and `enqueue_scan` stamps `NOW()` —
+/// two requests inside the same microsecond tie. When they do, a position
+/// counted as `enqueued_at <=` gives every tied row the SAME number while the
+/// display `ORDER BY` still renders a definite sequence, and
+/// `claim_next_scan`'s own `ORDER BY` picks whichever row the plan happens to
+/// reach first. Display, position, and admission must share one total order:
+/// `(enqueued_at, user_did)`.
+#[tokio::test]
+async fn test_pg_scan_queue_breaks_enqueued_at_ties_by_user_did() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    // Named for INSERTION order below, which is the exact REVERSE of the
+    // expected answer — so heap order cannot pass this by accident.
+    const ALPHA: &str = "did:plc:pgtest_q_tie271_alpha";
+    const BRAVO: &str = "did:plc:pgtest_q_tie271_bravo";
+    const CHARLIE: &str = "did:plc:pgtest_q_tie271_chrly";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // One literal timestamp for all three: a genuine tie, written directly
+    // because `enqueue_scan`'s NOW() cannot be relied on to collide.
+    {
+        use sqlx_core::pool::Pool;
+        use sqlx_postgres::Postgres;
+        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+        for did in [CHARLIE, BRAVO, ALPHA] {
+            db.delete_user_data(did).await.unwrap();
+            db.upsert_user(did, "q.bsky.social").await.unwrap();
+            sqlx_core::query::query(
+                "INSERT INTO scan_queue (user_did, status, enqueued_at)
+                 VALUES ($1, 'queued', TIMESTAMPTZ '2026-08-09 00:00:01+00')",
+            )
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    let rows = db.list_scan_queue().await.unwrap();
+    let listed: Vec<(&str, i64)> = rows
+        .iter()
+        .map(|r| (r.user_did.as_str(), r.position))
+        .collect();
+    assert_eq!(
+        listed,
+        vec![(ALPHA, 1), (BRAVO, 2), (CHARLIE, 3)],
+        "tied rows must get DISTINCT positions, in the order they are \
+         displayed; counting `enqueued_at <=` alone gives all three 3"
+    );
+
+    // The per-user column has to agree with the queue panel row-for-row.
+    for (did, expected) in [(ALPHA, 1), (BRAVO, 2), (CHARLIE, 3)] {
+        let entry = db.scan_queue_entry(did, 1).await.unwrap().unwrap();
+        assert_eq!(
+            entry.position, expected,
+            "{did} must be told the same position the queue panel shows"
+        );
+    }
+
+    // And admission must take whoever the dashboard shows as next.
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claim");
+    assert_eq!(
+        claim.user_did, rows[0].user_did,
+        "admission must take the row the dashboard shows as next"
+    );
+    assert_eq!(
+        claim.user_did, ALPHA,
+        "the total order is (enqueued_at, user_did), so ALPHA goes first"
+    );
+
+    db.finish_queued_scan(ALPHA, &claim.claim_id, None)
+        .await
+        .unwrap();
+    for d in [ALPHA, BRAVO, CHARLIE] {
+        db.delete_user_data(d).await.unwrap();
+    }
+}
