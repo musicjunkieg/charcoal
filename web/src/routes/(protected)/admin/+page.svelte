@@ -25,15 +25,32 @@
 	// them. This is #286's wedged state, which until now only ever appeared as
 	// an ERROR line in the server log. "Scans stopped happening" is exactly
 	// what an operator needs to see and will never find by grepping.
-	let wedged = $derived(
-		queue !== null && queue.queued > 0 && queue.running < queue.concurrency_limit
-	);
+	//
+	// It needs a DWELL, though, and running this locally is how I found that
+	// out: the bare condition is routinely true for up to one admitter TICK.
+	// A row inserted without going through `enqueue_scan` never fires the
+	// `try_send` wake, so it simply waits for the next tick — and a slot that
+	// frees is briefly idle before the next claim commits. Alarming instantly
+	// would mean alarming several times an hour during entirely healthy
+	// operation, which is how an alert gets ignored. TICK is 30s server-side;
+	// 45s leaves margin for a slow claim without hiding a real stall for long.
+	const WEDGE_GRACE_MS = 45_000;
+	let wedgedSince = $state<number | null>(null);
+	let wedged = $state(false);
+
+	function assessWedged() {
+		const stalled =
+			queue !== null && queue.queued > 0 && queue.running < queue.concurrency_limit;
+		wedgedSince = stalled ? (wedgedSince ?? Date.now()) : null;
+		wedged = wedgedSince !== null && Date.now() - wedgedSince > WEDGE_GRACE_MS;
+	}
 
 	async function loadUsers() {
 		try {
 			const res = await getAdminUsers();
 			users = res.users;
 			queue = res.queue;
+			assessWedged();
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
