@@ -5147,6 +5147,17 @@
       "created_at": "2026-08-10T15:44:11.865603-07:00",
       "updated_at": "2026-08-10T15:44:11.865603-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"Let's do 250 first\\n\\n[Session focus #250, P1: 'theming: the token system never reaches the authed app'. Approved design: channel tokens for rgba, semantic tier tokens as CSS classes, automated resolved-value diff with a negative control. Scope: 6 authed files + tokens.css + 1 test + 1 script. Not touching marketing pages, not changing any colour value, not doing #248/#249.]\"}"
+    },
+    {
+      "id": 476,
+      "change_id": "20b521eb-99d7-4692-9004-c817dfd06fc4",
+      "node_type": "outcome",
+      "title": "#250 landed: the authed app consumes tokens; final review caught a real Low-pill regression that every automated gate missed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-10T18:38:28.004494-07:00",
+      "updated_at": "2026-08-10T18:38:28.004494-07:00",
+      "metadata_json": "{\"branch\":\"feat/250-tokens-authed-app\",\"commit\":\"981a7af\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10198,6 +10209,17 @@
       "weight": 1.0,
       "rationale": "Retroactive: the red-then-green observation came from the I1 finish_scan seam fix",
       "created_at": "2026-08-10T15:15:47.791670-07:00"
+    },
+    {
+      "id": 470,
+      "from_node_id": 475,
+      "to_node_id": 476,
+      "from_change_id": "e8df47e4-7ffe-4f08-83b2-03ddac136c8d",
+      "to_change_id": "20b521eb-99d7-4692-9004-c817dfd06fc4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome of the #250 goal",
+      "created_at": "2026-08-10T18:38:32.993933-07:00"
     }
   ],
   "documents": [
