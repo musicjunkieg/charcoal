@@ -102,7 +102,11 @@ net **−1**, from 328 to 327.
 
 That third line is worth understanding: the pill borders were previously constructed at runtime by `${TIER_COLORS[tier]}40`, string-concatenating a hex-alpha suffix. No source scan could see them. Making them `rgb(var(--tier-high-rgb) / 0.25)` did not add a colour to the page — it made an existing one visible to static analysis.
 
-A zero-delta invariant cannot express de-duplication, and Task 5 is the one task in this plan that consolidates rather than substitutes. Tasks 6 and 7 substitute, so zero deltas is the right expectation for them again.
+A zero-delta invariant cannot express de-duplication.
+
+**Task 6 also consolidates, and re-baselined again at TOTAL 323.** Its Step 1 deletes the dashboard's own `.tier-high` / `.tier-elevated` / `.tier-watch` / `.tier-low` rules in favour of `tiers.css`, which already provides them — so the 327 baseline was double-counting those four colours, once in each file. Removing the duplicates is the point of the step. Verified as exactly four removals and zero additions.
+
+**Only Task 7 is a pure substitution**, so zero deltas is the right expectation there and nowhere else. Any task whose brief tells it to DELETE a rule in favour of a shared one will legitimately reduce the count; check the step, not the assumption.
 
 **Why the whole file and not a `grep` for the file you touched.** The script emits one record per file as `path<TAB>colour1\ncolour2\n…`, so a record spans many lines and only its *first* line contains the path. `grep "admin"` therefore returns 1 line out of ~40 and a diff of that compares almost nothing — it prints `INERT` no matter what changed. The baseline is 332 lines; exactly 1 matches `admin`. An earlier draft of this plan used the grep form in every task, which would have made all five checks near-vacuous. Diff the whole file; it is just as cheap and cannot lie.
 

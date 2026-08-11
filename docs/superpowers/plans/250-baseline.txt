@@ -52,7 +52,6 @@ web/src/routes/(protected)/dashboard/+page.svelte	#000000@0.4
 #a8a29e
 #a8a29e
 #a8a29e
-#a8a29e
 #a8a29e@0.07
 #a8a29e@0.07
 #a8a29e@0.1
@@ -92,10 +91,7 @@ web/src/routes/(protected)/dashboard/+page.svelte	#000000@0.4
 #f59e0b@0.35
 #f59e0b@0.45
 #f87171
-#fca5a5
 #fcd34d
-#fcd34d
-#fdba74
 #fdba74
 #fef3c7
 #fffbeb
@@ -325,4 +321,4 @@ web/src/lib/website/styles/tiers.css	#a8a29e
 #fca5a5
 #fcd34d
 #fdba74
-TOTAL 327
+TOTAL 323
