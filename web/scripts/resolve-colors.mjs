@@ -77,6 +77,17 @@ function resolve(text, tokens) {
 	// Strip comments before scanning. Hex-shaped issue references living only
 	// in comments (`// #257`, `/* #250 */`, `<!-- #257 -->`) are not colours,
 	// and left in place they'd read as spurious literals.
+	//
+	// CodeQL flags the single-pass `<!--…-->` removal as "incomplete
+	// multi-character sanitization". It is not sanitization: this script parses
+	// our own source files and prints colour strings to stdout, emitting no
+	// HTML and accepting no untrusted input. The single lazy pass is also the
+	// CORRECT parse rather than a lax one — HTML comments do not nest and
+	// terminate at the first `-->`, so `<!--<!-- #250 -->` is one comment in a
+	// browser too, and this removes exactly that. Verified: that input yields
+	// no colour, while a live `style="color: #86efac"` on the same file still
+	// does. The `/*…*/` pass is the same story; CSS and JS block comments do
+	// not nest either.
 	const stripped = stripLineComments(
 		text.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
 	);

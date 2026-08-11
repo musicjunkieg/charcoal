@@ -52,7 +52,8 @@ describe('tokens.css', () => {
 			'status-ok-rgb',
 			'tier-high-rgb',
 			'tier-elevated-rgb',
-			'tier-watch-rgb'
+			'tier-watch-rgb',
+			'tier-low-rgb'
 		]) {
 			expect(tokens.has(name), `missing --${name}`).toBe(true);
 		}
