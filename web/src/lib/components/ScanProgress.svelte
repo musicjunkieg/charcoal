@@ -129,8 +129,8 @@
 <style>
 	.scan-progress {
 		padding: 1.25rem 1.5rem;
-		background: rgba(28, 25, 23, 0.6);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		background: rgb(var(--charcoal-900-rgb) / 0.6);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 14px;
 		margin-bottom: 2rem;
 	}
@@ -145,7 +145,7 @@
 	.progress-title {
 		font-size: 1rem;
 		font-weight: 500;
-		color: #e8b48a;
+		color: var(--copper-light);
 		letter-spacing: 0.01em;
 	}
 
@@ -194,7 +194,7 @@
 	}
 
 	.step-check {
-		color: #86efac;
+		color: var(--status-ok);
 		font-size: 0.8125rem;
 	}
 
@@ -207,7 +207,7 @@
 	}
 
 	.step-spinner {
-		border: 2px solid rgba(201, 149, 108, 0.2);
+		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
@@ -234,7 +234,7 @@
 	.bar-track {
 		flex: 1;
 		height: 6px;
-		background: rgba(12, 10, 9, 0.6);
+		background: rgb(var(--charcoal-950-rgb) / 0.6);
 		border-radius: 3px;
 		overflow: hidden;
 	}
