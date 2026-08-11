@@ -107,12 +107,21 @@ function resolve(text, tokens) {
 	const declStripped = stripped.replace(customPropertyDecl, (_, lhs, _value, semi) => `${lhs}${semi}`);
 
 	// rgb(var(--x-rgb) / a) and rgba(...) literals both land as "hex@alpha".
-	const channelRef = /rgba?\(\s*var\(--([\w-]+)\)\s*\/\s*([\d.]+)\s*\)/g;
+	// Alpha is either a numeric literal (`0.2`) or a Svelte interpolation
+	// (`{Math.min(1, post.toxicity) * 0.3}`) — the latter has no fixed value
+	// to report, but the TOKEN it multiplies is still a real rendered colour
+	// and must not vanish silently. `{[^}]*}` deliberately only handles a
+	// single non-nested brace pair: every dynamic alpha in this codebase is a
+	// flat expression, not one containing an object/template literal with its
+	// own `{}`, so this stays a plain regex rather than a hand-rolled parser.
+	const channelRef = /rgba?\(\s*var\(--([\w-]+)\)\s*\/\s*(\{[^}]*\}|[\d.]+)\s*\)/g;
 	let body = declStripped.replace(channelRef, (_, name, alpha) => {
 		const raw = tokens.get(name);
+		const dynamic = alpha.startsWith('{');
 		if (raw !== undefined) {
 			const hex = channelsToHex(raw);
-			found.push(hex ? `${hex}@${alpha}` : `UNRESOLVED(--${name})`);
+			if (!hex) found.push(`UNRESOLVED(--${name})`);
+			else found.push(dynamic ? `${hex}@dynamic` : `${hex}@${alpha}`);
 		} else if (isLocallyDefined(name)) {
 			found.push(`LOCAL(--${name})`);
 		} else {

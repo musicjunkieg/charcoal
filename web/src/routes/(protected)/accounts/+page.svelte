@@ -247,6 +247,10 @@
 		color: var(--tier-watch);
 		border-color: rgb(var(--tier-watch-rgb) / 0.25);
 	}
+	.pill.active[data-tier='Low'] {
+		color: var(--tier-low);
+		border-color: rgb(var(--tier-low-rgb) / 0.25);
+	}
 
 	.search-row { flex: 1; min-width: 200px; }
 

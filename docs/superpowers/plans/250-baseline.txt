@@ -107,11 +107,13 @@ web/src/routes/(protected)/accounts/+page.svelte	#0c0a09@0.6
 #78716c
 #78716c
 #78716c
+#a8a29e
 #a8a29e@0.05
 #a8a29e@0.08
 #a8a29e@0.08
 #a8a29e@0.12
 #a8a29e@0.12
+#a8a29e@0.25
 #a8a29e@0.25
 #c9956c
 #c9956c
@@ -176,6 +178,7 @@ web/src/routes/(protected)/accounts/[handle]/+page.svelte	#1c1917@0.4
 #f59e0b@0.2
 #f87171
 #f87171@0.2
+#f87171@dynamic
 #fca5a5
 #fcd34d
 #fcd34d
@@ -321,4 +324,4 @@ web/src/lib/website/styles/tiers.css	#a8a29e
 #fca5a5
 #fcd34d
 #fdba74
-TOTAL 323
+TOTAL 326
