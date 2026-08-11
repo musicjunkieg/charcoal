@@ -5,13 +5,9 @@
 	import { AuthError } from '$lib/api.js';
 	import LabelButtons from '$lib/components/LabelButtons.svelte';
 	import type { ReviewAccount } from '$lib/types.js';
-
-	const TIER_COLORS: Record<string, string> = {
-		High: '#fca5a5',
-		Elevated: '#fdba74',
-		Watch: '#fcd34d',
-		Low: '#a8a29e'
-	};
+	import { tierClass } from '$lib/tier-class';
+	import '$lib/website/styles/tokens.css';
+	import '$lib/website/styles/tiers.css';
 
 	let accounts = $state<ReviewAccount[]>([]);
 	let loading = $state(true);
@@ -94,10 +90,7 @@
 								@{account.handle}
 							</a>
 							{#if account.threat_tier}
-								<span
-									class="card-tier"
-									style="color: {TIER_COLORS[account.threat_tier] ?? '#a8a29e'}"
-								>
+								<span class="card-tier {tierClass(account.threat_tier)}">
 									{account.threat_tier}
 								</span>
 							{/if}
@@ -159,13 +152,13 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.75rem;
 		font-weight: 400;
-		color: #fffbeb;
+		color: var(--cream-50);
 		letter-spacing: -0.01em;
 	}
 
 	.page-subtitle {
 		font-size: 0.875rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		margin-top: 0.25rem;
 	}
 
@@ -173,9 +166,9 @@
 		padding: 0.375rem 0.875rem;
 		font-size: 0.8125rem;
 		font-weight: 500;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.1);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.1);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 8px;
 		white-space: nowrap;
 	}
@@ -184,8 +177,8 @@
 
 	.spinner {
 		width: 32px; height: 32px;
-		border: 2px solid rgba(201, 149, 108, 0.2);
-		border-top-color: #c9956c;
+		border: 2px solid rgb(var(--copper-rgb) / 0.2);
+		border-top-color: var(--copper);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -198,14 +191,14 @@
 		align-items: center;
 		text-align: center;
 		padding: 4rem 2rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 	}
 
 	.empty-state h2 {
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.25rem;
 		font-weight: 400;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		margin-bottom: 0.5rem;
 	}
 
@@ -221,9 +214,9 @@
 		align-items: center;
 		justify-content: center;
 		font-size: 1.5rem;
-		color: #86efac;
-		background: rgba(134, 239, 172, 0.1);
-		border: 1px solid rgba(134, 239, 172, 0.2);
+		color: var(--status-ok);
+		background: rgb(var(--status-ok-rgb) / 0.1);
+		border: 1px solid rgb(var(--status-ok-rgb) / 0.2);
 		border-radius: 50%;
 		margin-bottom: 1rem;
 	}
@@ -233,15 +226,15 @@
 		font-size: 0.875rem;
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.1);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.1);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 8px;
 		text-decoration: none;
 		transition: background 0.2s;
 	}
 
-	.back-btn:hover { background: rgba(201, 149, 108, 0.18); }
+	.back-btn:hover { background: rgb(var(--copper-rgb) / 0.18); }
 
 	.review-list {
 		display: flex;
@@ -251,14 +244,14 @@
 
 	.review-card {
 		padding: 1.25rem;
-		background: rgba(28, 25, 23, 0.6);
-		border: 1px solid rgba(168, 162, 158, 0.1);
+		background: rgb(var(--charcoal-900-rgb) / 0.6);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		border-radius: 14px;
 		transition: border-color 0.2s;
 	}
 
 	.review-card:hover {
-		border-color: rgba(168, 162, 158, 0.18);
+		border-color: rgb(var(--charcoal-400-rgb) / 0.18);
 	}
 
 	.card-header {
@@ -279,14 +272,14 @@
 	.card-handle {
 		font-weight: 500;
 		font-size: 1rem;
-		color: #c9956c;
+		color: var(--copper);
 		text-decoration: none;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	.card-handle:hover { color: #e8b48a; }
+	.card-handle:hover { color: var(--copper-light); }
 
 	.card-tier {
 		font-size: 0.75rem;
@@ -298,12 +291,12 @@
 
 	.bsky-link {
 		font-size: 0.8125rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
 
-	.bsky-link:hover { color: #a8a29e; }
+	.bsky-link:hover { color: var(--charcoal-400); }
 
 	.card-scores {
 		display: flex;
@@ -317,8 +310,8 @@
 		align-items: center;
 		gap: 0.375rem;
 		padding: 0.25rem 0.625rem;
-		background: rgba(12, 10, 9, 0.5);
-		border: 1px solid rgba(168, 162, 158, 0.08);
+		background: rgb(var(--charcoal-950-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.08);
 		border-radius: 6px;
 	}
 
@@ -327,17 +320,17 @@
 		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: #57534e;
+		color: var(--charcoal-600);
 	}
 
 	.score-num {
 		font-size: 0.8125rem;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		font-variant-numeric: tabular-nums;
 	}
 
 	.card-actions {
-		border-top: 1px solid rgba(168, 162, 158, 0.07);
+		border-top: 1px solid rgb(var(--charcoal-400-rgb) / 0.07);
 		padding-top: 0.875rem;
 	}
 

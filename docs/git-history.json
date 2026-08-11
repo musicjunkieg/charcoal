@@ -1,5 +1,13 @@
 [
   {
+    "hash": "981a7afa09b4bba7b2d1eb31f51b413470e9d87d",
+    "short_hash": "981a7af",
+    "author": "Bryan Guffey",
+    "date": "2026-08-10T18:37:08-07:00",
+    "message": "fix(250): restore Low tier pill colour, make colour harness see dynamic alpha\n\nC1: the token refactor dropped the Low entry from TIER_COLORS on the\nmistaken premise that the original map had no Low colour — it did\n(#a8a29e). The three data-tier CSS rules only covered High/Elevated/\nWatch, so clicking the Low filter silently fell through to the plain\n.pill.active rule and rendered identically to All. Add --tier-low-rgb\nto tokens.css and a fourth .pill.active[data-tier=Low] rule.\n\nI2: resolve-colors.mjs required a numeric alpha in\nrgb(var(--x-rgb) / a), so an interpolated Svelte alpha (the toxicity\nbadge at accounts/[handle]/+page.svelte:189) never matched, fell\nthrough to the solid var() branch, and was silently discarded --\nproven by swapping its token to --copper-rgb and getting a\nbyte-identical harness run. channelRef now also accepts a\nsingle-level {...} alpha expression and emits \"<hex>@dynamic\" so the\ntoken identity is visible and a wrong token changes the output.\nVerified: swapping --status-error-rgb to --copper-rgb changes\n#f87171@dynamic to #c9956c@dynamic; reverting restores it.\n\nRe-baselined 250-baseline.txt: TOTAL 323 -> 326 (+#a8a29e,\n+#a8a29e@0.25 in accounts/+page.svelte from the restored Low rule;\n+#f87171@dynamic in accounts/[handle]/+page.svelte from the harness\nfix).\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
     "hash": "c811f8f0b369da513833a969dd002a0b8e0338e5",
     "short_hash": "c811f8f",
     "author": "chaos gremlin",

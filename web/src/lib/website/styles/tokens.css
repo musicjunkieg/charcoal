@@ -26,6 +26,11 @@
 	--copper: #c9956c;
 	--copper-glow: rgba(201, 149, 108, 0.3);
 
+	/* Copper's hover state. The audit called #e8b48a off-palette; it is not.
+	   Five of its six uses are :hover on a copper element — it is an unnamed
+	   interaction state, so naming it is the whole fix. */
+	--copper-light: #e8b48a;
+
 	/* Status — promoted, not invented (#255). These two values were already
 	   shipped six times each across the authed surfaces (.msg-error,
 	   .msg-success, .status-ready, the dashboard accuracy figure) as bare
@@ -34,6 +39,29 @@
 	   lets those files stop carrying literal hex (#250). */
 	--status-error: #f87171;
 	--status-ok: #86efac;
+
+	/* Threat tiers. Promoted from values shipped across three duplicated
+	   TIER_COLORS maps and again as dashboard CSS classes. --tier-low is the
+	   colour the inline `?? '#a8a29e'` fallback was already producing. */
+	--tier-high: #fca5a5;
+	--tier-elevated: #fdba74;
+	--tier-watch: #fcd34d;
+	--tier-low: #a8a29e;
+
+	/* Channel triplets for the ten colours that appear at alpha. Consumed as
+	   rgb(var(--copper-rgb) / 0.2). These are INDEPENDENT of the hex tokens
+	   above — src/lib/tokens.test.ts is what keeps the two in agreement. */
+	--copper-rgb: 201 149 108;
+	--charcoal-400-rgb: 168 162 158;
+	--charcoal-900-rgb: 28 25 23;
+	--charcoal-950-rgb: 12 10 9;
+	--amber-500-rgb: 245 158 11;
+	--status-error-rgb: 248 113 113;
+	--status-ok-rgb: 134 239 172;
+	--tier-high-rgb: 252 165 165;
+	--tier-elevated-rgb: 253 186 116;
+	--tier-watch-rgb: 252 211 77;
+	--tier-low-rgb: 168 162 158;
 
 	/* Typography */
 	--font-display: 'Libre Baskerville', Georgia, serif;

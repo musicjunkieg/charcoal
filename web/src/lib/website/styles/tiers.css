@@ -1,0 +1,14 @@
+/* Threat tier colours.
+ *
+ * Global rather than component-scoped, and deliberately so: four files need
+ * these exact rules, and copying them per component would reproduce the
+ * bypass this whole change is removing. Imported alongside tokens.css.
+ *
+ * Safe to reach only through an interpolated class expression — Svelte stops
+ * pruning class selectors entirely once any dynamic class is present on an
+ * element, verified against the compiler before this was written.
+ */
+.tier-high { color: var(--tier-high); }
+.tier-elevated { color: var(--tier-elevated); }
+.tier-watch { color: var(--tier-watch); }
+.tier-low { color: var(--tier-low); }

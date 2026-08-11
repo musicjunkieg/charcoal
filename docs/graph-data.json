@@ -4923,9 +4923,9 @@
       "node_type": "goal",
       "title": "Clear the four final-review findings on feat/257-scan-admission",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:41:24.882177-07:00",
-      "updated_at": "2026-08-06T10:41:24.882177-07:00",
+      "updated_at": "2026-08-10T15:15:51.954851-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"prompt\":\"You are fixing findings from the final whole-branch review on feat/257-scan-admission (chainlink #257). I1: run_scan swallows the pipeline error and returns Ok(()), so a failed scan is recorded status=done and poisons the ETA median. I2: dashboard header says \\\"Scan in progress\\\" for a queued user, using a stale started_at. I3: a_lease_that_lapses_after_boot_is_still_reclaimed uses a 1s lease that can degenerate into the boot-reclaim test. I5: CHANGELOG under-describes boot model loading / #182 / #264 and over-describes #246 / #239 / #262.\"}"
     },
     {
@@ -4934,9 +4934,9 @@
       "node_type": "action",
       "title": "I1: propagate the pipeline error out of run_scan via a testable finish_scan seam",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:57:54.957046-07:00",
-      "updated_at": "2026-08-06T10:57:54.957046-07:00",
+      "updated_at": "2026-08-10T15:15:51.966868-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":95,\"files\":[\"src/web/scan_job.rs\"]}"
     },
     {
@@ -4945,9 +4945,9 @@
       "node_type": "action",
       "title": "I3: raise the post-boot lease to 3s and assert the row is still running after spawn",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:57:54.968590-07:00",
-      "updated_at": "2026-08-06T10:57:54.968590-07:00",
+      "updated_at": "2026-08-10T15:15:51.977019-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"files\":[\"src/web/admitter.rs\"]}"
     },
     {
@@ -4956,9 +4956,9 @@
       "node_type": "action",
       "title": "I2: gate the dashboard 'Scan in progress' header on isQueued",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:57:54.980618-07:00",
-      "updated_at": "2026-08-06T10:57:54.980618-07:00",
+      "updated_at": "2026-08-10T15:15:51.984854-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"files\":[\"web/src/routes/(protected)/dashboard/+page.svelte\"]}"
     },
     {
@@ -4967,9 +4967,9 @@
       "node_type": "action",
       "title": "I5: add boot-model/#182/#264 changelog entries, drop three auto-generated issue titles",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:57:54.992146-07:00",
-      "updated_at": "2026-08-06T10:57:54.992146-07:00",
+      "updated_at": "2026-08-10T15:15:51.992602-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":90,\"files\":[\"CHANGELOG.md\"]}"
     },
     {
@@ -4978,9 +4978,9 @@
       "node_type": "outcome",
       "title": "All four review findings cleared; 727 web + 626 postgres tests pass with zero skips",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:59:06.060336-07:00",
-      "updated_at": "2026-08-06T10:59:06.060336-07:00",
+      "updated_at": "2026-08-10T15:15:52.000275-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"fd5ed15\",\"confidence\":95}"
     },
     {
@@ -4989,9 +4989,9 @@
       "node_type": "observation",
       "title": "I1 red-then-green: new test failed with left=Completed right=Failed; its ETA assertion independently failed with Some(0) vs None, proving the poisoned median was real",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T10:59:06.095958-07:00",
-      "updated_at": "2026-08-06T10:59:06.095958-07:00",
+      "updated_at": "2026-08-10T15:15:52.006495-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"confidence\":95}"
     },
     {
@@ -5000,9 +5000,9 @@
       "node_type": "action",
       "title": "Fix CodeRabbit PR #96 round 1: schema v12 backfills scan_queue.claim_id",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T13:13:50.198144-07:00",
-      "updated_at": "2026-08-06T13:13:50.198144-07:00",
+      "updated_at": "2026-08-10T15:15:52.012216-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"316cde8\",\"confidence\":92,\"files\":[\"migrations/postgres/0012_scan_queue_claim_id.sql\",\"src/db/schema.rs\",\"src/db/postgres.rs\",\"src/web/handlers/scan.rs\",\"src/web/handlers/admin.rs\"]}"
     },
     {
@@ -5011,9 +5011,9 @@
       "node_type": "outcome",
       "title": "Schema v12 verified in BOTH directions on BOTH backends; 730 web + 26 Postgres tests pass, zero skips, clippy clean x3",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-06T13:13:56.920002-07:00",
-      "updated_at": "2026-08-06T13:13:56.920002-07:00",
+      "updated_at": "2026-08-10T15:15:52.017965-07:00",
       "metadata_json": "{\"branch\":\"feat/257-scan-admission\",\"commit\":\"316cde8\",\"confidence\":93}"
     },
     {
@@ -5099,9 +5099,9 @@
       "node_type": "action",
       "title": "UI slice: queue-first admin panel, shaped with impeccable (Operate mode)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-10T15:07:22.150569-07:00",
-      "updated_at": "2026-08-10T15:07:22.150569-07:00",
+      "updated_at": "2026-08-10T15:15:52.023527-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"2186444\",\"confidence\":90}"
     },
     {
@@ -5110,9 +5110,9 @@
       "node_type": "observation",
       "title": "Running it locally exposed a false-alarm generator the tests could not: the wedged-queue alert fired on the BARE condition (queued>0 AND running<cap), which is routinely true during HEALTHY operation. Measured against a live server with three rows inserted directly: bare-condition TRUE at t=0s and t=8s, cleared by t=16s when the 30s tick claimed them. Two innocent causes — a row that reaches the table without going through enqueue_scan never fires the try_send wake and just waits for the tick, and a freed slot is briefly idle before the next claim commits. An alert with no dwell would put a red 'scans stopped happening' banner up several times an hour, which is how an alert becomes furniture.",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-10T15:07:35.547973-07:00",
-      "updated_at": "2026-08-10T15:07:35.547973-07:00",
+      "updated_at": "2026-08-10T15:15:52.029153-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"7f10819\",\"confidence\":95}"
     },
     {
@@ -5121,9 +5121,9 @@
       "node_type": "action",
       "title": "Give the wedged alert a 45s dwell against the server's 30s TICK",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-10T15:07:35.570620-07:00",
-      "updated_at": "2026-08-10T15:07:35.570620-07:00",
+      "updated_at": "2026-08-10T15:15:52.034345-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"7f10819\",\"confidence\":92}"
     },
     {
@@ -5132,10 +5132,32 @@
       "node_type": "outcome",
       "title": "#288 MERGED to staging (c811f8f, PR #98). CodeRabbit APPROVED after 3 rounds, 5 findings, ALL valid — no pushback warranted, unlike PR #96 where two were withdrawn. The MAJOR one was mine and its second-order half was better than my own diagnosis: list_scan_queue displayed ties in a total order while counting position with enqueued_at<=, so tied rows rendered in sequence all claiming the same number — AND claim_next_scan ordered on enqueued_at alone, so among ties the scan actually admitted need not be the one the dashboard shows as next. (enqueued_at, user_did) is now one total order across position, display and admission: 6 queries, both backends, row-value comparison. Closes #271. Second finding was me under-delivering against my own PR text — 'failed shows the reason' shipped as a title tooltip on a non-focusable span, mouse-only and invisible to screen readers. Also promoted --status-error/--status-ok from values already shipped 6x each as bare hex (closes #255); admin route now imports tokens.css and went 0 -> 14 var(--) uses, shrinking #250. 745 web + 643 pg + 36 vitest, zero skips, all 7 checks green.",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-08-10T15:07:50.326803-07:00",
-      "updated_at": "2026-08-10T15:07:50.326803-07:00",
+      "updated_at": "2026-08-10T15:15:52.040022-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"c811f8f\",\"confidence\":95}"
+    },
+    {
+      "id": 475,
+      "change_id": "e8df47e4-7ffe-4f08-83b2-03ddac136c8d",
+      "node_type": "goal",
+      "title": "#250: take the token system into the authed app",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-10T15:44:11.865603-07:00",
+      "updated_at": "2026-08-10T15:44:11.865603-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"Let's do 250 first\\n\\n[Session focus #250, P1: 'theming: the token system never reaches the authed app'. Approved design: channel tokens for rgba, semantic tier tokens as CSS classes, automated resolved-value diff with a negative control. Scope: 6 authed files + tokens.css + 1 test + 1 script. Not touching marketing pages, not changing any colour value, not doing #248/#249.]\"}"
+    },
+    {
+      "id": 476,
+      "change_id": "20b521eb-99d7-4692-9004-c817dfd06fc4",
+      "node_type": "outcome",
+      "title": "#250 landed: the authed app consumes tokens; final review caught a real Low-pill regression that every automated gate missed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-10T18:38:28.004494-07:00",
+      "updated_at": "2026-08-10T18:38:28.004494-07:00",
+      "metadata_json": "{\"branch\":\"feat/250-tokens-authed-app\",\"commit\":\"981a7af\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10176,6 +10198,28 @@
       "weight": 1.0,
       "rationale": "The CodeRabbit fix wave also fed the merge",
       "created_at": "2026-08-10T15:07:50.347754-07:00"
+    },
+    {
+      "id": 469,
+      "from_node_id": 456,
+      "to_node_id": 461,
+      "from_change_id": "9342c46b-bd75-42af-9674-85626fad1f58",
+      "to_change_id": "190a5880-a3e5-4154-9be0-7320bd794deb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Retroactive: the red-then-green observation came from the I1 finish_scan seam fix",
+      "created_at": "2026-08-10T15:15:47.791670-07:00"
+    },
+    {
+      "id": 470,
+      "from_node_id": 475,
+      "to_node_id": 476,
+      "from_change_id": "e8df47e4-7ffe-4f08-83b2-03ddac136c8d",
+      "to_change_id": "20b521eb-99d7-4692-9004-c817dfd06fc4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome of the #250 goal",
+      "created_at": "2026-08-10T18:38:32.993933-07:00"
     }
   ],
   "documents": [
