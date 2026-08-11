@@ -91,9 +91,24 @@ function resolve(text, tokens) {
 		return new RegExp(`--${name}\\s*:`).test(stripped);
 	}
 
+	// A custom-property DECLARATION is a definition, not a render:
+	// `--charcoal-900: #1c1917;` paints nothing by itself — only a var(--x)
+	// USAGE resolves to an actual displayed colour, and that's already
+	// handled below by channelRef/solidRef. Blank the value half of any
+	// `--name: value;` pair before the literal scans run, so a declared
+	// literal isn't double-counted against its own usages (or, if unused,
+	// counted as a phantom "rendered" colour that never painted anything).
+	// Scoped to `--`-prefixed properties only: ordinary CSS declarations
+	// (`color: #123;`) and JS object keys (`color: '#123'`) don't match the
+	// leading `--`, so they still count exactly as before. Operates on a
+	// derived copy, not `stripped` itself — isLocallyDefined above still
+	// needs the untouched `--name:` text to detect local indirection.
+	const customPropertyDecl = /(?<![\w-])(--[\w-]+\s*:\s*)([^;]+)(;)/g;
+	const declStripped = stripped.replace(customPropertyDecl, (_, lhs, _value, semi) => `${lhs}${semi}`);
+
 	// rgb(var(--x-rgb) / a) and rgba(...) literals both land as "hex@alpha".
 	const channelRef = /rgba?\(\s*var\(--([\w-]+)\)\s*\/\s*([\d.]+)\s*\)/g;
-	let body = stripped.replace(channelRef, (_, name, alpha) => {
+	let body = declStripped.replace(channelRef, (_, name, alpha) => {
 		const raw = tokens.get(name);
 		if (raw !== undefined) {
 			const hex = channelsToHex(raw);
