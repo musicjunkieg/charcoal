@@ -111,8 +111,6 @@ web/src/routes/(protected)/accounts/+page.svelte	#0c0a09@0.6
 #78716c
 #78716c
 #78716c
-#a8a29e
-#a8a29e
 #a8a29e@0.05
 #a8a29e@0.08
 #a8a29e@0.08
@@ -136,8 +134,11 @@ web/src/routes/(protected)/accounts/+page.svelte	#0c0a09@0.6
 #d6d3d1
 #e8b48a
 #fca5a5
+#fca5a5@0.25
 #fcd34d
+#fcd34d@0.25
 #fdba74
+#fdba74@0.25
 #fef3c7
 #fef3c7
 #fffbeb
@@ -156,7 +157,6 @@ web/src/routes/(protected)/accounts/[handle]/+page.svelte	#1c1917@0.4
 #78716c
 #78716c
 #78716c
-#a8a29e
 #a8a29e
 #a8a29e
 #a8a29e
@@ -197,8 +197,6 @@ web/src/routes/(protected)/review/+page.svelte	#0c0a09@0.5
 #86efac@0.1
 #86efac@0.2
 #a8a29e
-#a8a29e
-#a8a29e
 #a8a29e@0.07
 #a8a29e@0.08
 #a8a29e@0.1
@@ -216,9 +214,6 @@ web/src/routes/(protected)/review/+page.svelte	#0c0a09@0.5
 #d6d3d1
 #d6d3d1
 #e8b48a
-#fca5a5
-#fcd34d
-#fdba74
 #fffbeb
 web/src/routes/(protected)/admin/+page.svelte	#0c0a09
 #0c0a09@0.6
@@ -326,4 +321,8 @@ LOCAL(--tier-border)
 LOCAL(--tier-border)
 LOCAL(--tier-color)
 transparent
-TOTAL 328
+web/src/lib/website/styles/tiers.css	#a8a29e
+#fca5a5
+#fcd34d
+#fdba74
+TOTAL 327

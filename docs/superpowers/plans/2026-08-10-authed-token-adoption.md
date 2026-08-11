@@ -83,11 +83,26 @@ node web/scripts/resolve-colors.mjs \
   "web/src/routes/(protected)/admin/+page.svelte" \
   web/src/lib/components/ScanProgress.svelte \
   web/src/lib/components/LabelButtons.svelte \
+  web/src/lib/website/styles/tiers.css \
   > /tmp/250-check.txt
 diff docs/superpowers/plans/250-baseline.txt /tmp/250-check.txt && echo "INERT"
 ```
 
 Expected: `INERT`, with no diff output.
+
+**`tiers.css` joined the list after Task 5 created it.** A file that owns colour must be scanned, or colours that relocate into it disappear from the check without a same-file replacement — which is exactly what happened on Task 5 and produced a delta that looked like a regression and was not.
+
+**The baseline was re-established once, after Task 5, at TOTAL 327.** This was a deliberate consolidation checkpoint, not a number tuned to make a check pass, and the arithmetic was reconciled line by line first:
+
+- five duplicated `#a8a29e` inline fallbacks collapsed into one shared `.tier-low` rule → **−4**
+- three tier hexes relocated from the deleted `TIER_COLORS` maps into `tiers.css` → **0**
+- three pill-border colours became statically visible for the first time → **+3**
+
+net **−1**, from 328 to 327.
+
+That third line is worth understanding: the pill borders were previously constructed at runtime by `${TIER_COLORS[tier]}40`, string-concatenating a hex-alpha suffix. No source scan could see them. Making them `rgb(var(--tier-high-rgb) / 0.25)` did not add a colour to the page — it made an existing one visible to static analysis.
+
+A zero-delta invariant cannot express de-duplication, and Task 5 is the one task in this plan that consolidates rather than substitutes. Tasks 6 and 7 substitute, so zero deltas is the right expectation for them again.
 
 **Why the whole file and not a `grep` for the file you touched.** The script emits one record per file as `path<TAB>colour1\ncolour2\n…`, so a record spans many lines and only its *first* line contains the path. `grep "admin"` therefore returns 1 line out of ~40 and a diff of that compares almost nothing — it prints `INERT` no matter what changed. The baseline is 332 lines; exactly 1 matches `admin`. An earlier draft of this plan used the grep form in every task, which would have made all five checks near-vacuous. Diff the whole file; it is just as cheap and cannot lie.
 
