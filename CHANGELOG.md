@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- The authed app now consumes the design tokens instead of ~292 hard-coded
+  colour values (#250, #255). `tokens.css` defined the Charcoal palette and the
+  marketing pages used it; the product did not. This was bypass rather than
+  drift — the hard-coded values were overwhelmingly palette-*correct*, so
+  nothing looked broken, and a token change would propagate to the landing page
+  while silently skipping every authed surface. The failure only shows up the
+  day someone changes a colour and half the app ignores them.
+
+  The original audit counted 161 literal hex values. Measured before starting,
+  it was ~175 hex plus 117 `rgba()` literals the hex-only grep could not see —
+  the same palette at varying alpha. Those now resolve through channel tokens
+  (`--copper-rgb: 201 149 108`, consumed as `rgb(var(--copper-rgb) / 0.2)`).
+  Because a hex token and its channel triplet are independent declarations that
+  nothing in CSS relates, a test asserts every `--x-rgb` matches its `--x`.
+
+  Threat-tier colours had been duplicated four times: three TypeScript
+  `TIER_COLORS` maps plus a fourth copy in `LabelButtons` that the audit missed
+  because it is named `TIERS`. All four are gone, replaced by semantic tokens
+  selected through one global `tiers.css` — the pattern the dashboard already
+  used. That also removed a latent bug: the accounts filter pill built its
+  border with `` `${TIER_COLORS[tier]}40` ``, string-concatenating a hex-alpha
+  suffix, which no `var()`-based approach could have survived.
+
+  A `tierClass()` helper preserves the old `?? '#a8a29e'` fallback exactly, so
+  abstained accounts (`NotAssessed`, `Insufficient Data`) keep the colour they
+  had; interpolating the tier straight into a class name would have silently
+  recoloured them. Two files needed same-file overrides where moving a rule
+  from Svelte-scoped (0-2-0) to global (0-1-0) would otherwise have lost the
+  cascade; two others correctly needed none.
+
+  No colour changed. A resolved-value diff — which resolves every `var()` back
+  to a literal and compares the result per file — reports zero deltas, and was
+  negative-controlled before any clean run was trusted.
+
 ### Fixed
 - Give the scan queue ONE total order for display, position, and admission
   (#271, #288). `enqueued_at` alone is a partial order — SQLite stores it as
