@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- Completed a research spike on topic-fingerprint quality (#295): mapped the
+  current single-centroid pipeline against 2026 state of the art and produced
+  a good/better/best implementation plan (report in `docs/research/`,
+  follow-up issues #296–#299). No code changed.
 - The authed app now consumes the design tokens instead of ~292 hard-coded
   colour values (#250, #255). `tokens.css` defined the Charcoal palette and the
   marketing pages used it; the product did not. This was bypass rather than
