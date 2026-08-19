@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- Marked the deciduous graph exports (`docs/graph-data.json`,
+  `docs/git-history.json`) as generated in a new `.gitattributes` (#300).
+  They regenerate on every commit via the pre-commit hook; GitHub now
+  collapses them in PR diffs and `git diff` shows a single line instead of
+  hundreds of churned JSON lines. They remain committed — GitHub Pages
+  serves the graph viewer from `/docs`.
 - Completed a research spike on topic-fingerprint quality (#295): mapped the
   current single-centroid pipeline against 2026 state of the art and produced
   a good/better/best implementation plan (report in `docs/research/`,
