@@ -5158,6 +5158,94 @@
       "created_at": "2026-08-10T18:38:28.004494-07:00",
       "updated_at": "2026-08-10T18:38:28.004494-07:00",
       "metadata_json": "{\"branch\":\"feat/250-tokens-authed-app\",\"commit\":\"981a7af\",\"confidence\":95}"
+    },
+    {
+      "id": 477,
+      "change_id": "2c2ae6c1-7dbb-45ea-83c1-8275d15a9de7",
+      "node_type": "goal",
+      "title": "Spike: better topic fingerprints for protected users",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:07:26.331950-07:00",
+      "updated_at": "2026-08-12T07:07:26.331950-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"Let's do a spike and investigate what we can do to build better topic fingerprints. Right now I feel as if what we have is pretty coarse and it may be influencing our ability to match topics for protected users and their threat vectors. Look at what's state of the art today compared to what we're doing and share good, better, best with estimates on cost and complexity. Use staging as the base branch to start with.\"}"
+    },
+    {
+      "id": 478,
+      "change_id": "df4303cd-6b72-4f0a-a274-fba0193dcc83",
+      "node_type": "observation",
+      "title": "Mapped current fingerprint pipeline: single mean-pooled MiniLM centroid + greedy TF-IDF clusters; 11 defects incl. Stage-1 gate scale mismatch, unnormalized pooling, clamped negatives, no staleness",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:14:09.173471-07:00",
+      "updated_at": "2026-08-12T07:14:09.173471-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 479,
+      "change_id": "352eb4f1-1870-4d63-84f9-6af732a28236",
+      "node_type": "option",
+      "title": "GOOD: repair existing architecture (normalize, gate scale fix, cleaning, staleness) - low complexity, $0",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:14:09.188727-07:00",
+      "updated_at": "2026-08-12T07:14:09.188727-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90}"
+    },
+    {
+      "id": 480,
+      "change_id": "6d9ca4b5-5ad1-4053-a56c-869a76dac391",
+      "node_type": "option",
+      "title": "BETTER: multi-interest fingerprint - cluster protected user embeddings into K weighted topic centroids, max-over-topics overlap, optional bge-small upgrade - medium complexity, $0",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:14:09.201288-07:00",
+      "updated_at": "2026-08-12T07:14:09.201288-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90}"
+    },
+    {
+      "id": 481,
+      "change_id": "d593baec-58c8-490a-bdf3-d52909d00498",
+      "node_type": "option",
+      "title": "BEST: LLM topic profiling on top of BETTER - Claude Batch labels clusters + adversarial paraphrase anchors, ~$0.03/user Haiku - medium-high complexity",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:14:09.212580-07:00",
+      "updated_at": "2026-08-12T07:14:09.212580-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":85}"
+    },
+    {
+      "id": 482,
+      "change_id": "ac0a74ce-71a0-4d26-8ae3-d4dd831aa273",
+      "node_type": "action",
+      "title": "Wrote spike report docs/research/topic-fingerprint-spike-2026-08.md (good/better/best with cost+complexity)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:14:19.613556-07:00",
+      "updated_at": "2026-08-12T07:14:19.613556-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90}"
+    },
+    {
+      "id": 483,
+      "change_id": "cfc698d3-8e08-4268-8607-8c6ec1633c55",
+      "node_type": "outcome",
+      "title": "Spike #295 closed: 4 chainlink issues filed (#296 GOOD math fixes, #297 multi-interest fingerprint blocked-by 296, #298 bge-small subissue, #299 adversarial-anchor experiment); CHANGELOG reworded",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-12T07:56:25.477728-07:00",
+      "updated_at": "2026-08-12T07:56:25.477728-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 484,
+      "change_id": "07278eb9-c304-4107-af41-f6e4b9c7539f",
+      "node_type": "goal",
+      "title": "Silence deciduous graph JSON churn in diffs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-19T06:15:47.605785-07:00",
+      "updated_at": "2026-08-19T06:15:47.605785-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"what could we do to make that diff silent - deploy to somewhere else? Or is it just better to leave it? [follow-up:] Yeah, let's do 1 [option 1 = .gitattributes linguist-generated + -diff]\"}"
     }
   ],
   "edges": [
@@ -10220,6 +10308,72 @@
       "weight": 1.0,
       "rationale": "Implementation outcome of the #250 goal",
       "created_at": "2026-08-10T18:38:32.993933-07:00"
+    },
+    {
+      "id": 471,
+      "from_node_id": 477,
+      "to_node_id": 478,
+      "from_change_id": "2c2ae6c1-7dbb-45ea-83c1-8275d15a9de7",
+      "to_change_id": "df4303cd-6b72-4f0a-a274-fba0193dcc83",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codebase mapping for the spike",
+      "created_at": "2026-08-12T07:14:19.571499-07:00"
+    },
+    {
+      "id": 472,
+      "from_node_id": 477,
+      "to_node_id": 479,
+      "from_change_id": "2c2ae6c1-7dbb-45ea-83c1-8275d15a9de7",
+      "to_change_id": "352eb4f1-1870-4d63-84f9-6af732a28236",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spike option: good tier",
+      "created_at": "2026-08-12T07:14:19.585014-07:00"
+    },
+    {
+      "id": 473,
+      "from_node_id": 477,
+      "to_node_id": 480,
+      "from_change_id": "2c2ae6c1-7dbb-45ea-83c1-8275d15a9de7",
+      "to_change_id": "6d9ca4b5-5ad1-4053-a56c-869a76dac391",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spike option: better tier",
+      "created_at": "2026-08-12T07:14:19.593607-07:00"
+    },
+    {
+      "id": 474,
+      "from_node_id": 477,
+      "to_node_id": 481,
+      "from_change_id": "2c2ae6c1-7dbb-45ea-83c1-8275d15a9de7",
+      "to_change_id": "d593baec-58c8-490a-bdf3-d52909d00498",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spike option: best tier",
+      "created_at": "2026-08-12T07:14:19.601654-07:00"
+    },
+    {
+      "id": 475,
+      "from_node_id": 477,
+      "to_node_id": 482,
+      "from_change_id": "2c2ae6c1-7dbb-45ea-83c1-8275d15a9de7",
+      "to_change_id": "ac0a74ce-71a0-4d26-8ae3-d4dd831aa273",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spike deliverable",
+      "created_at": "2026-08-12T07:14:19.620629-07:00"
+    },
+    {
+      "id": 476,
+      "from_node_id": 482,
+      "to_node_id": 483,
+      "from_change_id": "ac0a74ce-71a0-4d26-8ae3-d4dd831aa273",
+      "to_change_id": "cfc698d3-8e08-4268-8607-8c6ec1633c55",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Issue writeup completes the spike deliverable",
+      "created_at": "2026-08-12T07:56:25.485743-07:00"
     }
   ],
   "documents": [
