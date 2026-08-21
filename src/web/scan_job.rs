@@ -522,8 +522,12 @@ const FINGERPRINT_MAX_AGE_DAYS: i64 = 14;
 
 /// True when a fingerprint's `updated_at` (both backends emit
 /// `YYYY-MM-DD HH:MM:SS` UTC) is more than FINGERPRINT_MAX_AGE_DAYS old.
-/// Unparseable timestamps count as fresh — a malformed row must not
-/// trigger a rebuild on every scan.
+/// Unparseable timestamps count as STALE: a successful rebuild rewrites
+/// `updated_at` via the DB clock, so a one-off corrupt row self-heals after
+/// one rebuild, while treating it as fresh would keep an old fingerprint on
+/// the fresh path forever. A rebuild-per-scan only persists under systemic
+/// timestamp-format drift, which the warn below makes loud — and the
+/// stale-rebuild-failure path already falls back gracefully. (#303)
 pub fn fingerprint_is_stale(updated_at: &str, now: chrono::NaiveDateTime) -> bool {
     match chrono::NaiveDateTime::parse_from_str(updated_at, "%Y-%m-%d %H:%M:%S") {
         Ok(built) => {
@@ -532,9 +536,9 @@ pub fn fingerprint_is_stale(updated_at: &str, now: chrono::NaiveDateTime) -> boo
         Err(_) => {
             warn!(
                 updated_at,
-                "Unparseable fingerprint timestamp; treating as fresh"
+                "Unparseable fingerprint timestamp; treating as stale and rebuilding"
             );
-            false
+            true
         }
     }
 }
@@ -1612,9 +1616,14 @@ mod fingerprint_staleness_tests {
     }
 
     #[test]
-    fn unparseable_timestamp_is_treated_as_fresh() {
-        // A malformed timestamp must not cause a rebuild loop on every scan.
-        assert!(!fingerprint_is_stale("not a date", now()));
-        assert!(!fingerprint_is_stale("", now()));
+    fn unparseable_timestamp_is_treated_as_stale() {
+        // A malformed timestamp must trigger the rebuild path: a successful
+        // rebuild rewrites updated_at via the DB clock, so a one-off corrupt
+        // row self-heals after one rebuild. Treating it as fresh would keep
+        // an old fingerprint on the fresh path FOREVER, silently bypassing
+        // the 14-day refresh. (#303, CodeRabbit PR #101; supersedes the
+        // original #296 plan decision.)
+        assert!(fingerprint_is_stale("not a date", now()));
+        assert!(fingerprint_is_stale("", now()));
     }
 }

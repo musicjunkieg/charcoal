@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c78e0a0d426ea98d942e9ec07b8487c10d9002ba",
+    "short_hash": "c78e0a0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T20:32:50-07:00",
+    "message": "fix(301): address CI clippy drift and CodeRabbit majors on PR #101\n\n- nli.rs: chunks_exact(3) -> as_chunks::<3>() (clippy 1.98 lint in CI;\n  untouched by #296 but blocks its PR)\n- Empty cleaned batch no longer produces a zero centroid: profile.rs\n  falls back to keyword overlap, scan_job/main.rs skip the embedding\n  save, so a URLs-only account cannot ride under the overlap gate\n- keyword_weights() requires finite, non-negative scores before\n  rank-weighting; malformed vectors take the uniform fallback\n  (regression tests for negative and non-finite)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
     "hash": "9e91bf1a575d282c0bd041a66b3182220cdbf64a",
     "short_hash": "9e91bf1",
     "author": "Bryan Guffey",

@@ -5389,6 +5389,17 @@
       "created_at": "2026-08-20T20:06:27.452112-07:00",
       "updated_at": "2026-08-20T20:06:27.452112-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"9e91bf1\",\"confidence\":95}"
+    },
+    {
+      "id": 498,
+      "change_id": "a6f2748f-3526-4d49-a9cc-2c533e06fefe",
+      "node_type": "outcome",
+      "title": "PR #101 loop done: CI green 7/7, CodeRabbit majors fixed (c78e0a0) + confirmed; freshness Major deferred to #302 with on-thread rationale",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T20:47:54.436755-07:00",
+      "updated_at": "2026-08-20T20:47:54.436755-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"c78e0a0\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10649,6 +10660,17 @@
       "weight": 1.0,
       "rationale": "Plan executed to completion",
       "created_at": "2026-08-20T20:06:27.460505-07:00"
+    },
+    {
+      "id": 489,
+      "from_node_id": 497,
+      "to_node_id": 498,
+      "from_change_id": "ebd065ea-615b-4bc8-9aaf-cc7ed3d46e64",
+      "to_change_id": "a6f2748f-3526-4d49-a9cc-2c533e06fefe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Post-review hardening of #296",
+      "created_at": "2026-08-20T20:47:54.445213-07:00"
     }
   ],
   "documents": [
