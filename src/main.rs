@@ -271,7 +271,7 @@ async fn main() -> Result<()> {
                 db.save_embedding(&did, &mean_emb).await?;
                 println!(
                     "  Embedding computed ({} posts → {}-dim vector)",
-                    post_texts.len(),
+                    embed_texts.len(),
                     charcoal::topics::embeddings::EMBEDDING_DIM,
                 );
             } else {

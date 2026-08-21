@@ -11,7 +11,11 @@
 // overlap scores, as long as the keywords that DO overlap point in the same
 // direction.
 //
-// Returns 0.0 for no overlap and 1.0 for identical topic profiles.
+// Results are clamped to [-1.0, 1.0]: 1.0 for identical topic profiles, -1.0
+// for perfectly opposing ones. In practice, keyword weights are non-negative
+// (TF-IDF scores), so real-world results fall in [0.0, 1.0] — negative
+// scores can only arise from other callers of `cosine_from_weights` that
+// pass signed weight vectors.
 
 use std::collections::HashMap;
 
@@ -19,7 +23,9 @@ use super::fingerprint::TopicFingerprint;
 
 /// Compute the cosine similarity between two fingerprints.
 ///
-/// Returns a score from 0.0 (no overlap) to 1.0 (identical topic profiles).
+/// Returns a score clamped to [-1.0, 1.0]: 1.0 for identical topic profiles,
+/// -1.0 for perfectly opposing ones. Keyword weights are non-negative in
+/// practice, so real fingerprint comparisons land in [0.0, 1.0].
 pub fn cosine_similarity(fp_a: &TopicFingerprint, fp_b: &TopicFingerprint) -> f64 {
     let weights_a = fp_a.keyword_weights();
     let weights_b = fp_b.keyword_weights();

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "15aaac8ff2cf66ef7b986032893577f64bd92579",
+    "short_hash": "15aaac8",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:40:05-07:00",
+    "message": "feat(296): rebuild protected fingerprint when older than 14 days\n\nupdated_at was recorded but never consulted; a fingerprint built once\nat onboarding was used forever. Web scans now refresh stale\nfingerprints, falling back to the stale one if the rebuild fails.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "35d5984b10c72e41b57818296b57b9189d134ad3",
     "short_hash": "35d5984",
     "author": "Bryan Guffey",

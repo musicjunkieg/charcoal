@@ -1,7 +1,8 @@
 // Sentence embedding-based topic overlap using all-MiniLM-L6-v2.
 //
 // Instead of comparing TF-IDF keyword lists (which fail when two people use
-// different words for the same topic — see docs/research-overlap-diagnosis.md),
+// different words for the same topic — see
+// docs/research/topic-fingerprint-spike-2026-08.md),
 // this module embeds post text into 384-dimensional vectors using a sentence
 // transformer. Cosine similarity between mean embeddings captures semantic
 // proximity: "fatphobia" and "obesity" land near each other even though they
