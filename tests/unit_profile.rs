@@ -122,9 +122,13 @@ async fn stage1_insufficient_data_when_fewer_than_five_posts() {
 
 #[tokio::test]
 async fn stage1_early_exit_low_when_clean_and_irrelevant() {
-    // 6 first-person originals (>= MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT), all
-    // scored 0.0 by the fixed scorer (< ONNX_CLEAN_THRESHOLD 0.10), and topics
-    // that don't overlap the astrophysics fingerprint (< overlap gate 0.15).
+    // 15 first-person originals (>= MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT, and
+    // >= 15 so FingerprintQuality::from_counts is Normal — a reliable
+    // fingerprint is required to legitimately authorize the early exit;
+    // Unreliable-quality blocking is covered directly by unit tests on
+    // `should_early_exit_stage1`, #296 Task 6), all scored 0.0 by the fixed
+    // scorer (< ONNX_CLEAN_THRESHOLD 0.10), and topics that don't overlap the
+    // astrophysics fingerprint (< overlap gate 0.15).
     let originals = vec![
         post("at://a/1", "had a lovely sandwich for lunch today"),
         post("at://a/2", "the weather is sunny and warm this morning"),
@@ -132,6 +136,21 @@ async fn stage1_early_exit_low_when_clean_and_irrelevant() {
         post("at://a/4", "made fresh coffee and read a paperback novel"),
         post("at://a/5", "took the dog for a walk around the park"),
         post("at://a/6", "baking bread this weekend, smells wonderful"),
+        post(
+            "at://a/7",
+            "reorganized my bookshelf by color this afternoon",
+        ),
+        post("at://a/8", "tried a new recipe for vegetable soup"),
+        post("at://a/9", "went for a bike ride along the river trail"),
+        post(
+            "at://a/10",
+            "planted some basil and thyme in the window box",
+        ),
+        post("at://a/11", "finished knitting a scarf for the winter"),
+        post("at://a/12", "cleaned out the garage over the weekend"),
+        post("at://a/13", "watched the sunset from the back porch"),
+        post("at://a/14", "made pancakes for breakfast with the kids"),
+        post("at://a/15", "repainted the fence a nice shade of blue"),
     ];
     let sample = PostSample {
         originals,
@@ -139,7 +158,7 @@ async fn stage1_early_exit_low_when_clean_and_irrelevant() {
         quotes: vec![],
         reply_ratio: 0.0,
         quote_ratio: 0.0,
-        total_posts: 6,
+        total_posts: 15,
     };
     let scorer = FixedScorer(0.0);
     let weights = ThreatWeights::default();
@@ -162,9 +181,9 @@ async fn stage1_early_exit_low_when_clean_and_irrelevant() {
             assert_eq!(score.threat_tier.as_deref(), Some("Low"));
             assert_eq!(score.threat_score, Some(0.0));
             assert_eq!(score.toxicity_score, Some(0.0));
-            assert_eq!(score.posts_analyzed, 6);
+            assert_eq!(score.posts_analyzed, 15);
             assert_eq!(score.scoring_confidence.as_deref(), Some("low"));
-            assert!(score.fingerprint_quality.is_some());
+            assert_eq!(score.fingerprint_quality.as_deref(), Some("normal"));
         }
         Stage1Outcome::Proceed { .. } => {
             panic!("expected Terminal early-exit for clean + irrelevant account")

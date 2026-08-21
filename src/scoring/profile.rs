@@ -376,21 +376,22 @@ pub async fn stage1_outcome_timed(
 
     // Early exit: all ONNX scores clean AND topic overlap below gate.
     // When overlap is unknown (extraction failed), do not early-exit.
+    let fp_quality = FingerprintQuality::from_counts(
+        stage1_sample.originals.len(),
+        stage1_sample.replies.len() + stage1_sample.quotes.len(),
+    );
+
     if should_early_exit_stage1(
         &stage1_clean_pass_scores,
         stage1_overlap,
         weights.keyword_gate_threshold, // Stage 1 overlap IS keyword-scale
+        fp_quality,
     ) {
         info!(
             handle = target_handle,
             posts = stage1_sample.total_posts,
             overlap = format!("{:.3}", stage1_overlap.unwrap_or(0.0)),
             "Stage 1 early exit: clean and topically irrelevant"
-        );
-
-        let fp_quality = FingerprintQuality::from_counts(
-            stage1_sample.originals.len(),
-            stage1_sample.replies.len() + stage1_sample.quotes.len(),
         );
 
         return Ok(Stage1Outcome::Terminal(Box::new(AccountScore {
@@ -996,11 +997,24 @@ pub const MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT: usize = 5;
 /// ONNX is ONLY reliable for low scores. A low score genuinely means
 /// no hostile language or identity terms. High scores are NOT trustworthy
 /// (keyword triggering on identity terms).
+///
+/// A fingerprint with `Unreliable` quality (zero originals) yields an
+/// overlap number derived entirely from reply context — the topics of
+/// whoever they were arguing with. That number must never be the reason we
+/// SKIP analyzing an account. Note this only blocks the early exit; Stage 2
+/// scoring still uses the overlap, because for an actual harasser the
+/// reply-derived topics ARE the protected user's spaces and damping them
+/// would create false negatives. Score-side use of quality waits for #135
+/// calibration. (#296)
 pub fn should_early_exit_stage1(
     onnx_scores: &[f64],
     topic_overlap: Option<f64>,
     overlap_gate_threshold: f64,
+    fp_quality: FingerprintQuality,
 ) -> bool {
+    if fp_quality == FingerprintQuality::Unreliable {
+        return false;
+    }
     if onnx_scores.len() < MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT {
         return false;
     }

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "056db5b16b1e5ea7d6a4c20037adbdb8b048dfa7",
+    "short_hash": "056db5b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:56:54-07:00",
+    "message": "fix(296): gate keyword-cosine overlap on its own scale, unify extractors\n\nStage 1 and the Stage 2 TF-IDF fallback were gated at 0.15 — a threshold\ncalibrated for embedding cosine (0.4-0.8 typical). Sparse keyword cosine\nruns far lower, so topically-relevant accounts were early-exited before\nthe semantic path ever ran. New keyword_gate_threshold (0.05,\nprovisional pending #135 calibration). Both stages now use the same\n60/10 extractor config as the protected fingerprint.\n\nAlso updates tests/unit_scoring.rs struct literals for the new\nThreatWeights.keyword_gate_threshold field (compiler-forced).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
     "hash": "8bad9489ba67bcf3215faea9b234d1e42c72401a",
     "short_hash": "8bad948",
     "author": "Bryan Guffey",

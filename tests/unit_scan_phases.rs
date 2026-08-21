@@ -855,13 +855,19 @@ mod gather_tests {
     }
 
     // ── Early-exit (clean + topically irrelevant, >=5 first-person) → Low ──
+    //
+    // 15 originals (not 6): FingerprintQuality::from_counts needs >= 15
+    // originals for Normal quality. A reliable fingerprint is required to
+    // legitimately authorize the early exit (#296 Task 6 blocks it for
+    // Unreliable quality) — this test is about the genuine early-exit path,
+    // not the block, so it uses a reliable fingerprint.
     #[tokio::test]
     async fn gather_early_exit_finalizes_low_and_stages_nothing() {
         let db = open_db().await;
         let fp = astrophysics_fingerprint();
         let weights = ThreatWeights::default();
 
-        let originals: Vec<Post> = (0..6)
+        let originals: Vec<Post> = (0..15)
             .map(|i| make_post(&format!("at://e/{i}"), "sandwiches and gardens and weather"))
             .collect();
         let sample = PostSample {
@@ -870,7 +876,7 @@ mod gather_tests {
             quotes: vec![],
             reply_ratio: 0.0,
             quote_ratio: 0.0,
-            total_posts: 6,
+            total_posts: 15,
         };
         let fetcher = CannedFetcher {
             sample,
