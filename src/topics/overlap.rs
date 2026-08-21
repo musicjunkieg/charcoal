@@ -54,7 +54,7 @@ pub fn cosine_from_weights(
     if denominator < f64::EPSILON {
         0.0
     } else {
-        (dot / denominator).clamp(0.0, 1.0)
+        (dot / denominator).clamp(-1.0, 1.0)
     }
 }
 

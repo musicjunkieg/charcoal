@@ -137,14 +137,15 @@ fn cosine_all_zero_weights() {
 }
 
 #[test]
-fn cosine_negative_weights_clamped_to_zero() {
-    // Negative dot product gets clamped to 0.0
+fn cosine_negative_weights_preserve_sign() {
+    // Keyword weights are non-negative in practice, but the clamp itself
+    // must not flatten opposition to 0.0 — see #296.
     let a: HashMap<String, f64> = [("x".to_string(), 1.0)].into();
     let b: HashMap<String, f64> = [("x".to_string(), -1.0)].into();
     assert_eq!(
         cosine_from_weights(&a, &b),
-        0.0,
-        "Negative cosine should be clamped to 0.0"
+        -1.0,
+        "Negative cosine should preserve sign, not clamp to 0.0"
     );
 }
 

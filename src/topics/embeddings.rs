@@ -252,9 +252,10 @@ pub fn mean_embedding(embeddings: &[Vec<f64>]) -> Vec<f64> {
 
 /// Cosine similarity between two embedding vectors.
 ///
-/// Returns 0.0 to 1.0 — the core comparison that replaces keyword-based
-/// overlap. Two accounts posting about the same topics will have high
-/// cosine similarity even if they use completely different vocabulary.
+/// Returns -1.0 to 1.0. Positive values mean semantic proximity; negative
+/// values mean opposition. Callers that gate on a threshold (scoring) treat
+/// anything below the gate identically, so preserving the sign changes only
+/// what is *recorded*, not how accounts are scored. (#296, spike #295 defect 5)
 pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
@@ -268,7 +269,7 @@ pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
     if denom < f64::EPSILON {
         0.0
     } else {
-        (dot / denom).clamp(0.0, 1.0)
+        (dot / denom).clamp(-1.0, 1.0)
     }
 }
 
@@ -356,15 +357,29 @@ mod tests {
     }
 
     #[test]
-    fn test_cosine_negative_values() {
-        // Opposite directions should give low similarity (clamped to 0.0)
+    fn test_cosine_opposite_vectors_preserve_sign() {
+        // Opposition is signal for a harassment detector — a vector pointing
+        // away from the protected user's topics must not masquerade as
+        // "no relationship" (0.0).
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![-1.0, 0.0, 0.0];
         let sim = cosine_similarity_embeddings(&a, &b);
         assert!(
-            sim.abs() < f64::EPSILON,
-            "Opposite vectors should clamp to 0.0, got {sim}"
+            (sim - -1.0).abs() < 1e-10,
+            "Opposite vectors should be -1.0, got {sim}"
         );
+    }
+
+    #[test]
+    fn test_cosine_partial_opposition_is_negative() {
+        let a = vec![1.0, 1.0, 0.0];
+        let b = vec![-1.0, 0.0, 0.0];
+        let sim = cosine_similarity_embeddings(&a, &b);
+        assert!(
+            sim < 0.0,
+            "Partially opposed vectors should be negative, got {sim}"
+        );
+        assert!(sim > -1.0);
     }
 
     #[test]
