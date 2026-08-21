@@ -93,8 +93,16 @@ impl TopicFingerprint {
         let mut weights = std::collections::HashMap::new();
         for cluster in &self.clusters {
             let score_sum: f64 = cluster.keyword_scores.iter().sum();
-            let rank_weighted =
-                cluster.keyword_scores.len() == cluster.keywords.len() && score_sum > f64::EPSILON;
+            // Every score must be finite and non-negative: a stored JSON with
+            // e.g. [-1.0, 2.0] sums positive but would mint negative keyword
+            // weights, and NaN/inf poison the shares. Malformed → uniform.
+            // (#301, CodeRabbit PR #101)
+            let rank_weighted = cluster.keyword_scores.len() == cluster.keywords.len()
+                && cluster
+                    .keyword_scores
+                    .iter()
+                    .all(|s| s.is_finite() && *s >= 0.0)
+                && score_sum > f64::EPSILON;
 
             if rank_weighted {
                 for (keyword, &score) in cluster.keywords.iter().zip(&cluster.keyword_scores) {
@@ -169,6 +177,47 @@ mod tests {
         let weights = fp.keyword_weights();
         assert!((weights["a"] - 0.3).abs() < 1e-9);
         assert!((weights["b"] - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_keyword_weights_negative_scores_fall_back_to_uniform() {
+        // [-1.0, 2.0] sums positive but would mint a negative weight for
+        // one keyword and an oversized weight for the other. Malformed
+        // scores must take the uniform path. (#301, CodeRabbit PR #101)
+        let fp = TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "t".to_string(),
+                keywords: vec!["a".to_string(), "b".to_string()],
+                keyword_scores: vec![-1.0, 2.0],
+                weight: 0.6,
+            }],
+            post_count: 10,
+        };
+        let weights = fp.keyword_weights();
+        assert!((weights["a"] - 0.3).abs() < 1e-9);
+        assert!((weights["b"] - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_keyword_weights_non_finite_scores_fall_back_to_uniform() {
+        // NaN poisons every arithmetic comparison downstream; infinity
+        // would zero out every other keyword's share. Both take uniform.
+        for bad in [f64::NAN, f64::INFINITY] {
+            let fp = TopicFingerprint {
+                clusters: vec![TopicCluster {
+                    label: "t".to_string(),
+                    keywords: vec!["a".to_string(), "b".to_string()],
+                    keyword_scores: vec![bad, 1.0],
+                    weight: 0.6,
+                }],
+                post_count: 10,
+            };
+            let weights = fp.keyword_weights();
+            assert!(
+                (weights["a"] - 0.3).abs() < 1e-9 && (weights["b"] - 0.3).abs() < 1e-9,
+                "score {bad} must trigger the uniform fallback"
+            );
+        }
     }
 
     #[test]

@@ -5275,9 +5275,9 @@
       "node_type": "goal",
       "title": "Implement #296: fix topic overlap math (8 defect repairs from spike #295)",
       "description": null,
-      "status": "pending",
+      "status": "achieved",
       "created_at": "2026-08-20T15:57:48.485226-07:00",
-      "updated_at": "2026-08-20T15:57:48.485226-07:00",
+      "updated_at": "2026-08-20T20:06:27.468374-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"confidence\":90,\"prompt\":\"let's start on #296\"}"
     },
     {
@@ -5367,6 +5367,28 @@
       "created_at": "2026-08-20T19:42:24.264818-07:00",
       "updated_at": "2026-08-20T19:42:24.264818-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"15aaac8\",\"confidence\":95}"
+    },
+    {
+      "id": 496,
+      "change_id": "b38b792e-9c01-4646-be24-fb0ff117fa28",
+      "node_type": "action",
+      "title": "Task 8/8 #296: docs + CHANGELOG + tri-feature verification (commit 9e91bf1), pushed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T19:59:11.903568-07:00",
+      "updated_at": "2026-08-20T19:59:11.903568-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"9e91bf1\",\"confidence\":95}"
+    },
+    {
+      "id": 497,
+      "change_id": "ebd065ea-615b-4bc8-9aaf-cc7ed3d46e64",
+      "node_type": "outcome",
+      "title": "#296 complete: 9 commits, all 8 repairs implemented, tri-feature verified, final whole-branch review READY TO MERGE",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T20:06:27.452112-07:00",
+      "updated_at": "2026-08-20T20:06:27.452112-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"9e91bf1\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10605,6 +10627,28 @@
       "weight": 1.0,
       "rationale": "Task 7 execution",
       "created_at": "2026-08-20T19:42:24.273995-07:00"
+    },
+    {
+      "id": 487,
+      "from_node_id": 488,
+      "to_node_id": 496,
+      "from_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "to_change_id": "b38b792e-9c01-4646-be24-fb0ff117fa28",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 execution",
+      "created_at": "2026-08-20T19:59:11.912235-07:00"
+    },
+    {
+      "id": 488,
+      "from_node_id": 488,
+      "to_node_id": 497,
+      "from_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "to_change_id": "ebd065ea-615b-4bc8-9aaf-cc7ed3d46e64",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan executed to completion",
+      "created_at": "2026-08-20T20:06:27.460505-07:00"
     }
   ],
   "documents": [

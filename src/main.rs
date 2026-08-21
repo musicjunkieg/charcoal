@@ -265,15 +265,21 @@ async fn main() -> Result<()> {
                     .map(|t| charcoal::topics::tfidf::clean_for_embedding(t))
                     .filter(|t| !t.is_empty())
                     .collect();
-                let post_embeddings = embedder.embed_batch(&embed_texts).await?;
-                let mean_emb =
-                    charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
-                db.save_embedding(&did, &mean_emb).await?;
-                println!(
-                    "  Embedding computed ({} posts → {}-dim vector)",
-                    embed_texts.len(),
-                    charcoal::topics::embeddings::EMBEDDING_DIM,
-                );
+                if embed_texts.is_empty() {
+                    // URLs/mentions-only corpus: saving the zero centroid
+                    // would silently zero every overlap comparison. (#301)
+                    println!("  Skipped: all posts were URLs/mentions only.");
+                } else {
+                    let post_embeddings = embedder.embed_batch(&embed_texts).await?;
+                    let mean_emb =
+                        charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
+                    db.save_embedding(&did, &mean_emb).await?;
+                    println!(
+                        "  Embedding computed ({} posts → {}-dim vector)",
+                        embed_texts.len(),
+                        charcoal::topics::embeddings::EMBEDDING_DIM,
+                    );
+                }
             } else {
                 println!(
                     "\n{}",

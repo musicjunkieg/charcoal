@@ -584,18 +584,29 @@ pub async fn build_user_fingerprint(
                     .map(|t| crate::topics::tfidf::clean_for_embedding(t))
                     .filter(|t| !t.is_empty())
                     .collect();
-                match embedder.embed_batch(&embed_texts).await {
-                    Ok(post_embeddings) => {
-                        let mean_emb =
-                            crate::topics::embeddings::normalized_mean_embedding(&post_embeddings);
-                        if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
-                            warn!(error = %e, "Failed to save embedding during fingerprint build");
-                        } else {
-                            info!("Sentence embedding computed and saved");
+                if embed_texts.is_empty() {
+                    // Every post cleaned to empty (URLs/mentions only). A
+                    // zero-vector centroid would silently zero all overlap
+                    // comparisons — keep the previous embedding instead.
+                    // (#301, CodeRabbit PR #101; near-unreachable in practice
+                    // because TF-IDF extraction above bails first on such a
+                    // corpus, but defense in depth is cheap here.)
+                    warn!("All posts cleaned to empty; skipping embedding save");
+                } else {
+                    match embedder.embed_batch(&embed_texts).await {
+                        Ok(post_embeddings) => {
+                            let mean_emb = crate::topics::embeddings::normalized_mean_embedding(
+                                &post_embeddings,
+                            );
+                            if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
+                                warn!(error = %e, "Failed to save embedding during fingerprint build");
+                            } else {
+                                info!("Sentence embedding computed and saved");
+                            }
                         }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "embed_batch failed during fingerprint build");
+                        Err(e) => {
+                            warn!(error = %e, "embed_batch failed during fingerprint build");
+                        }
                     }
                 }
             }

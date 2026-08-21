@@ -599,29 +599,48 @@ pub async fn score_from_sample(
                 embeddings::cosine_similarity_embeddings(protected_emb, precomputed),
                 false,
             )
-        } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
-            // Embedding path: embed target's posts, average, compare
-            let embed_texts: Vec<String> = fingerprint_posts
-                .iter()
-                .map(|t| crate::topics::tfidf::clean_for_embedding(t))
-                .filter(|t| !t.is_empty())
-                .collect();
-            let target_embeddings = emb.embed_batch(&embed_texts).await?;
-            let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
-            (
-                embeddings::cosine_similarity_embeddings(protected_emb, &target_mean),
-                false,
-            )
         } else {
-            // Fallback: TF-IDF keyword cosine — same extractor config as the
-            // protected fingerprint. This overlap lives on the sparse keyword
-            // scale and must be gated with keyword_gate_threshold below.
-            let topic_extractor = TfIdfExtractor::default();
-            let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
-            (
-                overlap::cosine_similarity(protected_fingerprint, &target_fingerprint),
-                true,
-            )
+            // Embedding path: embed target's posts, average, compare. Yields
+            // None when the embedder is unavailable OR every post cleaned to
+            // empty (URLs/mentions only) — a zero centroid would read as
+            // "no overlap" and let the gate suppress a hostile account.
+            // (#301, CodeRabbit PR #101)
+            let embedded_overlap =
+                if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
+                    let embed_texts: Vec<String> = fingerprint_posts
+                        .iter()
+                        .map(|t| crate::topics::tfidf::clean_for_embedding(t))
+                        .filter(|t| !t.is_empty())
+                        .collect();
+                    if embed_texts.is_empty() {
+                        None
+                    } else {
+                        let target_embeddings = emb.embed_batch(&embed_texts).await?;
+                        let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
+                        Some(embeddings::cosine_similarity_embeddings(
+                            protected_emb,
+                            &target_mean,
+                        ))
+                    }
+                } else {
+                    None
+                };
+
+            match embedded_overlap {
+                Some(overlap_value) => (overlap_value, false),
+                None => {
+                    // Fallback: TF-IDF keyword cosine — same extractor config
+                    // as the protected fingerprint. This overlap lives on the
+                    // sparse keyword scale and must be gated with
+                    // keyword_gate_threshold below.
+                    let topic_extractor = TfIdfExtractor::default();
+                    let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
+                    (
+                        overlap::cosine_similarity(protected_fingerprint, &target_fingerprint),
+                        true,
+                    )
+                }
+            }
         };
 
     // Step 4b: Compute behavioral signals (from PostSample — no separate API call)

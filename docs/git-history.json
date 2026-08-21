@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9e91bf1a575d282c0bd041a66b3182220cdbf64a",
+    "short_hash": "9e91bf1",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:50:46-07:00",
+    "message": "docs(296): changelog + fix stale doc references\n\n- CHANGELOG entry under Unreleased/Fixed for the eight #296 overlap-math\n  repairs (spike #295 GOOD tier).\n- embeddings.rs: fix stale pointer to a nonexistent\n  docs/research-overlap-diagnosis.md, now points at the real spike report.\n- overlap.rs: module and cosine_similarity doc comments described a\n  [0.0, 1.0] range, but cosine_from_weights has clamped to [-1.0, 1.0]\n  since Task 1. Rewritten to describe the actual contract, noting\n  keyword-space results are non-negative in practice.\n- main.rs: the post-embedding println reported post_texts.len() (raw\n  post count) instead of embed_texts.len() (the cleaned+filtered subset\n  actually embedded, since Task 3), overstating contributing posts.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
     "hash": "15aaac8ff2cf66ef7b986032893577f64bd92579",
     "short_hash": "15aaac8",
     "author": "Bryan Guffey",
