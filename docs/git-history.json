@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b67f0c77a7d301213c640056890728fb9d74df41",
+    "short_hash": "b67f0c7",
+    "author": "Bryan Guffey",
+    "date": "2026-08-19T06:16:33-07:00",
+    "message": "chore(300): mark deciduous graph exports as generated in .gitattributes\n\nlinguist-generated collapses docs/graph-data.json and git-history.json\nin PR diffs; -diff silences local git diff. The files stay committed\nbecause GitHub Pages serves the viewer from /docs.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
     "hash": "981a7afa09b4bba7b2d1eb31f51b413470e9d87d",
     "short_hash": "981a7af",
     "author": "Bryan Guffey",

@@ -5242,10 +5242,54 @@
       "node_type": "goal",
       "title": "Silence deciduous graph JSON churn in diffs",
       "description": null,
-      "status": "pending",
+      "status": "achieved",
       "created_at": "2026-08-19T06:15:47.605785-07:00",
-      "updated_at": "2026-08-19T06:15:47.605785-07:00",
+      "updated_at": "2026-08-20T15:51:45.093185-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":90,\"prompt\":\"what could we do to make that diff silent - deploy to somewhere else? Or is it just better to leave it? [follow-up:] Yeah, let's do 1 [option 1 = .gitattributes linguist-generated + -diff]\"}"
+    },
+    {
+      "id": 485,
+      "change_id": "0c38740a-9c86-4a56-addf-fd35065b02d7",
+      "node_type": "action",
+      "title": "Added .gitattributes (linguist-generated + -diff) for graph exports; committed pending #295 CHANGELOG entry; PR #100 to staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-19T06:17:25.687926-07:00",
+      "updated_at": "2026-08-19T06:17:25.687926-07:00",
+      "metadata_json": "{\"branch\":\"chore/silence-graph-json-diffs\",\"commit\":\"b67f0c7\",\"confidence\":95}"
+    },
+    {
+      "id": 486,
+      "change_id": "466a5b0c-10d1-4556-a669-4da567068296",
+      "node_type": "outcome",
+      "title": "Verified: 154-line graph-data.json churn now renders as one binary-differ line; PR #100 open",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-19T06:17:25.702437-07:00",
+      "updated_at": "2026-08-19T06:17:25.702437-07:00",
+      "metadata_json": "{\"branch\":\"chore/silence-graph-json-diffs\",\"confidence\":95}"
+    },
+    {
+      "id": 487,
+      "change_id": "143eb40b-17b9-42f3-a845-b0b5cd246ae8",
+      "node_type": "goal",
+      "title": "Implement #296: fix topic overlap math (8 defect repairs from spike #295)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T15:57:48.485226-07:00",
+      "updated_at": "2026-08-20T15:57:48.485226-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"confidence\":90,\"prompt\":\"let's start on #296\"}"
+    },
+    {
+      "id": 488,
+      "change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "node_type": "action",
+      "title": "Wrote TDD implementation plan docs/superpowers/plans/2026-08-20-296-overlap-math.md (8 tasks, locked design decisions)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T16:04:02.073760-07:00",
+      "updated_at": "2026-08-20T16:04:02.073760-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -10374,6 +10418,39 @@
       "weight": 1.0,
       "rationale": "Issue writeup completes the spike deliverable",
       "created_at": "2026-08-12T07:56:25.485743-07:00"
+    },
+    {
+      "id": 477,
+      "from_node_id": 484,
+      "to_node_id": 485,
+      "from_change_id": "07278eb9-c304-4107-af41-f6e4b9c7539f",
+      "to_change_id": "0c38740a-9c86-4a56-addf-fd35065b02d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of option 1",
+      "created_at": "2026-08-19T06:17:31.049405-07:00"
+    },
+    {
+      "id": 478,
+      "from_node_id": 485,
+      "to_node_id": 486,
+      "from_change_id": "0c38740a-9c86-4a56-addf-fd35065b02d7",
+      "to_change_id": "466a5b0c-10d1-4556-a669-4da567068296",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verification result",
+      "created_at": "2026-08-19T06:17:31.059756-07:00"
+    },
+    {
+      "id": 479,
+      "from_node_id": 487,
+      "to_node_id": 488,
+      "from_change_id": "143eb40b-17b9-42f3-a845-b0b5cd246ae8",
+      "to_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Planning phase of #296",
+      "created_at": "2026-08-20T16:04:02.082224-07:00"
     }
   ],
   "documents": [
