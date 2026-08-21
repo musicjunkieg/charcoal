@@ -361,10 +361,9 @@ pub async fn stage1_outcome_timed(
         stage1_texts.clone()
     };
     let stage1_overlap: Option<f64> = {
-        let topic_extractor = TfIdfExtractor {
-            top_n_keywords: 40,
-            max_clusters: 7,
-        };
+        // Same extractor config as the protected fingerprint (60/10) so the
+        // two keyword spaces share a vocabulary budget. (#296 defect 3)
+        let topic_extractor = TfIdfExtractor::default();
         match topic_extractor.extract(&stage1_fp_texts) {
             Ok(fp) => Some(overlap::cosine_similarity(protected_fingerprint, &fp)),
             // TF-IDF extraction failed (e.g. no usable tokens). Treat overlap as
@@ -380,7 +379,7 @@ pub async fn stage1_outcome_timed(
     if should_early_exit_stage1(
         &stage1_clean_pass_scores,
         stage1_overlap,
-        weights.overlap_gate_threshold,
+        weights.keyword_gate_threshold, // Stage 1 overlap IS keyword-scale
     ) {
         info!(
             handle = target_handle,
@@ -586,34 +585,43 @@ pub async fn score_from_sample(
     // Prefer sentence embeddings when available — they capture semantic
     // similarity ("fatphobia" ≈ "obesity") that keyword matching misses.
     // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
-    let topic_overlap = if let (Some(precomputed), Some(protected_emb)) =
-        (precomputed_target_embedding, protected_embedding)
-    {
-        // Precomputed path (#213): Phase A already embedded `fingerprint_posts`
-        // (the identical selection, via `select_fingerprint_posts`) and averaged
-        // them, so the cosine here is byte-identical to the embed-at-finalize
-        // path below — only the (expensive, mutex-serialized) embedding moved to
-        // Phase A where it overlaps I/O.
-        embeddings::cosine_similarity_embeddings(protected_emb, precomputed)
-    } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
-        // Embedding path: embed target's posts, average, compare
-        let embed_texts: Vec<String> = fingerprint_posts
-            .iter()
-            .map(|t| crate::topics::tfidf::clean_for_embedding(t))
-            .filter(|t| !t.is_empty())
-            .collect();
-        let target_embeddings = emb.embed_batch(&embed_texts).await?;
-        let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
-        embeddings::cosine_similarity_embeddings(protected_emb, &target_mean)
-    } else {
-        // Fallback: TF-IDF keyword cosine similarity
-        let topic_extractor = TfIdfExtractor {
-            top_n_keywords: 40,
-            max_clusters: 7,
+    let (topic_overlap, overlap_is_keyword_scale) =
+        if let (Some(precomputed), Some(protected_emb)) =
+            (precomputed_target_embedding, protected_embedding)
+        {
+            // Precomputed path (#213): Phase A already embedded `fingerprint_posts`
+            // (the identical selection, via `select_fingerprint_posts`) and averaged
+            // them, so the cosine here is byte-identical to the embed-at-finalize
+            // path below — only the (expensive, mutex-serialized) embedding moved to
+            // Phase A where it overlaps I/O.
+            (
+                embeddings::cosine_similarity_embeddings(protected_emb, precomputed),
+                false,
+            )
+        } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
+            // Embedding path: embed target's posts, average, compare
+            let embed_texts: Vec<String> = fingerprint_posts
+                .iter()
+                .map(|t| crate::topics::tfidf::clean_for_embedding(t))
+                .filter(|t| !t.is_empty())
+                .collect();
+            let target_embeddings = emb.embed_batch(&embed_texts).await?;
+            let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
+            (
+                embeddings::cosine_similarity_embeddings(protected_emb, &target_mean),
+                false,
+            )
+        } else {
+            // Fallback: TF-IDF keyword cosine — same extractor config as the
+            // protected fingerprint. This overlap lives on the sparse keyword
+            // scale and must be gated with keyword_gate_threshold below.
+            let topic_extractor = TfIdfExtractor::default();
+            let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
+            (
+                overlap::cosine_similarity(protected_fingerprint, &target_fingerprint),
+                true,
+            )
         };
-        let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
-        overlap::cosine_similarity(protected_fingerprint, &target_fingerprint)
-    };
 
     // Step 4b: Compute behavioral signals (from PostSample — no separate API call)
     let quote_ratio = sample.quote_ratio;
@@ -807,7 +815,17 @@ pub async fn score_from_sample(
     //   2. score_with_behavioral = raw_score * behavioral_boost (via gate)
     //   3. context_multiplier = 1.0 + (context_score * 0.5)
     //   4. final_score = score_with_behavioral * context_multiplier
-    let (raw_score, _) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
+    // Gate on the scale the overlap was actually measured on. (#296 defect 2)
+    let effective_weights = if overlap_is_keyword_scale {
+        ThreatWeights {
+            overlap_gate_threshold: weights.keyword_gate_threshold,
+            ..weights.clone()
+        }
+    } else {
+        weights.clone()
+    };
+    let (raw_score, _) =
+        threat::compute_threat_score(avg_toxicity, topic_overlap, &effective_weights);
 
     let (score_with_behavioral, benign_gate, gate_was_bypassed) =
         behavioral::apply_behavioral_modifier_contextual(

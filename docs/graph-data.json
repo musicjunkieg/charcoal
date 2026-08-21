@@ -5323,6 +5323,17 @@
       "created_at": "2026-08-20T18:20:05.133362-07:00",
       "updated_at": "2026-08-20T18:20:05.133362-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"7169011\",\"confidence\":95}"
+    },
+    {
+      "id": 492,
+      "change_id": "586b82ed-71fe-4981-bc8e-a821eae9df81",
+      "node_type": "action",
+      "title": "Task 4/8 #296: rank-weighted keywords (commit 8bad948), review approved",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T18:39:22.611157-07:00",
+      "updated_at": "2026-08-20T18:39:22.611157-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"8bad948\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10517,6 +10528,17 @@
       "weight": 1.0,
       "rationale": "Task 3 execution",
       "created_at": "2026-08-20T18:20:05.142378-07:00"
+    },
+    {
+      "id": 483,
+      "from_node_id": 488,
+      "to_node_id": 492,
+      "from_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "to_change_id": "586b82ed-71fe-4981-bc8e-a821eae9df81",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 execution",
+      "created_at": "2026-08-20T18:39:22.620850-07:00"
     }
   ],
   "documents": [

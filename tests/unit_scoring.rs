@@ -211,6 +211,7 @@ fn custom_weights_zero_produces_zero() {
         toxicity_weight: 0.0,
         overlap_multiplier: 0.0,
         overlap_gate_threshold: 0.15,
+        keyword_gate_threshold: 0.05,
         gate_max_score: 25.0,
     };
     let (score, tier) = compute_threat_score(0.9, 0.9, &w);
@@ -224,6 +225,7 @@ fn custom_weights_high_multiplier() {
         toxicity_weight: 70.0,
         overlap_multiplier: 3.0,
         overlap_gate_threshold: 0.15,
+        keyword_gate_threshold: 0.05,
         gate_max_score: 25.0,
     };
     let (score, _) = compute_threat_score(0.5, 0.5, &w);
@@ -237,6 +239,7 @@ fn custom_gate_max_score() {
         toxicity_weight: 70.0,
         overlap_multiplier: 1.5,
         overlap_gate_threshold: 0.15,
+        keyword_gate_threshold: 0.05,
         gate_max_score: 10.0, // lower gate cap
     };
     let (score, _) = compute_threat_score(0.9, 0.0, &w);
