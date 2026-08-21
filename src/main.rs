@@ -260,7 +260,12 @@ async fn main() -> Result<()> {
             if charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
                 println!("\nComputing sentence embeddings...");
                 let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
-                let post_embeddings = embedder.embed_batch(&post_texts).await?;
+                let embed_texts: Vec<String> = post_texts
+                    .iter()
+                    .map(|t| charcoal::topics::tfidf::clean_for_embedding(t))
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                let post_embeddings = embedder.embed_batch(&embed_texts).await?;
                 let mean_emb =
                     charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
                 db.save_embedding(&did, &mean_emb).await?;

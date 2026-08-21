@@ -5301,6 +5301,17 @@
       "created_at": "2026-08-20T17:39:47.488501-07:00",
       "updated_at": "2026-08-20T17:39:47.488501-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"3b3024b\",\"confidence\":95}"
+    },
+    {
+      "id": 490,
+      "change_id": "f7b4b25e-65ec-47d5-b08b-a5bbce4e9229",
+      "node_type": "action",
+      "title": "Task 2/8 #296: normalized mean embedding (commit 2b90a6b), review approved",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T17:58:31.121170-07:00",
+      "updated_at": "2026-08-20T17:58:31.121170-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"2b90a6b\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10473,6 +10484,17 @@
       "weight": 1.0,
       "rationale": "Task 1 execution",
       "created_at": "2026-08-20T17:39:47.496835-07:00"
+    },
+    {
+      "id": 481,
+      "from_node_id": 488,
+      "to_node_id": 490,
+      "from_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "to_change_id": "f7b4b25e-65ec-47d5-b08b-a5bbce4e9229",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 execution",
+      "created_at": "2026-08-20T17:58:31.130234-07:00"
     }
   ],
   "documents": [

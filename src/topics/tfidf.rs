@@ -182,6 +182,22 @@ fn clean_post(text: &str) -> String {
     cleaned
 }
 
+/// Clean a post for *embedding* (not TF-IDF).
+///
+/// Sentence transformers handle case, punctuation, and hashtags fine — those
+/// carry meaning. What pollutes a centroid is content-free tokens: URLs and
+/// @handles. Strip only those and collapse the whitespace they leave behind.
+/// Both the protected and candidate sides must use this so the two centroids
+/// live in the same (cleaned) space. (#296, spike #295 defect 7)
+pub fn clean_for_embedding(text: &str) -> String {
+    let cleaned = URL_PATTERN.replace_all(text, " ");
+    let cleaned = MENTION_PATTERN.replace_all(&cleaned, " ");
+    WHITESPACE_PATTERN
+        .replace_all(&cleaned, " ")
+        .trim()
+        .to_string()
+}
+
 /// Additional stop words for social media text.
 ///
 /// The standard English stop word list misses many common social media words
@@ -631,5 +647,27 @@ mod tests {
         assert!(!is_meaningful_keyword("a"));
         assert!(!is_meaningful_keyword("42"));
         assert!(!is_meaningful_keyword(""));
+    }
+
+    #[test]
+    fn test_clean_for_embedding_strips_urls_and_mentions() {
+        let input = "Check this out https://example.com/post?id=1 cc @friend.bsky.social so cool!";
+        let cleaned = clean_for_embedding(input);
+        assert_eq!(cleaned, "Check this out cc so cool!");
+    }
+
+    #[test]
+    fn test_clean_for_embedding_keeps_case_punctuation_hashtags() {
+        let input = "Fat Liberation ISN'T a trend — it's #CivilRights, 100%.";
+        let cleaned = clean_for_embedding(input);
+        // Case, punctuation, digits, and the hashtag word all survive.
+        assert!(cleaned.contains("Fat Liberation"));
+        assert!(cleaned.contains("#CivilRights"));
+        assert!(cleaned.contains("100%"));
+    }
+
+    #[test]
+    fn test_clean_for_embedding_url_only_post_becomes_empty() {
+        assert_eq!(clean_for_embedding("https://example.com"), "");
     }
 }

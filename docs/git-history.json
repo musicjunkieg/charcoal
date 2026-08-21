@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2b90a6b271f30022375aaa62c5463e417acf7a5b",
+    "short_hash": "2b90a6b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T17:56:19-07:00",
+    "message": "fix(296): L2-normalize per-post embeddings before averaging\n\nLong posts no longer dominate the account centroid. Zero vectors from\nempty texts are skipped instead of diluting the mean. Replaces\nmean_embedding at all four centroid sites; old function removed.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
     "hash": "3b3024b48df3cc3b2ca9cb70b4de3da7755c07d4",
     "short_hash": "3b3024b",
     "author": "Bryan Guffey",

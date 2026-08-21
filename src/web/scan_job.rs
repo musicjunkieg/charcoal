@@ -554,20 +554,27 @@ pub async fn build_user_fingerprint(
         })
         .await
         {
-            Ok(Ok(embedder)) => match embedder.embed_batch(&post_texts).await {
-                Ok(post_embeddings) => {
-                    let mean_emb =
-                        crate::topics::embeddings::normalized_mean_embedding(&post_embeddings);
-                    if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
-                        warn!(error = %e, "Failed to save embedding during fingerprint build");
-                    } else {
-                        info!("Sentence embedding computed and saved");
+            Ok(Ok(embedder)) => {
+                let embed_texts: Vec<String> = post_texts
+                    .iter()
+                    .map(|t| crate::topics::tfidf::clean_for_embedding(t))
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                match embedder.embed_batch(&embed_texts).await {
+                    Ok(post_embeddings) => {
+                        let mean_emb =
+                            crate::topics::embeddings::normalized_mean_embedding(&post_embeddings);
+                        if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
+                            warn!(error = %e, "Failed to save embedding during fingerprint build");
+                        } else {
+                            info!("Sentence embedding computed and saved");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "embed_batch failed during fingerprint build");
                     }
                 }
-                Err(e) => {
-                    warn!(error = %e, "embed_batch failed during fingerprint build");
-                }
-            },
+            }
             Ok(Err(e)) => {
                 warn!(error = %e, "Embedding model failed to load during fingerprint build");
             }

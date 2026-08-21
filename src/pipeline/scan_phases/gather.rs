@@ -480,11 +480,16 @@ pub async fn gather_account(
     let target_embedding = match (inputs.embedder, inputs.has_protected_embedding) {
         (Some(emb), true) => {
             let fp_posts = select_fingerprint_posts(&sample);
-            if fp_posts.is_empty() {
+            let embed_texts: Vec<String> = fp_posts
+                .iter()
+                .map(|t| crate::topics::tfidf::clean_for_embedding(t))
+                .filter(|t| !t.is_empty())
+                .collect();
+            if embed_texts.is_empty() {
                 None
             } else {
                 Some(normalized_mean_embedding(
-                    &emb.embed_batch(&fp_posts).await?,
+                    &emb.embed_batch(&embed_texts).await?,
                 ))
             }
         }
