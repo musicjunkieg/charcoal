@@ -544,6 +544,10 @@ fn cluster_keywords(
             .iter()
             .map(|&i| ranked[i].0.clone())
             .collect();
+        let keyword_scores: Vec<f64> = cluster_indices
+            .iter()
+            .map(|&i| ranked[i].1 as f64)
+            .collect();
 
         let label = generate_cluster_label(&cluster_keywords);
 
@@ -556,6 +560,7 @@ fn cluster_keywords(
         clusters.push(TopicCluster {
             label,
             keywords: cluster_keywords,
+            keyword_scores,
             weight,
         });
     }

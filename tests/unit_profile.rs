@@ -57,6 +57,7 @@ fn unrelated_fingerprint() -> TopicFingerprint {
                 "redshift".to_string(),
                 "telescope".to_string(),
             ],
+            keyword_scores: vec![],
             weight: 1.0,
         }],
         post_count: 100,

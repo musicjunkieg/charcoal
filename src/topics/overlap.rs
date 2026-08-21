@@ -69,6 +69,7 @@ mod tests {
             .map(|(kw, w)| TopicCluster {
                 label: kw.to_string(),
                 keywords: vec![kw.to_string()],
+                keyword_scores: vec![],
                 weight: *w,
             })
             .collect();

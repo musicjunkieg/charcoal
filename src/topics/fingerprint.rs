@@ -23,6 +23,11 @@ pub struct TopicCluster {
     pub label: String,
     /// The keywords that make up this cluster, in descending score order
     pub keywords: Vec<String>,
+    /// TF-IDF scores aligned with `keywords`. Empty for fingerprints
+    /// serialized before #296 — `keyword_weights()` falls back to a
+    /// uniform split so stored JSON keeps working.
+    #[serde(default)]
+    pub keyword_scores: Vec<f64>,
     /// Normalized weight (0.0 to 1.0) representing how much of the person's
     /// posting is about this topic
     pub weight: f64,
@@ -79,14 +84,28 @@ impl TopicFingerprint {
 
     /// Get the keyword weights as a flat map (keyword -> weight).
     /// Used for computing topic overlap between two accounts.
+    ///
+    /// Within a cluster, weight is distributed by TF-IDF score share, so the
+    /// seed keyword outweighs its co-occurring tail. (#296, spike #295
+    /// defect 6.) Falls back to a uniform split when scores are absent
+    /// (legacy JSON) or malformed.
     pub fn keyword_weights(&self) -> std::collections::HashMap<String, f64> {
         let mut weights = std::collections::HashMap::new();
         for cluster in &self.clusters {
-            // Each keyword in a cluster gets the cluster's weight,
-            // distributed evenly among the keywords
-            let per_keyword = cluster.weight / cluster.keywords.len().max(1) as f64;
-            for keyword in &cluster.keywords {
-                *weights.entry(keyword.clone()).or_insert(0.0) += per_keyword;
+            let score_sum: f64 = cluster.keyword_scores.iter().sum();
+            let rank_weighted =
+                cluster.keyword_scores.len() == cluster.keywords.len() && score_sum > f64::EPSILON;
+
+            if rank_weighted {
+                for (keyword, &score) in cluster.keywords.iter().zip(&cluster.keyword_scores) {
+                    *weights.entry(keyword.clone()).or_insert(0.0) +=
+                        cluster.weight * score / score_sum;
+                }
+            } else {
+                let per_keyword = cluster.weight / cluster.keywords.len().max(1) as f64;
+                for keyword in &cluster.keywords {
+                    *weights.entry(keyword.clone()).or_insert(0.0) += per_keyword;
+                }
             }
         }
         weights
@@ -104,11 +123,13 @@ mod tests {
                 TopicCluster {
                     label: "Test Topic".to_string(),
                     keywords: vec!["a".to_string(), "b".to_string()],
+                    keyword_scores: vec![],
                     weight: 0.6,
                 },
                 TopicCluster {
                     label: "Other".to_string(),
                     keywords: vec!["c".to_string()],
+                    keyword_scores: vec![],
                     weight: 0.4,
                 },
             ],
@@ -119,5 +140,50 @@ mod tests {
         assert!((weights["a"] - 0.3).abs() < 0.001);
         assert!((weights["b"] - 0.3).abs() < 0.001);
         assert!((weights["c"] - 0.4).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_keyword_weights_rank_weighted() {
+        let fp = TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "t".to_string(),
+                keywords: vec!["seed".to_string(), "neighbor".to_string()],
+                keyword_scores: vec![3.0, 1.0],
+                weight: 0.8,
+            }],
+            post_count: 100,
+        };
+        let weights = fp.keyword_weights();
+        // Cluster weight 0.8 split by score share: seed 3/4, neighbor 1/4
+        assert!((weights["seed"] - 0.6).abs() < 1e-9);
+        assert!((weights["neighbor"] - 0.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_keyword_weights_uniform_fallback_for_legacy_json() {
+        // A fingerprint serialized before keyword_scores existed
+        let json =
+            r#"{"clusters":[{"label":"t","keywords":["a","b"],"weight":0.6}],"post_count":10}"#;
+        let fp: TopicFingerprint =
+            serde_json::from_str(json).expect("legacy JSON must deserialize");
+        let weights = fp.keyword_weights();
+        assert!((weights["a"] - 0.3).abs() < 1e-9);
+        assert!((weights["b"] - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_keyword_weights_mismatched_scores_fall_back_to_uniform() {
+        let fp = TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "t".to_string(),
+                keywords: vec!["a".to_string(), "b".to_string()],
+                keyword_scores: vec![1.0], // wrong length — defensive fallback
+                weight: 0.6,
+            }],
+            post_count: 10,
+        };
+        let weights = fp.keyword_weights();
+        assert!((weights["a"] - 0.3).abs() < 1e-9);
+        assert!((weights["b"] - 0.3).abs() < 1e-9);
     }
 }

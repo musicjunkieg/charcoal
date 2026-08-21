@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7169011b3ac4fd4a124daecb44ebe1a9c773ea88",
+    "short_hash": "7169011",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:16:35-07:00",
+    "message": "fix(296): strip URLs and mentions before embedding on both sides\n\nNew clean_for_embedding keeps case/punctuation/hashtags (transformers\nuse them) and removes only content-free tokens. Applied at all four\ncentroid sites; NLI pair-matching embeddings intentionally untouched.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
     "hash": "2b90a6b271f30022375aaa62c5463e417acf7a5b",
     "short_hash": "2b90a6b",
     "author": "Bryan Guffey",

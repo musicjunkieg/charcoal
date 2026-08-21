@@ -5312,6 +5312,17 @@
       "created_at": "2026-08-20T17:58:31.121170-07:00",
       "updated_at": "2026-08-20T17:58:31.121170-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"2b90a6b\",\"confidence\":95}"
+    },
+    {
+      "id": 491,
+      "change_id": "de02eb02-d362-4bfd-87af-6f53d0e88c3f",
+      "node_type": "action",
+      "title": "Task 3/8 #296: clean_for_embedding at 4 centroid sites (commit 7169011), review approved",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T18:20:05.133362-07:00",
+      "updated_at": "2026-08-20T18:20:05.133362-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"7169011\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10495,6 +10506,17 @@
       "weight": 1.0,
       "rationale": "Task 2 execution",
       "created_at": "2026-08-20T17:58:31.130234-07:00"
+    },
+    {
+      "id": 482,
+      "from_node_id": 488,
+      "to_node_id": 491,
+      "from_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "to_change_id": "de02eb02-d362-4bfd-87af-6f53d0e88c3f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 execution",
+      "created_at": "2026-08-20T18:20:05.142378-07:00"
     }
   ],
   "documents": [
