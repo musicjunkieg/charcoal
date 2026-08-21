@@ -192,6 +192,71 @@ async fn stage1_early_exit_low_when_clean_and_irrelevant() {
 }
 
 // ============================================================
+// stage1_outcome — caller wiring: Unreliable fingerprint blocks early exit
+// (#296 Task 6)
+// ============================================================
+
+#[tokio::test]
+async fn stage1_no_early_exit_when_fingerprint_unreliable() {
+    // Regression test for the CALLER wiring, not the pure function.
+    // `should_early_exit_stage1` has unit tests proving it returns false for
+    // Unreliable quality, but nothing at the integration level proved
+    // `stage1_outcome` actually computes quality via
+    // `FingerprintQuality::from_counts` and passes it through. Before that
+    // wiring existed, this exact sample (small, clean, topically irrelevant)
+    // early-exited to Terminal("Low") same as the 15-original case above.
+    //
+    // 6 first-person originals (>= MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT's 5,
+    // so the onnx_scores.len() gate alone would allow early exit) but < 15,
+    // with 0 replies/quotes, so FingerprintQuality::from_counts(6, 0) is
+    // Unreliable (< 15 total posts). All posts score 0.0 by the fixed scorer
+    // (< ONNX_CLEAN_THRESHOLD 0.10), and topics don't overlap the
+    // astrophysics fingerprint (< overlap gate 0.15) — every other early-exit
+    // condition is satisfied. The only thing that should block the exit is
+    // the Unreliable quality flowing from stage1_outcome into
+    // should_early_exit_stage1.
+    let originals = vec![
+        post("at://a/1", "had a lovely sandwich for lunch today"),
+        post("at://a/2", "the weather is sunny and warm this morning"),
+        post("at://a/3", "watering my tomato plants in the garden"),
+        post("at://a/4", "made fresh coffee and read a paperback novel"),
+        post("at://a/5", "took the dog for a walk around the park"),
+        post("at://a/6", "baking bread this weekend, smells wonderful"),
+    ];
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 6,
+    };
+    let scorer = FixedScorer(0.0);
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let outcome = stage1_outcome(
+        &sample,
+        &scorer,
+        "clean.bsky.social",
+        "did:plc:clean",
+        &fp,
+        &weights,
+        None,
+    )
+    .await
+    .expect("stage1_outcome should not error");
+
+    match outcome {
+        Stage1Outcome::Proceed { .. } => {}
+        Stage1Outcome::Terminal(_) => panic!(
+            "expected Proceed: Unreliable fingerprint quality must block the \
+             Stage 1 early exit even when scores are clean and overlap is low"
+        ),
+    }
+}
+
+// ============================================================
 // stage1_outcome — coverage gate: unassessable-language posts (#222)
 // ============================================================
 

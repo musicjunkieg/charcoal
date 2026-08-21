@@ -998,14 +998,14 @@ pub const MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT: usize = 5;
 /// no hostile language or identity terms. High scores are NOT trustworthy
 /// (keyword triggering on identity terms).
 ///
-/// A fingerprint with `Unreliable` quality (zero originals) yields an
-/// overlap number derived entirely from reply context — the topics of
-/// whoever they were arguing with. That number must never be the reason we
-/// SKIP analyzing an account. Note this only blocks the early exit; Stage 2
-/// scoring still uses the overlap, because for an actual harasser the
-/// reply-derived topics ARE the protected user's spaces and damping them
-/// would create false negatives. Score-side use of quality waits for #135
-/// calibration. (#296)
+/// A fingerprint with `Unreliable` quality (zero originals, or under 15
+/// posts total) yields an overlap number derived entirely from reply
+/// context — the topics of whoever they were arguing with. That number
+/// must never be the reason we SKIP analyzing an account. Note this only
+/// blocks the early exit; Stage 2 scoring still uses the overlap, because
+/// for an actual harasser the reply-derived topics ARE the protected
+/// user's spaces and damping them would create false negatives. Score-side
+/// use of quality waits for #135 calibration. (#296)
 pub fn should_early_exit_stage1(
     onnx_scores: &[f64],
     topic_overlap: Option<f64>,
