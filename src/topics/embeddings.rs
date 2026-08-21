@@ -222,29 +222,34 @@ fn embed_sync(
     Ok(embeddings)
 }
 
-/// Compute the mean of multiple embedding vectors.
+/// Compute the mean of L2-normalized embedding vectors.
 ///
-/// Used to create a single "topic vector" for an account by averaging
-/// the embeddings of all their posts. This produces a stable centroid
-/// that represents the overall semantic space of what someone talks about.
-pub fn mean_embedding(embeddings: &[Vec<f64>]) -> Vec<f64> {
-    if embeddings.is_empty() {
-        return vec![0.0; EMBEDDING_DIM];
-    }
-
-    let n = embeddings.len() as f64;
+/// Each vector is scaled to unit length before averaging, so a long verbose
+/// post contributes exactly as much direction as a short one — the centroid
+/// reflects *what* someone posts about, not how long-winded each post is.
+/// Zero vectors (embeddings of empty text) are skipped entirely rather than
+/// dragging the mean toward the origin. (#296, spike #295 defect 4)
+pub fn normalized_mean_embedding(embeddings: &[Vec<f64>]) -> Vec<f64> {
     let mut mean = vec![0.0_f64; EMBEDDING_DIM];
+    let mut counted = 0.0_f64;
 
     for emb in embeddings {
+        let norm: f64 = emb.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm < f64::EPSILON {
+            continue;
+        }
+        counted += 1.0;
         for (i, &val) in emb.iter().enumerate() {
             if i < EMBEDDING_DIM {
-                mean[i] += val;
+                mean[i] += val / norm;
             }
         }
     }
 
-    for val in &mut mean {
-        *val /= n;
+    if counted > 0.0 {
+        for val in &mut mean {
+            *val /= counted;
+        }
     }
 
     mean
@@ -276,33 +281,6 @@ pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_mean_embedding_single() {
-        let embeddings = vec![vec![1.0, 2.0, 3.0]];
-        let mean = mean_embedding(&embeddings);
-        assert_eq!(mean.len(), EMBEDDING_DIM);
-        assert!((mean[0] - 1.0).abs() < f64::EPSILON);
-        assert!((mean[1] - 2.0).abs() < f64::EPSILON);
-        assert!((mean[2] - 3.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mean_embedding_multiple() {
-        let embeddings = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
-        let mean = mean_embedding(&embeddings);
-        assert!((mean[0] - 0.5).abs() < f64::EPSILON);
-        assert!((mean[1] - 0.5).abs() < f64::EPSILON);
-        assert!((mean[2] - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mean_embedding_empty() {
-        let embeddings: Vec<Vec<f64>> = vec![];
-        let mean = mean_embedding(&embeddings);
-        assert_eq!(mean.len(), EMBEDDING_DIM);
-        assert!(mean.iter().all(|&v| v == 0.0));
-    }
 
     #[test]
     fn test_cosine_identical() {
@@ -395,26 +373,49 @@ mod tests {
     }
 
     #[test]
-    fn test_mean_embedding_all_same() {
-        // Averaging identical vectors should return the same vector
-        let v = vec![0.5, -0.3, 0.8];
-        let embeddings = vec![v.clone(), v.clone(), v.clone()];
-        let mean = mean_embedding(&embeddings);
-        assert!((mean[0] - 0.5).abs() < 1e-10);
-        assert!((mean[1] - -0.3).abs() < 1e-10);
-        assert!((mean[2] - 0.8).abs() < 1e-10);
+    fn test_normalized_mean_ignores_magnitude() {
+        // A long post (large magnitude) and a short post (small magnitude)
+        // pointing in different directions must contribute EQUALLY.
+        // Unnormalized mean of [10,0] and [0,1] points 84° toward x.
+        // Normalized mean points exactly 45°.
+        let embeddings = vec![vec![10.0, 0.0], vec![0.0, 1.0]];
+        let mean = normalized_mean_embedding(&embeddings);
+        assert!(
+            (mean[0] - mean[1]).abs() < 1e-10,
+            "Equal contribution expected, got x={} y={}",
+            mean[0],
+            mean[1]
+        );
     }
 
     #[test]
-    fn test_mean_embedding_result_is_embedding_dim() {
-        // Even short input vectors produce EMBEDDING_DIM-length output
-        let embeddings = vec![vec![1.0, 2.0]];
-        let mean = mean_embedding(&embeddings);
-        assert_eq!(mean.len(), EMBEDDING_DIM);
-        // Elements beyond input length should be 0.0
-        assert!((mean[0] - 1.0).abs() < f64::EPSILON);
-        assert!((mean[1] - 2.0).abs() < f64::EPSILON);
-        assert!((mean[2] - 0.0).abs() < f64::EPSILON);
+    fn test_normalized_mean_skips_zero_vectors() {
+        let embeddings = vec![vec![0.0, 0.0], vec![3.0, 4.0]];
+        let mean = normalized_mean_embedding(&embeddings);
+        // Only the non-zero vector counts: unit vector of [3,4] = [0.6, 0.8]
+        assert!((mean[0] - 0.6).abs() < 1e-10);
+        assert!((mean[1] - 0.8).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_normalized_mean_empty_and_all_zero() {
+        let empty: Vec<Vec<f64>> = vec![];
+        assert_eq!(normalized_mean_embedding(&empty).len(), EMBEDDING_DIM);
+        let all_zero = vec![vec![0.0; 3]];
+        assert!(normalized_mean_embedding(&all_zero)
+            .iter()
+            .all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn test_normalized_mean_single_vector_is_unit() {
+        let embeddings = vec![vec![3.0, 4.0]];
+        let mean = normalized_mean_embedding(&embeddings);
+        let norm: f64 = mean.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-10,
+            "Single input should yield a unit vector"
+        );
     }
 
     #[test]

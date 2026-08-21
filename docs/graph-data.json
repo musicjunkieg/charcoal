@@ -5290,6 +5290,17 @@
       "created_at": "2026-08-20T16:04:02.073760-07:00",
       "updated_at": "2026-08-20T16:04:02.073760-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"confidence\":90}"
+    },
+    {
+      "id": 489,
+      "change_id": "58092529-39f4-487f-af1d-1a0f6c615303",
+      "node_type": "action",
+      "title": "Task 1/8 #296: sign-preserving cosine (commit 3b3024b), review approved",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T17:39:47.488501-07:00",
+      "updated_at": "2026-08-20T17:39:47.488501-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"3b3024b\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10451,6 +10462,17 @@
       "weight": 1.0,
       "rationale": "Planning phase of #296",
       "created_at": "2026-08-20T16:04:02.082224-07:00"
+    },
+    {
+      "id": 480,
+      "from_node_id": 488,
+      "to_node_id": 489,
+      "from_change_id": "17df4a8f-ef20-430e-a91d-813efb1bd04e",
+      "to_change_id": "58092529-39f4-487f-af1d-1a0f6c615303",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 1 execution",
+      "created_at": "2026-08-20T17:39:47.496835-07:00"
     }
   ],
   "documents": [

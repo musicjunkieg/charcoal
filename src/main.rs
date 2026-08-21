@@ -261,7 +261,8 @@ async fn main() -> Result<()> {
                 println!("\nComputing sentence embeddings...");
                 let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
                 let post_embeddings = embedder.embed_batch(&post_texts).await?;
-                let mean_emb = charcoal::topics::embeddings::mean_embedding(&post_embeddings);
+                let mean_emb =
+                    charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
                 db.save_embedding(&did, &mean_emb).await?;
                 println!(
                     "  Embedding computed ({} posts → {}-dim vector)",

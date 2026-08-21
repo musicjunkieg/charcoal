@@ -556,7 +556,8 @@ pub async fn build_user_fingerprint(
         {
             Ok(Ok(embedder)) => match embedder.embed_batch(&post_texts).await {
                 Ok(post_embeddings) => {
-                    let mean_emb = crate::topics::embeddings::mean_embedding(&post_embeddings);
+                    let mean_emb =
+                        crate::topics::embeddings::normalized_mean_embedding(&post_embeddings);
                     if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
                         warn!(error = %e, "Failed to save embedding during fingerprint build");
                     } else {

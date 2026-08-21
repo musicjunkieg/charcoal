@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3b3024b48df3cc3b2ca9cb70b4de3da7755c07d4",
+    "short_hash": "3b3024b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T17:36:27-07:00",
+    "message": "fix(296): preserve cosine sign instead of clamping negatives to zero\n\nOpposition is signal. Scoring is unchanged: the overlap gate catches\neverything below threshold, negative or zero.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "b67f0c77a7d301213c640056890728fb9d74df41",
     "short_hash": "b67f0c7",
     "author": "Bryan Guffey",

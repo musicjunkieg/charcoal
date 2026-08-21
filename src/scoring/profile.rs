@@ -598,7 +598,7 @@ pub async fn score_from_sample(
     } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
         // Embedding path: embed target's posts, average, compare
         let target_embeddings = emb.embed_batch(&fingerprint_posts).await?;
-        let target_mean = embeddings::mean_embedding(&target_embeddings);
+        let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
         embeddings::cosine_similarity_embeddings(protected_emb, &target_mean)
     } else {
         // Fallback: TF-IDF keyword cosine similarity
