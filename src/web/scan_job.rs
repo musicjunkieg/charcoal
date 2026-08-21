@@ -515,6 +515,30 @@ pub(crate) fn launch_scan(
     });
 }
 
+/// Rebuild the protected user's fingerprint when it's older than this.
+/// Matches the scan-staleness tiering cadence (Normal = 14 days). (#296,
+/// spike #295 defect 10 — updated_at was recorded but never consulted.)
+const FINGERPRINT_MAX_AGE_DAYS: i64 = 14;
+
+/// True when a fingerprint's `updated_at` (both backends emit
+/// `YYYY-MM-DD HH:MM:SS` UTC) is more than FINGERPRINT_MAX_AGE_DAYS old.
+/// Unparseable timestamps count as fresh — a malformed row must not
+/// trigger a rebuild on every scan.
+pub fn fingerprint_is_stale(updated_at: &str, now: chrono::NaiveDateTime) -> bool {
+    match chrono::NaiveDateTime::parse_from_str(updated_at, "%Y-%m-%d %H:%M:%S") {
+        Ok(built) => {
+            now.signed_duration_since(built) > chrono::Duration::days(FINGERPRINT_MAX_AGE_DAYS)
+        }
+        Err(_) => {
+            warn!(
+                updated_at,
+                "Unparseable fingerprint timestamp; treating as fresh"
+            );
+            false
+        }
+    }
+}
+
 /// Build a topic fingerprint and embeddings for a user.
 /// Fetches their recent posts, runs TF-IDF, and computes MiniLM embeddings.
 /// Used by both the scan pipeline (auto-fingerprint) and the admin pre-seed handler.
@@ -524,7 +548,7 @@ pub async fn build_user_fingerprint(
     user_did: &str,
     handle: &str,
 ) -> anyhow::Result<()> {
-    info!("No fingerprint found for {user_did}, building automatically");
+    info!("Building topic fingerprint for {user_did}");
 
     let client = PublicAtpClient::new(&config.public_api_url)?;
     let fp_posts = crate::bluesky::posts::fetch_recent_posts(&client, handle, 500).await?;
@@ -756,27 +780,44 @@ async fn run_scan(
     let client = PublicAtpClient::new(&config.public_api_url)?;
 
     let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
-        Some((json, _, _)) => serde_json::from_str(&json)?,
-        None => {
-            // Auto-fingerprint: fetch posts, run TF-IDF, compute embeddings, save to DB.
-            // build_user_fingerprint handles the full pipeline including embeddings.
+        Some((json, _, updated_at))
+            if !fingerprint_is_stale(&updated_at, chrono::Utc::now().naive_utc()) =>
+        {
+            serde_json::from_str(&json)?
+        }
+        existing => {
+            // Absent or stale: (re)build. On a stale-rebuild failure fall
+            // back to the stale fingerprint rather than failing the scan —
+            // stale data beats no scan.
+            let is_rebuild = existing.is_some();
             set_progress(
                 &scan_manager,
                 user_did,
                 claim_id,
                 WebScanPhase::Fingerprint,
-                "Building your topic fingerprint from recent posts…",
+                if is_rebuild {
+                    "Refreshing your topic fingerprint (older than 14 days)…"
+                } else {
+                    "Building your topic fingerprint from recent posts…"
+                },
             )
             .await;
 
-            build_user_fingerprint(&config, &*db, user_did, actor_handle).await?;
-
-            // Load the fingerprint we just built
-            let (json, _, _) = db
-                .get_fingerprint(user_did)
-                .await?
-                .expect("Fingerprint was just saved");
-            serde_json::from_str(&json)?
+            match build_user_fingerprint(&config, &*db, user_did, actor_handle).await {
+                Ok(()) => {
+                    let (json, _, _) = db
+                        .get_fingerprint(user_did)
+                        .await?
+                        .expect("Fingerprint was just saved");
+                    serde_json::from_str(&json)?
+                }
+                Err(e) if is_rebuild => {
+                    warn!(error = %e, "Fingerprint refresh failed; using stale fingerprint");
+                    let (json, _, _) = existing.expect("checked is_rebuild");
+                    serde_json::from_str(&json)?
+                }
+                Err(e) => return Err(e),
+            }
         }
     };
 
@@ -1532,5 +1573,37 @@ mod model_sharing_tests {
         assert!(Arc::ptr_eq(&a.toxicity, &b.toxicity));
         assert!(Arc::ptr_eq(&a.embedder, &b.embedder));
         assert_eq!(Arc::strong_count(&models), 3, "models + a + b");
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_staleness_tests {
+    use super::*;
+
+    fn now() -> chrono::NaiveDateTime {
+        chrono::NaiveDateTime::parse_from_str("2026-08-20 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+    }
+
+    #[test]
+    fn fresh_fingerprint_is_not_stale() {
+        assert!(!fingerprint_is_stale("2026-08-19 12:00:00", now()));
+    }
+
+    #[test]
+    fn fifteen_day_old_fingerprint_is_stale() {
+        assert!(fingerprint_is_stale("2026-08-05 11:59:59", now()));
+    }
+
+    #[test]
+    fn exactly_fourteen_days_is_not_stale() {
+        // Boundary: staleness begins strictly AFTER 14 days.
+        assert!(!fingerprint_is_stale("2026-08-06 12:00:00", now()));
+    }
+
+    #[test]
+    fn unparseable_timestamp_is_treated_as_fresh() {
+        // A malformed timestamp must not cause a rebuild loop on every scan.
+        assert!(!fingerprint_is_stale("not a date", now()));
+        assert!(!fingerprint_is_stale("", now()));
     }
 }

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "35d5984b10c72e41b57818296b57b9189d134ad3",
+    "short_hash": "35d5984",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:21:59-07:00",
+    "message": "test(296): stage1 caller honors the Unreliable early-exit block\n\nIntegration-level regression test: a 6-original clean irrelevant sample\nnow Proceeds instead of early-exiting. Also tightens the quality doc\nparenthetical to match from_counts semantics.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
     "hash": "056db5b16b1e5ea7d6a4c20037adbdb8b048dfa7",
     "short_hash": "056db5b",
     "author": "Bryan Guffey",
