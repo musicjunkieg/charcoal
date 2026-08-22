@@ -149,10 +149,21 @@ pub async fn build_user_fingerprint(
     // worker it would block every other task on that thread — including the
     // queue heartbeat in `run_under_slot`, whose lease would then look lapsed.
     // `assemble_fingerprint` itself stays sync so it remains unit-testable.
-    let artifacts =
+    let fallback_post_texts = post_texts.clone();
+    let assembled =
         tokio::task::spawn_blocking(move || assemble_fingerprint(&post_texts, embedded.as_ref()))
             .await
-            .context("fingerprint assembly task panicked")??;
+            .context("fingerprint assembly task panicked")?;
+    let artifacts = match assembled {
+        Ok(artifacts) => artifacts,
+        Err(error) => {
+            // Same contract as every other embedding failure on this path
+            // (#297 spec degradation table): a keyword fingerprint beats no
+            // fingerprint. A keyword-only assembly failure still propagates.
+            warn!(error = %error, "Fingerprint assembly failed; building keyword-only fingerprint");
+            assemble_fingerprint(&fallback_post_texts, None)?
+        }
+    };
     let json = serde_json::to_string(&artifacts.fingerprint)?;
     db.save_fingerprint_bundle(
         user_did,
