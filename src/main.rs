@@ -1153,21 +1153,30 @@ async fn main() -> Result<()> {
             sqlite_db.upsert_user(&did, &config.bluesky_handle).await?;
             pg_db.upsert_user(&did, &config.bluesky_handle).await?;
 
-            // 1. Migrate fingerprint + embedding
-            if let Some((json, count, _)) = sqlite_db.get_fingerprint(&did).await? {
-                pg_db.save_fingerprint(&did, &json, count).await?;
+            // 1. Migrate fingerprint + embedding + clusters
+            if let Some((json, post_count, _)) = sqlite_db.get_fingerprint(&did).await? {
+                let embedding = sqlite_db.get_embedding(&did).await?;
+                let clusters = sqlite_db.get_topic_centroids(&did).await?;
+                pg_db
+                    .save_fingerprint_bundle(
+                        &did,
+                        &json,
+                        post_count,
+                        embedding.as_deref(),
+                        &clusters,
+                    )
+                    .await?;
                 println!(
-                    "  {} Topic fingerprint migrated ({count} posts)",
+                    "  {} Topic fingerprint migrated ({post_count} posts)",
                     "✓".green()
                 );
 
-                // Migrate embedding if present
-                if let Some(embedding) = sqlite_db.get_embedding(&did).await? {
-                    pg_db.save_embedding(&did, &embedding).await?;
+                // Embedding already included in the bundle; report if present
+                if let Some(ref emb) = embedding {
                     println!(
                         "  {} Embedding migrated ({}-dim vector)",
                         "✓".green(),
-                        embedding.len()
+                        emb.len()
                     );
                 }
             } else {

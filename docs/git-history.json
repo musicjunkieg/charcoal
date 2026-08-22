@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d3754ec29e49c2966006608dad8bc756339dad05",
+    "short_hash": "d3754ec",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:17:23-07:00",
+    "message": "feat(302): Postgres save_fingerprint_bundle + get_topic_centroids\n\nImplements the two Database trait methods PgDatabase was missing since\nTask 5 added them (cargo check --features postgres was failing with\nE0046). Mirrors the SQLite semantics: one transaction upserts the\nfingerprint row (JSON + post_count + embedding_vector, f64->f32 for\npgvector) and bumps updated_at once, then replaces all topic_clusters\nrows for the user in cluster_index order. A keyword-only bundle\n(embedding: None) NULLs a prior embedding, since the bundle IS the\ngeneration, not an incremental patch.\n\nAdds two live-DB tests mirroring db_postgres.rs conventions: bundle\nroundtrip + replacement (tolerance-compared centroids, since pgvector\nstores f32), and delete_user_data cascading to topic_clusters via the\nmigration 0013 FK ON DELETE CASCADE.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
     "hash": "1ad3630afc6f9599b12d890ca760a46f83e27692",
     "short_hash": "1ad3630",
     "author": "Bryan Guffey",
