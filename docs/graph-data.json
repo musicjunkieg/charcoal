@@ -5631,6 +5631,28 @@
       "created_at": "2026-08-21T21:12:47.737603-07:00",
       "updated_at": "2026-08-21T21:12:47.737603-07:00",
       "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"53a3442\",\"confidence\":95}"
+    },
+    {
+      "id": 520,
+      "change_id": "469e2042-ef9b-4566-83a1-965cb86dbc04",
+      "node_type": "action",
+      "title": "Task 4: migration 0013 - topic_clusters table + overlap_legacy column (SQLite + Postgres)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T21:26:31.095470-07:00",
+      "updated_at": "2026-08-21T21:26:31.095470-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"c0f2c4e\",\"confidence\":90,\"files\":[\"src/db/schema.rs\",\"src/db/sqlite.rs\",\"src/db/postgres.rs\",\"migrations/postgres/0013_topic_clusters.sql\"]}"
+    },
+    {
+      "id": 521,
+      "change_id": "a385be40-5037-47c6-9c0b-b6393da47e85",
+      "node_type": "outcome",
+      "title": "Migration 0013 GREEN: topic_clusters + overlap_legacy on both backends; table-count tests updated 12->13; clippy clean web/postgres/no-features; 0 model-gated skips; committed c0f2c4e",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T21:26:40.319659-07:00",
+      "updated_at": "2026-08-21T21:26:40.319659-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"c0f2c4e\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -11199,6 +11221,39 @@
       "weight": 1.0,
       "rationale": "plan task 3 executed",
       "created_at": "2026-08-21T21:12:47.748604-07:00"
+    },
+    {
+      "id": 517,
+      "from_node_id": 516,
+      "to_node_id": 520,
+      "from_change_id": "72755b65-7ec5-4c68-8c7f-01e21eea596e",
+      "to_change_id": "469e2042-ef9b-4566-83a1-965cb86dbc04",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 of the 10-task #297/#302 plan",
+      "created_at": "2026-08-21T21:26:40.290360-07:00"
+    },
+    {
+      "id": 518,
+      "from_node_id": 514,
+      "to_node_id": 520,
+      "from_change_id": "b3b7c881-e9e1-4ad2-87dd-1ac9582f96b7",
+      "to_change_id": "469e2042-ef9b-4566-83a1-965cb86dbc04",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "overlap_legacy column implements the shadow-compare decision",
+      "created_at": "2026-08-21T21:26:40.301776-07:00"
+    },
+    {
+      "id": 519,
+      "from_node_id": 520,
+      "to_node_id": 521,
+      "from_change_id": "469e2042-ef9b-4566-83a1-965cb86dbc04",
+      "to_change_id": "a385be40-5037-47c6-9c0b-b6393da47e85",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "outcome of Task 4 implementation",
+      "created_at": "2026-08-21T21:26:43.939233-07:00"
     }
   ],
   "documents": [

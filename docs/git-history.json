@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c0f2c4e1a0d74d5600c5423ca177fe8ada05225e",
+    "short_hash": "c0f2c4e",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T21:26:18-07:00",
+    "message": "feat(297): migration 0013 - topic_clusters table + account_scores.overlap_legacy\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
     "hash": "53a34421b18ebeb08122f3c71f64619825ac1466",
     "short_hash": "53a3442",
     "author": "Bryan Guffey",

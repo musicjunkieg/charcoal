@@ -37,7 +37,7 @@
   - `pub struct PostCluster { pub centroid: Vec<f64>, pub members: Vec<usize>, pub weight: f64 }`
   - `pub struct ClusteringParams { pub merge_threshold: f64, pub max_clusters: usize }` with `Default` = `{ 0.60, 12 }`
   - `pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) -> Vec<PostCluster>`
-  - Guarantees: deterministic; zero-vector inputs skipped; surviving clusters pruned to size ≥ `max(2, (0.02 * n).ceil())` (n = non-zero inputs) unless that would leave zero clusters, in which case the largest cluster survives; `members` are indices into the ORIGINAL `embeddings` slice; weights over survivors sum to 1.0; clusters sorted by weight descending, ties by smallest first member index; centroids are L2-normalized.
+  - Guarantees: deterministic; zero-vector inputs skipped; surviving clusters pruned to size ≥ `max(2, (0.02 * n).ceil())` (n = non-zero inputs) unless that would leave zero clusters, in which case every cluster tied for the largest size survives (decision with Bryan 2026-08-21: a fragmented history keeps its several small topics rather than one arbitrary survivor); `members` are indices into the ORIGINAL `embeddings` slice; weights over survivors sum to 1.0; clusters sorted by weight descending, ties by smallest first member index; centroids are L2-normalized.
 
 - [ ] **Step 1: Write the failing tests**
 

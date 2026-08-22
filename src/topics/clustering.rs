@@ -162,7 +162,10 @@ pub fn build_clustered_fingerprint(
     // One TF-IDF pass per cluster, over that cluster's posts only. A single
     // output cluster per pass: we want ranked keywords for a label, not
     // sub-clustering. Small keyword budget — labels, not a parallel universe.
-    let labeler = TfIdfExtractor { top_n_keywords: 12, max_clusters: 1 };
+    let labeler = TfIdfExtractor {
+        top_n_keywords: 12,
+        max_clusters: 1,
+    };
 
     let mut json_clusters = Vec::with_capacity(clusters.len());
     for (i, cluster) in clusters.iter().enumerate() {
@@ -176,7 +179,11 @@ pub fn build_clustered_fingerprint(
         let (label, keywords, keyword_scores) = match labeler.extract(&member_texts) {
             Ok(fp) if !fp.clusters.is_empty() => {
                 let c = &fp.clusters[0];
-                (c.label.clone(), c.keywords.clone(), c.keyword_scores.clone())
+                (
+                    c.label.clone(),
+                    c.keywords.clone(),
+                    c.keyword_scores.clone(),
+                )
             }
             _ => (format!("topic {}", i + 1), Vec::new(), Vec::new()),
         };
@@ -198,7 +205,10 @@ pub fn build_clustered_fingerprint(
     }
 
     Ok((
-        TopicFingerprint { clusters: json_clusters, post_count: total_post_count },
+        TopicFingerprint {
+            clusters: json_clusters,
+            post_count: total_post_count,
+        },
         clusters,
     ))
 }
@@ -345,13 +355,19 @@ mod tests {
             "arranging a cappella voicings for choral rehearsal".into(),
             "rehearsal warmups for a cappella choral singers".into(),
         ];
-        let mut embs: Vec<Vec<f64>> = (0..3).map(|i| {
-            let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
-            v[0] = 1.0; v[1] = i as f64 * 0.01; v
-        }).collect();
+        let mut embs: Vec<Vec<f64>> = (0..3)
+            .map(|i| {
+                let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
+                v[0] = 1.0;
+                v[1] = i as f64 * 0.01;
+                v
+            })
+            .collect();
         embs.extend((0..3).map(|i| {
             let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
-            v[100] = 1.0; v[101] = i as f64 * 0.01; v
+            v[100] = 1.0;
+            v[101] = i as f64 * 0.01;
+            v
         }));
 
         let (fp, clusters) =
@@ -374,7 +390,9 @@ mod tests {
     fn clustered_fingerprint_rejects_mismatched_slices() {
         let texts = vec!["one post".to_string()];
         let embs: Vec<Vec<f64>> = Vec::new();
-        assert!(build_clustered_fingerprint(&texts, &embs, 1, &ClusteringParams::default()).is_err());
+        assert!(
+            build_clustered_fingerprint(&texts, &embs, 1, &ClusteringParams::default()).is_err()
+        );
     }
 
     #[test]
@@ -386,10 +404,14 @@ mod tests {
             "and the or but so".into(),
             "or so and the but".into(),
         ];
-        let embs: Vec<Vec<f64>> = (0..3).map(|i| {
-            let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
-            v[0] = 1.0; v[1] = i as f64 * 0.01; v
-        }).collect();
+        let embs: Vec<Vec<f64>> = (0..3)
+            .map(|i| {
+                let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
+                v[0] = 1.0;
+                v[1] = i as f64 * 0.01;
+                v
+            })
+            .collect();
         let (fp, clusters) =
             build_clustered_fingerprint(&texts, &embs, 3, &ClusteringParams::default()).unwrap();
         assert_eq!(clusters.len(), 1);
