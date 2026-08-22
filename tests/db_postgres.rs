@@ -238,6 +238,7 @@ async fn test_pg_account_score_upsert_and_rank() {
         handle: "pgtest.bsky.social".to_string(),
         toxicity_score: Some(0.75),
         topic_overlap: Some(0.4),
+        overlap_legacy: None,
         threat_score: Some(52.5),
         threat_tier: Some("High".to_string()),
         posts_analyzed: 15,

@@ -5708,6 +5708,28 @@
       "created_at": "2026-08-21T22:44:59.648936-07:00",
       "updated_at": "2026-08-21T22:44:59.648936-07:00",
       "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"e7ef3d0\",\"confidence\":92}"
+    },
+    {
+      "id": 529,
+      "change_id": "9d42d3a9-17d9-454f-9885-85ffaf58dd23",
+      "node_type": "action",
+      "title": "Task 9: scan wiring - centroids into scoring, overlap_legacy shadow column, legacy-format rebuild trigger",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T23:24:07.864143-07:00",
+      "updated_at": "2026-08-21T23:24:07.864143-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"f79c61a\",\"confidence\":90,\"files\":[\"src/scoring/profile.rs\",\"src/db/models.rs\",\"src/db/queries.rs\",\"src/db/postgres.rs\",\"src/web/scan_job.rs\",\"src/pipeline/scan_phases/finalize.rs\"]}"
+    },
+    {
+      "id": 530,
+      "change_id": "676b6471-586a-48e1-9c8e-682a6c0101b2",
+      "node_type": "outcome",
+      "title": "Task 9 GREEN: 2 new unit_profile tests (RED compile -> pass) + legacy_format_forces_rebuild 4-case test; full --features web suite 0 failures 0 model-gated skips; ZERO golden/composition expectation changes (all existing call sites pass None/empty = byte-identical old math); cargo check postgres+default clean, clippy --features web --all-targets clean. Committed f79c61a",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T23:24:14.930011-07:00",
+      "updated_at": "2026-08-21T23:24:14.930011-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"f79c61a\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -11386,6 +11408,28 @@
       "weight": 1.0,
       "rationale": "action produced this verified outcome",
       "created_at": "2026-08-21T22:45:02.798057-07:00"
+    },
+    {
+      "id": 527,
+      "from_node_id": 514,
+      "to_node_id": 529,
+      "from_change_id": "b3b7c881-e9e1-4ad2-87dd-1ac9582f96b7",
+      "to_change_id": "9d42d3a9-17d9-454f-9885-85ffaf58dd23",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements the approved shadow-compare decision: overlap_legacy recorded alongside the new max-over-topics live overlap",
+      "created_at": "2026-08-21T23:24:14.905365-07:00"
+    },
+    {
+      "id": 528,
+      "from_node_id": 529,
+      "to_node_id": 530,
+      "from_change_id": "9d42d3a9-17d9-454f-9885-85ffaf58dd23",
+      "to_change_id": "676b6471-586a-48e1-9c8e-682a6c0101b2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the Task 9 implementation",
+      "created_at": "2026-08-21T23:24:19.425366-07:00"
     }
   ],
   "documents": [

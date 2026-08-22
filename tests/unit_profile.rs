@@ -782,3 +782,54 @@ async fn empty_centroids_degrade_to_legacy_behavior() {
     let legacy = score.overlap_legacy.unwrap();
     assert!((overlap - legacy).abs() < 1e-9);
 }
+
+#[tokio::test]
+async fn empty_vec_centroids_degrade_same_as_none() {
+    // Production call sites pass Some(&vec) where the vec is EMPTY for pre-#297
+    // data. This must degrade identically to None: live overlap == legacy overlap
+    // == mean-centroid cosine; shadow still recorded.
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+    let empty: Vec<Vec<f64>> = Vec::new();
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,                   // embedder
+        Some(&mean),            // protected_embedding
+        Some(empty.as_slice()), // protected_topic_centroids — empty vec
+        Some(&candidate),       // precomputed_target_embedding
+        0.0,                    // median_engagement
+        false,                  // pile_on
+        None,                   // nli_scorer
+        None,                   // protected_posts_with_embeddings
+        None,                   // direct_pairs
+        None,                   // data_dir
+        None,                   // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    let legacy = score.overlap_legacy.unwrap();
+    assert!((overlap - legacy).abs() < 1e-9);
+}
