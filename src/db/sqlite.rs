@@ -654,6 +654,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_keyword_only_bundle_nulls_a_prior_embedding() {
+        let db = test_db().await;
+        let clusters = vec![crate::db::models::ClusterCentroid {
+            centroid: vec![0.5; 384],
+            post_count: 3,
+        }];
+        let emb = vec![0.25; 384];
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, Some(&emb), &clusters)
+            .await
+            .unwrap();
+        assert!(db.get_embedding(TEST_USER).await.unwrap().is_some());
+
+        // Downgrade to keyword-only: the new generation replaces EVERYTHING —
+        // a stale embedding surviving here would mix generations (#302).
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &[])
+            .await
+            .unwrap();
+        assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
+        assert!(db.get_topic_centroids(TEST_USER).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn test_delete_user_data_clears_topic_clusters() {
         let db = test_db().await;
         let clusters = vec![crate::db::models::ClusterCentroid {
