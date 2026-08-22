@@ -5609,6 +5609,17 @@
       "created_at": "2026-08-21T20:47:58.624798-07:00",
       "updated_at": "2026-08-21T20:47:58.624798-07:00",
       "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"c7c94ae\",\"confidence\":95}"
+    },
+    {
+      "id": 518,
+      "change_id": "fcfeeb67-f200-40a8-94cb-ff6b1cba0796",
+      "node_type": "action",
+      "title": "Task 2: max_topic_overlap implemented + reviewed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T21:00:09.725603-07:00",
+      "updated_at": "2026-08-21T21:00:09.725603-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"652782b\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -11155,6 +11166,17 @@
       "weight": 1.0,
       "rationale": "plan task 1 executed",
       "created_at": "2026-08-21T20:47:58.633510-07:00"
+    },
+    {
+      "id": 515,
+      "from_node_id": 517,
+      "to_node_id": 518,
+      "from_change_id": "cbf2aecf-97b7-4e7f-a3a3-0357664b0e50",
+      "to_change_id": "fcfeeb67-f200-40a8-94cb-ff6b1cba0796",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "plan task 2 executed",
+      "created_at": "2026-08-21T21:00:09.734689-07:00"
     }
   ],
   "documents": [

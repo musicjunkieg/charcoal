@@ -1,5 +1,13 @@
 [
   {
+    "hash": "652782b0ca1857170ac0f6b8c7a130257e7acba2",
+    "short_hash": "652782b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T20:51:19-07:00",
+    "message": "feat(297): max-over-topics overlap with legacy degrade to None\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "c7c94ae8cc4d17b754226054857e6da8d4c075c5",
     "short_hash": "c7c94ae",
     "author": "Bryan Guffey",

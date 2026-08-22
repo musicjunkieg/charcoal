@@ -136,6 +136,73 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
     out
 }
 
+use crate::topics::fingerprint::{TopicCluster, TopicFingerprint};
+use crate::topics::tfidf::TfIdfExtractor;
+use crate::topics::traits::TopicExtractor;
+
+/// Assemble a multi-interest fingerprint: cluster the post embeddings, then
+/// label each cluster by running TF-IDF over only that cluster's own posts
+/// (BERTopic-lite). JSON cluster i corresponds 1:1 with returned PostCluster
+/// i — the persistence layer relies on that ordering (#297/#302).
+pub fn build_clustered_fingerprint(
+    post_texts: &[String],
+    embeddings: &[Vec<f64>],
+    total_post_count: u32,
+    params: &ClusteringParams,
+) -> anyhow::Result<(TopicFingerprint, Vec<PostCluster>)> {
+    anyhow::ensure!(
+        post_texts.len() == embeddings.len(),
+        "post_texts ({}) and embeddings ({}) must be parallel slices",
+        post_texts.len(),
+        embeddings.len(),
+    );
+
+    let clusters = cluster_embeddings(embeddings, params);
+
+    // One TF-IDF pass per cluster, over that cluster's posts only. A single
+    // output cluster per pass: we want ranked keywords for a label, not
+    // sub-clustering. Small keyword budget — labels, not a parallel universe.
+    let labeler = TfIdfExtractor { top_n_keywords: 12, max_clusters: 1 };
+
+    let mut json_clusters = Vec::with_capacity(clusters.len());
+    for (i, cluster) in clusters.iter().enumerate() {
+        let member_texts: Vec<String> = cluster
+            .members
+            .iter()
+            .map(|&m| post_texts[m].clone())
+            .collect();
+        // Tiny or stop-word-only clusters can make TF-IDF bail; a fingerprint
+        // with an unlabeled topic beats no fingerprint, so degrade per-cluster.
+        let (label, keywords, keyword_scores) = match labeler.extract(&member_texts) {
+            Ok(fp) if !fp.clusters.is_empty() => {
+                let c = &fp.clusters[0];
+                (c.label.clone(), c.keywords.clone(), c.keyword_scores.clone())
+            }
+            _ => (format!("topic {}", i + 1), Vec::new(), Vec::new()),
+        };
+        json_clusters.push(TopicCluster {
+            label,
+            keywords,
+            keyword_scores,
+            weight: cluster.weight,
+        });
+    }
+
+    // Finite-value guard, same discipline as #296's keyword-score validation:
+    // a NaN centroid would poison every future cosine against this user.
+    for cluster in &clusters {
+        anyhow::ensure!(
+            cluster.centroid.iter().all(|v| v.is_finite()),
+            "non-finite value in cluster centroid",
+        );
+    }
+
+    Ok((
+        TopicFingerprint { clusters: json_clusters, post_count: total_post_count },
+        clusters,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +331,70 @@ mod tests {
         assert_eq!(clusters.len(), 5);
         let total_weight: f64 = clusters.iter().map(|c| c.weight).sum();
         assert!((total_weight - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn clustered_fingerprint_labels_each_topic_from_its_own_posts() {
+        // Two topic groups with distinctive vocabulary. Embeddings are synthetic
+        // (axis-separated); TF-IDF labeling runs on the real texts.
+        let texts: Vec<String> = vec![
+            "fat liberation is about body autonomy and fat acceptance".into(),
+            "fat acceptance and body liberation communities organizing".into(),
+            "body autonomy fat liberation acceptance politics".into(),
+            "choral rehearsal techniques for a cappella arrangements".into(),
+            "arranging a cappella voicings for choral rehearsal".into(),
+            "rehearsal warmups for a cappella choral singers".into(),
+        ];
+        let mut embs: Vec<Vec<f64>> = (0..3).map(|i| {
+            let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
+            v[0] = 1.0; v[1] = i as f64 * 0.01; v
+        }).collect();
+        embs.extend((0..3).map(|i| {
+            let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
+            v[100] = 1.0; v[101] = i as f64 * 0.01; v
+        }));
+
+        let (fp, clusters) =
+            build_clustered_fingerprint(&texts, &embs, 6, &ClusteringParams::default()).unwrap();
+        assert_eq!(fp.clusters.len(), 2);
+        assert_eq!(clusters.len(), 2);
+        assert_eq!(fp.post_count, 6);
+        // JSON cluster i ↔ PostCluster i, weights match.
+        for (jc, pc) in fp.clusters.iter().zip(clusters.iter()) {
+            assert!((jc.weight - pc.weight).abs() < 1e-9);
+            assert!(!jc.label.is_empty());
+        }
+        // Each topic's keywords come from ITS posts, not the other topic's.
+        let all_kw_0 = fp.clusters[0].keywords.join(" ");
+        let all_kw_1 = fp.clusters[1].keywords.join(" ");
+        assert_ne!(all_kw_0, all_kw_1);
+    }
+
+    #[test]
+    fn clustered_fingerprint_rejects_mismatched_slices() {
+        let texts = vec!["one post".to_string()];
+        let embs: Vec<Vec<f64>> = Vec::new();
+        assert!(build_clustered_fingerprint(&texts, &embs, 1, &ClusteringParams::default()).is_err());
+    }
+
+    #[test]
+    fn clustered_fingerprint_survives_label_extraction_failure() {
+        // A cluster whose posts are stop-words-only makes TF-IDF extraction bail;
+        // the cluster keeps a fallback label instead of killing the build.
+        let texts: Vec<String> = vec![
+            "the and but or so".into(),
+            "and the or but so".into(),
+            "or so and the but".into(),
+        ];
+        let embs: Vec<Vec<f64>> = (0..3).map(|i| {
+            let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
+            v[0] = 1.0; v[1] = i as f64 * 0.01; v
+        }).collect();
+        let (fp, clusters) =
+            build_clustered_fingerprint(&texts, &embs, 3, &ClusteringParams::default()).unwrap();
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(fp.clusters[0].label, "topic 1");
+        assert!(fp.clusters[0].keywords.is_empty());
+        assert!(fp.clusters[0].keyword_scores.is_empty());
     }
 }
