@@ -162,6 +162,10 @@ impl PgDatabase {
                     12,
                     include_str!("../../migrations/postgres/0012_scan_queue_claim_id.sql"),
                 ),
+                (
+                    13,
+                    include_str!("../../migrations/postgres/0013_topic_clusters.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {

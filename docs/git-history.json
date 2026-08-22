@@ -1,5 +1,13 @@
 [
   {
+    "hash": "53a34421b18ebeb08122f3c71f64619825ac1466",
+    "short_hash": "53a3442",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T21:03:10-07:00",
+    "message": "feat(297): assemble multi-interest fingerprint with per-cluster TF-IDF labels\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "652782b0ca1857170ac0f6b8c7a130257e7acba2",
     "short_hash": "652782b",
     "author": "Bryan Guffey",

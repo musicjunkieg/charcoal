@@ -626,8 +626,30 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
-        // scan_queue = 12 tables (v11)
-        assert_eq!(count, 12);
+        // scan_queue, topic_clusters = 13 tables (v13)
+        assert_eq!(count, 13);
+    }
+
+    #[tokio::test]
+    async fn test_migration_v13_creates_topic_clusters_and_overlap_legacy() {
+        let db = test_db().await;
+        let conn = db.conn.lock().await;
+        let has_table: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='topic_clusters'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_table, "topic_clusters table missing");
+        let has_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('account_scores') WHERE name='overlap_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_col, "account_scores.overlap_legacy missing");
     }
 
     #[tokio::test]
