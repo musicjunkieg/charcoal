@@ -143,6 +143,67 @@ pub fn get_embedding(conn: &Connection, user_did: &str) -> Result<Option<Vec<f64
     }
 }
 
+/// Persist a complete fingerprint generation in one transaction (#302).
+/// `unchecked_transaction` for the same reason as delete_user_data: these
+/// free functions take &Connection, and rusqlite's transaction() needs &mut.
+pub fn save_fingerprint_bundle(
+    conn: &Connection,
+    user_did: &str,
+    fingerprint_json: &str,
+    post_count: u32,
+    embedding: Option<&str>, // pre-serialized JSON array, like save_embedding
+    clusters: &[crate::db::models::ClusterCentroid],
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, updated_at)
+         VALUES (?1, ?2, ?3, ?4, datetime('now'))
+         ON CONFLICT(user_did) DO UPDATE SET
+            fingerprint_json = ?2,
+            post_count = ?3,
+            embedding_vector = ?4,
+            updated_at = datetime('now')",
+        params![user_did, fingerprint_json, post_count, embedding],
+    )?;
+    tx.execute(
+        "DELETE FROM topic_clusters WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    for (i, cluster) in clusters.iter().enumerate() {
+        let centroid_json = serde_json::to_string(&cluster.centroid)?;
+        tx.execute(
+            "INSERT INTO topic_clusters (user_did, cluster_index, centroid, post_count)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![user_did, i as i64, centroid_json, cluster.post_count],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Load topic centroids in cluster_index order. Empty = legacy/keyword-only.
+pub fn get_topic_centroids(
+    conn: &Connection,
+    user_did: &str,
+) -> Result<Vec<crate::db::models::ClusterCentroid>> {
+    let mut stmt = conn.prepare(
+        "SELECT centroid, post_count FROM topic_clusters
+         WHERE user_did = ?1 ORDER BY cluster_index",
+    )?;
+    let rows = stmt.query_map(params![user_did], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (json, post_count) = row?;
+        out.push(crate::db::models::ClusterCentroid {
+            centroid: serde_json::from_str(&json)?,
+            post_count,
+        });
+    }
+    Ok(out)
+}
+
 // --- Account scores ---
 
 /// Save or update an account's scores for a specific user.
@@ -992,6 +1053,12 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
     )?;
     tx.execute(
         "DELETE FROM topic_fingerprint WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    // #302: topic_clusters holds one row per centroid of the user's latest
+    // fingerprint generation; it must not outlive the account either.
+    tx.execute(
+        "DELETE FROM topic_clusters WHERE user_did = ?1",
         params![user_did],
     )?;
     tx.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;

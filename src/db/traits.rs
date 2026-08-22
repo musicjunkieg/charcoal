@@ -12,8 +12,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
+    NewAmplificationEvent, UserLabel, UserRow,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -198,6 +198,23 @@ pub trait Database: Send + Sync {
 
     /// Load the stored embedding vector for a user (if one exists).
     async fn get_embedding(&self, user_did: &str) -> Result<Option<Vec<f64>>>;
+
+    /// Persist a complete fingerprint generation atomically: JSON, mean
+    /// embedding, and per-topic centroid rows in ONE transaction, bumping
+    /// updated_at exactly once. `embedding: None` with empty `clusters` is the
+    /// legal keyword-only bundle (embedder unavailable). (#302)
+    async fn save_fingerprint_bundle(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+        embedding: Option<&[f64]>,
+        clusters: &[ClusterCentroid],
+    ) -> Result<()>;
+
+    /// Load stored topic centroids ordered by cluster_index. Empty = legacy
+    /// (pre-#297) or keyword-only fingerprint.
+    async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>>;
 
     // --- Account scores ---
 
@@ -538,4 +555,23 @@ pub trait Database: Send + Sync {
     /// A second, narrower method would be a second snapshot of a table that
     /// changes under it.
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>;
+}
+
+/// Reject bundles that would poison future cosines: every stored float must
+/// be finite. Runs before any I/O so a bad build can never split a
+/// generation. (#296 discipline, applied to #302.)
+pub fn validate_bundle(embedding: Option<&[f64]>, clusters: &[ClusterCentroid]) -> Result<()> {
+    if let Some(emb) = embedding {
+        anyhow::ensure!(
+            emb.iter().all(|v| v.is_finite()),
+            "non-finite value in mean embedding",
+        );
+    }
+    for (i, cluster) in clusters.iter().enumerate() {
+        anyhow::ensure!(
+            cluster.centroid.iter().all(|v| v.is_finite()),
+            "non-finite value in centroid of cluster {i}",
+        );
+    }
+    Ok(())
 }

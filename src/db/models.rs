@@ -31,6 +31,14 @@ pub struct AccountScore {
     pub scoring_confidence: Option<String>,
 }
 
+/// One stored topic centroid. Label/keywords/weight live in the fingerprint
+/// JSON (clusters[i] ↔ cluster_index i); this is only what scoring needs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClusterCentroid {
+    pub centroid: Vec<f64>,
+    pub post_count: u32,
+}
+
 /// Confidence level of a scoring result based on data volume.
 ///
 /// Used to prioritize re-scoring: Low confidence accounts are re-scored
