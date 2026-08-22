@@ -298,7 +298,8 @@ async fn main() -> Result<()> {
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             // Compute behavioral context for scoring
             let median_engagement = db.get_median_engagement(&did).await?;
@@ -349,6 +350,7 @@ async fn main() -> Result<()> {
                 concurrency as usize,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                Some(&protected_topic_centroids),
                 events,
                 median_engagement,
                 &pile_on_dids,
@@ -393,7 +395,8 @@ async fn main() -> Result<()> {
             let protected_fingerprint = load_fingerprint(&db, &did).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             let median_engagement = db.get_median_engagement(&did).await?;
             let pile_on_events = db.get_events_for_pile_on(&did).await?;
@@ -418,6 +421,7 @@ async fn main() -> Result<()> {
                             concurrency as usize,
                             embedder.as_ref(),
                             protected_embedding.as_deref(),
+                            Some(&protected_topic_centroids),
                             median_engagement,
                             &pile_on_dids,
                             Some(config.data_dir()),
@@ -451,6 +455,7 @@ async fn main() -> Result<()> {
                         concurrency as usize,
                         embedder.as_ref(),
                         protected_embedding.as_deref(),
+                        Some(&protected_topic_centroids),
                         median_engagement,
                         &pile_on_dids,
                         Some(config.data_dir()),
@@ -480,6 +485,7 @@ async fn main() -> Result<()> {
                             concurrency as usize,
                             embedder.as_ref(),
                             protected_embedding.as_deref(),
+                            Some(&protected_topic_centroids),
                             median_engagement,
                             &pile_on_dids,
                             Some(config.data_dir()),
@@ -521,6 +527,7 @@ async fn main() -> Result<()> {
                                 concurrency as usize,
                                 embedder.as_ref(),
                                 protected_embedding.as_deref(),
+                                Some(&protected_topic_centroids),
                                 median_engagement,
                                 &pile_on_dids,
                                 Some(config.data_dir()),
@@ -563,7 +570,8 @@ async fn main() -> Result<()> {
             let scorer = create_scorer(&config)?;
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             let median_engagement = db.get_median_engagement(&did).await?;
             let pile_on_events = db.get_events_for_pile_on(&did).await?;
@@ -583,6 +591,7 @@ async fn main() -> Result<()> {
                 &weights,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                Some(&protected_topic_centroids),
                 median_engagement,
                 &pile_on_dids,
                 None, // NLI scorer — not yet wired into CLI
@@ -709,7 +718,8 @@ async fn main() -> Result<()> {
             let protected_fingerprint = load_fingerprint(&db, &did).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             let median_engagement = db.get_median_engagement(&did).await?;
             let pile_on_events = db.get_events_for_pile_on(&did).await?;
@@ -757,6 +767,7 @@ async fn main() -> Result<()> {
                     &weights,
                     embedder.as_ref(),
                     protected_embedding.as_deref(),
+                    Some(&protected_topic_centroids),
                     median_engagement,
                     &pile_on_dids,
                     None, // NLI scorer — not yet wired into CLI
@@ -1306,6 +1317,7 @@ async fn load_embedder(
 ) -> (
     Option<charcoal::topics::embeddings::SentenceEmbedder>,
     Option<Vec<f64>>,
+    Vec<Vec<f64>>,
 ) {
     let embed_dir = charcoal::toxicity::download::embedding_model_dir(&config.model_dir);
 
@@ -1338,7 +1350,18 @@ async fn load_embedder(
         }
     };
 
-    (embedder, embedding)
+    // Per-topic centroids (#297). Empty for pre-#297 fingerprints or when the
+    // read fails — scoring then degrades to the mean-centroid cosine, which is
+    // exactly the pre-#297 behavior, so a warn is enough.
+    let centroids: Vec<Vec<f64>> = match db.get_topic_centroids(user_did).await {
+        Ok(rows) => rows.into_iter().map(|c| c.centroid).collect(),
+        Err(e) => {
+            warn!("Failed to load stored topic centroids: {e}");
+            Vec::new()
+        }
+    };
+
+    (embedder, embedding, centroids)
 }
 
 /// Query the Constellation backlink index for amplification events.

@@ -5686,6 +5686,28 @@
       "created_at": "2026-08-21T22:31:12.337086-07:00",
       "updated_at": "2026-08-21T22:31:12.337086-07:00",
       "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"65d0480\",\"confidence\":95}"
+    },
+    {
+      "id": 526,
+      "change_id": "091a5e83-831f-4697-954d-e3a0ee4c4209",
+      "node_type": "action",
+      "title": "Task 8/10: embedding-first build path shared by web scan and CLI (src/topics/build.rs), atomic bundle save",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T22:44:42.500164-07:00",
+      "updated_at": "2026-08-21T22:44:42.500164-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"e7ef3d0\",\"confidence\":90,\"files\":[\"src/topics/build.rs src/topics/mod.rs src/web/scan_job.rs src/main.rs\"]}"
+    },
+    {
+      "id": 527,
+      "change_id": "8ab38873-6b0e-4402-be57-93ba09209091",
+      "node_type": "outcome",
+      "title": "Task 8 GREEN: assemble_fingerprint TDD (RED compile error -> 2/2 pass); scan_job 15/15 + unit_admin 28/28 pass; full web suite 252+ tests 0 SKIP; clippy clean --features web; cargo check clean default/web/postgres. Committed e7ef3d0",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T22:44:59.648936-07:00",
+      "updated_at": "2026-08-21T22:44:59.648936-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"e7ef3d0\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -11331,6 +11353,39 @@
       "weight": 1.0,
       "rationale": "plan task 7 executed",
       "created_at": "2026-08-21T22:31:12.346505-07:00"
+    },
+    {
+      "id": 524,
+      "from_node_id": 503,
+      "to_node_id": 526,
+      "from_change_id": "b69905f2-41b0-4b1e-a390-961bef50719f",
+      "to_change_id": "091a5e83-831f-4697-954d-e3a0ee4c4209",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 of the 10-task #297/#302 implementation plan",
+      "created_at": "2026-08-21T22:44:46.034095-07:00"
+    },
+    {
+      "id": 525,
+      "from_node_id": 525,
+      "to_node_id": 526,
+      "from_change_id": "d0695d44-7c86-4493-bb68-830c591b828a",
+      "to_change_id": "091a5e83-831f-4697-954d-e3a0ee4c4209",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "plan task 8 executed after Task 7 (migrate bundle transfer) landed",
+      "created_at": "2026-08-21T22:44:54.866391-07:00"
+    },
+    {
+      "id": 526,
+      "from_node_id": 526,
+      "to_node_id": 527,
+      "from_change_id": "091a5e83-831f-4697-954d-e3a0ee4c4209",
+      "to_change_id": "8ab38873-6b0e-4402-be57-93ba09209091",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "action produced this verified outcome",
+      "created_at": "2026-08-21T22:45:02.798057-07:00"
     }
   ],
   "documents": [

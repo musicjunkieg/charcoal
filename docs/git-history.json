@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e7ef3d09e52cb02731f346d55d74c6d3f2be483c",
+    "short_hash": "e7ef3d0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:44:31-07:00",
+    "message": "feat(297): embedding-first build path shared by web scan and CLI, atomic bundle save\n\nTask 8/10: extract build_user_fingerprint into src/topics/build.rs so the\nCLI (built without the `web` feature) shares one embedding-first build path\nwith the web scan pipeline and admin pre-seed handler. scan_job.rs re-exports\nit for existing callers; main.rs Commands::Fingerprint delegates then loads\n+ displays. TDD: assemble_fingerprint tests written first (RED - compile\nerror), then implementation (GREEN, 2/2 passing).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
     "hash": "65d048084555d4de67093d6478cefcc62c4f5b55",
     "short_hash": "65d0480",
     "author": "Bryan Guffey",

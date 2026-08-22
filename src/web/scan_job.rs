@@ -548,6 +548,20 @@ pub fn fingerprint_is_stale(updated_at: &str, now: chrono::NaiveDateTime) -> boo
     }
 }
 
+/// A stored generation needs a format rebuild when the embedding path ran
+/// (mean embedding exists) but the per-topic centroid rows don't match the
+/// fingerprint JSON: zero rows = pre-#297 legacy, count mismatch = pre-#302
+/// divergence. Keyword-only fingerprints (no embedding) are NOT legacy —
+/// treating them as such would rebuild-loop every scan on model-less
+/// deployments. (#297)
+pub fn fingerprint_needs_rebuild_for_format(
+    has_embedding: bool,
+    centroid_rows: usize,
+    json_clusters: usize,
+) -> bool {
+    has_embedding && centroid_rows != json_clusters
+}
+
 /// Write the pipeline's terminal status, fenced by the claim that owns the
 /// entry (#274).
 ///
@@ -716,49 +730,90 @@ async fn run_scan(
 
     let client = PublicAtpClient::new(&config.public_api_url)?;
 
-    let fingerprint: TopicFingerprint = match db.get_fingerprint(user_did).await? {
-        Some((json, _, updated_at))
-            if !fingerprint_is_stale(&updated_at, chrono::Utc::now().naive_utc()) =>
-        {
-            serde_json::from_str(&json)?
-        }
-        existing => {
-            // Absent or stale: (re)build. On a stale-rebuild failure fall
-            // back to the stale fingerprint rather than failing the scan —
-            // stale data beats no scan.
-            let is_rebuild = existing.is_some();
-            set_progress(
-                &scan_manager,
-                user_did,
-                claim_id,
-                WebScanPhase::Fingerprint,
-                if is_rebuild {
-                    "Refreshing your topic fingerprint (older than 14 days)…"
-                } else {
-                    "Building your topic fingerprint from recent posts…"
-                },
-            )
-            .await;
+    // Load the stored generation as one snapshot: fingerprint JSON, mean
+    // embedding, and per-topic centroid rows. Scoring needs all three below,
+    // and the rebuild decision reads all three (#297) — loading them once here
+    // means the decision and the scan can never disagree about what is stored.
+    let stored = db.get_fingerprint(user_did).await?;
+    let mut protected_embedding = db.get_embedding(user_did).await?;
+    let mut protected_centroid_rows = db.get_topic_centroids(user_did).await?;
 
-            match build_user_fingerprint(&config, &*db, user_did, actor_handle).await {
-                Ok(()) => {
-                    let (json, _, _) = db
-                        .get_fingerprint(user_did)
-                        .await?
-                        .expect("Fingerprint was just saved");
-                    serde_json::from_str(&json)?
+    // An unreadable stored fingerprint is treated as absent rather than
+    // aborting the scan: a rebuild rewrites it, so the row self-heals. (The
+    // pre-#297 code parsed it with `?` and failed the whole scan.)
+    let stored_fingerprint: Option<TopicFingerprint> =
+        stored
+            .as_ref()
+            .and_then(|(json, _, _)| match serde_json::from_str(json) {
+                Ok(fp) => Some(fp),
+                Err(e) => {
+                    warn!(error = %e, "Stored fingerprint JSON is unreadable; rebuilding");
+                    None
                 }
-                Err(e) if is_rebuild => {
-                    warn!(error = %e, "Fingerprint refresh failed; using stale fingerprint");
-                    let (json, _, _) = existing.expect("checked is_rebuild");
-                    serde_json::from_str(&json)?
-                }
-                Err(e) => return Err(e),
+            });
+
+    // Rebuild when absent/unreadable, when older than 14 days (#296), or when
+    // the stored generation predates the clustered format (#297).
+    let needs_rebuild = match (&stored, &stored_fingerprint) {
+        (Some((_, _, updated_at)), Some(parsed)) => {
+            fingerprint_is_stale(updated_at, chrono::Utc::now().naive_utc())
+                || fingerprint_needs_rebuild_for_format(
+                    protected_embedding.is_some(),
+                    protected_centroid_rows.len(),
+                    parsed.clusters.len(),
+                )
+        }
+        _ => true,
+    };
+
+    let fingerprint: TopicFingerprint = if !needs_rebuild {
+        stored_fingerprint.expect("a fresh, well-formed fingerprint was just parsed")
+    } else {
+        // Absent or stale: (re)build. On a stale-rebuild failure fall
+        // back to the stale fingerprint rather than failing the scan —
+        // stale data beats no scan.
+        let is_rebuild = stored_fingerprint.is_some();
+        set_progress(
+            &scan_manager,
+            user_did,
+            claim_id,
+            WebScanPhase::Fingerprint,
+            if is_rebuild {
+                // Covers both triggers — age (#296) and stored-format
+                // upgrade (#297) — so the copy no longer claims a reason.
+                "Refreshing your topic fingerprint…"
+            } else {
+                "Building your topic fingerprint from recent posts…"
+            },
+        )
+        .await;
+
+        match build_user_fingerprint(&config, &*db, user_did, actor_handle).await {
+            Ok(()) => {
+                let (json, _, _) = db
+                    .get_fingerprint(user_did)
+                    .await?
+                    .expect("Fingerprint was just saved");
+                // The bundle save replaced the embedding and the centroid rows
+                // atomically (#302) — re-read both or scoring would compare
+                // candidates against the previous generation's vectors.
+                protected_embedding = db.get_embedding(user_did).await?;
+                protected_centroid_rows = db.get_topic_centroids(user_did).await?;
+                serde_json::from_str(&json)?
             }
+            Err(e) if is_rebuild => {
+                warn!(error = %e, "Fingerprint refresh failed; using stale fingerprint");
+                stored_fingerprint.expect("checked is_rebuild")
+            }
+            Err(e) => return Err(e),
         }
     };
 
-    let protected_embedding = db.get_embedding(user_did).await?;
+    // Scoring wants bare vectors; the row's post_count is fingerprint metadata.
+    let protected_topic_centroids: Vec<Vec<f64>> = protected_centroid_rows
+        .iter()
+        .map(|c| c.centroid.clone())
+        .collect();
 
     // Build per-post embeddings for follower NLI inferred pair matching.
     // Each protected post gets its own embedding so followers' posts can be
@@ -984,6 +1039,7 @@ async fn run_scan(
         8,    // concurrency
         embedder.as_deref(),
         protected_embedding.as_deref(),
+        Some(&protected_topic_centroids),
         events,
         median_engagement,
         &pile_on_dids,
@@ -1547,5 +1603,17 @@ mod fingerprint_staleness_tests {
         // original #296 plan decision.)
         assert!(fingerprint_is_stale("not a date", now()));
         assert!(fingerprint_is_stale("", now()));
+    }
+
+    #[test]
+    fn legacy_format_forces_rebuild() {
+        // Embedding present but zero centroid rows = pre-#297 generation.
+        assert!(fingerprint_needs_rebuild_for_format(true, 0, 3));
+        // Keyword-only fingerprint (no embedding) is NOT legacy — no rebuild loop.
+        assert!(!fingerprint_needs_rebuild_for_format(false, 0, 3));
+        // Row/JSON mismatch (pre-#302 divergence) rebuilds.
+        assert!(fingerprint_needs_rebuild_for_format(true, 2, 3));
+        // Healthy clustered generation: no rebuild.
+        assert!(!fingerprint_needs_rebuild_for_format(true, 3, 3));
     }
 }

@@ -89,6 +89,9 @@ pub struct PhasedScanDeps<'a> {
     pub embedder: Option<&'a SentenceEmbedder>,
     /// Optional protected-user embedding (Phase C).
     pub protected_embedding: Option<&'a [f64]>,
+    /// Optional per-topic centroids for the protected user (#297, Phase C).
+    /// Empty/absent degrades overlap to the pre-#297 mean-centroid cosine.
+    pub protected_topic_centroids: Option<&'a [Vec<f64>]>,
     /// Optional NLI scorer for context gating (Phase C).
     pub nli_scorer: Option<&'a NliScorer>,
     /// Optional protected posts with embeddings for follower NLI (Phase C).
@@ -666,6 +669,7 @@ async fn finalize_one(
         deps.weights,
         deps.embedder,
         deps.protected_embedding,
+        deps.protected_topic_centroids,
         deps.nli_scorer,
         deps.protected_posts_with_embeddings,
         deps.data_dir,

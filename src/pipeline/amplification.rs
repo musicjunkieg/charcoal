@@ -78,6 +78,7 @@ pub async fn run(
     concurrency: usize,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    protected_topic_centroids: Option<&[Vec<f64>]>,
     events: Vec<AmplificationNotification>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
@@ -531,6 +532,7 @@ pub async fn run(
                 weights,
                 embedder,
                 protected_embedding,
+                protected_topic_centroids,
                 // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
                 // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
                 // the NLI scorer and protected-post embeddings are threaded through

@@ -403,6 +403,7 @@ mod tests {
             handle: "unsupported.bsky.social".to_string(),
             toxicity_score: None,
             topic_overlap: None,
+            overlap_legacy: None,
             threat_score: None,
             threat_tier: Some("NotAssessed".to_string()),
             posts_analyzed: 5,

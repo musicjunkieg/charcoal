@@ -395,6 +395,7 @@ fn make_account(handle: &str, score: f64, tier: &str, toxicity: f64, overlap: f6
         handle: handle.to_string(),
         toxicity_score: Some(toxicity),
         topic_overlap: Some(overlap),
+        overlap_legacy: None,
         threat_score: Some(score),
         threat_tier: Some(tier.to_string()),
         posts_analyzed: 20,
@@ -795,6 +796,7 @@ async fn stage2_scores_only_assessable_subset() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on

@@ -210,8 +210,8 @@ pub fn get_topic_centroids(
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence, overlap_legacy)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -225,7 +225,8 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             context_score = ?11,
             graph_distance = ?12,
             fingerprint_quality = ?13,
-            scoring_confidence = ?14",
+            scoring_confidence = ?14,
+            overlap_legacy = ?15",
         params![
             user_did,
             score.did,
@@ -241,6 +242,7 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             score.graph_distance,
             score.fingerprint_quality,
             score.scoring_confidence,
+            score.overlap_legacy,
         ],
     )?;
     Ok(())
@@ -255,7 +257,8 @@ pub fn get_ranked_threats(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                graph_distance, fingerprint_quality, scoring_confidence, context_score
+                graph_distance, fingerprint_quality, scoring_confidence, context_score,
+                overlap_legacy
          FROM account_scores
          WHERE user_did = ?1 AND threat_score >= ?2
          ORDER BY threat_score DESC",
@@ -291,6 +294,7 @@ pub fn get_ranked_threats(
             graph_distance: row.get(10)?,
             fingerprint_quality: row.get(11)?,
             scoring_confidence: row.get(12)?,
+            overlap_legacy: row.get(14)?,
         })
     })?;
 
@@ -625,7 +629,8 @@ pub fn get_account_by_handle(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                fingerprint_quality, scoring_confidence, context_score, graph_distance
+                fingerprint_quality, scoring_confidence, context_score, graph_distance,
+                overlap_legacy
          FROM account_scores
          WHERE user_did = ?1 AND lower(handle) = lower(?2)
          LIMIT 1",
@@ -658,6 +663,7 @@ pub fn get_account_by_handle(
                 graph_distance: row.get(13)?,
                 fingerprint_quality: row.get(10)?,
                 scoring_confidence: row.get(11)?,
+                overlap_legacy: row.get(14)?,
             })
         })
         .optional()?;
@@ -673,7 +679,8 @@ pub fn get_account_by_did(
     let mut stmt = conn.prepare(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
-                fingerprint_quality, scoring_confidence, context_score, graph_distance
+                fingerprint_quality, scoring_confidence, context_score, graph_distance,
+                overlap_legacy
          FROM account_scores
          WHERE user_did = ?1 AND did = ?2
          LIMIT 1",
@@ -706,6 +713,7 @@ pub fn get_account_by_did(
                 graph_distance: row.get(13)?,
                 fingerprint_quality: row.get(10)?,
                 scoring_confidence: row.get(11)?,
+                overlap_legacy: row.get(14)?,
             })
         })
         .optional()?;
@@ -766,7 +774,8 @@ pub fn get_unlabeled_accounts(
     let mut stmt = conn.prepare(
         "SELECT a.did, a.handle, a.toxicity_score, a.topic_overlap, a.threat_score, a.threat_tier,
                 a.posts_analyzed, a.top_toxic_posts, a.scored_at, a.behavioral_signals,
-                a.context_score, a.fingerprint_quality, a.scoring_confidence
+                a.context_score, a.fingerprint_quality, a.scoring_confidence,
+                a.overlap_legacy
          FROM account_scores a
          LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
          WHERE a.user_did = ?1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
@@ -801,6 +810,7 @@ pub fn get_unlabeled_accounts(
             graph_distance: None,
             fingerprint_quality: row.get(11)?,
             scoring_confidence: row.get(12)?,
+            overlap_legacy: row.get(13)?,
         })
     })?;
 
@@ -1831,6 +1841,7 @@ mod tests {
             handle: "test.bsky.social".to_string(),
             toxicity_score: Some(0.8),
             topic_overlap: Some(0.3),
+            overlap_legacy: None,
             threat_score: Some(65.0),
             threat_tier: Some("Elevated".to_string()),
             posts_analyzed: 20,
@@ -1862,6 +1873,7 @@ mod tests {
             handle: "unassessed.bsky.social".to_string(),
             toxicity_score: None,
             topic_overlap: None,
+            overlap_legacy: None,
             threat_score: None,
             threat_tier: Some(ThreatTier::NotAssessed.as_str().to_string()),
             posts_analyzed: 5,
@@ -2013,6 +2025,7 @@ mod tests {
             handle: "Test.Bsky.Social".to_string(),
             toxicity_score: Some(0.5),
             topic_overlap: Some(0.2),
+            overlap_legacy: None,
             threat_score: Some(30.0),
             threat_tier: Some("Watch".to_string()),
             posts_analyzed: 10,
@@ -2046,6 +2059,7 @@ mod tests {
             handle: "test.bsky.social".to_string(),
             toxicity_score: Some(0.5),
             topic_overlap: Some(0.2),
+            overlap_legacy: None,
             threat_score: Some(30.0),
             threat_tier: Some("Watch".to_string()),
             posts_analyzed: 10,
@@ -2081,6 +2095,7 @@ mod tests {
             handle: "test.bsky.social".to_string(),
             toxicity_score: Some(0.5),
             topic_overlap: Some(0.2),
+            overlap_legacy: None,
             threat_score: Some(30.0),
             threat_tier: Some("Watch".to_string()),
             posts_analyzed: 10,
@@ -2147,6 +2162,7 @@ mod tests {
                 handle: format!("eng{i}.bsky.social"),
                 toxicity_score: Some(0.5),
                 topic_overlap: Some(0.2),
+                overlap_legacy: None,
                 threat_score: Some(30.0),
                 threat_tier: Some("Watch".to_string()),
                 posts_analyzed: 10,

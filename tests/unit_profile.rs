@@ -484,6 +484,7 @@ async fn score_from_sample_survivor_no_context() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on
@@ -621,6 +622,7 @@ async fn score_from_sample_uses_precomputed_target_embedding_without_an_embedder
         &weights,
         None,               // embedder — deliberately absent; precomputed must win
         Some(&protected),   // protected_embedding
+        None,               // protected_topic_centroids (legacy fingerprint)
         Some(&precomputed), // precomputed_target_embedding (NEW, from gather)
         0.0,                // median_engagement
         false,              // pile_on
@@ -643,4 +645,140 @@ async fn score_from_sample_uses_precomputed_target_embedding_without_an_embedder
         (overlap - expected_overlap).abs() < 1e-12,
         "precomputed overlap {overlap} != expected cosine {expected_overlap}"
     );
+}
+
+/// Shared fixture for the #297 overlap tests: five clean originals, no
+/// embedder, and a precomputed target vector — the same shape as the
+/// precomputed-path test above. Only the centroid argument varies.
+fn two_topic_sample() -> (
+    PostSample,
+    Vec<String>,
+    Vec<Option<String>>,
+    Vec<BinaryVerdict>,
+) {
+    let originals: Vec<Post> = (0..5)
+        .map(|i| post(&format!("at://o/{i}"), &format!("original {i}")))
+        .collect();
+    let all_post_texts: Vec<String> = originals.iter().map(|p| p.text.clone()).collect();
+    let contexts: Vec<Option<String>> = vec![None; 5];
+    let verdicts: Vec<_> = (0..5).map(|_| binary_verdict(false, 0.1)).collect();
+
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 5,
+    };
+
+    (sample, all_post_texts, contexts, verdicts)
+}
+
+#[tokio::test]
+async fn multi_topic_centroids_use_max_and_record_legacy_shadow() {
+    // Protected user has two orthogonal topics; the candidate's precomputed
+    // centroid sits exactly on topic B. Live overlap must be ~1.0 (max over
+    // topics); overlap_legacy must be the much lower mean-centroid cosine.
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+    let centroids = vec![topic_a, topic_b];
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,             // embedder — absent; the precomputed vector must win
+        Some(&mean),      // protected_embedding (pre-#297 mean centroid)
+        Some(&centroids), // protected_topic_centroids (#297)
+        Some(&candidate), // precomputed_target_embedding
+        0.0,              // median_engagement
+        false,            // pile_on
+        None,             // nli_scorer
+        None,             // protected_posts_with_embeddings
+        None,             // direct_pairs
+        None,             // data_dir
+        None,             // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    assert!(
+        overlap > 0.99,
+        "live overlap should be max-over-topics, got {overlap}"
+    );
+    let legacy = score.overlap_legacy.unwrap();
+    assert!(
+        legacy < 0.85,
+        "legacy shadow should be the smeared mean cosine, got {legacy}"
+    );
+    assert!(overlap > legacy);
+}
+
+#[tokio::test]
+async fn empty_centroids_degrade_to_legacy_behavior() {
+    // Pre-#297 fingerprint: no centroid rows. Live overlap == legacy overlap
+    // == mean-centroid cosine; shadow still recorded.
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,             // embedder
+        Some(&mean),      // protected_embedding
+        None,             // protected_topic_centroids — legacy fingerprint
+        Some(&candidate), // precomputed_target_embedding
+        0.0,              // median_engagement
+        false,            // pile_on
+        None,             // nli_scorer
+        None,             // protected_posts_with_embeddings
+        None,             // direct_pairs
+        None,             // data_dir
+        None,             // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    let legacy = score.overlap_legacy.unwrap();
+    assert!((overlap - legacy).abs() < 1e-9);
 }

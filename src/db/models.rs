@@ -13,6 +13,11 @@ pub struct AccountScore {
     pub handle: String,
     pub toxicity_score: Option<f64>,
     pub topic_overlap: Option<f64>,
+    /// Shadow-compare value (#297): what overlap WOULD have been under the
+    /// pre-#297 single-mean-centroid formula. Recorded so #135 can
+    /// recalibrate gates/tiers from real paired data. None on the keyword
+    /// fallback path (no embeddings involved).
+    pub overlap_legacy: Option<f64>,
     pub threat_score: Option<f64>,
     pub threat_tier: Option<String>,
     pub posts_analyzed: u32,
