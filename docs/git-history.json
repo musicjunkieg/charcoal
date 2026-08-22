@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4a52ffa5a11c1bdbdf3ee53aaa2a7a7b9ffcffa1",
+    "short_hash": "4a52ffa",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T23:35:08-07:00",
+    "message": "fix(297): postgres test literal + empty-vec centroid degrade coverage\n\nAdd missing overlap_legacy field to AccountScore literal in db_postgres.rs\ntest. Add sibling test empty_vec_centroids_degrade_same_as_none to cover\nthe production code path where Some(empty.as_slice()) is passed for\nprotected_topic_centroids (pre-#297 data).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
     "hash": "f79c61a5edabc596154ad03c4f634960ff918bb5",
     "short_hash": "f79c61a",
     "author": "Bryan Guffey",

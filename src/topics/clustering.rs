@@ -50,21 +50,54 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
     // NORMALIZED member vectors). Normalizing members first means the
     // centroid direction reflects what posts say, not how long they are —
     // the same reasoning as normalized_mean_embedding (#296).
-    let mut clusters: Vec<(Vec<usize>, Vec<f64>)> = Vec::new();
+    let mut normalized: Vec<(usize, Vec<f64>)> = Vec::new();
     for (i, emb) in embeddings.iter().enumerate() {
         let norm: f64 = emb.iter().map(|v| v * v).sum::<f64>().sqrt();
         if norm < f64::EPSILON {
             continue; // zero vector (empty text) — same skip as the mean path
         }
-        clusters.push((vec![i], emb.iter().map(|v| v / norm).collect()));
+        normalized.push((i, emb.iter().map(|v| v / norm).collect()));
     }
-    if clusters.is_empty() {
+    if normalized.is_empty() {
         return Vec::new();
     }
-    let n = clusters.len();
+    let n = normalized.len();
+    let dim = normalized[0].1.len();
 
-    // Merge loop: find the best pair by centroid cosine; merge while the best
-    // is at/above threshold, or unconditionally while over the cap.
+    // Sentence-embedding spaces are anisotropic: every vector shares a large
+    // common component, so raw cosines all sit high and the biggest cluster
+    // is always everything's best match — one hub absorbs the corpus
+    // (observed live: 487 of 500 posts in one cluster). Centering on the
+    // corpus mean removes the shared component, making merge decisions
+    // discriminative. Only MERGE DECISIONS use the centered vectors; output
+    // centroids stay in the original space, where candidate cosines happen.
+    let mut mu = vec![0.0_f64; dim];
+    for (_, v) in &normalized {
+        for (k, val) in v.iter().enumerate() {
+            mu[k] += val / n as f64;
+        }
+    }
+    let center = |v: &[f64]| -> Vec<f64> {
+        let c: Vec<f64> = v.iter().zip(&mu).map(|(a, m)| a - m).collect();
+        let norm: f64 = c.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if norm < f64::EPSILON {
+            v.to_vec() // post sits exactly on the corpus mean — keep original
+        } else {
+            c.iter().map(|x| x / norm).collect()
+        }
+    };
+
+    // Working state per cluster: (members, original-space sum, centered sum).
+    let mut clusters: Vec<(Vec<usize>, Vec<f64>, Vec<f64>)> = normalized
+        .into_iter()
+        .map(|(i, v)| {
+            let centered = center(&v);
+            (vec![i], v, centered)
+        })
+        .collect();
+
+    // Merge loop: find the best pair by CENTERED centroid cosine; merge while
+    // the best is at/above threshold, or unconditionally while over the cap.
     loop {
         if clusters.len() <= 1 {
             break;
@@ -72,7 +105,7 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
         let mut best: Option<(usize, usize, f64)> = None;
         for a in 0..clusters.len() {
             for b in (a + 1)..clusters.len() {
-                let sim = cosine_similarity_embeddings(&clusters[a].1, &clusters[b].1);
+                let sim = cosine_similarity_embeddings(&clusters[a].2, &clusters[b].2);
                 // Strict > keeps the FIRST (lowest-index) best pair on ties —
                 // the determinism guarantee.
                 if best.map(|(_, _, s)| sim > s).unwrap_or(true) {
@@ -85,11 +118,14 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
         if sim < params.merge_threshold && !over_cap {
             break;
         }
-        // Merge b into a: append members, sum the normalized vectors.
-        let (b_members, b_sum) = clusters.swap_remove(b);
+        // Merge b into a: append members, sum both vector spaces.
+        let (b_members, b_sum, b_centered) = clusters.swap_remove(b);
         clusters[a].0.extend(b_members);
         for (i, v) in b_sum.iter().enumerate() {
             clusters[a].1[i] += v;
+        }
+        for (i, v) in b_centered.iter().enumerate() {
+            clusters[a].2[i] += v;
         }
     }
 
@@ -98,18 +134,18 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
     // several small topics rather than one arbitrary survivor (decision 2026-08-21).
     // This ensures a valid fingerprint always has at least one topic.
     let min_size = 2usize.max((0.02 * n as f64).ceil() as usize);
-    let max_size = clusters.iter().map(|(m, _)| m.len()).max().unwrap_or(0);
+    let max_size = clusters.iter().map(|(m, _, _)| m.len()).max().unwrap_or(0);
     let effective_min = if max_size < min_size {
         max_size
     } else {
         min_size
     };
-    clusters.retain(|(members, _)| members.len() >= effective_min);
+    clusters.retain(|(members, _, _)| members.len() >= effective_min);
 
-    let total: f64 = clusters.iter().map(|(m, _)| m.len() as f64).sum();
+    let total: f64 = clusters.iter().map(|(m, _, _)| m.len() as f64).sum();
     let mut out: Vec<PostCluster> = clusters
         .into_iter()
-        .map(|(mut members, sum)| {
+        .map(|(mut members, sum, _)| {
             members.sort_unstable();
             let norm: f64 = sum.iter().map(|v| v * v).sum::<f64>().sqrt();
             let centroid = if norm < f64::EPSILON {
@@ -301,8 +337,13 @@ mod tests {
             vec_on_axis(0, 0.01),
         ];
         let clusters = cluster_embeddings(&embs, &ClusteringParams::default());
-        assert_eq!(clusters.len(), 1);
-        assert_eq!(clusters[0].members, vec![1, 2]); // original indices preserved
+        // Post-centering semantics: two near-identical vectors have
+        // antiparallel residuals (n=2 centering), so they stay singletons and
+        // the tied-largest rule keeps both. The zero vector is what this test
+        // pins: index 0 must appear in NO cluster.
+        let all_members: Vec<usize> = clusters.iter().flat_map(|c| c.members.clone()).collect();
+        assert!(!all_members.contains(&0), "zero vector must be skipped");
+        assert_eq!(all_members.len(), 2); // both real posts survive
     }
 
     #[test]
@@ -414,9 +455,14 @@ mod tests {
             .collect();
         let (fp, clusters) =
             build_clustered_fingerprint(&texts, &embs, 3, &ClusteringParams::default()).unwrap();
-        assert_eq!(clusters.len(), 1);
-        assert_eq!(fp.clusters[0].label, "topic 1");
-        assert!(fp.clusters[0].keywords.is_empty());
+        // Post-centering, 3 near-identical vectors stay singletons (residuals
+        // spread apart); what this test pins is the LABEL FALLBACK: every
+        // cluster of stop-words-only posts gets "topic N" with no keywords.
+        assert!(!clusters.is_empty());
+        for (i, jc) in fp.clusters.iter().enumerate() {
+            assert_eq!(jc.label, format!("topic {}", i + 1));
+            assert!(jc.keywords.is_empty());
+        }
         assert!(fp.clusters[0].keyword_scores.is_empty());
     }
 }
