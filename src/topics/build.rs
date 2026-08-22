@@ -160,8 +160,13 @@ pub async fn build_user_fingerprint(
             // Same contract as every other embedding failure on this path
             // (#297 spec degradation table): a keyword fingerprint beats no
             // fingerprint. A keyword-only assembly failure still propagates.
+            // The retry is a full TF-IDF pass over ≤500 posts — CPU work that
+            // belongs on a blocking thread for the same heartbeat reason as
+            // the primary attempt above.
             warn!(error = %error, "Fingerprint assembly failed; building keyword-only fingerprint");
-            assemble_fingerprint(&fallback_post_texts, None)?
+            tokio::task::spawn_blocking(move || assemble_fingerprint(&fallback_post_texts, None))
+                .await
+                .context("keyword-only fingerprint assembly task panicked")??
         }
     };
     let json = serde_json::to_string(&artifacts.fingerprint)?;
