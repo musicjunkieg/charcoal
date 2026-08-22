@@ -42,8 +42,9 @@ impl Default for ClusteringParams {
 ///
 /// Deterministic: pairs are compared with a fixed tie-break (lowest index
 /// pair wins), so the same input always produces the same clusters — no RNG,
-/// which keeps fingerprints reproducible and tests exact. O(n² · K) with
-/// n ≤ 500 on the build path only; scan-time cost is untouched.
+/// which keeps fingerprints reproducible and tests exact. O(n³) worst case
+/// (up to n-1 merges × O(n²) pair scan per merge); n ≤ 500 on the build path
+/// keeps runtime sub-second. Scan-time cost is untouched.
 pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) -> Vec<PostCluster> {
     // Working state: each cluster = (member indices, unnormalized sum of
     // NORMALIZED member vectors). Normalizing members first means the
@@ -92,9 +93,10 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
         }
     }
 
-    // Prune noise clusters. If pruning would delete everything (e.g. a
-    // 1-post corpus), keep the largest so a valid fingerprint always has at
-    // least one topic.
+    // Prune noise clusters. If pruning would delete everything (max_size < min_size),
+    // keep every cluster tied for the largest size: a fragmented history keeps its
+    // several small topics rather than one arbitrary survivor (decision 2026-08-21).
+    // This ensures a valid fingerprint always has at least one topic.
     let min_size = 2usize.max((0.02 * n as f64).ceil() as usize);
     let max_size = clusters.iter().map(|(m, _)| m.len()).max().unwrap_or(0);
     let effective_min = if max_size < min_size {
@@ -243,5 +245,24 @@ mod tests {
             .sum::<f64>()
             .sqrt();
         assert!((norm - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn all_below_min_size_keeps_every_tied_largest_cluster() {
+        // 5 mutually-orthogonal singleton topics: min_size = max(2, ceil(0.1)) = 2,
+        // every cluster is size 1, so the tied-largest fallback keeps ALL of them
+        // (decision 2026-08-21: a fragmented history keeps its several small
+        // topics rather than one arbitrary survivor).
+        let embs: Vec<Vec<f64>> = (0..5)
+            .map(|g| {
+                let mut v = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM];
+                v[g * 40] = 1.0;
+                v
+            })
+            .collect();
+        let clusters = cluster_embeddings(&embs, &ClusteringParams::default());
+        assert_eq!(clusters.len(), 5);
+        let total_weight: f64 = clusters.iter().map(|c| c.weight).sum();
+        assert!((total_weight - 1.0).abs() < 1e-9);
     }
 }
