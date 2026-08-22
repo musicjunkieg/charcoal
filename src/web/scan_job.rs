@@ -730,10 +730,15 @@ async fn run_scan(
 
     let client = PublicAtpClient::new(&config.public_api_url)?;
 
-    // Load the stored generation as one snapshot: fingerprint JSON, mean
-    // embedding, and per-topic centroid rows. Scoring needs all three below,
-    // and the rebuild decision reads all three (#297) — loading them once here
-    // means the decision and the scan can never disagree about what is stored.
+    // Load the stored generation up front: fingerprint JSON, mean embedding,
+    // and per-topic centroid rows. These are three independent reads, NOT one
+    // transactional snapshot — a concurrent `save_fingerprint_bundle` (the CLI
+    // or the admin pre-seed, neither of which the scan queue serializes) can
+    // commit between any two of them. What the single load buys is a coherent
+    // DECISION: the rebuild check below and the scoring further down see the
+    // same three values, so they cannot disagree with each other. A torn read
+    // costs at worst one unnecessary rebuild or one scan against mixed
+    // generations; the next scan re-reads and self-heals.
     let stored = db.get_fingerprint(user_did).await?;
     let mut protected_embedding = db.get_embedding(user_did).await?;
     let mut protected_centroid_rows = db.get_topic_centroids(user_did).await?;
@@ -790,10 +795,13 @@ async fn run_scan(
 
         match build_user_fingerprint(&config, &*db, user_did, actor_handle).await {
             Ok(()) => {
-                let (json, _, _) = db
-                    .get_fingerprint(user_did)
-                    .await?
-                    .expect("Fingerprint was just saved");
+                // `delete_user_data` or a concurrent rebuild can remove the row
+                // between the save and this read. Propagate instead of
+                // panicking the worker, which would surface to the user as
+                // "Background scan panicked" rather than a real error.
+                let (json, _, _) = db.get_fingerprint(user_did).await?.ok_or_else(|| {
+                    anyhow::anyhow!("fingerprint row vanished immediately after a successful save")
+                })?;
                 // The bundle save replaced the embedding and the centroid rows
                 // atomically (#302) — re-read both or scoring would compare
                 // candidates against the previous generation's vectors.

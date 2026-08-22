@@ -47,9 +47,14 @@ impl Default for ClusteringParams {
 ///
 /// Deterministic: pairs are compared with a fixed tie-break (lowest index
 /// pair wins), so the same input always produces the same clusters — no RNG,
-/// which keeps fingerprints reproducible and tests exact. O(n³) worst case
-/// (up to n-1 merges × O(n²) pair scan per merge); n ≤ 500 on the build path
-/// keeps runtime sub-second. Scan-time cost is untouched.
+/// which keeps fingerprints reproducible and tests exact.
+///
+/// O(n³) worst case (up to n-1 merges × an O(n²) pair scan per merge, each
+/// pair a 384-dimensional dot product). At the build-path cap of n=500 that is
+/// a seconds-scale worst case, not sub-second — an earlier version of this
+/// comment claimed otherwise on no measurement. It is off the scan path
+/// (fingerprint builds only, at most every 14 days per user) and now runs on a
+/// blocking thread, see `build_user_fingerprint`. Scan-time cost is untouched.
 pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) -> Vec<PostCluster> {
     // Stage 1: L2-normalize each vector (skipping zeros). Normalizing first
     // means direction reflects what posts say, not how long they are — the
@@ -65,8 +70,13 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
     if normalized.is_empty() {
         return Vec::new();
     }
-    let n = normalized.len();
     let dim = normalized[0].1.len();
+    // A ragged batch is malformed input, not signal: a vector wider than `dim`
+    // would panic on `mu[k]` below, a narrower one would mis-center silently.
+    // Drop them the same way zero vectors are dropped above. The first vector
+    // defines `dim`, so this can never empty the list.
+    normalized.retain(|(_, v)| v.len() == dim);
+    let n = normalized.len();
 
     // Sentence-embedding spaces are anisotropic: every vector shares a large
     // common component, so raw cosines all sit high and the biggest cluster
@@ -205,6 +215,16 @@ pub fn build_clustered_fingerprint(
 
     let clusters = cluster_embeddings(embeddings, params);
 
+    // Finite-value guard, same discipline as #296's keyword-score validation:
+    // a NaN centroid would poison every future cosine against this user.
+    // Checked BEFORE labeling so a rejected build skips the TF-IDF passes.
+    for cluster in &clusters {
+        anyhow::ensure!(
+            cluster.centroid.iter().all(|v| v.is_finite()),
+            "non-finite value in cluster centroid",
+        );
+    }
+
     // One TF-IDF pass per cluster, over that cluster's posts only. A single
     // output cluster per pass: we want ranked keywords for a label, not
     // sub-clustering. Small keyword budget — labels, not a parallel universe.
@@ -239,15 +259,6 @@ pub fn build_clustered_fingerprint(
             keyword_scores,
             weight: cluster.weight,
         });
-    }
-
-    // Finite-value guard, same discipline as #296's keyword-score validation:
-    // a NaN centroid would poison every future cosine against this user.
-    for cluster in &clusters {
-        anyhow::ensure!(
-            cluster.centroid.iter().all(|v| v.is_finite()),
-            "non-finite value in cluster centroid",
-        );
     }
 
     Ok((
@@ -354,6 +365,23 @@ mod tests {
         let all_members: Vec<usize> = clusters.iter().flat_map(|c| c.members.clone()).collect();
         assert!(!all_members.contains(&0), "zero vector must be skipped");
         assert_eq!(all_members.len(), 2); // both real posts survive
+    }
+
+    #[test]
+    fn ragged_vectors_are_skipped_not_panicked_on() {
+        // A vector wider than the first one used to index past the end of the
+        // corpus-mean accumulator. Malformed input must be dropped, like a zero
+        // vector, not crash the build. (CodeRabbit PR #102)
+        let mut wide = vec![0.0; crate::topics::embeddings::EMBEDDING_DIM + 5];
+        wide[0] = 1.0;
+        let embs = vec![vec_on_axis(0, 0.0), wide, vec_on_axis(0, 0.01)];
+        let clusters = cluster_embeddings(&embs, &ClusteringParams::default());
+        let all_members: Vec<usize> = clusters.iter().flat_map(|c| c.members.clone()).collect();
+        assert!(
+            !all_members.contains(&1),
+            "the ragged vector must be skipped"
+        );
+        assert_eq!(all_members.len(), 2, "both well-formed posts survive");
     }
 
     #[test]

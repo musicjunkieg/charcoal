@@ -558,13 +558,28 @@ pub trait Database: Send + Sync {
 }
 
 /// Reject bundles that would poison future cosines: every stored float must
-/// be finite. Runs before any I/O so a bad build can never split a
-/// generation. (#296 discipline, applied to #302.)
+/// be finite, and every vector must be exactly `EMBEDDING_DIM` wide. Runs
+/// before any I/O so a bad build can never split a generation.
+/// (#296 discipline, applied to #302.)
+///
+/// The width check exists because the two backends disagree about what they
+/// will accept: PostgreSQL's `vector(384)` rejects a wrong-width row outright,
+/// while SQLite stores centroids as unconstrained JSON. A wrong-width centroid
+/// that reached SQLite would then score 0.0 in every future cosine — inert, but
+/// indistinguishable from real data. Reject at the write instead.
+/// (CodeRabbit PR #102)
 pub fn validate_bundle(embedding: Option<&[f64]>, clusters: &[ClusterCentroid]) -> Result<()> {
+    use crate::topics::embeddings::EMBEDDING_DIM;
+
     if let Some(emb) = embedding {
         anyhow::ensure!(
             emb.iter().all(|v| v.is_finite()),
             "non-finite value in mean embedding",
+        );
+        anyhow::ensure!(
+            emb.len() == EMBEDDING_DIM,
+            "mean embedding has {} dimensions, expected {EMBEDDING_DIM}",
+            emb.len(),
         );
     }
     for (i, cluster) in clusters.iter().enumerate() {
@@ -572,6 +587,46 @@ pub fn validate_bundle(embedding: Option<&[f64]>, clusters: &[ClusterCentroid]) 
             cluster.centroid.iter().all(|v| v.is_finite()),
             "non-finite value in centroid of cluster {i}",
         );
+        anyhow::ensure!(
+            cluster.centroid.len() == EMBEDDING_DIM,
+            "centroid of cluster {i} has {} dimensions, expected {EMBEDDING_DIM}",
+            cluster.centroid.len(),
+        );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod validate_bundle_tests {
+    use super::{validate_bundle, ClusterCentroid};
+    use crate::topics::embeddings::EMBEDDING_DIM;
+
+    fn cluster(width: usize) -> ClusterCentroid {
+        ClusterCentroid {
+            centroid: vec![0.5; width],
+            post_count: 3,
+        }
+    }
+
+    #[test]
+    fn well_formed_bundle_passes() {
+        let emb = vec![0.25; EMBEDDING_DIM];
+        assert!(validate_bundle(Some(&emb), &[cluster(EMBEDDING_DIM)]).is_ok());
+        // Keyword-only: no embedding, no centroids.
+        assert!(validate_bundle(None, &[]).is_ok());
+    }
+
+    #[test]
+    fn wrong_width_embedding_is_rejected() {
+        let emb = vec![0.25; EMBEDDING_DIM - 1];
+        assert!(validate_bundle(Some(&emb), &[]).is_err());
+    }
+
+    #[test]
+    fn wrong_width_centroid_is_rejected() {
+        let emb = vec![0.25; EMBEDDING_DIM];
+        // One good, one narrow — the whole bundle must fail, not persist half.
+        let clusters = vec![cluster(EMBEDDING_DIM), cluster(8)];
+        assert!(validate_bundle(Some(&emb), &clusters).is_err());
+    }
 }

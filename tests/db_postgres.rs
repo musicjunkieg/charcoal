@@ -182,6 +182,13 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         .unwrap();
     let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
     assert_eq!(stored.len(), 1);
+    // Count alone would also pass if the delete ran but the insert did not —
+    // assert the survivor is the NEW generation's row, not an old one.
+    assert_eq!(stored[0].post_count, 9);
+    assert!(
+        stored[0].centroid.iter().all(|v| (v - 0.9).abs() < 1e-6),
+        "the surviving row must be the new generation's centroid"
+    );
     // None embedding leaves the column NULL for this generation.
     assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
 

@@ -243,10 +243,12 @@ async fn main() -> Result<()> {
                 &config.bluesky_handle,
             )
             .await?;
-            let (json, _, _) = db
-                .get_fingerprint(&did)
-                .await?
-                .expect("fingerprint was just saved");
+            // The row was just written, but the database is shared — a
+            // concurrent delete can land between the save and this read. Fail
+            // as a normal error instead of panicking the CLI.
+            let (json, _, _) = db.get_fingerprint(&did).await?.ok_or_else(|| {
+                anyhow::anyhow!("fingerprint disappeared between save and read-back")
+            })?;
             let fingerprint: charcoal::topics::fingerprint::TopicFingerprint =
                 serde_json::from_str(&json)?;
             fingerprint.display();
