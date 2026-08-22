@@ -5741,6 +5741,28 @@
       "created_at": "2026-08-21T23:46:08.760788-07:00",
       "updated_at": "2026-08-21T23:46:08.760788-07:00",
       "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"4a52ffa\",\"confidence\":95}"
+    },
+    {
+      "id": 532,
+      "change_id": "4e159a15-6088-4bfc-baf3-f6e165cd69b2",
+      "node_type": "observation",
+      "title": "Real-data gate caught hub degeneracy: 487/500 posts in one cluster, threshold-insensitive (MiniLM anisotropy)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-22T08:07:53.246069-07:00",
+      "updated_at": "2026-08-22T08:07:53.246069-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"confidence\":95}"
+    },
+    {
+      "id": 533,
+      "change_id": "7317d81f-7f87-4610-90e2-73528f78b4bf",
+      "node_type": "action",
+      "title": "Centered embeddings for merge decisions; original-space centroids preserved; Bryan signed off on 10-topic result",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-22T08:07:53.259176-07:00",
+      "updated_at": "2026-08-22T08:07:53.259176-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"ca868cd\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -11452,6 +11474,28 @@
       "weight": 1.0,
       "rationale": "review fix round on task 9",
       "created_at": "2026-08-21T23:46:08.768443-07:00"
+    },
+    {
+      "id": 530,
+      "from_node_id": 531,
+      "to_node_id": 532,
+      "from_change_id": "a04d2389-36d0-4465-a27b-f56970007cee",
+      "to_change_id": "4e159a15-6088-4bfc-baf3-f6e165cd69b2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "real-data validation exposed degeneracy",
+      "created_at": "2026-08-22T08:08:00.668280-07:00"
+    },
+    {
+      "id": 531,
+      "from_node_id": 532,
+      "to_node_id": 533,
+      "from_change_id": "4e159a15-6088-4bfc-baf3-f6e165cd69b2",
+      "to_change_id": "7317d81f-7f87-4610-90e2-73528f78b4bf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "anisotropy diagnosis -> centering fix",
+      "created_at": "2026-08-22T08:08:00.677865-07:00"
     }
   ],
   "documents": [

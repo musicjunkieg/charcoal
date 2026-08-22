@@ -6,7 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Multi-interest topic fingerprint (#297, spike #295 BETTER tier): the
+  protected user's posts are now clustered in embedding space into up to 12
+  weighted topic centroids (greedy agglomerative, centroid linkage,
+  deterministic), each labeled by TF-IDF over only its own posts — replacing
+  the single mean-pooled centroid that smeared multi-topic users into a
+  vector in nobody's topic region. Live overlap is now max-over-topics
+  ("is this account near ANY of my topics?"); candidates still get one
+  centroid, so scan-time cost is unchanged. Real-data validation forced one
+  algorithm correction: MiniLM embeddings are anisotropic, so merge
+  decisions run on mean-centered vectors (raw-space cosines collapsed 487
+  of 500 posts into one hub cluster); stored centroids stay in the original
+  space. Discovery search keywords now come one-per-semantic-topic for free.
+- Shadow compare for #135 recalibration: every embedding-scale score also
+  records the pre-#297 mean-centroid overlap in a new nullable
+  `account_scores.overlap_legacy` column (migration 0013, both backends),
+  so gate/tier thresholds can later be retuned from real paired data. The
+  live score, gates, and tiers use only the new overlap; thresholds are
+  numerically unchanged at ship time. Note for #135: at 500 posts the
+  12-cluster cap, not `merge_threshold`, determines cluster count — the
+  0.60 default is uncalibrated. A read path for the column is #305.
+
 ### Fixed
+- Fingerprint generations can no longer diverge (#302, CodeRabbit Major
+  deferred off PR #101): fingerprint JSON, mean embedding, and the new
+  per-topic centroid rows persist in ONE transaction per backend via
+  `save_fingerprint_bundle`, replacing the two-statement sequence whose
+  warn-only embedding failure could leave a fresh fingerprint beside a
+  stale embedding for up to 14 days. `charcoal migrate` transfers the whole
+  generation atomically too, and user deletion clears centroid rows (FK
+  cascade on Postgres, explicit delete on SQLite). A fingerprint whose
+  centroid rows don't match its JSON (pre-#297 legacy, or pre-#302
+  divergence) is treated as stale and rebuilt on the next scan — the same
+  amortized one-rebuild-per-user rollout as #296. An unreadable stored
+  fingerprint JSON now also rebuilds instead of failing that user's scans
+  forever (#303 precedent).
+- The web scan, admin pre-seed, and CLI `charcoal fingerprint` now share
+  one build path (`src/topics/build.rs`) instead of maintaining a
+  hand-duplicated copy in `main.rs`.
 - Repaired eight defects in the topic-overlap math (#296, spike #295 GOOD
   tier): per-post embeddings are L2-normalized before averaging so long
   posts no longer dominate the centroid; cosine similarity preserves its

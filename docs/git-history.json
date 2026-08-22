@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ca868cda33442a7adfacade1ff80703e01317f2c",
+    "short_hash": "ca868cd",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:07:47-07:00",
+    "message": "fix(297): center embeddings for merge decisions - hub-cluster degeneracy on real data\n\nReal-data validation (Task 10 step 4) produced one mega-cluster holding\n487/500 posts at every merge threshold: MiniLM embeddings are anisotropic,\nso raw cosines all sit high and the largest cluster is always the best\nmerge partner. Centering on the corpus mean (all-but-the-top style)\nremoves the shared component for MERGE DECISIONS ONLY; stored centroids\nstay in the original space, so scoring and shadow-compare semantics are\nuntouched. Bryan validated the resulting 10-topic fingerprint and signed\noff 2026-08-22; merge_threshold stays at the 0.60 default (output\nidentical at 0.60/0.70 in centered space). Two synthetic tests updated to\ncentered semantics (tiny near-identical corpora stay singletons; the\ntied-largest prune rule covers them).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "4a52ffa5a11c1bdbdf3ee53aaa2a7a7b9ffcffa1",
     "short_hash": "4a52ffa",
     "author": "Bryan Guffey",

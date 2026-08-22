@@ -22,8 +22,13 @@ pub struct PostCluster {
 /// merge, revisited by #135 recalibration.
 #[derive(Debug, Clone)]
 pub struct ClusteringParams {
-    /// Stop merging when the best remaining pair's centroid cosine falls
-    /// below this (unless still over `max_clusters`).
+    /// Stop merging when the best remaining pair's CENTERED-space centroid
+    /// cosine falls below this (unless still over `max_clusters`). Centered
+    /// cosines run far lower than raw ones (mean pairwise ≈ -1/(n-1)), so
+    /// this gate is much stricter than the same number in raw space. At
+    /// n=500 the cap does the merging work and this knob is effectively
+    /// inert until #135 retunes it — do not read the 0.60 default as
+    /// calibrated.
     pub merge_threshold: f64,
     /// Hard cap on surviving clusters; forces merges below the threshold.
     pub max_clusters: usize,
@@ -46,10 +51,9 @@ impl Default for ClusteringParams {
 /// (up to n-1 merges × O(n²) pair scan per merge); n ≤ 500 on the build path
 /// keeps runtime sub-second. Scan-time cost is untouched.
 pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) -> Vec<PostCluster> {
-    // Working state: each cluster = (member indices, unnormalized sum of
-    // NORMALIZED member vectors). Normalizing members first means the
-    // centroid direction reflects what posts say, not how long they are —
-    // the same reasoning as normalized_mean_embedding (#296).
+    // Stage 1: L2-normalize each vector (skipping zeros). Normalizing first
+    // means direction reflects what posts say, not how long they are — the
+    // same reasoning as normalized_mean_embedding (#296).
     let mut normalized: Vec<(usize, Vec<f64>)> = Vec::new();
     for (i, emb) in embeddings.iter().enumerate() {
         let norm: f64 = emb.iter().map(|v| v * v).sum::<f64>().sqrt();
@@ -147,6 +151,12 @@ pub fn cluster_embeddings(embeddings: &[Vec<f64>], params: &ClusteringParams) ->
         .into_iter()
         .map(|(mut members, sum, _)| {
             members.sort_unstable();
+            // Since merge decisions moved to centered space, "merged members
+            // can't cancel in raw space" is an empirical invariant (raw MiniLM
+            // cosines are uniformly high — the very anisotropy that motivated
+            // centering), not a structural one. If it ever broke, this branch
+            // emits a zero centroid that scores 0.0 everywhere: a silently
+            // inert topic, not a crash.
             let norm: f64 = sum.iter().map(|v| v * v).sum::<f64>().sqrt();
             let centroid = if norm < f64::EPSILON {
                 sum
