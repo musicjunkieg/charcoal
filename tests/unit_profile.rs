@@ -732,6 +732,72 @@ async fn multi_topic_centroids_use_max_and_record_legacy_shadow() {
         "legacy shadow should be the smeared mean cosine, got {legacy}"
     );
     assert!(overlap > legacy);
+
+    // The ally invariant: max-over-topics raises overlap for people who share
+    // the protected user's topics, and every verdict here is clean. Topic
+    // proximity alone must not move the tier.
+    assert_eq!(
+        score.threat_tier.as_deref(),
+        Some("Low"),
+        "near-perfect topic overlap with zero toxicity must stay Low"
+    );
+}
+
+/// #302/CodeRabbit PR #102: SQLite stores centroids as unconstrained JSON, so
+/// a stored centroid can be the wrong width. Scoring it as 0.0 would read as
+/// "no overlap" and suppress the legacy fallback — the live overlap must
+/// degrade to the mean-centroid cosine instead.
+#[tokio::test]
+async fn wrong_width_centroids_degrade_to_legacy_behavior() {
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+    // Every stored centroid is unusable against a 384-dim candidate.
+    let centroids = vec![vec![1.0; 8], vec![0.5; 16]];
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,             // embedder
+        Some(&mean),      // protected_embedding
+        Some(&centroids), // protected_topic_centroids — all wrong width
+        Some(&candidate), // precomputed_target_embedding
+        0.0,              // median_engagement
+        false,            // pile_on
+        None,             // nli_scorer
+        None,             // protected_posts_with_embeddings
+        None,             // direct_pairs
+        None,             // data_dir
+        None,             // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    let legacy = score.overlap_legacy.unwrap();
+    assert!(
+        (overlap - legacy).abs() < 1e-9,
+        "live {overlap} must fall back to legacy {legacy}, not a fabricated 0.0"
+    );
+    assert!(overlap > 0.0, "the legacy cosine here is positive");
 }
 
 #[tokio::test]

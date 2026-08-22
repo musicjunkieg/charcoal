@@ -5774,6 +5774,28 @@
       "created_at": "2026-08-22T08:21:25.782940-07:00",
       "updated_at": "2026-08-22T08:21:25.782940-07:00",
       "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"56d49d2\",\"confidence\":95}"
+    },
+    {
+      "id": 535,
+      "change_id": "a3f4bc49-252c-4f51-8b9b-b6015f94222d",
+      "node_type": "outcome",
+      "title": "Final whole-branch review READY TO MERGE: 0 C/I, all Minors follow-ups",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-22T08:30:23.523299-07:00",
+      "updated_at": "2026-08-22T08:30:23.523299-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"eeb30b1\",\"confidence\":95}"
+    },
+    {
+      "id": 536,
+      "change_id": "da4e4644-8d92-4ef5-80c7-aa3cfe94ffe4",
+      "node_type": "action",
+      "title": "Opened PR #102 feat/297 -> staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-22T08:31:25.272801-07:00",
+      "updated_at": "2026-08-22T08:31:25.272801-07:00",
+      "metadata_json": "{\"branch\":\"feat/297-multi-interest-fingerprint\",\"commit\":\"eeb30b1\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -11518,6 +11540,28 @@
       "weight": 1.0,
       "rationale": "task 10 closed the plan",
       "created_at": "2026-08-22T08:21:25.790273-07:00"
+    },
+    {
+      "id": 533,
+      "from_node_id": 534,
+      "to_node_id": 535,
+      "from_change_id": "bc9174a6-8941-4c64-b659-5636bdb7f9e5",
+      "to_change_id": "a3f4bc49-252c-4f51-8b9b-b6015f94222d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "branch validated end to end",
+      "created_at": "2026-08-22T08:30:23.532914-07:00"
+    },
+    {
+      "id": 534,
+      "from_node_id": 535,
+      "to_node_id": 536,
+      "from_change_id": "a3f4bc49-252c-4f51-8b9b-b6015f94222d",
+      "to_change_id": "da4e4644-8d92-4ef5-80c7-aa3cfe94ffe4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "ready-to-merge verdict -> PR",
+      "created_at": "2026-08-22T08:31:25.281104-07:00"
     }
   ],
   "documents": [

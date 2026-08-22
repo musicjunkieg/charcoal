@@ -3,7 +3,7 @@
 //! outside `src/web` because the CLI `charcoal fingerprint` must build
 //! without the `web` feature.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::{info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
@@ -144,7 +144,15 @@ pub async fn build_user_fingerprint(
         None
     };
 
-    let artifacts = assemble_fingerprint(&post_texts, embedded.as_ref())?;
+    // Clustering plus one TF-IDF pass per cluster is seconds-scale CPU work at
+    // n=500, and this function runs inside the scan future. Left on the runtime
+    // worker it would block every other task on that thread — including the
+    // queue heartbeat in `run_under_slot`, whose lease would then look lapsed.
+    // `assemble_fingerprint` itself stays sync so it remains unit-testable.
+    let artifacts =
+        tokio::task::spawn_blocking(move || assemble_fingerprint(&post_texts, embedded.as_ref()))
+            .await
+            .context("fingerprint assembly task panicked")??;
     let json = serde_json::to_string(&artifacts.fingerprint)?;
     db.save_fingerprint_bundle(
         user_did,

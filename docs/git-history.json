@@ -1,5 +1,13 @@
 [
   {
+    "hash": "eeb30b1f9435fa478267e767747c1d016f6391bf",
+    "short_hash": "eeb30b1",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:30:14-07:00",
+    "message": "docs(297): align spec label-keyword budget with implementation (12, was 6)\n\nFinal whole-branch review Minor: the plan overrode the spec without the\nspec being amended.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "56d49d25735bfb5b4fce83ca871005eca8550413",
     "short_hash": "56d49d2",
     "author": "Bryan Guffey",

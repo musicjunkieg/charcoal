@@ -287,11 +287,18 @@ pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
 /// Pure max, deliberately NOT weighted by topic weight: a topic that is 5%
 /// of someone's posting is still fully theirs; noise clusters were already
 /// pruned at build time. Sign is preserved (opposition signal, #296).
-/// Returns `None` for an empty topic set so callers can degrade to the
-/// legacy mean-centroid path (pre-#297 fingerprints).
+/// Returns `None` when no centroid is usable — an empty topic set, or one
+/// where every centroid's width differs from the candidate's — so callers
+/// degrade to the legacy mean-centroid path (pre-#297 fingerprints).
 pub fn max_topic_overlap(topic_centroids: &[Vec<f64>], candidate: &[f64]) -> Option<f64> {
     topic_centroids
         .iter()
+        // A mismatched width scores 0.0 in `cosine_similarity_embeddings`,
+        // which the caller cannot tell from a genuine "no overlap" — it would
+        // return `Some(0.0)` and silently suppress the legacy fallback. Drop
+        // those centroids so an all-mismatched set degrades instead.
+        // (CodeRabbit PR #102)
+        .filter(|topic| topic.len() == candidate.len())
         .map(|topic| cosine_similarity_embeddings(topic, candidate))
         .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
@@ -501,5 +508,32 @@ mod tests {
     fn max_topic_overlap_empty_topics_is_none() {
         let candidate = vec![1.0; EMBEDDING_DIM];
         assert!(max_topic_overlap(&[], &candidate).is_none());
+    }
+
+    #[test]
+    fn max_topic_overlap_ignores_wrong_width_centroids() {
+        // SQLite stores centroids as unconstrained JSON, so a wrong-width row
+        // can exist. It must not be scored as 0.0 alongside a usable centroid.
+        // (CodeRabbit PR #102)
+        let mut good = vec![0.0; EMBEDDING_DIM];
+        good[100] = 1.0;
+        let wrong_width = vec![1.0; 8];
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[100] = 1.0;
+
+        let overlap = max_topic_overlap(&[wrong_width, good], &candidate).unwrap();
+        assert!(
+            (overlap - 1.0).abs() < 1e-9,
+            "max must come from the compatible centroid, got {overlap}"
+        );
+    }
+
+    #[test]
+    fn max_topic_overlap_all_wrong_width_is_none() {
+        // Nothing usable left: return None so the caller falls back to the
+        // legacy mean-centroid cosine rather than reading a fabricated 0.0.
+        let candidate = vec![1.0; EMBEDDING_DIM];
+        let centroids = vec![vec![1.0; 8], vec![0.5; 16]];
+        assert!(max_topic_overlap(&centroids, &candidate).is_none());
     }
 }
