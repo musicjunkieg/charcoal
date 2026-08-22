@@ -279,6 +279,23 @@ pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
     }
 }
 
+/// Overlap between a candidate centroid and a SET of protected topic
+/// centroids: the best (maximum) cosine across topics. Answers "is this
+/// account near ANY of my topics?" — the actual threat question — instead of
+/// "is it near my average?" (#297, spike #295 defect 1).
+///
+/// Pure max, deliberately NOT weighted by topic weight: a topic that is 5%
+/// of someone's posting is still fully theirs; noise clusters were already
+/// pruned at build time. Sign is preserved (opposition signal, #296).
+/// Returns `None` for an empty topic set so callers can degrade to the
+/// legacy mean-centroid path (pre-#297 fingerprints).
+pub fn max_topic_overlap(topic_centroids: &[Vec<f64>], candidate: &[f64]) -> Option<f64> {
+    topic_centroids
+        .iter()
+        .map(|topic| cosine_similarity_embeddings(topic, candidate))
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +450,56 @@ mod tests {
             (sim - 1.0).abs() < 1e-10,
             "Identical sparse vectors should be 1.0"
         );
+    }
+
+    #[test]
+    fn max_topic_overlap_takes_the_best_topic() {
+        let mut topic_a = vec![0.0; EMBEDDING_DIM];
+        topic_a[0] = 1.0;
+        let mut topic_b = vec![0.0; EMBEDDING_DIM];
+        topic_b[100] = 1.0;
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[100] = 1.0; // exactly topic B
+        let overlap = max_topic_overlap(&[topic_a, topic_b], &candidate).unwrap();
+        assert!((overlap - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_topic_overlap_beats_smeared_mean_for_niche_topic() {
+        // The coarseness fix, demonstrated (#297's reason to exist): a candidate
+        // sitting exactly on ONE of two orthogonal topics scores ~1.0 against
+        // max-over-topics but only ~0.71 against the smeared mean centroid.
+        let mut topic_a = vec![0.0; EMBEDDING_DIM];
+        topic_a[0] = 1.0;
+        let mut topic_b = vec![0.0; EMBEDDING_DIM];
+        topic_b[100] = 1.0;
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[100] = 1.0;
+
+        let mean = normalized_mean_embedding(&[topic_a.clone(), topic_b.clone()]);
+        let legacy = cosine_similarity_embeddings(&mean, &candidate);
+        let multi = max_topic_overlap(&[topic_a, topic_b], &candidate).unwrap();
+        assert!(
+            multi > legacy + 0.2,
+            "multi {multi} should beat legacy {legacy}"
+        );
+    }
+
+    #[test]
+    fn max_topic_overlap_preserves_negative_sign() {
+        // Opposition is signal (#296 defect 5): a candidate pointing AWAY from
+        // every topic must stay negative, not clamp to zero.
+        let mut topic = vec![0.0; EMBEDDING_DIM];
+        topic[0] = 1.0;
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[0] = -1.0;
+        let overlap = max_topic_overlap(&[topic], &candidate).unwrap();
+        assert!((overlap - (-1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_topic_overlap_empty_topics_is_none() {
+        let candidate = vec![1.0; EMBEDDING_DIM];
+        assert!(max_topic_overlap(&[], &candidate).is_none());
     }
 }

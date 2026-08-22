@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c7c94ae8cc4d17b754226054857e6da8d4c075c5",
+    "short_hash": "c7c94ae",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T20:46:35-07:00",
+    "message": "fix(297): pin tied-largest prune fallback + correct complexity note\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
     "hash": "7f3cc598e5bcbf05bd0453686a537d0a0c4cd2ad",
     "short_hash": "7f3cc59",
     "author": "Bryan Guffey",
