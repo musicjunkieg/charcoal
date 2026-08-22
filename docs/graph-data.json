@@ -5187,9 +5187,9 @@
       "node_type": "option",
       "title": "GOOD: repair existing architecture (normalize, gate scale fix, cleaning, staleness) - low complexity, $0",
       "description": null,
-      "status": "pending",
+      "status": "chosen",
       "created_at": "2026-08-12T07:14:09.188727-07:00",
-      "updated_at": "2026-08-12T07:14:09.188727-07:00",
+      "updated_at": "2026-08-21T18:50:58.011709-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":90}"
     },
     {
@@ -5400,6 +5400,50 @@
       "created_at": "2026-08-20T20:47:54.436755-07:00",
       "updated_at": "2026-08-20T20:47:54.436755-07:00",
       "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"c78e0a0\",\"confidence\":95}"
+    },
+    {
+      "id": 499,
+      "change_id": "604032a3-a087-4c20-987b-cdc1a448dd31",
+      "node_type": "action",
+      "title": "Fixed #303: unparseable timestamps now stale (d1815d0), superseding the #296 plan decision after CodeRabbit outside-diff Major",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T22:29:01.853391-07:00",
+      "updated_at": "2026-08-20T22:29:01.853391-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"d1815d0\",\"confidence\":95}"
+    },
+    {
+      "id": 500,
+      "change_id": "138784ff-d616-415f-beab-65e82534fec7",
+      "node_type": "outcome",
+      "title": "PR #101 fully clear after round 2: CI 7/7 green on d1815d0, CodeRabbit zero actionable, only open thread is the #302 deferral record",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-20T22:33:02.050844-07:00",
+      "updated_at": "2026-08-20T22:33:02.050844-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"commit\":\"d1815d0\",\"confidence\":95}"
+    },
+    {
+      "id": 501,
+      "change_id": "dcdd354f-3572-480e-9fb8-56ec25f13426",
+      "node_type": "outcome",
+      "title": "CodeRabbit APPROVED PR #101 (19:06Z) after last open thread resolved; reviewDecision APPROVED, CI 7/7 green — #296 branch fully clear for merge",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T12:08:54.782229-07:00",
+      "updated_at": "2026-08-21T12:08:54.782229-07:00",
+      "metadata_json": "{\"branch\":\"feat/296-overlap-math\",\"confidence\":95}"
+    },
+    {
+      "id": 502,
+      "change_id": "9eacf7c8-e4dc-4b64-a5d7-419bad1be342",
+      "node_type": "outcome",
+      "title": "PR #101 MERGED to staging (90d80af): #296 GOOD tier live on staging; spike #295 GOOD arc complete",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-21T18:50:57.995747-07:00",
+      "updated_at": "2026-08-21T18:50:57.995747-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"90d80af\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -10671,6 +10715,50 @@
       "weight": 1.0,
       "rationale": "Post-review hardening of #296",
       "created_at": "2026-08-20T20:47:54.445213-07:00"
+    },
+    {
+      "id": 490,
+      "from_node_id": 498,
+      "to_node_id": 499,
+      "from_change_id": "a6f2748f-3526-4d49-a9cc-2c533e06fefe",
+      "to_change_id": "604032a3-a087-4c20-987b-cdc1a448dd31",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second CodeRabbit iteration",
+      "created_at": "2026-08-20T22:29:01.863938-07:00"
+    },
+    {
+      "id": 491,
+      "from_node_id": 499,
+      "to_node_id": 500,
+      "from_change_id": "604032a3-a087-4c20-987b-cdc1a448dd31",
+      "to_change_id": "138784ff-d616-415f-beab-65e82534fec7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Loop completion",
+      "created_at": "2026-08-20T22:33:02.060432-07:00"
+    },
+    {
+      "id": 492,
+      "from_node_id": 500,
+      "to_node_id": 501,
+      "from_change_id": "138784ff-d616-415f-beab-65e82534fec7",
+      "to_change_id": "dcdd354f-3572-480e-9fb8-56ec25f13426",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approval achieved; loop termination condition met",
+      "created_at": "2026-08-21T12:08:54.792564-07:00"
+    },
+    {
+      "id": 493,
+      "from_node_id": 501,
+      "to_node_id": 502,
+      "from_change_id": "dcdd354f-3572-480e-9fb8-56ec25f13426",
+      "to_change_id": "9eacf7c8-e4dc-4b64-a5d7-419bad1be342",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merge lands the work",
+      "created_at": "2026-08-21T18:50:58.004441-07:00"
     }
   ],
   "documents": [

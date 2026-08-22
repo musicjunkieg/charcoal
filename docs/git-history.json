@@ -1,5 +1,21 @@
 [
   {
+    "hash": "90d80af1a9f7696acf5a4e2518036026fdc92b8a",
+    "short_hash": "90d80af",
+    "author": "chaos gremlin",
+    "date": "2026-08-21T18:47:42-07:00",
+    "message": "Merge pull request #101 from musicjunkieg/feat/296-overlap-math\n\nfix(296): repair eight defects in the topic-overlap math (spike #295 GOOD tier)",
+    "files_changed": 0
+  },
+  {
+    "hash": "d1815d0a669d4fca301cef6c4cffa4c6a86879b2",
+    "short_hash": "d1815d0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T22:26:33-07:00",
+    "message": "fix(303): treat unparseable fingerprint timestamps as stale, not fresh\n\nCodeRabbit outside-diff Major on PR #101, and it is correct: a\nsuccessful rebuild rewrites updated_at via the DB clock, so a corrupt\nrow self-heals after one rebuild, while fresh-forever silently bypasses\nthe 14-day refresh. Rebuild-per-scan only persists under systemic\nformat drift, which the warn makes loud, and the stale-rebuild-failure\npath already falls back gracefully. Supersedes the #296 plan decision.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "c78e0a0d426ea98d942e9ec07b8487c10d9002ba",
     "short_hash": "c78e0a0",
     "author": "Bryan Guffey",
