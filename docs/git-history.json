@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7f3cc598e5bcbf05bd0453686a537d0a0c4cd2ad",
+    "short_hash": "7f3cc59",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T19:31:33-07:00",
+    "message": "docs(297): implementation plan - 10 TDD tasks for multi-interest fingerprint\n\nTasks: clustering module, max-over-topics overlap, per-cluster labeling,\nmigration 0013, save_fingerprint_bundle (SQLite + Postgres), migrate\ntransfer, shared build path in src/topics/build.rs (web is feature-gated),\nscan/scoring wiring with overlap_legacy shadow, full verification gates.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "cf66148d97af862bc029293bb33e2b8abb383b9f",
     "short_hash": "cf66148",
     "author": "Bryan Guffey",
