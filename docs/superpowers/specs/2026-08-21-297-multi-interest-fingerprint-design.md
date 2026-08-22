@@ -58,7 +58,7 @@ New flow:
    normalized mean of its member vectors; `weight` = member share of all
    clustered posts, normalized to sum 1.0 across survivors.
 4. **Label** each surviving cluster by running the existing TF-IDF extraction
-   (`TfIdfExtractor`) over only that cluster's posts; top ≤6 keywords populate
+   (`TfIdfExtractor`) over only that cluster's posts; top ≤12 keywords populate
    `TopicCluster { label, keywords, keyword_scores, weight }` — the JSON shape
    is unchanged, so serde compatibility holds. Keyword ranking is by score, so
    the seed-first positional assumption in discovery still holds.

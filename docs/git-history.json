@@ -1,5 +1,13 @@
 [
   {
+    "hash": "56d49d25735bfb5b4fce83ca871005eca8550413",
+    "short_hash": "56d49d2",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:13:39-07:00",
+    "message": "docs(297): changelog for multi-interest fingerprint + atomic persistence; comment fixes from review\n\nDoc-only code changes: merge_threshold doc now states centered-space scale\nand cap-dominance caveat for #135; stale working-state comment retitled;\nempirical-invariant note on the zero-centroid fallback.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
     "hash": "ca868cda33442a7adfacade1ff80703e01317f2c",
     "short_hash": "ca868cd",
     "author": "Bryan Guffey",
