@@ -133,6 +133,98 @@ async fn test_pg_embedding_roundtrip() {
     assert!((loaded[383] - 383.0 / 384.0).abs() < 0.001);
 }
 
+/// #302: `save_fingerprint_bundle` writes the fingerprint row, the mean
+/// embedding, and per-topic centroid rows in one transaction; a later
+/// keyword-only generation (`embedding: None`) must NULL out a prior
+/// embedding and drop the previous generation's extra cluster rows — the
+/// bundle IS the generation, not an incremental patch.
+#[tokio::test]
+async fn test_pg_bundle_roundtrip_and_replacement() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    cleanup_test_data(&url).await.unwrap();
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let clusters = vec![
+        charcoal::db::models::ClusterCentroid {
+            centroid: vec![0.5; 384],
+            post_count: 30,
+        },
+        charcoal::db::models::ClusterCentroid {
+            centroid: vec![-0.25; 384],
+            post_count: 12,
+        },
+    ];
+    let emb = vec![0.125; 384];
+    db.save_fingerprint_bundle(TEST_USER, "{}", 42, Some(&emb), &clusters)
+        .await
+        .unwrap();
+
+    let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+    assert_eq!(stored.len(), 2);
+    // pgvector stores f32 — compare with tolerance, same as the
+    // mean-embedding tests.
+    for (s, c) in stored.iter().zip(clusters.iter()) {
+        assert_eq!(s.post_count, c.post_count);
+        for (a, b) in s.centroid.iter().zip(c.centroid.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    // Replacement drops the old generation's extra rows.
+    let one = vec![charcoal::db::models::ClusterCentroid {
+        centroid: vec![0.9; 384],
+        post_count: 9,
+    }];
+    db.save_fingerprint_bundle(TEST_USER, "{}", 9, None, &one)
+        .await
+        .unwrap();
+    let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+    assert_eq!(stored.len(), 1);
+    // None embedding leaves the column NULL for this generation.
+    assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
+
+    cleanup_test_data(&url).await.unwrap();
+}
+
+/// Deleting a user must cascade to `topic_clusters` (FK ON DELETE CASCADE,
+/// migration 0013). Uses its own DID, not the shared `TEST_USER` — this test
+/// calls `delete_user_data`, and these tests run concurrently against one
+/// database, so deleting the shared user would pull data out from under a
+/// neighbouring test.
+#[tokio::test]
+async fn test_pg_delete_user_cascades_topic_clusters() {
+    const DEL_USER: &str = "did:plc:pgtest_bundle_del00000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    // Start from a known state without touching the shared fixtures.
+    db.delete_user_data(DEL_USER).await.unwrap();
+
+    let clusters = vec![charcoal::db::models::ClusterCentroid {
+        centroid: vec![0.5; 384],
+        post_count: 3,
+    }];
+    db.save_fingerprint_bundle(DEL_USER, "{}", 3, None, &clusters)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_topic_centroids(DEL_USER).await.unwrap().len(),
+        1,
+        "precondition: the cluster row must exist, or this test cannot fail"
+    );
+
+    db.delete_user_data(DEL_USER).await.unwrap();
+
+    assert!(
+        db.get_topic_centroids(DEL_USER).await.unwrap().is_empty(),
+        "topic_clusters must not survive account deletion on Postgres"
+    );
+}
+
 #[tokio::test]
 async fn test_pg_account_score_upsert_and_rank() {
     let Some(url) = database_url() else {

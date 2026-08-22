@@ -18,8 +18,8 @@ use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    ThreatTier, ToxicPost, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
+    NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
     eta_seconds, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
@@ -312,6 +312,80 @@ impl Database for PgDatabase {
             );
         }
         Ok(())
+    }
+
+    async fn save_fingerprint_bundle(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+        embedding: Option<&[f64]>,
+        clusters: &[ClusterCentroid],
+    ) -> Result<()> {
+        crate::db::traits::validate_bundle(embedding, clusters)?;
+        // One transaction for the whole generation (#302): fingerprint row
+        // (JSON + embedding + updated_at in one upsert), then cluster rows.
+        let mut tx = self.pool.begin().await?;
+        let vector = embedding.map(|e| {
+            let floats: Vec<f32> = e.iter().map(|&v| v as f32).collect();
+            pgvector::Vector::from(floats)
+        });
+        sqlx_core::query::query(
+            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, updated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT(user_did) DO UPDATE SET
+                fingerprint_json = $2,
+                post_count = $3,
+                embedding_vector = $4,
+                updated_at = NOW()",
+        )
+        .bind(user_did)
+        .bind(fingerprint_json)
+        .bind(i32::try_from(post_count).context("post_count exceeds i32 range")?)
+        .bind(vector)
+        .execute(&mut *tx)
+        .await?;
+        sqlx_core::query::query("DELETE FROM topic_clusters WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        for (i, cluster) in clusters.iter().enumerate() {
+            let floats: Vec<f32> = cluster.centroid.iter().map(|&v| v as f32).collect();
+            sqlx_core::query::query(
+                "INSERT INTO topic_clusters (user_did, cluster_index, centroid, post_count)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(user_did)
+            .bind(i as i32)
+            .bind(pgvector::Vector::from(floats))
+            .bind(
+                i32::try_from(cluster.post_count)
+                    .context("cluster post_count exceeds i32 range")?,
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>> {
+        let rows = sqlx_core::query::query(
+            "SELECT centroid, post_count FROM topic_clusters
+             WHERE user_did = $1 ORDER BY cluster_index",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                let vector: pgvector::Vector = r.get(0);
+                Ok(ClusterCentroid {
+                    centroid: vector.to_vec().iter().map(|&v| v as f64).collect(),
+                    post_count: r.get::<i32, _>(1) as u32,
+                })
+            })
+            .collect()
     }
 
     async fn get_fingerprint(&self, user_did: &str) -> Result<Option<(String, u32, String)>> {
