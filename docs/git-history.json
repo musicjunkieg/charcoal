@@ -1,5 +1,13 @@
 [
   {
+    "hash": "cf66148d97af862bc029293bb33e2b8abb383b9f",
+    "short_hash": "cf66148",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T19:16:07-07:00",
+    "message": "docs(297): design spec for multi-interest fingerprint + atomic persistence\n\nApproved section-by-section with Bryan 2026-08-21. Embedding-first\nclustering (BERTopic-lite), max-over-topics overlap, shadow compare via\naccount_scores.overlap_legacy, save_fingerprint_bundle transaction (#302),\nmigration 0013. #298 deferred; candidate-side dilution filed as #304.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "90d80af1a9f7696acf5a4e2518036026fdc92b8a",
     "short_hash": "90d80af",
     "author": "chaos gremlin",
