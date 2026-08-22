@@ -361,10 +361,9 @@ pub async fn stage1_outcome_timed(
         stage1_texts.clone()
     };
     let stage1_overlap: Option<f64> = {
-        let topic_extractor = TfIdfExtractor {
-            top_n_keywords: 40,
-            max_clusters: 7,
-        };
+        // Same extractor config as the protected fingerprint (60/10) so the
+        // two keyword spaces share a vocabulary budget. (#296 defect 3)
+        let topic_extractor = TfIdfExtractor::default();
         match topic_extractor.extract(&stage1_fp_texts) {
             Ok(fp) => Some(overlap::cosine_similarity(protected_fingerprint, &fp)),
             // TF-IDF extraction failed (e.g. no usable tokens). Treat overlap as
@@ -377,21 +376,22 @@ pub async fn stage1_outcome_timed(
 
     // Early exit: all ONNX scores clean AND topic overlap below gate.
     // When overlap is unknown (extraction failed), do not early-exit.
+    let fp_quality = FingerprintQuality::from_counts(
+        stage1_sample.originals.len(),
+        stage1_sample.replies.len() + stage1_sample.quotes.len(),
+    );
+
     if should_early_exit_stage1(
         &stage1_clean_pass_scores,
         stage1_overlap,
-        weights.overlap_gate_threshold,
+        weights.keyword_gate_threshold, // Stage 1 overlap IS keyword-scale
+        fp_quality,
     ) {
         info!(
             handle = target_handle,
             posts = stage1_sample.total_posts,
             overlap = format!("{:.3}", stage1_overlap.unwrap_or(0.0)),
             "Stage 1 early exit: clean and topically irrelevant"
-        );
-
-        let fp_quality = FingerprintQuality::from_counts(
-            stage1_sample.originals.len(),
-            stage1_sample.replies.len() + stage1_sample.quotes.len(),
         );
 
         return Ok(Stage1Outcome::Terminal(Box::new(AccountScore {
@@ -586,29 +586,62 @@ pub async fn score_from_sample(
     // Prefer sentence embeddings when available — they capture semantic
     // similarity ("fatphobia" ≈ "obesity") that keyword matching misses.
     // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
-    let topic_overlap = if let (Some(precomputed), Some(protected_emb)) =
-        (precomputed_target_embedding, protected_embedding)
-    {
-        // Precomputed path (#213): Phase A already embedded `fingerprint_posts`
-        // (the identical selection, via `select_fingerprint_posts`) and averaged
-        // them, so the cosine here is byte-identical to the embed-at-finalize
-        // path below — only the (expensive, mutex-serialized) embedding moved to
-        // Phase A where it overlaps I/O.
-        embeddings::cosine_similarity_embeddings(protected_emb, precomputed)
-    } else if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
-        // Embedding path: embed target's posts, average, compare
-        let target_embeddings = emb.embed_batch(&fingerprint_posts).await?;
-        let target_mean = embeddings::mean_embedding(&target_embeddings);
-        embeddings::cosine_similarity_embeddings(protected_emb, &target_mean)
-    } else {
-        // Fallback: TF-IDF keyword cosine similarity
-        let topic_extractor = TfIdfExtractor {
-            top_n_keywords: 40,
-            max_clusters: 7,
+    let (topic_overlap, overlap_is_keyword_scale) =
+        if let (Some(precomputed), Some(protected_emb)) =
+            (precomputed_target_embedding, protected_embedding)
+        {
+            // Precomputed path (#213): Phase A already embedded `fingerprint_posts`
+            // (the identical selection, via `select_fingerprint_posts`) and averaged
+            // them, so the cosine here is byte-identical to the embed-at-finalize
+            // path below — only the (expensive, mutex-serialized) embedding moved to
+            // Phase A where it overlaps I/O.
+            (
+                embeddings::cosine_similarity_embeddings(protected_emb, precomputed),
+                false,
+            )
+        } else {
+            // Embedding path: embed target's posts, average, compare. Yields
+            // None when the embedder is unavailable OR every post cleaned to
+            // empty (URLs/mentions only) — a zero centroid would read as
+            // "no overlap" and let the gate suppress a hostile account.
+            // (#301, CodeRabbit PR #101)
+            let embedded_overlap =
+                if let (Some(emb), Some(protected_emb)) = (embedder, protected_embedding) {
+                    let embed_texts: Vec<String> = fingerprint_posts
+                        .iter()
+                        .map(|t| crate::topics::tfidf::clean_for_embedding(t))
+                        .filter(|t| !t.is_empty())
+                        .collect();
+                    if embed_texts.is_empty() {
+                        None
+                    } else {
+                        let target_embeddings = emb.embed_batch(&embed_texts).await?;
+                        let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
+                        Some(embeddings::cosine_similarity_embeddings(
+                            protected_emb,
+                            &target_mean,
+                        ))
+                    }
+                } else {
+                    None
+                };
+
+            match embedded_overlap {
+                Some(overlap_value) => (overlap_value, false),
+                None => {
+                    // Fallback: TF-IDF keyword cosine — same extractor config
+                    // as the protected fingerprint. This overlap lives on the
+                    // sparse keyword scale and must be gated with
+                    // keyword_gate_threshold below.
+                    let topic_extractor = TfIdfExtractor::default();
+                    let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
+                    (
+                        overlap::cosine_similarity(protected_fingerprint, &target_fingerprint),
+                        true,
+                    )
+                }
+            }
         };
-        let target_fingerprint = topic_extractor.extract(&fingerprint_posts)?;
-        overlap::cosine_similarity(protected_fingerprint, &target_fingerprint)
-    };
 
     // Step 4b: Compute behavioral signals (from PostSample — no separate API call)
     let quote_ratio = sample.quote_ratio;
@@ -802,7 +835,17 @@ pub async fn score_from_sample(
     //   2. score_with_behavioral = raw_score * behavioral_boost (via gate)
     //   3. context_multiplier = 1.0 + (context_score * 0.5)
     //   4. final_score = score_with_behavioral * context_multiplier
-    let (raw_score, _) = threat::compute_threat_score(avg_toxicity, topic_overlap, weights);
+    // Gate on the scale the overlap was actually measured on. (#296 defect 2)
+    let effective_weights = if overlap_is_keyword_scale {
+        ThreatWeights {
+            overlap_gate_threshold: weights.keyword_gate_threshold,
+            ..weights.clone()
+        }
+    } else {
+        weights.clone()
+    };
+    let (raw_score, _) =
+        threat::compute_threat_score(avg_toxicity, topic_overlap, &effective_weights);
 
     let (score_with_behavioral, benign_gate, gate_was_bypassed) =
         behavioral::apply_behavioral_modifier_contextual(
@@ -973,11 +1016,24 @@ pub const MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT: usize = 5;
 /// ONNX is ONLY reliable for low scores. A low score genuinely means
 /// no hostile language or identity terms. High scores are NOT trustworthy
 /// (keyword triggering on identity terms).
+///
+/// A fingerprint with `Unreliable` quality (zero originals, or under 15
+/// posts total) yields an overlap number derived entirely from reply
+/// context — the topics of whoever they were arguing with. That number
+/// must never be the reason we SKIP analyzing an account. Note this only
+/// blocks the early exit; Stage 2 scoring still uses the overlap, because
+/// for an actual harasser the reply-derived topics ARE the protected
+/// user's spaces and damping them would create false negatives. Score-side
+/// use of quality waits for #135 calibration. (#296)
 pub fn should_early_exit_stage1(
     onnx_scores: &[f64],
     topic_overlap: Option<f64>,
     overlap_gate_threshold: f64,
+    fp_quality: FingerprintQuality,
 ) -> bool {
+    if fp_quality == FingerprintQuality::Unreliable {
+        return false;
+    }
     if onnx_scores.len() < MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT {
         return false;
     }

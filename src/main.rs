@@ -260,14 +260,26 @@ async fn main() -> Result<()> {
             if charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
                 println!("\nComputing sentence embeddings...");
                 let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
-                let post_embeddings = embedder.embed_batch(&post_texts).await?;
-                let mean_emb = charcoal::topics::embeddings::mean_embedding(&post_embeddings);
-                db.save_embedding(&did, &mean_emb).await?;
-                println!(
-                    "  Embedding computed ({} posts → {}-dim vector)",
-                    post_texts.len(),
-                    charcoal::topics::embeddings::EMBEDDING_DIM,
-                );
+                let embed_texts: Vec<String> = post_texts
+                    .iter()
+                    .map(|t| charcoal::topics::tfidf::clean_for_embedding(t))
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                if embed_texts.is_empty() {
+                    // URLs/mentions-only corpus: saving the zero centroid
+                    // would silently zero every overlap comparison. (#301)
+                    println!("  Skipped: all posts were URLs/mentions only.");
+                } else {
+                    let post_embeddings = embedder.embed_batch(&embed_texts).await?;
+                    let mean_emb =
+                        charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
+                    db.save_embedding(&did, &mean_emb).await?;
+                    println!(
+                        "  Embedding computed ({} posts → {}-dim vector)",
+                        embed_texts.len(),
+                        charcoal::topics::embeddings::EMBEDDING_DIM,
+                    );
+                }
             } else {
                 println!(
                     "\n{}",

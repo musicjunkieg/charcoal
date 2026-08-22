@@ -211,6 +211,7 @@ fn custom_weights_zero_produces_zero() {
         toxicity_weight: 0.0,
         overlap_multiplier: 0.0,
         overlap_gate_threshold: 0.15,
+        keyword_gate_threshold: 0.05,
         gate_max_score: 25.0,
     };
     let (score, tier) = compute_threat_score(0.9, 0.9, &w);
@@ -224,6 +225,7 @@ fn custom_weights_high_multiplier() {
         toxicity_weight: 70.0,
         overlap_multiplier: 3.0,
         overlap_gate_threshold: 0.15,
+        keyword_gate_threshold: 0.05,
         gate_max_score: 25.0,
     };
     let (score, _) = compute_threat_score(0.5, 0.5, &w);
@@ -237,6 +239,7 @@ fn custom_gate_max_score() {
         toxicity_weight: 70.0,
         overlap_multiplier: 1.5,
         overlap_gate_threshold: 0.15,
+        keyword_gate_threshold: 0.05,
         gate_max_score: 10.0, // lower gate cap
     };
     let (score, _) = compute_threat_score(0.9, 0.0, &w);
@@ -458,41 +461,66 @@ fn scoring_confidence_staleness_days() {
 
 #[test]
 fn early_exit_clean_and_irrelevant() {
+    use charcoal::bluesky::posts::FingerprintQuality;
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
-    assert!(should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
+    assert!(should_early_exit_stage1(
+        &onnx_scores,
+        Some(0.08),
+        0.15,
+        FingerprintQuality::Normal
+    ));
 }
 
 #[test]
 fn no_early_exit_if_any_onnx_above_threshold() {
+    use charcoal::bluesky::posts::FingerprintQuality;
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     let onnx_scores = vec![0.02, 0.05, 0.15, 0.01, 0.08];
-    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.08), 0.15));
+    assert!(!should_early_exit_stage1(
+        &onnx_scores,
+        Some(0.08),
+        0.15,
+        FingerprintQuality::Normal
+    ));
 }
 
 #[test]
 fn no_early_exit_if_overlap_above_gate() {
+    use charcoal::bluesky::posts::FingerprintQuality;
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
-    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.20), 0.15));
+    assert!(!should_early_exit_stage1(
+        &onnx_scores,
+        Some(0.20),
+        0.15,
+        FingerprintQuality::Normal
+    ));
 }
 
 #[test]
 fn no_early_exit_when_overlap_unknown() {
+    use charcoal::bluesky::posts::FingerprintQuality;
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     // TF-IDF extraction failure → overlap unknown → never early-exit, even
     // when ONNX scores look clean. Sparse-vocabulary or reply-heavy accounts
     // shouldn't slip through just because we couldn't compute their topics.
     let onnx_scores = vec![0.02, 0.05, 0.03, 0.01, 0.08];
-    assert!(!should_early_exit_stage1(&onnx_scores, None, 0.15));
+    assert!(!should_early_exit_stage1(
+        &onnx_scores,
+        None,
+        0.15,
+        FingerprintQuality::Normal
+    ));
 }
 
 #[test]
 fn no_early_exit_with_too_few_first_person_posts() {
+    use charcoal::bluesky::posts::FingerprintQuality;
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     // Reply-heavy account with only 2 originals — the clean-pass filter
@@ -500,18 +528,68 @@ fn no_early_exit_with_too_few_first_person_posts() {
     // the un-checked replies in pair context. Min-originals guard prevents
     // the false-clear.
     let onnx_scores = vec![0.02, 0.05];
-    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+    assert!(!should_early_exit_stage1(
+        &onnx_scores,
+        Some(0.05),
+        0.15,
+        FingerprintQuality::Normal
+    ));
 }
 
 #[test]
 fn no_early_exit_when_first_person_scores_empty() {
+    use charcoal::bluesky::posts::FingerprintQuality;
     use charcoal::scoring::profile::should_early_exit_stage1;
 
     // Reply-only sample — `iter().all()` on empty slice returns true, but
     // the empty list means we never actually checked any post. The guard
     // forces stage 2.
     let onnx_scores: Vec<f64> = vec![];
-    assert!(!should_early_exit_stage1(&onnx_scores, Some(0.05), 0.15));
+    assert!(!should_early_exit_stage1(
+        &onnx_scores,
+        Some(0.05),
+        0.15,
+        FingerprintQuality::Normal
+    ));
+}
+
+#[test]
+fn early_exit_denied_for_unreliable_fingerprint() {
+    use charcoal::bluesky::posts::FingerprintQuality;
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Clean scores + low overlap would normally exit — but a reply-only
+    // account's overlap is untrustworthy, so it must NOT be used to
+    // skip the full toxicity analysis. (#296, spike #295 defect 11)
+    let clean = vec![0.02; 10];
+    assert!(should_early_exit_stage1(
+        &clean,
+        Some(0.01),
+        0.05,
+        FingerprintQuality::Normal
+    ));
+    assert!(!should_early_exit_stage1(
+        &clean,
+        Some(0.01),
+        0.05,
+        FingerprintQuality::Unreliable
+    ));
+}
+
+#[test]
+fn early_exit_allowed_for_degraded_fingerprint() {
+    use charcoal::bluesky::posts::FingerprintQuality;
+    use charcoal::scoring::profile::should_early_exit_stage1;
+
+    // Degraded (some originals) keeps the old behavior — only the
+    // zero-originals case is untrustworthy enough to block the exit.
+    let clean = vec![0.02; 10];
+    assert!(should_early_exit_stage1(
+        &clean,
+        Some(0.01),
+        0.05,
+        FingerprintQuality::Degraded
+    ));
 }
 
 #[test]

@@ -1,5 +1,85 @@
 [
   {
+    "hash": "c78e0a0d426ea98d942e9ec07b8487c10d9002ba",
+    "short_hash": "c78e0a0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T20:32:50-07:00",
+    "message": "fix(301): address CI clippy drift and CodeRabbit majors on PR #101\n\n- nli.rs: chunks_exact(3) -> as_chunks::<3>() (clippy 1.98 lint in CI;\n  untouched by #296 but blocks its PR)\n- Empty cleaned batch no longer produces a zero centroid: profile.rs\n  falls back to keyword overlap, scan_job/main.rs skip the embedding\n  save, so a URLs-only account cannot ride under the overlap gate\n- keyword_weights() requires finite, non-negative scores before\n  rank-weighting; malformed vectors take the uniform fallback\n  (regression tests for negative and non-finite)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "9e91bf1a575d282c0bd041a66b3182220cdbf64a",
+    "short_hash": "9e91bf1",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:50:46-07:00",
+    "message": "docs(296): changelog + fix stale doc references\n\n- CHANGELOG entry under Unreleased/Fixed for the eight #296 overlap-math\n  repairs (spike #295 GOOD tier).\n- embeddings.rs: fix stale pointer to a nonexistent\n  docs/research-overlap-diagnosis.md, now points at the real spike report.\n- overlap.rs: module and cosine_similarity doc comments described a\n  [0.0, 1.0] range, but cosine_from_weights has clamped to [-1.0, 1.0]\n  since Task 1. Rewritten to describe the actual contract, noting\n  keyword-space results are non-negative in practice.\n- main.rs: the post-embedding println reported post_texts.len() (raw\n  post count) instead of embed_texts.len() (the cleaned+filtered subset\n  actually embedded, since Task 3), overstating contributing posts.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "15aaac8ff2cf66ef7b986032893577f64bd92579",
+    "short_hash": "15aaac8",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:40:05-07:00",
+    "message": "feat(296): rebuild protected fingerprint when older than 14 days\n\nupdated_at was recorded but never consulted; a fingerprint built once\nat onboarding was used forever. Web scans now refresh stale\nfingerprints, falling back to the stale one if the rebuild fails.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "35d5984b10c72e41b57818296b57b9189d134ad3",
+    "short_hash": "35d5984",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:21:59-07:00",
+    "message": "test(296): stage1 caller honors the Unreliable early-exit block\n\nIntegration-level regression test: a 6-original clean irrelevant sample\nnow Proceeds instead of early-exiting. Also tightens the quality doc\nparenthetical to match from_counts semantics.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
+    "hash": "056db5b16b1e5ea7d6a4c20037adbdb8b048dfa7",
+    "short_hash": "056db5b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:56:54-07:00",
+    "message": "fix(296): gate keyword-cosine overlap on its own scale, unify extractors\n\nStage 1 and the Stage 2 TF-IDF fallback were gated at 0.15 — a threshold\ncalibrated for embedding cosine (0.4-0.8 typical). Sparse keyword cosine\nruns far lower, so topically-relevant accounts were early-exited before\nthe semantic path ever ran. New keyword_gate_threshold (0.05,\nprovisional pending #135 calibration). Both stages now use the same\n60/10 extractor config as the protected fingerprint.\n\nAlso updates tests/unit_scoring.rs struct literals for the new\nThreatWeights.keyword_gate_threshold field (compiler-forced).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
+    "hash": "8bad9489ba67bcf3215faea9b234d1e42c72401a",
+    "short_hash": "8bad948",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:34:59-07:00",
+    "message": "fix(296): rank-weight keywords within clusters by TF-IDF score\n\nTopicCluster gains serde-defaulted keyword_scores; legacy stored JSON\nfalls back to the old uniform split. The seed keyword now outweighs\nits 6th co-occurring neighbor in keyword-space overlap.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 11
+  },
+  {
+    "hash": "7169011b3ac4fd4a124daecb44ebe1a9c773ea88",
+    "short_hash": "7169011",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:16:35-07:00",
+    "message": "fix(296): strip URLs and mentions before embedding on both sides\n\nNew clean_for_embedding keeps case/punctuation/hashtags (transformers\nuse them) and removes only content-free tokens. Applied at all four\ncentroid sites; NLI pair-matching embeddings intentionally untouched.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "2b90a6b271f30022375aaa62c5463e417acf7a5b",
+    "short_hash": "2b90a6b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T17:56:19-07:00",
+    "message": "fix(296): L2-normalize per-post embeddings before averaging\n\nLong posts no longer dominate the account centroid. Zero vectors from\nempty texts are skipped instead of diluting the mean. Replaces\nmean_embedding at all four centroid sites; old function removed.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "3b3024b48df3cc3b2ca9cb70b4de3da7755c07d4",
+    "short_hash": "3b3024b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T17:36:27-07:00",
+    "message": "fix(296): preserve cosine sign instead of clamping negatives to zero\n\nOpposition is signal. Scoring is unchanged: the overlap gate catches\neverything below threshold, negative or zero.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "b67f0c77a7d301213c640056890728fb9d74df41",
+    "short_hash": "b67f0c7",
+    "author": "Bryan Guffey",
+    "date": "2026-08-19T06:16:33-07:00",
+    "message": "chore(300): mark deciduous graph exports as generated in .gitattributes\n\nlinguist-generated collapses docs/graph-data.json and git-history.json\nin PR diffs; -diff silences local git diff. The files stay committed\nbecause GitHub Pages serves the viewer from /docs.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
     "hash": "981a7afa09b4bba7b2d1eb31f51b413470e9d87d",
     "short_hash": "981a7af",
     "author": "Bryan Guffey",

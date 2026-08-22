@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Repaired eight defects in the topic-overlap math (#296, spike #295 GOOD
+  tier): per-post embeddings are L2-normalized before averaging so long
+  posts no longer dominate the centroid; cosine similarity preserves its
+  sign instead of clamping opposition to zero; URLs and @mentions are
+  stripped before embedding on both sides; Stage 1 and the Stage-2 keyword
+  fallback gate on a keyword-scale threshold (0.05, provisional) instead of
+  the embedding-scale 0.15 that was silently early-exiting relevant
+  accounts; keyword weights are rank-weighted by TF-IDF score; extractor
+  configs are unified at 60 keywords / 10 clusters on both sides;
+  `Unreliable` candidate fingerprints can no longer authorize the Stage-1
+  early exit; and the protected fingerprint is rebuilt when older than 14
+  days instead of living forever.
+
 ### Changed
 - Marked the deciduous graph exports (`docs/graph-data.json`,
   `docs/git-history.json`) as generated in a new `.gitattributes` (#300).
