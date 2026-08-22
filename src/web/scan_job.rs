@@ -26,9 +26,14 @@ use crate::db::Database;
 use crate::scoring::behavioral::detect_pile_on_participants;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::fingerprint::TopicFingerprint;
-use crate::toxicity::download::{embedding_files_present, embedding_model_dir};
 use crate::toxicity::onnx::OnnxToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
+
+// The fingerprint build path moved to `crate::topics::build` (#297) so the
+// CLI (`charcoal fingerprint`, built without the `web` feature) can share it.
+// Re-exported here so admin.rs and this module's own callers keep resolving
+// `scan_job::build_user_fingerprint` unchanged.
+pub use crate::topics::build::build_user_fingerprint;
 
 /// The three ONNX models a scan needs, loaded once and shared.
 ///
@@ -541,89 +546,6 @@ pub fn fingerprint_is_stale(updated_at: &str, now: chrono::NaiveDateTime) -> boo
             true
         }
     }
-}
-
-/// Build a topic fingerprint and embeddings for a user.
-/// Fetches their recent posts, runs TF-IDF, and computes MiniLM embeddings.
-/// Used by both the scan pipeline (auto-fingerprint) and the admin pre-seed handler.
-pub async fn build_user_fingerprint(
-    config: &Config,
-    db: &dyn Database,
-    user_did: &str,
-    handle: &str,
-) -> anyhow::Result<()> {
-    info!("Building topic fingerprint for {user_did}");
-
-    let client = PublicAtpClient::new(&config.public_api_url)?;
-    let fp_posts = crate::bluesky::posts::fetch_recent_posts(&client, handle, 500).await?;
-    if fp_posts.is_empty() {
-        anyhow::bail!(
-            "No posts found — Charcoal needs posting history to build a topic fingerprint."
-        );
-    }
-
-    let post_texts: Vec<String> = fp_posts.iter().map(|p| p.text.clone()).collect();
-    let extractor = crate::topics::tfidf::TfIdfExtractor::default();
-    let fp = crate::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
-
-    let json = serde_json::to_string(&fp)?;
-    db.save_fingerprint(user_did, &json, fp.post_count).await?;
-    info!(
-        post_count = fp.post_count,
-        clusters = fp.clusters.len(),
-        "Topic fingerprint built and saved"
-    );
-
-    // Compute and save sentence embedding if the embedding model is available
-    let embed_dir = embedding_model_dir(&config.model_dir);
-    if embedding_files_present(&config.model_dir) {
-        match tokio::task::spawn_blocking(move || {
-            crate::topics::embeddings::SentenceEmbedder::load(&embed_dir)
-        })
-        .await
-        {
-            Ok(Ok(embedder)) => {
-                let embed_texts: Vec<String> = post_texts
-                    .iter()
-                    .map(|t| crate::topics::tfidf::clean_for_embedding(t))
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                if embed_texts.is_empty() {
-                    // Every post cleaned to empty (URLs/mentions only). A
-                    // zero-vector centroid would silently zero all overlap
-                    // comparisons — keep the previous embedding instead.
-                    // (#301, CodeRabbit PR #101; near-unreachable in practice
-                    // because TF-IDF extraction above bails first on such a
-                    // corpus, but defense in depth is cheap here.)
-                    warn!("All posts cleaned to empty; skipping embedding save");
-                } else {
-                    match embedder.embed_batch(&embed_texts).await {
-                        Ok(post_embeddings) => {
-                            let mean_emb = crate::topics::embeddings::normalized_mean_embedding(
-                                &post_embeddings,
-                            );
-                            if let Err(e) = db.save_embedding(user_did, &mean_emb).await {
-                                warn!(error = %e, "Failed to save embedding during fingerprint build");
-                            } else {
-                                info!("Sentence embedding computed and saved");
-                            }
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "embed_batch failed during fingerprint build");
-                        }
-                    }
-                }
-            }
-            Ok(Err(e)) => {
-                warn!(error = %e, "Embedding model failed to load during fingerprint build");
-            }
-            Err(e) => {
-                warn!(error = %e, "spawn_blocking panicked loading embedder during fingerprint build");
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Write the pipeline's terminal status, fenced by the claim that owns the

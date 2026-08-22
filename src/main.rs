@@ -230,63 +230,26 @@ async fn main() -> Result<()> {
             }
 
             println!("Building topic fingerprint from your recent posts...");
-
-            // Fetch recent posts (target 500 for a good fingerprint)
-            let posts =
-                charcoal::bluesky::posts::fetch_recent_posts(&client, &config.bluesky_handle, 500)
-                    .await?;
-
-            println!("Analyzing {} posts...", posts.len());
-
-            let post_texts: Vec<String> = posts.iter().map(|p| p.text.clone()).collect();
-
-            // Run TF-IDF extraction
-            let extractor = charcoal::topics::tfidf::TfIdfExtractor::default();
-            let fingerprint =
-                charcoal::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
-
-            // Display the fingerprint
-            fingerprint.display();
-
-            // Cache in the database
-            let json = serde_json::to_string(&fingerprint)?;
-            db.save_fingerprint(&did, &json, fingerprint.post_count)
-                .await?;
-
-            // Compute and store the mean sentence embedding for semantic overlap.
-            // This is optional — if the embedding model isn't downloaded yet, we
-            // skip it and fall back to TF-IDF keyword overlap during scoring.
-            let embed_dir = charcoal::toxicity::download::embedding_model_dir(&config.model_dir);
-            if charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
-                println!("\nComputing sentence embeddings...");
-                let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
-                let embed_texts: Vec<String> = post_texts
-                    .iter()
-                    .map(|t| charcoal::topics::tfidf::clean_for_embedding(t))
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                if embed_texts.is_empty() {
-                    // URLs/mentions-only corpus: saving the zero centroid
-                    // would silently zero every overlap comparison. (#301)
-                    println!("  Skipped: all posts were URLs/mentions only.");
-                } else {
-                    let post_embeddings = embedder.embed_batch(&embed_texts).await?;
-                    let mean_emb =
-                        charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
-                    db.save_embedding(&did, &mean_emb).await?;
-                    println!(
-                        "  Embedding computed ({} posts → {}-dim vector)",
-                        embed_texts.len(),
-                        charcoal::topics::embeddings::EMBEDDING_DIM,
-                    );
-                }
-            } else {
+            if !charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
                 println!(
-                    "\n{}",
+                    "{}",
                     "Tip: Run `charcoal download-model` to enable semantic topic overlap.".dimmed()
                 );
             }
-
+            charcoal::topics::build::build_user_fingerprint(
+                &config,
+                &*db,
+                &did,
+                &config.bluesky_handle,
+            )
+            .await?;
+            let (json, _, _) = db
+                .get_fingerprint(&did)
+                .await?
+                .expect("fingerprint was just saved");
+            let fingerprint: charcoal::topics::fingerprint::TopicFingerprint =
+                serde_json::from_str(&json)?;
+            fingerprint.display();
             println!(
                 "{}",
                 "Fingerprint saved. Review the topics above — do they look accurate?".bold()

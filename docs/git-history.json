@@ -1,5 +1,13 @@
 [
   {
+    "hash": "65d048084555d4de67093d6478cefcc62c4f5b55",
+    "short_hash": "65d0480",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:28:06-07:00",
+    "message": "feat(302): charcoal migrate transfers fingerprint generation as one bundle\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "d3754ec29e49c2966006608dad8bc756339dad05",
     "short_hash": "d3754ec",
     "author": "Bryan Guffey",
