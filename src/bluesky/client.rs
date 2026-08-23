@@ -141,7 +141,17 @@ impl PublicAtpClient {
                 });
             }
 
-            response.json::<T>().await.map_err(|e| {
+            // Split the read from the parse: `Response::json` does both under
+            // one error type, which misclassified a body read interrupted
+            // mid-transfer (genuinely transient, like #183's RunPod transport
+            // blip) as a permanent, non-retryable deserialization failure.
+            let bytes = response.bytes().await.map_err(|e| {
+                XrpcAttemptError::Transient(
+                    anyhow::Error::new(e).context(format!("Failed to read {nsid} response body")),
+                )
+            })?;
+
+            serde_json::from_slice(&bytes).map_err(|e| {
                 XrpcAttemptError::Permanent(
                     anyhow::Error::new(e).context(format!("Failed to deserialize {nsid} response")),
                 )

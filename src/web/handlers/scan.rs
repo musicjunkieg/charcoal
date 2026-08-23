@@ -30,12 +30,7 @@ pub async fn trigger_scan(
     // user "your scan failed" when the real answer is "re-authenticate".
     match state.db.get_user_handle(&auth.did).await {
         Ok(Some(_)) => {}
-        Ok(None) => {
-            return api_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "User not found — re-authenticate",
-            )
-        }
+        Ok(None) => return api_error(StatusCode::NOT_FOUND, "User not found — re-authenticate"),
         Err(e) => {
             tracing::error!(error = %format!("{e:#}"), "DB error looking up user handle");
             return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");

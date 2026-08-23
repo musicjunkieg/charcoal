@@ -308,6 +308,13 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
         [ "$n" -ge "$3" ]
     }
 
+    # History object uploads BEFORE the mutable backup object in both blocks
+    # below: R2 gives `$S3/issues.db` / `$S3/deciduous.db` no version history
+    # (see the R2-versioning note above), so it is the ONLY recovery point.
+    # Writing history first means a failed history upload aborts before the
+    # mutable object is overwritten, instead of after — the mutable copy is
+    # the non-critical step now, since a history snapshot already exists to
+    # fall back to if it fails. (#307, CodeRabbit PR #103)
     if [ -f "$REPO_ROOT/.chainlink/issues.db" ]; then
         if ! backup_row_sanity "$REPO_ROOT/.chainlink/issues.db" issues 25; then
             echo "  🛑 issues.db looks EMPTY or reset — refusing to overwrite the backup."
@@ -315,12 +322,12 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
             echo "     was destroyed. Restore first; uploading now would clobber the copy"
             echo "     you would restore FROM. See the recovery notes on #286."
             BACKUP_OK=false
-        elif aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1; then
-            aws s3 cp "$REPO_ROOT/.chainlink/issues.db" \
-                "$S3/history/issues-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1 || true
+        elif aws s3 cp "$REPO_ROOT/.chainlink/issues.db" \
+                "$S3/history/issues-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1; then
+            aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1 || true
             echo "  ✅ issues.db → $BACKUP_S3_BUCKET (+ history/issues-$BACKUP_STAMP.db)"
         else
-            echo "  ⚠️  issues.db upload failed (non-blocking)"
+            echo "  ⚠️  issues.db history upload failed — recovery point not written, skipping backup (non-blocking)"
             BACKUP_OK=false
         fi
     fi
@@ -329,12 +336,12 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
         if ! backup_row_sanity "$REPO_ROOT/.deciduous/deciduous.db" decision_nodes 25; then
             echo "  🛑 deciduous.db looks EMPTY or reset — refusing to overwrite the backup."
             BACKUP_OK=false
-        elif aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1; then
-            aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" \
-                "$S3/history/deciduous-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1 || true
+        elif aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" \
+                "$S3/history/deciduous-$BACKUP_STAMP.db" $ENDPOINT --quiet 2>&1; then
+            aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1 || true
             echo "  ✅ deciduous.db → $BACKUP_S3_BUCKET (+ history/deciduous-$BACKUP_STAMP.db)"
         else
-            echo "  ⚠️  deciduous.db upload failed (non-blocking)"
+            echo "  ⚠️  deciduous.db history upload failed — recovery point not written, skipping backup (non-blocking)"
             BACKUP_OK=false
         fi
     fi

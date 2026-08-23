@@ -1,5 +1,21 @@
 [
   {
+    "hash": "9e682bb39422f509b27b6d48126c13c5ef262c30",
+    "short_hash": "9e682bb",
+    "author": "chaos gremlin",
+    "date": "2026-08-23T13:46:26-07:00",
+    "message": "Merge pull request #102 from musicjunkieg/feat/297-multi-interest-fingerprint",
+    "files_changed": 0
+  },
+  {
+    "hash": "e800b2ffe090cf924fd72040a187240efbe9df1e",
+    "short_hash": "e800b2f",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T11:32:52-07:00",
+    "message": "fix(297): run keyword-only assembly retry on a blocking thread too\n\nCodeRabbit round 3: the degradation retry is a full TF-IDF pass over up\nto 500 posts - same heartbeat-blocking concern as the primary attempt.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
     "hash": "eeb30b1f9435fa478267e767747c1d016f6391bf",
     "short_hash": "eeb30b1",
     "author": "Bryan Guffey",

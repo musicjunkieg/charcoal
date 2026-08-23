@@ -111,6 +111,14 @@ describe('queueMessage', () => {
 		);
 	});
 
+	it('rounds up rather than to nearest, per the documented policy', () => {
+		// 61s = 1.017min; Math.round would floor this to "1 minute", but the
+		// policy comment says "round up to a minute" — Math.ceil is required.
+		expect(queueMessage({ position: 2, eta_seconds: 61 })).toBe(
+			"You're 2nd in line — about 2 minutes"
+		);
+	});
+
 	it('treats a nonsensical position as next rather than printing "0th"', () => {
 		expect(queueMessage({ position: 0, eta_seconds: null })).toBe("You're next in line");
 	});
