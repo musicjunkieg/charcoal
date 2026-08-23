@@ -5840,6 +5840,17 @@
       "created_at": "2026-08-23T15:07:34.668989-07:00",
       "updated_at": "2026-08-23T15:07:34.668989-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"9e682bb\",\"confidence\":95}"
+    },
+    {
+      "id": 541,
+      "change_id": "5fdcd222-81a5-4390-8b00-839d11e8a9f0",
+      "node_type": "action",
+      "title": "#307 fast-follow: 7 fixes implemented+reviewed (ad5c250), PR #104 opened into staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T16:38:20.947395-07:00",
+      "updated_at": "2026-08-23T16:38:20.947395-07:00",
+      "metadata_json": "{\"branch\":\"fix/307-pr103-fast-follow\",\"commit\":\"ad5c250\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -11639,6 +11650,17 @@
       "weight": 1.0,
       "rationale": "steps 1+2 executed",
       "created_at": "2026-08-23T15:07:34.677197-07:00"
+    },
+    {
+      "id": 538,
+      "from_node_id": 540,
+      "to_node_id": 541,
+      "from_change_id": "87b7f208-120e-41d3-98da-bc411e55dac6",
+      "to_change_id": "5fdcd222-81a5-4390-8b00-839d11e8a9f0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "promotion review triage -> fast-follow PR",
+      "created_at": "2026-08-23T16:38:20.956682-07:00"
     }
   ],
   "documents": [

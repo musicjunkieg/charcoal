@@ -327,7 +327,7 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
             aws s3 cp "$REPO_ROOT/.chainlink/issues.db" "$S3/issues.db" $ENDPOINT --quiet 2>&1 || true
             echo "  ✅ issues.db → $BACKUP_S3_BUCKET (+ history/issues-$BACKUP_STAMP.db)"
         else
-            echo "  ⚠️  issues.db history upload failed — recovery point not written, skipping backup (non-blocking)"
+            echo "  ⚠️  issues.db history upload failed — recovery point not written, skipping backup"
             BACKUP_OK=false
         fi
     fi
@@ -341,7 +341,7 @@ if [ -n "$BACKUP_S3_BUCKET" ] && [ -n "$BACKUP_S3_ACCESS_KEY_ID" ] && [ -n "$BAC
             aws s3 cp "$REPO_ROOT/.deciduous/deciduous.db" "$S3/deciduous.db" $ENDPOINT --quiet 2>&1 || true
             echo "  ✅ deciduous.db → $BACKUP_S3_BUCKET (+ history/deciduous-$BACKUP_STAMP.db)"
         else
-            echo "  ⚠️  deciduous.db history upload failed — recovery point not written, skipping backup (non-blocking)"
+            echo "  ⚠️  deciduous.db history upload failed — recovery point not written, skipping backup"
             BACKUP_OK=false
         fi
     fi

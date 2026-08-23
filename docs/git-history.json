@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ad5c250a05b3509b91a134de640a38723d09dfc9",
+    "short_hash": "ad5c250",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T16:11:59-07:00",
+    "message": "fix(307): PR #103 review fast-follow - seven adjudicated edge-case fixes\n\n1. scripts/install-hooks.sh: upload the immutable history/<name>-<UTC>.db\n   object before overwriting the mutable backup object, in both the\n   issues.db and deciduous.db blocks, so a failed history write cannot\n   lose the only recovery point.\n2. src/bluesky/client.rs: split response.bytes() (Transient on failure,\n   a mid-transfer network blip) from serde_json::from_slice (Permanent\n   on failure) instead of classifying both under one Permanent error.\n3. src/topics/fingerprint.rs: reject a non-finite score_sum in\n   keyword_weights rank_weighted path so [f64::MAX, f64::MAX], which\n   overflows to +inf, falls back to the documented uniform split\n   instead of zeroing every keyword share.\n4. src/web/handlers/scan.rs: trigger_scan now returns 404 (matching\n   trigger_admin_scan) instead of 500 when the authenticated session\n   has no corresponding user row.\n5. src/db/postgres.rs: get_fingerprint formats updated_at with\n   to_char(... AT TIME ZONE 'UTC', ...) so staleness parsing in\n   fingerprint_is_stale does not depend on the Postgres session\n   default timezone.\n6. web/src/lib/dashboard-state.ts: queueMessage rounds the ETA minutes\n   up with Math.ceil instead of Math.round, matching the documented\n   round-up policy (61s now reads \"about 2 minutes\").\n7. PRODUCT.md: correct the production access statement to state\n   CHARCOAL_ALLOWED_DID currently gates onboarding, while keeping the\n   existing \"empty = open access\" sentence.\n\nAlso updates tests/web_oauth.rs::scan_fails_when_user_not_registered,\nwhich asserted the pre-fix 500 status code as documented \"bug\"\nbehavior; it now asserts the corrected 404 from fix 4.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 11
+  },
+  {
     "hash": "9e682bb39422f509b27b6d48126c13c5ef262c30",
     "short_hash": "9e682bb",
     "author": "chaos gremlin",
