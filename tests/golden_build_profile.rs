@@ -531,6 +531,7 @@ async fn golden_c_stage2_survivor_no_nli() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on
@@ -728,6 +729,7 @@ async fn golden_c_benign_gate_fires() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement — our avg(80.0) > 0.0 → benign fires
         false, // pile_on
@@ -900,6 +902,7 @@ async fn golden_d_nli_two_pass_gate() {
         &weights,
         None,  // embedder (TF-IDF overlap path)
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on

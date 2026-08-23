@@ -1548,7 +1548,7 @@ mod finalize_tests {
         stage_account(&db, &sample, &verdicts, None).await;
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1597,7 +1597,7 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1635,7 +1635,7 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1660,7 +1660,7 @@ mod finalize_tests {
         let weights = ThreatWeights::default();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1709,7 +1709,7 @@ mod finalize_tests {
             .unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1776,7 +1776,7 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1845,6 +1845,7 @@ mod finalize_tests {
             &weights,
             None,               // embedder: absent → Mode B can't run anyway
             None,               // protected_embedding
+            None,               // protected_topic_centroids
             maybe_nli.as_ref(), // nli_scorer: present iff the model is on disk
             Some(&ppwe),        // protected_posts_with_embeddings (sentinel)
             None,               // data_dir
@@ -1956,7 +1957,8 @@ mod finalize_tests {
             &fp,
             &weights,
             Some(&embedder),
-            None,
+            None, // protected_embedding
+            None, // protected_topic_centroids
             Some(&nli),
             Some(&ppwe),
             Some(&data_dir),
@@ -2028,6 +2030,7 @@ mod finalize_tests {
             &weights,
             None, // embedder (Mode A uses direct pairs, no embedder needed)
             None, // protected_embedding
+            None, // protected_topic_centroids
             Some(&nli),
             None, // protected_posts_with_embeddings (Mode A ignores this)
             Some(&data_dir),
@@ -3020,6 +3023,7 @@ mod orchestration_tests {
             weights,
             embedder: None,
             protected_embedding: None,
+            protected_topic_centroids: None,
             nli_scorer: None,
             protected_posts_with_embeddings: None,
             data_dir: None,

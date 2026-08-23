@@ -18,8 +18,8 @@ use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    ThreatTier, ToxicPost, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
+    NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
     eta_seconds, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
@@ -161,6 +161,10 @@ impl PgDatabase {
                 (
                     12,
                     include_str!("../../migrations/postgres/0012_scan_queue_claim_id.sql"),
+                ),
+                (
+                    13,
+                    include_str!("../../migrations/postgres/0013_topic_clusters.sql"),
                 ),
             ];
 
@@ -310,6 +314,80 @@ impl Database for PgDatabase {
         Ok(())
     }
 
+    async fn save_fingerprint_bundle(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+        embedding: Option<&[f64]>,
+        clusters: &[ClusterCentroid],
+    ) -> Result<()> {
+        crate::db::traits::validate_bundle(embedding, clusters)?;
+        // One transaction for the whole generation (#302): fingerprint row
+        // (JSON + embedding + updated_at in one upsert), then cluster rows.
+        let mut tx = self.pool.begin().await?;
+        let vector = embedding.map(|e| {
+            let floats: Vec<f32> = e.iter().map(|&v| v as f32).collect();
+            pgvector::Vector::from(floats)
+        });
+        sqlx_core::query::query(
+            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, updated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT(user_did) DO UPDATE SET
+                fingerprint_json = $2,
+                post_count = $3,
+                embedding_vector = $4,
+                updated_at = NOW()",
+        )
+        .bind(user_did)
+        .bind(fingerprint_json)
+        .bind(i32::try_from(post_count).context("post_count exceeds i32 range")?)
+        .bind(vector)
+        .execute(&mut *tx)
+        .await?;
+        sqlx_core::query::query("DELETE FROM topic_clusters WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        for (i, cluster) in clusters.iter().enumerate() {
+            let floats: Vec<f32> = cluster.centroid.iter().map(|&v| v as f32).collect();
+            sqlx_core::query::query(
+                "INSERT INTO topic_clusters (user_did, cluster_index, centroid, post_count)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(user_did)
+            .bind(i as i32)
+            .bind(pgvector::Vector::from(floats))
+            .bind(
+                i32::try_from(cluster.post_count)
+                    .context("cluster post_count exceeds i32 range")?,
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>> {
+        let rows = sqlx_core::query::query(
+            "SELECT centroid, post_count FROM topic_clusters
+             WHERE user_did = $1 ORDER BY cluster_index",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|r| {
+                let vector: pgvector::Vector = r.get(0);
+                Ok(ClusterCentroid {
+                    centroid: vector.to_vec().iter().map(|&v| v as f64).collect(),
+                    post_count: r.get::<i32, _>(1) as u32,
+                })
+            })
+            .collect()
+    }
+
     async fn get_fingerprint(&self, user_did: &str) -> Result<Option<(String, u32, String)>> {
         let row = sqlx_core::query::query(
             "SELECT fingerprint_json, post_count,
@@ -357,8 +435,8 @@ impl Database for PgDatabase {
             "INSERT INTO account_scores
                 (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                  posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
-                 fingerprint_quality, scoring_confidence)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14)
+                 fingerprint_quality, scoring_confidence, overlap_legacy)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15)
              ON CONFLICT(user_did, did) DO UPDATE SET
                 handle = $3,
                 toxicity_score = $4,
@@ -372,7 +450,8 @@ impl Database for PgDatabase {
                 context_score = $11,
                 graph_distance = $12,
                 fingerprint_quality = $13,
-                scoring_confidence = $14",
+                scoring_confidence = $14,
+                overlap_legacy = $15",
         )
         .bind(user_did)
         .bind(&score.did)
@@ -388,6 +467,7 @@ impl Database for PgDatabase {
         .bind(&score.graph_distance)
         .bind(&score.fingerprint_quality)
         .bind(&score.scoring_confidence)
+        .bind(score.overlap_legacy)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -403,7 +483,8 @@ impl Database for PgDatabase {
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals, context_score,
-                    fingerprint_quality, scoring_confidence, graph_distance
+                    fingerprint_quality, scoring_confidence, graph_distance,
+                    overlap_legacy
              FROM account_scores
              WHERE user_did = $1 AND threat_score >= $2
              ORDER BY threat_score DESC",
@@ -447,6 +528,7 @@ impl Database for PgDatabase {
                 graph_distance: row.get(13),
                 fingerprint_quality: row.get(11),
                 scoring_confidence: row.get(12),
+                overlap_legacy: row.get(14),
             });
         }
         Ok(accounts)
@@ -790,7 +872,8 @@ impl Database for PgDatabase {
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals, context_score,
-                    fingerprint_quality, scoring_confidence, graph_distance
+                    fingerprint_quality, scoring_confidence, graph_distance,
+                    overlap_legacy
              FROM account_scores
              WHERE user_did = $1 AND lower(handle) = lower($2)
              LIMIT 1",
@@ -828,6 +911,7 @@ impl Database for PgDatabase {
                 graph_distance: r.get(13),
                 fingerprint_quality: r.get(11),
                 scoring_confidence: r.get(12),
+                overlap_legacy: r.get(14),
             }
         }))
     }
@@ -838,7 +922,8 @@ impl Database for PgDatabase {
                     posts_analyzed, top_toxic_posts,
                     to_char(scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     behavioral_signals, context_score,
-                    fingerprint_quality, scoring_confidence, graph_distance
+                    fingerprint_quality, scoring_confidence, graph_distance,
+                    overlap_legacy
              FROM account_scores
              WHERE user_did = $1 AND did = $2
              LIMIT 1",
@@ -876,6 +961,7 @@ impl Database for PgDatabase {
                 graph_distance: r.get(13),
                 fingerprint_quality: r.get(11),
                 scoring_confidence: r.get(12),
+                overlap_legacy: r.get(14),
             }
         }))
     }
@@ -933,7 +1019,8 @@ impl Database for PgDatabase {
                     a.posts_analyzed, a.top_toxic_posts,
                     to_char(a.scored_at, 'YYYY-MM-DD HH24:MI:SS') as scored_at,
                     a.behavioral_signals, a.context_score,
-                    a.fingerprint_quality, a.scoring_confidence, a.graph_distance
+                    a.fingerprint_quality, a.scoring_confidence, a.graph_distance,
+                    a.overlap_legacy
              FROM account_scores a
              LEFT JOIN user_labels ul ON a.user_did = ul.user_did AND a.did = ul.target_did
              WHERE a.user_did = $1 AND ul.target_did IS NULL AND a.threat_score IS NOT NULL
@@ -975,6 +1062,7 @@ impl Database for PgDatabase {
                 graph_distance: row.get(13),
                 fingerprint_quality: row.get(11),
                 scoring_confidence: row.get(12),
+                overlap_legacy: row.get(14),
             });
         }
         Ok(accounts)

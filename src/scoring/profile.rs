@@ -63,6 +63,7 @@ pub(crate) fn not_assessed_score(
         handle: handle.to_string(),
         toxicity_score: None,
         topic_overlap: None,
+        overlap_legacy: None,
         threat_score: None,
         threat_tier: Some(ThreatTier::NotAssessed.as_str().to_string()),
         posts_analyzed,
@@ -95,6 +96,7 @@ pub async fn build_profile(
     weights: &ThreatWeights,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    protected_topic_centroids: Option<&[Vec<f64>]>,
     median_engagement: f64,
     pile_on_dids: &std::collections::HashSet<String>,
     nli_scorer: Option<&NliScorer>,
@@ -189,6 +191,7 @@ pub async fn build_profile(
         weights,
         embedder,
         protected_embedding,
+        protected_topic_centroids,
         // build_profile is the monolithic (non-decoupled) path — it has no
         // Phase-A precompute, so it embeds at score time exactly as before.
         None,
@@ -296,6 +299,7 @@ pub async fn stage1_outcome_timed(
             handle: target_handle.to_string(),
             toxicity_score: None,
             topic_overlap: None,
+            overlap_legacy: None,
             threat_score: None,
             threat_tier: Some("Insufficient Data".to_string()),
             posts_analyzed: stage1_sample.total_posts as u32,
@@ -399,6 +403,9 @@ pub async fn stage1_outcome_timed(
             handle: target_handle.to_string(),
             toxicity_score: Some(0.0),
             topic_overlap: stage1_overlap,
+            // Stage-1 overlap is the cheap TF-IDF keyword cosine, not an
+            // embedding cosine — there is no mean-centroid shadow to record.
+            overlap_legacy: None,
             threat_score: Some(0.0),
             threat_tier: Some("Low".to_string()),
             posts_analyzed: stage1_sample.total_posts as u32,
@@ -468,6 +475,10 @@ pub async fn score_from_sample(
     weights: &ThreatWeights,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    // The protected user's per-topic centroids (#297). When non-empty the live
+    // overlap becomes max-over-topics; the pre-#297 mean-centroid cosine is
+    // still computed alongside as the `overlap_legacy` shadow.
+    protected_topic_centroids: Option<&[Vec<f64>]>,
     // Target mean embedding precomputed in Phase A (gather), where the ONNX
     // work overlaps I/O instead of serializing in Phase C. When `Some`, the
     // overlap step uses it directly and never touches `embedder` — the whole
@@ -586,7 +597,14 @@ pub async fn score_from_sample(
     // Prefer sentence embeddings when available — they capture semantic
     // similarity ("fatphobia" ≈ "obesity") that keyword matching misses.
     // Fall back to TF-IDF keyword cosine when the embedding model isn't loaded.
-    let (topic_overlap, overlap_is_keyword_scale) =
+    //
+    // Live overlap = max over the protected user's topic centroids (#297) —
+    // "is this account near ANY of my topics?". The pre-#297 mean-centroid
+    // cosine is computed alongside as `overlap_legacy` (shadow compare) so
+    // #135 can recalibrate from real paired data. Legacy fingerprints (no
+    // centroid rows) degrade to the mean-centroid cosine for BOTH values.
+    let topic_centroids = protected_topic_centroids.filter(|c| !c.is_empty());
+    let (topic_overlap, overlap_is_keyword_scale, overlap_legacy) =
         if let (Some(precomputed), Some(protected_emb)) =
             (precomputed_target_embedding, protected_embedding)
         {
@@ -595,10 +613,11 @@ pub async fn score_from_sample(
             // them, so the cosine here is byte-identical to the embed-at-finalize
             // path below — only the (expensive, mutex-serialized) embedding moved to
             // Phase A where it overlaps I/O.
-            (
-                embeddings::cosine_similarity_embeddings(protected_emb, precomputed),
-                false,
-            )
+            let legacy = embeddings::cosine_similarity_embeddings(protected_emb, precomputed);
+            let live = topic_centroids
+                .and_then(|tc| embeddings::max_topic_overlap(tc, precomputed))
+                .unwrap_or(legacy);
+            (live, false, Some(legacy))
         } else {
             // Embedding path: embed target's posts, average, compare. Yields
             // None when the embedder is unavailable OR every post cleaned to
@@ -617,17 +636,19 @@ pub async fn score_from_sample(
                     } else {
                         let target_embeddings = emb.embed_batch(&embed_texts).await?;
                         let target_mean = embeddings::normalized_mean_embedding(&target_embeddings);
-                        Some(embeddings::cosine_similarity_embeddings(
-                            protected_emb,
-                            &target_mean,
-                        ))
+                        let legacy =
+                            embeddings::cosine_similarity_embeddings(protected_emb, &target_mean);
+                        let live = topic_centroids
+                            .and_then(|tc| embeddings::max_topic_overlap(tc, &target_mean))
+                            .unwrap_or(legacy);
+                        Some((live, legacy))
                     }
                 } else {
                     None
                 };
 
             match embedded_overlap {
-                Some(overlap_value) => (overlap_value, false),
+                Some((live, legacy)) => (live, false, Some(legacy)),
                 None => {
                     // Fallback: TF-IDF keyword cosine — same extractor config
                     // as the protected fingerprint. This overlap lives on the
@@ -638,6 +659,7 @@ pub async fn score_from_sample(
                     (
                         overlap::cosine_similarity(protected_fingerprint, &target_fingerprint),
                         true,
+                        None, // keyword scale — no embedding shadow exists
                     )
                 }
             }
@@ -908,6 +930,7 @@ pub async fn score_from_sample(
         handle: target_handle.to_string(),
         toxicity_score: Some(avg_toxicity),
         topic_overlap: Some(topic_overlap),
+        overlap_legacy,
         threat_score: Some(final_score),
         threat_tier: Some(tier.to_string()),
         posts_analyzed: sample.total_posts as u32,

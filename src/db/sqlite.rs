@@ -14,10 +14,12 @@ use rusqlite::Connection;
 use tokio::sync::Mutex;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
+    NewAmplificationEvent, UserLabel, UserRow,
 };
-use super::traits::{Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip};
+use super::traits::{
+    validate_bundle, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+};
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 pub struct SqliteDatabase {
@@ -89,6 +91,32 @@ impl Database for SqliteDatabase {
     async fn get_embedding(&self, user_did: &str) -> Result<Option<Vec<f64>>> {
         let conn = self.conn.lock().await;
         super::queries::get_embedding(&conn, user_did)
+    }
+
+    async fn save_fingerprint_bundle(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+        embedding: Option<&[f64]>,
+        clusters: &[ClusterCentroid],
+    ) -> Result<()> {
+        validate_bundle(embedding, clusters)?;
+        let embedding_json = embedding.map(serde_json::to_string).transpose()?;
+        let conn = self.conn.lock().await;
+        super::queries::save_fingerprint_bundle(
+            &conn,
+            user_did,
+            fingerprint_json,
+            post_count,
+            embedding_json.as_deref(),
+            clusters,
+        )
+    }
+
+    async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_topic_centroids(&conn, user_did)
     }
 
     async fn upsert_account_score(&self, user_did: &str, score: &AccountScore) -> Result<()> {
@@ -511,6 +539,157 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_bundle_roundtrip_full() {
+        let db = test_db().await;
+        let clusters = vec![
+            crate::db::models::ClusterCentroid {
+                centroid: vec![0.5; 384],
+                post_count: 30,
+            },
+            crate::db::models::ClusterCentroid {
+                centroid: vec![-0.25; 384],
+                post_count: 12,
+            },
+        ];
+        let emb = vec![0.125; 384];
+        db.save_fingerprint_bundle(
+            TEST_USER,
+            "{\"clusters\":[],\"post_count\":42}",
+            42,
+            Some(&emb),
+            &clusters,
+        )
+        .await
+        .unwrap();
+
+        let (json, count, updated_at) = db.get_fingerprint(TEST_USER).await.unwrap().unwrap();
+        assert_eq!(count, 42);
+        assert!(json.contains("post_count"));
+        // updated_at honors the staleness parser's format contract.
+        assert!(chrono::NaiveDateTime::parse_from_str(&updated_at, "%Y-%m-%d %H:%M:%S").is_ok());
+
+        let stored_emb = db.get_embedding(TEST_USER).await.unwrap().unwrap();
+        assert_eq!(stored_emb.len(), 384);
+        let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+        assert_eq!(stored, clusters); // order = cluster_index
+    }
+
+    #[tokio::test]
+    async fn test_bundle_replaces_previous_generation_completely() {
+        let db = test_db().await;
+        let three = vec![
+            crate::db::models::ClusterCentroid {
+                centroid: vec![0.1; 384],
+                post_count: 5,
+            },
+            crate::db::models::ClusterCentroid {
+                centroid: vec![0.2; 384],
+                post_count: 6,
+            },
+            crate::db::models::ClusterCentroid {
+                centroid: vec![0.3; 384],
+                post_count: 7,
+            },
+        ];
+        db.save_fingerprint_bundle(TEST_USER, "{}", 18, None, &three)
+            .await
+            .unwrap();
+        let two = vec![
+            crate::db::models::ClusterCentroid {
+                centroid: vec![0.9; 384],
+                post_count: 9,
+            },
+            crate::db::models::ClusterCentroid {
+                centroid: vec![0.8; 384],
+                post_count: 8,
+            },
+        ];
+        db.save_fingerprint_bundle(TEST_USER, "{}", 17, None, &two)
+            .await
+            .unwrap();
+        let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+        assert_eq!(
+            stored.len(),
+            2,
+            "old generation's third row must not survive"
+        );
+        assert_eq!(stored, two);
+    }
+
+    #[tokio::test]
+    async fn test_bundle_keyword_only_is_legal() {
+        let db = test_db().await;
+        db.save_fingerprint_bundle(TEST_USER, "{}", 10, None, &[])
+            .await
+            .unwrap();
+        assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
+        assert!(db.get_topic_centroids(TEST_USER).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_bundle_rejects_non_finite_and_preserves_previous_generation() {
+        let db = test_db().await;
+        let good = vec![crate::db::models::ClusterCentroid {
+            centroid: vec![0.5; 384],
+            post_count: 3,
+        }];
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, None, &good)
+            .await
+            .unwrap();
+
+        let bad = vec![crate::db::models::ClusterCentroid {
+            centroid: vec![f64::NAN; 384],
+            post_count: 4,
+        }];
+        assert!(db
+            .save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &bad)
+            .await
+            .is_err());
+
+        // Generation 1 intact, in full: JSON and clusters both from gen 1.
+        let (json, count, _) = db.get_fingerprint(TEST_USER).await.unwrap().unwrap();
+        assert!(json.contains("gen\":1"));
+        assert_eq!(count, 3);
+        assert_eq!(db.get_topic_centroids(TEST_USER).await.unwrap(), good);
+    }
+
+    #[tokio::test]
+    async fn test_keyword_only_bundle_nulls_a_prior_embedding() {
+        let db = test_db().await;
+        let clusters = vec![crate::db::models::ClusterCentroid {
+            centroid: vec![0.5; 384],
+            post_count: 3,
+        }];
+        let emb = vec![0.25; 384];
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, Some(&emb), &clusters)
+            .await
+            .unwrap();
+        assert!(db.get_embedding(TEST_USER).await.unwrap().is_some());
+
+        // Downgrade to keyword-only: the new generation replaces EVERYTHING —
+        // a stale embedding surviving here would mix generations (#302).
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &[])
+            .await
+            .unwrap();
+        assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
+        assert!(db.get_topic_centroids(TEST_USER).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_delete_user_data_clears_topic_clusters() {
+        let db = test_db().await;
+        let clusters = vec![crate::db::models::ClusterCentroid {
+            centroid: vec![0.5; 384],
+            post_count: 3,
+        }];
+        db.save_fingerprint_bundle(TEST_USER, "{}", 3, None, &clusters)
+            .await
+            .unwrap();
+        db.delete_user_data(TEST_USER).await.unwrap();
+        assert!(db.get_topic_centroids(TEST_USER).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn test_trait_embedding_roundtrip() {
         let db = test_db().await;
         db.save_fingerprint(TEST_USER, r#"{"clusters":[]}"#, 50)
@@ -533,6 +712,7 @@ mod tests {
             handle: "test.bsky.social".to_string(),
             toxicity_score: Some(0.8),
             topic_overlap: Some(0.3),
+            overlap_legacy: None,
             threat_score: Some(65.0),
             threat_tier: Some("Elevated".to_string()),
             posts_analyzed: 20,
@@ -560,6 +740,7 @@ mod tests {
             handle: "unsupported.bsky.social".to_string(),
             toxicity_score: None,
             topic_overlap: None,
+            overlap_legacy: None,
             threat_score: None,
             threat_tier: Some("NotAssessed".to_string()),
             posts_analyzed: 5,
@@ -577,6 +758,7 @@ mod tests {
             handle: "normal.bsky.social".to_string(),
             toxicity_score: Some(0.1),
             topic_overlap: Some(0.1),
+            overlap_legacy: None,
             threat_score: Some(5.0),
             threat_tier: Some("Low".to_string()),
             posts_analyzed: 10,
@@ -626,8 +808,30 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
-        // scan_queue = 12 tables (v11)
-        assert_eq!(count, 12);
+        // scan_queue, topic_clusters = 13 tables (v13)
+        assert_eq!(count, 13);
+    }
+
+    #[tokio::test]
+    async fn test_migration_v13_creates_topic_clusters_and_overlap_legacy() {
+        let db = test_db().await;
+        let conn = db.conn.lock().await;
+        let has_table: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='topic_clusters'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_table, "topic_clusters table missing");
+        let has_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('account_scores') WHERE name='overlap_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_col, "account_scores.overlap_legacy missing");
     }
 
     #[tokio::test]
@@ -654,6 +858,7 @@ mod tests {
             handle: "test.bsky.social".to_string(),
             toxicity_score: Some(0.5),
             topic_overlap: Some(0.3),
+            overlap_legacy: None,
             threat_score: Some(20.0),
             threat_tier: Some("Elevated".to_string()),
             posts_analyzed: 10,
@@ -695,6 +900,7 @@ mod tests {
             handle: "findme.bsky.social".to_string(),
             toxicity_score: Some(0.1),
             topic_overlap: Some(0.2),
+            overlap_legacy: None,
             threat_score: Some(5.0),
             threat_tier: Some("Low".to_string()),
             posts_analyzed: 5,

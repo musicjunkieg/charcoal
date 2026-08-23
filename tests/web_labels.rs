@@ -28,6 +28,7 @@ mod tests {
             handle: handle.to_string(),
             toxicity_score: Some(0.5),
             topic_overlap: Some(0.3),
+            overlap_legacy: None,
             threat_score: Some(score),
             threat_tier: Some(tier.to_string()),
             posts_analyzed: 10,

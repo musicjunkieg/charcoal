@@ -432,6 +432,25 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         Ok(())
     })?;
 
+    // v13 (#297/#302): per-topic centroid rows + the shadow-compare column.
+    // No FK on SQLite — topic_fingerprint was rebuilt via a rename in v4 and
+    // rusqlite FK enforcement is off by default; deletes are handled
+    // explicitly inside delete_user_data's transaction instead.
+    run_migration(conn, 13, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS topic_clusters (
+                 user_did TEXT NOT NULL,
+                 cluster_index INTEGER NOT NULL,
+                 centroid TEXT NOT NULL,
+                 post_count INTEGER NOT NULL,
+                 PRIMARY KEY (user_did, cluster_index)
+             );
+             ALTER TABLE account_scores ADD COLUMN overlap_legacy REAL;
+             COMMIT;",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -488,8 +507,8 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips, scan_queue = 12 tables
-        assert_eq!(count, 12i64);
+        // scan_skips, scan_queue, topic_clusters = 13 tables (v13)
+        assert_eq!(count, 13i64);
     }
 
     #[test]
@@ -553,7 +572,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v12
+        // Verify schema_version has all versions through v13
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -561,7 +580,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     }
 
     #[test]
@@ -663,10 +682,10 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips, scan_queue = 12 tables
-        assert_eq!(count, 12i64);
+        // scan_skips, scan_queue, topic_clusters = 13 tables (v13)
+        assert_eq!(count, 13i64);
 
-        // Verify schema_version includes v4 through v12
+        // Verify schema_version includes v4 through v13
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -674,7 +693,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     }
 
     /// Does `scan_queue` currently have a `claim_id` column?

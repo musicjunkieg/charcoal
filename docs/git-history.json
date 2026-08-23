@@ -1,5 +1,141 @@
 [
   {
+    "hash": "eeb30b1f9435fa478267e767747c1d016f6391bf",
+    "short_hash": "eeb30b1",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:30:14-07:00",
+    "message": "docs(297): align spec label-keyword budget with implementation (12, was 6)\n\nFinal whole-branch review Minor: the plan overrode the spec without the\nspec being amended.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "56d49d25735bfb5b4fce83ca871005eca8550413",
+    "short_hash": "56d49d2",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:13:39-07:00",
+    "message": "docs(297): changelog for multi-interest fingerprint + atomic persistence; comment fixes from review\n\nDoc-only code changes: merge_threshold doc now states centered-space scale\nand cap-dominance caveat for #135; stale working-state comment retitled;\nempirical-invariant note on the zero-centroid fallback.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
+    "hash": "ca868cda33442a7adfacade1ff80703e01317f2c",
+    "short_hash": "ca868cd",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:07:47-07:00",
+    "message": "fix(297): center embeddings for merge decisions - hub-cluster degeneracy on real data\n\nReal-data validation (Task 10 step 4) produced one mega-cluster holding\n487/500 posts at every merge threshold: MiniLM embeddings are anisotropic,\nso raw cosines all sit high and the largest cluster is always the best\nmerge partner. Centering on the corpus mean (all-but-the-top style)\nremoves the shared component for MERGE DECISIONS ONLY; stored centroids\nstay in the original space, so scoring and shadow-compare semantics are\nuntouched. Bryan validated the resulting 10-topic fingerprint and signed\noff 2026-08-22; merge_threshold stays at the 0.60 default (output\nidentical at 0.60/0.70 in centered space). Two synthetic tests updated to\ncentered semantics (tiny near-identical corpora stay singletons; the\ntied-largest prune rule covers them).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "4a52ffa5a11c1bdbdf3ee53aaa2a7a7b9ffcffa1",
+    "short_hash": "4a52ffa",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T23:35:08-07:00",
+    "message": "fix(297): postgres test literal + empty-vec centroid degrade coverage\n\nAdd missing overlap_legacy field to AccountScore literal in db_postgres.rs\ntest. Add sibling test empty_vec_centroids_degrade_same_as_none to cover\nthe production code path where Some(empty.as_slice()) is passed for\nprotected_topic_centroids (pre-#297 data).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
+    "hash": "f79c61a5edabc596154ad03c4f634960ff918bb5",
+    "short_hash": "f79c61a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T23:23:48-07:00",
+    "message": "feat(297): max-over-topics live overlap, overlap_legacy shadow, legacy-format rebuild\n\nLive topic overlap now takes the max cosine over the protected user's\nper-topic centroids instead of a single mean-centroid cosine: \"is this\naccount near ANY of my topics?\". The pre-#297 mean-centroid value is\ncomputed alongside and stored as AccountScore.overlap_legacy so #135 can\nrecalibrate gates and tiers from real paired data. Fingerprints with no\ncentroid rows degrade to the old value for BOTH numbers, so nothing\nchanges until a generation is rebuilt.\n\n- AccountScore gains overlap_legacy: Option<f64>; both backends write it\n  and all four row-mappers read it (nullable column landed in Task 4).\n  None on the TF-IDF keyword path — there is no embedding shadow there.\n- score_from_sample gains protected_topic_centroids after\n  protected_embedding; threaded through finalize_account, PhasedScanDeps,\n  sweep (3 fns), amplification::run, build_profile, and the web scan job.\n  load_embedder now returns centroids beside the mean embedding.\n- New fingerprint_needs_rebuild_for_format(has_embedding, rows, clusters)\n  routes a stored generation to the rebuild arm when the embedding path\n  ran but centroid rows do not match the fingerprint JSON (0 rows =\n  pre-#297, mismatch = pre-#302). Keyword-only fingerprints are exempt so\n  model-less deployments cannot rebuild-loop. The web scan now loads\n  fingerprint + embedding + centroids as one snapshot before the decision\n  and re-reads embedding + centroids after a successful rebuild, since\n  the bundle save replaces both.\n- An unreadable stored fingerprint is now treated as absent (rebuild,\n  hard-fail if the rebuild fails) instead of aborting the scan outright.\n  The \"older than 14 days\" progress copy is now reason-neutral because\n  the format upgrade can trigger the same rebuild.\n\nNo golden/composition expectation changed: every existing call site\npasses None or an empty centroid set, which is byte-identical to the\npre-#297 mean-centroid math.\n\nTests: two new unit_profile tests pin max-over-topics + the legacy shadow\nand the empty-centroid degradation; a new scan_job test pins the four\nrebuild-trigger cases. Full --features web suite green, zero model-gated\nskips; cargo check (postgres, default) and clippy --features web\n--all-targets clean.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 21
+  },
+  {
+    "hash": "e7ef3d09e52cb02731f346d55d74c6d3f2be483c",
+    "short_hash": "e7ef3d0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:44:31-07:00",
+    "message": "feat(297): embedding-first build path shared by web scan and CLI, atomic bundle save\n\nTask 8/10: extract build_user_fingerprint into src/topics/build.rs so the\nCLI (built without the `web` feature) shares one embedding-first build path\nwith the web scan pipeline and admin pre-seed handler. scan_job.rs re-exports\nit for existing callers; main.rs Commands::Fingerprint delegates then loads\n+ displays. TDD: assemble_fingerprint tests written first (RED - compile\nerror), then implementation (GREEN, 2/2 passing).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "65d048084555d4de67093d6478cefcc62c4f5b55",
+    "short_hash": "65d0480",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:28:06-07:00",
+    "message": "feat(302): charcoal migrate transfers fingerprint generation as one bundle\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "d3754ec29e49c2966006608dad8bc756339dad05",
+    "short_hash": "d3754ec",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:17:23-07:00",
+    "message": "feat(302): Postgres save_fingerprint_bundle + get_topic_centroids\n\nImplements the two Database trait methods PgDatabase was missing since\nTask 5 added them (cargo check --features postgres was failing with\nE0046). Mirrors the SQLite semantics: one transaction upserts the\nfingerprint row (JSON + post_count + embedding_vector, f64->f32 for\npgvector) and bumps updated_at once, then replaces all topic_clusters\nrows for the user in cluster_index order. A keyword-only bundle\n(embedding: None) NULLs a prior embedding, since the bundle IS the\ngeneration, not an incremental patch.\n\nAdds two live-DB tests mirroring db_postgres.rs conventions: bundle\nroundtrip + replacement (tolerance-compared centroids, since pgvector\nstores f32), and delete_user_data cascading to topic_clusters via the\nmigration 0013 FK ON DELETE CASCADE.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
+    "hash": "1ad3630afc6f9599b12d890ca760a46f83e27692",
+    "short_hash": "1ad3630",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:09:30-07:00",
+    "message": "test(302): pin embedding NULL-out on keyword-only bundle downgrade\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
+    "hash": "c0f2c4e1a0d74d5600c5423ca177fe8ada05225e",
+    "short_hash": "c0f2c4e",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T21:26:18-07:00",
+    "message": "feat(297): migration 0013 - topic_clusters table + account_scores.overlap_legacy\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "53a34421b18ebeb08122f3c71f64619825ac1466",
+    "short_hash": "53a3442",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T21:03:10-07:00",
+    "message": "feat(297): assemble multi-interest fingerprint with per-cluster TF-IDF labels\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "652782b0ca1857170ac0f6b8c7a130257e7acba2",
+    "short_hash": "652782b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T20:51:19-07:00",
+    "message": "feat(297): max-over-topics overlap with legacy degrade to None\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "c7c94ae8cc4d17b754226054857e6da8d4c075c5",
+    "short_hash": "c7c94ae",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T20:46:35-07:00",
+    "message": "fix(297): pin tied-largest prune fallback + correct complexity note\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
+    "hash": "7f3cc598e5bcbf05bd0453686a537d0a0c4cd2ad",
+    "short_hash": "7f3cc59",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T19:31:33-07:00",
+    "message": "docs(297): implementation plan - 10 TDD tasks for multi-interest fingerprint\n\nTasks: clustering module, max-over-topics overlap, per-cluster labeling,\nmigration 0013, save_fingerprint_bundle (SQLite + Postgres), migrate\ntransfer, shared build path in src/topics/build.rs (web is feature-gated),\nscan/scoring wiring with overlap_legacy shadow, full verification gates.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "cf66148d97af862bc029293bb33e2b8abb383b9f",
+    "short_hash": "cf66148",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T19:16:07-07:00",
+    "message": "docs(297): design spec for multi-interest fingerprint + atomic persistence\n\nApproved section-by-section with Bryan 2026-08-21. Embedding-first\nclustering (BERTopic-lite), max-over-topics overlap, shadow compare via\naccount_scores.overlap_legacy, save_fingerprint_bundle transaction (#302),\nmigration 0013. #298 deferred; candidate-side dilution filed as #304.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "90d80af1a9f7696acf5a4e2518036026fdc92b8a",
+    "short_hash": "90d80af",
+    "author": "chaos gremlin",
+    "date": "2026-08-21T18:47:42-07:00",
+    "message": "Merge pull request #101 from musicjunkieg/feat/296-overlap-math\n\nfix(296): repair eight defects in the topic-overlap math (spike #295 GOOD tier)",
+    "files_changed": 0
+  },
+  {
+    "hash": "d1815d0a669d4fca301cef6c4cffa4c6a86879b2",
+    "short_hash": "d1815d0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T22:26:33-07:00",
+    "message": "fix(303): treat unparseable fingerprint timestamps as stale, not fresh\n\nCodeRabbit outside-diff Major on PR #101, and it is correct: a\nsuccessful rebuild rewrites updated_at via the DB clock, so a corrupt\nrow self-heals after one rebuild, while fresh-forever silently bypasses\nthe 14-day refresh. Rebuild-per-scan only persists under systemic\nformat drift, which the warn makes loud, and the stale-rebuild-failure\npath already falls back gracefully. Supersedes the #296 plan decision.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "c78e0a0d426ea98d942e9ec07b8487c10d9002ba",
     "short_hash": "c78e0a0",
     "author": "Bryan Guffey",

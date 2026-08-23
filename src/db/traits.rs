@@ -12,8 +12,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
+    NewAmplificationEvent, UserLabel, UserRow,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -198,6 +198,23 @@ pub trait Database: Send + Sync {
 
     /// Load the stored embedding vector for a user (if one exists).
     async fn get_embedding(&self, user_did: &str) -> Result<Option<Vec<f64>>>;
+
+    /// Persist a complete fingerprint generation atomically: JSON, mean
+    /// embedding, and per-topic centroid rows in ONE transaction, bumping
+    /// updated_at exactly once. `embedding: None` with empty `clusters` is the
+    /// legal keyword-only bundle (embedder unavailable). (#302)
+    async fn save_fingerprint_bundle(
+        &self,
+        user_did: &str,
+        fingerprint_json: &str,
+        post_count: u32,
+        embedding: Option<&[f64]>,
+        clusters: &[ClusterCentroid],
+    ) -> Result<()>;
+
+    /// Load stored topic centroids ordered by cluster_index. Empty = legacy
+    /// (pre-#297) or keyword-only fingerprint.
+    async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>>;
 
     // --- Account scores ---
 
@@ -538,4 +555,78 @@ pub trait Database: Send + Sync {
     /// A second, narrower method would be a second snapshot of a table that
     /// changes under it.
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>;
+}
+
+/// Reject bundles that would poison future cosines: every stored float must
+/// be finite, and every vector must be exactly `EMBEDDING_DIM` wide. Runs
+/// before any I/O so a bad build can never split a generation.
+/// (#296 discipline, applied to #302.)
+///
+/// The width check exists because the two backends disagree about what they
+/// will accept: PostgreSQL's `vector(384)` rejects a wrong-width row outright,
+/// while SQLite stores centroids as unconstrained JSON. A wrong-width centroid
+/// that reached SQLite would then score 0.0 in every future cosine — inert, but
+/// indistinguishable from real data. Reject at the write instead.
+/// (CodeRabbit PR #102)
+pub fn validate_bundle(embedding: Option<&[f64]>, clusters: &[ClusterCentroid]) -> Result<()> {
+    use crate::topics::embeddings::EMBEDDING_DIM;
+
+    if let Some(emb) = embedding {
+        anyhow::ensure!(
+            emb.iter().all(|v| v.is_finite()),
+            "non-finite value in mean embedding",
+        );
+        anyhow::ensure!(
+            emb.len() == EMBEDDING_DIM,
+            "mean embedding has {} dimensions, expected {EMBEDDING_DIM}",
+            emb.len(),
+        );
+    }
+    for (i, cluster) in clusters.iter().enumerate() {
+        anyhow::ensure!(
+            cluster.centroid.iter().all(|v| v.is_finite()),
+            "non-finite value in centroid of cluster {i}",
+        );
+        anyhow::ensure!(
+            cluster.centroid.len() == EMBEDDING_DIM,
+            "centroid of cluster {i} has {} dimensions, expected {EMBEDDING_DIM}",
+            cluster.centroid.len(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod validate_bundle_tests {
+    use super::{validate_bundle, ClusterCentroid};
+    use crate::topics::embeddings::EMBEDDING_DIM;
+
+    fn cluster(width: usize) -> ClusterCentroid {
+        ClusterCentroid {
+            centroid: vec![0.5; width],
+            post_count: 3,
+        }
+    }
+
+    #[test]
+    fn well_formed_bundle_passes() {
+        let emb = vec![0.25; EMBEDDING_DIM];
+        assert!(validate_bundle(Some(&emb), &[cluster(EMBEDDING_DIM)]).is_ok());
+        // Keyword-only: no embedding, no centroids.
+        assert!(validate_bundle(None, &[]).is_ok());
+    }
+
+    #[test]
+    fn wrong_width_embedding_is_rejected() {
+        let emb = vec![0.25; EMBEDDING_DIM - 1];
+        assert!(validate_bundle(Some(&emb), &[]).is_err());
+    }
+
+    #[test]
+    fn wrong_width_centroid_is_rejected() {
+        let emb = vec![0.25; EMBEDDING_DIM];
+        // One good, one narrow — the whole bundle must fail, not persist half.
+        let clusters = vec![cluster(EMBEDDING_DIM), cluster(8)];
+        assert!(validate_bundle(Some(&emb), &clusters).is_err());
+    }
 }

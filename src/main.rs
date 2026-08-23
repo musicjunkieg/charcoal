@@ -230,63 +230,28 @@ async fn main() -> Result<()> {
             }
 
             println!("Building topic fingerprint from your recent posts...");
-
-            // Fetch recent posts (target 500 for a good fingerprint)
-            let posts =
-                charcoal::bluesky::posts::fetch_recent_posts(&client, &config.bluesky_handle, 500)
-                    .await?;
-
-            println!("Analyzing {} posts...", posts.len());
-
-            let post_texts: Vec<String> = posts.iter().map(|p| p.text.clone()).collect();
-
-            // Run TF-IDF extraction
-            let extractor = charcoal::topics::tfidf::TfIdfExtractor::default();
-            let fingerprint =
-                charcoal::topics::traits::TopicExtractor::extract(&extractor, &post_texts)?;
-
-            // Display the fingerprint
-            fingerprint.display();
-
-            // Cache in the database
-            let json = serde_json::to_string(&fingerprint)?;
-            db.save_fingerprint(&did, &json, fingerprint.post_count)
-                .await?;
-
-            // Compute and store the mean sentence embedding for semantic overlap.
-            // This is optional — if the embedding model isn't downloaded yet, we
-            // skip it and fall back to TF-IDF keyword overlap during scoring.
-            let embed_dir = charcoal::toxicity::download::embedding_model_dir(&config.model_dir);
-            if charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
-                println!("\nComputing sentence embeddings...");
-                let embedder = charcoal::topics::embeddings::SentenceEmbedder::load(&embed_dir)?;
-                let embed_texts: Vec<String> = post_texts
-                    .iter()
-                    .map(|t| charcoal::topics::tfidf::clean_for_embedding(t))
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                if embed_texts.is_empty() {
-                    // URLs/mentions-only corpus: saving the zero centroid
-                    // would silently zero every overlap comparison. (#301)
-                    println!("  Skipped: all posts were URLs/mentions only.");
-                } else {
-                    let post_embeddings = embedder.embed_batch(&embed_texts).await?;
-                    let mean_emb =
-                        charcoal::topics::embeddings::normalized_mean_embedding(&post_embeddings);
-                    db.save_embedding(&did, &mean_emb).await?;
-                    println!(
-                        "  Embedding computed ({} posts → {}-dim vector)",
-                        embed_texts.len(),
-                        charcoal::topics::embeddings::EMBEDDING_DIM,
-                    );
-                }
-            } else {
+            if !charcoal::toxicity::download::embedding_files_present(&config.model_dir) {
                 println!(
-                    "\n{}",
+                    "{}",
                     "Tip: Run `charcoal download-model` to enable semantic topic overlap.".dimmed()
                 );
             }
-
+            charcoal::topics::build::build_user_fingerprint(
+                &config,
+                &*db,
+                &did,
+                &config.bluesky_handle,
+            )
+            .await?;
+            // The row was just written, but the database is shared — a
+            // concurrent delete can land between the save and this read. Fail
+            // as a normal error instead of panicking the CLI.
+            let (json, _, _) = db.get_fingerprint(&did).await?.ok_or_else(|| {
+                anyhow::anyhow!("fingerprint disappeared between save and read-back")
+            })?;
+            let fingerprint: charcoal::topics::fingerprint::TopicFingerprint =
+                serde_json::from_str(&json)?;
+            fingerprint.display();
             println!(
                 "{}",
                 "Fingerprint saved. Review the topics above — do they look accurate?".bold()
@@ -335,7 +300,8 @@ async fn main() -> Result<()> {
             };
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             // Compute behavioral context for scoring
             let median_engagement = db.get_median_engagement(&did).await?;
@@ -386,6 +352,7 @@ async fn main() -> Result<()> {
                 concurrency as usize,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                Some(&protected_topic_centroids),
                 events,
                 median_engagement,
                 &pile_on_dids,
@@ -430,7 +397,8 @@ async fn main() -> Result<()> {
             let protected_fingerprint = load_fingerprint(&db, &did).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             let median_engagement = db.get_median_engagement(&did).await?;
             let pile_on_events = db.get_events_for_pile_on(&did).await?;
@@ -455,6 +423,7 @@ async fn main() -> Result<()> {
                             concurrency as usize,
                             embedder.as_ref(),
                             protected_embedding.as_deref(),
+                            Some(&protected_topic_centroids),
                             median_engagement,
                             &pile_on_dids,
                             Some(config.data_dir()),
@@ -488,6 +457,7 @@ async fn main() -> Result<()> {
                         concurrency as usize,
                         embedder.as_ref(),
                         protected_embedding.as_deref(),
+                        Some(&protected_topic_centroids),
                         median_engagement,
                         &pile_on_dids,
                         Some(config.data_dir()),
@@ -517,6 +487,7 @@ async fn main() -> Result<()> {
                             concurrency as usize,
                             embedder.as_ref(),
                             protected_embedding.as_deref(),
+                            Some(&protected_topic_centroids),
                             median_engagement,
                             &pile_on_dids,
                             Some(config.data_dir()),
@@ -558,6 +529,7 @@ async fn main() -> Result<()> {
                                 concurrency as usize,
                                 embedder.as_ref(),
                                 protected_embedding.as_deref(),
+                                Some(&protected_topic_centroids),
                                 median_engagement,
                                 &pile_on_dids,
                                 Some(config.data_dir()),
@@ -600,7 +572,8 @@ async fn main() -> Result<()> {
             let scorer = create_scorer(&config)?;
 
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             let median_engagement = db.get_median_engagement(&did).await?;
             let pile_on_events = db.get_events_for_pile_on(&did).await?;
@@ -620,6 +593,7 @@ async fn main() -> Result<()> {
                 &weights,
                 embedder.as_ref(),
                 protected_embedding.as_deref(),
+                Some(&protected_topic_centroids),
                 median_engagement,
                 &pile_on_dids,
                 None, // NLI scorer — not yet wired into CLI
@@ -746,7 +720,8 @@ async fn main() -> Result<()> {
             let protected_fingerprint = load_fingerprint(&db, &did).await?;
             let scorer = create_scorer(&config)?;
             let weights = charcoal::scoring::threat::ThreatWeights::default();
-            let (embedder, protected_embedding) = load_embedder(&config, &db, &did).await;
+            let (embedder, protected_embedding, protected_topic_centroids) =
+                load_embedder(&config, &db, &did).await;
 
             let median_engagement = db.get_median_engagement(&did).await?;
             let pile_on_events = db.get_events_for_pile_on(&did).await?;
@@ -794,6 +769,7 @@ async fn main() -> Result<()> {
                     &weights,
                     embedder.as_ref(),
                     protected_embedding.as_deref(),
+                    Some(&protected_topic_centroids),
                     median_engagement,
                     &pile_on_dids,
                     None, // NLI scorer — not yet wired into CLI
@@ -1153,21 +1129,30 @@ async fn main() -> Result<()> {
             sqlite_db.upsert_user(&did, &config.bluesky_handle).await?;
             pg_db.upsert_user(&did, &config.bluesky_handle).await?;
 
-            // 1. Migrate fingerprint + embedding
-            if let Some((json, count, _)) = sqlite_db.get_fingerprint(&did).await? {
-                pg_db.save_fingerprint(&did, &json, count).await?;
+            // 1. Migrate fingerprint + embedding + clusters
+            if let Some((json, post_count, _)) = sqlite_db.get_fingerprint(&did).await? {
+                let embedding = sqlite_db.get_embedding(&did).await?;
+                let clusters = sqlite_db.get_topic_centroids(&did).await?;
+                pg_db
+                    .save_fingerprint_bundle(
+                        &did,
+                        &json,
+                        post_count,
+                        embedding.as_deref(),
+                        &clusters,
+                    )
+                    .await?;
                 println!(
-                    "  {} Topic fingerprint migrated ({count} posts)",
+                    "  {} Topic fingerprint migrated ({post_count} posts)",
                     "✓".green()
                 );
 
-                // Migrate embedding if present
-                if let Some(embedding) = sqlite_db.get_embedding(&did).await? {
-                    pg_db.save_embedding(&did, &embedding).await?;
+                // Embedding already included in the bundle; report if present
+                if let Some(ref emb) = embedding {
                     println!(
                         "  {} Embedding migrated ({}-dim vector)",
                         "✓".green(),
-                        embedding.len()
+                        emb.len()
                     );
                 }
             } else {
@@ -1334,6 +1319,7 @@ async fn load_embedder(
 ) -> (
     Option<charcoal::topics::embeddings::SentenceEmbedder>,
     Option<Vec<f64>>,
+    Vec<Vec<f64>>,
 ) {
     let embed_dir = charcoal::toxicity::download::embedding_model_dir(&config.model_dir);
 
@@ -1366,7 +1352,18 @@ async fn load_embedder(
         }
     };
 
-    (embedder, embedding)
+    // Per-topic centroids (#297). Empty for pre-#297 fingerprints or when the
+    // read fails — scoring then degrades to the mean-centroid cosine, which is
+    // exactly the pre-#297 behavior, so a warn is enough.
+    let centroids: Vec<Vec<f64>> = match db.get_topic_centroids(user_did).await {
+        Ok(rows) => rows.into_iter().map(|c| c.centroid).collect(),
+        Err(e) => {
+            warn!("Failed to load stored topic centroids: {e}");
+            Vec::new()
+        }
+    };
+
+    (embedder, embedding, centroids)
 }
 
 /// Query the Constellation backlink index for amplification events.
