@@ -52,7 +52,7 @@ export function queueMessage(q: {
 	if (q.eta_seconds == null) return place;
 	// Round up to a minute: a 20-second estimate is still a wait, and "about 0
 	// minutes" reads as "any moment now", which it is not.
-	const mins = Math.max(1, Math.round(q.eta_seconds / 60));
+	const mins = Math.max(1, Math.ceil(q.eta_seconds / 60));
 	return `${place} — about ${mins} minute${mins === 1 ? '' : 's'}`;
 }
 

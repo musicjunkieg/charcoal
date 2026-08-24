@@ -450,8 +450,12 @@ mod tests {
 
     #[tokio::test]
     async fn scan_fails_when_user_not_registered() {
-        // This test documents the bug: without a user row in the DB,
-        // POST /api/scan returns 500 "User not found".
+        // Without a user row in the DB, POST /api/scan returns 404 — a valid
+        // session with a missing user row is a client-actionable
+        // "re-authenticate" state, not a server error. This used to return
+        // 500, mis-routing it into server-error alerting; the equivalent
+        // condition in trigger_admin_scan (admin.rs) already returned 404.
+        // (#307, CodeRabbit PR #103)
         let Some(app) = build_test_app() else {
             eprintln!("SKIP: models not present, cannot build test AppState");
             return;
@@ -470,7 +474,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
         let body = axum::body::to_bytes(res.into_body(), usize::MAX)
             .await
             .unwrap();

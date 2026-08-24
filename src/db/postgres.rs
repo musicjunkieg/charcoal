@@ -391,7 +391,7 @@ impl Database for PgDatabase {
     async fn get_fingerprint(&self, user_did: &str) -> Result<Option<(String, u32, String)>> {
         let row = sqlx_core::query::query(
             "SELECT fingerprint_json, post_count,
-                    to_char(updated_at, 'YYYY-MM-DD HH24:MI:SS') as updated_at
+                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') as updated_at
              FROM topic_fingerprint WHERE user_did = $1",
         )
         .bind(user_did)

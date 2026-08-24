@@ -102,6 +102,7 @@ impl TopicFingerprint {
                     .keyword_scores
                     .iter()
                     .all(|s| s.is_finite() && *s >= 0.0)
+                && score_sum.is_finite()
                 && score_sum > f64::EPSILON;
 
             if rank_weighted {
@@ -218,6 +219,30 @@ mod tests {
                 "score {bad} must trigger the uniform fallback"
             );
         }
+    }
+
+    #[test]
+    fn test_keyword_weights_overflowing_sum_falls_back_to_uniform() {
+        // Each individual score is finite (f64::MAX passes is_finite()), but
+        // their sum overflows to +inf. That passes the per-element check and
+        // score_sum > EPSILON, so without an explicit score_sum.is_finite()
+        // guard every keyword's share (score / score_sum) evaluates to 0.0
+        // instead of falling back to the documented uniform split. (#307,
+        // CodeRabbit PR #103)
+        let fp = TopicFingerprint {
+            clusters: vec![TopicCluster {
+                label: "t".to_string(),
+                keywords: vec!["a".to_string(), "b".to_string()],
+                keyword_scores: vec![f64::MAX, f64::MAX],
+                weight: 0.6,
+            }],
+            post_count: 10,
+        };
+        let weights = fp.keyword_weights();
+        assert!(
+            (weights["a"] - 0.3).abs() < 1e-9 && (weights["b"] - 0.3).abs() < 1e-9,
+            "an overflowing score_sum must trigger the uniform fallback, got {weights:?}"
+        );
     }
 
     #[test]

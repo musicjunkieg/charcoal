@@ -14,10 +14,13 @@ threat picture — per-user topic fingerprint, per-user scores, isolated data.
 
 Bryan (@chaosgreml.in) is the operator and one user among many, not the sole
 audience. SPEC.md still says "Who is this for? Me (Bryan)"; that is historical.
-Production is open to all Bluesky users (`CHARCOAL_ALLOWED_DID` empty = open
-access), so multi-tenant concerns — onboarding a stranger who arrives cold,
-per-user isolation, explaining results to someone with no context — are core
-product truth rather than future work.
+Production access is currently gated by an allowlist (`CHARCOAL_ALLOWED_DID`)
+during controlled onboarding, not open to all Bluesky users — an empty value
+is what enables unrestricted access, and that is the intended end state, not
+the deployed one. Multi-tenant concerns — onboarding a stranger who arrives
+cold, per-user isolation, explaining results to someone with no context — are
+core product truth rather than future work regardless, since the gate is
+onboarding pacing, not a narrowing of who the product is for.
 
 A second, narrower role exists: **admin** (`CHARCOAL_ADMIN_DIDS`), which can
 view operational state and impersonate a user for support.
