@@ -1,5 +1,21 @@
 [
   {
+    "hash": "643f0350e2fc319bdfb05988d87586c751673bd4",
+    "short_hash": "643f035",
+    "author": "chaos gremlin",
+    "date": "2026-08-23T17:35:52-07:00",
+    "message": "Merge pull request #103 from musicjunkieg/staging\n\nPromote staging to production: admission control, admin visibility, design tokens, overlap math, multi-interest fingerprints",
+    "files_changed": 0
+  },
+  {
+    "hash": "58c5e4a7d58aa7ec6968d4531d1050d8bd0a987a",
+    "short_hash": "58c5e4a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T17:12:54-07:00",
+    "message": "fix: restrict CI workflow token to contents:read (CodeQL alert 23)\n\nThe workflow only checks out, builds, and tests - it never writes to the\nrepo, so the default broad GITHUB_TOKEN scopes were unused surface. This\nwas the sole open CodeQL alert and was failing the check on promotion\nPR #103.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "b8342700e8ad20ab2c592ed8c54754b162aeb559",
     "short_hash": "b834270",
     "author": "Bryan Guffey",

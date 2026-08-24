@@ -5862,6 +5862,94 @@
       "created_at": "2026-08-23T16:47:23.270051-07:00",
       "updated_at": "2026-08-23T16:47:23.270051-07:00",
       "metadata_json": "{\"branch\":\"fix/307-pr103-fast-follow\",\"commit\":\"b834270\",\"confidence\":95}"
+    },
+    {
+      "id": 543,
+      "change_id": "71aaae54-19ea-4254-9844-f70188a0815f",
+      "node_type": "action",
+      "title": "Answered all PR #103 threads per-thread with evidence; review state cleared; #308 filed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T17:37:01.646020-07:00",
+      "updated_at": "2026-08-23T17:37:01.646020-07:00",
+      "metadata_json": "{\"branch\":\"fix/ci-workflow-permissions\",\"commit\":\"58c5e4a\",\"confidence\":95}"
+    },
+    {
+      "id": 544,
+      "change_id": "2c483c18-effc-4db9-9d39-e9b34677d321",
+      "node_type": "outcome",
+      "title": "Prod promoted: 643f035 deployed SUCCESS, gate live, migrations v13 in. #306 closed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T17:38:15.037681-07:00",
+      "updated_at": "2026-08-23T17:38:15.037681-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"commit\":\"643f035\",\"confidence\":95}"
+    },
+    {
+      "id": 545,
+      "change_id": "01e06827-6211-4323-8a2c-cb2082ad78d1",
+      "node_type": "goal",
+      "title": "Allowlist admin UI for gated onboarding + minimal scan cooldown",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:22:06.768644-07:00",
+      "updated_at": "2026-08-23T20:22:06.768644-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":95,\"prompt\":\"yeah the allowlist admin ui - make sure we use the actual skills we have from impeccable for this\"}"
+    },
+    {
+      "id": 546,
+      "change_id": "d3f8113b-c8f4-4422-83f3-e00209bd78ee",
+      "node_type": "option",
+      "title": "Approach 1: access_requests table, per-request PK lookup, env var + admin as bootstrap OR",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:22:14.075575-07:00",
+      "updated_at": "2026-08-23T20:22:14.075575-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":90}"
+    },
+    {
+      "id": 547,
+      "change_id": "198af591-6035-4529-a235-235de621c783",
+      "node_type": "option",
+      "title": "Approach 2: same table plus in-memory cached allowlist set",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:22:14.090234-07:00",
+      "updated_at": "2026-08-23T20:22:14.090234-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":60}"
+    },
+    {
+      "id": 548,
+      "change_id": "498f5a46-a01c-44ba-9c17-7b2a1a7077d7",
+      "node_type": "option",
+      "title": "Approach 3: env var stays authoritative, table is waitlist only (edit env to approve)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:22:14.102067-07:00",
+      "updated_at": "2026-08-23T20:22:14.102067-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":20}"
+    },
+    {
+      "id": 549,
+      "change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "node_type": "decision",
+      "title": "Chose Approach 1: DB-backed gate with env/admin bootstrap OR; auto-waitlist on denied OAuth; two-button approve; sticky invisible deny; revoke keeps data; 24h cooldown w/ admin bypass",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:22:19.817147-07:00",
+      "updated_at": "2026-08-23T20:22:19.817147-07:00",
+      "metadata_json": "{\"branch\":\"main\",\"confidence\":95,\"prompt\":\"approach 1 is good\"}"
+    },
+    {
+      "id": 550,
+      "change_id": "59fe4cee-cf6e-4c84-bb27-a41bd3e230c3",
+      "node_type": "action",
+      "title": "Write brainstorm spec docs/superpowers/specs/2026-08-24-allowlist-admin-ui-design.md on feat/allowlist-admin-ui",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:22:31.247206-07:00",
+      "updated_at": "2026-08-23T20:22:31.247206-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-08-24-allowlist-admin-ui-design.md\"]}"
     }
   ],
   "edges": [
@@ -11683,6 +11771,105 @@
       "weight": 1.0,
       "rationale": "fast-follow loop closed",
       "created_at": "2026-08-23T16:47:23.278399-07:00"
+    },
+    {
+      "id": 540,
+      "from_node_id": 542,
+      "to_node_id": 543,
+      "from_change_id": "99f51019-709d-4d0a-a333-465b7e5b8a1e",
+      "to_change_id": "71aaae54-19ea-4254-9844-f70188a0815f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "promotion PR cleared for merge",
+      "created_at": "2026-08-23T17:37:01.655280-07:00"
+    },
+    {
+      "id": 541,
+      "from_node_id": 543,
+      "to_node_id": 544,
+      "from_change_id": "71aaae54-19ea-4254-9844-f70188a0815f",
+      "to_change_id": "2c483c18-effc-4db9-9d39-e9b34677d321",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "promotion landed in production",
+      "created_at": "2026-08-23T17:38:15.045034-07:00"
+    },
+    {
+      "id": 542,
+      "from_node_id": 545,
+      "to_node_id": 546,
+      "from_change_id": "01e06827-6211-4323-8a2c-cb2082ad78d1",
+      "to_change_id": "d3f8113b-c8f4-4422-83f3-e00209bd78ee",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option explored for goal",
+      "created_at": "2026-08-23T20:22:25.621683-07:00"
+    },
+    {
+      "id": 543,
+      "from_node_id": 545,
+      "to_node_id": 547,
+      "from_change_id": "01e06827-6211-4323-8a2c-cb2082ad78d1",
+      "to_change_id": "198af591-6035-4529-a235-235de621c783",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option explored for goal",
+      "created_at": "2026-08-23T20:22:25.632510-07:00"
+    },
+    {
+      "id": 544,
+      "from_node_id": 545,
+      "to_node_id": 548,
+      "from_change_id": "01e06827-6211-4323-8a2c-cb2082ad78d1",
+      "to_change_id": "498f5a46-a01c-44ba-9c17-7b2a1a7077d7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option explored for goal",
+      "created_at": "2026-08-23T20:22:25.640840-07:00"
+    },
+    {
+      "id": 545,
+      "from_node_id": 546,
+      "to_node_id": 549,
+      "from_change_id": "d3f8113b-c8f4-4422-83f3-e00209bd78ee",
+      "to_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chosen: simplest correct gate, immediate revocation, no cache coherence",
+      "created_at": "2026-08-23T20:22:25.649028-07:00"
+    },
+    {
+      "id": 546,
+      "from_node_id": 547,
+      "to_node_id": 549,
+      "from_change_id": "198af591-6035-4529-a235-235de621c783",
+      "to_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected: cache coherence cost with no gain at current scale",
+      "created_at": "2026-08-23T20:22:25.656114-07:00"
+    },
+    {
+      "id": 547,
+      "from_node_id": 548,
+      "to_node_id": 549,
+      "from_change_id": "498f5a46-a01c-44ba-9c17-7b2a1a7077d7",
+      "to_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected: approval would require a redeploy",
+      "created_at": "2026-08-23T20:22:25.662855-07:00"
+    },
+    {
+      "id": 548,
+      "from_node_id": 549,
+      "to_node_id": 550,
+      "from_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "to_change_id": "59fe4cee-cf6e-4c84-bb27-a41bd3e230c3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spec is first artifact of the chosen design",
+      "created_at": "2026-08-23T20:22:31.255633-07:00"
     }
   ],
   "documents": [
