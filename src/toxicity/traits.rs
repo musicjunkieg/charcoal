@@ -4,6 +4,8 @@
 // implementation uses a local ONNX model (Detoxify unbiased-toxic-roberta).
 // Google's Perspective API is available as a fallback.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -113,5 +115,44 @@ pub trait ToxicityScorer: Send + Sync {
             });
         }
         Ok(verdicts)
+    }
+}
+
+/// Delegate to the wrapped scorer so an `Arc<T>` can stand in for `Box<dyn
+/// ToxicityScorer>` without a second model load (#257).
+///
+/// Boot now loads the ONNX toxicity model once into `AppState` and scans
+/// share it via `Arc::clone`. `TwoStageToxicityScorer::new` still takes an
+/// owned `Box<dyn ToxicityScorer>`, so this lets callers pass
+/// `Box::new(Arc::clone(&models.toxicity))` — the box owns a cheap Arc
+/// handle, not a fresh model.
+///
+/// Every method is delegated explicitly (not left to the trait's defaults)
+/// so wrapped types that override batching, e.g. `OnnxToxicityScorer::score_batch`,
+/// keep their real behavior instead of falling back to `Arc<T>`'s own defaults.
+#[async_trait]
+impl<T: ToxicityScorer + ?Sized> ToxicityScorer for Arc<T> {
+    async fn score_text(&self, text: &str) -> Result<ToxicityResult> {
+        (**self).score_text(text).await
+    }
+
+    async fn score_batch(&self, texts: &[String]) -> Result<Vec<ToxicityResult>> {
+        (**self).score_batch(texts).await
+    }
+
+    async fn score_with_context(
+        &self,
+        text: &str,
+        context: Option<&str>,
+    ) -> Result<ToxicityResult> {
+        (**self).score_with_context(text, context).await
+    }
+
+    async fn classify_batch_with_contexts(
+        &self,
+        texts: &[String],
+        contexts: &[Option<String>],
+    ) -> Result<Vec<BinaryVerdict>> {
+        (**self).classify_batch_with_contexts(texts, contexts).await
     }
 }

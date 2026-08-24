@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How Charcoal Scores an Account — a walkthrough</title>
+<style>
+  :root{
+    --bg:#15171c; --panel:#1e2127; --panel2:#252932; --ink:#e8eaed; --muted:#9aa0aa;
+    --line:#333845; --accent:#ff7a45;
+    --low:#3fb56b; --watch:#e8c23b; --elev:#ef8a3c; --high:#e0524a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 20px 60px;}
+  h1{font-size:24px;margin:0 0 4px;}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 22px;}
+  .personas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px;}
+  .persona{flex:1;min-width:210px;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:14px 16px;cursor:pointer;transition:.15s;}
+  .persona:hover{border-color:#4a5160;}
+  .persona.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .persona .emoji{font-size:26px;}
+  .persona h3{margin:6px 0 2px;font-size:16px;}
+  .persona p{margin:0;color:var(--muted);font-size:12.5px;line-height:1.4;}
+
+  .stage-rail{display:flex;gap:6px;margin:8px 0 18px;}
+  .chip{flex:1;text-align:center;font-size:11px;padding:7px 4px;border-radius:8px;
+    background:var(--panel2);color:var(--muted);border:1px solid transparent;transition:.2s;}
+  .chip.done{color:var(--ink);}
+  .chip.active{background:var(--accent);color:#1b1b1b;font-weight:600;border-color:var(--accent);}
+  .chip.skip{opacity:.35;text-decoration:line-through;}
+
+  .stage-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:22px 24px;min-height:150px;display:flex;gap:22px;align-items:center;}
+  .stage-icon{font-size:46px;min-width:60px;text-align:center;}
+  .stage-body{flex:1;}
+  .stage-body h2{margin:0 0 6px;font-size:19px;}
+  .stage-body .plain{font-size:15.5px;line-height:1.5;margin:0 0 8px;}
+  .stage-body .tech{font-size:12.5px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace;
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;display:inline-block;}
+
+  .meter-wrap{margin:20px 0 6px;}
+  .meter-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
+  .meter-label{font-size:13px;color:var(--muted);}
+  .meter-num{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .meter-tier{font-size:13px;font-weight:700;padding:3px 10px;border-radius:20px;color:#1b1b1b;}
+  .bar{position:relative;height:26px;border-radius:13px;overflow:hidden;background:var(--panel2);
+    border:1px solid var(--line);}
+  .bands{position:absolute;inset:0;display:flex;}
+  .bands span{height:100%;opacity:.16;}
+  .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:13px;
+    transition:width .7s cubic-bezier(.4,0,.2,1),background .7s;}
+  .ticks{position:relative;height:16px;font-size:10px;color:var(--muted);}
+  .ticks span{position:absolute;transform:translateX(-50%);top:2px;}
+
+  .controls{display:flex;gap:10px;align-items:center;margin-top:22px;flex-wrap:wrap;}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:9px;padding:9px 16px;font-size:14px;cursor:pointer;transition:.15s;}
+  button:hover{border-color:#5a6273;}
+  button.primary{background:var(--accent);color:#1b1b1b;border-color:var(--accent);font-weight:600;}
+  button:disabled{opacity:.4;cursor:default;}
+  .step-count{color:var(--muted);font-size:13px;margin-left:auto;}
+  .legend{margin-top:24px;font-size:12px;color:var(--muted);line-height:1.6;}
+  .legend b{color:var(--ink);}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin:0 4px 0 10px;vertical-align:middle;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>How Charcoal scores an account</h1>
+  <p class="sub">Charcoal protects one person from online harassment <i>before</i> it happens. Pick someone below and watch the system decide how much of a threat they are — one step at a time.</p>
+
+  <div class="personas" id="personas"></div>
+
+  <div class="stage-rail" id="rail"></div>
+
+  <div class="stage-card">
+    <div class="stage-icon" id="icon">👋</div>
+    <div class="stage-body">
+      <h2 id="title">Pick an account to begin</h2>
+      <p class="plain" id="plain">Each account starts at zero. As Charcoal learns more, the score moves up (more concerning) or gets held down (probably fine).</p>
+      <span class="tech" id="tech">&nbsp;</span>
+    </div>
+  </div>
+
+  <div class="meter-wrap">
+    <div class="meter-top">
+      <span class="meter-label">Threat score (0–100)</span>
+      <span><span class="meter-num" id="num">0</span> <span class="meter-tier" id="tier" style="background:var(--low)">LOW</span></span>
+    </div>
+    <div class="bar">
+      <div class="bands">
+        <span style="width:8%;background:var(--low)"></span>
+        <span style="width:7%;background:var(--watch)"></span>
+        <span style="width:20%;background:var(--elev)"></span>
+        <span style="width:65%;background:var(--high)"></span>
+      </div>
+      <div class="fill" id="fill" style="background:var(--low)"></div>
+    </div>
+    <div class="ticks">
+      <span style="left:8%">8 · Watch</span>
+      <span style="left:15%">15 · Elevated</span>
+      <span style="left:35%">35 · High</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="restart">↺ Restart</button>
+    <button id="prev">‹ Back</button>
+    <button id="next" class="primary">Next ›</button>
+    <button id="play">⏸ Pause</button>
+    <span class="step-count" id="counter"></span>
+  </div>
+
+  <div class="legend">
+    <b>Tiers:</b>
+    <span class="dot" style="background:var(--low)"></span>Low
+    <span class="dot" style="background:var(--watch)"></span>Watch
+    <span class="dot" style="background:var(--elev)"></span>Elevated
+    <span class="dot" style="background:var(--high)"></span>High
+    &nbsp;·&nbsp; This is an illustration with example numbers; the real system uses the same steps and formulas.
+  </div>
+</div>
+
+<script>
+// ---- Stage definitions (shared order) ----
+const STAGES = ["Discover","Quick check","Toxicity","Topic overlap","Combine","Behavior","Tone of replies","Connection","Verdict"];
+
+// Each persona is a list of steps. Each step: stage index, icon, title, plain-language line,
+// the "under the hood" tech note, and the score the meter should animate TO after this step.
+const PEOPLE = {
+  dunker: {
+    emoji:"📣", name:"The Quote-Dunker", blurb:"A stranger who reposts your posts to mock them for their own audience.",
+    steps:[
+      {s:0,icon:"📣",t:"They show up",p:"This stranger quote-posted one of your posts to dunk on it. That act puts them — and their audience — into Charcoal's queue to be checked.",tech:"amplification event (quote) via Constellation backlinks",score:0},
+      {s:1,icon:"🔍",t:"Quick free check",p:"First a fast, local look: are they obviously harmless and talking about totally unrelated stuff? No — they're hostile and in your topic space. They move on to the full review.",tech:"Stage 1 triage · ONNX clean-pass < 0.10 → not cleared",score:0},
+      {s:2,icon:"☣️",t:"How often are they hostile?",p:"Charcoal reads their recent posts and flags the genuinely nasty ones. About 3 in 10 are hostile.",tech:"Zentropi binary labels → toxicity rate ≈ 0.30",score:0},
+      {s:3,icon:"🎯",t:"Do they talk about your topics?",p:"Yes — they're active in the same conversations you are. That proximity is what makes hostility actually reach you.",tech:"topic overlap ≈ 0.45 (sentence-embedding similarity)",score:0},
+      {s:4,icon:"🧮",t:"Combine the two",p:"Hostility alone isn't the danger — hostility plus sharing your topics is. The two are multiplied together into a base score.",tech:"0.30 × 70 × (1 + 0.45×1.5) ≈ 35",score:35},
+      {s:5,icon:"🎭",t:"How do they behave?",p:"They mostly quote-dunk and pile on, rather than create their own posts. That's a harassment pattern, so the score is nudged up.",tech:"hostile multiplier ×1.16 (quote-heavy)",score:41},
+      {s:6,icon:"🗣️",t:"What's the tone toward you?",p:"Their actual replies to you read as mocking and contemptuous, not honest disagreement. Another nudge up.",tech:"NLI context 0.45 → ×1.23",score:50},
+      {s:7,icon:"🔗",t:"Are you connected?",p:"You don't follow each other at all. Strangers are the most likely harassers, so the score is amplified once more.",tech:"graph distance: Stranger → ×1.2",score:60},
+      {s:8,icon:"🚨",t:"Verdict: HIGH",p:"A hostile stranger, active in your topics, who already dunks on you. Charcoal flags them as a High threat to review.",tech:"final ≈ 60 → tier High",score:60},
+    ]
+  },
+  friend: {
+    emoji:"💚", name:"The Supportive Friend", blurb:"A mutual follow who posts warmly about the very same topics you do.",
+    steps:[
+      {s:0,icon:"💚",t:"They show up",p:"This person reshared your post too — but supportively. Charcoal still checks them; sharing your topics isn't enough to judge anyone.",tech:"amplification event (repost) via Constellation",score:0},
+      {s:1,icon:"🔍",t:"Quick free check",p:"They're clearly in your topic space, so they get the full review (Charcoal never lets topic overlap alone clear OR condemn someone).",tech:"Stage 1 triage → proceed to full review",score:0},
+      {s:2,icon:"☣️",t:"How often are they hostile?",p:"Almost never. Their posts are warm and supportive — only about 1 in 20 trips any hostility flag.",tech:"Zentropi toxicity rate ≈ 0.05",score:0},
+      {s:3,icon:"🎯",t:"Do they talk about your topics?",p:"Very much so — high overlap. On its own this would look 'close to you,' but closeness isn't a threat.",tech:"topic overlap ≈ 0.80",score:0},
+      {s:4,icon:"🧮",t:"Combine the two",p:"Because hostility is near zero, multiplying it by topic overlap still gives a small number. The math keeps allies low by design.",tech:"0.05 × 70 × (1 + 0.80×1.5) ≈ 8",score:8},
+      {s:5,icon:"🛡️",t:"How do they behave? — the ally gate",p:"They create their own posts, rarely quote-dunk, and join no pile-ons. Charcoal recognizes a genuine community member and caps their score low.",tech:"benign gate: creator + low quote/reply → capped ≤ 12",score:8},
+      {s:6,icon:"🗣️",t:"What's the tone toward you?",p:"Their replies to you are friendly and agreeing, which cancels out hostility rather than adding to it.",tech:"NLI: support signal cancels hostility → ~no boost",score:8},
+      {s:7,icon:"🔗",t:"Are you connected?",p:"You follow each other. An existing relationship makes harassment unlikely, so the score is pulled down further.",tech:"graph distance: Mutual follow → ×0.6",score:5},
+      {s:8,icon:"✅",t:"Verdict: LOW",p:"Same topics as the Quote-Dunker, opposite result. Charcoal treats a supportive friend as no threat — which is the whole point.",tech:"final ≈ 5 → tier Low",score:5},
+    ]
+  },
+  clean: {
+    emoji:"🌱", name:"The Clean Stranger", blurb:"A stranger who posts about gardening and has nothing to do with your world.",
+    steps:[
+      {s:0,icon:"🌱",t:"They show up",p:"This account brushed past your network. Charcoal gives everyone a quick look before spending any real effort.",tech:"candidate account entering the pipeline",score:0},
+      {s:1,icon:"🔍",t:"Quick free check — and an early exit",p:"A fast, free local scan finds nothing hostile and zero overlap with your topics. No need to go further: Charcoal stops here and saves the cost of a full review.",tech:"Stage 1: all posts < 0.10 AND overlap < 0.15 → early exit",score:0},
+      {s:8,icon:"😌",t:"Verdict: LOW",p:"Cleared in seconds, no toxicity analysis needed. This is how Charcoal stays affordable — most accounts look like this and never reach the expensive steps.",tech:"final 0 → tier Low (≈50–60% of accounts exit here)",score:0},
+    ]
+  }
+};
+
+const tiers=[
+  {min:35,name:"HIGH",color:"--high"},
+  {min:15,name:"ELEVATED",color:"--elev"},
+  {min:8,name:"WATCH",color:"--watch"},
+  {min:0,name:"LOW",color:"--low"},
+];
+function tierFor(v){return tiers.find(t=>v>=t.min);}
+
+let current="dunker", idx=0, playing=true, timer=null, raf=null;
+
+const $=id=>document.getElementById(id);
+
+// Build persona cards
+const pel=$("personas");
+Object.entries(PEOPLE).forEach(([k,v])=>{
+  const d=document.createElement("div");
+  d.className="persona"+(k===current?" active":"");
+  d.dataset.k=k;
+  d.innerHTML=`<div class="emoji">${v.emoji}</div><h3>${v.name}</h3><p>${v.blurb}</p>`;
+  d.onclick=()=>{selectPerson(k);};
+  pel.appendChild(d);
+});
+
+// Build stage rail
+const rail=$("rail");
+STAGES.forEach((s,i)=>{
+  const c=document.createElement("div");
+  c.className="chip";c.id="chip"+i;c.textContent=s;
+  rail.appendChild(c);
+});
+
+function selectPerson(k){
+  current=k; idx=0;
+  document.querySelectorAll(".persona").forEach(p=>p.classList.toggle("active",p.dataset.k===k));
+  render(); play(true);
+}
+
+function animateScore(to){
+  cancelAnimationFrame(raf);
+  const numEl=$("num"), fillEl=$("fill"), tierEl=$("tier");
+  const from=parseFloat(numEl.textContent)||0;
+  const start=performance.now(), dur=650;
+  function frame(now){
+    const p=Math.min(1,(now-start)/dur);
+    const ease=1-Math.pow(1-p,3);
+    const v=from+(to-from)*ease;
+    numEl.textContent=v.toFixed(0);
+    const t=tierFor(v);
+    fillEl.style.width=Math.max(2,v)+"%";
+    fillEl.style.background="var("+t.color+")";
+    tierEl.textContent=t.name;
+    tierEl.style.background="var("+t.color+")";
+    if(p<1) raf=requestAnimationFrame(frame);
+  }
+  raf=requestAnimationFrame(frame);
+}
+
+function render(){
+  const steps=PEOPLE[current].steps;
+  const step=steps[idx];
+  $("icon").textContent=step.icon;
+  $("title").textContent=step.t;
+  $("plain").textContent=step.p;
+  $("tech").textContent=step.tech;
+  animateScore(step.score);
+
+  // rail: which stages this persona visits
+  const visited=new Set(steps.slice(0,idx+1).map(x=>x.s));
+  const willVisit=new Set(steps.map(x=>x.s));
+  STAGES.forEach((_,i)=>{
+    const c=$("chip"+i);
+    c.className="chip";
+    if(!willVisit.has(i)) c.classList.add("skip");
+    else if(i===step.s) c.classList.add("active");
+    else if(visited.has(i)) c.classList.add("done");
+  });
+
+  $("counter").textContent=`${PEOPLE[current].name} · step ${idx+1} of ${steps.length}`;
+  $("prev").disabled=idx===0;
+  $("next").disabled=idx===steps.length-1;
+}
+
+function next(){const n=PEOPLE[current].steps.length;if(idx<n-1){idx++;render();}else{play(false);}}
+function prev(){if(idx>0){idx--;render();}}
+function play(on){
+  playing=on; $("play").textContent=on?"⏸ Pause":"▶ Play";
+  clearInterval(timer);
+  if(on){timer=setInterval(()=>{
+    const n=PEOPLE[current].steps.length;
+    if(idx<n-1){idx++;render();}else{play(false);}
+  },2600);}
+}
+
+$("next").onclick=()=>{next();play(false);};
+$("prev").onclick=()=>{prev();play(false);};
+$("restart").onclick=()=>{idx=0;render();play(true);};
+$("play").onclick=()=>play(!playing);
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight"){next();play(false);}
+  if(e.key==="ArrowLeft"){prev();play(false);}
+  if(e.key===" "){e.preventDefault();play(!playing);}
+});
+
+render(); play(true);
+</script>
+</body>
+</html>

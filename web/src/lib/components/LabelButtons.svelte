@@ -1,4 +1,9 @@
 <script lang="ts">
+	// Design tokens (#250): this component styles itself from the shared
+	// palette rather than another set of literal hex values. The import is
+	// side-effectful CSS — it defines the :root custom properties the styles
+	// below reference.
+	import '$lib/website/styles/tokens.css';
 	import { labelAccount } from '$lib/api.js';
 
 	interface Props {
@@ -15,10 +20,10 @@
 	let error = $state('');
 
 	const TIERS = [
-		{ value: 'high', display: 'High', color: '#fca5a5', bg: 'rgba(252, 165, 165, 0.12)', border: 'rgba(252, 165, 165, 0.25)' },
-		{ value: 'elevated', display: 'Elevated', color: '#fdba74', bg: 'rgba(253, 186, 116, 0.12)', border: 'rgba(253, 186, 116, 0.25)' },
-		{ value: 'watch', display: 'Watch', color: '#fcd34d', bg: 'rgba(252, 211, 77, 0.12)', border: 'rgba(252, 211, 77, 0.25)' },
-		{ value: 'safe', display: 'Safe', color: '#86efac', bg: 'rgba(134, 239, 172, 0.12)', border: 'rgba(134, 239, 172, 0.25)' },
+		{ value: 'high', display: 'High', color: 'var(--tier-high)', bg: 'rgb(var(--tier-high-rgb) / 0.12)', border: 'rgb(var(--tier-high-rgb) / 0.25)' },
+		{ value: 'elevated', display: 'Elevated', color: 'var(--tier-elevated)', bg: 'rgb(var(--tier-elevated-rgb) / 0.12)', border: 'rgb(var(--tier-elevated-rgb) / 0.25)' },
+		{ value: 'watch', display: 'Watch', color: 'var(--tier-watch)', bg: 'rgb(var(--tier-watch-rgb) / 0.12)', border: 'rgb(var(--tier-watch-rgb) / 0.25)' },
+		{ value: 'safe', display: 'Safe', color: 'var(--status-ok)', bg: 'rgb(var(--status-ok-rgb) / 0.12)', border: 'rgb(var(--status-ok-rgb) / 0.25)' },
 	] as const;
 
 	function tierMatches(): boolean {
@@ -44,7 +49,7 @@
 
 <div class="label-group">
 	<div class="label-buttons">
-		{#each TIERS as tier}
+		{#each TIERS as tier (tier.value)}
 			<button
 				class="label-btn"
 				class:active={activeLabel === tier.value}
@@ -87,7 +92,7 @@
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--tier-color);
 		background: transparent;
-		border: 1px solid rgba(168, 162, 158, 0.15);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
 		border-radius: 8px;
 		cursor: pointer;
 		transition: all 0.2s;
@@ -111,17 +116,17 @@
 
 	.discrepancy {
 		font-size: 0.75rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		line-height: 1.4;
 	}
 
 	.discrepancy strong {
-		color: #a8a29e;
+		color: var(--charcoal-400);
 		text-transform: capitalize;
 	}
 
 	.label-error {
 		font-size: 0.75rem;
-		color: #f87171;
+		color: var(--status-error);
 	}
 </style>

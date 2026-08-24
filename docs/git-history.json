@@ -1,5 +1,429 @@
 [
   {
+    "hash": "b8342700e8ad20ab2c592ed8c54754b162aeb559",
+    "short_hash": "b834270",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T16:42:30-07:00",
+    "message": "fix(307): drop stale non-blocking wording from history-upload failure messages\n\nCodeRabbit round 2 on PR #104: the flag claim was already false (both else\nbranches set BACKUP_OK=false since ad5c250), but the message text still\nsaid non-blocking, contradicting the flag. Text now matches behavior.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "ad5c250a05b3509b91a134de640a38723d09dfc9",
+    "short_hash": "ad5c250",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T16:11:59-07:00",
+    "message": "fix(307): PR #103 review fast-follow - seven adjudicated edge-case fixes\n\n1. scripts/install-hooks.sh: upload the immutable history/<name>-<UTC>.db\n   object before overwriting the mutable backup object, in both the\n   issues.db and deciduous.db blocks, so a failed history write cannot\n   lose the only recovery point.\n2. src/bluesky/client.rs: split response.bytes() (Transient on failure,\n   a mid-transfer network blip) from serde_json::from_slice (Permanent\n   on failure) instead of classifying both under one Permanent error.\n3. src/topics/fingerprint.rs: reject a non-finite score_sum in\n   keyword_weights rank_weighted path so [f64::MAX, f64::MAX], which\n   overflows to +inf, falls back to the documented uniform split\n   instead of zeroing every keyword share.\n4. src/web/handlers/scan.rs: trigger_scan now returns 404 (matching\n   trigger_admin_scan) instead of 500 when the authenticated session\n   has no corresponding user row.\n5. src/db/postgres.rs: get_fingerprint formats updated_at with\n   to_char(... AT TIME ZONE 'UTC', ...) so staleness parsing in\n   fingerprint_is_stale does not depend on the Postgres session\n   default timezone.\n6. web/src/lib/dashboard-state.ts: queueMessage rounds the ETA minutes\n   up with Math.ceil instead of Math.round, matching the documented\n   round-up policy (61s now reads \"about 2 minutes\").\n7. PRODUCT.md: correct the production access statement to state\n   CHARCOAL_ALLOWED_DID currently gates onboarding, while keeping the\n   existing \"empty = open access\" sentence.\n\nAlso updates tests/web_oauth.rs::scan_fails_when_user_not_registered,\nwhich asserted the pre-fix 500 status code as documented \"bug\"\nbehavior; it now asserts the corrected 404 from fix 4.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 11
+  },
+  {
+    "hash": "9e682bb39422f509b27b6d48126c13c5ef262c30",
+    "short_hash": "9e682bb",
+    "author": "chaos gremlin",
+    "date": "2026-08-23T13:46:26-07:00",
+    "message": "Merge pull request #102 from musicjunkieg/feat/297-multi-interest-fingerprint",
+    "files_changed": 0
+  },
+  {
+    "hash": "e800b2ffe090cf924fd72040a187240efbe9df1e",
+    "short_hash": "e800b2f",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T11:32:52-07:00",
+    "message": "fix(297): run keyword-only assembly retry on a blocking thread too\n\nCodeRabbit round 3: the degradation retry is a full TF-IDF pass over up\nto 500 posts - same heartbeat-blocking concern as the primary attempt.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
+    "hash": "eeb30b1f9435fa478267e767747c1d016f6391bf",
+    "short_hash": "eeb30b1",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:30:14-07:00",
+    "message": "docs(297): align spec label-keyword budget with implementation (12, was 6)\n\nFinal whole-branch review Minor: the plan overrode the spec without the\nspec being amended.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "56d49d25735bfb5b4fce83ca871005eca8550413",
+    "short_hash": "56d49d2",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:13:39-07:00",
+    "message": "docs(297): changelog for multi-interest fingerprint + atomic persistence; comment fixes from review\n\nDoc-only code changes: merge_threshold doc now states centered-space scale\nand cap-dominance caveat for #135; stale working-state comment retitled;\nempirical-invariant note on the zero-centroid fallback.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
+    "hash": "ca868cda33442a7adfacade1ff80703e01317f2c",
+    "short_hash": "ca868cd",
+    "author": "Bryan Guffey",
+    "date": "2026-08-22T08:07:47-07:00",
+    "message": "fix(297): center embeddings for merge decisions - hub-cluster degeneracy on real data\n\nReal-data validation (Task 10 step 4) produced one mega-cluster holding\n487/500 posts at every merge threshold: MiniLM embeddings are anisotropic,\nso raw cosines all sit high and the largest cluster is always the best\nmerge partner. Centering on the corpus mean (all-but-the-top style)\nremoves the shared component for MERGE DECISIONS ONLY; stored centroids\nstay in the original space, so scoring and shadow-compare semantics are\nuntouched. Bryan validated the resulting 10-topic fingerprint and signed\noff 2026-08-22; merge_threshold stays at the 0.60 default (output\nidentical at 0.60/0.70 in centered space). Two synthetic tests updated to\ncentered semantics (tiny near-identical corpora stay singletons; the\ntied-largest prune rule covers them).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "4a52ffa5a11c1bdbdf3ee53aaa2a7a7b9ffcffa1",
+    "short_hash": "4a52ffa",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T23:35:08-07:00",
+    "message": "fix(297): postgres test literal + empty-vec centroid degrade coverage\n\nAdd missing overlap_legacy field to AccountScore literal in db_postgres.rs\ntest. Add sibling test empty_vec_centroids_degrade_same_as_none to cover\nthe production code path where Some(empty.as_slice()) is passed for\nprotected_topic_centroids (pre-#297 data).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
+    "hash": "f79c61a5edabc596154ad03c4f634960ff918bb5",
+    "short_hash": "f79c61a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T23:23:48-07:00",
+    "message": "feat(297): max-over-topics live overlap, overlap_legacy shadow, legacy-format rebuild\n\nLive topic overlap now takes the max cosine over the protected user's\nper-topic centroids instead of a single mean-centroid cosine: \"is this\naccount near ANY of my topics?\". The pre-#297 mean-centroid value is\ncomputed alongside and stored as AccountScore.overlap_legacy so #135 can\nrecalibrate gates and tiers from real paired data. Fingerprints with no\ncentroid rows degrade to the old value for BOTH numbers, so nothing\nchanges until a generation is rebuilt.\n\n- AccountScore gains overlap_legacy: Option<f64>; both backends write it\n  and all four row-mappers read it (nullable column landed in Task 4).\n  None on the TF-IDF keyword path — there is no embedding shadow there.\n- score_from_sample gains protected_topic_centroids after\n  protected_embedding; threaded through finalize_account, PhasedScanDeps,\n  sweep (3 fns), amplification::run, build_profile, and the web scan job.\n  load_embedder now returns centroids beside the mean embedding.\n- New fingerprint_needs_rebuild_for_format(has_embedding, rows, clusters)\n  routes a stored generation to the rebuild arm when the embedding path\n  ran but centroid rows do not match the fingerprint JSON (0 rows =\n  pre-#297, mismatch = pre-#302). Keyword-only fingerprints are exempt so\n  model-less deployments cannot rebuild-loop. The web scan now loads\n  fingerprint + embedding + centroids as one snapshot before the decision\n  and re-reads embedding + centroids after a successful rebuild, since\n  the bundle save replaces both.\n- An unreadable stored fingerprint is now treated as absent (rebuild,\n  hard-fail if the rebuild fails) instead of aborting the scan outright.\n  The \"older than 14 days\" progress copy is now reason-neutral because\n  the format upgrade can trigger the same rebuild.\n\nNo golden/composition expectation changed: every existing call site\npasses None or an empty centroid set, which is byte-identical to the\npre-#297 mean-centroid math.\n\nTests: two new unit_profile tests pin max-over-topics + the legacy shadow\nand the empty-centroid degradation; a new scan_job test pins the four\nrebuild-trigger cases. Full --features web suite green, zero model-gated\nskips; cargo check (postgres, default) and clippy --features web\n--all-targets clean.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 21
+  },
+  {
+    "hash": "e7ef3d09e52cb02731f346d55d74c6d3f2be483c",
+    "short_hash": "e7ef3d0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:44:31-07:00",
+    "message": "feat(297): embedding-first build path shared by web scan and CLI, atomic bundle save\n\nTask 8/10: extract build_user_fingerprint into src/topics/build.rs so the\nCLI (built without the `web` feature) shares one embedding-first build path\nwith the web scan pipeline and admin pre-seed handler. scan_job.rs re-exports\nit for existing callers; main.rs Commands::Fingerprint delegates then loads\n+ displays. TDD: assemble_fingerprint tests written first (RED - compile\nerror), then implementation (GREEN, 2/2 passing).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "65d048084555d4de67093d6478cefcc62c4f5b55",
+    "short_hash": "65d0480",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:28:06-07:00",
+    "message": "feat(302): charcoal migrate transfers fingerprint generation as one bundle\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "d3754ec29e49c2966006608dad8bc756339dad05",
+    "short_hash": "d3754ec",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:17:23-07:00",
+    "message": "feat(302): Postgres save_fingerprint_bundle + get_topic_centroids\n\nImplements the two Database trait methods PgDatabase was missing since\nTask 5 added them (cargo check --features postgres was failing with\nE0046). Mirrors the SQLite semantics: one transaction upserts the\nfingerprint row (JSON + post_count + embedding_vector, f64->f32 for\npgvector) and bumps updated_at once, then replaces all topic_clusters\nrows for the user in cluster_index order. A keyword-only bundle\n(embedding: None) NULLs a prior embedding, since the bundle IS the\ngeneration, not an incremental patch.\n\nAdds two live-DB tests mirroring db_postgres.rs conventions: bundle\nroundtrip + replacement (tolerance-compared centroids, since pgvector\nstores f32), and delete_user_data cascading to topic_clusters via the\nmigration 0013 FK ON DELETE CASCADE.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 4
+  },
+  {
+    "hash": "1ad3630afc6f9599b12d890ca760a46f83e27692",
+    "short_hash": "1ad3630",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T22:09:30-07:00",
+    "message": "test(302): pin embedding NULL-out on keyword-only bundle downgrade\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
+    "hash": "c0f2c4e1a0d74d5600c5423ca177fe8ada05225e",
+    "short_hash": "c0f2c4e",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T21:26:18-07:00",
+    "message": "feat(297): migration 0013 - topic_clusters table + account_scores.overlap_legacy\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "53a34421b18ebeb08122f3c71f64619825ac1466",
+    "short_hash": "53a3442",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T21:03:10-07:00",
+    "message": "feat(297): assemble multi-interest fingerprint with per-cluster TF-IDF labels\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "652782b0ca1857170ac0f6b8c7a130257e7acba2",
+    "short_hash": "652782b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T20:51:19-07:00",
+    "message": "feat(297): max-over-topics overlap with legacy degrade to None\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "c7c94ae8cc4d17b754226054857e6da8d4c075c5",
+    "short_hash": "c7c94ae",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T20:46:35-07:00",
+    "message": "fix(297): pin tied-largest prune fallback + correct complexity note\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
+    "hash": "7f3cc598e5bcbf05bd0453686a537d0a0c4cd2ad",
+    "short_hash": "7f3cc59",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T19:31:33-07:00",
+    "message": "docs(297): implementation plan - 10 TDD tasks for multi-interest fingerprint\n\nTasks: clustering module, max-over-topics overlap, per-cluster labeling,\nmigration 0013, save_fingerprint_bundle (SQLite + Postgres), migrate\ntransfer, shared build path in src/topics/build.rs (web is feature-gated),\nscan/scoring wiring with overlap_legacy shadow, full verification gates.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "cf66148d97af862bc029293bb33e2b8abb383b9f",
+    "short_hash": "cf66148",
+    "author": "Bryan Guffey",
+    "date": "2026-08-21T19:16:07-07:00",
+    "message": "docs(297): design spec for multi-interest fingerprint + atomic persistence\n\nApproved section-by-section with Bryan 2026-08-21. Embedding-first\nclustering (BERTopic-lite), max-over-topics overlap, shadow compare via\naccount_scores.overlap_legacy, save_fingerprint_bundle transaction (#302),\nmigration 0013. #298 deferred; candidate-side dilution filed as #304.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "90d80af1a9f7696acf5a4e2518036026fdc92b8a",
+    "short_hash": "90d80af",
+    "author": "chaos gremlin",
+    "date": "2026-08-21T18:47:42-07:00",
+    "message": "Merge pull request #101 from musicjunkieg/feat/296-overlap-math\n\nfix(296): repair eight defects in the topic-overlap math (spike #295 GOOD tier)",
+    "files_changed": 0
+  },
+  {
+    "hash": "d1815d0a669d4fca301cef6c4cffa4c6a86879b2",
+    "short_hash": "d1815d0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T22:26:33-07:00",
+    "message": "fix(303): treat unparseable fingerprint timestamps as stale, not fresh\n\nCodeRabbit outside-diff Major on PR #101, and it is correct: a\nsuccessful rebuild rewrites updated_at via the DB clock, so a corrupt\nrow self-heals after one rebuild, while fresh-forever silently bypasses\nthe 14-day refresh. Rebuild-per-scan only persists under systemic\nformat drift, which the warn makes loud, and the stale-rebuild-failure\npath already falls back gracefully. Supersedes the #296 plan decision.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "c78e0a0d426ea98d942e9ec07b8487c10d9002ba",
+    "short_hash": "c78e0a0",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T20:32:50-07:00",
+    "message": "fix(301): address CI clippy drift and CodeRabbit majors on PR #101\n\n- nli.rs: chunks_exact(3) -> as_chunks::<3>() (clippy 1.98 lint in CI;\n  untouched by #296 but blocks its PR)\n- Empty cleaned batch no longer produces a zero centroid: profile.rs\n  falls back to keyword overlap, scan_job/main.rs skip the embedding\n  save, so a URLs-only account cannot ride under the overlap gate\n- keyword_weights() requires finite, non-negative scores before\n  rank-weighting; malformed vectors take the uniform fallback\n  (regression tests for negative and non-finite)\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "9e91bf1a575d282c0bd041a66b3182220cdbf64a",
+    "short_hash": "9e91bf1",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:50:46-07:00",
+    "message": "docs(296): changelog + fix stale doc references\n\n- CHANGELOG entry under Unreleased/Fixed for the eight #296 overlap-math\n  repairs (spike #295 GOOD tier).\n- embeddings.rs: fix stale pointer to a nonexistent\n  docs/research-overlap-diagnosis.md, now points at the real spike report.\n- overlap.rs: module and cosine_similarity doc comments described a\n  [0.0, 1.0] range, but cosine_from_weights has clamped to [-1.0, 1.0]\n  since Task 1. Rewritten to describe the actual contract, noting\n  keyword-space results are non-negative in practice.\n- main.rs: the post-embedding println reported post_texts.len() (raw\n  post count) instead of embed_texts.len() (the cleaned+filtered subset\n  actually embedded, since Task 3), overstating contributing posts.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "15aaac8ff2cf66ef7b986032893577f64bd92579",
+    "short_hash": "15aaac8",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:40:05-07:00",
+    "message": "feat(296): rebuild protected fingerprint when older than 14 days\n\nupdated_at was recorded but never consulted; a fingerprint built once\nat onboarding was used forever. Web scans now refresh stale\nfingerprints, falling back to the stale one if the rebuild fails.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "35d5984b10c72e41b57818296b57b9189d134ad3",
+    "short_hash": "35d5984",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T19:21:59-07:00",
+    "message": "test(296): stage1 caller honors the Unreliable early-exit block\n\nIntegration-level regression test: a 6-original clean irrelevant sample\nnow Proceeds instead of early-exiting. Also tightens the quality doc\nparenthetical to match from_counts semantics.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
+    "hash": "056db5b16b1e5ea7d6a4c20037adbdb8b048dfa7",
+    "short_hash": "056db5b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:56:54-07:00",
+    "message": "fix(296): gate keyword-cosine overlap on its own scale, unify extractors\n\nStage 1 and the Stage 2 TF-IDF fallback were gated at 0.15 — a threshold\ncalibrated for embedding cosine (0.4-0.8 typical). Sparse keyword cosine\nruns far lower, so topically-relevant accounts were early-exited before\nthe semantic path ever ran. New keyword_gate_threshold (0.05,\nprovisional pending #135 calibration). Both stages now use the same\n60/10 extractor config as the protected fingerprint.\n\nAlso updates tests/unit_scoring.rs struct literals for the new\nThreatWeights.keyword_gate_threshold field (compiler-forced).\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
+    "hash": "8bad9489ba67bcf3215faea9b234d1e42c72401a",
+    "short_hash": "8bad948",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:34:59-07:00",
+    "message": "fix(296): rank-weight keywords within clusters by TF-IDF score\n\nTopicCluster gains serde-defaulted keyword_scores; legacy stored JSON\nfalls back to the old uniform split. The seed keyword now outweighs\nits 6th co-occurring neighbor in keyword-space overlap.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 11
+  },
+  {
+    "hash": "7169011b3ac4fd4a124daecb44ebe1a9c773ea88",
+    "short_hash": "7169011",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T18:16:35-07:00",
+    "message": "fix(296): strip URLs and mentions before embedding on both sides\n\nNew clean_for_embedding keeps case/punctuation/hashtags (transformers\nuse them) and removes only content-free tokens. Applied at all four\ncentroid sites; NLI pair-matching embeddings intentionally untouched.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "2b90a6b271f30022375aaa62c5463e417acf7a5b",
+    "short_hash": "2b90a6b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T17:56:19-07:00",
+    "message": "fix(296): L2-normalize per-post embeddings before averaging\n\nLong posts no longer dominate the account centroid. Zero vectors from\nempty texts are skipped instead of diluting the mean. Replaces\nmean_embedding at all four centroid sites; old function removed.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "3b3024b48df3cc3b2ca9cb70b4de3da7755c07d4",
+    "short_hash": "3b3024b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-20T17:36:27-07:00",
+    "message": "fix(296): preserve cosine sign instead of clamping negatives to zero\n\nOpposition is signal. Scoring is unchanged: the overlap gate catches\neverything below threshold, negative or zero.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "b67f0c77a7d301213c640056890728fb9d74df41",
+    "short_hash": "b67f0c7",
+    "author": "Bryan Guffey",
+    "date": "2026-08-19T06:16:33-07:00",
+    "message": "chore(300): mark deciduous graph exports as generated in .gitattributes\n\nlinguist-generated collapses docs/graph-data.json and git-history.json\nin PR diffs; -diff silences local git diff. The files stay committed\nbecause GitHub Pages serves the viewer from /docs.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
+    "hash": "981a7afa09b4bba7b2d1eb31f51b413470e9d87d",
+    "short_hash": "981a7af",
+    "author": "Bryan Guffey",
+    "date": "2026-08-10T18:37:08-07:00",
+    "message": "fix(250): restore Low tier pill colour, make colour harness see dynamic alpha\n\nC1: the token refactor dropped the Low entry from TIER_COLORS on the\nmistaken premise that the original map had no Low colour — it did\n(#a8a29e). The three data-tier CSS rules only covered High/Elevated/\nWatch, so clicking the Low filter silently fell through to the plain\n.pill.active rule and rendered identically to All. Add --tier-low-rgb\nto tokens.css and a fourth .pill.active[data-tier=Low] rule.\n\nI2: resolve-colors.mjs required a numeric alpha in\nrgb(var(--x-rgb) / a), so an interpolated Svelte alpha (the toxicity\nbadge at accounts/[handle]/+page.svelte:189) never matched, fell\nthrough to the solid var() branch, and was silently discarded --\nproven by swapping its token to --copper-rgb and getting a\nbyte-identical harness run. channelRef now also accepts a\nsingle-level {...} alpha expression and emits \"<hex>@dynamic\" so the\ntoken identity is visible and a wrong token changes the output.\nVerified: swapping --status-error-rgb to --copper-rgb changes\n#f87171@dynamic to #c9956c@dynamic; reverting restores it.\n\nRe-baselined 250-baseline.txt: TOTAL 323 -> 326 (+#a8a29e,\n+#a8a29e@0.25 in accounts/+page.svelte from the restored Low rule;\n+#f87171@dynamic in accounts/[handle]/+page.svelte from the harness\nfix).\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+    "files_changed": 4
+  },
+  {
+    "hash": "c811f8f0b369da513833a969dd002a0b8e0338e5",
+    "short_hash": "c811f8f",
+    "author": "chaos gremlin",
+    "date": "2026-08-10T15:03:05-07:00",
+    "message": "Merge pull request #98 from musicjunkieg/feat/288-admin-scan-visibility",
+    "files_changed": 0
+  },
+  {
+    "hash": "31f21a9a84718d76bf7cae5460f3fc7888afb9fe",
+    "short_hash": "31f21a9",
+    "author": "Bryan Guffey",
+    "date": "2026-08-10T14:41:44-07:00",
+    "message": "fix(288): one total order for queue position, display, and admission\n\nCodeRabbit round 1 on PR #98, both findings.\n\nMAJOR (#271). `enqueued_at` alone is a PARTIAL order — SQLite stores it as\nRFC3339 text and Postgres stamps NOW(), so two requests in the same tick tie —\nand the three consumers disagreed about what to do with a tie.\n`list_scan_queue` sorted on (enqueued_at, user_did) but counted position as\n`enqueued_at <=`, so tied rows rendered 1st/2nd/3rd while all of them were\ntold they were 3rd. `scan_queue_entry` repeated the same count.\n`claim_next_scan` ordered on enqueued_at alone, so the row actually admitted\nwas not necessarily the row the dashboard showed as next — the display order\nand the admission order were different orders.\n\nAll five queries across both backends now use (enqueued_at, user_did): a\nrow-value comparison for the two position predicates, the same pair in both\nORDER BYs. Row values rather than an OR expansion so the predicate is visibly\nthe same expression the ORDER BY sorts on — two spellings of one order is how\nthey drift apart again.\n\nFour regression tests, one per backend surface plus the equivalence itself.\nThey seed rows sharing ONE enqueued_at written directly to the table, because\n`enqueue_scan` stamps wall-clock time and its rows cannot tie, and insert them\nin reverse user_did order so rowid/heap order is the exact reverse of the\nexpected answer. Verified red first: all three positions came back 3, and\nadmission took the row displayed LAST. The Postgres claim assertion was never\nreached in that red run, so it got its own negative control — reverting only\nthat ORDER BY makes it fail and nothing else.\n\nMINOR. The admin dashboard carried a failed scan's reason solely in a `title`\nattribute on a non-focusable span: unreachable by keyboard, unannounced by\nscreen readers, absent entirely on touch. The cell now renders the reason\ninline under \"Failed\", shortened to 72 chars so a RunPod payload cannot widen\nthe 9rem column, with the full untruncated phrase in a visually-hidden sibling\nand the visible copy aria-hidden. No new literal colour, font-size, or radius:\n--charcoal-400 (the AA floor for body text here) and 0.8125rem, both already\nin the file.\n\nCloses #271.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
+    "hash": "7f108192b149ccd342a439545d821dd42bd0d9ec",
+    "short_hash": "7f10819",
+    "author": "Bryan Guffey",
+    "date": "2026-08-10T03:18:29-07:00",
+    "message": "fix(288): give the wedged-queue alert a dwell before it fires\n\nRunning this locally is what found it. The bare condition -- queued > 0\nwhile running < cap -- is routinely true during entirely healthy\noperation, so alerting on it instantly would put a red \"scans stopped\nhappening\" banner on the page several times an hour.\n\nTwo ways it goes true without anything being wrong: a row that reaches\nthe table without going through enqueue_scan never fires the try_send\nwake and simply waits for the next tick, and a slot that frees is\nbriefly idle before the next claim commits.\n\nMeasured against a local server with three rows inserted directly:\nbare-condition TRUE at t=0s and t=8s, cleared by t=16s when the tick\nclaimed them. An alert with no dwell fires for that whole window.\n\nTICK is 30s server-side (admitter.rs:53), so the alert now requires the\ncondition to persist past 45s -- margin for a slow claim, without hiding\na real stall for meaningfully longer. The timestamp is captured on the\ntransition into the condition and cleared on the way out, so the dwell\nmeasures the stall itself rather than how long the page happened to be\nopen.\n\nRefs #288, #286",
+    "files_changed": 1
+  },
+  {
+    "hash": "21864440c73fc56ba0e3d83567ff3ba3c936f061",
+    "short_hash": "2186444",
+    "author": "Bryan Guffey",
+    "date": "2026-08-09T23:21:23-07:00",
+    "message": "feat(288): show the scan queue on the admin dashboard\n\nThe admin page could not see the queue. Its only scan column came from\nthe process-local ScanManager, which knows nothing about queued work,\nloses everything on restart, and cannot see another replica -- the view\nevery other admission decision moved off in #257/#278. Since admin\ntriggers now enqueue rather than launch, an admin-triggered scan sat\nqueued and this page showed nothing at all about it.\n\nQueue first: a Scan Queue section is now the first block on the page,\nabove Add Protected User, because \"what is the system doing right now\"\nis the reason to open it. It carries a capacity line sourced from the\ncap, and an ordered list of ACTIVE scans only -- a queue is ordered and\nusually short, so one row per registered user would bury it.\n\nThe users table keeps its Last Scan column but it is status-aware now:\nrunning shows elapsed, queued shows position, failed shows the reason,\nand a user with no queue row at all reads \"Never scanned\" -- a\ndistinction the old column could not draw.\n\nThree states this kind of panel usually gets wrong:\n\n- Idle renders as \"No scans running or queued.\" Plain text, no spinner.\n  Idle is a real answer, not a loading state.\n- Queued is described as WAITING, never as progress. PRODUCT.md makes\n  that rule for the user-facing view; it applies just as much to the\n  operator, who otherwise cannot tell a stalled queue from a busy one.\n- A wedged queue -- rows waiting while a slot is free -- gets a visible\n  alert. That is #286s silent-failure state, and until now it existed\n  only as an ERROR line in a log nobody greps.\n\nAlso fixes the poll, which fired only while a fingerprint was building.\nFingerprints finish in seconds; scans run for hours, so the panel would\nhave rendered once and frozen.\n\nPromotes two colours into tokens.css and DESIGN.md (#255). #f87171 and\n#86efac were already shipped six times each across the authed surfaces\nas bare hex -- the system HAD an error and a success colour, they just\nhad no name, so every file retyped them. Naming them is what let this\nsection use var(--) throughout: it adds no new literal colour, size or\nradius, and the file now imports tokens.css for the first time (#250).\n\nRefs #288, #255, #250, #286",
+    "files_changed": 6
+  },
+  {
+    "hash": "da99f44df647b914fb26222f83abb5d99318a97b",
+    "short_hash": "da99f44",
+    "author": "Bryan Guffey",
+    "date": "2026-08-09T23:07:51-07:00",
+    "message": "fix(288): show the admin dashboard the real scan queue\n\nGET /api/admin/users built its only scan column from the process-local\nScanManager, so it knew only about scans this process launched: empty\nafter a redeploy, blind to a second replica, no concept of \"queued\" — so\nan admin-triggered scan, which since #257 is enqueued rather than\nlaunched, showed nothing at all — and unable to tell a failed scan from\none that never ran. Every other admission decision moved to the durable\nscan_queue row in #257/#278; this was the last consumer left behind.\n\nAdds Database::list_scan_queue, returning every row with the same\ncorrelated-COUNT position that scan_queue_entry computes (two formulas\nfor one number is how the panel and the per-user column start\ndisagreeing). One query serves both consumers: the handler indexes it by\nDID to enrich each user with status, position, started/finished and last\nerror, and filters the queued+running rows into a \"queue\" panel carrying\nthe CHARCOAL_SCAN_CONCURRENCY cap they are measured against.\n\nlast_scan_at keeps its name and its meaning — \"when the most recent scan\nstarted\" — but now comes from the durable row, so it survives a restart.\nfingerprint_building deliberately stays on ScanManager: it tracks a\ntokio::spawn this process owns and has no durable row anywhere. A\ndatabase error fails the request rather than degrading to \"nobody has\never scanned\", because an operator acts on that.\n\nPostgres renders timestamps via to_rfc3339(), never ::TEXT, which varies\nwith the connection TimeZone and is not RFC3339 at all.\n\nTested on both backends per #270. The ordering tests seed timestamps\nrunning BACKWARDS rather than using enqueue_scan, because NOW()-stamped\nrows come back in insertion order anyway — SQLite returns rowid order and\nPostgres heap order for an unordered SELECT, so the obvious version of\nthis test passes against a query with no ORDER BY. Verified by deleting\nthe clause: both backends returned insertion order and both tests caught\nit.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 9
+  },
+  {
+    "hash": "c73ea0be2a352f38b03f43b072825f05fe0e9120",
+    "short_hash": "c73ea0b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T20:55:45-07:00",
+    "message": "fix(257): clear CodeRabbit PR #96 round-2 findings\n\nSix findings, each with a test that fails without the fix.\n\n- PublicAtpClient had no request timeout. Async reqwest has no default\n  one, so a host that accepts the connection and never answers held a\n  gather task forever; the #182 retries cannot help a request that never\n  returns. Same 30s/10s constants as the Constellation fix (#235), and a\n  regression test that takes the mock full 30s without them.\n- eta_seconds differed between backends: SQLite truncated durations with\n  num_seconds(), Postgres kept fractions via EXTRACT(EPOCH ...). SQLite\n  now keeps the fraction — eta multiplies the median by the batch count,\n  so truncation compounds (90.5s two batches out is 181s, not 180s), and\n  rounding both would discard precision Postgres already has. Added a\n  cross-backend parity test seeded with identical timestamps.\n- A panicking scan recorded a fixed \"Background scan panicked\" with the\n  payload dropped, in both ScanStatus::last_error and the durable\n  scan_queue row. Reuses scan_phases::panic_message, now pub(crate).\n- tests/web_scan_queue.rs returned early when models were absent, so all\n  four passed having asserted nothing. They now fail loudly with the\n  command that fixes the environment. (#269 covers the older tests.)\n- Untrack web/build/index.html (#279) — gitignored but force-added, with\n  the assets it references absent. Inert (CI and Docker rebuild the SPA\n  before any --features web build) but stale. Index only; still on disk\n  for include_dir!.\n- Two .impeccable/design.json examples did not do what they claimed: the\n  brand mark described pulsing rings and a breathing core with no\n  animation defined (so its reduced-motion rule disabled nothing), and\n  the nav described itself as fixed while sitting in normal flow.\n\n734 web tests and 633 postgres tests pass, zero skips; clippy clean on\nweb, postgres, and no-features.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 10
+  },
+  {
+    "hash": "316cde8df27a6797031a6377b284e55bb6a5ad2b",
+    "short_hash": "316cde8",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T13:13:37-07:00",
+    "message": "fix(257): add schema v12 to backfill scan_queue.claim_id, plus review fixes\n\nCodeRabbit round 1 on PR #96.\n\nv11 was amended in place to add the claim_id fencing token while #257 was\nstill on its branch. That was reasonable — v11 had never shipped — but it is\nnot sufficient. Both migration runners skip a version that schema_version\nalready records, so a database created from the PRE-amendment v11 has a\nscan_queue with no claim_id AND version 11 recorded: 0011 never runs again\nand the column is never added. Every claim, heartbeat and finish then fails\nwith a missing-column error. Amending 0011 cannot repair that, because 0011\nis exactly the migration those databases no longer run.\n\nv12 adds the column on both backends. Postgres uses ADD COLUMN IF NOT EXISTS\nand self-records its version (the runner does not do it — a migration that\nomits the INSERT re-runs forever). SQLite has no IF NOT EXISTS, so it probes\nsqlite_master for the table and pragma_table_info for the column and only\nALTERs when the column is genuinely missing. On a fresh database v11 already\ncreates the column, so v12 is a clean no-op.\n\nVerified both directions on both backends against live databases, including\na negative control: neutering the ALTER makes the pre-amendment test fail.\nNo deployed environment is affected — staging and production are both at v10\nwith no scan_queue table — so the exposed population is developer machines.\n\nAlso in this pass:\n\n- POST /api/scan and the admin trigger reported position: 0 when the queue\n  read-back failed, with the error discarded. 0 is a REAL position — it is\n  what a running scan reports — so that made \"the database read failed\"\n  indistinguishable from \"your scan is already running\". Both endpoints now\n  log the error and emit position: null, which no successful read produces.\n  Same silent-failure shape already fixed in delete_user.\n- .impeccable/design.json component examples carried 6 transitions and 4\n  hover transforms behind a single prefers-reduced-motion query, so the\n  copyable examples contradicted DESIGN.md, which calls the query mandatory.\n  Each animated example now guards its own motion.\n- PRODUCT.md described the scan flow without the queued state this branch\n  introduces, and still claimed no design system was binding. Both corrected;\n  the init provenance is kept because it is worth keeping.\n- Four scan_queue Postgres tests shared two DIDs. Not a live failure, but a\n  load-bearing coincidence in tests whose whole purpose is isolation.\n\nRefs #257\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 11
+  },
+  {
+    "hash": "fd5ed1516f7dd58717702f3dc55af5c8235608d1",
+    "short_hash": "fd5ed15",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T10:58:52-07:00",
+    "message": "fix(257): propagate pipeline errors, and correct three review findings\n\nFour findings from the final whole-branch review.\n\nI1 (src/web/scan_job.rs): run_scan passed the pipeline Result to\nrecord_scan_outcome and then returned Ok(()) unconditionally, so\nrun_under_slot classified every pipeline failure as SlotExit::Completed\nand finish_queued_scan wrote status=done with a NULL error. Beyond the\ndurable row lying to an operator, that poisoned the ETA:\nscan_queue_entry medians finished_at - started_at over status=done rows,\nso a scan that died two minutes in became a two-minute *successful* scan\nand every queued user was quoted it. The tail of run_scan is now a\nfinish_scan seam that records the outcome and then returns the Result,\nso the error survives.\n\nThis was the fifth instance on this branch of a test asserting a\nguarantee it never exercised: a_failed_scan_releases_its_slot drives\nrun_under_slot with a hand-written async { Err(..) }, a shape production\nnever produced, since SlotExit::Failed was only reachable from the ?s in\nmodel/classifier/fingerprint setup. The new test composes the real\nfinish_scan and was watched failing first (left: Completed, right:\nFailed). Its ETA assertion was separately verified able to fail: under\nthe bug the next queued user got eta_seconds Some(0) instead of None.\n\nConsequence of the fix: a pipeline error now reaches the Failed arm of\nrun_under_slot, whose generic \"see server logs\" line would overwrite the\nmore useful message record_scan_outcome wrote (partial results may have\nbeen saved). That arm now leaves an already-Failed phase message alone;\nsetup errors and panics never get that far and still need one.\n\nI2 (dashboard/+page.svelte): the header read \"Scan in progress - 47m\n12s\" for a QUEUED user, ticking, counted from their previous scan,\nbecause scan_running is true while queued and started_at is the\nprocess-local ScanManager value that is never cleared when a scan\nfinishes. Gated on isQueued the same way line 235 already was; queued\nusers fall through to \"Last scan: ...\", which is what that timestamp\nactually is.\n\nI3 (src/web/admitter.rs):\na_lease_that_lapses_after_boot_is_still_reclaimed claimed with a 1s\nlease, so a tokio::spawn delayed past that second let the BOOT pass\nreclaim the row and the test silently degenerated into\nboot_reclaims_before_the_first_claim - passing without exercising the\nevery-pass reclaim that keeps a mid-scan redeploy from wedging the\nadmitter. Chose the lease raise (3s, timeout 20s) as the primary fix\nbecause it is a margin rather than a race, and ALSO added the\nstill-running assertion right after the spawn so a future narrowing\nfails loudly instead of silently.\n\nI5 (CHANGELOG.md): added the three shipped changes that had no entry -\nmodels load once at boot with a fatal failure and a ~0.78 to ~1.28GB\nidle RAM rise, #182 read retries, #264 Phase A timing split. Removed\nthree entries that were auto-generated chainlink issue TITLES rather\nthan descriptions of shipped code (#246 an audit, #239 a branch\nintegration, #262 closed as not needed). Same cleanup as fd37833.\n\nVerified: cargo test --features web 727 passed / 0 failed / 0 SKIP;\npostgres --all-targets 626 passed / 0 failed / 0 SKIP; clippy clean on\nweb, postgres and no-features; npm test 36 passed; svelte-check and\neslint report no new problems in the edited file; svelte-autofixer\nreports no issues.\n\nRefs #257\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 6
+  },
+  {
+    "hash": "8b8dc31a158cf6f306d7ef92be16b6dc79670887",
+    "short_hash": "8b8dc31",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T10:24:48-07:00",
+    "message": "feat(257): tell a queued user they are waiting, not scanning\n\nGET /api/status has served a `queued` phase and a `queue` block since Task 6,\nbut the SPA had no such phase: `phaseToStepIndex` clamped it to 0, so a user\nwaiting for a free slot watched \"Reading your posts\" spin with a live elapsed\ntimer while nothing at all was running. The one screen that exists to tell\nsomeone whether they are safe was telling them work was underway when it was\nnot.\n\nScanProgress now renders a distinct waiting state for `queued` — no checklist,\nno progress bar, no counters, no spinner — with the position and, when there\nis one, the estimate: \"You're 3rd in line - about 70 minutes\". The estimate is\nomitted rather than defaulted when eta_seconds is null (no completed scan to\ntake a median from), and the copy says so out loud instead of inventing a\nnumber. `phaseToStepIndex('queued')` returns -1 for the same reason: no step\nhas started.\n\nThe dashboard header drops its \"Scanning...\" spinner for a still \"Queued\"\nmarker on the same grounds.\n\nAccessibility, both in the launch set for this component:\n\n- #248: the step spinner and the bar transition are now gated behind\n  prefers-reduced-motion. The waiting state adds no motion at all.\n- #249: elapsed, progress message, expectation and pending-step text were\n  2.3-3.6:1 on this panel and now use colors.body-text (6.9:1); the new\n  waiting copy is body-text and body-text-bright (6.9:1 and 11.7:1). Step\n  state is carried by icon and weight rather than by fading text below AA.\n- The position line is the only aria-live region and is polite, so a 5s poll\n  re-announces the position and not the whole panel.\n\nStyling comes from tokens.css via var(), which #250 found was imported\nnowhere; both edited files now import it rather than adding more literal hex.\n\nRefs #257, #248, #249, #250",
+    "files_changed": 7
+  },
+  {
+    "hash": "385c3f33aea01cd708c5de2141990329cda61a88",
+    "short_hash": "385c3f3",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T07:12:05-07:00",
+    "message": "feat(257): POST /api/scan queues instead of refusing\n\nBefore this, a second concurrent user got 409 \"Another scan is already in\nprogress on this server\" — under open signup (#256) that is their entire\nexperience, and with 22min-2h scans they could see it all day.\n\nNow both trigger endpoints enqueue (idempotent by user_did PK), wake the\nadmitter so a free slot is taken immediately rather than on the next 30s\ntick, and return 202 with position and ETA. The admin trigger enqueues like\neveryone else per Bryan's ruling — it used to call launch_scan directly, so\nits scans never touched scan_queue and real concurrency would have been\nCHARCOAL_SCAN_CONCURRENCY + admin scans. One admission path, cap holds.\n\nlaunch_scan is now pub(crate) and demands a QueueSlot, so there is no way\nleft to start a scan outside the queue. The any_running flag is deleted\noutright: with the queue as the admission authority it could only disagree\nwith it, and did in both directions.\n\nGET /api/status prefers the durable scan_queue row over the process-local\nScanManager, gaining a queued phase and a queue block omitted entirely when\nthe user is not waiting, so existing clients see no change.\n\nAlso fixes three defects that were dormant only because nothing enqueued:\n\n#273 — run_admitter reclaims and admits in the same pass, and the oldest\nqueued row is usually the one it just re-queued, for a user whose pipeline\nis still executing. Two pipelines then wrote the same scan_state resume\nmarkers and both drained classification_queue against RunPod, where the $2\nceiling is per scan. Admission now consults an in-process registry of live\nclaims, released by a guard on every exit. Not keyed on ScanManager, whose\nentry deliberately still says running — that would refuse the successor\nforever. Seen RED: launched [\"did:plc:live\", \"did:plc:live\"].\n\n#274 — run_scan writes its terminal status from inside the scan future,\nbefore run_under_slot classifies the exit, so a zombie that finished inside\nthe window had already stamped Done over its successor's live entry. The\nprior fix covered only the Abandoned arm, which that write never takes.\nStatus writes are now fenced on the owning claim_id. Seen RED.\n\n#275 — AtCapacity drops from WARN to INFO. It fires every 30s tick while\nany backlog exists, and under open signup a standing backlog is the steady\nstate; at WARN it trains an operator to filter the level that carries the\nWedged ERROR.\n\nRefs #257, #273, #274, #275",
+    "files_changed": 11
+  },
+  {
+    "hash": "3195c387c18a2e36deab8c74681c6ea4b771ad7a",
+    "short_hash": "3195c38",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T06:44:40-07:00",
+    "message": "docs(257): record Task 5 approval and pin #273/#274 as Task 6 blockers\n\nThe Task 5 re-review approved the admitter but surfaced two Importants\nthat are dormant only because nothing enqueues yet. Task 6 wiring enqueue\nis precisely what makes them live, so they are pinned to that task rather\nthan filed as follow-ups.\n\n#273: the admitter reclaims and admits in the same pass, so the row it\njust re-queued is usually the one it immediately claims -- starting a\nsecond pipeline for a user whose first is still running. Two pipelines\nshare scan_state resume markers and both drain classification_queue\nagainst RunPod, where the $2 ceiling is per-scan and so is paid twice.\n\n#274: run_scan writes terminal status before run_under_slot classifies\nthe exit, so a zombie finishing inside the window writes Done over the\nsuccessor live entry.\n\nRefs #257, #273, #274, #275\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 2
+  },
+  {
+    "hash": "2c4d7fe9fe75897e61493cfd57cba6dba69ad7fe",
+    "short_hash": "2c4d7fe",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T06:33:51-07:00",
+    "message": "fix(257): reclaim lapsed leases every pass, not only at boot\n\nThe lease backstop ran once, before the admitter loop. Both backends only\nreclaim rows whose lease has ALREADY lapsed, and claim_next_scan counts\nevery running row regardless of lease, so any row whose lease expired\nafter the boot pass held its slot for the life of the process — silently,\nsince claim_next_scan returns Ok(None) for that exactly as it does for an\nempty queue.\n\nThe timeline is the ordinary redeploy: Railway starts the new container\nwhile the old one still heartbeats, so the new boot reclaim correctly\nfinds nothing; the old container is then stopped and its rows freeze with\na lease that lapses a minute later with nobody watching. Scans run 22min\nto 2h, so at cap 2 two redeploys wedge admission permanently.\n\nReclaiming in-process is safe because of the fencing token: a live but\nstarved worker sees Lost on its next beat and abandons.\n\nAlso in this wave:\n\n- run_under_slot: the scan/heartbeat composition split out of launch_scan\n  behind a generic future, so all four exits (Ok, Err, panic, lease lost)\n  are asserted against in-memory SQLite instead of being untestable\n  without ~500MB of ONNX models.\n- Abandonment no longer clobbers the successor. The C1 fix makes reclaim\n  reachable at runtime, at which point the zombie ScanManager write would\n  overwrite a successor entry and report a running scan as failed.\n- scan_queue_depth() on both backends + stall_kind(): a stall under the\n  cap now logs at ERROR instead of looking identical to an idle queue.\n  spawn_admitter awaits its own JoinHandle so a dead loop is loud.\n- select! matches the heartbeat join result: a JoinError is the heartbeat\n  TASK dying, not the lease lapsing, and now respawns instead of killing\n  a two-hour scan with a false \"slot was reassigned\".\n- HEARTBEAT_INTERVAL 40s -> 30s (LEASE_SECS/4). The comments claimed\n  three beats of slack; at 40s there were two. Slack is load-bearing now\n  that a lapsed lease is acted on within a tick.\n- Closed wake channel cannot hot-spin (Some(()) pattern disables the\n  branch instead of completing it instantly).\n- Module header describes single-path admission as the target state and\n  names the two paths that still bypass the cap.\n\nTests: +7 web (713), +2 postgres (626). The reclaim test was seen red\nagainst the boot-only implementation, and the abandonment test red\nagainst the clobbering one.",
+    "files_changed": 9
+  },
+  {
+    "hash": "11af1c3ad2f58a5eac41aad977e7805904acdaf0",
+    "short_hash": "11af1c3",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T01:57:37-07:00",
+    "message": "feat(257): admitter loop claims queued scans under a cap\n\nOne background task per process, and the only thing that turns a queued\nrow into a running scan. Wakes on enqueue, on completion, and on a 30s\nbackstop tick; claims while running < CHARCOAL_SCAN_CONCURRENCY (default\n2, clamped 1..8).\n\nReclaims at boot before its first claim: any row still running when this\nprocess starts belongs to a scan it did not start, so the lease is stale\nby definition. Without it two orphaned rows deadlock a cap-2 server.\n\nThe fencing bool is now unignorable. heartbeat_scan and\nfinish_queued_scan return a bare Result<bool> whose bool nothing marks,\nso the whole I2 property could be dropped by writing `.await?;`. Both are\nwrapped in #[must_use] ClaimStatus, and every outcome is handled\ndistinctly: released, superseded (leave the successor alone, do not\nretry), or the DB was unreachable (the slot stays held until the lease\nreclaim frees it). A lost heartbeat abandons the scan rather than burning\nGPU budget on a slot another worker now owns.\n\nA scan that fails to launch releases its slot immediately rather than\nholding it until the lease lapses — otherwise one bad row throttles the\nwhole server for two minutes.\n\nConfig is defensive: zero or garbage falls back to 2 rather than\ndisabling admission, which would silently stop every scan.\n\nlaunch_scan gains an Option<QueueSlot>; the two direct callers pass None\nuntil #257 Task 6 moves POST /api/scan to an enqueue. Admission logic is\ntested against a ScanLauncher seam so it does not need the 500MB model\nvolume — 5 of the 6 behavioural tests were observed red first, and the\nsixth (wake-not-tick) was negative-controlled.\n\nRefs #257",
+    "files_changed": 8
+  },
+  {
+    "hash": "2e5030b6f6eaac5e055c0d04d5a044ef916c5059",
+    "short_hash": "2e5030b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T01:31:48-07:00",
+    "message": "docs(257): correct the spec claim that SKIP LOCKED enforced the cap\n\nThe spec asserted \"concurrent enqueue never admits past the limit — the\nSKIP LOCKED guarantee\" and called the design multi-replica-correct. Both\nwere wrong, and Task 4 shipped the defect they described. SKIP LOCKED is\na safe-dequeue idiom; it says nothing about HOW MANY rows get dequeued.\nThe unlocked COUNT(*) in front of it is the real gate, and at READ\nCOMMITTED two admitters pass it together — then SKIP LOCKED hands them\ndifferent rows, so the cap breaks cleanly instead of loudly. Reproduced\nat cap 1: running_after = 2. The cap is now held by pg_advisory_xact_lock\ntaken before the count.\n\nAlso records that the testing section needed a genuinely concurrent\nclaim test — sequential awaits on one connection never contend a row, so\nthe original passed against an implementation that over-admits.\n\nTask 4 and Task 5 plan sections now carry warnings that their listings\nare superseded: signatures changed to carry a claim/fencing token.\n\nSeparately, CLAUDE.md documented a Postgres test command that cannot\nwork — postgres://charcoal:charcoal@localhost fails with\nFATAL: role \"charcoal\" does not exist, because a Homebrew install\ncreates a superuser named after the OS account. Every agent following\nthose instructions hits it (#272).\n\nRefs #257, #272\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "26b1830aaff6a9cf1bf8184b5c0a86c87ac4ac3f",
+    "short_hash": "26b1830",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T01:09:11-07:00",
+    "message": "fix(257): enforce the scan admission cap under concurrency\n\nThe cap did not hold. claim_next_scan counted running rows at READ\nCOMMITTED, which takes no lock, so two admitters both read the same\npre-claim count, both passed the guard, and SKIP LOCKED handed them\ndifferent rows. Reproduced with four concurrent claimers at cap 1:\ntwo were admitted. pg_advisory_xact_lock at the top of the transaction\nmakes admission single-file; SKIP LOCKED stays for row selection.\n\nThe old cap test could not catch this: three sequential awaits on one\nconnection never contend. Replaced with a JoinSet of concurrent claims,\nseen RED (got 2, want 1, 3 of 3 runs) before the lock went in.\n\nfinish_queued_scan had no status guard and nothing tied it to the claim\nthat produced it, so a worker whose lease lapsed could stomp the new\nowner row to done and free a slot still in use. Added a claim_id fencing\ntoken, generated database-side (gen_random_uuid on Postgres,\nrandomblob on SQLite) so it costs no new Rust dependency. claim returns\nit, heartbeat and finish require it and now return bool so a worker can\ntell its claim was stolen. reclaim and re-enqueue null it out.\n\nSQLite is not vulnerable to the admission race as wired - one\nMutex<Connection> held across the whole call - but WAL mode plus BEGIN\nDEFERRED would let two processes over-admit, so the transaction is now\nBEGIN IMMEDIATE and fails loudly instead.\n\nAlso: enqueued_at goes through DateTime<Utc>::to_rfc3339 so both\nbackends agree; ETA is None unless queued, and divides by the cap\n(ceil(position / cap) * median) instead of overstating by up to the cap\nfactor; NULL leases are reclaimable; row errors propagate instead of\nbeing dropped by filter_map(ok).\n\nSchema v11 is unshipped, so the v11 migrations were amended in place\nrather than adding a v12.\n\nTest coverage the review found missing: idempotency now asserts\nenqueued_at is unchanged (the row count could never have caught the\nguard being removed - user_did is the primary key), FIFO claim order,\nheartbeat, finish on success and failure, double-finish, stale-claim\nrejection, done to re-enqueue, and NULL-lease reclaim. Both new guards\nnegative-controlled.\n\nTwo pre-existing harness problems surfaced: cleanup_test_data deleted a\nscan_state key owned by one test from a helper six tests call, and the\nscan_queue tests could not recover from a panic because cap and position\nare whole-table figures. Both fixed.\n\nRefs #257",
+    "files_changed": 9
+  },
+  {
+    "hash": "7e8ec24629ad134df9c2bb56a01c8b88ebbeaebe",
+    "short_hash": "7e8ec24",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T00:31:09-07:00",
+    "message": "feat(257): scan_queue table and Database methods (schema v11)\n\nReplaces ScanManager any_running bool with a durable queue. Admission\nbecomes \"how many rows are running?\" — which survives a redeploy, is\ncorrect with more than one replica, and makes position and ETA real\nrather than guessed.\n\nuser_did as PK makes enqueue idempotent, so a double-click cannot\ndouble-book. lease_expires is what makes the deploy cadence safe: a\nkilled scan lapses and is re-queued at boot, and #208 scan_phase means it\nresumes rather than restarts.\n\nPostgres claims with FOR UPDATE SKIP LOCKED so two admitters never take\nthe same row. SQLite uses a write transaction — single process, no\nSKIP LOCKED needed — and is deliberately minimal because #263 deletes\nthat backend.\n\nCap test negative-controlled: with the guard widened it fails on the\nthird claim, so it is measuring the cap rather than passing vacuously.\n\nAlso: delete_user_data (both backends) now clears scan_queue rows, and\ntable_count fixtures updated from 11 to 12 for the new table. The three\nnew Postgres tests are serialized behind a static mutex in the test file\n— unlike every other table here, scan queue position/count is genuinely\nglobal rather than user-scoped, so under the default parallel test\nharness one test could observe another's in-flight queued row. Confirmed\nby direct reproduction (~1 failure in 3 runs before the fix, 6/6 clean\nafter) rather than assumed.\n\nRefs #257",
+    "files_changed": 9
+  },
+  {
+    "hash": "eb57b589db3f0c165ca94b86c2affdca2a1f6445",
+    "short_hash": "eb57b58",
+    "author": "Bryan Guffey",
+    "date": "2026-08-06T00:05:20-07:00",
+    "message": "feat(257): load ONNX models once at boot into AppState\n\nModels loaded per scan so they were not held while idle. Since #231 moved\nNLI to the fp32 export that is ~500MB per concurrent scan against a\n1.11GB production peak, which is what makes concurrency unsafe rather\nthan merely untidy — the global scan gate was implicitly protecting\nmemory, not just leftover from single-user days.\n\nScanModels holds all three behind Arc; scans clone handles. Their\nexisting Arc<Mutex<Session>> is untouched: this changes ownership and\nlifetime, not concurrency semantics.\n\nFail-fast at boot rather than degrading per scan. The per-scan path\ndegraded when a model was absent; at boot that would hide a broken model\nvolume behind a green healthcheck.\n\nAccepted cost: prod idles ~0.776GB today and ~1.28GB after, raising the\nmetered RAM floor (#188) even on days nobody scans.\n\nAdded a blanket impl<T: ToxicityScorer + ?Sized> ToxicityScorer for\nArc<T> (src/toxicity/traits.rs) so a shared Arc<OnnxToxicityScorer> can\nbe boxed as Box<dyn ToxicityScorer> for TwoStageToxicityScorer::new\nwithout a second load or touching that constructor signature.\n\ntest_helpers.rs: AppState::models is non-optional per the task interface,\nbut tests must not require the ~500MB model volume to construct an\nAppState. build_test_app[_with_db] now return Option, gated behind a\nOnceLock-cached model load (mirrors the nli_files_present skip-gate used\nelsewhere in the suite); callers in tests/web_labels.rs and\ntests/web_oauth.rs pattern-match and skip with an eprintln SKIP: message\nwhen absent.\n\nRefs #257 #52\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 10
+  },
+  {
+    "hash": "f14554eea453af7b0a55404604d5ed1086858316",
+    "short_hash": "f14554e",
+    "author": "Bryan Guffey",
+    "date": "2026-08-05T23:45:04-07:00",
+    "message": "fix(264): capture Stage-1 ONNX inference time in Phase A timing split\n\nPhase A timing (#264, e1d4fa3) missed the Stage-1 score_batch call in\nstage1_outcome — real ONNX inference that runs for every account before\nthe Stage-2 clean pass, on the same model mutex. That made clean_pass_ms\nand inference_pct systematically undercount inference share for the\n#257 concurrency decision, biasing it toward looking safer to raise\nconcurrency than it actually is.\n\nAdds GatherTiming.stage1_onnx_ms as a third, separately-visible bucket\n(Stage 1 runs for every account; Stage 2 only for survivors, so folding\nthem together would blur two different questions). inference_pct() now\nsums both buckets. stage1_outcome gains a stage1_outcome_timed sibling\nthat narrows the timer to just the scorer.score_batch(...) call --\nnone of stage1_outcome's non-inference work (language coverage gate,\n<5-posts check, TF-IDF extraction, early-exit comparison) is included.\nstage1_outcome itself is unchanged for its other callers.\n\nAdds a wiring test (gather_account_populates_all_timing_buckets_when_reaching_stage_2)\nusing delayed test doubles, since no prior test asserted gather_account\nactually produces non-zero timings -- only that the GatherTiming struct\narithmetic works in isolation.",
+    "files_changed": 6
+  },
+  {
+    "hash": "e1d4fa33c1feec2ee31e0f7566e1931fc259947a",
+    "short_hash": "e1d4fa3",
+    "author": "Bryan Guffey",
+    "date": "2026-08-05T23:06:51-07:00",
+    "message": "perf(264): record Phase A fetch vs clean-pass split\n\nThe #257 concurrency default rested on an estimate. An earlier draft of\nthe spec claimed Phase A was \"~100% Bluesky I/O\"; tracing the call sites\nshowed gather.rs runs the ONNX clean pass in the same phase, so two\nconcurrent scans contend on the shared model mutex by an unmeasured\namount.\n\ngather_account now returns GatherTiming alongside its outcome, and Phase\nA logs the aggregate with inference_pct. Under ~10% means concurrency 2\nshould approach 2x; 30%+ means the mutex is the ceiling and the lever is\na session pool rather than more concurrency.\n\nMirrors the delayTime/executionTime split from #61 that made the burst\nphase tunable.\n\nAlso updates tests/unit_scan_phases.rs call sites for the new\nResult<(GatherOutcome, GatherTiming)> return type — not listed in the\ntask brief, found by full-tree grep + compiler errors.\n\nCloses #264",
+    "files_changed": 3
+  },
+  {
+    "hash": "efc2293d9042fcdaf5b3eaac33820f55cf414578",
+    "short_hash": "efc2293",
+    "author": "Bryan Guffey",
+    "date": "2026-08-05T19:36:00-07:00",
+    "message": "docs(243): correct the tier badge — it is colored text, not a filled chip\n\nCaught by the audit (#246) reading the implementation instead of the doc I\nhad just written.\n\naccounts/+page.svelte:155 renders the tier as an inline color on a span, and\n.tier-badge is only font-weight + font-size. There is no fill, border or\nradius anywhere in it. DESIGN.md described \"a filled chip in the tier's color\nwith dark text\", and the sidecar shipped a ds-tier snippet with a background\nand 8px radius — a component that exists nowhere in the product. The live\npanel would have rendered it as though it were real.\n\nCorrected in three places: the Components section, the frontmatter tokens\n(tier-chip-* -> tier-badge-*, now transparent background with the tier as\ntextColor), and the sidecar HTML/CSS.\n\nAlso sharpened two things while in there:\n\n- Added the measured contrast for tier text on the ground (10.41 / 11.71 /\n  13.70 / 7.83:1), which is the evidence that the desaturation costs nothing\n  in legibility — the strongest argument for The Indoor Voice Rule.\n\n- The abstention target now stays inside the text idiom (Muted with a dashed\n  underline) rather than introducing a filled chip the system does not\n  otherwise use, and the implementation-gap note names the actual mechanism:\n  the ?? fallback is Low's exact color, so abstention is not unstyled, it is\n  disguised as a genuine Low verdict.\n\nRefs #243 #245 #246",
+    "files_changed": 2
+  },
+  {
+    "hash": "a80350b7190522ecc6fd9e819fe831e1578508e4",
+    "short_hash": "a80350b",
+    "author": "Bryan Guffey",
+    "date": "2026-07-31T22:17:44-07:00",
+    "message": "chore(239): integrate main into staging to unblock the promotion\n\nPR #63 (staging -> main) was mergeStateStatus=DIRTY: main carried the\ntemplate-backfill commits #70-#75 that never reached staging, and both\nbranches had edited the same files.\n\nTouches ONLY tooling and docs -- no Rust, Cargo, migrations, or web files --\nso the promotion gains no application-code risk from this.\n\nFour conflicts, resolved:\n\n.gitignore -- kept staging entries. main restructured this file and does NOT\ncover models/, .worktrees/, .superpowers/ or /docs/research/. Dropping\nmodels/ alone would have risked committing ~500MB of ONNX artifacts. main\nside of the second hunk was empty, so nothing was lost; main .gitignore.local\nconvention came through the auto-merge intact.\n\n.chainlink/issues-export.json -- modify/delete, kept staging deletion. The\nfile was deliberately untracked in #60/#181 because tracking a regenerated\nartifact made every branch integration conflict on churned JSON.\n\nscripts/install-hooks.sh -- conflict of intent. staging (#181) skips staging\nthe export when gitignored; main force-adds it with git add -f. Kept the\nstaging behaviour since we just deleted the tracked file, but ADOPTED main\n(cd \"$REPO_ROOT\" && ...) wrapper, which fixes the stray-shadow-.chainlink cwd\nbug. No _would_clobber guard on this branch -- that guard protects a\nCOMMITTED file from an empty export, and this file is deliberately not\ncommitted. _would_clobber stays in use for docs/graph-data.json.\n\ndocs/git-history.json -- generated; regenerated with deciduous sync rather\nthan hand-merged. Both graph artifacts validated as parseable JSON.\n\nCLAUDE.md auto-merged, but the merge silently dropped staging EnterWorktree\nban. Checked rather than assumed: main did not lose it by accident, it\ndeliberately REVERSES it (\"that turned out to be stale after the mid-2026\nupgrade\"). Bryan confirmed main wins, so the auto-merge result stands.\nVerified the ban is not left contradicting anywhere else -- neither the\nglobal CLAUDE.md nor the session memory carries it.\n\ninstall-hooks.sh syntax-checked; settings.json and both graph JSONs parse.\n\nRefs #239",
+    "files_changed": 0
+  },
+  {
     "hash": "da719650de3abaa585382809a5a04029f1e5409d",
     "short_hash": "da71965",
     "author": "Bryan Guffey",

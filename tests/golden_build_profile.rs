@@ -76,6 +76,7 @@ fn astrophysics_fingerprint() -> TopicFingerprint {
                 "galaxy".to_string(),
                 "cosmology".to_string(),
             ],
+            keyword_scores: vec![],
             weight: 1.0,
         }],
         post_count: 200,
@@ -98,6 +99,7 @@ fn toxicology_fingerprint() -> TopicFingerprint {
                 "contamination".to_string(),
                 "exposure".to_string(),
             ],
+            keyword_scores: vec![],
             weight: 1.0,
         }],
         post_count: 200,
@@ -245,19 +247,25 @@ async fn golden_a_insufficient_data_with_graph_distance() {
 
 #[tokio::test]
 async fn golden_b_early_exit_terminal_low() {
-    // Golden snapshot: 6 first-person originals, all scored 0.0 (< ONNX_CLEAN_THRESHOLD
+    // Golden snapshot: 15 first-person originals, all scored 0.0 (< ONNX_CLEAN_THRESHOLD
     // of 0.10), and topically irrelevant to the astrophysics fingerprint.
     // The early-exit gate fires and produces a Terminal "Low" score.
+    //
+    // originals >= 15 → FingerprintQuality::Normal, so the fingerprint is
+    // reliable and the early exit is legitimately authorized (#296 Task 6:
+    // an Unreliable-quality fingerprint must NOT authorize this exit — that
+    // scenario is covered by unit tests on `should_early_exit_stage1`
+    // directly, not this golden snapshot).
     //
     // Snapshotted values:
     //   threat_tier = "Low"
     //   toxicity_score = Some(0.0)   (set explicitly by the early-exit branch)
     //   threat_score = Some(0.0)     (set explicitly by the early-exit branch)
     //   scoring_confidence = Some("low")
-    //   fingerprint_quality = Some(<non-None>)  (derived from originals/replies count)
+    //   fingerprint_quality = Some("normal")  (15 originals, 0 replies+quotes)
     //   context_score = None
     //   behavioral_signals = None
-    //   posts_analyzed = 6
+    //   posts_analyzed = 15
     let originals = vec![
         make_post("at://golden/b/1", "had a lovely sandwich for lunch today"),
         make_post(
@@ -274,6 +282,36 @@ async fn golden_b_early_exit_terminal_low() {
             "at://golden/b/6",
             "baking bread this weekend, smells wonderful",
         ),
+        make_post(
+            "at://golden/b/7",
+            "reorganized my bookshelf by color this afternoon",
+        ),
+        make_post("at://golden/b/8", "tried a new recipe for vegetable soup"),
+        make_post(
+            "at://golden/b/9",
+            "went for a bike ride along the river trail",
+        ),
+        make_post(
+            "at://golden/b/10",
+            "planted some basil and thyme in the window box",
+        ),
+        make_post(
+            "at://golden/b/11",
+            "finished knitting a scarf for the winter",
+        ),
+        make_post(
+            "at://golden/b/12",
+            "cleaned out the garage over the weekend",
+        ),
+        make_post("at://golden/b/13", "watched the sunset from the back porch"),
+        make_post(
+            "at://golden/b/14",
+            "made pancakes for breakfast with the kids",
+        ),
+        make_post(
+            "at://golden/b/15",
+            "repainted the fence a nice shade of blue",
+        ),
     ];
     let sample = PostSample {
         originals,
@@ -281,7 +319,7 @@ async fn golden_b_early_exit_terminal_low() {
         quotes: vec![],
         reply_ratio: 0.0,
         quote_ratio: 0.0,
-        total_posts: 6,
+        total_posts: 15,
     };
 
     let scorer = FixedScorer(0.0); // All ONNX scores are 0.0 → below 0.10 clean threshold
@@ -321,7 +359,7 @@ async fn golden_b_early_exit_terminal_low() {
                 Some(0.0),
                 "early-exit threat_score must be exactly 0.0"
             );
-            assert_eq!(score.posts_analyzed, 6, "posts_analyzed must match sample");
+            assert_eq!(score.posts_analyzed, 15, "posts_analyzed must match sample");
             // Confidence is set to "low" because this is a Stage-1 early exit.
             assert_eq!(
                 score.scoring_confidence.as_deref(),
@@ -329,11 +367,12 @@ async fn golden_b_early_exit_terminal_low() {
                 "early-exit scoring_confidence must be low"
             );
             // fingerprint_quality is populated even for early exits (FingerprintQuality::from_counts).
-            // 6 originals, 0 replies+quotes → originals>=15 is false, total=6<15 → Unreliable.
+            // 15 originals → originals>=15 → Normal. A Normal-quality fingerprint is what
+            // makes this early exit legitimate (#296 Task 6 blocks the exit for Unreliable).
             assert_eq!(
                 score.fingerprint_quality.as_deref(),
-                Some("unreliable"),
-                "early-exit fingerprint_quality for 6 originals, 0 replies = Unreliable"
+                Some("normal"),
+                "early-exit fingerprint_quality for 15 originals, 0 replies = Normal"
             );
             // NLI and behavioral signals are NOT run on early-exit accounts.
             assert!(
@@ -492,6 +531,7 @@ async fn golden_c_stage2_survivor_no_nli() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on
@@ -689,6 +729,7 @@ async fn golden_c_benign_gate_fires() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement — our avg(80.0) > 0.0 → benign fires
         false, // pile_on
@@ -861,6 +902,7 @@ async fn golden_d_nli_two_pass_gate() {
         &weights,
         None,  // embedder (TF-IDF overlap path)
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on

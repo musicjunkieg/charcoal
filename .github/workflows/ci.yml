@@ -6,6 +6,11 @@ on:
   push:
     branches: [main, staging]
 
+# The default GITHUB_TOKEN grants write scopes this workflow never uses;
+# checkout + build + test only ever need to read the repo (CodeQL alert 23).
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"

@@ -1,4 +1,9 @@
 <script lang="ts">
+	// Design tokens (#250): imported explicitly rather than relying on a child
+	// component to have pulled them in, so the var() references below resolve
+	// on their own terms.
+	import '$lib/website/styles/tokens.css';
+	import '$lib/website/styles/tiers.css';
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -12,7 +17,7 @@
 	} from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import { TIER_DESCRIPTIONS } from '$lib/tiers.js';
-	import { dashboardView } from '$lib/dashboard-state.js';
+	import { dashboardView, isQueued } from '$lib/dashboard-state.js';
 	import { topKeywords } from '$lib/fingerprint-keywords.js';
 	import { pollActions } from '$lib/poll-actions.js';
 	import ScanProgress from '$lib/components/ScanProgress.svelte';
@@ -218,7 +223,13 @@
 	<div class="page-header">
 		<div>
 			<h1 class="page-title">Threat Intelligence</h1>
-			{#if status?.scan_running && status.started_at}
+			<!-- Queued is not scanning (#257), and `started_at` is the process-local
+			     ScanManager's, which is never cleared when a scan finishes. Without
+			     the isQueued gate a repeat user waiting for a slot reads "Scan in
+			     progress — 47m 12s", ticking, counted from their PREVIOUS scan, and
+			     directly above a panel telling them their scan hasn't started. They
+			     fall through to "Last scan: …", which is what that timestamp is. -->
+			{#if status && !isQueued(status) && status.scan_running && status.started_at}
 				<p class="page-subtitle scan-in-progress">
 					Scan in progress — {elapsedTime(status.started_at)}
 				</p>
@@ -228,7 +239,14 @@
 		</div>
 
 		<div class="scan-area">
-			{#if status?.scan_running}
+			{#if status && isQueued(status)}
+				<!-- Queued is not scanning (#257). No spinner: nothing has started
+				     yet, and a moving one here would say otherwise. -->
+				<div class="scan-queued">
+					<span class="queued-dot" aria-hidden="true"></span>
+					<span>Queued</span>
+				</div>
+			{:else if status?.scan_running}
 				<div class="scan-running">
 					<div class="spinner"></div>
 					<span>Scanning…</span>
@@ -407,7 +425,7 @@
 					</div>
 					<div class="accuracy-grid">
 						<div class="accuracy-stat">
-							<span class="accuracy-num" style="color: #86efac"
+							<span class="accuracy-num" style="color: var(--status-ok)"
 								>{(accuracy.accuracy * 100).toFixed(0)}%</span
 							>
 							<span class="accuracy-label">Accuracy</span>
@@ -417,11 +435,11 @@
 							<span class="accuracy-label">Labeled</span>
 						</div>
 						<div class="accuracy-stat">
-							<span class="accuracy-num" style="color: #fdba74">{accuracy.overscored}</span>
+							<span class="accuracy-num accuracy-over">{accuracy.overscored}</span>
 							<span class="accuracy-label">Overscored</span>
 						</div>
 						<div class="accuracy-stat">
-							<span class="accuracy-num" style="color: #fcd34d">{accuracy.underscored}</span>
+							<span class="accuracy-num accuracy-under">{accuracy.underscored}</span>
 							<span class="accuracy-label">Underscored</span>
 						</div>
 					</div>
@@ -524,13 +542,13 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.75rem;
 		font-weight: 400;
-		color: #fffbeb;
+		color: var(--cream-50);
 		letter-spacing: -0.01em;
 	}
 
 	.page-subtitle {
 		font-size: 0.875rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		margin-top: 0.25rem;
 	}
 
@@ -546,33 +564,52 @@
 		font-size: 0.9375rem;
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #0c0a09;
-		background: linear-gradient(135deg, #f59e0b 0%, #c9956c 100%);
+		color: var(--charcoal-950);
+		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
 		border: none;
 		border-radius: 10px;
 		cursor: pointer;
 		transition:
 			transform 0.2s,
 			box-shadow 0.2s;
-		box-shadow: 0 4px 12px -2px rgba(245, 158, 11, 0.35);
+		box-shadow: 0 4px 12px -2px rgb(var(--amber-500-rgb) / 0.35);
 	}
 
 	.btn-scan:hover {
 		transform: translateY(-1px);
-		box-shadow: 0 6px 16px -2px rgba(245, 158, 11, 0.45);
+		box-shadow: 0 6px 16px -2px rgb(var(--amber-500-rgb) / 0.45);
 	}
 
 	.scan-running {
 		display: flex;
 		align-items: center;
 		gap: 0.625rem;
-		color: #c9956c;
+		color: var(--copper);
 		font-size: 0.875rem;
+	}
+
+	/* Waiting for a slot, not working (#257): the same layout as .scan-running
+	   but a still dot instead of the spinner, and colors.body-text rather than
+	   the copper the live states use. */
+	.scan-queued {
+		display: flex;
+		align-items: center;
+		gap: 0.625rem;
+		color: var(--charcoal-400);
+		font-size: 0.875rem;
+	}
+
+	.queued-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--charcoal-400);
+		flex-shrink: 0;
 	}
 
 	.scan-error {
 		font-size: 0.8125rem;
-		color: #f87171;
+		color: var(--status-error);
 		text-align: right;
 	}
 
@@ -593,14 +630,14 @@
 
 	.load-error-text {
 		font-size: 0.9375rem;
-		color: #a8a29e;
+		color: var(--charcoal-400);
 	}
 
 	.spinner {
 		width: 24px;
 		height: 24px;
-		border: 2px solid rgba(201, 149, 108, 0.2);
-		border-top-color: #c9956c;
+		border: 2px solid rgb(var(--copper-rgb) / 0.2);
+		border-top-color: var(--copper);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -629,18 +666,18 @@
 		align-items: center;
 		padding: 1.5rem 1rem;
 		border-radius: 14px;
-		border: 1px solid rgba(168, 162, 158, 0.1);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		text-decoration: none;
 		transition:
 			transform 0.2s,
 			box-shadow 0.2s,
 			border-color 0.2s;
-		background: rgba(28, 25, 23, 0.6);
+		background: rgb(var(--charcoal-900-rgb) / 0.6);
 	}
 
 	.tier-card:hover {
 		transform: translateY(-2px);
-		border-color: rgba(201, 149, 108, 0.3);
+		border-color: rgb(var(--copper-rgb) / 0.3);
 		box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
 	}
 
@@ -660,20 +697,8 @@
 		opacity: 0.7;
 	}
 
-	.tier-high {
-		color: #fca5a5;
-	}
-	.tier-elevated {
-		color: #fdba74;
-	}
-	.tier-watch {
-		color: #fcd34d;
-	}
-	.tier-low {
-		color: #a8a29e;
-	}
 	.tier-not-assessed {
-		color: #78716c;
+		color: var(--charcoal-500);
 		cursor: default;
 	}
 
@@ -682,9 +707,9 @@
 		padding: 0.5rem 1rem;
 		margin-bottom: 1rem;
 		font-size: 0.8125rem;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.08);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.08);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 10px;
 		text-align: center;
 	}
@@ -713,7 +738,7 @@
 	}
 
 	.legend-desc {
-		color: #57534e;
+		color: var(--charcoal-600);
 	}
 
 	/* Top threats */
@@ -733,20 +758,20 @@
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.625rem 1rem;
-		background: rgba(28, 25, 23, 0.5);
-		border: 1px solid rgba(168, 162, 158, 0.07);
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.07);
 		border-radius: 10px;
 		text-decoration: none;
 		transition: border-color 0.2s;
 	}
 
 	.threat-row:hover {
-		border-color: rgba(201, 149, 108, 0.3);
+		border-color: rgb(var(--copper-rgb) / 0.3);
 	}
 
 	.threat-handle {
 		font-weight: 500;
-		color: #c9956c;
+		color: var(--copper);
 		font-size: 0.9375rem;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -763,7 +788,7 @@
 	.threat-score {
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 0.9375rem;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		font-variant-numeric: tabular-nums;
 	}
 
@@ -771,8 +796,8 @@
 	.search-box {
 		display: flex;
 		align-items: center;
-		background: rgba(12, 10, 9, 0.6);
-		border: 1px solid rgba(168, 162, 158, 0.15);
+		background: rgb(var(--charcoal-950-rgb) / 0.6);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
 		border-radius: 12px;
 		padding: 0 1rem;
 		margin-bottom: 2.5rem;
@@ -780,12 +805,12 @@
 	}
 
 	.search-box:focus-within {
-		border-color: #c9956c;
-		box-shadow: 0 0 0 3px rgba(201, 149, 108, 0.12);
+		border-color: var(--copper);
+		box-shadow: 0 0 0 3px rgb(var(--copper-rgb) / 0.12);
 	}
 
 	.search-at {
-		color: #57534e;
+		color: var(--charcoal-600);
 		font-size: 1rem;
 		margin-right: 0.25rem;
 	}
@@ -797,12 +822,12 @@
 		padding: 0.875rem 0;
 		font-size: 0.9375rem;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #fef3c7;
+		color: var(--cream-100);
 		outline: none;
 	}
 
 	.search-input::placeholder {
-		color: #44403c;
+		color: var(--charcoal-700);
 	}
 
 	.search-btn {
@@ -810,16 +835,16 @@
 		font-size: 0.875rem;
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.1);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.1);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 8px;
 		cursor: pointer;
 		transition: background 0.2s;
 	}
 
 	.search-btn:hover {
-		background: rgba(201, 149, 108, 0.18);
+		background: rgb(var(--copper-rgb) / 0.18);
 	}
 
 	/* Events */
@@ -837,18 +862,18 @@
 	.section-title {
 		font-size: 1rem;
 		font-weight: 500;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		letter-spacing: 0.01em;
 	}
 
 	.section-link {
 		font-size: 0.8125rem;
-		color: #c9956c;
+		color: var(--copper);
 		text-decoration: none;
 	}
 
 	.section-link:hover {
-		color: #e8b48a;
+		color: var(--copper-light);
 	}
 
 	.events-list {
@@ -863,8 +888,8 @@
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.875rem 1rem;
-		background: rgba(28, 25, 23, 0.5);
-		border: 1px solid rgba(168, 162, 158, 0.07);
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.07);
 		border-radius: 10px;
 	}
 
@@ -875,24 +900,24 @@
 
 	.event-handle {
 		font-weight: 500;
-		color: #c9956c;
+		color: var(--copper);
 		text-decoration: none;
 		font-size: 0.9375rem;
 	}
 
 	.event-handle:hover {
-		color: #e8b48a;
+		color: var(--copper-light);
 	}
 
 	.event-type {
 		font-size: 0.8125rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		margin-left: 0.5rem;
 	}
 
 	.event-text {
 		font-size: 0.8125rem;
-		color: #a8a29e;
+		color: var(--charcoal-400);
 		margin-top: 0.25rem;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -909,23 +934,23 @@
 
 	.event-time {
 		font-size: 0.8125rem;
-		color: #57534e;
+		color: var(--charcoal-600);
 	}
 
 	.event-link {
 		font-size: 0.75rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		text-decoration: none;
 	}
 
 	.event-link:hover {
-		color: #a8a29e;
+		color: var(--charcoal-400);
 	}
 
 	.empty-state {
 		padding: 3rem 0;
 		text-align: center;
-		color: #57534e;
+		color: var(--charcoal-600);
 		font-size: 0.9375rem;
 	}
 
@@ -933,26 +958,26 @@
 	.fingerprint-card {
 		margin-top: 2rem;
 		padding: 1rem 1.25rem;
-		background: rgba(28, 25, 23, 0.5);
-		border: 1px solid rgba(168, 162, 158, 0.1);
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		border-radius: 14px;
 	}
 
 	.fingerprint-summary {
 		font-size: 1rem;
 		font-weight: 500;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		cursor: pointer;
 		letter-spacing: 0.01em;
 	}
 
 	.fingerprint-summary:hover {
-		color: #e8b48a;
+		color: var(--copper-light);
 	}
 
 	.fingerprint-hint {
 		font-size: 0.8125rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		line-height: 1.5;
 		margin: 0.75rem 0;
 	}
@@ -966,9 +991,9 @@
 	.chip {
 		padding: 0.25rem 0.75rem;
 		font-size: 0.8125rem;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.08);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.08);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 999px;
 	}
 
@@ -980,7 +1005,7 @@
 	}
 
 	.scan-in-progress {
-		color: #c9956c;
+		color: var(--copper);
 	}
 
 	/* Welcome screen */
@@ -998,13 +1023,13 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.5rem;
 		font-weight: 400;
-		color: #fffbeb;
+		color: var(--cream-50);
 		margin-bottom: 1.25rem;
 	}
 
 	.welcome-text {
 		font-size: 0.9375rem;
-		color: #a8a29e;
+		color: var(--charcoal-400);
 		line-height: 1.6;
 		margin-bottom: 1rem;
 	}
@@ -1019,8 +1044,8 @@
 	.accuracy-panel {
 		margin-bottom: 2.5rem;
 		padding: 1.25rem;
-		background: rgba(28, 25, 23, 0.5);
-		border: 1px solid rgba(168, 162, 158, 0.1);
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		border-radius: 14px;
 	}
 
@@ -1048,8 +1073,18 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.5rem;
 		font-weight: 400;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		line-height: 1;
+	}
+
+	/* Same specificity as .accuracy-num (0-1-0, both gain the scoping class
+	   equally) — declared after it so these win the tie on elements that
+	   carry both classes, the way the inline styles they replaced always did. */
+	.accuracy-over {
+		color: var(--tier-elevated);
+	}
+	.accuracy-under {
+		color: var(--tier-watch);
 	}
 
 	.accuracy-label {
@@ -1057,12 +1092,12 @@
 		font-weight: 500;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #57534e;
+		color: var(--charcoal-600);
 	}
 
 	.accuracy-hint {
 		font-size: 0.8125rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		margin-top: 0.875rem;
 		text-align: center;
 	}

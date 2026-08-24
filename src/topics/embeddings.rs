@@ -1,7 +1,8 @@
 // Sentence embedding-based topic overlap using all-MiniLM-L6-v2.
 //
 // Instead of comparing TF-IDF keyword lists (which fail when two people use
-// different words for the same topic — see docs/research-overlap-diagnosis.md),
+// different words for the same topic — see
+// docs/research/topic-fingerprint-spike-2026-08.md),
 // this module embeds post text into 384-dimensional vectors using a sentence
 // transformer. Cosine similarity between mean embeddings captures semantic
 // proximity: "fatphobia" and "obesity" land near each other even though they
@@ -222,29 +223,34 @@ fn embed_sync(
     Ok(embeddings)
 }
 
-/// Compute the mean of multiple embedding vectors.
+/// Compute the mean of L2-normalized embedding vectors.
 ///
-/// Used to create a single "topic vector" for an account by averaging
-/// the embeddings of all their posts. This produces a stable centroid
-/// that represents the overall semantic space of what someone talks about.
-pub fn mean_embedding(embeddings: &[Vec<f64>]) -> Vec<f64> {
-    if embeddings.is_empty() {
-        return vec![0.0; EMBEDDING_DIM];
-    }
-
-    let n = embeddings.len() as f64;
+/// Each vector is scaled to unit length before averaging, so a long verbose
+/// post contributes exactly as much direction as a short one — the centroid
+/// reflects *what* someone posts about, not how long-winded each post is.
+/// Zero vectors (embeddings of empty text) are skipped entirely rather than
+/// dragging the mean toward the origin. (#296, spike #295 defect 4)
+pub fn normalized_mean_embedding(embeddings: &[Vec<f64>]) -> Vec<f64> {
     let mut mean = vec![0.0_f64; EMBEDDING_DIM];
+    let mut counted = 0.0_f64;
 
     for emb in embeddings {
+        let norm: f64 = emb.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm < f64::EPSILON {
+            continue;
+        }
+        counted += 1.0;
         for (i, &val) in emb.iter().enumerate() {
             if i < EMBEDDING_DIM {
-                mean[i] += val;
+                mean[i] += val / norm;
             }
         }
     }
 
-    for val in &mut mean {
-        *val /= n;
+    if counted > 0.0 {
+        for val in &mut mean {
+            *val /= counted;
+        }
     }
 
     mean
@@ -252,9 +258,10 @@ pub fn mean_embedding(embeddings: &[Vec<f64>]) -> Vec<f64> {
 
 /// Cosine similarity between two embedding vectors.
 ///
-/// Returns 0.0 to 1.0 — the core comparison that replaces keyword-based
-/// overlap. Two accounts posting about the same topics will have high
-/// cosine similarity even if they use completely different vocabulary.
+/// Returns -1.0 to 1.0. Positive values mean semantic proximity; negative
+/// values mean opposition. Callers that gate on a threshold (scoring) treat
+/// anything below the gate identically, so preserving the sign changes only
+/// what is *recorded*, not how accounts are scored. (#296, spike #295 defect 5)
 pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
@@ -268,40 +275,37 @@ pub fn cosine_similarity_embeddings(a: &[f64], b: &[f64]) -> f64 {
     if denom < f64::EPSILON {
         0.0
     } else {
-        (dot / denom).clamp(0.0, 1.0)
+        (dot / denom).clamp(-1.0, 1.0)
     }
+}
+
+/// Overlap between a candidate centroid and a SET of protected topic
+/// centroids: the best (maximum) cosine across topics. Answers "is this
+/// account near ANY of my topics?" — the actual threat question — instead of
+/// "is it near my average?" (#297, spike #295 defect 1).
+///
+/// Pure max, deliberately NOT weighted by topic weight: a topic that is 5%
+/// of someone's posting is still fully theirs; noise clusters were already
+/// pruned at build time. Sign is preserved (opposition signal, #296).
+/// Returns `None` when no centroid is usable — an empty topic set, or one
+/// where every centroid's width differs from the candidate's — so callers
+/// degrade to the legacy mean-centroid path (pre-#297 fingerprints).
+pub fn max_topic_overlap(topic_centroids: &[Vec<f64>], candidate: &[f64]) -> Option<f64> {
+    topic_centroids
+        .iter()
+        // A mismatched width scores 0.0 in `cosine_similarity_embeddings`,
+        // which the caller cannot tell from a genuine "no overlap" — it would
+        // return `Some(0.0)` and silently suppress the legacy fallback. Drop
+        // those centroids so an all-mismatched set degrades instead.
+        // (CodeRabbit PR #102)
+        .filter(|topic| topic.len() == candidate.len())
+        .map(|topic| cosine_similarity_embeddings(topic, candidate))
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_mean_embedding_single() {
-        let embeddings = vec![vec![1.0, 2.0, 3.0]];
-        let mean = mean_embedding(&embeddings);
-        assert_eq!(mean.len(), EMBEDDING_DIM);
-        assert!((mean[0] - 1.0).abs() < f64::EPSILON);
-        assert!((mean[1] - 2.0).abs() < f64::EPSILON);
-        assert!((mean[2] - 3.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mean_embedding_multiple() {
-        let embeddings = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
-        let mean = mean_embedding(&embeddings);
-        assert!((mean[0] - 0.5).abs() < f64::EPSILON);
-        assert!((mean[1] - 0.5).abs() < f64::EPSILON);
-        assert!((mean[2] - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_mean_embedding_empty() {
-        let embeddings: Vec<Vec<f64>> = vec![];
-        let mean = mean_embedding(&embeddings);
-        assert_eq!(mean.len(), EMBEDDING_DIM);
-        assert!(mean.iter().all(|&v| v == 0.0));
-    }
 
     #[test]
     fn test_cosine_identical() {
@@ -356,15 +360,29 @@ mod tests {
     }
 
     #[test]
-    fn test_cosine_negative_values() {
-        // Opposite directions should give low similarity (clamped to 0.0)
+    fn test_cosine_opposite_vectors_preserve_sign() {
+        // Opposition is signal for a harassment detector — a vector pointing
+        // away from the protected user's topics must not masquerade as
+        // "no relationship" (0.0).
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![-1.0, 0.0, 0.0];
         let sim = cosine_similarity_embeddings(&a, &b);
         assert!(
-            sim.abs() < f64::EPSILON,
-            "Opposite vectors should clamp to 0.0, got {sim}"
+            (sim - -1.0).abs() < 1e-10,
+            "Opposite vectors should be -1.0, got {sim}"
         );
+    }
+
+    #[test]
+    fn test_cosine_partial_opposition_is_negative() {
+        let a = vec![1.0, 1.0, 0.0];
+        let b = vec![-1.0, 0.0, 0.0];
+        let sim = cosine_similarity_embeddings(&a, &b);
+        assert!(
+            sim < 0.0,
+            "Partially opposed vectors should be negative, got {sim}"
+        );
+        assert!(sim > -1.0);
     }
 
     #[test]
@@ -380,26 +398,49 @@ mod tests {
     }
 
     #[test]
-    fn test_mean_embedding_all_same() {
-        // Averaging identical vectors should return the same vector
-        let v = vec![0.5, -0.3, 0.8];
-        let embeddings = vec![v.clone(), v.clone(), v.clone()];
-        let mean = mean_embedding(&embeddings);
-        assert!((mean[0] - 0.5).abs() < 1e-10);
-        assert!((mean[1] - -0.3).abs() < 1e-10);
-        assert!((mean[2] - 0.8).abs() < 1e-10);
+    fn test_normalized_mean_ignores_magnitude() {
+        // A long post (large magnitude) and a short post (small magnitude)
+        // pointing in different directions must contribute EQUALLY.
+        // Unnormalized mean of [10,0] and [0,1] points 84° toward x.
+        // Normalized mean points exactly 45°.
+        let embeddings = vec![vec![10.0, 0.0], vec![0.0, 1.0]];
+        let mean = normalized_mean_embedding(&embeddings);
+        assert!(
+            (mean[0] - mean[1]).abs() < 1e-10,
+            "Equal contribution expected, got x={} y={}",
+            mean[0],
+            mean[1]
+        );
     }
 
     #[test]
-    fn test_mean_embedding_result_is_embedding_dim() {
-        // Even short input vectors produce EMBEDDING_DIM-length output
-        let embeddings = vec![vec![1.0, 2.0]];
-        let mean = mean_embedding(&embeddings);
-        assert_eq!(mean.len(), EMBEDDING_DIM);
-        // Elements beyond input length should be 0.0
-        assert!((mean[0] - 1.0).abs() < f64::EPSILON);
-        assert!((mean[1] - 2.0).abs() < f64::EPSILON);
-        assert!((mean[2] - 0.0).abs() < f64::EPSILON);
+    fn test_normalized_mean_skips_zero_vectors() {
+        let embeddings = vec![vec![0.0, 0.0], vec![3.0, 4.0]];
+        let mean = normalized_mean_embedding(&embeddings);
+        // Only the non-zero vector counts: unit vector of [3,4] = [0.6, 0.8]
+        assert!((mean[0] - 0.6).abs() < 1e-10);
+        assert!((mean[1] - 0.8).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_normalized_mean_empty_and_all_zero() {
+        let empty: Vec<Vec<f64>> = vec![];
+        assert_eq!(normalized_mean_embedding(&empty).len(), EMBEDDING_DIM);
+        let all_zero = vec![vec![0.0; 3]];
+        assert!(normalized_mean_embedding(&all_zero)
+            .iter()
+            .all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn test_normalized_mean_single_vector_is_unit() {
+        let embeddings = vec![vec![3.0, 4.0]];
+        let mean = normalized_mean_embedding(&embeddings);
+        let norm: f64 = mean.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-10,
+            "Single input should yield a unit vector"
+        );
     }
 
     #[test]
@@ -416,5 +457,83 @@ mod tests {
             (sim - 1.0).abs() < 1e-10,
             "Identical sparse vectors should be 1.0"
         );
+    }
+
+    #[test]
+    fn max_topic_overlap_takes_the_best_topic() {
+        let mut topic_a = vec![0.0; EMBEDDING_DIM];
+        topic_a[0] = 1.0;
+        let mut topic_b = vec![0.0; EMBEDDING_DIM];
+        topic_b[100] = 1.0;
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[100] = 1.0; // exactly topic B
+        let overlap = max_topic_overlap(&[topic_a, topic_b], &candidate).unwrap();
+        assert!((overlap - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_topic_overlap_beats_smeared_mean_for_niche_topic() {
+        // The coarseness fix, demonstrated (#297's reason to exist): a candidate
+        // sitting exactly on ONE of two orthogonal topics scores ~1.0 against
+        // max-over-topics but only ~0.71 against the smeared mean centroid.
+        let mut topic_a = vec![0.0; EMBEDDING_DIM];
+        topic_a[0] = 1.0;
+        let mut topic_b = vec![0.0; EMBEDDING_DIM];
+        topic_b[100] = 1.0;
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[100] = 1.0;
+
+        let mean = normalized_mean_embedding(&[topic_a.clone(), topic_b.clone()]);
+        let legacy = cosine_similarity_embeddings(&mean, &candidate);
+        let multi = max_topic_overlap(&[topic_a, topic_b], &candidate).unwrap();
+        assert!(
+            multi > legacy + 0.2,
+            "multi {multi} should beat legacy {legacy}"
+        );
+    }
+
+    #[test]
+    fn max_topic_overlap_preserves_negative_sign() {
+        // Opposition is signal (#296 defect 5): a candidate pointing AWAY from
+        // every topic must stay negative, not clamp to zero.
+        let mut topic = vec![0.0; EMBEDDING_DIM];
+        topic[0] = 1.0;
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[0] = -1.0;
+        let overlap = max_topic_overlap(&[topic], &candidate).unwrap();
+        assert!((overlap - (-1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn max_topic_overlap_empty_topics_is_none() {
+        let candidate = vec![1.0; EMBEDDING_DIM];
+        assert!(max_topic_overlap(&[], &candidate).is_none());
+    }
+
+    #[test]
+    fn max_topic_overlap_ignores_wrong_width_centroids() {
+        // SQLite stores centroids as unconstrained JSON, so a wrong-width row
+        // can exist. It must not be scored as 0.0 alongside a usable centroid.
+        // (CodeRabbit PR #102)
+        let mut good = vec![0.0; EMBEDDING_DIM];
+        good[100] = 1.0;
+        let wrong_width = vec![1.0; 8];
+        let mut candidate = vec![0.0; EMBEDDING_DIM];
+        candidate[100] = 1.0;
+
+        let overlap = max_topic_overlap(&[wrong_width, good], &candidate).unwrap();
+        assert!(
+            (overlap - 1.0).abs() < 1e-9,
+            "max must come from the compatible centroid, got {overlap}"
+        );
+    }
+
+    #[test]
+    fn max_topic_overlap_all_wrong_width_is_none() {
+        // Nothing usable left: return None so the caller falls back to the
+        // legacy mean-centroid cosine rather than reading a fabricated 0.0.
+        let candidate = vec![1.0; EMBEDDING_DIM];
+        let centroids = vec![vec![1.0; 8], vec![0.5; 16]];
+        assert!(max_topic_overlap(&centroids, &candidate).is_none());
     }
 }

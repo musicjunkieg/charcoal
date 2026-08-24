@@ -22,6 +22,13 @@ describe('phaseToStepIndex', () => {
 		expect(phaseToStepIndex('finalizing')).toBe(3);
 	});
 
+	it('reports no active step while queued (#257)', () => {
+		// A queued scan has not started. Clamping to 0 would light up "Reading
+		// your posts" and tell a waiting user that work is underway — the exact
+		// lie this issue exists to remove.
+		expect(phaseToStepIndex('queued')).toBe(-1);
+	});
+
 	it('clamps phases outside the running set to step 0', () => {
 		// idle/done/failed should never render the checklist, but if they do,
 		// point at the first step rather than -1 (which would mark all done).

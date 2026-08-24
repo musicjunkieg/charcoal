@@ -16,6 +16,7 @@ fn extract_search_keywords_from_fingerprint() {
                     "liberation".to_string(),
                     "body".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 0.8,
             },
             TopicCluster {
@@ -25,11 +26,13 @@ fn extract_search_keywords_from_fingerprint() {
                     "identity".to_string(),
                     "trans".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 0.6,
             },
             TopicCluster {
                 label: "community".to_string(),
                 keywords: vec!["community".to_string(), "governance".to_string()],
+                keyword_scores: vec![],
                 weight: 0.3,
             },
         ],
@@ -55,16 +58,19 @@ fn extract_search_keywords_respects_limit() {
             TopicCluster {
                 label: "topic1".to_string(),
                 keywords: vec!["keyword1".to_string()],
+                keyword_scores: vec![],
                 weight: 0.9,
             },
             TopicCluster {
                 label: "topic2".to_string(),
                 keywords: vec!["keyword2".to_string()],
+                keyword_scores: vec![],
                 weight: 0.5,
             },
             TopicCluster {
                 label: "topic3".to_string(),
                 keywords: vec!["keyword3".to_string()],
+                keyword_scores: vec![],
                 weight: 0.3,
             },
         ],
@@ -131,6 +137,7 @@ fn extract_keywords_skips_short_terms() {
         clusters: vec![TopicCluster {
             label: "test".to_string(),
             keywords: vec!["ab".to_string(), "long_keyword".to_string()],
+            keyword_scores: vec![],
             weight: 0.9,
         }],
         post_count: 10,

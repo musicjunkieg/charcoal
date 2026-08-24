@@ -6,7 +6,278 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Multi-interest topic fingerprint (#297, spike #295 BETTER tier): the
+  protected user's posts are now clustered in embedding space into up to 12
+  weighted topic centroids (greedy agglomerative, centroid linkage,
+  deterministic), each labeled by TF-IDF over only its own posts — replacing
+  the single mean-pooled centroid that smeared multi-topic users into a
+  vector in nobody's topic region. Live overlap is now max-over-topics
+  ("is this account near ANY of my topics?"); candidates still get one
+  centroid, so scan-time cost is unchanged. Real-data validation forced one
+  algorithm correction: MiniLM embeddings are anisotropic, so merge
+  decisions run on mean-centered vectors (raw-space cosines collapsed 487
+  of 500 posts into one hub cluster); stored centroids stay in the original
+  space. Discovery search keywords now come one-per-semantic-topic for free.
+- Shadow compare for #135 recalibration: every embedding-scale score also
+  records the pre-#297 mean-centroid overlap in a new nullable
+  `account_scores.overlap_legacy` column (migration 0013, both backends),
+  so gate/tier thresholds can later be retuned from real paired data. The
+  live score, gates, and tiers use only the new overlap; thresholds are
+  numerically unchanged at ship time. Note for #135: at 500 posts the
+  12-cluster cap, not `merge_threshold`, determines cluster count — the
+  0.60 default is uncalibrated. A read path for the column is #305.
+
 ### Fixed
+- Fingerprint generations can no longer diverge (#302, CodeRabbit Major
+  deferred off PR #101): fingerprint JSON, mean embedding, and the new
+  per-topic centroid rows persist in ONE transaction per backend via
+  `save_fingerprint_bundle`, replacing the two-statement sequence whose
+  warn-only embedding failure could leave a fresh fingerprint beside a
+  stale embedding for up to 14 days. `charcoal migrate` transfers the whole
+  generation atomically too, and user deletion clears centroid rows (FK
+  cascade on Postgres, explicit delete on SQLite). A fingerprint whose
+  centroid rows don't match its JSON (pre-#297 legacy, or pre-#302
+  divergence) is treated as stale and rebuilt on the next scan — the same
+  amortized one-rebuild-per-user rollout as #296. An unreadable stored
+  fingerprint JSON now also rebuilds instead of failing that user's scans
+  forever (#303 precedent).
+- The web scan, admin pre-seed, and CLI `charcoal fingerprint` now share
+  one build path (`src/topics/build.rs`) instead of maintaining a
+  hand-duplicated copy in `main.rs`.
+- Repaired eight defects in the topic-overlap math (#296, spike #295 GOOD
+  tier): per-post embeddings are L2-normalized before averaging so long
+  posts no longer dominate the centroid; cosine similarity preserves its
+  sign instead of clamping opposition to zero; URLs and @mentions are
+  stripped before embedding on both sides; Stage 1 and the Stage-2 keyword
+  fallback gate on a keyword-scale threshold (0.05, provisional) instead of
+  the embedding-scale 0.15 that was silently early-exiting relevant
+  accounts; keyword weights are rank-weighted by TF-IDF score; extractor
+  configs are unified at 60 keywords / 10 clusters on both sides;
+  `Unreliable` candidate fingerprints can no longer authorize the Stage-1
+  early exit; and the protected fingerprint is rebuilt when older than 14
+  days instead of living forever.
+
+### Changed
+- Marked the deciduous graph exports (`docs/graph-data.json`,
+  `docs/git-history.json`) as generated in a new `.gitattributes` (#300).
+  They regenerate on every commit via the pre-commit hook; GitHub now
+  collapses them in PR diffs and `git diff` shows a single line instead of
+  hundreds of churned JSON lines. They remain committed — GitHub Pages
+  serves the graph viewer from `/docs`.
+- Completed a research spike on topic-fingerprint quality (#295): mapped the
+  current single-centroid pipeline against 2026 state of the art and produced
+  a good/better/best implementation plan (report in `docs/research/`,
+  follow-up issues #296–#299). No code changed.
+- The authed app now consumes the design tokens instead of ~292 hard-coded
+  colour values (#250, #255). `tokens.css` defined the Charcoal palette and the
+  marketing pages used it; the product did not. This was bypass rather than
+  drift — the hard-coded values were overwhelmingly palette-*correct*, so
+  nothing looked broken, and a token change would propagate to the landing page
+  while silently skipping every authed surface. The failure only shows up the
+  day someone changes a colour and half the app ignores them.
+
+  The original audit counted 161 literal hex values. Measured before starting,
+  it was ~175 hex plus 117 `rgba()` literals the hex-only grep could not see —
+  the same palette at varying alpha. Those now resolve through channel tokens
+  (`--copper-rgb: 201 149 108`, consumed as `rgb(var(--copper-rgb) / 0.2)`).
+  Because a hex token and its channel triplet are independent declarations that
+  nothing in CSS relates, a test asserts every `--x-rgb` matches its `--x`.
+
+  Threat-tier colours had been duplicated four times: three TypeScript
+  `TIER_COLORS` maps plus a fourth copy in `LabelButtons` that the audit missed
+  because it is named `TIERS`. All four are gone, replaced by semantic tokens
+  selected through one global `tiers.css` — the pattern the dashboard already
+  used. That also removed a latent bug: the accounts filter pill built its
+  border with `` `${TIER_COLORS[tier]}40` ``, string-concatenating a hex-alpha
+  suffix, which no `var()`-based approach could have survived.
+
+  A `tierClass()` helper preserves the old `?? '#a8a29e'` fallback exactly, so
+  abstained accounts (`NotAssessed`, `Insufficient Data`) keep the colour they
+  had; interpolating the tier straight into a class name would have silently
+  recoloured them. Two files needed same-file overrides where moving a rule
+  from Svelte-scoped (0-2-0) to global (0-1-0) would otherwise have lost the
+  cascade; two others correctly needed none.
+
+  No colour changed. A resolved-value diff — which resolves every `var()` back
+  to a literal and compares the result per file — reports zero deltas, and was
+  negative-controlled before any clean run was trusted.
+
+### Fixed
+- Give the scan queue ONE total order for display, position, and admission
+  (#271, #288). `enqueued_at` alone is a partial order — SQLite stores it as
+  RFC3339 text and Postgres stamps `NOW()`, so two requests landing in the same
+  tick tie — and the three places that consumed it disagreed about what to do
+  with a tie. `list_scan_queue` sorted on `(enqueued_at, user_did)` but counted
+  position as `enqueued_at <=`, so tied rows rendered 1st, 2nd, 3rd while every
+  one of them was told it was 3rd; `scan_queue_entry` repeated the same count;
+  and `claim_next_scan` ordered on `enqueued_at` alone, so the row admitted next
+  was not necessarily the row the dashboard showed as next. All six queries
+  across both backends now use `(enqueued_at, user_did)` — a row-value
+  comparison for the position counts, the same pair in both `ORDER BY`s. The
+  regression tests seed rows sharing one timestamp, which `enqueue_scan`'s
+  wall-clock stamp cannot produce, and assert distinct positions plus that
+  admission takes the row listed first.
+- Show the reason a scan failed in the admin dashboard's Last Scan cell (#288).
+  It was carried only by a `title` attribute on a non-focusable `<span>` —
+  unreachable by keyboard, unannounced by screen readers, and simply absent on
+  touch, so the failure detail this feature exists to surface was visible to
+  nobody who could not hover. The cell now renders the reason inline, shortened
+  to keep the column narrow, with the full untruncated string in a
+  visually-hidden sibling so assistive tech gets all of it.
+- Show the admin dashboard the real scan queue (#288). `GET /api/admin/users`
+  built its only scan column from the process-local `ScanManager`, so it knew
+  only about scans *this* process launched: the column was empty after a
+  redeploy, blind to a second replica, had no concept of `queued` — meaning an
+  admin-triggered scan, which since #257 is enqueued rather than launched,
+  showed nothing at all — and could not tell a failed scan from one that never
+  ran. Every other admission decision moved to the durable `scan_queue` row in
+  #257/#278; this was the last consumer left behind. A new
+  `Database::list_scan_queue` returns every row with its queue position, and
+  the handler uses that one query twice: to enrich each user with status,
+  position, start, finish and last error, and to render a `queue` panel of the
+  active rows against `CHARCOAL_SCAN_CONCURRENCY`. `fingerprint_building` stays
+  on `ScanManager`, which is the correct scope for it — it tracks a
+  `tokio::spawn` this process owns and has no durable row anywhere. A database
+  error now fails the request rather than degrading to "nobody has ever
+  scanned", because an operator acts on that.
+- Point the git hooks at the checked-out models (#284). The pre-push hook runs
+  `cargo test` without `CHARCOAL_MODEL_DIR`, and test binaries never load `.env`
+  (dotenvy runs in `main.rs` only) — so once the #257 queue tests started failing
+  loudly instead of passing silently, the hook blocked every push and the
+  variable had to be set by hand. It is now exported when a `models/` directory
+  exists and the caller has not set one.
+- Give `PublicAtpClient` a request timeout — 30s per request, 10s to connect
+  (#257). Async `reqwest` has **no** default timeout, so a Bluesky host that
+  accepted the connection and then never answered held its gather task forever.
+  The #182 retries above do not help: a request that never returns never
+  becomes an error to retry. This is the same defect already fixed for
+  Constellation in #235, and the same constants; under scan concurrency a
+  permanently-parked task costs a queue slot that never comes back. The
+  regression test asserts a stalled response gives up on its own clock —
+  without the timeout it takes the mock's full 30 seconds.
+- Make `eta_seconds` identical across the two database backends (#257). The
+  SQLite side measured completed scans with `num_seconds()`, which truncates,
+  while Postgres used `EXTRACT(EPOCH FROM ...)`, which keeps fractional
+  seconds — so the same scan history quoted a different wait either side of a
+  backend switch. SQLite now keeps the fraction rather than Postgres losing it:
+  `eta_seconds` multiplies the median by the batch count, so truncation
+  compounds (a 90.5s median two batches out is 181s, not 180s), and rounding
+  both would mean discarding precision Postgres already has. A cross-backend
+  parity test seeds both with the same hand-written timestamps and asserts they
+  answer the same.
+- Record the panic message when a background scan unwinds (#257). The
+  `catch_unwind` around the scan future dropped the payload and stored a fixed
+  `"Background scan panicked"`, and that string is what reaches *both*
+  `ScanStatus::last_error` and the durable `scan_queue` row — so a panicked
+  scan left no clue about its cause in either place. It now reuses
+  `scan_phases::panic_message`, the extractor the gather path already uses for
+  exactly this.
+- Stop the #257 HTTP queue tests from passing when the ONNX models are absent.
+  Each guarded on model availability and returned early, printing a skip line
+  that libtest discards for passing tests — five tests on this branch have
+  already asserted guarantees they never exercised. They now fail loudly with
+  the command that fixes the environment. (The wider cleanup of the older
+  model-gated tests is #269.)
+- Untrack `web/build/index.html` (#279). `web/build` is gitignored, but this
+  one file had been force-added, so it sat in the tree while the twelve hashed
+  assets it references did not. It was inert — CI and the Dockerfile both run
+  `npm run build` before any `--features web` cargo build, so the committed copy
+  was never the one deployed — but it had to be hand-refreshed on every frontend
+  change and misled anyone reading the tree. Removed from the index only; the
+  file stays on disk, where `include_dir!` needs it.
+- Make two `.impeccable/design.json` examples do what they claim. The brand
+  mark's description says the rings pulse and the core breathes, but its CSS
+  defined no animation at all — so the `prefers-reduced-motion` rule was
+  disabling nothing. Both animations are now present (4.5s cycle, rings
+  staggered 0.4s, per DESIGN.md), and the reduced-motion override has something
+  real to turn off. The navigation example described itself as fixed over a
+  gradient fade while sitting in normal flow; it now carries the
+  `position: fixed` / viewport offsets / `z-index: 100` the shipped nav uses.
+  These are copyable reference examples — the point is that they match the
+  system they document.
+- Add schema **v12**, which backfills `scan_queue.claim_id` (#257). v11 was
+  amended in place to add the fencing token while #257 was still on its branch —
+  reasonable, since v11 had never shipped, but not sufficient: a database created
+  from the *pre-amendment* v11 has a `scan_queue` with no `claim_id` **and**
+  version 11 already recorded, so both migration runners skip 0011 entirely and
+  the column is never added. Every claim, heartbeat and finish then fails with a
+  missing-column error. Amending 0011 cannot reach those databases; only a new
+  version can. No deployed environment is affected (staging and production both
+  stopped at v10 with no `scan_queue` table) — the exposed population is
+  developer machines that ran this branch mid-stream. The migration is a clean
+  no-op on a fresh database, where v11 already creates the column.
+- Report a failed queue read-back as `position: null` rather than `0` on both
+  scan-trigger endpoints (#257). The enqueue still succeeds and the answer is
+  still `202`, but `0` is a *real* position — it is what a `running` scan
+  reports — so falling back to it made "the database read failed" indistinguish-
+  able from "your scan is already running", with the error discarded on top. The
+  error is now logged and the unknown case is a value no successful read ever
+  produces. Same silent-failure shape already fixed in `delete_user` (#278).
+- Retry public Bluesky reads on 429 and 5xx (#182). Every read through
+  `PublicAtpClient` now makes up to 4 attempts, backing off exponentially from
+  250ms to 8s with jitter. A typed `XrpcAttemptError` decides what is
+  retryable rather than string-matching an `anyhow` chain: transport failures,
+  429 and 5xx back off, while other 4xx and deserialization failures return on
+  the first attempt instead of being retried into a guaranteed-identical
+  answer. Discovery had been capped at ~8 in-flight requests explicitly "until
+  #182 lands"; scan concurrency (#257) pushes in-flight requests past that
+  ceiling, and with no backoff a rate-limited read surfaced as a plain fetch
+  failure — which #236 shows can cost an entire account.
+- Gate `delete_user` on the durable `scan_queue` row rather than the
+  process-local `ScanManager` (#278). The old guard only knew about scans *this
+  process* launched, so it missed a user who was merely queued, one running on
+  another replica, and anything surviving a restart — every other admission
+  decision had already moved to the queue row and this one was left behind. A
+  database error in the new lookup is a `500` rather than an implicit yes:
+  the guard it replaced was an in-memory read that could not fail, so treating
+  "we cannot tell" as "go ahead" would delete a user out from under a live
+  scan, which is the one thing the check exists to prevent.
+- **`POST /api/scan` queues instead of refusing (#257).** Scans were globally
+  single-flight — one per *server* — so a second user got
+  `409 "Another scan is already in progress on this server"`. With open signup
+  (#256) and scans that run 22 minutes to 2 hours, that was the second user's
+  entire experience of Charcoal, all day. Both trigger endpoints now enqueue and
+  return `202` with a queue position and ETA; the background admitter is the one
+  and only thing that starts a scan, under `CHARCOAL_SCAN_CONCURRENCY`. The
+  admin trigger enqueues like everyone else rather than jumping the queue — one
+  admission path, so the cap (and the GPU spend behind it) holds absolutely.
+  `GET /api/status` now prefers the durable `scan_queue` row over the
+  process-local `ScanManager`, gaining a `queued` phase and a `queue` block that
+  is omitted entirely when the user is not waiting. The process-global
+  `any_running` flag is deleted: with the queue as the admission authority it
+  could only disagree with it, and it disagreed in both directions — refusing
+  admin triggers whenever any admitted scan ran, and letting an extra scan past
+  the cap when the first of two concurrent scans cleared it globally.
+- Refuse to start a second pipeline for a user whose first is still executing
+  (#273). `run_admitter` reclaims lapsed leases and admits in the *same* pass
+  with no delay between them, and `claim_next_scan` takes the oldest queued row
+  — which is very often the row the reclaim just re-queued, for a user whose
+  pipeline is still running. Two pipelines then wrote the same `scan_state`
+  resume markers (#208) and both drained `classification_queue` against RunPod,
+  where the `$2` cost ceiling is *per scan* and was therefore paid twice, with
+  real concurrency exceeding the cap. The fencing token alone did not cover
+  this: the successor starts long before the predecessor's next beat, and if the
+  lease lapsed *because* `heartbeat_scan` was erroring, `heartbeat_until_lost`
+  retries through `Err` and may never notice. Admission now also consults an
+  in-process registry of live claims, released on every exit by a guard. It is
+  deliberately not keyed on `ScanManager`, whose entry still says "running" on
+  purpose — that guard would refuse the successor forever.
+- Fence every scan-status write on the claim that owns it (#274). `run_scan`
+  writes its terminal status from *inside* the scan future, before
+  `run_under_slot` ever classifies the exit, so a superseded worker whose
+  pipeline finished inside the window had already stamped `Done` over its
+  successor's live entry by the time the `Completed` arm ran and correctly did
+  nothing; every `set_progress` call in that window landed there too. A previous
+  fix covered only the `Abandoned` exit arm, which is the one path that write
+  never takes. Ownership now lives on the status entry itself and a stale write
+  is a no-op, which also lets the abandonment path report honestly instead of
+  leaving a "running" label that would never change.
+- Drop the `AtCapacity` admission log from WARN to INFO (#275). It fires on
+  every 30s tick for as long as any backlog exists — ~120 lines an hour — and
+  under open signup a standing backlog is the expected steady state, not an
+  incident. At WARN it trains an operator to filter WARN, which costs them the
+  `Wedged` ERROR that actually means something.
 - Clear `scan_skips` when an account is deleted (#234). `delete_user_data`
   cleared every user-scoped table except `scan_skips` (added in v10, #226), so a
   deleted account left behind the user's DID, the DIDs of accounts scanned on
@@ -80,6 +351,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of a misleading `[tox: 0.00]`.
 
 ### Changed
+- Give the R2 backups history, a sanity gate, and a 30-day expiry (#286).
+  Cloudflare R2 does **not** implement bucket versioning — `PutBucketVersioning`,
+  `GetBucketVersioning` and `ListObjectVersions` are all unimplemented — so
+  `s3://charcoal-backups/issues.db` was a single object with no history that
+  every commit overwrote. On 2026-08-07 that came within one commit of being
+  unrecoverable: checking out an old branch that *tracks* `.chainlink/issues.db`
+  destroyed the live database, chainlink silently created an empty one, and a
+  commit in that state would have uploaded it over the only good copy. Since the
+  storage layer offers no versioning, the hook now creates the history itself —
+  each upload also writes `history/<name>-<UTC>.db` — and refuses to upload a
+  database with implausibly few rows, which is the guard that actually blocks
+  that failure. A `expire-backup-history-30d` lifecycle rule expires the
+  `history/` prefix after 30 days; the canonical pair is deliberately outside it.
+- Animate the classification progress bar with `transform: scaleX()` instead of
+  `width` (#280). Transitioning `width` relayouts on every frame of the 0.5s
+  animation; `transform` is composited. The gradient is unaffected — it spans
+  the element either way, so compressing it by scale matches compressing it by
+  width — and the only real difference is that `scaleX` squashes the 3px radius
+  horizontally on the growing edge, which is sub-pixel on a 6px-tall bar.
+- Load the three ONNX models once at boot into shared state instead of per
+  scan, and refuse to start the server when any of them is missing (#257).
+  Concurrent scans would each pay ~500MB otherwise — the fp32 NLI export (#231)
+  is 284MB of it — which is what made concurrency a memory problem rather than
+  merely an untidy one. Two operational consequences to know before deploying:
+  **the server now fails to boot on a broken model volume** rather than
+  degrading scan by scan, so a bad volume surfaces as a failed deploy instead of
+  as user-visible scan failures hours later; and **idle memory rises from
+  ~0.78GB to ~1.28GB**, which Railway meters continuously (#188) even on days
+  nobody scans.
+- Cover the six `scan_queue` methods on SQLite, which is the default backend and had none. Closes a regression gap rather than a bug — a reviewer hand-verified no divergence from Postgres exists today, but the #257 fix wave had changed SQLite's transaction behaviour to `BEGIN IMMEDIATE`, added `UPDATE .. RETURNING`, and added the `claim_id` fencing guard, none of it exercised. The two ETA cases are split deliberately: both the status gate and the median branch return `None`, so a single test would pass for the wrong reason (#270)
 - Verify danabra.mov re-scan 2026-07-20 (post-#224) (#229)
 - Railway drops scan logs at 500/sec — observability gap during scans (#226)
 - Diagnose degraded=true on the 8174-account staging scan (2026-07-19) (#220)
@@ -87,6 +388,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Batch the 5 NLI hypotheses into one padded `[5, max_len]` forward pass instead of 5 sequential single-item inferences — ~5× fewer NLI ONNX runs, biggest in the amplification event loop (NLI per event). NOTE: the quantized `nli-deberta-v3-xsmall` export is not perfectly padding-invariant, so batching shifts `context_score` by a small, systematic amount — **measured on macOS ARM64 only** (≈0.006 on the final hostility, ≈0.002–0.008 per hypothesis), and accepted *on that platform* as within the model's own quantization noise and immaterial to threat tiers (bands 8/15/35). A model-gated unit test at a 0.02 tolerance was intended to pin the batch-vs-single equivalence, but it never actually executed in CI (it read `default_model_dir()` while CI sets `CHARCOAL_MODEL_DIR`), so **nothing has ever enforced this bound** (#213). **CORRECTION (#231):** on Linux x86_64 — the platform production runs on — the same model bytes diverge by **0.14** on hypothesis 0 (batched 0.031 vs single 0.172), far outside that tolerance. The equivalence claim was therefore never verified where it matters. **RESOLVED (#231):** the cause was the quantized export's runtime per-tensor activation scale, not padding; the fp32 export makes batching exact on both platforms, and the equivalence test is un-quarantined at a `1e-4` tolerance. The batching speedup here was also overstated — measured 1.69x, not ~5x (#213)
 
 ### Added
+- Phase A now logs where its time actually goes — Bluesky fetch vs the Stage-1
+  ONNX pass vs the Stage-2 clean pass, with an `inference_pct` (#264). The #257
+  concurrency default rested on an estimate that Phase A was "~100% Bluesky
+  I/O"; it is not, because `gather.rs` runs ONNX inference in the same phase, on
+  the shared model mutex. Stage 1 and Stage 2 are separate buckets on purpose —
+  Stage 1 runs for every account, Stage 2 only for survivors, so folding them
+  together would blur two different questions. This is the number that decides
+  whether raising `CHARCOAL_SCAN_CONCURRENCY` helps: under ~10% inference,
+  concurrency 2 should approach 2x; at 30%+ the mutex is the ceiling and the
+  lever is a session pool instead of more concurrency.
 - Add handle typeahead to the login screen (proxied via backend) (#227)
 - Onboarding scan progress + live threat visibility in web UI (#1)
 - Batched RunPod classifier — the burst phase now sends **N post texts per `/runsync` request** instead of one, so vLLM's continuous batching (`max_num_seqs=32`) does the on-GPU parallelism and the queue-bound warm-idle waste (RunPod `delayTime` ~3-4s vs `executionTime` ~0.13s) collapses toward the compute floor — targeting ~$1/onboarding vs the prior ~$6-10. Handler and Rust client are batch-only (`{"input":{"contents":[…]}}` → `{"output":{"verdicts":[…]}}`); a post that fails to decode is recorded as an explicit benign `decode-error` sentinel (fail-open, logged + metered + scan `degraded`) rather than failing the batch or livelocking resume. Additive `classify_batch`/`max_batch_size` on the classifier trait keep Zentropi 1-per-call. New env: `CHARCOAL_RUNPOD_BATCH_SIZE` — texts per RunPod request (default 32 = handler `max_num_seqs`, clamped 1–128); in-flight texts ≈ `CHARCOAL_BURST_CONCURRENCY` × this (#186)

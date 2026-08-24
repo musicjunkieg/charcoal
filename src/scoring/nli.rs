@@ -249,10 +249,15 @@ impl NliScorer {
             };
 
             // Softmax each row's 3 logits → entailment probability.
-            // (data.len() == batch * 3, guaranteed by the shape check above.)
+            // (data.len() == batch * 3, guaranteed by the shape check above.
+            // as_chunks over chunks_exact: CI's clippy 1.98 enforces
+            // chunks_exact_to_as_chunks; the discarded remainder is empty
+            // by the same shape guarantee.)
             Ok(logits_data
-                .chunks_exact(3)
-                .map(softmax_entailment)
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|chunk| softmax_entailment(chunk))
                 .collect())
         })
         .await

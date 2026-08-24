@@ -6,16 +6,12 @@
 	import { AuthError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
 	import LabelButtons from '$lib/components/LabelButtons.svelte';
+	import { tierClass } from '$lib/tier-class';
+	import '$lib/website/styles/tokens.css';
+	import '$lib/website/styles/tiers.css';
 
 	let asUser = $derived($page.url.searchParams.get('as_user'));
 	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
-
-	const TIER_COLORS: Record<string, string> = {
-		High: '#fca5a5',
-		Elevated: '#fdba74',
-		Watch: '#fcd34d',
-		Low: '#a8a29e'
-	};
 
 	let account = $state<Account | null>(null);
 	let loading = $state(true);
@@ -105,7 +101,7 @@
 			</div>
 			<div class="score-card">
 				{#if account.threat_tier}
-					<div class="score-value" style="color: {TIER_COLORS[account.threat_tier] ?? '#a8a29e'}">
+					<div class="score-value {tierClass(account.threat_tier)}">
 						{account.threat_tier}
 					</div>
 				{:else}
@@ -187,10 +183,10 @@
 			<section class="section">
 				<h2 class="section-title">Evidence — Top Toxic Posts</h2>
 				<div class="posts-list">
-					{#each account.top_toxic_posts as post}
+					{#each account.top_toxic_posts as post (post.uri)}
 						<div class="post-card">
 							<div class="post-header">
-								<span class="tox-badge" style="background: rgba(248, 113, 113, {Math.min(1, post.toxicity) * 0.3})">
+								<span class="tox-badge" style="background: rgb(var(--status-error-rgb) / {Math.min(1, post.toxicity) * 0.3})">
 									Toxicity: {(post.toxicity * 100).toFixed(0)}%
 								</span>
 								<a
@@ -215,20 +211,20 @@
 	.back-link {
 		display: inline-block;
 		font-size: 0.875rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		text-decoration: none;
 		margin-bottom: 1.5rem;
 		transition: color 0.2s;
 	}
 
-	.back-link:hover { color: #a8a29e; }
+	.back-link:hover { color: var(--charcoal-400); }
 
 	.loading-state { display: flex; justify-content: center; padding: 4rem 0; }
 
 	.spinner {
 		width: 32px; height: 32px;
-		border: 2px solid rgba(201, 149, 108, 0.2);
-		border-top-color: #c9956c;
+		border: 2px solid rgb(var(--copper-rgb) / 0.2);
+		border-top-color: var(--copper);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
@@ -238,18 +234,18 @@
 	.not-found {
 		padding: 3rem 0;
 		text-align: center;
-		color: #78716c;
+		color: var(--charcoal-500);
 	}
 
-	.not-found h2 { font-size: 1.25rem; color: #d6d3d1; margin-bottom: 0.5rem; }
+	.not-found h2 { font-size: 1.25rem; color: var(--charcoal-300); margin-bottom: 0.5rem; }
 
 	.not-scored-banner {
 		padding: 1rem 1.25rem;
 		margin-bottom: 1.5rem;
-		background: rgba(245, 158, 11, 0.08);
-		border: 1px solid rgba(245, 158, 11, 0.2);
+		background: rgb(var(--amber-500-rgb) / 0.08);
+		border: 1px solid rgb(var(--amber-500-rgb) / 0.2);
 		border-radius: 10px;
-		color: #fcd34d;
+		color: var(--tier-watch);
 		font-size: 0.875rem;
 		line-height: 1.5;
 	}
@@ -267,20 +263,20 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.875rem;
 		font-weight: 400;
-		color: #fffbeb;
+		color: var(--cream-50);
 		letter-spacing: -0.01em;
 	}
 
-	.did { font-size: 0.8125rem; color: #57534e; margin-top: 0.25rem; font-family: monospace; }
+	.did { font-size: 0.8125rem; color: var(--charcoal-600); margin-top: 0.25rem; font-family: monospace; }
 
 	.bsky-link {
 		padding: 0.5rem 1rem;
 		font-size: 0.875rem;
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.1);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.1);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 8px;
 		text-decoration: none;
 		transition: background 0.2s;
@@ -288,13 +284,13 @@
 		flex-shrink: 0;
 	}
 
-	.bsky-link:hover { background: rgba(201, 149, 108, 0.18); }
+	.bsky-link:hover { background: rgb(var(--copper-rgb) / 0.18); }
 
 	.label-section {
 		margin-bottom: 1.5rem;
 		padding: 1rem 1.25rem;
-		background: rgba(28, 25, 23, 0.4);
-		border: 1px solid rgba(168, 162, 158, 0.08);
+		background: rgb(var(--charcoal-900-rgb) / 0.4);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.08);
 		border-radius: 12px;
 	}
 
@@ -307,8 +303,8 @@
 
 	.score-card {
 		padding: 1.25rem 1rem;
-		background: rgba(28, 25, 23, 0.6);
-		border: 1px solid rgba(168, 162, 158, 0.1);
+		background: rgb(var(--charcoal-900-rgb) / 0.6);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		border-radius: 12px;
 		text-align: center;
 	}
@@ -317,24 +313,36 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.75rem;
 		font-weight: 400;
-		color: #fef3c7;
+		color: var(--cream-100);
 		line-height: 1;
 		margin-bottom: 0.5rem;
 	}
 
-	.score-value.muted { color: #57534e; }
+	.score-value.muted { color: var(--charcoal-600); }
+
+	/* Overrides .score-value's own colour above: without these, the plain
+	   global .tier-* rules (specificity 0-1-0) lose to this file's own
+	   .score-value rule (0-2-0 once Svelte's scoping class is attached),
+	   the same way .score-value.muted and .signal-value.warn below already
+	   override the base rule for their class. The inline style this
+	   replaced always won regardless of specificity; a bare tier-* class
+	   would not have. */
+	.score-value.tier-high { color: var(--tier-high); }
+	.score-value.tier-elevated { color: var(--tier-elevated); }
+	.score-value.tier-watch { color: var(--tier-watch); }
+	.score-value.tier-low { color: var(--tier-low); }
 
 	.score-label {
 		font-size: 0.75rem;
 		font-weight: 500;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
-		color: #57534e;
+		color: var(--charcoal-600);
 	}
 
 	.meta {
 		font-size: 0.8125rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		margin-bottom: 2rem;
 	}
 
@@ -345,7 +353,7 @@
 		font-weight: 600;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #78716c;
+		color: var(--charcoal-500);
 		margin-bottom: 1rem;
 	}
 
@@ -359,41 +367,41 @@
 		gap: 0.75rem;
 	}
 
-	.signal-label { font-size: 0.875rem; color: #a8a29e; }
+	.signal-label { font-size: 0.875rem; color: var(--charcoal-400); }
 
 	.signal-bar-wrap {
 		height: 4px;
-		background: rgba(168, 162, 158, 0.1);
+		background: rgb(var(--charcoal-400-rgb) / 0.1);
 		border-radius: 2px;
 		overflow: hidden;
 	}
 
 	.signal-bar {
 		height: 100%;
-		background: linear-gradient(90deg, #c9956c, #f59e0b);
+		background: linear-gradient(90deg, var(--copper), var(--amber-500));
 		border-radius: 2px;
 		transition: width 0.5s ease;
 	}
 
 	.signal-value {
 		font-size: 0.875rem;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		min-width: 3.5rem;
 		text-align: right;
 	}
 
 	.signal-value.alone { grid-column: 2 / -1; justify-self: end; }
-	.signal-value.warn { color: #fdba74; }
+	.signal-value.warn { color: var(--tier-elevated); }
 
-	.empty-text { font-size: 0.9375rem; color: #57534e; }
+	.empty-text { font-size: 0.9375rem; color: var(--charcoal-600); }
 
 	/* Posts */
 	.posts-list { display: flex; flex-direction: column; gap: 0.75rem; }
 
 	.post-card {
 		padding: 1rem;
-		background: rgba(28, 25, 23, 0.5);
-		border: 1px solid rgba(168, 162, 158, 0.08);
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.08);
 		border-radius: 10px;
 	}
 
@@ -407,27 +415,27 @@
 	.tox-badge {
 		font-size: 0.8125rem;
 		font-weight: 500;
-		color: #f87171;
+		color: var(--status-error);
 		padding: 0.25rem 0.625rem;
 		border-radius: 6px;
-		border: 1px solid rgba(248, 113, 113, 0.2);
+		border: 1px solid rgb(var(--status-error-rgb) / 0.2);
 	}
 
 	.post-link {
 		font-size: 0.8125rem;
-		color: #78716c;
+		color: var(--charcoal-500);
 		text-decoration: none;
 	}
 
-	.post-link:hover { color: #a8a29e; }
+	.post-link:hover { color: var(--charcoal-400); }
 
 	.post-text {
 		font-size: 0.9375rem;
-		color: #d6d3d1;
+		color: var(--charcoal-300);
 		line-height: 1.6;
 	}
 
-	.muted { color: #57534e; }
+	.muted { color: var(--charcoal-600); }
 
 	@media (max-width: 640px) {
 		.score-grid { grid-template-columns: repeat(2, 1fr); }

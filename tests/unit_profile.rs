@@ -57,6 +57,7 @@ fn unrelated_fingerprint() -> TopicFingerprint {
                 "redshift".to_string(),
                 "telescope".to_string(),
             ],
+            keyword_scores: vec![],
             weight: 1.0,
         }],
         post_count: 100,
@@ -121,9 +122,99 @@ async fn stage1_insufficient_data_when_fewer_than_five_posts() {
 
 #[tokio::test]
 async fn stage1_early_exit_low_when_clean_and_irrelevant() {
-    // 6 first-person originals (>= MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT), all
-    // scored 0.0 by the fixed scorer (< ONNX_CLEAN_THRESHOLD 0.10), and topics
-    // that don't overlap the astrophysics fingerprint (< overlap gate 0.15).
+    // 15 first-person originals (>= MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT, and
+    // >= 15 so FingerprintQuality::from_counts is Normal — a reliable
+    // fingerprint is required to legitimately authorize the early exit;
+    // Unreliable-quality blocking is covered directly by unit tests on
+    // `should_early_exit_stage1`, #296 Task 6), all scored 0.0 by the fixed
+    // scorer (< ONNX_CLEAN_THRESHOLD 0.10), and topics that don't overlap the
+    // astrophysics fingerprint (< overlap gate 0.15).
+    let originals = vec![
+        post("at://a/1", "had a lovely sandwich for lunch today"),
+        post("at://a/2", "the weather is sunny and warm this morning"),
+        post("at://a/3", "watering my tomato plants in the garden"),
+        post("at://a/4", "made fresh coffee and read a paperback novel"),
+        post("at://a/5", "took the dog for a walk around the park"),
+        post("at://a/6", "baking bread this weekend, smells wonderful"),
+        post(
+            "at://a/7",
+            "reorganized my bookshelf by color this afternoon",
+        ),
+        post("at://a/8", "tried a new recipe for vegetable soup"),
+        post("at://a/9", "went for a bike ride along the river trail"),
+        post(
+            "at://a/10",
+            "planted some basil and thyme in the window box",
+        ),
+        post("at://a/11", "finished knitting a scarf for the winter"),
+        post("at://a/12", "cleaned out the garage over the weekend"),
+        post("at://a/13", "watched the sunset from the back porch"),
+        post("at://a/14", "made pancakes for breakfast with the kids"),
+        post("at://a/15", "repainted the fence a nice shade of blue"),
+    ];
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 15,
+    };
+    let scorer = FixedScorer(0.0);
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let outcome = stage1_outcome(
+        &sample,
+        &scorer,
+        "clean.bsky.social",
+        "did:plc:clean",
+        &fp,
+        &weights,
+        None,
+    )
+    .await
+    .expect("stage1_outcome should not error");
+
+    match outcome {
+        Stage1Outcome::Terminal(score) => {
+            assert_eq!(score.threat_tier.as_deref(), Some("Low"));
+            assert_eq!(score.threat_score, Some(0.0));
+            assert_eq!(score.toxicity_score, Some(0.0));
+            assert_eq!(score.posts_analyzed, 15);
+            assert_eq!(score.scoring_confidence.as_deref(), Some("low"));
+            assert_eq!(score.fingerprint_quality.as_deref(), Some("normal"));
+        }
+        Stage1Outcome::Proceed { .. } => {
+            panic!("expected Terminal early-exit for clean + irrelevant account")
+        }
+    }
+}
+
+// ============================================================
+// stage1_outcome — caller wiring: Unreliable fingerprint blocks early exit
+// (#296 Task 6)
+// ============================================================
+
+#[tokio::test]
+async fn stage1_no_early_exit_when_fingerprint_unreliable() {
+    // Regression test for the CALLER wiring, not the pure function.
+    // `should_early_exit_stage1` has unit tests proving it returns false for
+    // Unreliable quality, but nothing at the integration level proved
+    // `stage1_outcome` actually computes quality via
+    // `FingerprintQuality::from_counts` and passes it through. Before that
+    // wiring existed, this exact sample (small, clean, topically irrelevant)
+    // early-exited to Terminal("Low") same as the 15-original case above.
+    //
+    // 6 first-person originals (>= MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT's 5,
+    // so the onnx_scores.len() gate alone would allow early exit) but < 15,
+    // with 0 replies/quotes, so FingerprintQuality::from_counts(6, 0) is
+    // Unreliable (< 15 total posts). All posts score 0.0 by the fixed scorer
+    // (< ONNX_CLEAN_THRESHOLD 0.10), and topics don't overlap the
+    // astrophysics fingerprint (< overlap gate 0.15) — every other early-exit
+    // condition is satisfied. The only thing that should block the exit is
+    // the Unreliable quality flowing from stage1_outcome into
+    // should_early_exit_stage1.
     let originals = vec![
         post("at://a/1", "had a lovely sandwich for lunch today"),
         post("at://a/2", "the weather is sunny and warm this morning"),
@@ -157,17 +248,11 @@ async fn stage1_early_exit_low_when_clean_and_irrelevant() {
     .expect("stage1_outcome should not error");
 
     match outcome {
-        Stage1Outcome::Terminal(score) => {
-            assert_eq!(score.threat_tier.as_deref(), Some("Low"));
-            assert_eq!(score.threat_score, Some(0.0));
-            assert_eq!(score.toxicity_score, Some(0.0));
-            assert_eq!(score.posts_analyzed, 6);
-            assert_eq!(score.scoring_confidence.as_deref(), Some("low"));
-            assert!(score.fingerprint_quality.is_some());
-        }
-        Stage1Outcome::Proceed { .. } => {
-            panic!("expected Terminal early-exit for clean + irrelevant account")
-        }
+        Stage1Outcome::Proceed { .. } => {}
+        Stage1Outcome::Terminal(_) => panic!(
+            "expected Proceed: Unreliable fingerprint quality must block the \
+             Stage 1 early exit even when scores are clean and overlap is low"
+        ),
     }
 }
 
@@ -399,6 +484,7 @@ async fn score_from_sample_survivor_no_context() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on
@@ -536,6 +622,7 @@ async fn score_from_sample_uses_precomputed_target_embedding_without_an_embedder
         &weights,
         None,               // embedder — deliberately absent; precomputed must win
         Some(&protected),   // protected_embedding
+        None,               // protected_topic_centroids (legacy fingerprint)
         Some(&precomputed), // precomputed_target_embedding (NEW, from gather)
         0.0,                // median_engagement
         false,              // pile_on
@@ -558,4 +645,257 @@ async fn score_from_sample_uses_precomputed_target_embedding_without_an_embedder
         (overlap - expected_overlap).abs() < 1e-12,
         "precomputed overlap {overlap} != expected cosine {expected_overlap}"
     );
+}
+
+/// Shared fixture for the #297 overlap tests: five clean originals, no
+/// embedder, and a precomputed target vector — the same shape as the
+/// precomputed-path test above. Only the centroid argument varies.
+fn two_topic_sample() -> (
+    PostSample,
+    Vec<String>,
+    Vec<Option<String>>,
+    Vec<BinaryVerdict>,
+) {
+    let originals: Vec<Post> = (0..5)
+        .map(|i| post(&format!("at://o/{i}"), &format!("original {i}")))
+        .collect();
+    let all_post_texts: Vec<String> = originals.iter().map(|p| p.text.clone()).collect();
+    let contexts: Vec<Option<String>> = vec![None; 5];
+    let verdicts: Vec<_> = (0..5).map(|_| binary_verdict(false, 0.1)).collect();
+
+    let sample = PostSample {
+        originals,
+        replies: vec![],
+        quotes: vec![],
+        reply_ratio: 0.0,
+        quote_ratio: 0.0,
+        total_posts: 5,
+    };
+
+    (sample, all_post_texts, contexts, verdicts)
+}
+
+#[tokio::test]
+async fn multi_topic_centroids_use_max_and_record_legacy_shadow() {
+    // Protected user has two orthogonal topics; the candidate's precomputed
+    // centroid sits exactly on topic B. Live overlap must be ~1.0 (max over
+    // topics); overlap_legacy must be the much lower mean-centroid cosine.
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+    let centroids = vec![topic_a, topic_b];
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,             // embedder — absent; the precomputed vector must win
+        Some(&mean),      // protected_embedding (pre-#297 mean centroid)
+        Some(&centroids), // protected_topic_centroids (#297)
+        Some(&candidate), // precomputed_target_embedding
+        0.0,              // median_engagement
+        false,            // pile_on
+        None,             // nli_scorer
+        None,             // protected_posts_with_embeddings
+        None,             // direct_pairs
+        None,             // data_dir
+        None,             // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    assert!(
+        overlap > 0.99,
+        "live overlap should be max-over-topics, got {overlap}"
+    );
+    let legacy = score.overlap_legacy.unwrap();
+    assert!(
+        legacy < 0.85,
+        "legacy shadow should be the smeared mean cosine, got {legacy}"
+    );
+    assert!(overlap > legacy);
+
+    // The ally invariant: max-over-topics raises overlap for people who share
+    // the protected user's topics, and every verdict here is clean. Topic
+    // proximity alone must not move the tier.
+    assert_eq!(
+        score.threat_tier.as_deref(),
+        Some("Low"),
+        "near-perfect topic overlap with zero toxicity must stay Low"
+    );
+}
+
+/// #302/CodeRabbit PR #102: SQLite stores centroids as unconstrained JSON, so
+/// a stored centroid can be the wrong width. Scoring it as 0.0 would read as
+/// "no overlap" and suppress the legacy fallback — the live overlap must
+/// degrade to the mean-centroid cosine instead.
+#[tokio::test]
+async fn wrong_width_centroids_degrade_to_legacy_behavior() {
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+    // Every stored centroid is unusable against a 384-dim candidate.
+    let centroids = vec![vec![1.0; 8], vec![0.5; 16]];
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,             // embedder
+        Some(&mean),      // protected_embedding
+        Some(&centroids), // protected_topic_centroids — all wrong width
+        Some(&candidate), // precomputed_target_embedding
+        0.0,              // median_engagement
+        false,            // pile_on
+        None,             // nli_scorer
+        None,             // protected_posts_with_embeddings
+        None,             // direct_pairs
+        None,             // data_dir
+        None,             // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    let legacy = score.overlap_legacy.unwrap();
+    assert!(
+        (overlap - legacy).abs() < 1e-9,
+        "live {overlap} must fall back to legacy {legacy}, not a fabricated 0.0"
+    );
+    assert!(overlap > 0.0, "the legacy cosine here is positive");
+}
+
+#[tokio::test]
+async fn empty_centroids_degrade_to_legacy_behavior() {
+    // Pre-#297 fingerprint: no centroid rows. Live overlap == legacy overlap
+    // == mean-centroid cosine; shadow still recorded.
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,             // embedder
+        Some(&mean),      // protected_embedding
+        None,             // protected_topic_centroids — legacy fingerprint
+        Some(&candidate), // precomputed_target_embedding
+        0.0,              // median_engagement
+        false,            // pile_on
+        None,             // nli_scorer
+        None,             // protected_posts_with_embeddings
+        None,             // direct_pairs
+        None,             // data_dir
+        None,             // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    let legacy = score.overlap_legacy.unwrap();
+    assert!((overlap - legacy).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn empty_vec_centroids_degrade_same_as_none() {
+    // Production call sites pass Some(&vec) where the vec is EMPTY for pre-#297
+    // data. This must degrade identically to None: live overlap == legacy overlap
+    // == mean-centroid cosine; shadow still recorded.
+    let dim = charcoal::topics::embeddings::EMBEDDING_DIM;
+    let mut topic_a = vec![0.0; dim];
+    topic_a[0] = 1.0;
+    let mut topic_b = vec![0.0; dim];
+    topic_b[100] = 1.0;
+    let mean = charcoal::topics::embeddings::normalized_mean_embedding(&[
+        topic_a.clone(),
+        topic_b.clone(),
+    ]);
+    let candidate = topic_b.clone();
+    let empty: Vec<Vec<f64>> = Vec::new();
+
+    let (sample, all_post_texts, contexts, verdicts) = two_topic_sample();
+    let weights = ThreatWeights::default();
+    let fp = unrelated_fingerprint();
+
+    let score = score_from_sample(
+        &sample,
+        &all_post_texts,
+        &contexts,
+        &verdicts,
+        &fp,
+        &weights,
+        None,                   // embedder
+        Some(&mean),            // protected_embedding
+        Some(empty.as_slice()), // protected_topic_centroids — empty vec
+        Some(&candidate),       // precomputed_target_embedding
+        0.0,                    // median_engagement
+        false,                  // pile_on
+        None,                   // nli_scorer
+        None,                   // protected_posts_with_embeddings
+        None,                   // direct_pairs
+        None,                   // data_dir
+        None,                   // graph_distance
+        "survivor.bsky.social",
+        "did:plc:survivor",
+        None, // stage1_overlap
+    )
+    .await
+    .expect("score_from_sample should not error");
+
+    let overlap = score.topic_overlap.unwrap();
+    let legacy = score.overlap_legacy.unwrap();
+    assert!((overlap - legacy).abs() < 1e-9);
 }

@@ -5,17 +5,14 @@
 	import { getAccounts } from '$lib/api.js';
 	import { AuthError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
+	import { tierClass } from '$lib/tier-class';
+	import '$lib/website/styles/tokens.css';
+	import '$lib/website/styles/tiers.css';
 
 	let asUser = $derived($page.url.searchParams.get('as_user'));
 	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
 
 	const TIERS = ['All', 'High', 'Elevated', 'Watch', 'Low'] as const;
-	const TIER_COLORS: Record<string, string> = {
-		High: '#fca5a5',
-		Elevated: '#fdba74',
-		Watch: '#fcd34d',
-		Low: '#a8a29e'
-	};
 
 	let accounts = $state<Account[]>([]);
 	let total = $state(0);
@@ -92,12 +89,12 @@
 	<!-- Filters -->
 	<div class="filters">
 		<div class="tier-pills">
-			{#each TIERS as tier}
+			{#each TIERS as tier (tier)}
 				<button
 					class="pill"
 					class:active={selectedTier === tier}
+					data-tier={tier}
 					onclick={() => applyTier(tier)}
-					style={tier !== 'All' && selectedTier === tier ? `color: ${TIER_COLORS[tier]}; border-color: ${TIER_COLORS[tier]}40` : ''}
 				>{tier}</button>
 			{/each}
 		</div>
@@ -152,7 +149,7 @@
 							</td>
 							<td class="col-tier">
 								{#if account.threat_tier}
-									<span class="tier-badge" style="color: {TIER_COLORS[account.threat_tier] ?? '#a8a29e'}">
+									<span class="tier-badge {tierClass(account.threat_tier)}">
 										{account.threat_tier}
 									</span>
 								{:else}
@@ -201,13 +198,13 @@
 		font-family: 'Libre Baskerville', Georgia, serif;
 		font-size: 1.75rem;
 		font-weight: 400;
-		color: #fffbeb;
+		color: var(--cream-50);
 	}
 
 	.total-badge {
 		font-size: 0.8125rem;
-		color: #78716c;
-		background: rgba(168, 162, 158, 0.08);
+		color: var(--charcoal-500);
+		background: rgb(var(--charcoal-400-rgb) / 0.08);
 		padding: 0.25rem 0.625rem;
 		border-radius: 999px;
 	}
@@ -227,34 +224,51 @@
 		font-size: 0.875rem;
 		font-weight: 400;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #78716c;
-		background: rgba(28, 25, 23, 0.6);
-		border: 1px solid rgba(168, 162, 158, 0.12);
+		color: var(--charcoal-500);
+		background: rgb(var(--charcoal-900-rgb) / 0.6);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.12);
 		border-radius: 999px;
 		cursor: pointer;
 		transition: all 0.2s;
 	}
 
-	.pill:hover { color: #d6d3d1; border-color: rgba(168, 162, 158, 0.25); }
-	.pill.active { color: #fef3c7; background: rgba(201, 149, 108, 0.12); border-color: rgba(201, 149, 108, 0.3); }
+	.pill:hover { color: var(--charcoal-300); border-color: rgb(var(--charcoal-400-rgb) / 0.25); }
+	.pill.active { color: var(--cream-100); background: rgb(var(--copper-rgb) / 0.12); border-color: rgb(var(--copper-rgb) / 0.3); }
+
+	.pill.active[data-tier='High'] {
+		color: var(--tier-high);
+		border-color: rgb(var(--tier-high-rgb) / 0.25);
+	}
+	.pill.active[data-tier='Elevated'] {
+		color: var(--tier-elevated);
+		border-color: rgb(var(--tier-elevated-rgb) / 0.25);
+	}
+	.pill.active[data-tier='Watch'] {
+		color: var(--tier-watch);
+		border-color: rgb(var(--tier-watch-rgb) / 0.25);
+	}
+	.pill.active[data-tier='Low'] {
+		color: var(--tier-low);
+		border-color: rgb(var(--tier-low-rgb) / 0.25);
+	}
 
 	.search-row { flex: 1; min-width: 200px; }
 
 	.search-box {
 		display: flex;
 		align-items: center;
-		background: rgba(12, 10, 9, 0.6);
-		border: 1px solid rgba(168, 162, 158, 0.12);
+		background: rgb(var(--charcoal-950-rgb) / 0.6);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.12);
 		border-radius: 10px;
 		padding: 0 0.875rem;
 	}
 
 	.search-box:focus-within {
-		border-color: #c9956c;
-		box-shadow: 0 0 0 2px rgba(201, 149, 108, 0.1);
+		border-color: var(--copper);
+		box-shadow: 0 0 0 2px rgb(var(--copper-rgb) / 0.1);
 	}
 
-	.search-at { color: #44403c; font-size: 0.9375rem; margin-right: 0.25rem; }
+	.search-at { color: var(--charcoal-700); font-size: 0.9375rem; margin-right: 0.25rem; }
 
 	.search-input {
 		flex: 1;
@@ -263,38 +277,38 @@
 		padding: 0.625rem 0;
 		font-size: 0.875rem;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #fef3c7;
+		color: var(--cream-100);
 		outline: none;
 	}
 
-	.search-input::placeholder { color: #44403c; }
+	.search-input::placeholder { color: var(--charcoal-700); }
 
 	.search-btn {
 		padding: 0.375rem 0.75rem;
 		font-size: 0.8125rem;
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #c9956c;
+		color: var(--copper);
 		background: transparent;
 		border: none;
 		cursor: pointer;
 	}
 
-	.search-btn:hover { color: #e8b48a; }
+	.search-btn:hover { color: var(--copper-light); }
 
 	.loading-state { display: flex; justify-content: center; padding: 4rem 0; }
 
 	.spinner {
 		width: 32px; height: 32px;
-		border: 2px solid rgba(201, 149, 108, 0.2);
-		border-top-color: #c9956c;
+		border: 2px solid rgb(var(--copper-rgb) / 0.2);
+		border-top-color: var(--copper);
 		border-radius: 50%;
 		animation: spin 0.8s linear infinite;
 	}
 
 	@keyframes spin { to { transform: rotate(360deg); } }
 
-	.empty-state { padding: 3rem 0; text-align: center; color: #57534e; font-size: 0.9375rem; }
+	.empty-state { padding: 3rem 0; text-align: center; color: var(--charcoal-600); font-size: 0.9375rem; }
 
 	.table-wrap { overflow-x: auto; }
 
@@ -311,14 +325,14 @@
 		font-weight: 500;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		color: #57534e;
-		border-bottom: 1px solid rgba(168, 162, 158, 0.08);
+		color: var(--charcoal-600);
+		border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.08);
 	}
 
 	.table td {
 		padding: 0.75rem 0.75rem;
-		border-bottom: 1px solid rgba(168, 162, 158, 0.05);
-		color: #d6d3d1;
+		border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.05);
+		color: var(--charcoal-300);
 	}
 
 	.account-row {
@@ -326,13 +340,13 @@
 		transition: background 0.15s;
 	}
 
-	.account-row:hover td { background: rgba(201, 149, 108, 0.04); }
+	.account-row:hover td { background: rgb(var(--copper-rgb) / 0.04); }
 
-	.handle-text { color: #c9956c; font-weight: 500; }
+	.handle-text { color: var(--copper); font-weight: 500; }
 
 	.tier-badge { font-weight: 500; font-size: 0.875rem; }
 
-	.muted { color: #78716c; }
+	.muted { color: var(--charcoal-500); }
 
 	.col-rank { width: 3rem; }
 	.col-tier { width: 5rem; }
@@ -353,16 +367,16 @@
 		padding: 0.5rem 1rem;
 		font-size: 0.875rem;
 		font-family: 'Outfit', system-ui, sans-serif;
-		color: #c9956c;
-		background: rgba(201, 149, 108, 0.1);
-		border: 1px solid rgba(201, 149, 108, 0.2);
+		color: var(--copper);
+		background: rgb(var(--copper-rgb) / 0.1);
+		border: 1px solid rgb(var(--copper-rgb) / 0.2);
 		border-radius: 8px;
 		cursor: pointer;
 		transition: background 0.2s;
 	}
 
-	.page-btn:hover:not(:disabled) { background: rgba(201, 149, 108, 0.18); }
+	.page-btn:hover:not(:disabled) { background: rgb(var(--copper-rgb) / 0.18); }
 	.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-	.page-info { font-size: 0.875rem; color: #78716c; }
+	.page-info { font-size: 0.875rem; color: var(--charcoal-500); }
 </style>

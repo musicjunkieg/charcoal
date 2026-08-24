@@ -16,6 +16,7 @@ use crate::db::models::ThreatTier;
 /// accounts (allies) from being flagged as threats.
 ///
 /// `score = toxicity * toxicity_weight * (1 + overlap * overlap_multiplier)`
+#[derive(Clone)]
 pub struct ThreatWeights {
     /// Base weight for toxicity (default 70.0)
     pub toxicity_weight: f64,
@@ -23,9 +24,14 @@ pub struct ThreatWeights {
     /// At max overlap (1.0), the toxicity score is multiplied by (1 + 1.5) = 2.5x.
     pub overlap_multiplier: f64,
     /// Topic overlap below this threshold triggers the gate (default 0.15).
-    /// Adjusted for sentence embedding scale where most accounts in the
-    /// social neighborhood have overlap 0.4-0.8.
+    /// Calibrated for the SENTENCE-EMBEDDING cosine scale, where most
+    /// accounts in the social neighborhood land at 0.4-0.8.
     pub overlap_gate_threshold: f64,
+    /// Gate threshold for TF-IDF KEYWORD-cosine overlap (default 0.05,
+    /// provisional — recalibrate with #135). Sparse keyword vectors produce
+    /// systematically lower cosines than dense embeddings; applying the
+    /// embedding-scale 0.15 to them over-gates. (#296, spike #295 defect 2)
+    pub keyword_gate_threshold: f64,
     /// Maximum score when the gate is active (default 25.0)
     pub gate_max_score: f64,
 }
@@ -36,6 +42,7 @@ impl Default for ThreatWeights {
             toxicity_weight: 70.0,
             overlap_multiplier: 1.5,
             overlap_gate_threshold: 0.15,
+            keyword_gate_threshold: 0.05,
             gate_max_score: 25.0,
         }
     }
@@ -226,5 +233,33 @@ mod tests {
             "Borderline Watch + extreme context should promote to Elevated, got {score}"
         );
         assert_eq!(tier, ThreatTier::Elevated);
+    }
+
+    #[test]
+    fn keyword_gate_threshold_default_is_below_embedding_gate() {
+        let weights = ThreatWeights::default();
+        assert!((weights.keyword_gate_threshold - 0.05).abs() < 1e-9);
+        assert!(weights.keyword_gate_threshold < weights.overlap_gate_threshold);
+    }
+
+    #[test]
+    fn keyword_scale_overlap_not_gated_under_swapped_threshold() {
+        // 0.08 keyword-cosine overlap is meaningful on the sparse keyword
+        // scale. Under the embedding gate (0.15) it was wrongly gated; with
+        // the keyword threshold swapped in, it reaches the multiplicative
+        // formula.
+        let base = ThreatWeights::default();
+        let effective = ThreatWeights {
+            overlap_gate_threshold: base.keyword_gate_threshold,
+            ..base.clone()
+        };
+        let (gated_score, _) = compute_threat_score(0.8, 0.08, &base);
+        let (scored, _) = compute_threat_score(0.8, 0.08, &effective);
+        assert!(
+            (gated_score - 20.0).abs() < 0.1,
+            "embedding gate caps at 0.8*25"
+        );
+        // 0.8 * 70 * (1 + 0.08*1.5) = 56 * 1.12 = 62.7
+        assert!((scored - 62.72).abs() < 0.1, "expected ~62.7, got {scored}");
     }
 }

@@ -41,7 +41,9 @@ use crate::toxicity::traits::ToxicityScorer;
 
 use burst::{run_burst, BurstOutcome};
 use finalize::{finalize_account, FinalizeOutcome};
-use gather::{gather_account, CleanPassScorer, GatherInputs, GatherOutcome, PostFetcher};
+use gather::{
+    gather_account, CleanPassScorer, GatherInputs, GatherOutcome, GatherTiming, PostFetcher,
+};
 use staging::ScanPhase;
 
 /// One candidate account to scan, with the per-account inputs the orchestrator
@@ -87,6 +89,9 @@ pub struct PhasedScanDeps<'a> {
     pub embedder: Option<&'a SentenceEmbedder>,
     /// Optional protected-user embedding (Phase C).
     pub protected_embedding: Option<&'a [f64]>,
+    /// Optional per-topic centroids for the protected user (#297, Phase C).
+    /// Empty/absent degrades overlap to the pre-#297 mean-centroid cosine.
+    pub protected_topic_centroids: Option<&'a [Vec<f64>]>,
     /// Optional NLI scorer for context gating (Phase C).
     pub nli_scorer: Option<&'a NliScorer>,
     /// Optional protected posts with embeddings for follower NLI (Phase C).
@@ -327,6 +332,10 @@ struct GatherSweep {
     /// True if at least one account's gather failed and was skipped — the scan
     /// is then incomplete and the caller should mark the summary `degraded`.
     skipped: bool,
+    /// Aggregate fetch-vs-clean-pass split across every account gathered in
+    /// this sweep (#264). Accounts that errored contribute nothing — their
+    /// timing was never returned.
+    timing: GatherTiming,
 }
 
 /// Extract a human-readable message from a panic payload.
@@ -334,7 +343,12 @@ struct GatherSweep {
 /// Rust panics carry a `Box<dyn Any + Send>`; the most common payloads are
 /// `&'static str` (e.g. `unwrap()`) and `String` (e.g. `panic!("{}", …)`).
 /// Any other payload type is reported as `"<non-string panic>"`.
-fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+///
+/// `pub(crate)` so the web layer's `catch_unwind` around a whole scan
+/// (`web::scan_job::classify`) reuses this rather than duplicating the
+/// downcast — or, as it did, dropping the payload and recording a fixed
+/// string that says nothing about the cause.
+pub(crate) fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         s.to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
@@ -406,8 +420,13 @@ async fn run_gather(
     let mut sweep = GatherSweep::default();
     while let Some((account_did, result)) = results.next().await {
         match result {
-            Ok(GatherOutcome::Terminal) => sweep.terminal_scored += 1,
-            Ok(GatherOutcome::Enqueued) => {}
+            Ok((GatherOutcome::Terminal, timing)) => {
+                sweep.terminal_scored += 1;
+                sweep.timing.add(&timing);
+            }
+            Ok((GatherOutcome::Enqueued, timing)) => {
+                sweep.timing.add(&timing);
+            }
             Err(e) => {
                 sweep.skipped = true;
                 // `{e:#}` (alternate Display) walks the anyhow source chain; plain
@@ -438,6 +457,17 @@ async fn run_gather(
             }
         }
     }
+
+    info!(
+        phase = "gather",
+        fetch_ms = sweep.timing.fetch_ms,
+        clean_pass_ms = sweep.timing.clean_pass_ms,
+        stage1_onnx_ms = sweep.timing.stage1_onnx_ms,
+        total_ms = sweep.timing.total_ms,
+        inference_pct = sweep.timing.inference_pct(),
+        "Phase A timing split (#264)"
+    );
+
     Ok(sweep)
 }
 
@@ -452,7 +482,7 @@ async fn gather_one(
     user_did: &str,
     candidate: &CandidateInput,
     deps: &PhasedScanDeps<'_>,
-) -> Result<GatherOutcome> {
+) -> Result<(GatherOutcome, GatherTiming)> {
     let inputs = gather_inputs(candidate, deps);
     gather_account(
         db,
@@ -568,6 +598,10 @@ async fn recover_account_inner(
     db.clear_account_staging(user_did, account_did).await?;
 
     let inputs = gather_inputs(candidate, deps);
+    // Timing is discarded here: this is the Phase C re-gather recovery path,
+    // not the main Phase A sweep `run_gather` instruments and logs (#264). A
+    // rare per-account retry contributing to the scan-wide split would skew
+    // it without changing the concurrency-default conclusion it exists for.
     if matches!(
         gather_account(
             db,
@@ -577,7 +611,8 @@ async fn recover_account_inner(
             deps.clean_pass,
             &inputs,
         )
-        .await?,
+        .await?
+        .0,
         GatherOutcome::Terminal
     ) {
         // Re-gather hit a terminal Stage-1 outcome: the score was written by
@@ -634,6 +669,7 @@ async fn finalize_one(
         deps.weights,
         deps.embedder,
         deps.protected_embedding,
+        deps.protected_topic_centroids,
         deps.nli_scorer,
         deps.protected_posts_with_embeddings,
         deps.data_dir,

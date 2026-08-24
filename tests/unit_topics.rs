@@ -30,6 +30,7 @@ fn keyword_weights_single_cluster_single_keyword() {
         clusters: vec![TopicCluster {
             label: "test".to_string(),
             keywords: vec!["fat".to_string()],
+            keyword_scores: vec![],
             weight: 0.8,
         }],
         post_count: 10,
@@ -45,6 +46,7 @@ fn keyword_weights_distributed_evenly() {
         clusters: vec![TopicCluster {
             label: "test".to_string(),
             keywords: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            keyword_scores: vec![],
             weight: 0.9,
         }],
         post_count: 10,
@@ -63,11 +65,13 @@ fn keyword_weights_accumulates_across_clusters() {
             TopicCluster {
                 label: "A".to_string(),
                 keywords: vec!["shared".to_string()],
+                keyword_scores: vec![],
                 weight: 0.3,
             },
             TopicCluster {
                 label: "B".to_string(),
                 keywords: vec!["shared".to_string()],
+                keyword_scores: vec![],
                 weight: 0.2,
             },
         ],
@@ -88,6 +92,7 @@ fn keyword_weights_empty_keywords_vec_produces_empty_map() {
         clusters: vec![TopicCluster {
             label: "empty".to_string(),
             keywords: vec![],
+            keyword_scores: vec![],
             weight: 0.5,
         }],
         post_count: 10,
@@ -101,6 +106,7 @@ fn keyword_weights_zero_weight_cluster() {
         clusters: vec![TopicCluster {
             label: "zero".to_string(),
             keywords: vec!["a".to_string(), "b".to_string()],
+            keyword_scores: vec![],
             weight: 0.0,
         }],
         post_count: 10,
@@ -137,14 +143,15 @@ fn cosine_all_zero_weights() {
 }
 
 #[test]
-fn cosine_negative_weights_clamped_to_zero() {
-    // Negative dot product gets clamped to 0.0
+fn cosine_negative_weights_preserve_sign() {
+    // Keyword weights are non-negative in practice, but the clamp itself
+    // must not flatten opposition to 0.0 — see #296.
     let a: HashMap<String, f64> = [("x".to_string(), 1.0)].into();
     let b: HashMap<String, f64> = [("x".to_string(), -1.0)].into();
     assert_eq!(
         cosine_from_weights(&a, &b),
-        0.0,
-        "Negative cosine should be clamped to 0.0"
+        -1.0,
+        "Negative cosine should preserve sign, not clamp to 0.0"
     );
 }
 
@@ -224,6 +231,7 @@ fn cosine_similarity_one_empty_fp() {
         clusters: vec![TopicCluster {
             label: "test".to_string(),
             keywords: vec!["fat".to_string()],
+            keyword_scores: vec![],
             weight: 0.5,
         }],
         post_count: 10,

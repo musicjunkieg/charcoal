@@ -62,6 +62,40 @@ fn refine_phase(
     (refined, Some(progress))
 }
 
+/// Reconcile the in-memory scan status against the user's `scan_queue` row.
+///
+/// The row wins wherever they disagree (#257). `ScanManager` is process-local
+/// and knows nothing about a scan that has not started yet, and it is left
+/// saying "running" forever by a scan whose lease lapsed — the queue row is the
+/// durable answer to both, so preferring it dissolves the stale-label problem
+/// rather than managing it.
+///
+/// Returns the phase to report and whether a scan is live from the user's point
+/// of view (queued counts: they asked for a scan and one is coming).
+fn reconcile_with_queue(
+    mem_phase: WebScanPhase,
+    mem_running: bool,
+    queue_status: Option<&str>,
+) -> (WebScanPhase, bool) {
+    match queue_status {
+        // Never enqueued — nothing to reconcile against.
+        None => (mem_phase, mem_running),
+        Some("queued") => (WebScanPhase::Queued, true),
+        // Another replica (or this one before a restart) is running it, so the
+        // in-memory phase may be Idle while the scan is genuinely live.
+        Some("running") if mem_phase == WebScanPhase::Idle => (WebScanPhase::Starting, true),
+        Some("running") => (mem_phase, true),
+        // Terminal. If memory still claims a live scan it is a zombie entry —
+        // report the queue's verdict, not the abandoned pipeline's last words.
+        Some("done") if mem_running => (WebScanPhase::Done, false),
+        Some("failed") if mem_running => (WebScanPhase::Failed, false),
+        Some("done") | Some("failed") => (mem_phase, false),
+        // An unrecognised status is a schema the code doesn't know; don't
+        // invent a verdict from it.
+        Some(_) => (mem_phase, mem_running),
+    }
+}
+
 /// Read an integer scan_state value; missing keys, DB errors, and malformed
 /// values all degrade to None — progress is decoration, never a 500.
 async fn read_count(db: &dyn Database, user_did: &str, key: &str) -> Option<i64> {
@@ -81,7 +115,7 @@ pub async fn get_status(
     // Snapshot scan status fields and release the lock before awaiting the DB.
     // Holding the read guard across an async DB call would block writers (e.g.
     // the scan job updating progress) for the duration of the query.
-    let (scan_running, started_at, progress_message, last_error, mem_phase) = {
+    let (mem_running, started_at, mut progress_message, last_error, mem_phase) = {
         let mgr = state.scan_manager.read().await;
         match mgr.get_status(&auth.effective_did) {
             Some(s) => (
@@ -94,6 +128,32 @@ pub async fn get_status(
             None => (false, None, String::new(), None, WebScanPhase::Idle),
         }
     };
+
+    // The queue row is the authority on whether a scan is live (#257).
+    // Failures here degrade to the in-memory view rather than 500 — a status
+    // poll must keep working when the queue query does not.
+    let queue = match state
+        .db
+        .scan_queue_entry(
+            &auth.effective_did,
+            crate::web::admitter::scan_concurrency(),
+        )
+        .await
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "failed to read the scan queue entry");
+            None
+        }
+    };
+    let (mem_phase, scan_running) = reconcile_with_queue(
+        mem_phase,
+        mem_running,
+        queue.as_ref().map(|e| e.status.as_str()),
+    );
+    if mem_phase == WebScanPhase::Queued {
+        progress_message = "Waiting for a free scan slot…".to_string();
+    }
 
     // Refine the coarse Scoring phase from pipeline state in the DB.
     let (phase, progress) = if scan_running && mem_phase == WebScanPhase::Scoring {
@@ -175,7 +235,9 @@ pub async fn get_status(
     // threats.len() would count those skipped rows in the total but in no bucket.
     let total = high + elevated + watch + low + not_assessed;
 
-    Json(serde_json::json!({
+    // The queue block appears only while the user is actually waiting, so a
+    // client that predates it sees no change at all.
+    let mut body = serde_json::json!({
         "scan_running": scan_running,
         "started_at": started_at,
         "progress_message": progress_message,
@@ -190,13 +252,88 @@ pub async fn get_status(
             "not_assessed": not_assessed,
             "total": total,
         }
-    }))
-    .into_response()
+    });
+
+    if let Some(entry) = queue.filter(|e| e.status == "queued") {
+        body["queue"] = serde_json::json!({
+            "position": entry.position,
+            "eta_seconds": entry.eta_seconds,
+            "enqueued_at": entry.enqueued_at,
+        });
+    }
+
+    Json(body).into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_user_with_no_queue_row_is_reported_from_memory_alone() {
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Done, false, None),
+            (WebScanPhase::Done, false)
+        );
+    }
+
+    #[test]
+    fn a_queued_user_is_reported_queued_and_live() {
+        // Live from the user's point of view: they asked for a scan, one is
+        // coming, and the dashboard must keep polling.
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Idle, false, Some("queued")),
+            (WebScanPhase::Queued, true)
+        );
+        // Even when memory still holds the previous run's terminal phase.
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Done, false, Some("queued")),
+            (WebScanPhase::Queued, true)
+        );
+    }
+
+    #[test]
+    fn a_running_row_beats_an_empty_memory() {
+        // Another replica, or this one after a restart: the row says running
+        // and memory has never heard of the scan.
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Idle, false, Some("running")),
+            (WebScanPhase::Starting, true)
+        );
+        // With a live entry the pipeline's own phase is the more specific one.
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Scoring, true, Some("running")),
+            (WebScanPhase::Scoring, true)
+        );
+    }
+
+    /// The stale-"running" label an abandoned scan leaves behind (#274). Its
+    /// ScanManager entry says running forever; the queue row is what actually
+    /// knows the slot was released.
+    #[test]
+    fn a_terminal_row_overrides_a_zombie_running_label() {
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Scoring, true, Some("failed")),
+            (WebScanPhase::Failed, false)
+        );
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Scoring, true, Some("done")),
+            (WebScanPhase::Done, false)
+        );
+        // Memory already agrees it is over — keep its more specific phase.
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Failed, false, Some("done")),
+            (WebScanPhase::Failed, false)
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_status_changes_nothing() {
+        assert_eq!(
+            reconcile_with_queue(WebScanPhase::Scoring, true, Some("wat")),
+            (WebScanPhase::Scoring, true)
+        );
+    }
 
     #[test]
     fn not_running_returns_mem_phase_no_progress() {

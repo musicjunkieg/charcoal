@@ -155,16 +155,19 @@ fn fingerprint_to_cosine_manual_pipeline() {
                     "liberation".to_string(),
                     "stigma".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 0.5,
             },
             TopicCluster {
                 label: "queer identity".to_string(),
                 keywords: vec!["queer".to_string(), "trans".to_string()],
+                keyword_scores: vec![],
                 weight: 0.3,
             },
             TopicCluster {
                 label: "governance".to_string(),
                 keywords: vec!["governance".to_string(), "moderation".to_string()],
+                keyword_scores: vec![],
                 weight: 0.2,
             },
         ],
@@ -176,11 +179,13 @@ fn fingerprint_to_cosine_manual_pipeline() {
             TopicCluster {
                 label: "body politics".to_string(),
                 keywords: vec!["fat".to_string(), "body".to_string(), "stigma".to_string()],
+                keyword_scores: vec![],
                 weight: 0.6,
             },
             TopicCluster {
                 label: "gaming".to_string(),
                 keywords: vec!["gaming".to_string(), "esports".to_string()],
+                keyword_scores: vec![],
                 weight: 0.4,
             },
         ],
@@ -390,6 +395,7 @@ fn make_account(handle: &str, score: f64, tier: &str, toxicity: f64, overlap: f6
         handle: handle.to_string(),
         toxicity_score: Some(toxicity),
         topic_overlap: Some(overlap),
+        overlap_legacy: None,
         threat_score: Some(score),
         threat_tier: Some(tier.to_string()),
         posts_analyzed: 20,
@@ -455,11 +461,13 @@ fn report_includes_fingerprint_section() {
             TopicCluster {
                 label: "fat liberation".to_string(),
                 keywords: vec!["fat".to_string(), "liberation".to_string()],
+                keyword_scores: vec![],
                 weight: 0.6,
             },
             TopicCluster {
                 label: "queer identity".to_string(),
                 keywords: vec!["queer".to_string(), "trans".to_string()],
+                keyword_scores: vec![],
                 weight: 0.4,
             },
         ],
@@ -773,6 +781,7 @@ async fn stage2_scores_only_assessable_subset() {
         clusters: vec![TopicCluster {
             label: "hobbies".to_string(),
             keywords: vec!["hobbies".to_string(), "post".to_string()],
+            keyword_scores: vec![],
             weight: 1.0,
         }],
         post_count: 10,
@@ -787,6 +796,7 @@ async fn stage2_scores_only_assessable_subset() {
         &weights,
         None,  // embedder
         None,  // protected_embedding
+        None,  // protected_topic_centroids
         None,  // precomputed_target_embedding
         0.0,   // median_engagement
         false, // pile_on

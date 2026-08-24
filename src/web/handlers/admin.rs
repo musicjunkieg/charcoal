@@ -39,7 +39,37 @@ pub async fn get_identity(
     }))
 }
 
+/// Render one `scan_queue` row for the dashboard (#288).
+///
+/// `handle` is joined in from the user list rather than stored on the row: the
+/// queue panel lists DIDs, and no operator can read a DID. It is `null` for the
+/// vanishingly rare case of a queue row whose user has been deleted — the row
+/// still deserves to be visible.
+fn scan_row_json(row: &crate::db::traits::ScanQueueRow, handle: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "user_did": row.user_did,
+        "handle": handle,
+        "status": row.status,
+        "position": row.position,
+        "enqueued_at": row.enqueued_at,
+        "started_at": row.started_at,
+        "finished_at": row.finished_at,
+        "last_error": row.last_error,
+    })
+}
+
 /// GET /api/admin/users — list all registered users with status info.
+///
+/// The scan columns come from the durable `scan_queue` (#288), not from the
+/// process-local `ScanManager`. The old view only knew about scans *this*
+/// process launched: it was empty after a redeploy, blind to a second replica,
+/// had no concept of "queued" at all — so an admin-triggered scan, which since
+/// #257 is enqueued rather than launched, showed nothing — and could not tell a
+/// failed scan from one that never ran.
+///
+/// `fingerprint_building` deliberately stays on `ScanManager`. It tracks a
+/// `tokio::spawn` this process owns and has no durable row anywhere, so
+/// process-local is the correct scope for it.
 pub async fn list_users(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -51,9 +81,39 @@ pub async fn list_users(
         tracing::error!("Failed to list users: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // Fail the request rather than degrade to "nobody has ever scanned" — a
+    // dashboard that quietly reports an empty queue during a database blip is
+    // worse than one that reports an error, because an operator acts on it.
+    let queue_rows = state.db.list_scan_queue().await.map_err(|e| {
+        tracing::error!("Failed to list the scan queue: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let handles: std::collections::HashMap<&str, &str> = users
+        .iter()
+        .map(|u| (u.did.as_str(), u.handle.as_str()))
+        .collect();
+    let by_did: std::collections::HashMap<&str, &crate::db::traits::ScanQueueRow> = queue_rows
+        .iter()
+        .map(|row| (row.user_did.as_str(), row))
+        .collect();
+
+    // Counts come from the same snapshot the panel renders, not from a second
+    // `scan_queue_depth` round-trip that could disagree with it.
+    let running = queue_rows.iter().filter(|r| r.status == "running").count();
+    let queued = queue_rows.iter().filter(|r| r.status == "queued").count();
+    // Already ordered oldest-first by `list_scan_queue`, which is the order the
+    // queue drains in.
+    let active: Vec<serde_json::Value> = queue_rows
+        .iter()
+        .filter(|r| r.status == "queued" || r.status == "running")
+        .map(|r| scan_row_json(r, handles.get(r.user_did.as_str()).copied()))
+        .collect();
+
     let mgr = state.scan_manager.read().await;
     let mut response = Vec::new();
-    for user in users {
+    for user in &users {
         let has_fp = state.db.has_fingerprint(&user.did).await.unwrap_or(false);
         let count = state
             .db
@@ -61,18 +121,33 @@ pub async fn list_users(
             .await
             .unwrap_or(0);
         let fp_building = mgr.is_fingerprint_building(&user.did);
-        let last_scan = mgr.get_status(&user.did).and_then(|s| s.started_at.clone());
+        let scan = by_did.get(user.did.as_str()).copied();
         response.push(serde_json::json!({
             "did": user.did,
             "handle": user.handle,
             "has_fingerprint": has_fp,
             "fingerprint_building": fp_building,
-            "last_scan_at": last_scan,
+            // Unchanged key, unchanged meaning — "when did this user's most
+            // recent scan start" — but sourced from the durable row, so it now
+            // survives a restart and sees other replicas. Null while a scan is
+            // only queued, because a queued scan has not started. Duplicated
+            // inside `scan` so the panel and the table read one shape.
+            "last_scan_at": scan.and_then(|r| r.started_at.clone()),
+            "scan": scan.map(|r| scan_row_json(r, Some(user.handle.as_str()))),
             "scored_accounts": count,
             "last_login_at": user.last_login_at,
         }));
     }
-    Ok(Json(serde_json::json!({ "users": response })))
+
+    Ok(Json(serde_json::json!({
+        "users": response,
+        "queue": {
+            "running": running,
+            "queued": queued,
+            "concurrency_limit": crate::web::admitter::scan_concurrency(),
+            "active": active,
+        },
+    })))
 }
 
 /// POST /api/admin/users — pre-seed a user by Bluesky handle.
@@ -179,7 +254,14 @@ pub async fn pre_seed_user(
     ))
 }
 
-/// POST /api/admin/users/{did}/scan — trigger a scan for a specific user.
+/// POST /api/admin/users/{did}/scan — queue a scan for a specific user.
+///
+/// Enqueues exactly like `POST /api/scan` does, per Bryan's ruling on #257.
+/// This used to call `launch_scan` directly, which never touched `scan_queue`
+/// and was therefore invisible to `claim_next_scan`'s running count — real
+/// concurrency would have been `CHARCOAL_SCAN_CONCURRENCY + admin scans`, and
+/// the GPU spend with it. Admin gives up starting immediately; there is one
+/// admission path and the cap holds absolutely.
 pub async fn trigger_admin_scan(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -191,7 +273,10 @@ pub async fn trigger_admin_scan(
             Json(serde_json::json!({"error": "Admin required"})),
         ));
     }
-    let handle = state
+    // Existence check only — the admitter looks the handle up again when it
+    // claims the row. Checking here turns "this DID was never registered" into
+    // a 404 now rather than a failed queue row later.
+    state
         .db
         .get_user_handle(&target_did)
         .await
@@ -208,33 +293,56 @@ pub async fn trigger_admin_scan(
             )
         })?;
 
-    {
-        let mut mgr = state.scan_manager.write().await;
-        mgr.try_start_scan(&target_did).map_err(|msg| {
-            (
-                StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": msg})),
-            )
-        })?;
+    state.db.enqueue_scan(&target_did).await.map_err(|e| {
+        tracing::error!(error = %format!("{e:#}"), "admin enqueue failed");
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "Could not queue the scan"})),
+        )
+    })?;
+
+    if let Some(wake) = &state.scan_wake {
+        let _ = wake.try_send(());
     }
 
     tracing::info!(
         admin_did = %auth.did,
         target_did = %target_did,
-        "Admin triggered scan"
+        "Admin queued scan"
     );
 
-    scan_job::launch_scan(
-        state.config.clone(),
-        state.db.clone(),
-        state.scan_manager.clone(),
-        target_did.clone(),
-        handle,
-    );
+    // Same shape as POST /api/scan, deliberately: the enqueue succeeded so this
+    // stays 202, but a failed read-back reports `position: null` rather than 0.
+    // 0 is what a *running* scan legitimately reports, so reusing it here would
+    // hide a database error behind a plausible-looking answer.
+    let entry = match state
+        .db
+        .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
+        .await
+    {
+        Ok(entry) => entry,
+        Err(e) => {
+            tracing::error!(
+                target_did = %target_did,
+                error = %format!("{e:#}"),
+                "admin queued the scan but could not read back its queue entry"
+            );
+            None
+        }
+    };
+    let (status, position, eta) = match entry {
+        Some(e) => (e.status, Some(e.position), e.eta_seconds),
+        None => ("queued".to_string(), None, None),
+    };
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(serde_json::json!({"message": "Scan started", "user_did": target_did})),
+        Json(serde_json::json!({
+            "status": status,
+            "position": position,
+            "eta_seconds": eta,
+            "user_did": target_did,
+        })),
     ))
 }
 
@@ -270,12 +378,37 @@ pub async fn delete_user(
         ));
     }
 
-    {
-        let mgr = state.scan_manager.read().await;
-        if mgr.is_scan_running_for(&target_did) {
+    // Gate on the durable `scan_queue` row, not `ScanManager::is_scan_running_for`
+    // (#278). The in-process status map only knows about scans THIS process
+    // launched, so it misses a row that is merely queued, one running on
+    // another replica, and anything left over a restart. `delete_user_data`
+    // already clears `scan_queue` below, so nothing is orphaned either way —
+    // this just makes the guard as durable as the rest of #257's admission
+    // path instead of trusting a process-local view.
+    //
+    // A DB error here must NOT fall through to the delete. The guard it
+    // replaced was an in-memory read that could not fail, so `if let Ok(..)`
+    // would have quietly turned "we cannot tell" into "go ahead" — deleting a
+    // user out from under a live scan is exactly what this check exists to
+    // prevent, so an unreadable queue is a 500, not an implicit yes.
+    let queue_entry = state
+        .db
+        .scan_queue_entry(&target_did, crate::web::admitter::scan_concurrency())
+        .await
+        .map_err(|e| {
+            tracing::error!(target_did = %target_did, error = %e, "delete_user: scan_queue lookup failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+    if let Some(entry) = queue_entry {
+        if matches!(entry.status.as_str(), "queued" | "running") {
             return Err((
                 StatusCode::CONFLICT,
-                Json(serde_json::json!({"error": "Cannot delete user with running scan"})),
+                Json(
+                    serde_json::json!({"error": "Cannot delete user with queued or running scan"}),
+                ),
             ));
         }
     }

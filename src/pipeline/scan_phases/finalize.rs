@@ -55,7 +55,7 @@ pub enum FinalizeOutcome {
 /// verdicts.
 ///
 /// The protected-context params (`protected_fingerprint`, `weights`,
-/// `embedder`, `protected_embedding`, `nli_scorer`,
+/// `embedder`, `protected_embedding`, `protected_topic_centroids`, `nli_scorer`,
 /// `protected_posts_with_embeddings`, `data_dir`) are runtime values supplied
 /// by the orchestrator (Chunk 6) — they are NOT carried in the blob, which only
 /// holds per-account data. Their names/types mirror `score_from_sample`.
@@ -68,6 +68,7 @@ pub async fn finalize_account(
     weights: &ThreatWeights,
     embedder: Option<&SentenceEmbedder>,
     protected_embedding: Option<&[f64]>,
+    protected_topic_centroids: Option<&[Vec<f64>]>,
     nli_scorer: Option<&NliScorer>,
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     data_dir: Option<&std::path::Path>,
@@ -193,6 +194,7 @@ pub async fn finalize_account(
                 weights,
                 embedder,
                 protected_embedding,
+                protected_topic_centroids,
                 // Precomputed in Phase A (gather); when present the overlap step
                 // skips the (mutex-serialized) embedding entirely (#213).
                 blob.target_embedding.as_deref(),

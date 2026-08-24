@@ -686,6 +686,7 @@ mod gather_tests {
                     "galaxy".to_string(),
                     "cosmology".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 1.0,
             }],
             post_count: 200,
@@ -778,7 +779,7 @@ mod gather_tests {
         .await;
 
         // Before #221 this was Err and the account vanished from the scan.
-        let outcome = outcome.expect("one unscoreable post must not fail the account");
+        let (outcome, _timing) = outcome.expect("one unscoreable post must not fail the account");
         assert_eq!(
             outcome,
             charcoal::pipeline::scan_phases::gather::GatherOutcome::Enqueued,
@@ -854,13 +855,19 @@ mod gather_tests {
     }
 
     // ── Early-exit (clean + topically irrelevant, >=5 first-person) → Low ──
+    //
+    // 15 originals (not 6): FingerprintQuality::from_counts needs >= 15
+    // originals for Normal quality. A reliable fingerprint is required to
+    // legitimately authorize the early exit (#296 Task 6 blocks it for
+    // Unreliable quality) — this test is about the genuine early-exit path,
+    // not the block, so it uses a reliable fingerprint.
     #[tokio::test]
     async fn gather_early_exit_finalizes_low_and_stages_nothing() {
         let db = open_db().await;
         let fp = astrophysics_fingerprint();
         let weights = ThreatWeights::default();
 
-        let originals: Vec<Post> = (0..6)
+        let originals: Vec<Post> = (0..15)
             .map(|i| make_post(&format!("at://e/{i}"), "sandwiches and gardens and weather"))
             .collect();
         let sample = PostSample {
@@ -869,7 +876,7 @@ mod gather_tests {
             quotes: vec![],
             reply_ratio: 0.0,
             quote_ratio: 0.0,
-            total_posts: 6,
+            total_posts: 15,
         };
         let fetcher = CannedFetcher {
             sample,
@@ -1166,7 +1173,7 @@ mod gather_tests {
         let scorer = FixedScorer(0.0);
         let clean = FixedCleanPass(0.0);
 
-        let outcome = gather_account(
+        let (outcome, _timing) = gather_account(
             &db,
             TEST_USER,
             &fetcher,
@@ -1209,6 +1216,132 @@ mod gather_tests {
                 .unwrap()
                 .is_none(),
             "no AccountInput blob should be stashed when the account abstains"
+        );
+    }
+
+    // ── #264: prove gather_account's timing WIRING, not just the arithmetic ──
+    //
+    // `GatherTiming::add`/`inference_pct` are unit-tested directly in
+    // `gather.rs`, but nothing before this proved the timers are actually
+    // wired into `gather_account` — a dropped or misplaced `Instant::now()`
+    // call would still pass every other test in this suite silently, since
+    // none of them assert on the returned `GatherTiming` at all.
+    //
+    // Test doubles sleep a few ms so the recorded time is unambiguously
+    // non-zero rather than a coin-flip on `Instant::elapsed()` rounding to 0.
+
+    struct DelayedFetcher {
+        sample: PostSample,
+        parents: HashMap<String, String>,
+    }
+
+    #[async_trait]
+    impl PostFetcher for DelayedFetcher {
+        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            Ok(self.sample.clone())
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            Ok(self.parents.clone())
+        }
+    }
+
+    // Non-clean fixed scorer that sleeps — used as the Stage-1 ONNX scorer,
+    // so `stage1_onnx_ms` (the exact `scorer.score_batch` call this task
+    // wires up) has measurable, non-zero time.
+    struct DelayedScorer(f64);
+
+    #[async_trait]
+    impl ToxicityScorer for DelayedScorer {
+        async fn score_text(&self, _text: &str) -> Result<ToxicityResult> {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            Ok(ToxicityResult {
+                toxicity: self.0,
+                attributes: Default::default(),
+            })
+        }
+    }
+
+    struct DelayedCleanPass(f64);
+
+    #[async_trait]
+    impl CleanPassScorer for DelayedCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            Ok(vec![self.0; texts.len()])
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_account_populates_all_timing_buckets_when_reaching_stage_2() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        // Enough posts to clear the Stage-1 minimum; a non-clean Stage-1 score
+        // (0.9) forces `Proceed` so Stage 2's clean pass also runs and both
+        // inference buckets get exercised in one call.
+        let originals: Vec<_> = (0..20)
+            .map(|i| make_post(&format!("at://p/{i}"), "supernova remnants and pulsars"))
+            .collect();
+        let total = originals.len();
+        let sample = PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: total,
+        };
+
+        let fetcher = DelayedFetcher {
+            sample,
+            parents: HashMap::new(),
+        };
+        let scorer = DelayedScorer(0.9);
+        let clean = DelayedCleanPass(0.9);
+
+        let (outcome, timing) = gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &scorer,
+            &clean,
+            &inputs(&fp, &weights),
+        )
+        .await
+        .expect("gather_account should not error");
+
+        assert_eq!(
+            outcome,
+            charcoal::pipeline::scan_phases::gather::GatherOutcome::Enqueued,
+            "non-clean Stage-1 scores must proceed to Stage 2"
+        );
+
+        assert!(
+            timing.fetch_ms > 0,
+            "fetch_ms must record the DelayedFetcher round trips, got {}",
+            timing.fetch_ms
+        );
+        assert!(
+            timing.stage1_onnx_ms > 0,
+            "stage1_onnx_ms must record Stage 1's scorer.score_batch call, got {}",
+            timing.stage1_onnx_ms
+        );
+        assert!(
+            timing.clean_pass_ms > 0,
+            "clean_pass_ms must record Stage 2's onnx_clean_pass call, got {}",
+            timing.clean_pass_ms
+        );
+        assert!(
+            timing.total_ms >= timing.fetch_ms + timing.stage1_onnx_ms + timing.clean_pass_ms,
+            "total_ms ({}) must cover at least the sum of the measured buckets \
+             (fetch {} + stage1_onnx {} + clean_pass {})",
+            timing.total_ms,
+            timing.fetch_ms,
+            timing.stage1_onnx_ms,
+            timing.clean_pass_ms
         );
     }
 }
@@ -1273,6 +1406,7 @@ mod finalize_tests {
                     "galaxy".to_string(),
                     "cosmology".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 1.0,
             }],
             post_count: 200,
@@ -1295,6 +1429,7 @@ mod finalize_tests {
                     "contamination".to_string(),
                     "exposure".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 1.0,
             }],
             post_count: 200,
@@ -1413,7 +1548,7 @@ mod finalize_tests {
         stage_account(&db, &sample, &verdicts, None).await;
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1462,7 +1597,7 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1500,7 +1635,7 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1525,7 +1660,7 @@ mod finalize_tests {
         let weights = ThreatWeights::default();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1574,7 +1709,7 @@ mod finalize_tests {
             .unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1641,7 +1776,7 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None,
+            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
         )
         .await
         .unwrap();
@@ -1710,6 +1845,7 @@ mod finalize_tests {
             &weights,
             None,               // embedder: absent → Mode B can't run anyway
             None,               // protected_embedding
+            None,               // protected_topic_centroids
             maybe_nli.as_ref(), // nli_scorer: present iff the model is on disk
             Some(&ppwe),        // protected_posts_with_embeddings (sentinel)
             None,               // data_dir
@@ -1821,7 +1957,8 @@ mod finalize_tests {
             &fp,
             &weights,
             Some(&embedder),
-            None,
+            None, // protected_embedding
+            None, // protected_topic_centroids
             Some(&nli),
             Some(&ppwe),
             Some(&data_dir),
@@ -1893,6 +2030,7 @@ mod finalize_tests {
             &weights,
             None, // embedder (Mode A uses direct pairs, no embedder needed)
             None, // protected_embedding
+            None, // protected_topic_centroids
             Some(&nli),
             None, // protected_posts_with_embeddings (Mode A ignores this)
             Some(&data_dir),
@@ -2673,6 +2811,7 @@ mod orchestration_tests {
                     "galaxy".to_string(),
                     "cosmology".to_string(),
                 ],
+                keyword_scores: vec![],
                 weight: 1.0,
             }],
             post_count: 200,
@@ -2884,6 +3023,7 @@ mod orchestration_tests {
             weights,
             embedder: None,
             protected_embedding: None,
+            protected_topic_centroids: None,
             nli_scorer: None,
             protected_posts_with_embeddings: None,
             data_dir: None,
