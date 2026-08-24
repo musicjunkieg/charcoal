@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b8342700e8ad20ab2c592ed8c54754b162aeb559",
+    "short_hash": "b834270",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T16:42:30-07:00",
+    "message": "fix(307): drop stale non-blocking wording from history-upload failure messages\n\nCodeRabbit round 2 on PR #104: the flag claim was already false (both else\nbranches set BACKUP_OK=false since ad5c250), but the message text still\nsaid non-blocking, contradicting the flag. Text now matches behavior.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "ad5c250a05b3509b91a134de640a38723d09dfc9",
     "short_hash": "ad5c250",
     "author": "Bryan Guffey",
