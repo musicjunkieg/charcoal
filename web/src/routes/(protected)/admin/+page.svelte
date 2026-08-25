@@ -437,9 +437,11 @@
 
 		<!-- aria-live: approve/deny/grant outcomes announce without stealing
 		     focus; the partial-failure case especially must not be missable. -->
+		<!-- The wrapper is the ONE live region; an inner role="status" would carry
+		     its own implicit region and announce every outcome twice. -->
 		<div aria-live="polite">
 			{#if accessMsg}
-				<p class={accessMsg.kind === 'ok' ? 'msg-success' : 'msg-error'} role="status">
+				<p class={accessMsg.kind === 'ok' ? 'msg-success' : 'msg-error'}>
 					{accessMsg.text}
 				</p>
 			{/if}
@@ -471,14 +473,14 @@
 									onclick={() => handleApprove(req)}
 									disabled={accessActionDid !== null}
 								>
-									Approve
+									{accessActionDid === req.did ? '…' : 'Approve'}
 								</button>
 								<button
 									class="btn-action btn-delete"
 									onclick={() => handleDeny(req)}
 									disabled={accessActionDid !== null}
 								>
-									Deny
+									{accessActionDid === req.did ? '…' : 'Deny'}
 								</button>
 							</div>
 						</li>
