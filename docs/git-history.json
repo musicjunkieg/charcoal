@@ -1,5 +1,13 @@
 [
   {
+    "hash": "11fda38e26bfd50979e00dbd57c5b634b37e56e7",
+    "short_hash": "11fda38",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T20:23:58-07:00",
+    "message": "docs(309): allowlist admin UI + minimal cooldown design spec\n\nBrainstormed and approved: access_requests table (v14), auto-waitlist on\ndenied OAuth, two-button approve, sticky invisible deny, revoke-keeps-data,\n24h scan cooldown with admin bypass. Visual design delegated to impeccable\nat implementation time.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "643f0350e2fc319bdfb05988d87586c751673bd4",
     "short_hash": "643f035",
     "author": "chaos gremlin",

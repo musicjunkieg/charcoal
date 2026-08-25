@@ -5950,6 +5950,17 @@
       "created_at": "2026-08-23T20:22:31.247206-07:00",
       "updated_at": "2026-08-23T20:22:31.247206-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-08-24-allowlist-admin-ui-design.md\"]}"
+    },
+    {
+      "id": 551,
+      "change_id": "297b92cd-deaf-47ef-8026-c80ec41ca14f",
+      "node_type": "outcome",
+      "title": "Spec written, self-reviewed (one 500-vs-503 inconsistency fixed inline), committed as 11fda38 on feat/allowlist-admin-ui",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-23T20:24:09.426468-07:00",
+      "updated_at": "2026-08-23T20:24:09.426468-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"11fda38\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -11870,6 +11881,17 @@
       "weight": 1.0,
       "rationale": "Spec is first artifact of the chosen design",
       "created_at": "2026-08-23T20:22:31.255633-07:00"
+    },
+    {
+      "id": 549,
+      "from_node_id": 550,
+      "to_node_id": 551,
+      "from_change_id": "59fe4cee-cf6e-4c84-bb27-a41bd3e230c3",
+      "to_change_id": "297b92cd-deaf-47ef-8026-c80ec41ca14f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spec commit is the action's outcome",
+      "created_at": "2026-08-23T20:24:09.435734-07:00"
     }
   ],
   "documents": [
