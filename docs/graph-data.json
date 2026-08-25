@@ -6038,6 +6038,28 @@
       "created_at": "2026-08-25T00:34:57.411475-07:00",
       "updated_at": "2026-08-25T00:34:57.411475-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"7c0f68a\",\"confidence\":90}"
+    },
+    {
+      "id": 559,
+      "change_id": "9a9bebb0-5764-4ffe-ac66-8d269a560304",
+      "node_type": "action",
+      "title": "Task 4: check_access three-clause gate + require_auth rewiring (#309)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T00:52:26.425489-07:00",
+      "updated_at": "2026-08-25T00:52:26.425489-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"99b16fd\",\"confidence\":90,\"files\":[\"src/web/auth.rs\",\"tests/web_access_gate.rs\"]}"
+    },
+    {
+      "id": 560,
+      "change_id": "14605ec1-320b-4257-aca6-82d5fe5c01c3",
+      "node_type": "outcome",
+      "title": "Task 4 done: check_access (3 OR clauses) + require_auth 403 access_revoked JSON code + DB-error fail-closed 500. 4 integration tests (web_access_gate.rs, TDD RED confirmed then GREEN) + 3 inline unit tests; regression set (unit_oauth, web_oauth, web_scan_queue) 0 failures 0 model-gated skips; clippy --features web --all-targets clean; fmt clean. Committed 99b16fd.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T00:52:36.326414-07:00",
+      "updated_at": "2026-08-25T00:52:36.326414-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"99b16fd\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -12057,6 +12079,28 @@
       "weight": 1.0,
       "rationale": "Plan task 3 outcome (implementer-logged), review clean",
       "created_at": "2026-08-25T00:37:35.724860-07:00"
+    },
+    {
+      "id": 558,
+      "from_node_id": 552,
+      "to_node_id": 559,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "9a9bebb0-5764-4ffe-ac66-8d269a560304",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements Task 4 of the 12-task allowlist admin UI plan",
+      "created_at": "2026-08-25T00:52:30.618026-07:00"
+    },
+    {
+      "id": 559,
+      "from_node_id": 559,
+      "to_node_id": 560,
+      "from_change_id": "9a9bebb0-5764-4ffe-ac66-8d269a560304",
+      "to_change_id": "14605ec1-320b-4257-aca6-82d5fe5c01c3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action produced this outcome",
+      "created_at": "2026-08-25T00:52:39.971309-07:00"
     }
   ],
   "documents": [

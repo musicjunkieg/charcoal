@@ -223,8 +223,10 @@ pub async fn check_access(
 
 /// Axum middleware: reject requests without a valid session cookie.
 ///
-/// Returns 401 if no valid session, 403 if the DID is not allowed.
-/// On success, inserts `AuthUser { did }` into request extensions.
+/// Returns 401 with no valid session, 403 with code "access_revoked" when the
+/// DID fails the three-clause access gate, and 500 (failing closed) when the
+/// gate itself cannot be evaluated. On success, inserts `AuthUser` into
+/// request extensions.
 pub async fn require_auth(
     State(state): State<AppState>,
     mut request: Request,
@@ -474,5 +476,32 @@ mod tests {
             .await
             .expect("check_access should not error");
         assert!(!allowed, "gate is active and there is no row for this DID");
+    }
+
+    #[tokio::test]
+    async fn check_access_db_error_propagates_as_err_never_allow() {
+        // A DB failure must surface as Err (callers fail closed) — never Ok(true).
+        let conn =
+            rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
+        crate::db::schema::create_tables(&conn).expect("schema creation should succeed");
+        // Sabotage: remove the table so get_access_request errors at query time.
+        conn.execute("DROP TABLE access_requests", [])
+            .expect("table should exist and drop successfully");
+        let db = crate::db::sqlite::SqliteDatabase::new(conn);
+
+        // Env gate ACTIVE (some other DID), requester is not admin — forces clause 3.
+        // Build the Config the same way the neighboring tests do, with
+        // allowed_did = TEST_DID and admin_dids = "".
+        let config = crate::config::Config {
+            allowed_did: TEST_DID.to_string(),
+            admin_dids: String::new(),
+            ..crate::config::Config::test_defaults()
+        };
+
+        let result = check_access(OUTSIDER_DID, &config, &db).await;
+        assert!(
+            result.is_err(),
+            "DB failure must be Err, not silently allowed/denied"
+        );
     }
 }

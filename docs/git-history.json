@@ -1,5 +1,13 @@
 [
   {
+    "hash": "99b16fd455cc741fab8332ca9fc408049fb28e89",
+    "short_hash": "99b16fd",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T00:51:59-07:00",
+    "message": "feat(309): three-clause access gate with access_revoked 403 code",
+    "files_changed": 4
+  },
+  {
     "hash": "7c0f68a3d90e0c96ee2a276c4d11c100c15b153e",
     "short_hash": "7c0f68a",
     "author": "Bryan Guffey",
