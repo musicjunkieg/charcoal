@@ -71,10 +71,18 @@ pub async fn trigger_scan(
                             chrono::Utc::now(),
                             state.config.scan_cooldown_hours,
                         ) {
+                            // Word the limit to match the configured window —
+                            // "one per day" is only true at the 24h default.
+                            let window = match state.config.scan_cooldown_hours {
+                                24 => "one per day".to_string(),
+                                h => format!("one every {h} hours"),
+                            };
                             return (
                                 StatusCode::TOO_MANY_REQUESTS,
                                 Json(serde_json::json!({
-                                    "error": "You scanned recently — scans are limited to one per day",
+                                    "error": format!(
+                                        "You scanned recently — scans are limited to {window}"
+                                    ),
                                     "retry_at": retry_at,
                                 })),
                             )

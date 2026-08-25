@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6613b9dc4b3bbc3c485ad43fa98868ee787398b0",
+    "short_hash": "6613b9d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T02:14:49-07:00",
+    "message": "feat(258,309): per-user scan cooldown with admin bypass",
+    "files_changed": 6
+  },
+  {
     "hash": "bbae761f0455ce7c886ebd36fc4fa2fc1245ad47",
     "short_hash": "bbae761",
     "author": "Bryan Guffey",

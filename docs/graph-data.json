@@ -6137,6 +6137,28 @@
       "created_at": "2026-08-25T02:01:23.368164-07:00",
       "updated_at": "2026-08-25T02:01:23.368164-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"bbae761\"}"
+    },
+    {
+      "id": 568,
+      "change_id": "9893a4de-67a3-4ee4-b6dc-7754c9e99066",
+      "node_type": "action",
+      "title": "Task 9: per-user scan cooldown (#258 minimal) with admin bypass",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T02:15:17.005299-07:00",
+      "updated_at": "2026-08-25T02:15:17.005299-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"6613b9d\",\"confidence\":90,\"files\":[\"src/config.rs\",\"src/web/handlers/scan.rs\",\".env.example\",\"tests/web_scan_queue.rs\",\"tests/web_access_admin.rs\"]}"
+    },
+    {
+      "id": 569,
+      "change_id": "b676a5cd-1cec-4cbf-acd3-df9085432ee3",
+      "node_type": "outcome",
+      "title": "Task 9 done: Config.scan_cooldown_hours (default 24, 0=disabled) + pure cooldown_retry_at helper + check in trigger_scan before enqueue_scan; admin.rs untouched (deliberate bypass). TDD: 3 inline unit tests (inside/outside window, disabled, unparseable timestamp) + 2 integration tests in web_scan_queue.rs (done row 429s with retry_at, failed row still 202) + 1 admin-bypass integration test in web_access_admin.rs (done row + admin trigger = 202). All pre-existing scan-queue/admin tests stayed green, 0 model-gated skips. clippy --features web --all-targets clean; cargo fmt required one pass. Committed 6613b9d.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T02:15:23.203666-07:00",
+      "updated_at": "2026-08-25T02:15:23.203666-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"6613b9d\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -12299,6 +12321,39 @@
       "weight": 1.0,
       "rationale": "Plan task 8 outcome (implementer-logged); controller fix 780a9e3 restored success log, review clean",
       "created_at": "2026-08-25T02:05:42.708132-07:00"
+    },
+    {
+      "id": 571,
+      "from_node_id": 549,
+      "to_node_id": 568,
+      "from_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "to_change_id": "9893a4de-67a3-4ee4-b6dc-7754c9e99066",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 implements the 24h cooldown w/ admin bypass chosen in Approach 1",
+      "created_at": "2026-08-25T02:15:27.428593-07:00"
+    },
+    {
+      "id": 572,
+      "from_node_id": 552,
+      "to_node_id": 568,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "9893a4de-67a3-4ee4-b6dc-7754c9e99066",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 9 action",
+      "created_at": "2026-08-25T02:15:27.440836-07:00"
+    },
+    {
+      "id": 573,
+      "from_node_id": 568,
+      "to_node_id": 569,
+      "from_change_id": "9893a4de-67a3-4ee4-b6dc-7754c9e99066",
+      "to_change_id": "b676a5cd-1cec-4cbf-acd3-df9085432ee3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-25T02:15:27.449420-07:00"
     }
   ],
   "documents": [
