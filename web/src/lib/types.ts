@@ -217,3 +217,25 @@ export interface PreSeedResponse {
 	did: string;
 	handle: string;
 }
+
+export interface AccessRequest {
+	did: string;
+	handle: string;
+	status: 'pending' | 'allowed' | 'denied';
+	requested_at: string;
+	decided_at: string | null;
+	decided_by: string | null;
+}
+
+export interface AccessListResponse {
+	pending: AccessRequest[];
+	allowed: AccessRequest[];
+	denied: AccessRequest[];
+}
+
+export interface ApproveScanResponse {
+	did: string;
+	access: string;
+	/** "queued" on full success; anything else is an honest partial failure. */
+	scan: string;
+}

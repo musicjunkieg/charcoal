@@ -15,7 +15,7 @@
 		triggerScan,
 		getAccuracy
 	} from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import { TIER_DESCRIPTIONS } from '$lib/tiers.js';
 	import { dashboardView, isQueued } from '$lib/dashboard-state.js';
 	import { topKeywords } from '$lib/fingerprint-keywords.js';
@@ -107,6 +107,10 @@
 				await goto('/login');
 				return;
 			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
 			loadError = err instanceof Error ? err.message : 'Failed to load dashboard';
 		} finally {
 			loading = false;
@@ -156,6 +160,10 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 				return;
 			}
 			scanError = err instanceof Error ? err.message : 'Scan failed to start';

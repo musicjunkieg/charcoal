@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import '$lib/website/styles/tokens.css';
 	import type { AdminUser, AdminQueue, AdminScanRow } from '$lib/types.js';
 
@@ -54,6 +54,8 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+			} else if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 			}
 		} finally {
 			loading = false;
@@ -130,6 +132,10 @@
 				await goto('/login');
 				return;
 			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
 			addError = err instanceof Error ? err.message : 'Failed to add user';
 		} finally {
 			addLoading = false;
@@ -146,6 +152,10 @@
 				await goto('/login');
 				return;
 			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
 		} finally {
 			scanningDid = null;
 		}
@@ -160,6 +170,10 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 				return;
 			}
 		} finally {

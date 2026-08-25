@@ -3,7 +3,7 @@
 	import { goto, pushState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { getAccounts } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
 	import { tierClass } from '$lib/tier-class';
 	import '$lib/website/styles/tokens.css';
@@ -35,6 +35,8 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+			} else if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 			}
 		} finally {
 			loading = false;

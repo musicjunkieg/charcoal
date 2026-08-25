@@ -6,7 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { getStatus, logout, getIdentity } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import type { Identity } from '$lib/types.js';
 
 	let { children } = $props();
@@ -24,6 +24,9 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			} else if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 				return;
 			}
 			// Non-auth error (network, server error) — still allow through;
