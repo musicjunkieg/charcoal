@@ -199,6 +199,10 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/admin/access/{did}/deny",
             post(handlers::access::deny_access),
         )
+        .route(
+            "/api/admin/access/{did}/approve-scan",
+            post(handlers::access::approve_access_and_scan),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,

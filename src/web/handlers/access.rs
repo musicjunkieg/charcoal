@@ -12,6 +12,7 @@ use serde::Deserialize;
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::db::traits::AccessRequestRow;
+use crate::web::scan_job;
 use crate::web::{AppState, AuthUser};
 
 fn admin_guard(auth: &AuthUser) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
@@ -173,5 +174,85 @@ pub async fn grant_access_by_handle(
     tracing::info!(admin_did = %auth.did, target_did = %did, target_handle = %handle, "Access granted by handle");
     Ok(Json(
         serde_json::json!({"did": did, "handle": handle, "status": "allowed"}),
+    ))
+}
+
+/// POST /api/admin/access/{did}/approve-scan — approve AND kick off onboarding.
+///
+/// Two operations reported honestly: approval commits first; a scan-side
+/// failure downgrades the `scan` field, never the approval. The enqueue goes
+/// through `enqueue_scan` like every other scan (#257: one admission path).
+pub async fn approve_access_and_scan(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(did): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    admin_guard(&auth)?;
+    // Reuse the approve path: 404 / decided_by / idempotency all match.
+    let _ = decide(&state, &auth, &did, "allowed").await?;
+
+    // The access row is the source of the handle for pre-seeding.
+    let row = match state.db.get_access_request(&did).await {
+        Ok(Some(row)) => row,
+        Ok(None) | Err(_) => {
+            // The decide() above just succeeded, so this is a read-back race
+            // or DB blip — approval stands, scan does not happen.
+            return Ok(Json(serde_json::json!({
+                "did": did, "access": "granted", "scan": "failed to queue",
+            })));
+        }
+    };
+
+    // Pre-seed the user row if they have never signed in, spawning the same
+    // background fingerprint build pre_seed_user does.
+    let user_missing = state
+        .db
+        .get_user_handle(&did)
+        .await
+        .ok()
+        .flatten()
+        .is_none();
+    if user_missing {
+        if let Err(e) = state.db.upsert_user(&did, &row.handle).await {
+            tracing::error!(error = %format!("{e:#}"), "approve-scan: upsert_user failed");
+            return Ok(Json(serde_json::json!({
+                "did": did, "access": "granted", "scan": "failed to queue",
+            })));
+        }
+        let db = state.db.clone();
+        let config = state.config.clone();
+        let scan_mgr = state.scan_manager.clone();
+        let fp_did = did.clone();
+        let fp_handle = row.handle.clone();
+        {
+            let mut mgr = scan_mgr.write().await;
+            mgr.start_fingerprint_build(&fp_did);
+        }
+        tokio::spawn(async move {
+            let result = scan_job::build_user_fingerprint(&config, &*db, &fp_did, &fp_handle).await;
+            let mut mgr = scan_mgr.write().await;
+            mgr.finish_fingerprint_build(&fp_did);
+            if let Err(e) = result {
+                tracing::error!(target_did = %fp_did, "Fingerprint build failed: {e}");
+            }
+        });
+    }
+
+    let scan = match state.db.enqueue_scan(&did).await {
+        Ok(()) => {
+            if let Some(wake) = &state.scan_wake {
+                let _ = wake.try_send(());
+            }
+            "queued"
+        }
+        Err(e) => {
+            tracing::error!(error = %format!("{e:#}"), "approve-scan: enqueue failed");
+            "failed to queue"
+        }
+    };
+
+    tracing::info!(admin_did = %auth.did, target_did = %did, scan, "Approve + scan");
+    Ok(Json(
+        serde_json::json!({"did": did, "access": "granted", "scan": scan}),
     ))
 }

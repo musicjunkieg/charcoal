@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2334d4a3fe57b6ccce9370e25a455ff2af279b4c",
+    "short_hash": "2334d4a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:51:53-07:00",
+    "message": "feat(309): grant access by handle endpoint\n\nImplementer subagent stalled on a backgrounded test run (10th occurrence);\ncontroller verified 4/4 web_access_admin + clippy clean and committed.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
     "hash": "2913235ba6999a46ded5521f47230399efbaa7b1",
     "short_hash": "2913235",
     "author": "Bryan Guffey",

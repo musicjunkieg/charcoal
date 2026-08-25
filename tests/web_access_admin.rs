@@ -152,3 +152,46 @@ async fn approve_deny_flip_status_and_404_without_a_row() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn approve_scan_grants_seeds_and_queues() {
+    let (app, db) = build_admin_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_access_request_pending(WAITER, "w.bsky.social")
+        .await
+        .expect("row");
+
+    let uri = format!("/api/admin/access/{WAITER}/approve-scan");
+    let (status, body) = call(&app, "POST", &uri, TEST_DID).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["access"], "granted");
+    assert_eq!(body["scan"], "queued");
+    assert_eq!(
+        db.get_access_request(WAITER).await.unwrap().unwrap().status,
+        "allowed"
+    );
+    assert_eq!(
+        db.get_user_handle(WAITER).await.unwrap().as_deref(),
+        Some("w.bsky.social"),
+        "user row pre-seeded from the access row's handle"
+    );
+    let queued = db
+        .list_scan_queue()
+        .await
+        .unwrap()
+        .into_iter()
+        .any(|r| r.user_did == WAITER && r.status == "queued");
+    assert!(queued, "scan enqueued");
+}
+
+#[tokio::test]
+async fn approve_scan_404s_without_a_row() {
+    let (app, _db) = build_admin_test_app_with_db().expect(MODELS_REQUIRED);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/admin/access/did:plc:norow/approve-scan",
+        TEST_DID,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

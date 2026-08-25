@@ -6104,6 +6104,17 @@
       "created_at": "2026-08-25T01:30:57.394365-07:00",
       "updated_at": "2026-08-25T01:30:57.394365-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"2913235\"}"
+    },
+    {
+      "id": 565,
+      "change_id": "dfdd278f-9912-4618-b7a2-d7563c8601b1",
+      "node_type": "outcome",
+      "title": "Task 7 grant-by-handle complete: 2334d4a (implementer stalled, controller verified+committed), review clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T01:53:41.058566-07:00",
+      "updated_at": "2026-08-25T01:53:41.058566-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"2334d4a\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -12222,6 +12233,17 @@
       "weight": 1.0,
       "rationale": "Plan task 6 outcome (implementer-logged), review clean",
       "created_at": "2026-08-25T01:33:26.099980-07:00"
+    },
+    {
+      "id": 567,
+      "from_node_id": 552,
+      "to_node_id": 565,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "dfdd278f-9912-4618-b7a2-d7563c8601b1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 7 outcome",
+      "created_at": "2026-08-25T01:53:46.065455-07:00"
     }
   ],
   "documents": [
