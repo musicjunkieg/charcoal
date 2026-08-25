@@ -1,5 +1,13 @@
 [
   {
+    "hash": "765dea2434cb0a84b4dadc6b55f32c6667c6e3ab",
+    "short_hash": "765dea2",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T04:18:20-07:00",
+    "message": "fix(309): finish-review fixes - single live region, in-flight button labels\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
     "hash": "2a09c0daf582128de597cdf89a02a4daac765fe8",
     "short_hash": "2a09c0d",
     "author": "Bryan Guffey",
