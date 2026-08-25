@@ -12288,6 +12288,17 @@
       "weight": 1.0,
       "rationale": "Implementation outcome",
       "created_at": "2026-08-25T02:01:27.179685-07:00"
+    },
+    {
+      "id": 570,
+      "from_node_id": 552,
+      "to_node_id": 567,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "15e048a9-0e80-4379-91d9-430535f8ca5f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 8 outcome (implementer-logged); controller fix 780a9e3 restored success log, review clean",
+      "created_at": "2026-08-25T02:05:42.708132-07:00"
     }
   ],
   "documents": [

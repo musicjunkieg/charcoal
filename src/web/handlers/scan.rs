@@ -20,6 +20,27 @@ use axum::{Extension, Json};
 
 use crate::web::{api_error, AppState, AuthUser};
 
+/// If the last successful scan finished inside the cooldown window, the
+/// RFC3339 instant at which the next scan becomes available. None = no
+/// cooldown (elapsed, disabled, or unparseable timestamp — never block on
+/// bad data).
+pub(crate) fn cooldown_retry_at(
+    finished_at: &str,
+    now: chrono::DateTime<chrono::Utc>,
+    cooldown_hours: u64,
+) -> Option<String> {
+    if cooldown_hours == 0 {
+        return None;
+    }
+    let finished = chrono::DateTime::parse_from_rfc3339(finished_at).ok()?;
+    let retry_at = finished + chrono::Duration::hours(cooldown_hours as i64);
+    if now < retry_at {
+        Some(retry_at.to_rfc3339())
+    } else {
+        None
+    }
+}
+
 /// POST /api/scan — queue a background threat scan for the caller.
 pub async fn trigger_scan(
     State(state): State<AppState>,
@@ -34,6 +55,40 @@ pub async fn trigger_scan(
         Err(e) => {
             tracing::error!(error = %format!("{e:#}"), "DB error looking up user handle");
             return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    }
+
+    // #258: one successful scan per user per cooldown window. Failed scans
+    // don't count, and the admin trigger path (handlers/admin.rs) deliberately
+    // has no such check — that is the operator's bypass.
+    match state.db.list_scan_queue().await {
+        Ok(rows) => {
+            if let Some(row) = rows.iter().find(|r| r.user_did == auth.did) {
+                if row.status == "done" {
+                    if let Some(finished_at) = &row.finished_at {
+                        if let Some(retry_at) = cooldown_retry_at(
+                            finished_at,
+                            chrono::Utc::now(),
+                            state.config.scan_cooldown_hours,
+                        ) {
+                            return (
+                                StatusCode::TOO_MANY_REQUESTS,
+                                Json(serde_json::json!({
+                                    "error": "You scanned recently — scans are limited to one per day",
+                                    "retry_at": retry_at,
+                                })),
+                            )
+                                .into_response();
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            // A cooldown is an abuse guard, not a correctness gate: if we
+            // cannot read the queue, let the enqueue proceed rather than
+            // refusing service on a DB blip.
+            tracing::warn!(error = %format!("{e:#}"), "cooldown check skipped — could not read scan queue");
         }
     }
 
@@ -89,4 +144,36 @@ pub async fn trigger_scan(
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn inside_window_returns_retry_at() {
+        let finished = (Utc::now() - Duration::hours(1)).to_rfc3339();
+        let retry = cooldown_retry_at(&finished, Utc::now(), 24);
+        assert!(retry.is_some());
+        let expected =
+            chrono::DateTime::parse_from_rfc3339(&finished).unwrap() + Duration::hours(24);
+        assert_eq!(retry.unwrap(), expected.to_rfc3339());
+    }
+
+    #[test]
+    fn outside_window_and_disabled_return_none() {
+        let finished = (Utc::now() - Duration::hours(25)).to_rfc3339();
+        assert!(cooldown_retry_at(&finished, Utc::now(), 24).is_none());
+        let recent = (Utc::now() - Duration::hours(1)).to_rfc3339();
+        assert!(
+            cooldown_retry_at(&recent, Utc::now(), 0).is_none(),
+            "0 disables"
+        );
+    }
+
+    #[test]
+    fn unparseable_finished_at_never_blocks() {
+        assert!(cooldown_retry_at("not-a-timestamp", Utc::now(), 24).is_none());
+    }
 }

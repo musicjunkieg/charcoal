@@ -195,3 +195,32 @@ async fn approve_scan_404s_without_a_row() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// #258/#309: the admin trigger path (`handlers/admin.rs`) deliberately has no
+/// cooldown check — that is the operator's bypass. A user whose own retry
+/// would 429 must still be scannable by an admin.
+#[tokio::test]
+async fn admin_trigger_bypasses_the_cooldown() {
+    let (app, db) = build_admin_test_app_with_db().expect(MODELS_REQUIRED);
+    const COOLDOWN_USER: &str = "did:plc:cooldownuser0000000000";
+    db.upsert_user(COOLDOWN_USER, "cooldown.bsky.social")
+        .await
+        .expect("user");
+    db.enqueue_scan(COOLDOWN_USER).await.expect("enqueue");
+    let claim = db
+        .claim_next_scan(1, 600)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    db.finish_queued_scan(COOLDOWN_USER, &claim.claim_id, None)
+        .await
+        .expect("finish");
+
+    let uri = format!("/api/admin/users/{COOLDOWN_USER}/scan");
+    let (status, body) = call(&app, "POST", &uri, TEST_DID).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "admin trigger must bypass the per-user cooldown: {body}"
+    );
+}
