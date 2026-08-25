@@ -6115,6 +6115,28 @@
       "created_at": "2026-08-25T01:53:41.058566-07:00",
       "updated_at": "2026-08-25T01:53:41.058566-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"2334d4a\",\"confidence\":95}"
+    },
+    {
+      "id": 566,
+      "change_id": "5dca29a8-e987-4911-8057-1101f7276c71",
+      "node_type": "action",
+      "title": "Task 8: approve-scan endpoint - grant plus pre-seed plus enqueue (#309)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T02:01:16.992291-07:00",
+      "updated_at": "2026-08-25T02:01:16.992291-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"bbae761\",\"files\":[\"src/web/handlers/access.rs\",\"src/web/mod.rs\",\"tests/web_access_admin.rs\"]}"
+    },
+    {
+      "id": 567,
+      "change_id": "15e048a9-0e80-4379-91d9-430535f8ca5f",
+      "node_type": "outcome",
+      "title": "Task 8 done: approve_access_and_scan reuses decide() via ?, pre-seeds user row + spawns fingerprint build (pre_seed_user's exact block) only when user row missing, enqueues via enqueue_scan + scan_wake try_send (#257 single admission path). Honest partial-failure: approval never rolled back, scan-side failures downgrade to failed to queue. TDD: 2 new tests (grant/seed/queue happy path, 404-without-row) both pass; full file 6/6 green; 0 model-gated skips. clippy --features web --all-targets clean; cargo fmt needed one pass (brief snippet needed reformatting, consistent with Task 6). Committed bbae761.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T02:01:23.368164-07:00",
+      "updated_at": "2026-08-25T02:01:23.368164-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"bbae761\"}"
     }
   ],
   "edges": [
@@ -12244,6 +12266,28 @@
       "weight": 1.0,
       "rationale": "Plan task 7 outcome",
       "created_at": "2026-08-25T01:53:46.065455-07:00"
+    },
+    {
+      "id": 568,
+      "from_node_id": 545,
+      "to_node_id": 566,
+      "from_change_id": "01e06827-6211-4323-8a2c-cb2082ad78d1",
+      "to_change_id": "5dca29a8-e987-4911-8057-1101f7276c71",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 implements the approve-scan endpoint for the allowlist admin UI goal",
+      "created_at": "2026-08-25T02:01:27.170112-07:00"
+    },
+    {
+      "id": 569,
+      "from_node_id": 566,
+      "to_node_id": 567,
+      "from_change_id": "5dca29a8-e987-4911-8057-1101f7276c71",
+      "to_change_id": "15e048a9-0e80-4379-91d9-430535f8ca5f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-25T02:01:27.179685-07:00"
     }
   ],
   "documents": [

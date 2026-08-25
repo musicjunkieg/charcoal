@@ -234,6 +234,8 @@ pub async fn approve_access_and_scan(
             mgr.finish_fingerprint_build(&fp_did);
             if let Err(e) = result {
                 tracing::error!(target_did = %fp_did, "Fingerprint build failed: {e}");
+            } else {
+                tracing::info!(target_did = %fp_did, "Fingerprint build complete");
             }
         });
     }

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bbae761f0455ce7c886ebd36fc4fa2fc1245ad47",
+    "short_hash": "bbae761",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T02:00:52-07:00",
+    "message": "feat(309): approve-scan endpoint - grant plus pre-seed plus enqueue",
+    "files_changed": 5
+  },
+  {
     "hash": "2334d4a3fe57b6ccce9370e25a455ff2af279b4c",
     "short_hash": "2334d4a",
     "author": "Bryan Guffey",
