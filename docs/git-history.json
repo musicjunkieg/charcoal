@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7c0f68a3d90e0c96ee2a276c4d11c100c15b153e",
+    "short_hash": "7c0f68a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T00:34:24-07:00",
+    "message": "feat(309): access_requests Postgres impl + parity tests",
+    "files_changed": 4
+  },
+  {
     "hash": "4d07f8d2e67f3af9629479508c42385fff92ba04",
     "short_hash": "4d07f8d",
     "author": "Bryan Guffey",

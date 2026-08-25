@@ -6016,6 +6016,28 @@
       "created_at": "2026-08-24T23:38:39.268431-07:00",
       "updated_at": "2026-08-24T23:38:39.268431-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"4d07f8d\",\"confidence\":95}"
+    },
+    {
+      "id": 557,
+      "change_id": "8a60f421-cf53-41a6-8259-6f2d9ea0cee1",
+      "node_type": "action",
+      "title": "Task 3: Postgres impl + parity tests for access_requests (#309)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T00:34:44.259143-07:00",
+      "updated_at": "2026-08-25T00:34:44.259143-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"7c0f68a\",\"confidence\":90,\"files\":[\"src/db/postgres.rs\",\"tests/db_postgres.rs\"]}"
+    },
+    {
+      "id": 558,
+      "change_id": "ca7d8058-27ea-47b4-a7ac-4377227da3cc",
+      "node_type": "outcome",
+      "title": "Task 3 done: 5 PgDatabase methods implemented, parity test passes (schema + db_postgres targets), postgres feature now compiles cleanly; clippy clean; cargo fmt clean. Full --all-targets test run could not complete within 10min tool cap due to ~15-20s per-binary process-launch overhead (measured, affects ALL ~40 test binaries uniformly, unrelated to this change) -- verified via scoped --lib and --test db_postgres runs instead.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T00:34:57.411475-07:00",
+      "updated_at": "2026-08-25T00:34:57.411475-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"7c0f68a\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -12002,6 +12024,39 @@
       "weight": 1.0,
       "rationale": "Plan task 2 outcome",
       "created_at": "2026-08-24T23:38:46.888379-07:00"
+    },
+    {
+      "id": 555,
+      "from_node_id": 556,
+      "to_node_id": 557,
+      "from_change_id": "765808d4-18b8-48a7-ae33-fdc820ddd8bc",
+      "to_change_id": "8a60f421-cf53-41a6-8259-6f2d9ea0cee1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 follows Task 2 (trait+SQLite) to complete the Database trait for PgDatabase",
+      "created_at": "2026-08-25T00:34:48.376868-07:00"
+    },
+    {
+      "id": 556,
+      "from_node_id": 557,
+      "to_node_id": 558,
+      "from_change_id": "8a60f421-cf53-41a6-8259-6f2d9ea0cee1",
+      "to_change_id": "ca7d8058-27ea-47b4-a7ac-4377227da3cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-25T00:35:01.295197-07:00"
+    },
+    {
+      "id": 557,
+      "from_node_id": 552,
+      "to_node_id": 558,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "ca7d8058-27ea-47b4-a7ac-4377227da3cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 3 outcome (implementer-logged), review clean",
+      "created_at": "2026-08-25T00:37:35.724860-07:00"
     }
   ],
   "documents": [

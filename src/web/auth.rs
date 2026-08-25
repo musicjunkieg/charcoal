@@ -11,14 +11,16 @@
 //
 // Auth check (this middleware):
 //   extract charcoal_session cookie → parse → verify HMAC → verify age
-//   → extract DID → check against CHARCOAL_ALLOWED_DID → allow/deny
+//   → extract DID → run the three-clause access gate (see `check_access`):
+//     CHARCOAL_ALLOWED_DID env bootstrap OR CHARCOAL_ADMIN_DIDS OR an
+//     `access_requests` row with status 'allowed' → allow/deny (#309)
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Request, State};
 use axum::http::header;
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
@@ -190,6 +192,35 @@ pub fn did_is_admin(did: &str, admin_dids: &str) -> bool {
         .any(|admin_did| constant_time_eq(admin_did, did))
 }
 
+/// Full access decision for an authenticated DID (#309).
+///
+/// Three OR'd clauses, in order:
+/// 1. `CHARCOAL_ALLOWED_DID` env bootstrap — `did_is_allowed` returns true for
+///    an EMPTY env var (open access), so the table is only consulted when the
+///    gate is actively configured. The env list can never be locked out by
+///    DB state.
+/// 2. `CHARCOAL_ADMIN_DIDS` — an admin cannot revoke their own access via
+///    the table.
+/// 3. An `access_requests` row with status 'allowed'.
+///
+/// `Err` means "could not check" — callers MUST fail closed.
+pub async fn check_access(
+    did: &str,
+    config: &crate::config::Config,
+    db: &dyn crate::db::Database,
+) -> anyhow::Result<bool> {
+    if did_is_allowed(did, &config.allowed_did) {
+        return Ok(true);
+    }
+    if did_is_admin(did, &config.admin_dids) {
+        return Ok(true);
+    }
+    Ok(matches!(
+        db.get_access_request(did).await?,
+        Some(row) if row.status == "allowed"
+    ))
+}
+
 /// Axum middleware: reject requests without a valid session cookie.
 ///
 /// Returns 401 if no valid session, 403 if the DID is not allowed.
@@ -200,17 +231,35 @@ pub async fn require_auth(
     next: Next,
 ) -> Response {
     let session_secret = &state.config.session_secret;
-    let allowed_did = &state.config.allowed_did;
 
     match extract_session_did(&request, session_secret) {
         None => super::api_error(
             axum::http::StatusCode::UNAUTHORIZED,
             "Authentication required",
         ),
-        Some(did) if !did_is_allowed(&did, allowed_did) => {
-            super::api_error(axum::http::StatusCode::FORBIDDEN, "Access denied")
-        }
         Some(did) => {
+            match check_access(&did, &state.config, &*state.db).await {
+                Err(e) => {
+                    tracing::error!(error = %format!("{e:#}"), "access check failed — failing closed");
+                    return super::api_error(
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        "Database error",
+                    );
+                }
+                Ok(false) => {
+                    // Machine-readable code so the SPA can route to /waitlist
+                    // instead of rendering a broken dashboard (#309).
+                    return (
+                        axum::http::StatusCode::FORBIDDEN,
+                        axum::Json(serde_json::json!({
+                            "error": "Access is not currently active for this account",
+                            "code": "access_revoked",
+                        })),
+                    )
+                        .into_response();
+                }
+                Ok(true) => {}
+            }
             let is_admin = did_is_admin(&did, &state.config.admin_dids);
 
             // Extract as_user query param for impersonation (URL-decode the value)
@@ -364,5 +413,66 @@ mod tests {
         assert!(!verify_token("secret", "not.a.valid.token.format"));
         assert!(!verify_token("secret", ""));
         assert!(!verify_token("secret", "onlytwoparts.here"));
+    }
+
+    // --- check_access (#309) ---
+
+    const ADMIN_DID: &str = "did:plc:adminaaaaaaaaaaaaaaaaaaa";
+    const OUTSIDER_DID: &str = "did:plc:outsiderrrrrrrrrrrrrrrrr";
+
+    /// In-memory SQLite DB with the schema applied — mirrors `test_helpers::build_app`.
+    fn test_db() -> crate::db::sqlite::SqliteDatabase {
+        let conn =
+            rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
+        crate::db::schema::create_tables(&conn).expect("schema creation should succeed");
+        crate::db::sqlite::SqliteDatabase::new(conn)
+    }
+
+    #[tokio::test]
+    async fn check_access_empty_env_is_open_without_any_row() {
+        let db = test_db();
+        let config = crate::config::Config {
+            allowed_did: String::new(),
+            admin_dids: String::new(),
+            ..crate::config::Config::test_defaults()
+        };
+        let allowed = check_access(OUTSIDER_DID, &config, &db)
+            .await
+            .expect("check_access should not error");
+        assert!(
+            allowed,
+            "empty allowed_did means open access — table never consulted"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_access_admin_passes_even_without_a_row() {
+        let db = test_db();
+        let config = crate::config::Config {
+            allowed_did: TEST_DID.to_string(),
+            admin_dids: ADMIN_DID.to_string(),
+            ..crate::config::Config::test_defaults()
+        };
+        let allowed = check_access(ADMIN_DID, &config, &db)
+            .await
+            .expect("check_access should not error");
+        assert!(
+            allowed,
+            "admin DIDs pass clause 2 regardless of table state"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_access_env_set_and_no_row_fails() {
+        let db = test_db();
+        let config = crate::config::Config {
+            allowed_did: TEST_DID.to_string(),
+            admin_dids: String::new(),
+            ..crate::config::Config::test_defaults()
+        };
+        let allowed = check_access(OUTSIDER_DID, &config, &db)
+            .await
+            .expect("check_access should not error");
+        assert!(!allowed, "gate is active and there is no row for this DID");
     }
 }
