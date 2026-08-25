@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2a09c0daf582128de597cdf89a02a4daac765fe8",
+    "short_hash": "2a09c0d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T02:24:36-07:00",
+    "message": "feat(309): frontend plumbing - access wrappers, access_revoked routing, waitlist placeholder",
+    "files_changed": 11
+  },
+  {
     "hash": "6613b9dc4b3bbc3c485ad43fa98868ee787398b0",
     "short_hash": "6613b9d",
     "author": "Bryan Guffey",

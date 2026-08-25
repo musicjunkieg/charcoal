@@ -6159,6 +6159,28 @@
       "created_at": "2026-08-25T02:15:23.203666-07:00",
       "updated_at": "2026-08-25T02:15:23.203666-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"6613b9d\",\"confidence\":90}"
+    },
+    {
+      "id": 570,
+      "change_id": "677354a9-21a5-437b-9963-9e5a7e8c64cb",
+      "node_type": "action",
+      "title": "Task 10: frontend plumbing - access wrappers, access_revoked routing, waitlist placeholder (#309)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T02:25:31.474868-07:00",
+      "updated_at": "2026-08-25T02:25:31.474868-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"2a09c0d\",\"confidence\":90,\"files\":[\"web/src/lib/api.ts web/src/lib/types.ts web/src/lib/api-errors.test.ts web/src/routes/waitlist/+page.svelte web/src/routes/(protected)/+layout.svelte\"]}"
+    },
+    {
+      "id": 571,
+      "change_id": "64baa832-dc0e-42da-8ea0-017284759dfe",
+      "node_type": "outcome",
+      "title": "Task 10 done: AccessRevokedError class, apiFetch 403 access_revoked handling, 5 admin access wrappers (getAccessRequests/grantAccess/approveAccess/approveAccessAndScan/denyAccess), AccessRequest/AccessListResponse/ApproveScanResponse types, waitlist placeholder route. AuthError sweep: mirrored goto('/waitlist') at all 8 catch sites across (protected)/+layout.svelte + review/accounts/accounts[handle]/dashboard(x2)/admin(x4) pages. TDD: wrote api-errors.test.ts first (RED - AccessRevokedError not exported), implemented, GREEN. Full vitest suite 45/45 pass (incl. pre-existing), build clean, svelte-autofixer clean on waitlist page. Tokens verified against tokens.css (--cream-100/--font-body/--font-display all real, no invented hex). Committed 2a09c0d.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T02:25:40.687625-07:00",
+      "updated_at": "2026-08-25T02:25:40.687625-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"2a09c0d\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -12365,6 +12387,39 @@
       "weight": 1.0,
       "rationale": "Plan task 9 outcome (implementer-logged); controller fix 2bf77b9 window-aware message, review clean",
       "created_at": "2026-08-25T02:21:26.112876-07:00"
+    },
+    {
+      "id": 575,
+      "from_node_id": 549,
+      "to_node_id": 570,
+      "from_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "to_change_id": "677354a9-21a5-437b-9963-9e5a7e8c64cb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 10 implements the frontend plumbing for the chosen allowlist approach",
+      "created_at": "2026-08-25T02:25:46.174172-07:00"
+    },
+    {
+      "id": 576,
+      "from_node_id": 570,
+      "to_node_id": 571,
+      "from_change_id": "677354a9-21a5-437b-9963-9e5a7e8c64cb",
+      "to_change_id": "64baa832-dc0e-42da-8ea0-017284759dfe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation outcome",
+      "created_at": "2026-08-25T02:25:46.184823-07:00"
+    },
+    {
+      "id": 577,
+      "from_node_id": 552,
+      "to_node_id": 571,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "64baa832-dc0e-42da-8ea0-017284759dfe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 10 outcome (subagent-implemented)",
+      "created_at": "2026-08-25T02:25:46.194824-07:00"
     }
   ],
   "documents": [
