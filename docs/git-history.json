@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4d07f8d2e67f3af9629479508c42385fff92ba04",
+    "short_hash": "4d07f8d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-24T23:34:50-07:00",
+    "message": "feat(309): AccessRequestRow + access_requests trait methods, SQLite impl",
+    "files_changed": 6
+  },
+  {
     "hash": "0ba641c7c2c9feccd57ed26e46f3b4f1a5eeafca",
     "short_hash": "0ba641c",
     "author": "Bryan Guffey",

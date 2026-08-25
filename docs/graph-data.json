@@ -5983,6 +5983,39 @@
       "created_at": "2026-08-24T23:24:53.149613-07:00",
       "updated_at": "2026-08-24T23:24:53.149613-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"0ba641c\",\"confidence\":95}"
+    },
+    {
+      "id": 554,
+      "change_id": "cd47bac2-c99e-4022-93c0-4ede0d2dc5ae",
+      "node_type": "action",
+      "title": "Task 2: AccessRequestRow + trait methods + SQLite impl (#309)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-24T23:35:12.134726-07:00",
+      "updated_at": "2026-08-24T23:35:12.134726-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"4d07f8d\",\"confidence\":90,\"files\":[\"src/db/traits.rs\",\"src/db/queries.rs\",\"src/db/sqlite.rs\",\"tests/unit_access.rs\"]}"
+    },
+    {
+      "id": 555,
+      "change_id": "e4fc5112-e3e7-471a-8ecf-06c8c79ab4d6",
+      "node_type": "outcome",
+      "title": "Task 2 done: AccessRequestRow struct, 5 trait methods, SQLite impl; 4/4 tests pass, clippy clean, fmt clean; postgres feature intentionally broken (Task 3's job)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-24T23:35:20.998284-07:00",
+      "updated_at": "2026-08-24T23:35:20.998284-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"4d07f8d\",\"confidence\":95}"
+    },
+    {
+      "id": 556,
+      "change_id": "765808d4-18b8-48a7-ae33-fdc820ddd8bc",
+      "node_type": "outcome",
+      "title": "Task 2 trait+SQLite complete: 4d07f8d, review clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-24T23:38:39.268431-07:00",
+      "updated_at": "2026-08-24T23:38:39.268431-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"4d07f8d\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -11936,6 +11969,39 @@
       "weight": 1.0,
       "rationale": "Plan task 1 outcome",
       "created_at": "2026-08-24T23:24:53.155910-07:00"
+    },
+    {
+      "id": 552,
+      "from_node_id": 552,
+      "to_node_id": 554,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "cd47bac2-c99e-4022-93c0-4ede0d2dc5ae",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements Task 2 of the 12-task allowlist admin UI plan",
+      "created_at": "2026-08-24T23:35:16.320342-07:00"
+    },
+    {
+      "id": 553,
+      "from_node_id": 554,
+      "to_node_id": 555,
+      "from_change_id": "cd47bac2-c99e-4022-93c0-4ede0d2dc5ae",
+      "to_change_id": "e4fc5112-e3e7-471a-8ecf-06c8c79ab4d6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action produced this outcome",
+      "created_at": "2026-08-24T23:35:24.832661-07:00"
+    },
+    {
+      "id": 554,
+      "from_node_id": 552,
+      "to_node_id": 556,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "765808d4-18b8-48a7-ae33-fdc820ddd8bc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 2 outcome",
+      "created_at": "2026-08-24T23:38:46.888379-07:00"
     }
   ],
   "documents": [

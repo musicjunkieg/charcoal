@@ -1819,3 +1819,76 @@ async fn test_pg_scan_queue_breaks_enqueued_at_ties_by_user_did() {
         db.delete_user_data(d).await.unwrap();
     }
 }
+
+// --- Access requests (#309) ---
+
+/// Delete a test's `access_requests` row directly — the table is deliberately
+/// NOT cascaded by `delete_user_data` (it's an admin grant/deny record, not
+/// user content; see migration 0014), so cleanup has to go around it.
+async fn delete_access_request(url: &str, did: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM access_requests WHERE did = $1")
+        .bind(did)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// Postgres side of `tests/unit_access.rs` — same state machine, same
+/// assertions, against `PgDatabase` instead of `SqliteDatabase`.
+#[tokio::test]
+async fn test_pg_access_requests_state_machine_parity() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    const DID: &str = "did:plc:pgaccesstest000000000000";
+    const NO_ROW_DID: &str = "did:plc:norow0000000000000000000";
+    // `connect_postgres` runs migrations, so it must go first — this may be
+    // the run that creates `access_requests` (migration 0014) in a fresh
+    // `charcoal_test` database.
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    delete_access_request(&url, DID).await;
+
+    db.upsert_access_request_pending(DID, "old.bsky.social")
+        .await
+        .unwrap();
+    let row = db.get_access_request(DID).await.unwrap().unwrap();
+    assert_eq!(
+        (row.status.as_str(), row.handle.as_str()),
+        ("pending", "old.bsky.social")
+    );
+
+    // Deny, then sign in again with a new handle: status must NOT reset —
+    // ON CONFLICT only refreshes handle.
+    assert!(db
+        .set_access_status(DID, "denied", "did:plc:admin")
+        .await
+        .unwrap());
+    db.upsert_access_request_pending(DID, "new.bsky.social")
+        .await
+        .unwrap();
+    let row = db.get_access_request(DID).await.unwrap().unwrap();
+    assert_eq!(row.status, "denied", "denied is sticky through re-login");
+    assert_eq!(row.handle, "new.bsky.social", "handle refreshes anyway");
+
+    // Admin grant-by-handle flips a denied row straight to allowed.
+    db.grant_access(DID, "new.bsky.social", "did:plc:admin")
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_access_request(DID).await.unwrap().unwrap().status,
+        "allowed"
+    );
+
+    // Deciding a row that doesn't exist reports false, not an error.
+    assert!(!db
+        .set_access_status(NO_ROW_DID, "allowed", "x")
+        .await
+        .unwrap());
+
+    assert!(!db.list_access_requests().await.unwrap().is_empty());
+
+    delete_access_request(&url, DID).await;
+}
