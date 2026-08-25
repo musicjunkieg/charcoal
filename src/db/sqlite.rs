@@ -836,8 +836,8 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
-        // scan_queue, topic_clusters = 13 tables (v13)
-        assert_eq!(count, 13);
+        // scan_queue, topic_clusters, access_requests = 14 tables (v14)
+        assert_eq!(count, 14);
     }
 
     #[tokio::test]

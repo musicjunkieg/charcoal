@@ -1,5 +1,13 @@
 [
   {
+    "hash": "fff9c2d8128b0df2e68192d8c62c88492f29a278",
+    "short_hash": "fff9c2d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:16:49-07:00",
+    "message": "feat(309): denied OAuth auto-waitlists and redirects to /waitlist",
+    "files_changed": 4
+  },
+  {
     "hash": "99b16fd455cc741fab8332ca9fc408049fb28e89",
     "short_hash": "99b16fd",
     "author": "Bryan Guffey",
