@@ -12101,6 +12101,17 @@
       "weight": 1.0,
       "rationale": "Action produced this outcome",
       "created_at": "2026-08-25T00:52:39.971309-07:00"
+    },
+    {
+      "id": 560,
+      "from_node_id": 552,
+      "to_node_id": 560,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "14605ec1-320b-4257-aca6-82d5fe5c01c3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 4 outcome (implementer-logged); fix round c7c3379 added fail-closed test, re-review clean",
+      "created_at": "2026-08-25T01:01:00.488394-07:00"
     }
   ],
   "documents": [

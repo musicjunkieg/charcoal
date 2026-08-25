@@ -78,6 +78,37 @@ pub fn build_admin_test_app_with_db() -> Option<(axum::Router, Arc<dyn crate::db
     build_app_with_admins("", TEST_DID)
 }
 
+/// Build a test app AND hand back the full `AppState` (default gate: only
+/// `TEST_DID` is allowed).
+///
+/// Needed by tests that must drive state the router's handlers read/write
+/// but that plain HTTP requests can't reach — e.g. seeding
+/// `state.pending_oauth` so the OAuth callback's post-token-exchange gate
+/// logic (#309) can be exercised against a wiremock stub instead of a live
+/// PDS. `AppState` is `Clone` (all fields are `Arc`-wrapped), so the returned
+/// state shares the exact same underlying data the router was built with —
+/// mutating it through this handle is visible to in-flight requests.
+pub fn build_test_app_with_state() -> Option<(axum::Router, AppState)> {
+    build_app_with_admins_state(TEST_DID, "")
+}
+
+/// Like `build_test_app_with_state`, but the caller supplies an
+/// already-constructed `Database`.
+///
+/// Exists so tests can pre-sabotage a `SqliteDatabase` (e.g. drop a table)
+/// BEFORE it's wired into the router, to exercise fail-closed paths a healthy
+/// DB can never reach — e.g. `check_access`'s `Err` arm inside the OAuth
+/// callback gate (#309). A plain in-memory DB built through the trait object
+/// can't be sabotaged from outside the crate (`SqliteDatabase`'s connection
+/// is private), so this takes the DB as-is instead of building one itself.
+pub fn build_test_app_with_state_and_db(
+    db: Arc<dyn crate::db::Database>,
+    allowed_did: &str,
+    admin_dids: &str,
+) -> Option<(axum::Router, AppState)> {
+    build_app_with_admins_state_and_db(db, allowed_did, admin_dids)
+}
+
 fn build_app(allowed_did: &str) -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
     build_app_with_admins(allowed_did, "")
 }
@@ -86,6 +117,26 @@ fn build_app_with_admins(
     allowed_did: &str,
     admin_dids: &str,
 ) -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
+    let (router, state) = build_app_with_admins_state(allowed_did, admin_dids)?;
+    Some((router, state.db))
+}
+
+fn build_app_with_admins_state(
+    allowed_did: &str,
+    admin_dids: &str,
+) -> Option<(axum::Router, AppState)> {
+    let conn =
+        rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
+    create_tables(&conn).expect("schema creation should succeed");
+    let db = Arc::new(SqliteDatabase::new(conn)) as Arc<dyn crate::db::Database>;
+    build_app_with_admins_state_and_db(db, allowed_did, admin_dids)
+}
+
+fn build_app_with_admins_state_and_db(
+    db: Arc<dyn crate::db::Database>,
+    allowed_did: &str,
+    admin_dids: &str,
+) -> Option<(axum::Router, AppState)> {
     let models = test_models()?;
 
     let config = Config {
@@ -96,16 +147,11 @@ fn build_app_with_admins(
         ..Config::test_defaults()
     };
 
-    let conn =
-        rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
-    create_tables(&conn).expect("schema creation should succeed");
-    let db = Arc::new(SqliteDatabase::new(conn)) as Arc<dyn crate::db::Database>;
-
     let signing_key =
         generate_key(KeyType::P256Private).expect("P-256 key generation should succeed");
 
     let state = AppState {
-        db: db.clone(),
+        db,
         config: Arc::new(config),
         scan_manager: Arc::new(RwLock::new(ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
@@ -118,7 +164,7 @@ fn build_app_with_admins(
         scan_wake: None,
     };
 
-    Some((build_router(state), db))
+    Some((build_router(state.clone()), state))
 }
 
 /// Build an in-memory Axum router for tests that don't need DB access.

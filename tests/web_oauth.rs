@@ -16,7 +16,7 @@ mod tests {
 
     use charcoal::web::auth::{create_token, COOKIE_NAME};
     use charcoal::web::test_helpers::{
-        build_test_app, build_test_app_with_db, TEST_DID, TEST_SECRET,
+        build_test_app, build_test_app_with_db, build_test_app_with_state, TEST_DID, TEST_SECRET,
     };
 
     fn session_cookie(did: &str) -> String {
@@ -553,6 +553,303 @@ mod tests {
         assert!(
             set_cookie.contains("Max-Age=0"),
             "Logout should set Max-Age=0 to expire the cookie. Got: {set_cookie}"
+        );
+    }
+
+    // ---- Callback gate: denied sign-in auto-waitlists (#309, Task 5) ----
+    //
+    // The callback handler exchanges the code for tokens via `oauth_complete`,
+    // which makes a REAL HTTP POST to `authorization_server.token_endpoint` —
+    // there is no seam to fake that response in-process. So driving the gate
+    // block (which runs AFTER the token exchange) requires either a live PDS
+    // or a stand-in HTTP server for the token endpoint.
+    //
+    // `build_test_app_with_state` (added for this task) hands back the live
+    // `AppState` so a `PendingOAuth` can be seeded directly into
+    // `state.pending_oauth` — the same map `/api/auth/initiate` populates —
+    // pointing `authorization_server.token_endpoint` at a `wiremock`
+    // `MockServer`. `wiremock` is already a project dependency exercised the
+    // same way in tests/unit_classifier.rs, so this reuses existing test
+    // infrastructure rather than inventing a new mocking framework. A plain
+    // 200 JSON response satisfies `oauth_complete`: its `DpopRetry` middleware
+    // only intervenes on 400/401 (nonce-challenge retry), so no DPoP-nonce
+    // choreography is needed for the happy path this handler expects.
+    //
+    // This drives the actual `/api/auth/callback` HTTP handler end-to-end,
+    // so all three behavioral contracts are asserted at the real HTTP layer:
+    // pending row + redirect + no cookie/no user row; handle refresh keeps
+    // denied sticky; a denied row stays denied and still redirects. The
+    // DB-error fail-closed path is asserted the same way, by sabotaging the
+    // DB.
+    //
+    // NOTE: the redirect status is 303 See Other, not 302 Found — that's what
+    // `axum::response::Redirect::to()` sends (see axum's redirect.rs), the
+    // same helper the pre-existing `/dashboard` success redirect uses. The
+    // task brief's sample assertion said `StatusCode::FOUND`; verified against
+    // actual axum behavior and left as `SEE_OTHER` here instead of changing
+    // production code to deviate from the codebase's established redirect
+    // convention.
+
+    /// Seed `state.pending_oauth[state_param]` with a `PendingOAuth` whose
+    /// token exchange resolves against a fresh `wiremock` server returning
+    /// `sub: did`. Returns the (kept-alive) mock server — it must outlive the
+    /// callback request or the POST to its token endpoint will fail to connect.
+    async fn seed_callback_state(
+        state: &charcoal::web::AppState,
+        state_param: &str,
+        did: &str,
+        handle: &str,
+    ) -> wiremock::MockServer {
+        use atproto_identity::key::{generate_key, KeyType};
+        use atproto_oauth::resources::AuthorizationServer;
+        use atproto_oauth::workflow::OAuthRequest;
+        use charcoal::web::handlers::oauth::PendingOAuth;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        let token_response = serde_json::json!({
+            "access_token": "test-access-token",
+            "token_type": "DPoP",
+            "refresh_token": "test-refresh-token",
+            "scope": "atproto",
+            "expires_in": 3600,
+            "sub": did,
+        });
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(token_response))
+            .mount(&mock)
+            .await;
+
+        let dpop_key =
+            generate_key(KeyType::P256Private).expect("DPoP key generation should succeed");
+        let now = chrono::Utc::now();
+        let oauth_request = OAuthRequest {
+            oauth_state: state_param.to_string(),
+            issuer: "https://mock-authz.test".to_string(),
+            authorization_server: "https://mock-authz.test".to_string(),
+            nonce: "test-nonce".to_string(),
+            pkce_verifier: "test-verifier".to_string(),
+            signing_public_key: "unused-by-callback".to_string(),
+            dpop_private_key: dpop_key.to_string(),
+            created_at: now,
+            expires_at: now + chrono::Duration::hours(1),
+        };
+        let authorization_server = AuthorizationServer {
+            issuer: "https://mock-authz.test".to_string(),
+            token_endpoint: format!("{}/token", mock.uri()),
+            ..Default::default()
+        };
+
+        state.pending_oauth.write().await.insert(
+            state_param.to_string(),
+            PendingOAuth {
+                oauth_request,
+                authorization_server,
+                handle: handle.to_string(),
+            },
+        );
+
+        mock
+    }
+
+    async fn call_callback(app: axum::Router, state_param: &str) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/auth/callback?code=fakecode&state={state_param}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn callback_denies_new_did_upserts_pending_redirects_no_cookie_no_user() {
+        let Some((app, state)) = build_test_app_with_state() else {
+            eprintln!("SKIP: models not present, cannot build test AppState");
+            return;
+        };
+        const DENIED_DID: &str = "did:plc:denied0000000000000000001";
+
+        let _mock =
+            seed_callback_state(&state, "state-new-denial", DENIED_DID, "denied.bsky.social").await;
+        let res = call_callback(app, "state-new-denial").await;
+
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res.headers().get("location").unwrap(), "/waitlist");
+        assert!(
+            res.headers().get("set-cookie").is_none(),
+            "a denied sign-in must not set a session cookie"
+        );
+
+        let row = state
+            .db
+            .get_access_request(DENIED_DID)
+            .await
+            .unwrap()
+            .expect("gate denial should upsert a pending access_requests row");
+        assert_eq!(row.status, "pending");
+        assert_eq!(row.handle, "denied.bsky.social");
+        assert!(
+            state
+                .db
+                .get_user_handle(DENIED_DID)
+                .await
+                .unwrap()
+                .is_none(),
+            "a denied sign-in must not create a users row"
+        );
+    }
+
+    #[tokio::test]
+    async fn callback_second_denied_attempt_refreshes_handle_keeps_pending_status() {
+        let Some((app, state)) = build_test_app_with_state() else {
+            eprintln!("SKIP: models not present, cannot build test AppState");
+            return;
+        };
+        const DENIED_DID: &str = "did:plc:denied0000000000000000002";
+
+        let _mock1 =
+            seed_callback_state(&state, "state-first", DENIED_DID, "first.bsky.social").await;
+        let res1 = call_callback(app.clone(), "state-first").await;
+        assert_eq!(res1.status(), StatusCode::SEE_OTHER);
+
+        let row1 = state
+            .db
+            .get_access_request(DENIED_DID)
+            .await
+            .unwrap()
+            .expect("first denied attempt should record a pending row");
+        assert_eq!(row1.status, "pending");
+        assert_eq!(row1.handle, "first.bsky.social");
+
+        // Second sign-in attempt from the same DID, different handle.
+        let _mock2 =
+            seed_callback_state(&state, "state-second", DENIED_DID, "second.bsky.social").await;
+        let res2 = call_callback(app, "state-second").await;
+        assert_eq!(res2.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res2.headers().get("location").unwrap(), "/waitlist");
+
+        let row2 = state
+            .db
+            .get_access_request(DENIED_DID)
+            .await
+            .unwrap()
+            .expect("second denied attempt should still have a row");
+        assert_eq!(
+            row2.handle, "second.bsky.social",
+            "the upsert should refresh the handle"
+        );
+        assert_eq!(
+            row2.status, "pending",
+            "a second sign-in attempt must not change status on its own"
+        );
+    }
+
+    #[tokio::test]
+    async fn callback_denied_row_stays_denied_and_still_redirects() {
+        let Some((app, state)) = build_test_app_with_state() else {
+            eprintln!("SKIP: models not present, cannot build test AppState");
+            return;
+        };
+        const DENIED_DID: &str = "did:plc:denied0000000000000000003";
+
+        // Pre-seed a row an admin has explicitly denied.
+        state
+            .db
+            .upsert_access_request_pending(DENIED_DID, "original.bsky.social")
+            .await
+            .unwrap();
+        state
+            .db
+            .set_access_status(DENIED_DID, "denied", TEST_DID)
+            .await
+            .unwrap();
+
+        let _mock = seed_callback_state(
+            &state,
+            "state-still-denied",
+            DENIED_DID,
+            "retry.bsky.social",
+        )
+        .await;
+        let res = call_callback(app, "state-still-denied").await;
+
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res.headers().get("location").unwrap(), "/waitlist");
+        assert!(res.headers().get("set-cookie").is_none());
+
+        let row = state
+            .db
+            .get_access_request(DENIED_DID)
+            .await
+            .unwrap()
+            .expect("row should still exist");
+        assert_eq!(
+            row.status, "denied",
+            "a sign-in attempt must never move a denied row back to pending"
+        );
+        assert_eq!(
+            row.handle, "retry.bsky.social",
+            "the handle still refreshes even while denied"
+        );
+        assert!(
+            state
+                .db
+                .get_user_handle(DENIED_DID)
+                .await
+                .unwrap()
+                .is_none(),
+            "a denied DID must never get a users row, no matter how many attempts"
+        );
+    }
+
+    #[tokio::test]
+    async fn callback_gate_check_db_error_fails_closed_with_500() {
+        // Sabotage the access_requests table so check_access's clause 3 query
+        // errors out. The gate must fail CLOSED: 500, not a redirect, not a
+        // session cookie — auth.rs's check_access_db_error_propagates_as_err_never_allow
+        // already proves this for check_access in isolation; this proves the
+        // callback's new Err arm actually wires that into a safe HTTP response.
+        use charcoal::db::sqlite::SqliteDatabase;
+        use charcoal::web::test_helpers::build_test_app_with_state_and_db;
+
+        let conn =
+            rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
+        charcoal::db::schema::create_tables(&conn).expect("schema creation should succeed");
+        conn.execute("DROP TABLE access_requests", [])
+            .expect("table should exist and drop successfully");
+        let db = std::sync::Arc::new(SqliteDatabase::new(conn))
+            as std::sync::Arc<dyn charcoal::db::Database>;
+
+        // allowed_did = TEST_DID, requester is a different DID and not an
+        // admin — forces check_access into clause 3 (the sabotaged table).
+        let Some((app, state)) = build_test_app_with_state_and_db(db, TEST_DID, "") else {
+            eprintln!("SKIP: models not present, cannot build test AppState");
+            return;
+        };
+        const OUTSIDER_DID: &str = "did:plc:outsider000000000000000";
+
+        let _mock = seed_callback_state(
+            &state,
+            "state-db-error",
+            OUTSIDER_DID,
+            "outsider.bsky.social",
+        )
+        .await;
+        let res = call_callback(app, "state-db-error").await;
+
+        assert_eq!(
+            res.status(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "a gate-check DB error must fail closed with 500, never allow or redirect"
+        );
+        assert!(
+            res.headers().get("set-cookie").is_none(),
+            "a failed-closed gate check must never set a session cookie"
         );
     }
 }

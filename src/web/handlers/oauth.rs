@@ -431,17 +431,34 @@ pub async fn callback(
         }
     };
 
-    // Gate on CHARCOAL_ALLOWED_DID
-    if !crate::web::auth::did_is_allowed(&authenticated_did, &state.config.allowed_did) {
-        tracing::warn!(
-            "Login attempt from disallowed DID '{}' (allowed: '{}')",
-            authenticated_did,
-            state.config.allowed_did
-        );
-        return api_error(
-            StatusCode::FORBIDDEN,
-            "This Bluesky account is not authorized to access this dashboard",
-        );
+    // Gate: env bootstrap OR admin OR DB allowlist row (#309).
+    match crate::web::auth::check_access(&authenticated_did, &state.config, &*state.db).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!(
+                did = %authenticated_did,
+                handle = %pending.handle,
+                "Disallowed sign-in recorded as access request"
+            );
+            // Best-effort bookkeeping: the person's experience must not depend
+            // on the upsert succeeding — the gate already denied them.
+            if let Err(e) = state
+                .db
+                .upsert_access_request_pending(&authenticated_did, &pending.handle)
+                .await
+            {
+                tracing::error!(error = %format!("{e:#}"), "failed to record access request");
+            }
+            // Top-level browser navigation: redirect to a real page, never JSON.
+            return Redirect::to("/waitlist").into_response();
+        }
+        Err(e) => {
+            tracing::error!(error = %format!("{e:#}"), "access check failed at login — failing closed");
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not complete sign-in — please try again",
+            );
+        }
     }
 
     // Register the authenticated user in the database.
