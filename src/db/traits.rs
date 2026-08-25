@@ -153,6 +153,19 @@ pub struct ScanQueueDepth {
     pub running: usize,
 }
 
+/// One `access_requests` row (#309).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessRequestRow {
+    pub did: String,
+    pub handle: String,
+    /// "pending" | "allowed" | "denied"
+    pub status: String,
+    /// RFC3339, like every other timestamp on this trait.
+    pub requested_at: String,
+    pub decided_at: Option<String>,
+    pub decided_by: Option<String>,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -555,6 +568,22 @@ pub trait Database: Send + Sync {
     /// A second, narrower method would be a second snapshot of a table that
     /// changes under it.
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>;
+
+    // --- Access requests (#309) ---
+
+    async fn get_access_request(&self, did: &str) -> Result<Option<AccessRequestRow>>;
+
+    /// Creates a 'pending' row; if a row exists, refreshes handle ONLY (status untouched).
+    async fn upsert_access_request_pending(&self, did: &str, handle: &str) -> Result<()>;
+
+    /// Sets status + decided_at/decided_by on an existing row. Returns false if no row.
+    async fn set_access_status(&self, did: &str, status: &str, decided_by: &str) -> Result<bool>;
+
+    /// Admin grant-by-handle: upsert straight to 'allowed' (works with or without a prior row).
+    async fn grant_access(&self, did: &str, handle: &str, decided_by: &str) -> Result<()>;
+
+    /// All rows, oldest requested_at first.
+    async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>>;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0ba641c7c2c9feccd57ed26e46f3b4f1a5eeafca",
+    "short_hash": "0ba641c",
+    "author": "Bryan Guffey",
+    "date": "2026-08-24T23:21:49-07:00",
+    "message": "feat(309): schema v14 access_requests table, both backends",
+    "files_changed": 5
+  },
+  {
     "hash": "7789946994dcbc954a2b1b8ecab314c3928317b0",
     "short_hash": "7789946",
     "author": "Bryan Guffey",
