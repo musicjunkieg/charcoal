@@ -5961,6 +5961,17 @@
       "created_at": "2026-08-23T20:24:09.426468-07:00",
       "updated_at": "2026-08-23T20:24:09.426468-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"11fda38\",\"confidence\":95}"
+    },
+    {
+      "id": 552,
+      "change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "node_type": "action",
+      "title": "Wrote 12-task implementation plan docs/superpowers/plans/2026-08-24-allowlist-admin-ui.md",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-24T22:46:22.109791-07:00",
+      "updated_at": "2026-08-24T22:46:22.109791-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"7789946\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-08-24-allowlist-admin-ui.md\"]}"
     }
   ],
   "edges": [
@@ -11892,6 +11903,17 @@
       "weight": 1.0,
       "rationale": "Spec commit is the action's outcome",
       "created_at": "2026-08-23T20:24:09.435734-07:00"
+    },
+    {
+      "id": 550,
+      "from_node_id": 549,
+      "to_node_id": 552,
+      "from_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "to_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan derives from the approved design decision",
+      "created_at": "2026-08-24T22:46:22.117779-07:00"
     }
   ],
   "documents": [

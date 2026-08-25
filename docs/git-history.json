@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7789946994dcbc954a2b1b8ecab314c3928317b0",
+    "short_hash": "7789946",
+    "author": "Bryan Guffey",
+    "date": "2026-08-24T22:46:07-07:00",
+    "message": "docs(309): implementation plan for allowlist admin UI + cooldown\n\n12 tasks: schema v14 -> trait/impls -> gate -> OAuth waitlist -> admin\nendpoints -> cooldown -> frontend plumbing -> impeccable UI -> verification.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "11fda38e26bfd50979e00dbd57c5b634b37e56e7",
     "short_hash": "11fda38",
     "author": "Bryan Guffey",

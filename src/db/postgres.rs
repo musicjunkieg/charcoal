@@ -166,6 +166,10 @@ impl PgDatabase {
                     13,
                     include_str!("../../migrations/postgres/0013_topic_clusters.sql"),
                 ),
+                (
+                    14,
+                    include_str!("../../migrations/postgres/0014_access_requests.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
