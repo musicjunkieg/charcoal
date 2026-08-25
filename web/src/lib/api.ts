@@ -35,6 +35,17 @@ export class AccessRevokedError extends Error {
 	}
 }
 
+/** 429 from POST /api/scan: the per-user cooldown (#258). Not an error state —
+ *  the dashboard renders it as a calm notice with the retry instant. */
+export class CooldownError extends Error {
+	retry_at: string;
+	constructor(message: string, retry_at: string) {
+		super(message);
+		this.name = 'CooldownError';
+		this.retry_at = retry_at;
+	}
+}
+
 function getAsUser(): string | null {
 	if (typeof window === 'undefined') return null;
 	return new URLSearchParams(window.location.search).get('as_user');
@@ -57,6 +68,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 		const body = await res.json().catch(() => ({}));
 		if (res.status === 403 && body.code === 'access_revoked') {
 			throw new AccessRevokedError();
+		}
+		if (res.status === 429 && typeof body.retry_at === 'string') {
+			throw new CooldownError(body.error ?? 'Scan cooldown active', body.retry_at);
 		}
 		throw new Error(body.error ?? `HTTP ${res.status}`);
 	}

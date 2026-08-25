@@ -100,7 +100,9 @@ impl Config {
         let scan_cooldown_hours = env::var("CHARCOAL_SCAN_COOLDOWN_HOURS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(24);
+            .unwrap_or(24)
+            // chrono::Duration::hours panics on absurd magnitudes; a year is already "off".
+            .min(24 * 365);
 
         Ok(Self {
             bluesky_handle: env::var("BLUESKY_HANDLE").unwrap_or_default(),

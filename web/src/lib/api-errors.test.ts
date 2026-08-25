@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AccessRevokedError, AuthError, getStatus } from './api.js';
+import { AccessRevokedError, AuthError, CooldownError, getStatus } from './api.js';
 
 function mockFetch(status: number, body: unknown) {
 	vi.stubGlobal(
@@ -26,5 +26,19 @@ describe('apiFetch error classification', () => {
 		const err = await getStatus().catch((e) => e);
 		expect(err).toBeInstanceOf(Error);
 		expect(err).not.toBeInstanceOf(AccessRevokedError);
+	});
+
+	it('throws CooldownError on 429 with retry_at, preserving the instant', async () => {
+		mockFetch(429, { error: 'Scan cooldown active', retry_at: '2026-08-26T12:00:00Z' });
+		const err = await getStatus().catch((e) => e);
+		expect(err).toBeInstanceOf(CooldownError);
+		expect((err as CooldownError).retry_at).toBe('2026-08-26T12:00:00Z');
+	});
+
+	it('throws plain Error on a 429 without retry_at', async () => {
+		mockFetch(429, { error: 'Too many requests' });
+		const err = await getStatus().catch((e) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect(err).not.toBeInstanceOf(CooldownError);
 	});
 });

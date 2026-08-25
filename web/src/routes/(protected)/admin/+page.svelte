@@ -138,6 +138,16 @@
 		return `${clean.slice(0, MAX_INLINE_REASON - 1).trimEnd()}…`;
 	}
 
+	/** Short visible form of a DID for the Access panel (#309 fast-follow,
+	 *  Fix 1c) — defense in depth alongside the callback's server-side DID
+	 *  binding check: an admin can see at a glance that the handle and DID
+	 *  actually match what they expect. The full DID lives in a `.sr-only`
+	 *  sibling; a `title` tooltip would be unreachable by keyboard/touch,
+	 *  same reasoning as the `.scan-failed` cell below. */
+	function didTail(did: string): string {
+		return `did:…${did.slice(-8)}`;
+	}
+
 	function displayHandle(scan: AdminScanRow): string {
 		// An orphaned queue row (user deleted mid-scan) has no handle. Show the
 		// DID tail rather than "unknown" — it is still identifiable, and the
@@ -459,6 +469,8 @@
 					{#each access.pending as req (req.did)}
 						<li class="access-pending-item">
 							<span class="handle-text">@{req.handle}</span>
+							<span class="did-tail muted" aria-hidden="true">{didTail(req.did)}</span>
+							<span class="sr-only">{req.did}</span>
 							<span class="access-when">asked {formatDate(req.requested_at)}</span>
 							<div class="action-btns access-actions">
 								<button
@@ -535,6 +547,8 @@
 									</td>
 									<td class="col-handle">
 										<span class="handle-text">@{req.handle}</span>
+										<span class="did-tail muted" aria-hidden="true">{didTail(req.did)}</span>
+										<span class="sr-only">{req.did}</span>
 									</td>
 									<td class="col-access-when muted">{formatDate(req.decided_at)}</td>
 									<td class="col-access-action">
@@ -1092,6 +1106,9 @@
 
 	.handle-text { color: var(--copper); font-weight: 500; }
 	.muted { color: var(--charcoal-500); }
+	/* DID next to the handle (#309 fast-follow, Fix 1c) — same secondary-text
+	   size as the rest of this file's muted labels. */
+	.did-tail { font-size: 0.8125rem; margin-left: 0.375rem; }
 
 	.status-ready { color: var(--status-ok); font-size: 0.875rem; }
 	.status-building { color: var(--copper); font-size: 0.875rem; }

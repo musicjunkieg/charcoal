@@ -647,6 +647,71 @@ mod tests {
                 oauth_request,
                 authorization_server,
                 handle: handle.to_string(),
+                did: did.to_string(),
+            },
+        );
+
+        mock
+    }
+
+    /// Like `seed_callback_state`, but the handle at initiate resolved to a
+    /// DIFFERENT DID than the one the token exchange authenticates as — the
+    /// DID-binding mismatch case (#309 fast-follow, Fix 1).
+    async fn seed_callback_state_mismatched_did(
+        state: &charcoal::web::AppState,
+        state_param: &str,
+        pending_did: &str,
+        authenticated_did: &str,
+        handle: &str,
+    ) -> wiremock::MockServer {
+        use atproto_identity::key::{generate_key, KeyType};
+        use atproto_oauth::resources::AuthorizationServer;
+        use atproto_oauth::workflow::OAuthRequest;
+        use charcoal::web::handlers::oauth::PendingOAuth;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        let token_response = serde_json::json!({
+            "access_token": "test-access-token",
+            "token_type": "DPoP",
+            "refresh_token": "test-refresh-token",
+            "scope": "atproto",
+            "expires_in": 3600,
+            "sub": authenticated_did,
+        });
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(token_response))
+            .mount(&mock)
+            .await;
+
+        let dpop_key =
+            generate_key(KeyType::P256Private).expect("DPoP key generation should succeed");
+        let now = chrono::Utc::now();
+        let oauth_request = OAuthRequest {
+            oauth_state: state_param.to_string(),
+            issuer: "https://mock-authz.test".to_string(),
+            authorization_server: "https://mock-authz.test".to_string(),
+            nonce: "test-nonce".to_string(),
+            pkce_verifier: "test-verifier".to_string(),
+            signing_public_key: "unused-by-callback".to_string(),
+            dpop_private_key: dpop_key.to_string(),
+            created_at: now,
+            expires_at: now + chrono::Duration::hours(1),
+        };
+        let authorization_server = AuthorizationServer {
+            issuer: "https://mock-authz.test".to_string(),
+            token_endpoint: format!("{}/token", mock.uri()),
+            ..Default::default()
+        };
+
+        state.pending_oauth.write().await.insert(
+            state_param.to_string(),
+            PendingOAuth {
+                oauth_request,
+                authorization_server,
+                handle: handle.to_string(),
+                did: pending_did.to_string(),
             },
         );
 
@@ -804,6 +869,64 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "a denied DID must never get a users row, no matter how many attempts"
+        );
+    }
+
+    #[tokio::test]
+    async fn callback_rejects_did_mismatch_no_row_no_cookie_no_user() {
+        // The handle typed at /api/auth/initiate resolved to PENDING_DID, but
+        // the account that actually completed the OAuth dance authenticates
+        // as a different DID entirely. The callback must reject this before
+        // touching the DB or the access gate — no access_requests row, no
+        // session cookie, no users row (Fix 1, #309 fast-follow).
+        let Some((app, state)) = build_test_app_with_state() else {
+            eprintln!("SKIP: models not present, cannot build test AppState");
+            return;
+        };
+        const PENDING_DID: &str = "did:plc:typedhandleowner0000001";
+        const AUTHENTICATED_DID: &str = "did:plc:actualsignerxxxxxxxxx001";
+
+        let _mock = seed_callback_state_mismatched_did(
+            &state,
+            "state-did-mismatch",
+            PENDING_DID,
+            AUTHENTICATED_DID,
+            "someone-elses-handle.bsky.social",
+        )
+        .await;
+        let res = call_callback(app, "state-did-mismatch").await;
+
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(
+            res.headers().get("set-cookie").is_none(),
+            "a DID mismatch must never set a session cookie"
+        );
+        assert!(
+            state
+                .db
+                .get_access_request(PENDING_DID)
+                .await
+                .unwrap()
+                .is_none(),
+            "a DID mismatch must not write an access_requests row for the typed handle's DID"
+        );
+        assert!(
+            state
+                .db
+                .get_access_request(AUTHENTICATED_DID)
+                .await
+                .unwrap()
+                .is_none(),
+            "a DID mismatch must not write an access_requests row for the authenticated DID either"
+        );
+        assert!(
+            state
+                .db
+                .get_user_handle(AUTHENTICATED_DID)
+                .await
+                .unwrap()
+                .is_none(),
+            "a DID mismatch must not create a users row"
         );
     }
 

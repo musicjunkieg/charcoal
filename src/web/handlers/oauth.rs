@@ -30,6 +30,12 @@ pub struct PendingOAuth {
     /// The user-input handle from the initiate request.
     /// Stored here so the callback can register the user in the DB.
     pub handle: String,
+    /// The DID the handle resolved to during initiate (#309 fast-follow).
+    /// The callback compares this against the token exchange's authenticated
+    /// DID (`sub`) — without that check, a person can type someone else's
+    /// handle, authenticate as themselves, and get an access/users row that
+    /// carries a handle they don't own.
+    pub did: String,
 }
 
 // ---- Client metadata ----
@@ -248,6 +254,7 @@ pub async fn initiate(
             oauth_request,
             authorization_server: authorization_server.clone(),
             handle: handle.clone(),
+            did: did.clone(),
         },
     );
 
@@ -430,6 +437,23 @@ pub async fn callback(
             );
         }
     };
+
+    // Bind the handle to the account that actually authenticated (#309
+    // fast-follow). Without this, a person can type someone ELSE's handle
+    // at /api/auth/initiate, authenticate as themselves on a shared PDS, and
+    // walk away with an access_requests/users row carrying a handle they
+    // don't own — the admin Access UI would show only that (wrong) handle.
+    if pending.did != authenticated_did {
+        tracing::warn!(
+            typed_handle_did = %pending.did,
+            authenticated_did = %authenticated_did,
+            "OAuth callback DID mismatch — typed handle resolves to a different account"
+        );
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "You signed in as a different account than the handle you entered — please try again",
+        );
+    }
 
     // Gate: env bootstrap OR admin OR DB allowlist row (#309).
     match crate::web::auth::check_access(&authenticated_did, &state.config, &*state.db).await {

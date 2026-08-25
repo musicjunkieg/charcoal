@@ -12,7 +12,6 @@ use serde::Deserialize;
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::db::traits::AccessRequestRow;
-use crate::web::scan_job;
 use crate::web::{AppState, AuthUser};
 
 fn admin_guard(auth: &AuthUser) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
@@ -182,6 +181,14 @@ pub async fn grant_access_by_handle(
 /// Two operations reported honestly: approval commits first; a scan-side
 /// failure downgrades the `scan` field, never the approval. The enqueue goes
 /// through `enqueue_scan` like every other scan (#257: one admission path).
+///
+/// Does NOT spawn a fingerprint build itself — the enqueued scan builds a
+/// missing/stale fingerprint on its own (scan_job::run_scan's needs_rebuild
+/// branch, shared by every other scan trigger). Spawning one here as well
+/// raced two concurrent builds of the same fingerprint (final-review fix
+/// wave). `pre_seed_user` (handlers/admin.rs) still spawns its own build
+/// because it only pre-seeds a user row and enqueues nothing — without a
+/// queued scan, nothing else would ever build the fingerprint.
 pub async fn approve_access_and_scan(
     Extension(auth): Extension<AuthUser>,
     State(state): State<AppState>,
@@ -203,8 +210,9 @@ pub async fn approve_access_and_scan(
         }
     };
 
-    // Pre-seed the user row if they have never signed in, spawning the same
-    // background fingerprint build pre_seed_user does.
+    // Pre-seed the user row if they have never signed in. The scan enqueued
+    // below builds the fingerprint itself when one is missing — no spawn
+    // needed here.
     let user_missing = state
         .db
         .get_user_handle(&did)
@@ -219,25 +227,6 @@ pub async fn approve_access_and_scan(
                 "did": did, "access": "granted", "scan": "failed to queue",
             })));
         }
-        let db = state.db.clone();
-        let config = state.config.clone();
-        let scan_mgr = state.scan_manager.clone();
-        let fp_did = did.clone();
-        let fp_handle = row.handle.clone();
-        {
-            let mut mgr = scan_mgr.write().await;
-            mgr.start_fingerprint_build(&fp_did);
-        }
-        tokio::spawn(async move {
-            let result = scan_job::build_user_fingerprint(&config, &*db, &fp_did, &fp_handle).await;
-            let mut mgr = scan_mgr.write().await;
-            mgr.finish_fingerprint_build(&fp_did);
-            if let Err(e) = result {
-                tracing::error!(target_did = %fp_did, "Fingerprint build failed: {e}");
-            } else {
-                tracing::info!(target_did = %fp_did, "Fingerprint build complete");
-            }
-        });
     }
 
     let scan = match state.db.enqueue_scan(&did).await {
