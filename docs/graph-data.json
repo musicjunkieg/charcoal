@@ -6082,6 +6082,17 @@
       "created_at": "2026-08-25T01:17:24.809375-07:00",
       "updated_at": "2026-08-25T01:17:24.809375-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"fff9c2d\",\"confidence\":90}"
+    },
+    {
+      "id": 563,
+      "change_id": "bf3d2592-cbc7-4552-8217-88d4f2c9705c",
+      "node_type": "action",
+      "title": "Task 6: admin access endpoints - list/approve/deny (#309)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T01:29:14.800034-07:00",
+      "updated_at": "2026-08-25T01:29:14.800034-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"d8329e8\",\"files\":[\"src/web/handlers/access.rs\",\"src/web/handlers/mod.rs\",\"src/web/mod.rs\",\"tests/web_access_admin.rs\"]}"
     }
   ],
   "edges": [
@@ -12156,6 +12167,28 @@
       "weight": 1.0,
       "rationale": "outcome of Task 5 implementation action",
       "created_at": "2026-08-25T01:17:28.793700-07:00"
+    },
+    {
+      "id": 563,
+      "from_node_id": 552,
+      "to_node_id": 562,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "73fb8b44-1d00-477c-ac97-649847b74e3f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 5 outcome (implementer-logged); table-count pin fixed by controller d8329e8, review clean",
+      "created_at": "2026-08-25T01:23:53.821568-07:00"
+    },
+    {
+      "id": 564,
+      "from_node_id": 549,
+      "to_node_id": 563,
+      "from_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "to_change_id": "bf3d2592-cbc7-4552-8217-88d4f2c9705c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 implements the DB-backed access endpoints chosen in Approach 1",
+      "created_at": "2026-08-25T01:29:18.682477-07:00"
     }
   ],
   "documents": [

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d8329e8a52071f56ba9221906a4be5015859512d",
+    "short_hash": "d8329e8",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:20:54-07:00",
+    "message": "test(309): bump trait-level table-count pin missed by v14 migration\n\nsqlite.rs test_trait_table_count pinned 13 tables; Task 1 updated the\nschema.rs pins but this one lives outside the files the plan named.\nSurfaced by the Task 5 full-suite run.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "fff9c2d8128b0df2e68192d8c62c88492f29a278",
     "short_hash": "fff9c2d",
     "author": "Bryan Guffey",
