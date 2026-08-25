@@ -39,6 +39,30 @@ async fn call(app: &axum::Router, method: &str, uri: &str, did: &str) -> (Status
     )
 }
 
+async fn post_json(app: &axum::Router, uri: &str, did: &str, body: &str) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .method("POST")
+                .header("cookie", session_cookie(did))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .expect("request builds"),
+        )
+        .await
+        .expect("router responds");
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
 #[tokio::test]
 async fn non_admin_gets_403_on_every_access_endpoint() {
     let (app, db) = build_admin_test_app_with_db().expect(MODELS_REQUIRED);
@@ -53,6 +77,26 @@ async fn non_admin_gets_403_on_every_access_endpoint() {
         let (status, _) = call(&app, m, u, NON_ADMIN).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{m} {u}");
     }
+    // grant_access_by_handle takes a Json body, so the extractor runs before
+    // admin_guard — a bodyless request (what `call` sends) 415s before the
+    // handler ever checks admin status. Exercise the 403 path with a
+    // well-formed body via post_json instead (deviation from the brief,
+    // which assumed `call` would work for every route in this loop).
+    let (status, _) = post_json(
+        &app,
+        "/api/admin/access",
+        NON_ADMIN,
+        r#"{"handle": "someone.bsky.social"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "POST /api/admin/access");
+}
+
+#[tokio::test]
+async fn grant_by_handle_validates_input() {
+    let (app, _db) = build_admin_test_app_with_db().expect(MODELS_REQUIRED);
+    let (status, _) = post_json(&app, "/api/admin/access", TEST_DID, r#"{"handle": "  "}"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

@@ -6,8 +6,11 @@
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{Extension, Json};
+use serde::Deserialize;
 
+use crate::bluesky::client::PublicAtpClient;
 use crate::db::traits::AccessRequestRow;
 use crate::web::{AppState, AuthUser};
 
@@ -107,4 +110,68 @@ pub async fn deny_access(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     admin_guard(&auth)?;
     decide(&state, &auth, &did, "denied").await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GrantRequest {
+    pub handle: String,
+}
+
+/// POST /api/admin/access — grant access by Bluesky handle.
+/// Resolution + error mapping copied from pre_seed_user (handlers/admin.rs):
+/// 404 for unknown handles, 502 when resolution infrastructure fails.
+pub async fn grant_access_by_handle(
+    Extension(auth): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Json(body): Json<GrantRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    admin_guard(&auth)?;
+    let handle = body.handle.trim().trim_start_matches('@').to_string();
+    if handle.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Handle is required"})),
+        ));
+    }
+
+    let client = PublicAtpClient::new(&state.config.public_api_url).map_err(|e| {
+        tracing::error!("Failed to create ATP client: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "Internal error"})),
+        )
+    })?;
+    let did = match client.resolve_handle(&handle).await {
+        Ok(did) => did,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("not found") || msg.contains("404") {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": format!("Handle not found: {handle}")})),
+                ));
+            }
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": format!("Failed to resolve handle: {msg}")})),
+            ));
+        }
+    };
+
+    state
+        .db
+        .grant_access(&did, &handle, &auth.did)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %format!("{e:#}"), "failed to grant access");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Database error"})),
+            )
+        })?;
+
+    tracing::info!(admin_did = %auth.did, target_did = %did, target_handle = %handle, "Access granted by handle");
+    Ok(Json(
+        serde_json::json!({"did": did, "handle": handle, "status": "allowed"}),
+    ))
 }

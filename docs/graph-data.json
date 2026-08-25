@@ -6093,6 +6093,17 @@
       "created_at": "2026-08-25T01:29:14.800034-07:00",
       "updated_at": "2026-08-25T01:29:14.800034-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"d8329e8\",\"files\":[\"src/web/handlers/access.rs\",\"src/web/handlers/mod.rs\",\"src/web/mod.rs\",\"tests/web_access_admin.rs\"]}"
+    },
+    {
+      "id": 564,
+      "change_id": "925ac711-93d2-4340-9952-e6fd2383c176",
+      "node_type": "outcome",
+      "title": "Task 6 done: list/approve/deny endpoints registered at /api/admin/access*, admin_guard 403, idempotent decide() helper returns concrete Result type for Task 8 reuse. TDD: 3 new tests RED (503, routes missing) then GREEN. clippy --features web --all-targets clean; cargo fmt clean (brief's snippet needed reformatting). Committed 2913235.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T01:30:57.394365-07:00",
+      "updated_at": "2026-08-25T01:30:57.394365-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"2913235\"}"
     }
   ],
   "edges": [
@@ -12189,6 +12200,28 @@
       "weight": 1.0,
       "rationale": "Task 6 implements the DB-backed access endpoints chosen in Approach 1",
       "created_at": "2026-08-25T01:29:18.682477-07:00"
+    },
+    {
+      "id": 565,
+      "from_node_id": 563,
+      "to_node_id": 564,
+      "from_change_id": "bf3d2592-cbc7-4552-8217-88d4f2c9705c",
+      "to_change_id": "925ac711-93d2-4340-9952-e6fd2383c176",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of Task 6 action",
+      "created_at": "2026-08-25T01:31:02.054574-07:00"
+    },
+    {
+      "id": 566,
+      "from_node_id": 552,
+      "to_node_id": 564,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "925ac711-93d2-4340-9952-e6fd2383c176",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 6 outcome (implementer-logged), review clean",
+      "created_at": "2026-08-25T01:33:26.099980-07:00"
     }
   ],
   "documents": [

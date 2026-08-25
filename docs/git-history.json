@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2913235ba6999a46ded5521f47230399efbaa7b1",
+    "short_hash": "2913235",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:30:41-07:00",
+    "message": "feat(309): admin access endpoints - list, approve, deny",
+    "files_changed": 6
+  },
+  {
     "hash": "d8329e8a52071f56ba9221906a4be5015859512d",
     "short_hash": "d8329e8",
     "author": "Bryan Guffey",
