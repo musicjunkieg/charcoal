@@ -6192,6 +6192,17 @@
       "created_at": "2026-08-25T04:19:31.819504-07:00",
       "updated_at": "2026-08-25T04:19:31.819504-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"765dea2\",\"confidence\":95}"
+    },
+    {
+      "id": 573,
+      "change_id": "5d8d1031-9e8c-4f07-b306-4e08c5def1a4",
+      "node_type": "outcome",
+      "title": "Task 12 + final review complete: fix wave 158eea5, verdict READY TO MERGE; #4 deny-in-open-mode escalated to Bryan; follow-ups #310-#313 filed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-25T05:11:46.740390-07:00",
+      "updated_at": "2026-08-25T05:11:46.740390-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"158eea5\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -12442,6 +12453,17 @@
       "weight": 1.0,
       "rationale": "Plan task 11 outcome",
       "created_at": "2026-08-25T04:19:31.827280-07:00"
+    },
+    {
+      "id": 579,
+      "from_node_id": 552,
+      "to_node_id": 573,
+      "from_change_id": "0c54d826-2c5e-48f9-a661-5b59d03c928b",
+      "to_change_id": "5d8d1031-9e8c-4f07-b306-4e08c5def1a4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 12 outcome: final review ready-to-merge",
+      "created_at": "2026-08-25T05:11:52.411856-07:00"
     }
   ],
   "documents": [

@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `allowed` row in the new `access_requests` table (schema v14, both
   backends) — checked per-request, failing closed on DB errors. A session
   revoked mid-flight now routes to /waitlist instead of a broken dashboard.
+  When the env gate is unset (open access), table decisions are inert by
+  design — the admin Access section shows a warning banner for exactly that
+  state (surfaced via a new `access_gate_active` field on /api/me).
 - Per-user scan cooldown (#258, minimal): one successful scan per user per
   `CHARCOAL_SCAN_COOLDOWN_HOURS` (default 24, 0 disables), enforced at
   enqueue with a friendly 429 carrying `retry_at`. Failed scans retry

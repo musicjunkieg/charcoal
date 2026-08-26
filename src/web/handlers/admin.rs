@@ -32,10 +32,15 @@ pub async fn get_identity(
         .ok()
         .flatten()
         .unwrap_or_default();
+    // Whether CHARCOAL_ALLOWED_DID is configured at all. When it is empty the
+    // gate is open and access-table decisions are inert (clause 1 short-circuits
+    // before the table is read) — the admin UI warns about exactly that (#309).
+    let access_gate_active = !state.config.allowed_did.trim().is_empty();
     Json(serde_json::json!({
         "did": auth.did,
         "handle": handle,
         "is_admin": auth.is_admin,
+        "access_gate_active": access_gate_active,
     }))
 }
 

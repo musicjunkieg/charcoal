@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser } from '$lib/api.js';
+	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser, getIdentity } from '$lib/api.js';
 	import {
 		getAccessRequests,
 		grantAccess,
@@ -39,6 +39,10 @@
 	// here, so a partial failure (access granted, scan not queued) is never
 	// silently swallowed by a row re-render.
 	let accessMsg = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
+	// Defaults TRUE so the warning never flashes during load; flips only on a
+	// positive answer that the gate is off. If /api/me fails we show nothing —
+	// the banner is advisory, not a control.
+	let gateActive = $state(true);
 
 	/** Allowed and denied together, most recent decision first — one history
 	 *  of who was let in and who was turned away, not two lists to cross-read. */
@@ -374,6 +378,9 @@
 	onMount(() => {
 		loadUsers();
 		loadAccess();
+		getIdentity()
+			.then((i) => (gateActive = i.access_gate_active))
+			.catch(() => {});
 		startPolling();
 	});
 
@@ -444,6 +451,17 @@
 	     accounts for scanning and deliberately does not touch access. -->
 	<section class="access-section">
 		<h2 class="section-title">Access</h2>
+
+		{#if !gateActive}
+			<!-- The one honest thing to say when CHARCOAL_ALLOWED_DID is unset:
+			     the gate's open-access clause short-circuits before the table is
+			     read, so approve/deny below are recorded but change nothing. -->
+			<p class="access-gate-off">
+				Access control is off — CHARCOAL_ALLOWED_DID is unset, so anyone can
+				sign in. Decisions here are recorded but have no effect until the
+				gate is turned back on.
+			</p>
+		{/if}
 
 		<!-- aria-live: approve/deny/grant outcomes announce without stealing
 		     focus; the partial-failure case especially must not be missable. -->
@@ -880,6 +898,19 @@
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		border-radius: 12px;
+	}
+
+	/* Same voice as .queue-wedged: a real operational warning, quiet red,
+	   never an alarm bar. On-ramp values, tokens only. */
+	.access-gate-off {
+		font-size: 0.8125rem;
+		color: var(--status-error);
+		background: rgb(var(--status-error-rgb) / 0.08);
+		border: 1px solid rgb(var(--status-error-rgb) / 0.35);
+		border-radius: 8px;
+		padding: 0.625rem 0.75rem;
+		margin: 0 0 0.75rem;
+		line-height: 1.5;
 	}
 
 	.access-pending-count {
