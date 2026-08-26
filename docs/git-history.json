@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3a3e5db3324830ec3e1cea4d0364a3eb8e75ccd0",
+    "short_hash": "3a3e5db",
+    "author": "Bryan Guffey",
+    "date": "2026-08-26T13:29:22-07:00",
+    "message": "feat(309): warn when access decisions are inert in open-access mode\n\nBryan chose the banner mitigation for the final-review finding: /api/me\ngains access_gate_active (false when CHARCOAL_ALLOWED_DID is unset) and\nthe admin Access section renders a warning that decisions are recorded\nbut have no effect while the gate is open. Gate semantics unchanged.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
     "hash": "158eea58fc05bee9160764dda5fb929a5ac7d63f",
     "short_hash": "158eea5",
     "author": "Bryan Guffey",

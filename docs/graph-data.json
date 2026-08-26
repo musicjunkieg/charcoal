@@ -6203,6 +6203,28 @@
       "created_at": "2026-08-25T05:11:46.740390-07:00",
       "updated_at": "2026-08-25T05:11:46.740390-07:00",
       "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"158eea5\",\"confidence\":95}"
+    },
+    {
+      "id": 574,
+      "change_id": "a0d79aff-d4bd-4ce9-8567-544966b10d5c",
+      "node_type": "action",
+      "title": "Banner mitigation for deny-in-open-mode (Bryan's decision): access_gate_active on /api/me + Access-section warning",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-26T13:29:36.600189-07:00",
+      "updated_at": "2026-08-26T13:29:36.600189-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"3a3e5db\",\"confidence\":95,\"prompt\":\"yeah the allowlist admin ui — 1. Banner baybeeee 2. Open the PR\"}"
+    },
+    {
+      "id": 575,
+      "change_id": "c40a4ef2-d11c-4d2b-80a6-1e38f19af1d5",
+      "node_type": "outcome",
+      "title": "PR #106 opened into staging: allowlist admin UI + cooldown + open-mode banner (Bryan decisions: banner + PR)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-08-26T13:59:35.257966-07:00",
+      "updated_at": "2026-08-26T13:59:35.257966-07:00",
+      "metadata_json": "{\"branch\":\"feat/allowlist-admin-ui\",\"commit\":\"3a3e5db\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -12464,6 +12486,28 @@
       "weight": 1.0,
       "rationale": "Plan task 12 outcome: final review ready-to-merge",
       "created_at": "2026-08-25T05:11:52.411856-07:00"
+    },
+    {
+      "id": 580,
+      "from_node_id": 549,
+      "to_node_id": 574,
+      "from_change_id": "3345081d-6af3-4b53-8f02-2ce740a4ab07",
+      "to_change_id": "a0d79aff-d4bd-4ce9-8567-544966b10d5c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bryan chose banner mitigation for the deny-in-open-mode finding",
+      "created_at": "2026-08-26T13:59:41.682679-07:00"
+    },
+    {
+      "id": 581,
+      "from_node_id": 574,
+      "to_node_id": 575,
+      "from_change_id": "a0d79aff-d4bd-4ce9-8567-544966b10d5c",
+      "to_change_id": "c40a4ef2-d11c-4d2b-80a6-1e38f19af1d5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Banner shipped and PR opened",
+      "created_at": "2026-08-26T13:59:41.692531-07:00"
     }
   ],
   "documents": [

@@ -477,8 +477,11 @@
 
 		{#if accessLoading}
 			<div class="loading-state"><div class="spinner"></div></div>
-		{:else if access}
-			{#if access.pending.length > 0}
+		{:else}
+			<!-- The grant form renders even when the list failed to load: an
+			     admin who cannot SEE requests can still let someone in, and
+			     the error message above already says what broke. -->
+			{#if access && access.pending.length > 0}
 				<p class="access-pending-count">
 					<strong>{access.pending.length}</strong>
 					{access.pending.length === 1 ? 'request' : 'requests'} waiting for a decision
@@ -516,7 +519,7 @@
 						</li>
 					{/each}
 				</ul>
-			{:else}
+			{:else if access}
 				<p class="access-idle">No requests waiting.</p>
 			{/if}
 
@@ -542,7 +545,7 @@
 				</button>
 			</div>
 
-			{#if decided.length > 0}
+			{#if access && decided.length > 0}
 				<div class="table-wrap">
 					<table class="table access-table">
 						<thead>
@@ -593,7 +596,7 @@
 						</tbody>
 					</table>
 				</div>
-			{:else if access.pending.length === 0}
+			{:else if access && access.pending.length === 0}
 				<p class="access-idle access-empty-hint">
 					No access requests yet — anyone who tries to sign in without access
 					will appear here.

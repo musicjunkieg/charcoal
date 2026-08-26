@@ -201,9 +201,22 @@ pub async fn approve_access_and_scan(
     // The access row is the source of the handle for pre-seeding.
     let row = match state.db.get_access_request(&did).await {
         Ok(Some(row)) => row,
-        Ok(None) | Err(_) => {
+        other => {
             // The decide() above just succeeded, so this is a read-back race
-            // or DB blip — approval stands, scan does not happen.
+            // or DB blip — approval stands, scan does not happen. The two
+            // cases log differently so an operator can tell them apart; the
+            // response is the same honest "failed to queue" either way.
+            match other {
+                Err(e) => tracing::error!(
+                    error = %format!("{e:#}"),
+                    target_did = %did,
+                    "approve-scan: access row read-back failed"
+                ),
+                _ => tracing::warn!(
+                    target_did = %did,
+                    "approve-scan: access row vanished after approval"
+                ),
+            }
             return Ok(Json(serde_json::json!({
                 "did": did, "access": "granted", "scan": "failed to queue",
             })));
