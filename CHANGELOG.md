@@ -7,6 +7,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Allowlist admin UI + auto-waitlist (#309): gated onboarding no longer
+  means editing a Railway env var. A Bluesky sign-in that fails the access
+  gate now records a pending request (verified DID + handle) and lands on a
+  styled /waitlist page — previously it dead-ended on raw JSON. Admins
+  manage access from the dashboard's new Access section: approve, approve +
+  first scan (pre-seed + enqueue, partial failure reported honestly), deny,
+  grant by handle. Denial is sticky and indistinguishable from pending by
+  design, and revoking keeps the person's data. The gate itself became
+  three OR'd clauses — `CHARCOAL_ALLOWED_DID` env bootstrap (lockout-proof,
+  empty still means open access), admin DIDs implicitly allowed, or an
+  `allowed` row in the new `access_requests` table (schema v14, both
+  backends) — checked per-request, failing closed on DB errors. A session
+  revoked mid-flight now routes to /waitlist instead of a broken dashboard.
+- Per-user scan cooldown (#258, minimal): one successful scan per user per
+  `CHARCOAL_SCAN_COOLDOWN_HOURS` (default 24, 0 disables), enforced at
+  enqueue with a friendly 429 carrying `retry_at`. Failed scans retry
+  immediately; admin-triggered scans bypass the cooldown deliberately.
+  Also documents the previously-undocumented `CHARCOAL_ADMIN_DIDS` in
+  .env.example.
 - Multi-interest topic fingerprint (#297, spike #295 BETTER tier): the
   protected user's posts are now clustered in embedding space into up to 12
   weighted topic centroids (greedy agglomerative, centroid linkage,

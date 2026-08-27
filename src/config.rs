@@ -64,6 +64,10 @@ pub struct Config {
     /// Secret for HMAC session token signing (CHARCOAL_SESSION_SECRET env var)
     #[cfg(feature = "web")]
     pub session_secret: String,
+    /// Minimum hours between one user's successful scans (CHARCOAL_SCAN_COOLDOWN_HOURS).
+    /// 0 disables the cooldown. Admin-triggered scans bypass it.
+    #[cfg(feature = "web")]
+    pub scan_cooldown_hours: u64,
 }
 
 impl Config {
@@ -92,6 +96,13 @@ impl Config {
         let oauth_client_id = env::var("CHARCOAL_OAUTH_CLIENT_ID").unwrap_or_default();
         #[cfg(feature = "web")]
         let session_secret = env::var("CHARCOAL_SESSION_SECRET").unwrap_or_default();
+        #[cfg(feature = "web")]
+        let scan_cooldown_hours = env::var("CHARCOAL_SCAN_COOLDOWN_HOURS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(24)
+            // chrono::Duration::hours panics on absurd magnitudes; a year is already "off".
+            .min(24 * 365);
 
         Ok(Self {
             bluesky_handle: env::var("BLUESKY_HANDLE").unwrap_or_default(),
@@ -118,6 +129,8 @@ impl Config {
             oauth_client_id,
             #[cfg(feature = "web")]
             session_secret,
+            #[cfg(feature = "web")]
+            scan_cooldown_hours,
         })
     }
 
@@ -213,6 +226,8 @@ impl Config {
             oauth_client_id: "https://test.example.com/oauth-client-metadata.json".to_string(),
             #[cfg(feature = "web")]
             session_secret: "test_session_secret_at_least_32_chars!".to_string(),
+            #[cfg(feature = "web")]
+            scan_cooldown_hours: 24,
         }
     }
 }

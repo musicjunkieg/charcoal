@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { getAccount } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
 	import LabelButtons from '$lib/components/LabelButtons.svelte';
 	import { tierClass } from '$lib/tier-class';
@@ -37,6 +37,10 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 				return;
 			}
 			if (err instanceof Error && err.message === 'HTTP 404') {

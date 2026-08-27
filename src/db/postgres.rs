@@ -22,7 +22,8 @@ use super::models::{
     NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
-    eta_seconds, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    eta_seconds, AccessRequestRow, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry,
+    ScanQueueRow, ScanSkip,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -165,6 +166,10 @@ impl PgDatabase {
                 (
                     13,
                     include_str!("../../migrations/postgres/0013_topic_clusters.sql"),
+                ),
+                (
+                    14,
+                    include_str!("../../migrations/postgres/0014_access_requests.sql"),
                 ),
             ];
 
@@ -1875,6 +1880,94 @@ impl Database for PgDatabase {
                         .map(|t| t.to_rfc3339()),
                     last_error: row.get::<Option<String>, _>(5),
                 }
+            })
+            .collect())
+    }
+
+    // --- Access requests (#309) ---
+
+    async fn get_access_request(&self, did: &str) -> Result<Option<AccessRequestRow>> {
+        let row = sqlx_core::query::query(
+            "SELECT did, handle, status, requested_at, decided_at, decided_by
+             FROM access_requests WHERE did = $1",
+        )
+        .bind(did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| AccessRequestRow {
+            did: r.get::<String, _>(0),
+            handle: r.get::<String, _>(1),
+            status: r.get::<String, _>(2),
+            requested_at: r.get::<String, _>(3),
+            decided_at: r.get::<Option<String>, _>(4),
+            decided_by: r.get::<Option<String>, _>(5),
+        }))
+    }
+
+    async fn upsert_access_request_pending(&self, did: &str, handle: &str) -> Result<()> {
+        // ON CONFLICT refreshes the handle ONLY: a denied row stays denied and
+        // an allowed row stays allowed — sign-in attempts never move the
+        // state machine. Same rule as the SQLite side.
+        sqlx_core::query::query(
+            "INSERT INTO access_requests (did, handle, status, requested_at)
+             VALUES ($1, $2, 'pending', $3)
+             ON CONFLICT (did) DO UPDATE SET handle = EXCLUDED.handle",
+        )
+        .bind(did)
+        .bind(handle)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn set_access_status(&self, did: &str, status: &str, decided_by: &str) -> Result<bool> {
+        let result = sqlx_core::query::query(
+            "UPDATE access_requests SET status = $2, decided_at = $3, decided_by = $4
+             WHERE did = $1",
+        )
+        .bind(did)
+        .bind(status)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(decided_by)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn grant_access(&self, did: &str, handle: &str, decided_by: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx_core::query::query(
+            "INSERT INTO access_requests (did, handle, status, requested_at, decided_at, decided_by)
+             VALUES ($1, $2, 'allowed', $3, $3, $4)
+             ON CONFLICT (did) DO UPDATE SET status = 'allowed', handle = EXCLUDED.handle,
+                 decided_at = EXCLUDED.decided_at, decided_by = EXCLUDED.decided_by",
+        )
+        .bind(did)
+        .bind(handle)
+        .bind(now)
+        .bind(decided_by)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>> {
+        let rows = sqlx_core::query::query(
+            "SELECT did, handle, status, requested_at, decided_at, decided_by
+             FROM access_requests ORDER BY requested_at ASC, did ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| AccessRequestRow {
+                did: r.get::<String, _>(0),
+                handle: r.get::<String, _>(1),
+                status: r.get::<String, _>(2),
+                requested_at: r.get::<String, _>(3),
+                decided_at: r.get::<Option<String>, _>(4),
+                decided_by: r.get::<Option<String>, _>(5),
             })
             .collect())
     }

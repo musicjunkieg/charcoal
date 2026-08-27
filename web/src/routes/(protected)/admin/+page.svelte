@@ -2,9 +2,17 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import {
+		getAccessRequests,
+		grantAccess,
+		approveAccess,
+		approveAccessAndScan,
+		denyAccess
+	} from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import '$lib/website/styles/tokens.css';
 	import type { AdminUser, AdminQueue, AdminScanRow } from '$lib/types.js';
+	import type { AccessListResponse, AccessRequest } from '$lib/types.js';
 
 	let users = $state<AdminUser[]>([]);
 	let queue = $state<AdminQueue | null>(null);
@@ -20,6 +28,27 @@
 	let anyBuilding = $derived(users.some((u) => u.fingerprint_building));
 	let anyScanning = $derived(scanningDid !== null);
 	let queueActive = $derived((queue?.active.length ?? 0) > 0);
+
+	// ── Access (#309): who may sign in at all ──
+	let access = $state<AccessListResponse | null>(null);
+	let accessLoading = $state(true);
+	let grantHandle = $state('');
+	let grantLoading = $state(false);
+	let accessActionDid = $state<string | null>(null);
+	// One message strip for the whole section: every access action reports
+	// here, so a partial failure (access granted, scan not queued) is never
+	// silently swallowed by a row re-render.
+	let accessMsg = $state<{ kind: 'ok' | 'error'; text: string } | null>(null);
+
+	/** Allowed and denied together, most recent decision first — one history
+	 *  of who was let in and who was turned away, not two lists to cross-read. */
+	let decided = $derived(
+		access
+			? [...access.allowed, ...access.denied].sort((a, b) =>
+					(b.decided_at ?? '').localeCompare(a.decided_at ?? '')
+				)
+			: []
+	);
 
 	// Queued rows exist while running is UNDER the cap — nothing is claiming
 	// them. This is #286's wedged state, which until now only ever appeared as
@@ -54,6 +83,8 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+			} else if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 			}
 		} finally {
 			loading = false;
@@ -107,6 +138,16 @@
 		return `${clean.slice(0, MAX_INLINE_REASON - 1).trimEnd()}…`;
 	}
 
+	/** Short visible form of a DID for the Access panel (#309 fast-follow,
+	 *  Fix 1c) — defense in depth alongside the callback's server-side DID
+	 *  binding check: an admin can see at a glance that the handle and DID
+	 *  actually match what they expect. The full DID lives in a `.sr-only`
+	 *  sibling; a `title` tooltip would be unreachable by keyboard/touch,
+	 *  same reasoning as the `.scan-failed` cell below. */
+	function didTail(did: string): string {
+		return `did:…${did.slice(-8)}`;
+	}
+
 	function displayHandle(scan: AdminScanRow): string {
 		// An orphaned queue row (user deleted mid-scan) has no handle. Show the
 		// DID tail rather than "unknown" — it is still identifiable, and the
@@ -130,6 +171,10 @@
 				await goto('/login');
 				return;
 			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
 			addError = err instanceof Error ? err.message : 'Failed to add user';
 		} finally {
 			addLoading = false;
@@ -144,6 +189,10 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 				return;
 			}
 		} finally {
@@ -162,8 +211,136 @@
 				await goto('/login');
 				return;
 			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
 		} finally {
 			deletingDid = null;
+		}
+	}
+
+	// ── Access actions (#309) ──
+	// Every handler routes auth failures the same way as the rest of the page,
+	// reports into accessMsg, and refetches — the list on screen is always the
+	// server's answer, never an optimistic local mutation.
+
+	async function routeAuthFailure(err: unknown): Promise<boolean> {
+		if (err instanceof AuthError) {
+			await goto('/login');
+			return true;
+		}
+		if (err instanceof AccessRevokedError) {
+			await goto('/waitlist');
+			return true;
+		}
+		return false;
+	}
+
+	async function loadAccess() {
+		try {
+			access = await getAccessRequests();
+		} catch (err) {
+			if (await routeAuthFailure(err)) return;
+			accessMsg = { kind: 'error', text: 'Could not load access requests' };
+		} finally {
+			accessLoading = false;
+		}
+	}
+
+	async function handleGrant() {
+		const trimmed = grantHandle.trim().replace(/^@/, '');
+		if (!trimmed) return;
+		accessMsg = null;
+		grantLoading = true;
+		try {
+			const res = await grantAccess(trimmed);
+			accessMsg = { kind: 'ok', text: `Access granted to @${res.handle}` };
+			grantHandle = '';
+			await loadAccess();
+		} catch (err) {
+			if (await routeAuthFailure(err)) return;
+			accessMsg = {
+				kind: 'error',
+				text: err instanceof Error ? err.message : 'Failed to grant access'
+			};
+		} finally {
+			grantLoading = false;
+		}
+	}
+
+	async function handleApprove(req: AccessRequest) {
+		accessMsg = null;
+		accessActionDid = req.did;
+		try {
+			await approveAccess(req.did);
+			accessMsg = { kind: 'ok', text: `Approved @${req.handle}` };
+			await loadAccess();
+		} catch (err) {
+			if (await routeAuthFailure(err)) return;
+			accessMsg = {
+				kind: 'error',
+				text: err instanceof Error ? err.message : 'Failed to approve'
+			};
+		} finally {
+			accessActionDid = null;
+		}
+	}
+
+	async function handleApproveScan(req: AccessRequest) {
+		accessMsg = null;
+		accessActionDid = req.did;
+		try {
+			const res = await approveAccessAndScan(req.did);
+			// The endpoint reports the two operations separately, and so do we:
+			// approval never rolls back, so a scan-side failure must read as
+			// "granted, but…" rather than vanishing into a generic error.
+			if (res.scan === 'queued') {
+				accessMsg = { kind: 'ok', text: `Approved @${req.handle} — first scan queued` };
+			} else {
+				accessMsg = {
+					kind: 'error',
+					text: `Access granted to @${req.handle}, but the scan could not be queued — use Scan in the users table below`
+				};
+			}
+			// The users table changed too (pre-seeded row), not just the access list.
+			await Promise.all([loadAccess(), loadUsers()]);
+		} catch (err) {
+			if (await routeAuthFailure(err)) return;
+			accessMsg = {
+				kind: 'error',
+				text: err instanceof Error ? err.message : 'Failed to approve'
+			};
+		} finally {
+			accessActionDid = null;
+		}
+	}
+
+	/** Deny doubles as revoke — same endpoint, same sticky 'denied' state.
+	 *  The confirm copy differs because the admin's mental model differs. */
+	async function handleDeny(req: AccessRequest) {
+		const prompt =
+			req.status === 'allowed'
+				? `Revoke access for @${req.handle}? They keep their data — they just can't sign in until re-approved.`
+				: `Deny @${req.handle}? They'll keep seeing the waitlist page and can be approved later.`;
+		if (!confirm(prompt)) return;
+		accessMsg = null;
+		accessActionDid = req.did;
+		try {
+			await denyAccess(req.did);
+			accessMsg = {
+				kind: 'ok',
+				text: req.status === 'allowed' ? `Revoked @${req.handle}` : `Denied @${req.handle}`
+			};
+			await loadAccess();
+		} catch (err) {
+			if (await routeAuthFailure(err)) return;
+			accessMsg = {
+				kind: 'error',
+				text: err instanceof Error ? err.message : 'Failed to deny'
+			};
+		} finally {
+			accessActionDid = null;
 		}
 	}
 
@@ -196,6 +373,7 @@
 
 	onMount(() => {
 		loadUsers();
+		loadAccess();
 		startPolling();
 	});
 
@@ -261,9 +439,158 @@
 		{/if}
 	</section>
 
+	<!-- Access (#309): who may sign in at all. Everything about granting,
+	     denying, and revoking lives here — the pre-seed form below prepares
+	     accounts for scanning and deliberately does not touch access. -->
+	<section class="access-section">
+		<h2 class="section-title">Access</h2>
+
+		<!-- aria-live: approve/deny/grant outcomes announce without stealing
+		     focus; the partial-failure case especially must not be missable. -->
+		<!-- The wrapper is the ONE live region; an inner role="status" would carry
+		     its own implicit region and announce every outcome twice. -->
+		<div aria-live="polite">
+			{#if accessMsg}
+				<p class={accessMsg.kind === 'ok' ? 'msg-success' : 'msg-error'}>
+					{accessMsg.text}
+				</p>
+			{/if}
+		</div>
+
+		{#if accessLoading}
+			<div class="loading-state"><div class="spinner"></div></div>
+		{:else if access}
+			{#if access.pending.length > 0}
+				<p class="access-pending-count">
+					<strong>{access.pending.length}</strong>
+					{access.pending.length === 1 ? 'request' : 'requests'} waiting for a decision
+				</p>
+				<ul class="access-pending-list">
+					{#each access.pending as req (req.did)}
+						<li class="access-pending-item">
+							<span class="handle-text">@{req.handle}</span>
+							<span class="did-tail muted" aria-hidden="true">{didTail(req.did)}</span>
+							<span class="sr-only">{req.did}</span>
+							<span class="access-when">asked {formatDate(req.requested_at)}</span>
+							<div class="action-btns access-actions">
+								<button
+									class="btn-action btn-approve-scan"
+									onclick={() => handleApproveScan(req)}
+									disabled={accessActionDid !== null}
+								>
+									{accessActionDid === req.did ? 'Working…' : 'Approve + scan'}
+								</button>
+								<button
+									class="btn-action btn-scan"
+									onclick={() => handleApprove(req)}
+									disabled={accessActionDid !== null}
+								>
+									{accessActionDid === req.did ? '…' : 'Approve'}
+								</button>
+								<button
+									class="btn-action btn-delete"
+									onclick={() => handleDeny(req)}
+									disabled={accessActionDid !== null}
+								>
+									{accessActionDid === req.did ? '…' : 'Deny'}
+								</button>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<p class="access-idle">No requests waiting.</p>
+			{/if}
+
+			<div class="add-form grant-form">
+				<div class="add-input-wrap">
+					<span class="input-at">@</span>
+					<input
+						type="text"
+						class="add-input"
+						placeholder="handle.bsky.social"
+						aria-label="Grant access by Bluesky handle"
+						bind:value={grantHandle}
+						onkeydown={(e) => e.key === 'Enter' && handleGrant()}
+						disabled={grantLoading}
+					/>
+				</div>
+				<button
+					class="btn-add"
+					onclick={handleGrant}
+					disabled={grantLoading || !grantHandle.trim()}
+				>
+					{grantLoading ? 'Granting…' : 'Grant Access'}
+				</button>
+			</div>
+
+			{#if decided.length > 0}
+				<div class="table-wrap">
+					<table class="table access-table">
+						<thead>
+							<tr>
+								<th class="col-access-status">Status</th>
+								<th class="col-handle">Handle</th>
+								<th class="col-access-when">Decided</th>
+								<th class="col-access-action"><span class="sr-only">Action</span></th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each decided as req (req.did)}
+								<tr class="user-row">
+									<td class="col-access-status">
+										{#if req.status === 'allowed'}
+											<span class="access-status-allowed">Allowed</span>
+										{:else}
+											<span class="access-status-denied">Denied</span>
+										{/if}
+									</td>
+									<td class="col-handle">
+										<span class="handle-text">@{req.handle}</span>
+										<span class="did-tail muted" aria-hidden="true">{didTail(req.did)}</span>
+										<span class="sr-only">{req.did}</span>
+									</td>
+									<td class="col-access-when muted">{formatDate(req.decided_at)}</td>
+									<td class="col-access-action">
+										{#if req.status === 'allowed'}
+											<button
+												class="btn-action btn-delete"
+												onclick={() => handleDeny(req)}
+												disabled={accessActionDid !== null}
+											>
+												{accessActionDid === req.did ? '…' : 'Revoke'}
+											</button>
+										{:else}
+											<button
+												class="btn-action btn-scan"
+												onclick={() => handleApprove(req)}
+												disabled={accessActionDid !== null}
+											>
+												{accessActionDid === req.did ? '…' : 'Approve'}
+											</button>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{:else if access.pending.length === 0}
+				<p class="access-idle access-empty-hint">
+					No access requests yet — anyone who tries to sign in without access
+					will appear here.
+				</p>
+			{/if}
+		{/if}
+	</section>
+
 	<!-- Pre-seed form -->
 	<section class="add-section">
 		<h2 class="section-title">Add Protected User</h2>
+		<p class="section-hint">
+			Prepares an account for scanning — does not grant sign-in access. To let
+			someone in, use Grant Access above.
+		</p>
 		<div class="add-form">
 			<div class="add-input-wrap">
 				<span class="input-at">@</span>
@@ -541,6 +868,119 @@
 		border: 0;
 	}
 
+	/* ── Access (#309) ──────────────────────────────────────────────────
+	   Every value here is on the DESIGN.md ramp (1rem / 0.8125rem; 8px / 12px)
+	   and every colour comes through tokens.css — this section adds no new
+	   literals, per the #250 discipline. Status words carry meaning in text
+	   first, colour second: Allowed gets the existing ok-green, Denied gets
+	   quiet grey rather than red — a recorded decision, not an alarm. */
+	.access-section {
+		margin-bottom: 2.5rem;
+		padding: 1.25rem;
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
+		border-radius: 12px;
+	}
+
+	.access-pending-count {
+		font-size: 1rem;
+		color: var(--charcoal-300);
+		margin: 0 0 0.75rem;
+	}
+
+	.access-pending-count strong {
+		color: var(--copper);
+		font-weight: 500;
+	}
+
+	.access-idle {
+		font-size: 0.8125rem;
+		color: var(--charcoal-400);
+		margin: 0 0 1rem;
+	}
+
+	.access-empty-hint {
+		margin: 1rem 0 0;
+	}
+
+	.access-pending-list {
+		list-style: none;
+		margin: 0 0 1.25rem;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+	}
+
+	.access-pending-item {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		padding: 0.5rem 0.75rem;
+		background: var(--charcoal-900);
+		border-radius: 8px;
+	}
+
+	.access-when {
+		font-size: 0.8125rem;
+		color: var(--charcoal-400);
+	}
+
+	.access-actions {
+		margin-left: auto;
+	}
+
+	/* The "do both" action leads the row in the same amber-action voice as the
+	   page's other primary buttons, at row scale. Amber is action, per DESIGN. */
+	.btn-approve-scan {
+		color: var(--charcoal-950);
+		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
+		border: none;
+		box-shadow: 0 2px 8px -2px rgb(var(--amber-500-rgb) / 0.35);
+	}
+
+	.btn-approve-scan:hover:not(:disabled) {
+		box-shadow: 0 4px 12px -2px rgb(var(--amber-500-rgb) / 0.45);
+	}
+
+	.btn-approve-scan:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+		box-shadow: none;
+	}
+
+	.grant-form {
+		margin-bottom: 1.25rem;
+	}
+
+	.access-table {
+		margin-top: 0.25rem;
+	}
+
+	.access-status-allowed {
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: var(--status-ok);
+	}
+
+	.access-status-denied {
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: var(--charcoal-400);
+	}
+
+	.col-access-status { width: 6rem; }
+	.col-access-when { width: 9rem; }
+	.col-access-action { width: 6rem; text-align: right; }
+
+	.section-hint {
+		font-size: 0.8125rem;
+		color: var(--charcoal-400);
+		margin: -0.375rem 0 0.875rem;
+		line-height: 1.5;
+	}
+
 	/* Add user form */
 	.add-section {
 		margin-bottom: 2.5rem;
@@ -666,6 +1106,9 @@
 
 	.handle-text { color: var(--copper); font-weight: 500; }
 	.muted { color: var(--charcoal-500); }
+	/* DID next to the handle (#309 fast-follow, Fix 1c) — same secondary-text
+	   size as the rest of this file's muted labels. */
+	.did-tail { font-size: 0.8125rem; margin-left: 0.375rem; }
 
 	.status-ready { color: var(--status-ok); font-size: 0.875rem; }
 	.status-building { color: var(--copper); font-size: 0.875rem; }
@@ -725,5 +1168,8 @@
 		.add-input-wrap { width: 100%; }
 		.btn-add { width: 100%; }
 		.action-btns { flex-wrap: wrap; }
+		/* Pending rows stack: actions drop below the handle at full width
+		   rather than cramming three buttons beside it. */
+		.access-actions { margin-left: 0; width: 100%; }
 	}
 </style>

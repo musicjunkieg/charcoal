@@ -30,6 +30,12 @@ pub struct PendingOAuth {
     /// The user-input handle from the initiate request.
     /// Stored here so the callback can register the user in the DB.
     pub handle: String,
+    /// The DID the handle resolved to during initiate (#309 fast-follow).
+    /// The callback compares this against the token exchange's authenticated
+    /// DID (`sub`) — without that check, a person can type someone else's
+    /// handle, authenticate as themselves, and get an access/users row that
+    /// carries a handle they don't own.
+    pub did: String,
 }
 
 // ---- Client metadata ----
@@ -248,6 +254,7 @@ pub async fn initiate(
             oauth_request,
             authorization_server: authorization_server.clone(),
             handle: handle.clone(),
+            did: did.clone(),
         },
     );
 
@@ -431,17 +438,51 @@ pub async fn callback(
         }
     };
 
-    // Gate on CHARCOAL_ALLOWED_DID
-    if !crate::web::auth::did_is_allowed(&authenticated_did, &state.config.allowed_did) {
+    // Bind the handle to the account that actually authenticated (#309
+    // fast-follow). Without this, a person can type someone ELSE's handle
+    // at /api/auth/initiate, authenticate as themselves on a shared PDS, and
+    // walk away with an access_requests/users row carrying a handle they
+    // don't own — the admin Access UI would show only that (wrong) handle.
+    if pending.did != authenticated_did {
         tracing::warn!(
-            "Login attempt from disallowed DID '{}' (allowed: '{}')",
-            authenticated_did,
-            state.config.allowed_did
+            typed_handle_did = %pending.did,
+            authenticated_did = %authenticated_did,
+            "OAuth callback DID mismatch — typed handle resolves to a different account"
         );
         return api_error(
             StatusCode::FORBIDDEN,
-            "This Bluesky account is not authorized to access this dashboard",
+            "You signed in as a different account than the handle you entered — please try again",
         );
+    }
+
+    // Gate: env bootstrap OR admin OR DB allowlist row (#309).
+    match crate::web::auth::check_access(&authenticated_did, &state.config, &*state.db).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!(
+                did = %authenticated_did,
+                handle = %pending.handle,
+                "Disallowed sign-in recorded as access request"
+            );
+            // Best-effort bookkeeping: the person's experience must not depend
+            // on the upsert succeeding — the gate already denied them.
+            if let Err(e) = state
+                .db
+                .upsert_access_request_pending(&authenticated_did, &pending.handle)
+                .await
+            {
+                tracing::error!(error = %format!("{e:#}"), "failed to record access request");
+            }
+            // Top-level browser navigation: redirect to a real page, never JSON.
+            return Redirect::to("/waitlist").into_response();
+        }
+        Err(e) => {
+            tracing::error!(error = %format!("{e:#}"), "access check failed at login — failing closed");
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not complete sign-in — please try again",
+            );
+        }
     }
 
     // Register the authenticated user in the database.

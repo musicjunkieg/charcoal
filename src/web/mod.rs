@@ -187,6 +187,22 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/admin/users/{did}",
             delete(handlers::admin::delete_user),
         )
+        .route(
+            "/api/admin/access",
+            get(handlers::access::list_access).post(handlers::access::grant_access_by_handle),
+        )
+        .route(
+            "/api/admin/access/{did}/approve",
+            post(handlers::access::approve_access),
+        )
+        .route(
+            "/api/admin/access/{did}/deny",
+            post(handlers::access::deny_access),
+        )
+        .route(
+            "/api/admin/access/{did}/approve-scan",
+            post(handlers::access::approve_access_and_scan),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,

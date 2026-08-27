@@ -18,7 +18,8 @@ use super::models::{
     NewAmplificationEvent, UserLabel, UserRow,
 };
 use super::traits::{
-    validate_bundle, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    validate_bundle, AccessRequestRow, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry,
+    ScanQueueRow, ScanSkip,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -498,6 +499,33 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::list_scan_queue(&conn)
     }
+
+    // --- Access requests (#309) ---
+
+    async fn get_access_request(&self, did: &str) -> Result<Option<AccessRequestRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_access_request(&conn, did)
+    }
+
+    async fn upsert_access_request_pending(&self, did: &str, handle: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_access_request_pending(&conn, did, handle)
+    }
+
+    async fn set_access_status(&self, did: &str, status: &str, decided_by: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::set_access_status(&conn, did, status, decided_by)
+    }
+
+    async fn grant_access(&self, did: &str, handle: &str, decided_by: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::grant_access(&conn, did, handle, decided_by)
+    }
+
+    async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_access_requests(&conn)
+    }
 }
 
 #[cfg(test)]
@@ -808,8 +836,8 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
-        // scan_queue, topic_clusters = 13 tables (v13)
-        assert_eq!(count, 13);
+        // scan_queue, topic_clusters, access_requests = 14 tables (v14)
+        assert_eq!(count, 14);
     }
 
     #[tokio::test]

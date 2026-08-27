@@ -1734,6 +1734,89 @@ pub fn scan_queue_entry(
     }))
 }
 
+// --- Access requests (#309) ---
+
+pub fn get_access_request(
+    conn: &Connection,
+    did: &str,
+) -> Result<Option<crate::db::traits::AccessRequestRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, status, requested_at, decided_at, decided_by
+         FROM access_requests WHERE did = ?1",
+    )?;
+    let row = stmt
+        .query_row([did], |r| {
+            Ok(crate::db::traits::AccessRequestRow {
+                did: r.get(0)?,
+                handle: r.get(1)?,
+                status: r.get(2)?,
+                requested_at: r.get(3)?,
+                decided_at: r.get(4)?,
+                decided_by: r.get(5)?,
+            })
+        })
+        .optional()?;
+    Ok(row)
+}
+
+pub fn upsert_access_request_pending(conn: &Connection, did: &str, handle: &str) -> Result<()> {
+    // ON CONFLICT refreshes the handle ONLY: a denied row stays denied and an
+    // allowed row stays allowed — sign-in attempts never move the state machine.
+    conn.execute(
+        "INSERT INTO access_requests (did, handle, status, requested_at)
+         VALUES (?1, ?2, 'pending', ?3)
+         ON CONFLICT (did) DO UPDATE SET handle = excluded.handle",
+        rusqlite::params![did, handle, chrono::Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+pub fn set_access_status(
+    conn: &Connection,
+    did: &str,
+    status: &str,
+    decided_by: &str,
+) -> Result<bool> {
+    let n = conn.execute(
+        "UPDATE access_requests SET status = ?2, decided_at = ?3, decided_by = ?4
+         WHERE did = ?1",
+        rusqlite::params![did, status, chrono::Utc::now().to_rfc3339(), decided_by],
+    )?;
+    Ok(n > 0)
+}
+
+pub fn grant_access(conn: &Connection, did: &str, handle: &str, decided_by: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO access_requests (did, handle, status, requested_at, decided_at, decided_by)
+         VALUES (?1, ?2, 'allowed', ?3, ?3, ?4)
+         ON CONFLICT (did) DO UPDATE SET status = 'allowed', handle = excluded.handle,
+             decided_at = excluded.decided_at, decided_by = excluded.decided_by",
+        rusqlite::params![did, handle, now, decided_by],
+    )?;
+    Ok(())
+}
+
+pub fn list_access_requests(conn: &Connection) -> Result<Vec<crate::db::traits::AccessRequestRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, status, requested_at, decided_at, decided_by
+         FROM access_requests ORDER BY requested_at ASC, did ASC",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(crate::db::traits::AccessRequestRow {
+                did: r.get(0)?,
+                handle: r.get(1)?,
+                status: r.get(2)?,
+                requested_at: r.get(3)?,
+                decided_at: r.get(4)?,
+                decided_by: r.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

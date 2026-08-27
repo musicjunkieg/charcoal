@@ -14,13 +14,35 @@ import type {
 	ReviewResponse,
 	Identity,
 	AdminUsersResponse,
-	PreSeedResponse
+	PreSeedResponse,
+	AccessListResponse,
+	ApproveScanResponse
 } from './types.js';
 
 export class AuthError extends Error {
 	constructor() {
 		super('Authentication required');
 		this.name = 'AuthError';
+	}
+}
+
+/** 403 with code "access_revoked": the DID is no longer on the allowlist.
+ *  Callers route to /waitlist instead of rendering a broken dashboard. */
+export class AccessRevokedError extends Error {
+	constructor() {
+		super('Access is not currently active for this account');
+		this.name = 'AccessRevokedError';
+	}
+}
+
+/** 429 from POST /api/scan: the per-user cooldown (#258). Not an error state —
+ *  the dashboard renders it as a calm notice with the retry instant. */
+export class CooldownError extends Error {
+	retry_at: string;
+	constructor(message: string, retry_at: string) {
+		super(message);
+		this.name = 'CooldownError';
+		this.retry_at = retry_at;
 	}
 }
 
@@ -44,6 +66,12 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
+		if (res.status === 403 && body.code === 'access_revoked') {
+			throw new AccessRevokedError();
+		}
+		if (res.status === 429 && typeof body.retry_at === 'string') {
+			throw new CooldownError(body.error ?? 'Scan cooldown active', body.retry_at);
+		}
 		throw new Error(body.error ?? `HTTP ${res.status}`);
 	}
 	return res.json() as Promise<T>;
@@ -205,4 +233,35 @@ export async function deleteAdminUser(did: string): Promise<void> {
 	await apiFetch(`/api/admin/users/${encodeURIComponent(did)}`, {
 		method: 'DELETE',
 	});
+}
+
+// ---- Access (allowlist) ----
+
+export async function getAccessRequests(): Promise<AccessListResponse> {
+	return apiFetch<AccessListResponse>('/api/admin/access');
+}
+
+export async function grantAccess(
+	handle: string
+): Promise<{ did: string; handle: string; status: string }> {
+	return apiFetch('/api/admin/access', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ handle })
+	});
+}
+
+export async function approveAccess(did: string): Promise<void> {
+	await apiFetch(`/api/admin/access/${encodeURIComponent(did)}/approve`, { method: 'POST' });
+}
+
+export async function approveAccessAndScan(did: string): Promise<ApproveScanResponse> {
+	return apiFetch<ApproveScanResponse>(
+		`/api/admin/access/${encodeURIComponent(did)}/approve-scan`,
+		{ method: 'POST' }
+	);
+}
+
+export async function denyAccess(did: string): Promise<void> {
+	await apiFetch(`/api/admin/access/${encodeURIComponent(did)}/deny`, { method: 'POST' });
 }

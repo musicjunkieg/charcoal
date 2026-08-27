@@ -1,5 +1,133 @@
 [
   {
+    "hash": "765dea2434cb0a84b4dadc6b55f32c6667c6e3ab",
+    "short_hash": "765dea2",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T04:18:20-07:00",
+    "message": "fix(309): finish-review fixes - single live region, in-flight button labels\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 1
+  },
+  {
+    "hash": "2a09c0daf582128de597cdf89a02a4daac765fe8",
+    "short_hash": "2a09c0d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T02:24:36-07:00",
+    "message": "feat(309): frontend plumbing - access wrappers, access_revoked routing, waitlist placeholder",
+    "files_changed": 11
+  },
+  {
+    "hash": "6613b9dc4b3bbc3c485ad43fa98868ee787398b0",
+    "short_hash": "6613b9d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T02:14:49-07:00",
+    "message": "feat(258,309): per-user scan cooldown with admin bypass",
+    "files_changed": 6
+  },
+  {
+    "hash": "bbae761f0455ce7c886ebd36fc4fa2fc1245ad47",
+    "short_hash": "bbae761",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T02:00:52-07:00",
+    "message": "feat(309): approve-scan endpoint - grant plus pre-seed plus enqueue",
+    "files_changed": 5
+  },
+  {
+    "hash": "2334d4a3fe57b6ccce9370e25a455ff2af279b4c",
+    "short_hash": "2334d4a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:51:53-07:00",
+    "message": "feat(309): grant access by handle endpoint\n\nImplementer subagent stalled on a backgrounded test run (10th occurrence);\ncontroller verified 4/4 web_access_admin + clippy clean and committed.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
+    "hash": "2913235ba6999a46ded5521f47230399efbaa7b1",
+    "short_hash": "2913235",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:30:41-07:00",
+    "message": "feat(309): admin access endpoints - list, approve, deny",
+    "files_changed": 6
+  },
+  {
+    "hash": "d8329e8a52071f56ba9221906a4be5015859512d",
+    "short_hash": "d8329e8",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:20:54-07:00",
+    "message": "test(309): bump trait-level table-count pin missed by v14 migration\n\nsqlite.rs test_trait_table_count pinned 13 tables; Task 1 updated the\nschema.rs pins but this one lives outside the files the plan named.\nSurfaced by the Task 5 full-suite run.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "fff9c2d8128b0df2e68192d8c62c88492f29a278",
+    "short_hash": "fff9c2d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T01:16:49-07:00",
+    "message": "feat(309): denied OAuth auto-waitlists and redirects to /waitlist",
+    "files_changed": 4
+  },
+  {
+    "hash": "99b16fd455cc741fab8332ca9fc408049fb28e89",
+    "short_hash": "99b16fd",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T00:51:59-07:00",
+    "message": "feat(309): three-clause access gate with access_revoked 403 code",
+    "files_changed": 4
+  },
+  {
+    "hash": "7c0f68a3d90e0c96ee2a276c4d11c100c15b153e",
+    "short_hash": "7c0f68a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T00:34:24-07:00",
+    "message": "feat(309): access_requests Postgres impl + parity tests",
+    "files_changed": 4
+  },
+  {
+    "hash": "4d07f8d2e67f3af9629479508c42385fff92ba04",
+    "short_hash": "4d07f8d",
+    "author": "Bryan Guffey",
+    "date": "2026-08-24T23:34:50-07:00",
+    "message": "feat(309): AccessRequestRow + access_requests trait methods, SQLite impl",
+    "files_changed": 6
+  },
+  {
+    "hash": "0ba641c7c2c9feccd57ed26e46f3b4f1a5eeafca",
+    "short_hash": "0ba641c",
+    "author": "Bryan Guffey",
+    "date": "2026-08-24T23:21:49-07:00",
+    "message": "feat(309): schema v14 access_requests table, both backends",
+    "files_changed": 5
+  },
+  {
+    "hash": "7789946994dcbc954a2b1b8ecab314c3928317b0",
+    "short_hash": "7789946",
+    "author": "Bryan Guffey",
+    "date": "2026-08-24T22:46:07-07:00",
+    "message": "docs(309): implementation plan for allowlist admin UI + cooldown\n\n12 tasks: schema v14 -> trait/impls -> gate -> OAuth waitlist -> admin\nendpoints -> cooldown -> frontend plumbing -> impeccable UI -> verification.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "11fda38e26bfd50979e00dbd57c5b634b37e56e7",
+    "short_hash": "11fda38",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T20:23:58-07:00",
+    "message": "docs(309): allowlist admin UI + minimal cooldown design spec\n\nBrainstormed and approved: access_requests table (v14), auto-waitlist on\ndenied OAuth, two-button approve, sticky invisible deny, revoke-keeps-data,\n24h scan cooldown with admin bypass. Visual design delegated to impeccable\nat implementation time.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
+    "hash": "643f0350e2fc319bdfb05988d87586c751673bd4",
+    "short_hash": "643f035",
+    "author": "chaos gremlin",
+    "date": "2026-08-23T17:35:52-07:00",
+    "message": "Merge pull request #103 from musicjunkieg/staging\n\nPromote staging to production: admission control, admin visibility, design tokens, overlap math, multi-interest fingerprints",
+    "files_changed": 0
+  },
+  {
+    "hash": "58c5e4a7d58aa7ec6968d4531d1050d8bd0a987a",
+    "short_hash": "58c5e4a",
+    "author": "Bryan Guffey",
+    "date": "2026-08-23T17:12:54-07:00",
+    "message": "fix: restrict CI workflow token to contents:read (CodeQL alert 23)\n\nThe workflow only checks out, builds, and tests - it never writes to the\nrepo, so the default broad GITHUB_TOKEN scopes were unused surface. This\nwas the sole open CodeQL alert and was failing the check on promotion\nPR #103.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 3
+  },
+  {
     "hash": "b8342700e8ad20ab2c592ed8c54754b162aeb559",
     "short_hash": "b834270",
     "author": "Bryan Guffey",
