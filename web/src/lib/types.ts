@@ -211,6 +211,9 @@ export interface Identity {
 	did: string;
 	handle: string;
 	is_admin: boolean;
+	/** False when CHARCOAL_ALLOWED_DID is unset (open access) — access-table
+	 *  decisions are inert in that mode and the admin UI warns about it. */
+	access_gate_active: boolean;
 }
 
 export interface PreSeedResponse {

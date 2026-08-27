@@ -4,7 +4,9 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use charcoal::web::auth::{create_token, COOKIE_NAME};
-use charcoal::web::test_helpers::{build_test_app_with_db, TEST_DID, TEST_SECRET};
+use charcoal::web::test_helpers::{
+    build_open_test_app_with_db, build_test_app_with_db, TEST_DID, TEST_SECRET,
+};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -39,6 +41,27 @@ async fn get_me(app: &axum::Router, did: &str) -> (StatusCode, Value) {
 
 // build_test_app_with_db pins CHARCOAL_ALLOWED_DID to TEST_DID, so the env
 // gate is ACTIVE in these tests and OUTSIDER is not on it.
+
+// /api/me reports whether the env gate is configured at all, so the admin UI
+// can warn that Deny/Revoke are inert in open-access mode (#309 final-review
+// Important #4, Bryan's chosen mitigation: surface it, don't change gate
+// semantics).
+
+#[tokio::test]
+async fn me_reports_gate_active_when_env_set() {
+    let (app, _db) = build_test_app_with_db().expect(MODELS_REQUIRED);
+    let (status, body) = get_me(&app, TEST_DID).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["access_gate_active"], true, "{body}");
+}
+
+#[tokio::test]
+async fn me_reports_gate_off_when_env_empty() {
+    let (app, _db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    let (status, body) = get_me(&app, OUTSIDER).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["access_gate_active"], false, "{body}");
+}
 
 #[tokio::test]
 async fn env_member_still_passes_with_empty_table() {

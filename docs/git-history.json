@@ -1,5 +1,21 @@
 [
   {
+    "hash": "3a3e5db3324830ec3e1cea4d0364a3eb8e75ccd0",
+    "short_hash": "3a3e5db",
+    "author": "Bryan Guffey",
+    "date": "2026-08-26T13:29:22-07:00",
+    "message": "feat(309): warn when access decisions are inert in open-access mode\n\nBryan chose the banner mitigation for the final-review finding: /api/me\ngains access_gate_active (false when CHARCOAL_ALLOWED_DID is unset) and\nthe admin Access section renders a warning that decisions are recorded\nbut have no effect while the gate is open. Gate semantics unchanged.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 7
+  },
+  {
+    "hash": "158eea58fc05bee9160764dda5fb929a5ac7d63f",
+    "short_hash": "158eea5",
+    "author": "Bryan Guffey",
+    "date": "2026-08-25T05:09:23-07:00",
+    "message": "fix(309): final-review fixes - DID-bound handles, single fingerprint build, calm cooldown notice, config clamp\n\nFour fixes from the #309 final-review pass:\n\n1. Bind the OAuth handle to the authenticated DID: the callback now\n   compares the DID resolved at /api/auth/initiate against the token\n   exchange sub and rejects a mismatch with 403 before writing any\n   row, cookie, or user upsert. Admin Access UI shows the DID beside\n   the handle as defense in depth.\n2. approve_access_and_scan no longer spawns its own fingerprint\n   build - the enqueued scan already builds a missing/stale one,\n   so the spawn was racing two concurrent builds of the same\n   fingerprint.\n3. Scan cooldown 429s render as a calm \"next scan available at...\"\n   notice on the dashboard instead of the red error state.\n4. CHARCOAL_SCAN_COOLDOWN_HOURS is clamped to one year so a bad env\n   value cannot make chrono::Duration::hours panic.",
+    "files_changed": 8
+  },
+  {
     "hash": "765dea2434cb0a84b4dadc6b55f32c6667c6e3ab",
     "short_hash": "765dea2",
     "author": "Bryan Guffey",

@@ -131,7 +131,16 @@
 			const prevRunning = status.scan_running;
 			try {
 				status = await getStatus();
-			} catch {
+			} catch (err) {
+				// Transient poll failures are ignored (the view keeps its last
+				// data), but auth-terminal errors are not transient: a session
+				// revoked or expired mid-poll must route away, not leave the
+				// user on a dashboard that silently stopped updating.
+				if (err instanceof AccessRevokedError) {
+					await goto('/waitlist');
+				} else if (err instanceof AuthError) {
+					await goto('/login');
+				}
 				return;
 			}
 			// Refresh partial results while running; on the falling edge (scan
