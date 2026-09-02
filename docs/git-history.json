@@ -1,5 +1,21 @@
 [
   {
+    "hash": "cf698202fcd73e279832598fa76acc68dcfe7571",
+    "short_hash": "cf69820",
+    "author": "chaos gremlin",
+    "date": "2026-08-27T11:06:21-07:00",
+    "message": "Merge pull request #107 from musicjunkieg/feat/allowlist-admin-ui",
+    "files_changed": 0
+  },
+  {
+    "hash": "602fb6baa8bdf745d5f8d06f9df0df9ee444ec8e",
+    "short_hash": "602fb6b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-26T14:27:49-07:00",
+    "message": "fix(309): PR #106 review round 1 - three CodeRabbit findings\n\nGrant form stays reachable when the access list fails to load; dashboard\npolling routes access_revoked/auth errors instead of swallowing them;\napprove-scan logs the read-back failure case distinctly.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
     "hash": "3a3e5db3324830ec3e1cea4d0364a3eb8e75ccd0",
     "short_hash": "3a3e5db",
     "author": "Bryan Guffey",
