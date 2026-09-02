@@ -1,5 +1,13 @@
 [
   {
+    "hash": "98fb5587c383b6fd7abe7d8e2523c86c6ec1319a",
+    "short_hash": "98fb558",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:56:53-07:00",
+    "message": "feat(315): bulk confirm sheet lists accounts with checkboxes (spec §5.1)\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 14
+  },
+  {
     "hash": "b758671f956652f74f5442beef5b93233bc21b26",
     "short_hash": "b758671",
     "author": "Bryan Guffey",

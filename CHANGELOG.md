@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Mute and block from Charcoal (#315): tier-wide and per-account mute/block,
+  with undo, from the Accounts page. The tier-wide confirm sheet lists every
+  account with a pre-checked box, its tier, and its top signal, so nothing
+  runs on a tier alone. Charcoal asks Bluesky for exactly three fine-grained
+  abilities (`repo:app.bsky.graph.block` create/delete,
+  `rpc:app.bsky.graph.muteActor`, `rpc:app.bsky.graph.unmuteActor`) on first
+  use — never `transition:generic`. Tokens are AES-256-GCM encrypted at rest
+  under `CHARCOAL_TOKEN_KEY`; unset disables the feature. Every action is
+  logged with the score and tier at the time, so a later drop to Watch shows
+  as a note instead of vanishing. Nothing Charcoal writes to the PDS carries
+  a label, list, reason, or Charcoal's name.
 - Allowlist admin UI + auto-waitlist (#309): gated onboarding no longer
   means editing a Railway env var. A Bluesky sign-in that fails the access
   gate now records a pending request (verified DID + handle) and lands on a

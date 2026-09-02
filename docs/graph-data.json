@@ -7050,6 +7050,28 @@
       "created_at": "2026-09-02T03:37:14.766307-07:00",
       "updated_at": "2026-09-02T03:37:14.766307-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"b758671\",\"confidence\":85,\"files\":[\"src/web/handlers/actions.rs src/web/mod.rs tests/web_actions.rs web/src/lib/api.ts web/src/lib/types.ts web/src/lib/top-signal.ts web/src/lib/sheet-rows.ts web/src/lib/components/ConfirmSheet.svelte web/src/routes/(protected)/accounts/+page.svelte\"]}"
+    },
+    {
+      "id": 651,
+      "change_id": "5d5bd7cd-fb04-437d-bc27-d74776d3512c",
+      "node_type": "outcome",
+      "title": "Task 12b done: 98fb558, vitest 89/89 (11 new: 7 top-signal + 4 sheet-rows), web_actions 20/20 (1 new + auth-gate updated), 0 SKIP, svelte build+autofixer clean on both svelte files, clippy web/no-features/postgres + fmt clean. Deviation: active_actions_lists_every_active_forward_row test grants OTHER access via db.grant_access before asserting empty active list — OTHER isn't in allowed_did/admin so the brief's literal test would 403 before reaching the handler.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:57:28.613208-07:00",
+      "updated_at": "2026-09-02T03:57:28.613208-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"98fb558\",\"confidence\":90}"
+    },
+    {
+      "id": 652,
+      "change_id": "65e3f101-d67c-4960-8a58-3b1c030b5d61",
+      "node_type": "outcome",
+      "title": "Task 12b review approved: spec §5.1 list verified, $effect deps traced (rows only), owner-scoping proven at SQL layer; 2 cosmetic Minors",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:03:36.753196-07:00",
+      "updated_at": "2026-09-02T04:03:36.753196-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"98fb558\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -14202,6 +14224,28 @@
       "weight": 1.0,
       "rationale": "implementation",
       "created_at": "2026-09-02T03:37:17.864185-07:00"
+    },
+    {
+      "id": 661,
+      "from_node_id": 650,
+      "to_node_id": 651,
+      "from_change_id": "1074f735-198e-49c5-88a2-ffb73c87c401",
+      "to_change_id": "5d5bd7cd-fb04-437d-bc27-d74776d3512c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "test verification and commit",
+      "created_at": "2026-09-02T03:57:32.050104-07:00"
+    },
+    {
+      "id": 662,
+      "from_node_id": 651,
+      "to_node_id": 652,
+      "from_change_id": "5d5bd7cd-fb04-437d-bc27-d74776d3512c",
+      "to_change_id": "65e3f101-d67c-4960-8a58-3b1c030b5d61",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task review",
+      "created_at": "2026-09-02T04:03:41.366367-07:00"
     }
   ],
   "documents": [
