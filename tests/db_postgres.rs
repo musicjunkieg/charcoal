@@ -1971,3 +1971,174 @@ async fn test_pg_oauth_session_parity() {
     assert!(!db.delete_oauth_session(ACTIONS_DID).await.unwrap());
     delete_actions_rows(&url, ACTIONS_DID).await;
 }
+
+/// Postgres side of the action_batches/actions tests in tests/unit_actions_db.rs.
+#[tokio::test]
+async fn test_pg_action_batches_parity() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, ACTIONS_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    let na = |t: &str, k: &str| NewAction {
+        target_did: t.to_string(),
+        kind: k.to_string(),
+        undo_of: None,
+        score_at_action: Some(41.5),
+        tier_at_action: Some("High".to_string()),
+    };
+
+    let first = db
+        .create_action_batch(
+            ACTIONS_DID,
+            "mute",
+            "tier:High",
+            &[na("did:plc:a", "mute"), na("did:plc:b", "mute")],
+        )
+        .await
+        .unwrap();
+    let b = db.get_action_batch(first).await.unwrap().unwrap();
+    assert_eq!((b.status.as_str(), b.requested), ("queued", 2));
+    let rows = db.list_actions_for_batch(first).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].score_at_action, Some(41.5));
+
+    db.set_action_batch_status(first, "running", None)
+        .await
+        .unwrap();
+    let started = db
+        .get_action_batch(first)
+        .await
+        .unwrap()
+        .unwrap()
+        .started_at
+        .unwrap();
+    db.set_action_batch_status(first, "running", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_action_batch(first)
+            .await
+            .unwrap()
+            .unwrap()
+            .started_at
+            .unwrap(),
+        started
+    );
+
+    db.update_action(
+        rows[0].id,
+        "applied",
+        Some("at://x/app.bsky.graph.block/y"),
+        None,
+    )
+    .await
+    .unwrap();
+    db.update_action(rows[0].id, "undone", None, None)
+        .await
+        .unwrap();
+    let r = db.get_action(rows[0].id).await.unwrap().unwrap();
+    assert_eq!(
+        r.record_uri.as_deref(),
+        Some("at://x/app.bsky.graph.block/y")
+    );
+    assert!(r.undone_at.is_some() && r.applied_at.is_some());
+
+    db.update_action(rows[1].id, "skipped_already_done", None, None)
+        .await
+        .unwrap();
+    assert_eq!(db.active_actions(ACTIONS_DID).await.unwrap().len(), 1);
+
+    let second = db
+        .create_action_batch(ACTIONS_DID, "block", "single", &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.list_action_batches(ACTIONS_DID, 10, 0)
+            .await
+            .unwrap()
+            .iter()
+            .map(|b| b.id)
+            .collect::<Vec<_>>(),
+        vec![second, first]
+    );
+    let unfinished = db.list_unfinished_batches().await.unwrap();
+    assert!(unfinished.contains(&first) && unfinished.contains(&second));
+    db.set_action_batch_status(first, "partial", Some("1 failed"))
+        .await
+        .unwrap();
+    assert!(db
+        .get_action_batch(first)
+        .await
+        .unwrap()
+        .unwrap()
+        .finished_at
+        .is_some());
+    assert!(!db.list_unfinished_batches().await.unwrap().contains(&first));
+
+    delete_actions_rows(&url, ACTIONS_DID).await;
+}
+
+/// Postgres side of the score-snapshot + cascade test in
+/// tests/unit_actions_db.rs (score_snapshots_and_cascade).
+#[tokio::test]
+async fn test_pg_action_score_snapshots_and_cascade() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, ACTIONS_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    db.upsert_user(ACTIONS_DID, "actions.pgtest").await.unwrap();
+    let score = AccountScore {
+        did: "did:plc:a".to_string(),
+        handle: "a.test".to_string(),
+        toxicity_score: Some(0.5),
+        topic_overlap: Some(0.3),
+        overlap_legacy: None,
+        threat_score: Some(41.5),
+        threat_tier: Some("High".to_string()),
+        posts_analyzed: 10,
+        top_toxic_posts: vec![],
+        scored_at: "2026-09-01T12:00:00Z".to_string(),
+        behavioral_signals: None,
+        context_score: None,
+        graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
+    };
+    db.upsert_account_score(ACTIONS_DID, &score).await.unwrap();
+    let snaps = db.list_score_snapshots(ACTIONS_DID).await.unwrap();
+    assert_eq!(snaps.len(), 1);
+    assert_eq!(snaps[0].did, "did:plc:a");
+    assert_eq!(snaps[0].handle, "a.test");
+    assert_eq!(snaps[0].threat_tier.as_deref(), Some("High"));
+
+    let id = db
+        .create_action_batch(
+            ACTIONS_DID,
+            "mute",
+            "single",
+            &[NewAction {
+                target_did: "did:plc:a".to_string(),
+                kind: "mute".to_string(),
+                undo_of: None,
+                score_at_action: Some(41.5),
+                tier_at_action: Some("High".to_string()),
+            }],
+        )
+        .await
+        .unwrap();
+    db.delete_user_data(ACTIONS_DID).await.unwrap();
+    assert!(db.get_action_batch(id).await.unwrap().is_none());
+    assert!(db
+        .list_score_snapshots(ACTIONS_DID)
+        .await
+        .unwrap()
+        .is_empty());
+
+    delete_actions_rows(&url, ACTIONS_DID).await;
+}

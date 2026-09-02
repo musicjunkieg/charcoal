@@ -183,6 +183,64 @@ pub struct OauthSessionRow {
     pub updated_at: String,
 }
 
+/// One user request (#315): a tier-wide mute, a single block, an undo, or a
+/// retry. `source` is free text for the log: `tier:High`, `single`,
+/// `undo:<batch_id>`, `retry:<batch_id>`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionBatchRow {
+    pub id: i64,
+    pub user_did: String,
+    pub kind: String,
+    pub source: String,
+    pub requested: i64,
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+/// One target account within a batch (#315). `record_uri` is the
+/// `app.bsky.graph.block` record Charcoal itself created — the ONLY thing an
+/// undo is allowed to delete. `score_at_action`/`tier_at_action` are snapshots
+/// so the log explains itself after later rescans.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionRow {
+    pub id: i64,
+    pub batch_id: i64,
+    pub user_did: String,
+    pub target_did: String,
+    pub kind: String,
+    pub status: String,
+    pub record_uri: Option<String>,
+    pub undo_of: Option<i64>,
+    pub error: Option<String>,
+    pub score_at_action: Option<f64>,
+    pub tier_at_action: Option<String>,
+    pub applied_at: Option<String>,
+    pub undone_at: Option<String>,
+}
+
+/// Input for `create_action_batch`; the DB assigns ids and `pending`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewAction {
+    pub target_did: String,
+    pub kind: String,
+    pub undo_of: Option<i64>,
+    pub score_at_action: Option<f64>,
+    pub tier_at_action: Option<String>,
+}
+
+/// The slice of `account_scores` the actions feature needs: enough to
+/// validate targets, snapshot score/tier, and compute tier drift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoreSnapshot {
+    pub did: String,
+    pub handle: String,
+    pub threat_score: Option<f64>,
+    pub threat_tier: Option<String>,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -627,6 +685,67 @@ pub trait Database: Send + Sync {
 
     /// Returns whether a row existed.
     async fn delete_oauth_session(&self, user_did: &str) -> Result<bool>;
+
+    // --- Action batches (#315) ---
+
+    /// One transaction: the batch (`queued`, `requested = rows.len()`) and
+    /// every action (`pending`). Returns the batch id.
+    async fn create_action_batch(
+        &self,
+        user_did: &str,
+        kind: &str,
+        source: &str,
+        rows: &[NewAction],
+    ) -> Result<i64>;
+
+    async fn get_action_batch(&self, id: i64) -> Result<Option<ActionBatchRow>>;
+
+    /// Newest first (`created_at DESC, id DESC`), scoped to one user.
+    async fn list_action_batches(
+        &self,
+        user_did: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ActionBatchRow>>;
+
+    /// `id ASC`.
+    async fn list_actions_for_batch(&self, batch_id: i64) -> Result<Vec<ActionRow>>;
+
+    /// Every batch in `queued` or `running`, across all users, `id ASC`.
+    /// Boot-time resume (§4.5).
+    async fn list_unfinished_batches(&self) -> Result<Vec<i64>>;
+
+    /// Stamps `started_at` the first time a batch goes `running`, and
+    /// `finished_at` on any terminal status (`done`/`partial`/`failed`).
+    /// `error` replaces the stored error (pass `None` to clear it).
+    async fn set_action_batch_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()>;
+
+    /// Stamps `applied_at` on `applied`/`skipped_already_done` and `undone_at`
+    /// on `undone`. `record_uri` is written only when `Some` — an undo must
+    /// never erase the URI that proves what Charcoal created.
+    async fn update_action(
+        &self,
+        id: i64,
+        status: &str,
+        record_uri: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()>;
+
+    async fn get_action(&self, id: i64) -> Result<Option<ActionRow>>;
+
+    /// Rows currently in effect for a user: `applied` or
+    /// `skipped_already_done`, `id ASC`. Drives "already muted" in the confirm
+    /// sheet and the detail-page buttons.
+    async fn active_actions(&self, user_did: &str) -> Result<Vec<ActionRow>>;
+
+    /// `did, handle, threat_score, threat_tier` for every scored account of
+    /// the user. Target validation, snapshots, and drift all read this.
+    async fn list_score_snapshots(&self, user_did: &str) -> Result<Vec<ScoreSnapshot>>;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "1e384ebf94ddc219d52ec1cf38484c4b78e3f28e",
+    "short_hash": "1e384eb",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T22:02:14-07:00",
+    "message": "feat(315): migration v15 and oauth_sessions trait methods\n\noauth_sessions, action_batches, actions on both backends. Token rotation\nis compare-and-swap on updated_at so concurrent refreshes cannot both\npersist a single-use refresh token. delete_user_data cascades all three.",
+    "files_changed": 10
+  },
+  {
     "hash": "8bd5d7e7ce8441343f1321dcd1c0ba11573c1561",
     "short_hash": "8bd5d7e",
     "author": "Bryan Guffey",

@@ -6566,6 +6566,50 @@
       "created_at": "2026-09-01T21:20:58.702383-07:00",
       "updated_at": "2026-09-01T21:20:58.702383-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"8bd5d7e\",\"confidence\":90}"
+    },
+    {
+      "id": 607,
+      "change_id": "7f7722e3-d937-4f5a-ba68-7d69527f965b",
+      "node_type": "action",
+      "title": "Task 4: migration v15 + oauth_sessions trait methods (sqlite+pg)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T22:02:32.278845-07:00",
+      "updated_at": "2026-09-01T22:02:32.278845-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"1e384eb\",\"confidence\":90}"
+    },
+    {
+      "id": 608,
+      "change_id": "a0537f12-f557-438f-b42f-6d1c392cb75a",
+      "node_type": "outcome",
+      "title": "Task 4 done: 1e384eb, sqlite + pg parity green",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T22:02:39.319055-07:00",
+      "updated_at": "2026-09-01T22:02:39.319055-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"1e384eb\",\"confidence\":90}"
+    },
+    {
+      "id": 609,
+      "change_id": "5689cae8-d908-4f42-9fb3-235f088c6a15",
+      "node_type": "observation",
+      "title": "Task 4 review approved: CAS + created_at preservation + cascade deletes verified both backends; 3 minors logged in ledger",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T22:06:12.527690-07:00",
+      "updated_at": "2026-09-01T22:06:12.527690-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 610,
+      "change_id": "8281045b-677c-43fc-81d6-6adaf91900c7",
+      "node_type": "action",
+      "title": "Task 5: action_batches/actions/score-snapshot trait methods (sqlite+pg)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T22:37:12.264615-07:00",
+      "updated_at": "2026-09-01T22:37:12.264615-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"1e384eb\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13212,6 +13256,50 @@
       "weight": 1.0,
       "rationale": "Task 3 implementation complete",
       "created_at": "2026-09-01T21:21:01.273321-07:00"
+    },
+    {
+      "id": 615,
+      "from_node_id": 599,
+      "to_node_id": 607,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "7f7722e3-d937-4f5a-ba68-7d69527f965b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 of #315 plan",
+      "created_at": "2026-09-01T22:02:35.882758-07:00"
+    },
+    {
+      "id": 616,
+      "from_node_id": 607,
+      "to_node_id": 608,
+      "from_change_id": "7f7722e3-d937-4f5a-ba68-7d69527f965b",
+      "to_change_id": "a0537f12-f557-438f-b42f-6d1c392cb75a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation produced these test/clippy results",
+      "created_at": "2026-09-01T22:02:43.173979-07:00"
+    },
+    {
+      "id": 617,
+      "from_node_id": 608,
+      "to_node_id": 609,
+      "from_change_id": "a0537f12-f557-438f-b42f-6d1c392cb75a",
+      "to_change_id": "5689cae8-d908-4f42-9fb3-235f088c6a15",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Reviewer verdict on Task 4",
+      "created_at": "2026-09-01T22:06:16.119291-07:00"
+    },
+    {
+      "id": 618,
+      "from_node_id": 599,
+      "to_node_id": 610,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "8281045b-677c-43fc-81d6-6adaf91900c7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 of #315 plan",
+      "created_at": "2026-09-01T22:37:15.478780-07:00"
     }
   ],
   "documents": [

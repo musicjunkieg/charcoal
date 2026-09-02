@@ -18,8 +18,9 @@ use super::models::{
     NewAmplificationEvent, UserLabel, UserRow,
 };
 use super::traits::{
-    validate_bundle, AccessRequestRow, Database, OauthSessionRow, ScanClaim, ScanQueueDepth,
-    ScanQueueEntry, ScanQueueRow, ScanSkip,
+    validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, Database, NewAction,
+    OauthSessionRow, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -563,6 +564,80 @@ impl Database for SqliteDatabase {
     async fn delete_oauth_session(&self, user_did: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
         super::queries::delete_oauth_session(&conn, user_did)
+    }
+
+    // --- Action batches (#315) ---
+
+    async fn create_action_batch(
+        &self,
+        user_did: &str,
+        kind: &str,
+        source: &str,
+        rows: &[NewAction],
+    ) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::create_action_batch(&conn, user_did, kind, source, rows)
+    }
+
+    async fn get_action_batch(&self, id: i64) -> Result<Option<ActionBatchRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_action_batch(&conn, id)
+    }
+
+    async fn list_action_batches(
+        &self,
+        user_did: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ActionBatchRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_action_batches(&conn, user_did, limit, offset)
+    }
+
+    async fn list_actions_for_batch(&self, batch_id: i64) -> Result<Vec<ActionRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_actions_for_batch(&conn, batch_id)
+    }
+
+    async fn list_unfinished_batches(&self) -> Result<Vec<i64>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_unfinished_batches(&conn)
+    }
+
+    async fn set_action_batch_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::set_action_batch_status(&conn, id, status, error)
+    }
+
+    async fn update_action(
+        &self,
+        id: i64,
+        status: &str,
+        record_uri: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::update_action(&conn, id, status, record_uri, error)
+    }
+
+    async fn get_action(&self, id: i64) -> Result<Option<ActionRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_action(&conn, id)
+    }
+
+    async fn active_actions(&self, user_did: &str) -> Result<Vec<ActionRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::active_actions(&conn, user_did)
+    }
+
+    async fn list_score_snapshots(&self, user_did: &str) -> Result<Vec<ScoreSnapshot>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_score_snapshots(&conn, user_did)
     }
 }
 
