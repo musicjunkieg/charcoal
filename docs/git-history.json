@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6736d5d4076b29e4685e7e0fdd11f2f5348546f6",
+    "short_hash": "6736d5d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T17:29:51-07:00",
+    "message": "docs(315): design spec for tier-based mute/block actions\n\nManual bulk mute/block by tier, per-account actions, /actions log with\nundo, incremental OAuth consent with granular scopes only, per-user\nsessions encrypted at rest (AES-256-GCM, CHARCOAL_TOKEN_KEY), refresh\nrotation serialized per user, reconcile-first execution, #261 invariant\nas prerequisite doc.",
+    "files_changed": 3
+  },
+  {
     "hash": "cf698202fcd73e279832598fa76acc68dcfe7571",
     "short_hash": "cf69820",
     "author": "chaos gremlin",

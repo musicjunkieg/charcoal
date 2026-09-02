@@ -6467,6 +6467,17 @@
       "created_at": "2026-09-01T17:27:57.446870-07:00",
       "updated_at": "2026-09-01T17:27:57.446870-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"cf69820\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-09-01-315-tier-actions-design.md\"]}"
+    },
+    {
+      "id": 598,
+      "change_id": "1d044a81-c9a1-42eb-b092-26055e73eaa9",
+      "node_type": "outcome",
+      "title": "Spec committed 6736d5d and pushed to feat/315-tier-actions (verified via ls-remote)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T17:30:04.769413-07:00",
+      "updated_at": "2026-09-01T17:30:04.769413-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"6736d5d\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -12981,6 +12992,17 @@
       "weight": 1.0,
       "rationale": "Design approved → write spec",
       "created_at": "2026-09-01T17:27:57.453714-07:00"
+    },
+    {
+      "id": 603,
+      "from_node_id": 597,
+      "to_node_id": 598,
+      "from_change_id": "e11c8c3e-bf9d-40cd-8efb-e1ed286be4fb",
+      "to_change_id": "1d044a81-c9a1-42eb-b092-26055e73eaa9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spec written and pushed",
+      "created_at": "2026-09-01T17:30:04.776376-07:00"
     }
   ],
   "documents": [
