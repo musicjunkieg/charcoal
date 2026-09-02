@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6aa88d1d542abe00718e152ee8ccf7832a06fd5f",
+    "short_hash": "6aa88d1",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T20:55:42-07:00",
+    "message": "docs(261): write the self-protective invariant\n\nCharcoal outputs act only on the user own experience and reach. Written\nfirst because #315 (tier actions) is bound by it.",
+    "files_changed": 4
+  },
+  {
     "hash": "e7d0d1437ee4a81a99744b47293f932cf990b5cf",
     "short_hash": "e7d0d14",
     "author": "Bryan Guffey",

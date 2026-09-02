@@ -54,7 +54,11 @@ mod tests {
             json["redirect_uris"].is_array(),
             "redirect_uris must be an array"
         );
-        assert_eq!(json["scope"], "atproto");
+        assert_eq!(
+            json["scope"],
+            charcoal::web::actions::scope::client_scope(),
+            "client metadata must advertise the union of login + write scopes"
+        );
         assert_eq!(json["token_endpoint_auth_method"], "private_key_jwt");
         assert_eq!(json["application_type"], "web");
         assert_eq!(json["dpop_bound_access_tokens"], true);

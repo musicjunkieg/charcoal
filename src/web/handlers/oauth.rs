@@ -77,7 +77,7 @@ pub async fn client_metadata(State(state): State<AppState>) -> Response {
         "client_name": "Charcoal",
         "client_uri": base_uri,
         "redirect_uris": [redirect_uri],
-        "scope": "atproto",
+        "scope": crate::web::actions::scope::client_scope(),
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "token_endpoint_auth_method": "private_key_jwt",

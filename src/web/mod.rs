@@ -24,6 +24,7 @@ use tracing::info;
 use crate::config::Config;
 use crate::db::Database;
 
+pub mod actions;
 pub mod admitter;
 pub mod auth;
 pub mod handlers;
