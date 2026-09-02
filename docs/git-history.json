@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6a78a886322abf66599089260e31a96ba7fde7ec",
+    "short_hash": "6a78a88",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T06:38:40-07:00",
+    "message": "fix(315): restore focus when the confirm sheet closes\n\nCodeRabbit N4 (nitpick): opening the sheet moved focus to it but never gave\nit back, stranding keyboard/screen-reader focus at document body on close.\nCaptures document.activeElement before focusing the sheet and restores it in\nthe effect cleanup. No Tab trap added — that is the separately tracked\nfollow-up (#316). svelte-autofixer clean (issues: []; the remaining\nsuggestions are pre-existing, out of this scope, or explicitly caveated by\nthe tool as ignorable — see report).",
+    "files_changed": 1
+  },
+  {
     "hash": "2b48b3beb4fdbdf4218b2e19edb9121b1a12a13e",
     "short_hash": "2b48b3b",
     "author": "Bryan Guffey",

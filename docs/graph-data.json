@@ -7226,6 +7226,17 @@
       "created_at": "2026-09-02T06:19:08.786782-07:00",
       "updated_at": "2026-09-02T06:19:08.786782-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"2b48b3b\",\"confidence\":85}"
+    },
+    {
+      "id": 667,
+      "change_id": "1201f1b5-4651-4a80-b974-95e35e1a8774",
+      "node_type": "outcome",
+      "title": "PR #109 CodeRabbit round 1 fixes R1-R6 + N1-N4 done: 4bed8ba..6a78a88 (8 commits). unit_actions_pds 7/7, unit_actions_session 9/9, unit_actions_runner 17/17, web_actions 23/23, db_postgres 37/37 x2, vitest 94/94, clippy web+postgres clean, fmt clean, build clean, svelte-autofixer clean on all 3 touched svelte files (0 issues; ConfirmSheet.svelte has pre-existing style suggestions, none new).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T06:39:01.275342-07:00",
+      "updated_at": "2026-09-02T06:39:01.275342-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"6a78a88\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -14598,6 +14609,17 @@
       "weight": 1.0,
       "rationale": "review round 1",
       "created_at": "2026-09-02T06:19:13.240092-07:00"
+    },
+    {
+      "id": 681,
+      "from_node_id": 666,
+      "to_node_id": 667,
+      "from_change_id": "3a734e07-b8b8-43fa-b6bb-f202c26b9251",
+      "to_change_id": "1201f1b5-4651-4a80-b974-95e35e1a8774",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "fix wave complete",
+      "created_at": "2026-09-02T06:39:03.521949-07:00"
     }
   ],
   "documents": [

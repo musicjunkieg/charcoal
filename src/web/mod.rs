@@ -48,7 +48,7 @@ const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Build the shared outbound HTTP client used for OAuth/PDS calls.
 ///
 /// Single source of truth for the client-level timeout so production and
-/// tests never drift (#315 CodeRabbit R1).
+/// tests never drift.
 pub(crate) fn outbound_http() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(OUTBOUND_HTTP_TIMEOUT)
