@@ -226,6 +226,36 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/admin/access/{did}/approve-scan",
             post(handlers::access::approve_access_and_scan),
         )
+        .route("/api/actions/status", get(handlers::actions::get_status))
+        .route("/api/actions/connect", post(handlers::actions::connect))
+        .route(
+            "/api/actions/disconnect",
+            post(handlers::actions::disconnect),
+        )
+        .route(
+            "/api/actions/batches",
+            get(handlers::actions::list_batches).post(handlers::actions::create_batch),
+        )
+        .route(
+            "/api/actions/batches/{id}",
+            get(handlers::actions::get_batch),
+        )
+        .route(
+            "/api/actions/batches/{id}/undo",
+            post(handlers::actions::undo_batch),
+        )
+        .route(
+            "/api/actions/batches/{id}/retry",
+            post(handlers::actions::retry_batch),
+        )
+        .route(
+            "/api/actions/{action_id}/undo",
+            post(handlers::actions::undo_action),
+        )
+        .route(
+            "/api/accounts/{handle}/actions",
+            get(handlers::actions::account_actions),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,

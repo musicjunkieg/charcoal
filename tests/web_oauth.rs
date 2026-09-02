@@ -652,6 +652,7 @@ mod tests {
                 authorization_server,
                 handle: handle.to_string(),
                 did: did.to_string(),
+                write_consent: None,
             },
         );
 
@@ -716,6 +717,7 @@ mod tests {
                 authorization_server,
                 handle: handle.to_string(),
                 did: pending_did.to_string(),
+                write_consent: None,
             },
         );
 

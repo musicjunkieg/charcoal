@@ -6731,6 +6731,39 @@
       "created_at": "2026-09-02T00:35:33.637645-07:00",
       "updated_at": "2026-09-02T00:35:33.637645-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"9c6ab53\",\"confidence\":85}"
+    },
+    {
+      "id": 622,
+      "change_id": "1b3a6702-25a1-4426-98cf-6e35957c7d61",
+      "node_type": "outcome",
+      "title": "Task 8 done: 468b5b4, 12 runner tests + 6 pds + 9 session + 22 web_oauth (1 ignored) all pass, clippy clean web+postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:51:24.784850-07:00",
+      "updated_at": "2026-09-02T00:51:24.784850-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"468b5b4\",\"confidence\":90}"
+    },
+    {
+      "id": 623,
+      "change_id": "efdaadea-3442-48bc-995a-8be1b7325e58",
+      "node_type": "observation",
+      "title": "Task 8 review approved: retry math traced to call counts, undo verifies stored record_uri still live; 3 Minor (pagination-cap comment only on undo path, applied-with-NULL-record_uri when PDS omits uri, doc cite mismatch)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:57:35.690147-07:00",
+      "updated_at": "2026-09-02T00:57:35.690147-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 624,
+      "change_id": "4a73f290-e930-47f5-a7d2-6ce7d8e2d788",
+      "node_type": "action",
+      "title": "Task 9: HTTP endpoints (/api/actions/*) + write-consent OAuth branch + scope_grants_write",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:57:58.035135-07:00",
+      "updated_at": "2026-09-02T00:57:58.035135-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"468b5b4\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13542,6 +13575,39 @@
       "weight": 1.0,
       "rationale": "Plan task 8 implementation",
       "created_at": "2026-09-02T00:35:36.055758-07:00"
+    },
+    {
+      "id": 630,
+      "from_node_id": 621,
+      "to_node_id": 622,
+      "from_change_id": "d044acf8-4dc3-457f-b084-988f1ac3df9d",
+      "to_change_id": "1b3a6702-25a1-4426-98cf-6e35957c7d61",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 result",
+      "created_at": "2026-09-02T00:51:28.253972-07:00"
+    },
+    {
+      "id": 631,
+      "from_node_id": 622,
+      "to_node_id": 623,
+      "from_change_id": "1b3a6702-25a1-4426-98cf-6e35957c7d61",
+      "to_change_id": "efdaadea-3442-48bc-995a-8be1b7325e58",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task reviewer verdict on the Task 8 outcome",
+      "created_at": "2026-09-02T00:57:42.246239-07:00"
+    },
+    {
+      "id": 632,
+      "from_node_id": 599,
+      "to_node_id": 624,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "4a73f290-e930-47f5-a7d2-6ce7d8e2d788",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 9 implementation",
+      "created_at": "2026-09-02T00:57:58.042379-07:00"
     }
   ],
   "documents": [

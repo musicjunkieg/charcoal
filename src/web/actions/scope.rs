@@ -28,6 +28,16 @@ pub fn client_scope() -> String {
     write_scope()
 }
 
+/// Did the authorization server grant what we asked for? Servers may reorder
+/// or normalise the scope string, so this checks for the three resources by
+/// prefix rather than comparing the whole string.
+pub fn scope_grants_write(granted: &str) -> bool {
+    let has = |prefix: &str| granted.split_whitespace().any(|s| s.starts_with(prefix));
+    has("repo:app.bsky.graph.block")
+        && has("rpc:app.bsky.graph.muteActor")
+        && has("rpc:app.bsky.graph.unmuteActor")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +64,25 @@ mod tests {
             assert!(c.contains(part), "client scope missing {part}");
         }
         Scope::parse_multiple(&c).expect("client scope must parse");
+    }
+
+    #[test]
+    fn scope_grants_write_accepts_the_full_grant_in_any_order() {
+        assert!(scope_grants_write(&write_scope()));
+        let scope = write_scope();
+        let reordered: Vec<&str> = scope.split(' ').rev().collect::<Vec<_>>();
+        assert!(scope_grants_write(&reordered.join(" ")));
+    }
+
+    #[test]
+    fn scope_grants_write_rejects_partial_grants() {
+        assert!(!scope_grants_write("atproto"));
+        assert!(!scope_grants_write(
+            "atproto repo:app.bsky.graph.block?action=create&action=delete"
+        ));
+        assert!(!scope_grants_write(
+            "atproto rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
+        ));
+        assert!(!scope_grants_write("transition:generic"));
     }
 }
