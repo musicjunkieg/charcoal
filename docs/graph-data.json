@@ -6665,6 +6665,39 @@
       "created_at": "2026-09-01T23:38:37.476453-07:00",
       "updated_at": "2026-09-01T23:38:37.476453-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"820c5f4\",\"confidence\":85}"
+    },
+    {
+      "id": 616,
+      "change_id": "78a7b2ba-8f07-4e3e-b1dc-e615c776d8ff",
+      "node_type": "outcome",
+      "title": "Task 6 done: e0e579e, unit_actions_pds 6/6 + web_oauth 22/22 (1 ignored) passed, clippy clean web+postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:03:24.293448-07:00",
+      "updated_at": "2026-09-02T00:03:24.293448-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"e0e579e\",\"confidence\":90}"
+    },
+    {
+      "id": 617,
+      "change_id": "34e1ef7e-504c-440b-9b1c-f24daa2ee61a",
+      "node_type": "observation",
+      "title": "Task 6 review approved: DPoP single-retry bounded, #261 record shape verified (3 fields), oauth_tokens stash fully removed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:09:15.170602-07:00",
+      "updated_at": "2026-09-02T00:09:15.170602-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 618,
+      "change_id": "833c3e58-3359-4133-bc08-608d5740deb0",
+      "node_type": "action",
+      "title": "Task 7: SessionStore store/load-with-refresh/status/disconnect",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:10:58.434202-07:00",
+      "updated_at": "2026-09-02T00:10:58.434202-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"e0e579e\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13410,6 +13443,39 @@
       "weight": 1.0,
       "rationale": "Task 6 of #315 plan",
       "created_at": "2026-09-01T23:38:40.516771-07:00"
+    },
+    {
+      "id": 624,
+      "from_node_id": 615,
+      "to_node_id": 616,
+      "from_change_id": "746439cc-7c54-4eb1-bf2c-00bd229b943e",
+      "to_change_id": "78a7b2ba-8f07-4e3e-b1dc-e615c776d8ff",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 implementation outcome",
+      "created_at": "2026-09-02T00:03:27.576236-07:00"
+    },
+    {
+      "id": 625,
+      "from_node_id": 616,
+      "to_node_id": 617,
+      "from_change_id": "78a7b2ba-8f07-4e3e-b1dc-e615c776d8ff",
+      "to_change_id": "34e1ef7e-504c-440b-9b1c-f24daa2ee61a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Reviewer verdict on Task 6",
+      "created_at": "2026-09-02T00:09:19.096394-07:00"
+    },
+    {
+      "id": 626,
+      "from_node_id": 599,
+      "to_node_id": 618,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "833c3e58-3359-4133-bc08-608d5740deb0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 7 of #315 plan",
+      "created_at": "2026-09-02T00:11:01.481132-07:00"
     }
   ],
   "documents": [

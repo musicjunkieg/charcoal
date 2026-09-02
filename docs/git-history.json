@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e0e579eb6a6213b38a105353b0216bd7c4cf2ef0",
+    "short_hash": "e0e579e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T00:03:08-07:00",
+    "message": "feat(315): PdsClient with DPoP nonce retry; AppState sessions + action_wake\n\nRemoves the in-memory oauth_tokens stash. Blocks are written with subject\nand createdAt only; deletes go only by rkey the caller stored.",
+    "files_changed": 11
+  },
+  {
     "hash": "820c5f4a9a4b0faf142ff49dc7fd52e82a713668",
     "short_hash": "820c5f4",
     "author": "Bryan Guffey",
