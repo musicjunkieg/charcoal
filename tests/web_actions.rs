@@ -164,6 +164,11 @@ async fn seed_batch(
         .await
         .expect("batch");
     let actions = db.list_actions_for_batch(id).await.expect("rows");
+    assert_eq!(
+        actions.len(),
+        statuses.len(),
+        "seed_batch needs one status per row"
+    );
     for (a, (status, uri)) in actions.iter().zip(statuses) {
         db.update_action(a.id, status, *uri, None)
             .await

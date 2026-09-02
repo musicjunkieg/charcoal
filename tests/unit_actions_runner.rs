@@ -561,7 +561,7 @@ async fn rate_limit_pauses_then_retries() {
     let started = std::time::Instant::now();
     h.runner.run_batch(id).await;
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
+        started.elapsed() < std::time::Duration::from_secs(1),
         "max_wait cap not applied"
     );
     assert_eq!(
