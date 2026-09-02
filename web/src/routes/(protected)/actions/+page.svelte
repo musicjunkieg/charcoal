@@ -22,7 +22,12 @@
 	let status = $state<ActionsStatus | null>(null);
 	let batches = $state<ActionBatchSummary[]>([]);
 	let loading = $state(true);
+	/** Transient load/disconnect failures. Cleared on every poll. */
 	let error = $state('');
+	/** The `?actions_error=` message from a failed consent round-trip. Kept
+	 *  separate because it describes something that already happened — a poll
+	 *  clearing `error` must not wipe it off the screen. */
+	let consentError = $state('');
 	let timer: ReturnType<typeof setInterval> | null = null;
 
 	const ERROR_COPY: Record<string, string> = {
@@ -33,6 +38,9 @@
 	};
 
 	async function load() {
+		// This polls every 3 s while a batch is in flight; one failed poll must
+		// not leave a red banner standing over a list that has since updated.
+		error = '';
 		try {
 			status = await getActionsStatus();
 			batches = (await listActionBatches(50, 0)).batches;
@@ -69,7 +77,7 @@
 	}
 
 	onMount(() => {
-		if (actionsError) error = ERROR_COPY[actionsError] ?? ERROR_COPY.failed;
+		if (actionsError) consentError = ERROR_COPY[actionsError] ?? ERROR_COPY.failed;
 		load();
 	});
 	onDestroy(() => {
@@ -109,6 +117,9 @@
 			<p class="connection muted">Not connected</p>
 		{/if}
 
+		{#if consentError}
+			<p class="error">{consentError}</p>
+		{/if}
 		{#if error}
 			<p class="error">{error}</p>
 		{/if}

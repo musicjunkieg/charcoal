@@ -110,10 +110,20 @@ describe('flags', () => {
 		expect(canRetry(summary({ status: 'partial', counts: { failed: 1 } }))).toBe(true);
 		expect(canRetry(summary({ status: 'queued', error: 'not_connected', counts: { pending: 2 } }))).toBe(false);
 		expect(canRetry(summary({ status: 'running', counts: { failed: 1 } }))).toBe(false);
+		expect(canRetry(summary({ status: 'done', counts: { applied: 2 } }))).toBe(false);
 	});
-	it('canUndo for finished forward batches with active rows', () => {
+	// A reconcile-step failure stores the batch `failed` with every row still
+	// `pending`. Retry re-queues exactly those, so the button has to appear.
+	it('canRetry for a failed batch whose rows never ran', () => {
+		expect(canRetry(summary({ status: 'failed', counts: { pending: 2 } }))).toBe(true);
+	});
+	it('canUndo only for rows Charcoal applied', () => {
 		expect(canUndo(summary({ counts: { applied: 1 } }))).toBe(true);
 		expect(canUndo(summary({ kind: 'undo', counts: { applied: 1 } }))).toBe(false);
 		expect(canUndo(summary({ counts: { failed: 1 } }))).toBe(false);
+		// The user's own mute or block: in force, but never Charcoal's to
+		// remove (#261).
+		expect(canUndo(summary({ counts: { skipped_already_done: 3 } }))).toBe(false);
+		expect(canUndo(summary({ counts: { applied: 1, skipped_already_done: 3 } }))).toBe(true);
 	});
 });

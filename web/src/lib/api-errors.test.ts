@@ -5,6 +5,7 @@ import {
 	AuthError,
 	CooldownError,
 	NotConnectedError,
+	NotFoundError,
 	getStatus
 } from './api.js';
 
@@ -57,5 +58,21 @@ describe('apiFetch error classification', () => {
 	it('throws ActionsDisabledError on 503 with code actions_disabled', async () => {
 		mockFetch(503, { error: 'Actions are not enabled', code: 'actions_disabled' });
 		await expect(getStatus()).rejects.toBeInstanceOf(ActionsDisabledError);
+	});
+
+	// Pages branch on this: a genuine 404 means "gone", anything else means
+	// "try again" — conflating them latches a live page into a dead end.
+	it('throws NotFoundError on 404, carrying the server message', async () => {
+		mockFetch(404, { error: 'Not found', code: 'not_found' });
+		const err = await getStatus().catch((e) => e);
+		expect(err).toBeInstanceOf(NotFoundError);
+		expect((err as NotFoundError).message).toBe('Not found');
+	});
+
+	it('throws a plain Error on a 500, not NotFoundError', async () => {
+		mockFetch(500, { error: 'Something went wrong' });
+		const err = await getStatus().catch((e) => e);
+		expect(err).toBeInstanceOf(Error);
+		expect(err).not.toBeInstanceOf(NotFoundError);
 	});
 });

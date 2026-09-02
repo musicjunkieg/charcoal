@@ -78,10 +78,18 @@ export function rowNote(r: ActionRowView): string {
 
 export function canRetry(b: ActionBatchSummary): boolean {
 	if (isRunning(b) || isParked(b)) return false;
-	return (b.counts.failed ?? 0) > 0;
+	// A batch that gave up before the write step (a PDS 5xx on the reconcile
+	// read, a transient token refresh failure) is stored `failed` with every
+	// row still `pending`. Those rows are the work that never happened, so
+	// Retry re-queues them alongside genuinely failed ones.
+	const stalled = b.status === 'failed' || b.status === 'partial' ? (b.counts.pending ?? 0) : 0;
+	return (b.counts.failed ?? 0) + stalled > 0;
 }
 
+/** Undo is offered only for rows Charcoal itself applied. A
+ *  `skipped_already_done` row is the user's own mute or block — shown as in
+ *  force, never undone (#261). */
 export function canUndo(b: ActionBatchSummary): boolean {
 	if (b.kind === 'undo' || isRunning(b) || isParked(b)) return false;
-	return (b.counts.applied ?? 0) + (b.counts.skipped_already_done ?? 0) > 0;
+	return (b.counts.applied ?? 0) > 0;
 }

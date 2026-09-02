@@ -113,7 +113,11 @@
 			{@const s = states[kind]}
 			{#if s.state === 'done'}
 				<span class="done">{s.label}</span>
-				<button class="undo" onclick={() => undo(kind)} disabled={busy}>Undo</button>
+				<!-- No Undo when `actionId` is null: that mute or block is the
+				     person's own, and Charcoal does not remove it (#261). -->
+				{#if s.actionId !== null}
+					<button class="undo" onclick={() => undo(kind)} disabled={busy}>Undo</button>
+				{/if}
 			{:else}
 				<button class="act" data-kind={kind} onclick={() => (sheet = kind)} disabled={busy}>
 					{s.label}

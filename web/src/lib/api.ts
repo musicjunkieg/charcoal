@@ -62,6 +62,16 @@ export class NotConnectedError extends Error {
 	}
 }
 
+/** 404: the thing asked for does not exist (or is not this account's).
+ *  Distinguished from a 500 or a dropped request so a page can render "not
+ *  found" for the first and a retryable error for the second. */
+export class NotFoundError extends Error {
+	constructor(message?: string) {
+		super(message ?? 'Not found');
+		this.name = 'NotFoundError';
+	}
+}
+
 /** 503 with code "actions_disabled": the server has no CHARCOAL_TOKEN_KEY.
  *  Buttons are hidden from status; this only fires if one slips through. */
 export class ActionsDisabledError extends Error {
@@ -102,6 +112,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 		}
 		if (res.status === 503 && body.code === 'actions_disabled') {
 			throw new ActionsDisabledError();
+		}
+		if (res.status === 404 || body.code === 'not_found') {
+			throw new NotFoundError(body.error);
 		}
 		throw new Error(body.error ?? `HTTP ${res.status}`);
 	}

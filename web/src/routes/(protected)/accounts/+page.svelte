@@ -46,6 +46,21 @@
 	let bulkTier = $derived(bulkTierFor(selectedTier));
 	let showBulk = $derived(showBulkBar({ bulkTier, actionsStatus, asUser, total }));
 
+	/** An expired cookie or a revoked grant is not a bulk-action error — it is
+	 *  the same "you are signed out" that `load()` handles. Returns true when
+	 *  it has taken over with a redirect. */
+	function redirectedForAuth(e: unknown): boolean {
+		if (e instanceof AuthError) {
+			goto('/login');
+			return true;
+		}
+		if (e instanceof AccessRevokedError) {
+			goto('/waitlist');
+			return true;
+		}
+		return false;
+	}
+
 	/** Every account in the given tier, across pages (server caps per_page at 200). */
 	async function loadTierAccounts(tier: string): Promise<Account[]> {
 		const got: Account[] = [];
@@ -68,6 +83,7 @@
 			sheetTier = tier;
 			sheet = kind;
 		} catch (e) {
+			if (redirectedForAuth(e)) return;
 			bulkError = e instanceof Error ? e.message : 'Something went wrong';
 		} finally {
 			bulkBusy = false;
@@ -89,6 +105,7 @@
 				await startConsent(kind, { tier: sheetTier });
 				return;
 			}
+			if (redirectedForAuth(e)) return;
 			bulkError = e instanceof Error ? e.message : 'Something went wrong';
 		} finally {
 			bulkBusy = false;

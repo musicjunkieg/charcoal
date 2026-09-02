@@ -10,6 +10,7 @@
 		undoAction,
 		startConsent,
 		NotConnectedError,
+		NotFoundError,
 		AuthError,
 		AccessRevokedError
 	} from '$lib/api.js';
@@ -38,12 +39,20 @@
 	};
 
 	async function load() {
+		// Reset both first: this runs every 3 s while a batch is in flight, and
+		// a single dropped poll must not latch the page into an error state
+		// while the runner is still applying blocks behind it.
+		notFound = false;
+		error = '';
 		try {
 			detail = await getActionBatch(Number($page.params.id));
 		} catch (err) {
 			if (err instanceof AuthError) return goto('/login');
 			if (err instanceof AccessRevokedError) return goto('/waitlist');
-			notFound = true;
+			if (err instanceof NotFoundError) notFound = true;
+			// Anything else is a blip, not a missing batch — say so and keep
+			// the last-good detail on screen.
+			else error = err instanceof Error ? err.message : 'Something went wrong';
 		} finally {
 			loading = false;
 		}
@@ -87,11 +96,17 @@
 <div class="page">
 	<a href="/actions{asUserSuffix}" class="back-link">← All actions</a>
 
+	<!-- Outside the branch below so a load failure is readable whether or not
+	     there is a last-good batch to keep showing. -->
+	{#if error}
+		<p class="error">{error}</p>
+	{/if}
+
 	{#if loading}
 		<div class="loading-state"><div class="spinner"></div></div>
-	{:else if notFound || !detail}
+	{:else if notFound}
 		<div class="not-found"><h2>Action not found</h2></div>
-	{:else}
+	{:else if detail}
 		{@const b = detail.batch}
 		<div class="header">
 			<h1 class="headline">{batchHeadline(b)}</h1>
@@ -108,9 +123,6 @@
 						<button onclick={() => startConsent('undo')} disabled={busy}>Reconnect</button>
 					{/if}
 				</div>
-			{/if}
-			{#if error}
-				<p class="error">{error}</p>
 			{/if}
 		</div>
 
@@ -145,7 +157,9 @@
 							{/if}
 						</td>
 						<td>
-							{#if !asUser && b.kind !== 'undo' && r.undo_of === null && (r.status === 'applied' || r.status === 'skipped_already_done')}
+							<!-- Undo only what Charcoal applied. A `skipped_already_done`
+							     row is the user's own mute or block (#261). -->
+							{#if !asUser && b.kind !== 'undo' && r.undo_of === null && r.status === 'applied'}
 								<button class="link" onclick={() => run(() => undoAction(r.id), 'undo')} disabled={busy}>Undo</button>
 							{/if}
 						</td>

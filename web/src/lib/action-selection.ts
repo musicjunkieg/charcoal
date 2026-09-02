@@ -10,10 +10,12 @@ export interface ActiveRow {
 }
 
 export interface ButtonState {
-	/** `available` — offer the action; `done` — show the tick and an Undo. */
+	/** `available` — offer the action; `done` — show the tick. */
 	state: 'available' | 'done';
 	label: string;
-	/** The active row to undo when `state === 'done'`. */
+	/** The row to undo, when Charcoal is the one that applied it. `null` for
+	 *  a `skipped_already_done` row: that mute or block is the user's own and
+	 *  Charcoal never removes it (#261), so no Undo is offered. */
 	actionId: number | null;
 }
 
@@ -26,6 +28,12 @@ export function buttonState(active: ActiveRow[], kind: ActionKind): ButtonState 
 	const row = active.find(
 		(r) => r.kind === kind && (r.status === 'applied' || r.status === 'skipped_already_done')
 	);
-	if (row) return { state: 'done', label: LABELS[kind].done, actionId: row.id };
+	if (row) {
+		return {
+			state: 'done',
+			label: LABELS[kind].done,
+			actionId: row.status === 'applied' ? row.id : null
+		};
+	}
 	return { state: 'available', label: LABELS[kind].available, actionId: null };
 }
