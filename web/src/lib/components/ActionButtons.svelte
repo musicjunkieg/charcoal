@@ -75,7 +75,13 @@
 		try {
 			const res = await createActionBatch(kind, `account:${handle}`, [did]);
 			if (res.batch_id !== null) await goto(`/actions/${res.batch_id}`);
-			else await refresh();
+			else {
+				// The server returns batch_id: null when every target is already
+				// in force (is_in_force: Charcoal applied it, or the user already
+				// held it themselves) — never for "in progress" work.
+				notice = 'That action is already in place.';
+				await refresh();
+			}
 		} catch (e) {
 			if (e instanceof NotConnectedError) {
 				await startConsent(kind, { handle });
