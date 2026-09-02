@@ -67,7 +67,9 @@
 
 	let sheetEl = $state<HTMLDivElement | null>(null);
 	$effect(() => {
+		const prev = document.activeElement as HTMLElement | null;
 		sheetEl?.focus();
+		return () => prev?.focus();
 	});
 </script>
 
