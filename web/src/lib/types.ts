@@ -242,3 +242,66 @@ export interface ApproveScanResponse {
 	/** "queued" on full success; anything else is an honest partial failure. */
 	scan: string;
 }
+
+// ---- Mute / block actions (#315) ----
+
+export type ActionKind = 'mute' | 'block';
+export type ActionBatchKind = ActionKind | 'undo';
+export type ActionBatchStatus = 'queued' | 'running' | 'done' | 'partial' | 'failed';
+export type ActionRowStatus =
+	| 'pending'
+	| 'applied'
+	| 'skipped_already_done'
+	| 'failed'
+	| 'undone';
+
+export interface ActionsStatus {
+	enabled: boolean;
+	connected: boolean;
+	scope?: string;
+	pds_url?: string;
+	connected_at?: string;
+}
+
+export interface ActionBatchSummary {
+	id: number;
+	kind: ActionBatchKind;
+	source: string;
+	requested: number;
+	status: ActionBatchStatus;
+	error: string | null;
+	created_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+	counts: Partial<Record<ActionRowStatus, number>>;
+	drifted: boolean;
+}
+
+export interface ActionRowView {
+	id: number;
+	batch_id: number;
+	target_did: string;
+	handle: string | null;
+	kind: ActionKind;
+	status: ActionRowStatus;
+	record_uri: string | null;
+	undo_of: number | null;
+	error: string | null;
+	score_at_action: number | null;
+	tier_at_action: string | null;
+	current_tier: string | null;
+	drifted: boolean;
+	applied_at: string | null;
+	undone_at: string | null;
+}
+
+export interface ActionBatchDetail {
+	batch: ActionBatchSummary;
+	actions: ActionRowView[];
+}
+
+export interface CreateBatchResponse {
+	batch_id: number | null;
+	requested: number;
+	skipped_active: number;
+}

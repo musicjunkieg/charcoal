@@ -6786,6 +6786,61 @@
       "created_at": "2026-09-02T02:31:12.474054-07:00",
       "updated_at": "2026-09-02T02:31:12.474054-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 627,
+      "change_id": "9422cdcd-0383-40bb-ab91-f6bec156cd88",
+      "node_type": "action",
+      "title": "Task 9 fix: scope_grants_write requires create+delete",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:38:32.803394-07:00",
+      "updated_at": "2026-09-02T02:38:32.803394-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"3ad5f52\",\"confidence\":90}"
+    },
+    {
+      "id": 628,
+      "change_id": "62ca195a-4fa7-45e6-b893-f78483a3f569",
+      "node_type": "outcome",
+      "title": "Fix wave done: 3ad5f52, scope tests 11/11 (7 new), web_actions 19/19, web_oauth 22/22, clippy clean web+postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:38:40.045752-07:00",
+      "updated_at": "2026-09-02T02:38:40.045752-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"3ad5f52\",\"confidence\":90}"
+    },
+    {
+      "id": 629,
+      "change_id": "a11bb999-e285-4562-801b-fac1e35a6485",
+      "node_type": "observation",
+      "title": "Task 9 re-review approved: scope_grants_write verified against vendored parser (bare repo scope = all 3 actions); fails closed on unparseable grant tokens — watch for invalid_scope from a future AS",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:41:05.409790-07:00",
+      "updated_at": "2026-09-02T02:41:05.409790-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 630,
+      "change_id": "25313c61-937d-42d2-b36c-85c0b3965feb",
+      "node_type": "action",
+      "title": "Task 10: frontend actions client + ActionButtons",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:42:41.816066-07:00",
+      "updated_at": "2026-09-02T02:42:41.816066-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"3ad5f52\",\"confidence\":85}"
+    },
+    {
+      "id": 631,
+      "change_id": "b8a10572-10a9-4d47-af83-ca23f052d926",
+      "node_type": "action",
+      "title": "Task 10 impl: TS actions client + buttonState + ActionButtons.svelte",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:43:48.366120-07:00",
+      "updated_at": "2026-09-02T02:43:48.366120-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"3ad5f52\",\"confidence\":85,\"files\":[\"web/src/lib/types.ts web/src/lib/api.ts web/src/lib/action-selection.ts web/src/lib/components/ActionButtons.svelte\"]}"
     }
   ],
   "edges": [
@@ -13652,6 +13707,61 @@
       "weight": 1.0,
       "rationale": "Task reviewer verdict on the Task 9 outcome",
       "created_at": "2026-09-02T02:31:12.480519-07:00"
+    },
+    {
+      "id": 635,
+      "from_node_id": 625,
+      "to_node_id": 627,
+      "from_change_id": "cf2819f3-df75-45e1-9e9c-1c91f260c495",
+      "to_change_id": "9422cdcd-0383-40bb-ab91-f6bec156cd88",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fix",
+      "created_at": "2026-09-02T02:38:35.918641-07:00"
+    },
+    {
+      "id": 636,
+      "from_node_id": 627,
+      "to_node_id": 628,
+      "from_change_id": "9422cdcd-0383-40bb-ab91-f6bec156cd88",
+      "to_change_id": "62ca195a-4fa7-45e6-b893-f78483a3f569",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action produced this outcome",
+      "created_at": "2026-09-02T02:38:42.894853-07:00"
+    },
+    {
+      "id": 637,
+      "from_node_id": 628,
+      "to_node_id": 629,
+      "from_change_id": "62ca195a-4fa7-45e6-b893-f78483a3f569",
+      "to_change_id": "a11bb999-e285-4562-801b-fac1e35a6485",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review verdict on the fix outcome",
+      "created_at": "2026-09-02T02:41:05.416557-07:00"
+    },
+    {
+      "id": 638,
+      "from_node_id": 599,
+      "to_node_id": 630,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "25313c61-937d-42d2-b36c-85c0b3965feb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 10 implementation",
+      "created_at": "2026-09-02T02:42:45.140634-07:00"
+    },
+    {
+      "id": 639,
+      "from_node_id": 630,
+      "to_node_id": 631,
+      "from_change_id": "25313c61-937d-42d2-b36c-85c0b3965feb",
+      "to_change_id": "b8a10572-10a9-4d47-af83-ca23f052d926",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-09-02T02:43:51.374081-07:00"
     }
   ],
   "documents": [

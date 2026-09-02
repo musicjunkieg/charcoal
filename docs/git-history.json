@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3ad5f52cd0c8d429e4f0fc1e4e9bdfbb335efdfa",
+    "short_hash": "3ad5f52",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:38:19-07:00",
+    "message": "fix(315): scope_grants_write requires block create+delete; normalize undo_action ownership check",
+    "files_changed": 4
+  },
+  {
     "hash": "de9c38c287e53dad388b94b2031b1d0295bbd4f7",
     "short_hash": "de9c38c",
     "author": "Bryan Guffey",
