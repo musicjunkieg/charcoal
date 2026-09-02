@@ -46,9 +46,14 @@ pub struct AppState {
     /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
     /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
     pub pending_oauth: Arc<RwLock<HashMap<String, handlers::oauth::PendingOAuth>>>,
-    /// AT Protocol tokens for the authenticated user.
-    /// Stored in-memory for this milestone (lost on restart — user re-authenticates).
-    pub oauth_tokens: Arc<RwLock<Option<serde_json::Value>>>,
+    /// OAuth write sessions (#315): `Some` only when `CHARCOAL_TOKEN_KEY` is
+    /// valid. `None` means the actions feature is disabled — endpoints answer
+    /// 503 `actions_disabled` and nothing else changes.
+    pub sessions: Option<Arc<actions::session::SessionStore>>,
+    /// Wake channel for the background action runner (#315). Send a batch id
+    /// after inserting it so it runs now. `None` in test helpers that spawn
+    /// no runner, and when the feature is disabled.
+    pub action_wake: Option<tokio::sync::mpsc::Sender<i64>>,
     /// P-256 signing key for JWT client assertions. Generated at startup.
     pub signing_key: atproto_identity::key::KeyData,
     /// Shared HTTP client for outbound calls made by handlers (#227).
@@ -121,12 +126,18 @@ pub async fn run_server(
     );
     info!("Loaded ONNX models (toxicity + embedding + NLI) into shared state");
 
+    // Computed before `config` moves into `Arc::new` below — `from_config`
+    // only needs a borrow, and once wrapped in `Arc<Config>` a mutable move
+    // is not the point; we just need the read to happen first.
+    let sessions = actions::session::SessionStore::from_config(&config).map(Arc::new);
+
     let state = AppState {
         db,
         config: Arc::new(config),
         scan_manager: Arc::new(RwLock::new(scan_job::ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
-        oauth_tokens: Arc::new(RwLock::new(None)),
+        sessions,
+        action_wake: None,
         signing_key,
         http: reqwest::Client::new(),
         typeahead_limiter: handlers::typeahead::build_limiter(),
@@ -140,6 +151,17 @@ pub async fn run_server(
     let scan_wake = admitter::spawn_admitter(state.clone());
     let state = AppState {
         scan_wake: Some(scan_wake),
+        ..state
+    };
+
+    // One action runner per process (#315). Only spawned when the feature is
+    // enabled; it resumes any batch left queued/running by the last deploy.
+    let action_wake = state
+        .sessions
+        .is_some()
+        .then(|| actions::runner::spawn_runner(state.clone()));
+    let state = AppState {
+        action_wake,
         ..state
     };
 

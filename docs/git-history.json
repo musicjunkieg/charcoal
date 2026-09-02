@@ -1,5 +1,13 @@
 [
   {
+    "hash": "820c5f4a9a4b0faf142ff49dc7fd52e82a713668",
+    "short_hash": "820c5f4",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T23:24:11-07:00",
+    "message": "test(315): mirror every Task 5 SQLite assertion on Postgres\n\nCloses four Postgres coverage gaps found in review:\n- undo_rows_point_at_originals: add test_pg_undo_rows_point_at_originals\n- batch_status_transitions_stamp_timestamps: drive the failed transition\n  (stamps finished_at + error) and the queued transition that clears\n  both, inside test_pg_action_batches_parity\n- update_action_stamps_and_preserves_record_uri: mirror the final\n  update_action(..., \"failed\", None, Some(\"boom\")) call and its error\n  assertion\n- listing_and_active_and_unfinished: add test_pg_listing_and_active_and_unfinished\n  with cross-user isolation (active_actions on an unrelated DID, a third\n  DIDs batch in list_unfinished_batches, a \"done\" transition removing a\n  batch from that list) using exact list equality filtered to this\n  tests own batch ids, since list_unfinished_batches is a global query\n  against a shared database\n\nAlso: assert a queued transition clears finished_at (not just error) on\nboth backends, and assert applied_at survives the undone transition in\nthe SQLite update_action test (the Postgres mirror already asserted it).\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
     "hash": "8fe948d33da7f8ac7d843c1bf066d4be3c0ff7b0",
     "short_hash": "8fe948d",
     "author": "Bryan Guffey",

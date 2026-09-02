@@ -6621,6 +6621,50 @@
       "created_at": "2026-09-01T22:37:38.863447-07:00",
       "updated_at": "2026-09-01T22:37:38.863447-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"8fe948d\",\"confidence\":90}"
+    },
+    {
+      "id": 612,
+      "change_id": "8a13aebf-7f33-4f32-86df-2729d669b37a",
+      "node_type": "action",
+      "title": "Task 5 fix: Postgres test parity gaps",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T23:24:39.776050-07:00",
+      "updated_at": "2026-09-01T23:24:39.776050-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"820c5f4\",\"confidence\":85}"
+    },
+    {
+      "id": 613,
+      "change_id": "954e8bc6-3304-423d-a74f-c01ecad7a5a1",
+      "node_type": "outcome",
+      "title": "Task 5 fix done: 820c5f4, pg 37/37 + sqlite 10/10",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T23:24:46.143085-07:00",
+      "updated_at": "2026-09-01T23:24:46.143085-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"820c5f4\",\"confidence\":90}"
+    },
+    {
+      "id": 614,
+      "change_id": "5b3b2b2d-f294-44fc-8fb2-e6e6f986e16f",
+      "node_type": "observation",
+      "title": "Task 5 re-review approved: all 4 Important + 2 Minor Postgres parity gaps closed in 820c5f4",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T23:36:33.058476-07:00",
+      "updated_at": "2026-09-01T23:36:33.058476-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 615,
+      "change_id": "746439cc-7c54-4eb1-bf2c-00bd229b943e",
+      "node_type": "action",
+      "title": "Task 6: AppState wiring, DPoP HTTP helper, PdsClient",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T23:38:37.476453-07:00",
+      "updated_at": "2026-09-01T23:38:37.476453-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"820c5f4\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13322,6 +13366,50 @@
       "weight": 1.0,
       "rationale": "Task 5 implementation outcome",
       "created_at": "2026-09-01T22:37:41.902650-07:00"
+    },
+    {
+      "id": 620,
+      "from_node_id": 611,
+      "to_node_id": 612,
+      "from_change_id": "9bee8c20-881d-4b2b-b2c1-0855228f8752",
+      "to_change_id": "8a13aebf-7f33-4f32-86df-2729d669b37a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 review finding",
+      "created_at": "2026-09-01T23:24:42.882467-07:00"
+    },
+    {
+      "id": 621,
+      "from_node_id": 612,
+      "to_node_id": 613,
+      "from_change_id": "8a13aebf-7f33-4f32-86df-2729d669b37a",
+      "to_change_id": "954e8bc6-3304-423d-a74f-c01ecad7a5a1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome of Task 5 fix action",
+      "created_at": "2026-09-01T23:24:49.313338-07:00"
+    },
+    {
+      "id": 622,
+      "from_node_id": 613,
+      "to_node_id": 614,
+      "from_change_id": "954e8bc6-3304-423d-a74f-c01ecad7a5a1",
+      "to_change_id": "5b3b2b2d-f294-44fc-8fb2-e6e6f986e16f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review verdict on Task 5 fix",
+      "created_at": "2026-09-01T23:36:36.468685-07:00"
+    },
+    {
+      "id": 623,
+      "from_node_id": 599,
+      "to_node_id": 615,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "746439cc-7c54-4eb1-bf2c-00bd229b943e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 of #315 plan",
+      "created_at": "2026-09-01T23:38:40.516771-07:00"
     }
   ],
   "documents": [

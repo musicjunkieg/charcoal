@@ -17,6 +17,9 @@ pub const TEST_SECRET: &str = "test_session_secret_at_least_32_chars!";
 pub const TEST_DID: &str = "did:plc:testalloweddid0000000000";
 pub const TEST_CLIENT_ID: &str = "https://test.example.com/oauth-client-metadata.json";
 
+/// Fixed AES-256-GCM key for tests (64 hex chars). Never used outside tests.
+pub const TEST_TOKEN_KEY: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
 /// Load the shared ONNX models used by test `AppState`s, once per test binary.
 ///
 /// `AppState::models` is `Arc<ScanModels>`, not optional (#257) — boot fails
@@ -144,18 +147,23 @@ fn build_app_with_admins_state_and_db(
         admin_dids: admin_dids.to_string(),
         oauth_client_id: TEST_CLIENT_ID.to_string(),
         session_secret: TEST_SECRET.to_string(),
+        token_key: Some(TEST_TOKEN_KEY.to_string()),
         ..Config::test_defaults()
     };
 
     let signing_key =
         generate_key(KeyType::P256Private).expect("P-256 key generation should succeed");
 
+    // Computed before `config` moves into `Arc::new` in the AppState literal.
+    let sessions = crate::web::actions::session::SessionStore::from_config(&config).map(Arc::new);
+
     let state = AppState {
         db,
         config: Arc::new(config),
         scan_manager: Arc::new(RwLock::new(ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
-        oauth_tokens: Arc::new(RwLock::new(None)),
+        sessions,
+        action_wake: None,
         signing_key,
         http: reqwest::Client::new(),
         typeahead_limiter: crate::web::handlers::typeahead::build_limiter(),
@@ -165,6 +173,40 @@ fn build_app_with_admins_state_and_db(
     };
 
     Some((build_router(state.clone()), state))
+}
+
+/// Like `build_test_app_with_db` but with NO token key: the actions feature
+/// is disabled and every /api/actions endpoint must answer 503.
+pub fn build_test_app_actions_disabled() -> Option<(axum::Router, Arc<dyn crate::db::Database>)> {
+    let conn =
+        rusqlite::Connection::open_in_memory().expect("in-memory SQLite should always succeed");
+    create_tables(&conn).expect("schema creation should succeed");
+    let db: Arc<dyn crate::db::Database> = Arc::new(SqliteDatabase::new(conn));
+    let models = test_models()?;
+    let config = Config {
+        allowed_did: TEST_DID.to_string(),
+        admin_dids: String::new(),
+        oauth_client_id: TEST_CLIENT_ID.to_string(),
+        session_secret: TEST_SECRET.to_string(),
+        token_key: None,
+        ..Config::test_defaults()
+    };
+    let signing_key =
+        generate_key(KeyType::P256Private).expect("P-256 key generation should succeed");
+    let state = AppState {
+        db: db.clone(),
+        config: Arc::new(config),
+        scan_manager: Arc::new(RwLock::new(ScanManager::new())),
+        pending_oauth: Arc::new(RwLock::new(HashMap::new())),
+        sessions: None,
+        action_wake: None,
+        signing_key,
+        http: reqwest::Client::new(),
+        typeahead_limiter: crate::web::handlers::typeahead::build_limiter(),
+        models,
+        scan_wake: None,
+    };
+    Some((build_router(state), db))
 }
 
 /// Build an in-memory Axum router for tests that don't need DB access.

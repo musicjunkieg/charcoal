@@ -502,17 +502,6 @@ pub async fn callback(
         tracing::warn!("Failed to update last_login_at: {e}");
     }
 
-    // Store tokens in-memory for future XRPC calls (muting/blocking milestone).
-    // TokenResponse doesn't derive Serialize, so store the fields we need manually.
-    *state.oauth_tokens.write().await = Some(serde_json::json!({
-        "access_token": token_response.access_token,
-        "token_type": token_response.token_type,
-        "refresh_token": token_response.refresh_token,
-        "scope": token_response.scope,
-        "expires_in": token_response.expires_in,
-        "sub": token_response.sub,
-    }));
-
     // Issue session cookie with DID embedded
     let token = crate::web::auth::create_token(&state.config.session_secret, &authenticated_did);
     let cookie = crate::web::auth::set_cookie_header(&token, true);
