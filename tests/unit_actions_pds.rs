@@ -1,10 +1,12 @@
 //! PdsClient against a wiremock stand-in PDS (#315, spec §4.2/§4.3/§6).
 #![cfg(feature = "web")]
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use atproto_identity::key::{generate_key, KeyType};
-use charcoal::web::actions::pds::{PdsClient, PdsError, Write};
+use charcoal::web::actions::pds::{PdsClient, PdsError, Write, MAX_LIST_PAGES};
 use wiremock::matchers::{body_partial_json, header_exists, method, path, query_param};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 const ME: &str = "did:plc:me00000000000000000000";
 
@@ -195,6 +197,39 @@ async fn get_blocks_and_mutes_paginate() {
     );
     let mutes = c.get_mutes().await.unwrap();
     assert!(mutes.contains("did:plc:m1") && mutes.len() == 1);
+}
+
+/// Always returns a fresh, non-empty cursor so `paginate` never sees a
+/// repeat and never exits early — the only way to actually reach the cap.
+struct EverAdvancingCursor(AtomicUsize);
+
+impl Respond for EverAdvancingCursor {
+    fn respond(&self, _req: &Request) -> ResponseTemplate {
+        let n = self.0.fetch_add(1, Ordering::SeqCst);
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "cursor": format!("c{n}"),
+            "blocks": []
+        }))
+    }
+}
+
+#[tokio::test]
+async fn get_blocks_page_cap_is_an_error_not_a_partial_success() {
+    let mock = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/xrpc/app.bsky.graph.getBlocks"))
+        .respond_with(EverAdvancingCursor(AtomicUsize::new(0)))
+        .expect(MAX_LIST_PAGES as u64)
+        .mount(&mock)
+        .await;
+
+    match client(&mock).get_blocks().await.unwrap_err() {
+        PdsError::Transport(msg) => assert!(
+            msg.contains("pages"),
+            "error should mention the page cap: {msg}"
+        ),
+        other => panic!("expected Transport, got {other:?}"),
+    }
 }
 
 #[test]

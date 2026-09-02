@@ -17,33 +17,30 @@ use super::dpop_http::{send_dpop, DpopResponse};
 pub const BLOCK_COLLECTION: &str = "app.bsky.graph.block";
 /// applyWrites hard limit on the reference PDS.
 pub const APPLY_WRITES_MAX: usize = 200;
+/// Hard stop on `getBlocks`/`getMutes` pagination. A misbehaving server that
+/// repeats a cursor must not spin forever, but hitting this cap means the
+/// list is truncated — the caller must never treat that as success.
+pub const MAX_LIST_PAGES: usize = 100;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PdsError {
     /// HTTP 429. `reset_at` is the unix-seconds value of `ratelimit-reset` if
     /// the header was present and parseable.
+    #[error("rate limited")]
     RateLimited { reset_at: Option<i64> },
     /// 401 that is not a nonce challenge: the access token is dead.
+    #[error("not authorized")]
     Auth,
     /// Any other 4xx. `message` is `"<error>: <message>"` from the JSON body
     /// when present, else the status reason.
+    #[error("{status}: {message}")]
     Client { status: u16, message: String },
     /// 5xx — retryable.
+    #[error("server error {status}")]
     Server { status: u16 },
     /// Could not reach the server, or minting failed — retryable.
+    #[error("transport: {0}")]
     Transport(String),
-}
-
-impl std::fmt::Display for PdsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PdsError::RateLimited { .. } => write!(f, "rate limited"),
-            PdsError::Auth => write!(f, "not authorized"),
-            PdsError::Client { status, message } => write!(f, "{status}: {message}"),
-            PdsError::Server { status } => write!(f, "server error {status}"),
-            PdsError::Transport(m) => write!(f, "transport: {m}"),
-        }
-    }
 }
 
 impl PdsError {
@@ -197,9 +194,7 @@ impl PdsClient {
         mut each: impl FnMut(&Value),
     ) -> Result<(), PdsError> {
         let mut cursor: Option<String> = None;
-        // Hard stop so a misbehaving server that repeats a cursor cannot spin
-        // forever: 100 pages × 100 items is far beyond any real block list.
-        for _ in 0..100 {
+        for _ in 0..MAX_LIST_PAGES {
             let url = format!("{}/xrpc/{nsid}", self.pds_url);
             let c = cursor.clone();
             let resp = send_dpop(
@@ -231,7 +226,9 @@ impl PdsClient {
                 _ => return Ok(()),
             }
         }
-        Ok(())
+        Err(PdsError::Transport(format!(
+            "{nsid}: list exceeded {MAX_LIST_PAGES} pages; refusing a partial view"
+        )))
     }
 
     async fn post(&self, nsid: &str, body: &Value) -> Result<DpopResponse, PdsError> {

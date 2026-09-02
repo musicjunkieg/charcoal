@@ -251,10 +251,11 @@ impl ActionRunner {
         pds: &PdsClient,
         pending: &[ActionRow],
     ) -> anyhow::Result<Option<Halt>> {
-        // Reconcile set, capped at 100 pages x 100 items by
-        // PdsClient::paginate. 10k mutes is far beyond any current user; a
-        // truncated set here would read as "not muted" and re-mute someone
-        // the user already muted.
+        // Reconcile set. PdsClient::paginate caps at MAX_LIST_PAGES pages and
+        // returns Err rather than a partial list — `anyhow::bail!` below then
+        // fails this batch and leaves its rows pending for Retry, instead of
+        // reading a truncated set as "not muted" and re-muting someone the
+        // user already muted.
         let existing = match self.call(|| pds.get_mutes()).await {
             Ok(Ok(set)) => set,
             Ok(Err(e)) => anyhow::bail!("getMutes: {e}"),
@@ -286,9 +287,10 @@ impl ActionRunner {
         pds: &PdsClient,
         pending: &[ActionRow],
     ) -> anyhow::Result<Option<Halt>> {
-        // Reconcile set, capped at 100 pages x 100 items by
-        // PdsClient::paginate. 10k blocks is far beyond any current user; a
-        // truncated set here would read as "not blocked" and create a second
+        // Reconcile set. PdsClient::paginate caps at MAX_LIST_PAGES pages and
+        // returns Err rather than a partial list — `anyhow::bail!` below then
+        // fails this batch and leaves its rows pending for Retry, instead of
+        // reading a truncated set as "not blocked" and creating a second
         // block record for someone the user already blocked.
         let existing = match self.call(|| pds.get_blocks()).await {
             Ok(Ok(map)) => map,
@@ -320,10 +322,11 @@ impl ActionRunner {
         own_did: &str,
         pending: &[ActionRow],
     ) -> anyhow::Result<Option<Halt>> {
-        // Reconcile sets, capped at 100 pages x 100 items by
-        // PdsClient::paginate. 10k blocks/mutes is far beyond any current
-        // user; a truncated set here would read as "already gone" and settle
-        // an undo that never removed anything.
+        // Reconcile sets. PdsClient::paginate caps at MAX_LIST_PAGES pages
+        // and returns Err rather than a partial list, which fails this batch
+        // and leaves its rows pending for Retry, instead of reading a
+        // truncated set as "already gone" and settling an undo that never
+        // removed anything.
         let blocks = if pending.iter().any(|a| a.kind == "block") {
             match self.call(|| pds.get_blocks()).await {
                 Ok(Ok(map)) => map,
