@@ -6698,6 +6698,39 @@
       "created_at": "2026-09-02T00:10:58.434202-07:00",
       "updated_at": "2026-09-02T00:10:58.434202-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"e0e579e\",\"confidence\":85}"
+    },
+    {
+      "id": 619,
+      "change_id": "733536da-8992-4611-88fc-1c644cb9288d",
+      "node_type": "outcome",
+      "title": "Task 7 done: 9c6ab53, unit_actions_session 9/9 + unit_actions_pds 6/6 passed, clippy clean web+postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:28:50.292538-07:00",
+      "updated_at": "2026-09-02T00:28:50.292538-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"9c6ab53\",\"confidence\":90}"
+    },
+    {
+      "id": 620,
+      "change_id": "848e925c-477c-44fa-b82a-d8a144493c0f",
+      "node_type": "observation",
+      "title": "Task 7 review approved: CAS-miss reload + per-DID lock verified against update_oauth_tokens; 3 Minor (AAD labels lack _enc suffix, revoke() non-DPoP best-effort, lock map never evicted)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:35:14.900173-07:00",
+      "updated_at": "2026-09-02T00:35:14.900173-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 621,
+      "change_id": "d044acf8-4dc3-457f-b084-988f1ac3df9d",
+      "node_type": "action",
+      "title": "Task 8: ActionRunner reconcile-first batch engine + spawn_runner + oauth_client extraction",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T00:35:33.637645-07:00",
+      "updated_at": "2026-09-02T00:35:33.637645-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"9c6ab53\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13476,6 +13509,39 @@
       "weight": 1.0,
       "rationale": "Task 7 of #315 plan",
       "created_at": "2026-09-02T00:11:01.481132-07:00"
+    },
+    {
+      "id": 627,
+      "from_node_id": 618,
+      "to_node_id": 619,
+      "from_change_id": "833c3e58-3359-4133-bc08-608d5740deb0",
+      "to_change_id": "733536da-8992-4611-88fc-1c644cb9288d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 7 implementation outcome",
+      "created_at": "2026-09-02T00:28:54.914668-07:00"
+    },
+    {
+      "id": 628,
+      "from_node_id": 619,
+      "to_node_id": 620,
+      "from_change_id": "733536da-8992-4611-88fc-1c644cb9288d",
+      "to_change_id": "848e925c-477c-44fa-b82a-d8a144493c0f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task reviewer verdict on the Task 7 outcome",
+      "created_at": "2026-09-02T00:35:21.009122-07:00"
+    },
+    {
+      "id": 629,
+      "from_node_id": 599,
+      "to_node_id": 621,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "d044acf8-4dc3-457f-b084-988f1ac3df9d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 8 implementation",
+      "created_at": "2026-09-02T00:35:36.055758-07:00"
     }
   ],
   "documents": [

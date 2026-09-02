@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9c6ab531ae699bc65b1f05eb2f15f693f22f5f5d",
+    "short_hash": "9c6ab53",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T00:28:35-07:00",
+    "message": "feat(315): SessionStore — encrypted OAuth sessions with serialized refresh and disconnect",
+    "files_changed": 4
+  },
+  {
     "hash": "e0e579eb6a6213b38a105353b0216bd7c4cf2ef0",
     "short_hash": "e0e579e",
     "author": "Bryan Guffey",

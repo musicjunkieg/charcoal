@@ -112,6 +112,16 @@ fn derive_redirect_uri(client_id: &str) -> String {
     format!("{}/api/auth/callback", derive_base_url(client_id))
 }
 
+/// The confidential-client identity used for every token-endpoint call:
+/// login (PAR + code exchange), write-consent, refresh, and revocation.
+pub(crate) fn oauth_client(state: &AppState) -> OAuthClient {
+    OAuthClient {
+        client_id: state.config.oauth_client_id.clone(),
+        redirect_uri: derive_redirect_uri(&state.config.oauth_client_id),
+        private_signing_key_data: state.signing_key.clone(),
+    }
+}
+
 // ---- Initiate ----
 
 #[derive(Deserialize)]
@@ -187,12 +197,7 @@ pub async fn initiate(
     };
 
     // Step 5: Build OAuth client config
-    let redirect_uri = derive_redirect_uri(&state.config.oauth_client_id);
-    let oauth_client = OAuthClient {
-        client_id: state.config.oauth_client_id.clone(),
-        redirect_uri,
-        private_signing_key_data: state.signing_key.clone(),
-    };
+    let oauth_client = oauth_client(&state);
 
     let oauth_request_state = OAuthRequestState {
         state: oauth_state.clone(),
@@ -396,12 +401,7 @@ pub async fn callback(
         };
 
     // Build the OAuth client config
-    let redirect_uri = derive_redirect_uri(&state.config.oauth_client_id);
-    let oauth_client = OAuthClient {
-        client_id: state.config.oauth_client_id.clone(),
-        redirect_uri,
-        private_signing_key_data: state.signing_key.clone(),
-    };
+    let oauth_client = oauth_client(&state);
 
     let http_client = reqwest::Client::new();
 
