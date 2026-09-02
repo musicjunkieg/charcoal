@@ -1894,8 +1894,10 @@ async fn test_pg_access_requests_state_machine_parity() {
 }
 
 // --- OAuth write sessions (#315) ---
-
-const ACTIONS_DID: &str = "did:plc:pgactionstest00000000000";
+//
+// Each test below owns a private DID (rather than sharing one constant) so
+// that parallel test runs cannot delete each other's rows out from under a
+// concurrently-running test — the CodeRabbit R3 finding on PR #109.
 
 async fn delete_actions_rows(url: &str, did: &str) {
     use sqlx_core::pool::Pool;
@@ -1914,9 +1916,9 @@ async fn delete_actions_rows(url: &str, did: &str) {
     }
 }
 
-fn pg_session_row(updated_at: &str) -> charcoal::db::traits::OauthSessionRow {
+fn pg_session_row(did: &str, updated_at: &str) -> charcoal::db::traits::OauthSessionRow {
     charcoal::db::traits::OauthSessionRow {
-        user_did: ACTIONS_DID.to_string(),
+        user_did: did.to_string(),
         pds_url: "https://pds.example".to_string(),
         scope: "atproto repo:app.bsky.graph.block".to_string(),
         access_token_enc: vec![1, 2, 3],
@@ -1931,54 +1933,58 @@ fn pg_session_row(updated_at: &str) -> charcoal::db::traits::OauthSessionRow {
 /// Postgres side of `tests/unit_actions_db.rs` oauth_sessions tests.
 #[tokio::test]
 async fn test_pg_oauth_session_parity() {
+    const OAUTH_DID: &str = "did:plc:pgactionsoauth0000000000";
+
     let Some(url) = database_url() else {
         return;
     };
-    delete_actions_rows(&url, ACTIONS_DID).await;
+    delete_actions_rows(&url, OAUTH_DID).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    assert!(db.get_oauth_session(ACTIONS_DID).await.unwrap().is_none());
-    db.upsert_oauth_session(&pg_session_row("t1"))
+    assert!(db.get_oauth_session(OAUTH_DID).await.unwrap().is_none());
+    db.upsert_oauth_session(&pg_session_row(OAUTH_DID, "t1"))
         .await
         .unwrap();
     assert_eq!(
-        db.get_oauth_session(ACTIONS_DID).await.unwrap().unwrap(),
-        pg_session_row("t1")
+        db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap(),
+        pg_session_row(OAUTH_DID, "t1")
     );
 
-    let mut second = pg_session_row("t2");
+    let mut second = pg_session_row(OAUTH_DID, "t2");
     second.created_at = "2026-09-02T00:00:00+00:00".to_string();
     second.access_token_enc = vec![9, 9, 9];
     db.upsert_oauth_session(&second).await.unwrap();
-    let got = db.get_oauth_session(ACTIONS_DID).await.unwrap().unwrap();
+    let got = db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap();
     assert_eq!(got.created_at, "2026-09-01T00:00:00+00:00");
     assert_eq!(got.access_token_enc, vec![9, 9, 9]);
 
     assert!(!db
-        .update_oauth_tokens(ACTIONS_DID, &[10], &[11], 2_000_000_000, "stale", "t3")
+        .update_oauth_tokens(OAUTH_DID, &[10], &[11], 2_000_000_000, "stale", "t3")
         .await
         .unwrap());
     assert!(db
-        .update_oauth_tokens(ACTIONS_DID, &[10], &[11], 2_000_000_000, "t2", "t3")
+        .update_oauth_tokens(OAUTH_DID, &[10], &[11], 2_000_000_000, "t2", "t3")
         .await
         .unwrap());
-    let got = db.get_oauth_session(ACTIONS_DID).await.unwrap().unwrap();
+    let got = db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap();
     assert_eq!(got.access_token_enc, vec![10]);
     assert_eq!(got.updated_at, "t3");
     assert_eq!(got.dpop_key_enc, vec![7, 8, 9]);
 
-    assert!(db.delete_oauth_session(ACTIONS_DID).await.unwrap());
-    assert!(!db.delete_oauth_session(ACTIONS_DID).await.unwrap());
-    delete_actions_rows(&url, ACTIONS_DID).await;
+    assert!(db.delete_oauth_session(OAUTH_DID).await.unwrap());
+    assert!(!db.delete_oauth_session(OAUTH_DID).await.unwrap());
+    delete_actions_rows(&url, OAUTH_DID).await;
 }
 
 /// Postgres side of the action_batches/actions tests in tests/unit_actions_db.rs.
 #[tokio::test]
 async fn test_pg_action_batches_parity() {
+    const BATCHES_DID: &str = "did:plc:pgactionsbatches00000000";
+
     let Some(url) = database_url() else {
         return;
     };
-    delete_actions_rows(&url, ACTIONS_DID).await;
+    delete_actions_rows(&url, BATCHES_DID).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
     use charcoal::db::traits::NewAction;
 
@@ -1992,7 +1998,7 @@ async fn test_pg_action_batches_parity() {
 
     let first = db
         .create_action_batch(
-            ACTIONS_DID,
+            BATCHES_DID,
             "mute",
             "tier:High",
             &[na("did:plc:a", "mute"), na("did:plc:b", "mute")],
@@ -2082,14 +2088,14 @@ async fn test_pg_action_batches_parity() {
     db.update_action(rows[1].id, "skipped_already_done", None, None)
         .await
         .unwrap();
-    assert_eq!(db.active_actions(ACTIONS_DID).await.unwrap().len(), 1);
+    assert_eq!(db.active_actions(BATCHES_DID).await.unwrap().len(), 1);
 
     let second = db
-        .create_action_batch(ACTIONS_DID, "block", "single", &[])
+        .create_action_batch(BATCHES_DID, "block", "single", &[])
         .await
         .unwrap();
     assert_eq!(
-        db.list_action_batches(ACTIONS_DID, 10, 0)
+        db.list_action_batches(BATCHES_DID, 10, 0)
             .await
             .unwrap()
             .iter()
@@ -2111,7 +2117,7 @@ async fn test_pg_action_batches_parity() {
         .is_some());
     assert!(!db.list_unfinished_batches().await.unwrap().contains(&first));
 
-    delete_actions_rows(&url, ACTIONS_DID).await;
+    delete_actions_rows(&url, BATCHES_DID).await;
 }
 
 /// Postgres side of `undo_rows_point_at_originals` in
@@ -2255,14 +2261,16 @@ async fn test_pg_listing_and_active_and_unfinished() {
 /// tests/unit_actions_db.rs (score_snapshots_and_cascade).
 #[tokio::test]
 async fn test_pg_action_score_snapshots_and_cascade() {
+    const CASCADE_DID: &str = "did:plc:pgactionscascade0000000";
+
     let Some(url) = database_url() else {
         return;
     };
-    delete_actions_rows(&url, ACTIONS_DID).await;
+    delete_actions_rows(&url, CASCADE_DID).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
     use charcoal::db::traits::NewAction;
 
-    db.upsert_user(ACTIONS_DID, "actions.pgtest").await.unwrap();
+    db.upsert_user(CASCADE_DID, "actions.pgtest").await.unwrap();
     let score = AccountScore {
         did: "did:plc:a".to_string(),
         handle: "a.test".to_string(),
@@ -2280,8 +2288,8 @@ async fn test_pg_action_score_snapshots_and_cascade() {
         fingerprint_quality: None,
         scoring_confidence: None,
     };
-    db.upsert_account_score(ACTIONS_DID, &score).await.unwrap();
-    let snaps = db.list_score_snapshots(ACTIONS_DID).await.unwrap();
+    db.upsert_account_score(CASCADE_DID, &score).await.unwrap();
+    let snaps = db.list_score_snapshots(CASCADE_DID).await.unwrap();
     assert_eq!(snaps.len(), 1);
     assert_eq!(snaps[0].did, "did:plc:a");
     assert_eq!(snaps[0].handle, "a.test");
@@ -2289,7 +2297,7 @@ async fn test_pg_action_score_snapshots_and_cascade() {
 
     let id = db
         .create_action_batch(
-            ACTIONS_DID,
+            CASCADE_DID,
             "mute",
             "single",
             &[NewAction {
@@ -2305,7 +2313,7 @@ async fn test_pg_action_score_snapshots_and_cascade() {
     // An OAuth write session is the other row `delete_user_data` has to clear
     // on the backend that actually runs in production (#315).
     db.upsert_oauth_session(&charcoal::db::traits::OauthSessionRow {
-        user_did: ACTIONS_DID.to_string(),
+        user_did: CASCADE_DID.to_string(),
         pds_url: "https://pds.pgtest".to_string(),
         scope: "atproto".to_string(),
         access_token_enc: vec![1, 2, 3],
@@ -2317,19 +2325,19 @@ async fn test_pg_action_score_snapshots_and_cascade() {
     })
     .await
     .unwrap();
-    assert!(db.get_oauth_session(ACTIONS_DID).await.unwrap().is_some());
+    assert!(db.get_oauth_session(CASCADE_DID).await.unwrap().is_some());
 
-    db.delete_user_data(ACTIONS_DID).await.unwrap();
+    db.delete_user_data(CASCADE_DID).await.unwrap();
     assert!(db.get_action_batch(id).await.unwrap().is_none());
     // No ON DELETE CASCADE on `actions.batch_id`: deleting the batch alone
     // would leave the target DIDs behind.
     assert!(db.list_actions_for_batch(id).await.unwrap().is_empty());
-    assert!(db.get_oauth_session(ACTIONS_DID).await.unwrap().is_none());
+    assert!(db.get_oauth_session(CASCADE_DID).await.unwrap().is_none());
     assert!(db
-        .list_score_snapshots(ACTIONS_DID)
+        .list_score_snapshots(CASCADE_DID)
         .await
         .unwrap()
         .is_empty());
 
-    delete_actions_rows(&url, ACTIONS_DID).await;
+    delete_actions_rows(&url, CASCADE_DID).await;
 }
