@@ -6522,6 +6522,28 @@
       "created_at": "2026-09-01T20:56:09.512385-07:00",
       "updated_at": "2026-09-01T20:56:09.512385-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"6aa88d1\",\"confidence\":90}"
+    },
+    {
+      "id": 603,
+      "change_id": "014a7774-5e7c-4d3e-b2ce-0a02316710c4",
+      "node_type": "action",
+      "title": "Task 2: write_scope() + client metadata scope union",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T21:07:09.288900-07:00",
+      "updated_at": "2026-09-01T21:07:09.288900-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"47edf0a\",\"confidence\":90}"
+    },
+    {
+      "id": 604,
+      "change_id": "b0abb2eb-fe32-4279-9dee-1b0c8185d7c5",
+      "node_type": "outcome",
+      "title": "Task 2 done: 47edf0a, scope tests green (2 passed), client_metadata test green (2 passed)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T21:07:11.458269-07:00",
+      "updated_at": "2026-09-01T21:07:11.458269-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"47edf0a\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -13124,6 +13146,28 @@
       "weight": 1.0,
       "rationale": "Implementation completed successfully",
       "created_at": "2026-09-01T20:56:10.969175-07:00"
+    },
+    {
+      "id": 611,
+      "from_node_id": 599,
+      "to_node_id": 603,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "014a7774-5e7c-4d3e-b2ce-0a02316710c4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 of #315 plan",
+      "created_at": "2026-09-01T21:07:13.510615-07:00"
+    },
+    {
+      "id": 612,
+      "from_node_id": 603,
+      "to_node_id": 604,
+      "from_change_id": "014a7774-5e7c-4d3e-b2ce-0a02316710c4",
+      "to_change_id": "b0abb2eb-fe32-4279-9dee-1b0c8185d7c5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action produced this outcome",
+      "created_at": "2026-09-01T21:07:15.044336-07:00"
     }
   ],
   "documents": [

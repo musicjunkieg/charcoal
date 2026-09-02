@@ -1,5 +1,13 @@
 [
   {
+    "hash": "47edf0aeebb5165002f5579e9043fb2924596ddc",
+    "short_hash": "47edf0a",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T21:07:00-07:00",
+    "message": "feat(315): write_scope() and client metadata scope union\n\nGranular scopes only; the string lives in one function.",
+    "files_changed": 7
+  },
+  {
     "hash": "6aa88d1d542abe00718e152ee8ccf7832a06fd5f",
     "short_hash": "6aa88d1",
     "author": "Bryan Guffey",
