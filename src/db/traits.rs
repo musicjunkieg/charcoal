@@ -166,6 +166,23 @@ pub struct AccessRequestRow {
     pub decided_by: Option<String>,
 }
 
+/// One write-scoped OAuth grant per user (#315). Every `*_enc` column is an
+/// AES-256-GCM blob produced by `web::actions::crypto::TokenCrypto`; the DB
+/// layer never sees plaintext. `access_expires_at` is unix seconds; the two
+/// timestamps are RFC3339 like every other table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OauthSessionRow {
+    pub user_did: String,
+    pub pds_url: String,
+    pub scope: String,
+    pub access_token_enc: Vec<u8>,
+    pub refresh_token_enc: Vec<u8>,
+    pub dpop_key_enc: Vec<u8>,
+    pub access_expires_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -584,6 +601,32 @@ pub trait Database: Send + Sync {
 
     /// All rows, oldest requested_at first.
     async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>>;
+
+    // --- OAuth write sessions (#315) ---
+
+    async fn get_oauth_session(&self, user_did: &str) -> Result<Option<OauthSessionRow>>;
+
+    /// Insert, or replace every column except `created_at` (re-consent keeps
+    /// the original connection date).
+    async fn upsert_oauth_session(&self, row: &OauthSessionRow) -> Result<()>;
+
+    /// Compare-and-swap token rotation. Writes the new pair ONLY when the
+    /// row's `updated_at` still equals `expected_updated_at`, and returns
+    /// whether it did. AT Protocol refresh tokens are single-use, so two
+    /// concurrent refreshes must never both persist — the loser sees `false`
+    /// and re-reads the winner's tokens (`web::actions::session`).
+    async fn update_oauth_tokens(
+        &self,
+        user_did: &str,
+        access_token_enc: &[u8],
+        refresh_token_enc: &[u8],
+        access_expires_at: i64,
+        expected_updated_at: &str,
+        new_updated_at: &str,
+    ) -> Result<bool>;
+
+    /// Returns whether a row existed.
+    async fn delete_oauth_session(&self, user_did: &str) -> Result<bool>;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

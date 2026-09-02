@@ -6544,6 +6544,28 @@
       "created_at": "2026-09-01T21:07:11.458269-07:00",
       "updated_at": "2026-09-01T21:07:11.458269-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"47edf0a\",\"confidence\":90}"
+    },
+    {
+      "id": 605,
+      "change_id": "c6b029fc-d3b8-4ef5-bd2a-4696b682afa4",
+      "node_type": "action",
+      "title": "Task 3: CHARCOAL_TOKEN_KEY config + AES-256-GCM TokenCrypto",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T21:20:47.374148-07:00",
+      "updated_at": "2026-09-01T21:20:47.374148-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"8bd5d7e\",\"confidence\":90}"
+    },
+    {
+      "id": 606,
+      "change_id": "0fc7cf49-97f1-4e22-9625-d5d9dab8906f",
+      "node_type": "outcome",
+      "title": "Task 3 done: 8bd5d7e, 6 crypto tests green",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T21:20:58.702383-07:00",
+      "updated_at": "2026-09-01T21:20:58.702383-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"8bd5d7e\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -13168,6 +13190,28 @@
       "weight": 1.0,
       "rationale": "Action produced this outcome",
       "created_at": "2026-09-01T21:07:15.044336-07:00"
+    },
+    {
+      "id": 613,
+      "from_node_id": 599,
+      "to_node_id": 605,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "c6b029fc-d3b8-4ef5-bd2a-4696b682afa4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 of #315 plan",
+      "created_at": "2026-09-01T21:20:55.992572-07:00"
+    },
+    {
+      "id": 614,
+      "from_node_id": 605,
+      "to_node_id": 606,
+      "from_change_id": "c6b029fc-d3b8-4ef5-bd2a-4696b682afa4",
+      "to_change_id": "0fc7cf49-97f1-4e22-9625-d5d9dab8906f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 implementation complete",
+      "created_at": "2026-09-01T21:21:01.273321-07:00"
     }
   ],
   "documents": [

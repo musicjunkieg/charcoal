@@ -18,8 +18,8 @@ use super::models::{
     NewAmplificationEvent, UserLabel, UserRow,
 };
 use super::traits::{
-    validate_bundle, AccessRequestRow, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry,
-    ScanQueueRow, ScanSkip,
+    validate_bundle, AccessRequestRow, Database, OauthSessionRow, ScanClaim, ScanQueueDepth,
+    ScanQueueEntry, ScanQueueRow, ScanSkip,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -526,6 +526,44 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::list_access_requests(&conn)
     }
+
+    // --- OAuth write sessions (#315) ---
+
+    async fn get_oauth_session(&self, user_did: &str) -> Result<Option<OauthSessionRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_oauth_session(&conn, user_did)
+    }
+
+    async fn upsert_oauth_session(&self, row: &OauthSessionRow) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_oauth_session(&conn, row)
+    }
+
+    async fn update_oauth_tokens(
+        &self,
+        user_did: &str,
+        access_token_enc: &[u8],
+        refresh_token_enc: &[u8],
+        access_expires_at: i64,
+        expected_updated_at: &str,
+        new_updated_at: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::update_oauth_tokens(
+            &conn,
+            user_did,
+            access_token_enc,
+            refresh_token_enc,
+            access_expires_at,
+            expected_updated_at,
+            new_updated_at,
+        )
+    }
+
+    async fn delete_oauth_session(&self, user_did: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_oauth_session(&conn, user_did)
+    }
 }
 
 #[cfg(test)]
@@ -836,8 +874,9 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores, amplification_events,
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
-        // scan_queue, topic_clusters, access_requests = 14 tables (v14)
-        assert_eq!(count, 14);
+        // scan_queue, topic_clusters, access_requests,
+        // oauth_sessions, action_batches, actions = 17 tables (v15)
+        assert_eq!(count, 17);
     }
 
     #[tokio::test]

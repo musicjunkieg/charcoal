@@ -1892,3 +1892,82 @@ async fn test_pg_access_requests_state_machine_parity() {
 
     delete_access_request(&url, DID).await;
 }
+
+// --- OAuth write sessions (#315) ---
+
+const ACTIONS_DID: &str = "did:plc:pgactionstest00000000000";
+
+async fn delete_actions_rows(url: &str, did: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    for sql in [
+        "DELETE FROM actions WHERE user_did = $1",
+        "DELETE FROM action_batches WHERE user_did = $1",
+        "DELETE FROM oauth_sessions WHERE user_did = $1",
+    ] {
+        sqlx_core::query::query(sql)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
+fn pg_session_row(updated_at: &str) -> charcoal::db::traits::OauthSessionRow {
+    charcoal::db::traits::OauthSessionRow {
+        user_did: ACTIONS_DID.to_string(),
+        pds_url: "https://pds.example".to_string(),
+        scope: "atproto repo:app.bsky.graph.block".to_string(),
+        access_token_enc: vec![1, 2, 3],
+        refresh_token_enc: vec![4, 5, 6],
+        dpop_key_enc: vec![7, 8, 9],
+        access_expires_at: 1_700_000_000,
+        created_at: "2026-09-01T00:00:00+00:00".to_string(),
+        updated_at: updated_at.to_string(),
+    }
+}
+
+/// Postgres side of `tests/unit_actions_db.rs` oauth_sessions tests.
+#[tokio::test]
+async fn test_pg_oauth_session_parity() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, ACTIONS_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    assert!(db.get_oauth_session(ACTIONS_DID).await.unwrap().is_none());
+    db.upsert_oauth_session(&pg_session_row("t1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_oauth_session(ACTIONS_DID).await.unwrap().unwrap(),
+        pg_session_row("t1")
+    );
+
+    let mut second = pg_session_row("t2");
+    second.created_at = "2026-09-02T00:00:00+00:00".to_string();
+    second.access_token_enc = vec![9, 9, 9];
+    db.upsert_oauth_session(&second).await.unwrap();
+    let got = db.get_oauth_session(ACTIONS_DID).await.unwrap().unwrap();
+    assert_eq!(got.created_at, "2026-09-01T00:00:00+00:00");
+    assert_eq!(got.access_token_enc, vec![9, 9, 9]);
+
+    assert!(!db
+        .update_oauth_tokens(ACTIONS_DID, &[10], &[11], 2_000_000_000, "stale", "t3")
+        .await
+        .unwrap());
+    assert!(db
+        .update_oauth_tokens(ACTIONS_DID, &[10], &[11], 2_000_000_000, "t2", "t3")
+        .await
+        .unwrap());
+    let got = db.get_oauth_session(ACTIONS_DID).await.unwrap().unwrap();
+    assert_eq!(got.access_token_enc, vec![10]);
+    assert_eq!(got.updated_at, "t3");
+    assert_eq!(got.dpop_key_enc, vec![7, 8, 9]);
+
+    assert!(db.delete_oauth_session(ACTIONS_DID).await.unwrap());
+    assert!(!db.delete_oauth_session(ACTIONS_DID).await.unwrap());
+    delete_actions_rows(&url, ACTIONS_DID).await;
+}

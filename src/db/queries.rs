@@ -1071,6 +1071,17 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
         "DELETE FROM topic_clusters WHERE user_did = ?1",
         params![user_did],
     )?;
+    // #315: the user's write grant and everything Charcoal did with it.
+    // actions references action_batches, so it goes first.
+    tx.execute("DELETE FROM actions WHERE user_did = ?1", params![user_did])?;
+    tx.execute(
+        "DELETE FROM action_batches WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.execute(
+        "DELETE FROM oauth_sessions WHERE user_did = ?1",
+        params![user_did],
+    )?;
     tx.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
     tx.commit()?;
     Ok(())
@@ -1815,6 +1826,103 @@ pub fn list_access_requests(conn: &Connection) -> Result<Vec<crate::db::traits::
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+// --- OAuth write sessions (#315) ---
+
+const OAUTH_SESSION_COLS: &str = "user_did, pds_url, scope, access_token_enc, refresh_token_enc, \
+     dpop_key_enc, access_expires_at, created_at, updated_at";
+
+fn read_oauth_session(
+    r: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::db::traits::OauthSessionRow> {
+    Ok(crate::db::traits::OauthSessionRow {
+        user_did: r.get(0)?,
+        pds_url: r.get(1)?,
+        scope: r.get(2)?,
+        access_token_enc: r.get(3)?,
+        refresh_token_enc: r.get(4)?,
+        dpop_key_enc: r.get(5)?,
+        access_expires_at: r.get(6)?,
+        created_at: r.get(7)?,
+        updated_at: r.get(8)?,
+    })
+}
+
+pub fn get_oauth_session(
+    conn: &Connection,
+    user_did: &str,
+) -> Result<Option<crate::db::traits::OauthSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {OAUTH_SESSION_COLS} FROM oauth_sessions WHERE user_did = ?1"
+    ))?;
+    Ok(stmt.query_row([user_did], read_oauth_session).optional()?)
+}
+
+pub fn upsert_oauth_session(
+    conn: &Connection,
+    row: &crate::db::traits::OauthSessionRow,
+) -> Result<()> {
+    // created_at is deliberately absent from the DO UPDATE list: re-consent
+    // rotates every secret but keeps the original connection date.
+    conn.execute(
+        "INSERT INTO oauth_sessions (user_did, pds_url, scope, access_token_enc,
+             refresh_token_enc, dpop_key_enc, access_expires_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT (user_did) DO UPDATE SET
+             pds_url = excluded.pds_url, scope = excluded.scope,
+             access_token_enc = excluded.access_token_enc,
+             refresh_token_enc = excluded.refresh_token_enc,
+             dpop_key_enc = excluded.dpop_key_enc,
+             access_expires_at = excluded.access_expires_at,
+             updated_at = excluded.updated_at",
+        rusqlite::params![
+            row.user_did,
+            row.pds_url,
+            row.scope,
+            row.access_token_enc,
+            row.refresh_token_enc,
+            row.dpop_key_enc,
+            row.access_expires_at,
+            row.created_at,
+            row.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn update_oauth_tokens(
+    conn: &Connection,
+    user_did: &str,
+    access_token_enc: &[u8],
+    refresh_token_enc: &[u8],
+    access_expires_at: i64,
+    expected_updated_at: &str,
+    new_updated_at: &str,
+) -> Result<bool> {
+    let n = conn.execute(
+        "UPDATE oauth_sessions
+         SET access_token_enc = ?2, refresh_token_enc = ?3, access_expires_at = ?4,
+             updated_at = ?6
+         WHERE user_did = ?1 AND updated_at = ?5",
+        rusqlite::params![
+            user_did,
+            access_token_enc,
+            refresh_token_enc,
+            access_expires_at,
+            expected_updated_at,
+            new_updated_at,
+        ],
+    )?;
+    Ok(n > 0)
+}
+
+pub fn delete_oauth_session(conn: &Connection, user_did: &str) -> Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM oauth_sessions WHERE user_did = ?1",
+        rusqlite::params![user_did],
+    )?;
+    Ok(n > 0)
 }
 
 #[cfg(test)]

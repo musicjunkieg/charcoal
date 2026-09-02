@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8bd5d7e7ce8441343f1321dcd1c0ba11573c1561",
+    "short_hash": "8bd5d7e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T21:20:35-07:00",
+    "message": "feat(315): CHARCOAL_TOKEN_KEY config and AES-256-GCM TokenCrypto\n\nVersioned blob, column name bound as AAD, key never derived from the\nsession secret.",
+    "files_changed": 8
+  },
+  {
     "hash": "47edf0aeebb5165002f5579e9043fb2924596ddc",
     "short_hash": "47edf0a",
     "author": "Bryan Guffey",

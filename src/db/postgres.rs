@@ -22,8 +22,8 @@ use super::models::{
     NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
-    eta_seconds, AccessRequestRow, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry,
-    ScanQueueRow, ScanSkip,
+    eta_seconds, AccessRequestRow, Database, OauthSessionRow, ScanClaim, ScanQueueDepth,
+    ScanQueueEntry, ScanQueueRow, ScanSkip,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -170,6 +170,10 @@ impl PgDatabase {
                 (
                     14,
                     include_str!("../../migrations/postgres/0014_access_requests.sql"),
+                ),
+                (
+                    15,
+                    include_str!("../../migrations/postgres/0015_actions.sql"),
                 ),
             ];
 
@@ -1303,6 +1307,20 @@ impl Database for PgDatabase {
             .bind(user_did)
             .execute(&mut *tx)
             .await?;
+        // #315: the user's write grant and everything Charcoal did with it.
+        // actions references action_batches, so it goes first.
+        sqlx_core::query::query("DELETE FROM actions WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM action_batches WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM oauth_sessions WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         sqlx_core::query::query("DELETE FROM users WHERE did = $1")
             .bind(user_did)
             .execute(&mut *tx)
@@ -1970,6 +1988,93 @@ impl Database for PgDatabase {
                 decided_by: r.get::<Option<String>, _>(5),
             })
             .collect())
+    }
+
+    // --- OAuth write sessions (#315) ---
+
+    async fn get_oauth_session(&self, user_did: &str) -> Result<Option<OauthSessionRow>> {
+        let row = sqlx_core::query::query(
+            "SELECT user_did, pds_url, scope, access_token_enc, refresh_token_enc,
+                    dpop_key_enc, access_expires_at, created_at, updated_at
+             FROM oauth_sessions WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| OauthSessionRow {
+            user_did: r.get::<String, _>(0),
+            pds_url: r.get::<String, _>(1),
+            scope: r.get::<String, _>(2),
+            access_token_enc: r.get::<Vec<u8>, _>(3),
+            refresh_token_enc: r.get::<Vec<u8>, _>(4),
+            dpop_key_enc: r.get::<Vec<u8>, _>(5),
+            access_expires_at: r.get::<i64, _>(6),
+            created_at: r.get::<String, _>(7),
+            updated_at: r.get::<String, _>(8),
+        }))
+    }
+
+    async fn upsert_oauth_session(&self, row: &OauthSessionRow) -> Result<()> {
+        // created_at is deliberately absent from the DO UPDATE list: re-consent
+        // rotates every secret but keeps the original connection date.
+        sqlx_core::query::query(
+            "INSERT INTO oauth_sessions (user_did, pds_url, scope, access_token_enc,
+                 refresh_token_enc, dpop_key_enc, access_expires_at, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (user_did) DO UPDATE SET
+                 pds_url = EXCLUDED.pds_url, scope = EXCLUDED.scope,
+                 access_token_enc = EXCLUDED.access_token_enc,
+                 refresh_token_enc = EXCLUDED.refresh_token_enc,
+                 dpop_key_enc = EXCLUDED.dpop_key_enc,
+                 access_expires_at = EXCLUDED.access_expires_at,
+                 updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&row.user_did)
+        .bind(&row.pds_url)
+        .bind(&row.scope)
+        .bind(&row.access_token_enc)
+        .bind(&row.refresh_token_enc)
+        .bind(&row.dpop_key_enc)
+        .bind(row.access_expires_at)
+        .bind(&row.created_at)
+        .bind(&row.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn update_oauth_tokens(
+        &self,
+        user_did: &str,
+        access_token_enc: &[u8],
+        refresh_token_enc: &[u8],
+        access_expires_at: i64,
+        expected_updated_at: &str,
+        new_updated_at: &str,
+    ) -> Result<bool> {
+        let result = sqlx_core::query::query(
+            "UPDATE oauth_sessions
+             SET access_token_enc = $2, refresh_token_enc = $3, access_expires_at = $4,
+                 updated_at = $6
+             WHERE user_did = $1 AND updated_at = $5",
+        )
+        .bind(user_did)
+        .bind(access_token_enc)
+        .bind(refresh_token_enc)
+        .bind(access_expires_at)
+        .bind(expected_updated_at)
+        .bind(new_updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn delete_oauth_session(&self, user_did: &str) -> Result<bool> {
+        let result = sqlx_core::query::query("DELETE FROM oauth_sessions WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
     }
 }
 
