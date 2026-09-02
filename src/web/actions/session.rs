@@ -21,6 +21,7 @@ use tracing::{info, warn};
 use super::crypto::TokenCrypto;
 use super::dpop_http::send_dpop;
 use super::pds::PdsClient;
+use super::scope::scope_grants_write;
 use crate::config::Config;
 use crate::db::traits::OauthSessionRow;
 use crate::db::Database;
@@ -179,7 +180,7 @@ impl SessionStore {
             .get_oauth_session(did)
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?;
-        Ok(row.map(|r| SessionStatus {
+        Ok(row.filter(usable).map(|r| SessionStatus {
             scope: r.scope,
             pds_url: r.pds_url,
             connected_at: r.created_at,
@@ -199,6 +200,7 @@ impl SessionStore {
             .get_oauth_session(did)
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?
+            .filter(usable)
             .ok_or(SessionError::NotConnected)?;
         if !needs_refresh(&row) {
             return self.decrypt(&row);
@@ -213,6 +215,7 @@ impl SessionStore {
             .get_oauth_session(did)
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?
+            .filter(usable)
             .ok_or(SessionError::NotConnected)?;
         if !needs_refresh(&row) {
             return self.decrypt(&row);
@@ -345,6 +348,16 @@ impl SessionStore {
             .map_err(|e| SessionError::Crypto(e.to_string()))?;
         String::from_utf8(bytes).map_err(|_| SessionError::Crypto(format!("{column}: not utf-8")))
     }
+}
+
+/// A stored row counts as a connection only while its grant still covers
+/// everything the runner does. Consent checked `scope_grants_write` when the
+/// row was written, so this only bites when `write_scope()` has since grown —
+/// #322 added the two reconcile reads — and the row predates it. Reading such
+/// a row as "not connected" sends the person through consent once more; the
+/// alternative was a 403 on the first proxied read of every batch.
+fn usable(row: &OauthSessionRow) -> bool {
+    scope_grants_write(&row.scope)
 }
 
 fn needs_refresh(row: &OauthSessionRow) -> bool {

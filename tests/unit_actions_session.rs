@@ -9,6 +9,7 @@ use atproto_oauth::workflow::{OAuthClient, TokenResponse};
 use charcoal::config::Config;
 use charcoal::db::sqlite::SqliteDatabase;
 use charcoal::db::Database;
+use charcoal::web::actions::scope::write_scope;
 use charcoal::web::actions::session::{SessionError, SessionStore};
 use rusqlite::Connection;
 use wiremock::matchers::{body_string_contains, method, path};
@@ -36,11 +37,15 @@ fn oauth_client() -> OAuthClient {
 }
 
 fn tokens(access: &str, refresh: &str, expires_in: u32) -> TokenResponse {
+    tokens_with_scope(access, refresh, expires_in, &write_scope())
+}
+
+fn tokens_with_scope(access: &str, refresh: &str, expires_in: u32, scope: &str) -> TokenResponse {
     TokenResponse {
         access_token: access.to_string(),
         token_type: "DPoP".to_string(),
         refresh_token: Some(refresh.to_string()),
-        scope: "atproto repo:app.bsky.graph.block".to_string(),
+        scope: scope.to_string(),
         expires_in,
         sub: Some(DID.to_string()),
         extra: Default::default(),
@@ -362,7 +367,51 @@ async fn status_reports_scope_without_secrets() {
     .await
     .unwrap();
     let st = s.status(db.as_ref(), DID).await.unwrap().unwrap();
-    assert_eq!(st.scope, "atproto repo:app.bsky.graph.block");
+    assert_eq!(st.scope, write_scope());
     assert_eq!(st.pds_url, "https://pds.test");
     assert!(!st.connected_at.is_empty());
+}
+
+/// #322: a row stored under an older `write_scope()` (the #315 grant had no
+/// `rpc:` scopes for the reconcile reads) must read as NOT connected — from
+/// both `status` (so the UI offers consent again) and `load_for_write` (so
+/// the runner parks the batch as `not_connected` instead of failing it at
+/// the first proxied read with a 403).
+#[tokio::test]
+async fn row_with_insufficient_scope_reads_as_not_connected() {
+    let db = setup_db();
+    let s = store();
+    let key = generate_key(KeyType::P256Private).unwrap();
+    let pre_322 = "atproto repo:app.bsky.graph.block?action=create&action=delete \
+                   rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+                   rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview";
+    s.store(
+        db.as_ref(),
+        DID,
+        "https://pds.test",
+        &key,
+        &tokens_with_scope("acc1", "ref1", 3600, pre_322),
+    )
+    .await
+    .unwrap();
+
+    assert!(s.status(db.as_ref(), DID).await.unwrap().is_none());
+    let http = reqwest::Client::new();
+    let err = s
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "{err:?}");
+
+    // Re-consent overwrites the stale row and the DID is connected again.
+    s.store(
+        db.as_ref(),
+        DID,
+        "https://pds.test",
+        &key,
+        &tokens("acc2", "ref2", 3600),
+    )
+    .await
+    .unwrap();
+    assert!(s.status(db.as_ref(), DID).await.unwrap().is_some());
 }

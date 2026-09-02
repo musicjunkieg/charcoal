@@ -5,8 +5,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use atproto_identity::key::{generate_key, KeyType};
 use charcoal::web::actions::pds::{PdsClient, PdsError, Write, MAX_LIST_PAGES};
-use wiremock::matchers::{body_partial_json, header_exists, method, path, query_param};
-use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+use charcoal::web::actions::scope::APPVIEW_DID;
+use wiremock::matchers::{body_partial_json, header, header_exists, method, path, query_param};
+use wiremock::{Match, Mock, MockServer, Request, Respond, ResponseTemplate};
+
+/// Matches only requests that do NOT carry the named header.
+struct NoHeader(&'static str);
+
+impl Match for NoHeader {
+    fn matches(&self, request: &Request) -> bool {
+        !request.headers.contains_key(self.0)
+    }
+}
 
 const ME: &str = "did:plc:me00000000000000000000";
 
@@ -197,6 +207,81 @@ async fn get_blocks_and_mutes_paginate() {
     );
     let mutes = c.get_mutes().await.unwrap();
     assert!(mutes.contains("did:plc:m1") && mutes.len() == 1);
+}
+
+/// #322: a PDS with no default AppView configured (any self-hosted reference
+/// PDS, e.g. airlock.ltd) answers 501 `MethodNotImplemented` to `app.bsky.*`
+/// calls unless the request names the AppView in an `atproto-proxy` header.
+/// bsky.social fills that in implicitly, which is how the gap shipped. Every
+/// proxied call must carry the header; the value must be the exact service
+/// DID the `rpc:` scopes were granted for, or the PDS's scope check fails.
+#[tokio::test]
+async fn app_bsky_calls_carry_the_atproto_proxy_header() {
+    let mock = MockServer::start().await;
+    for (m, p, body) in [
+        (
+            "GET",
+            "/xrpc/app.bsky.graph.getBlocks",
+            serde_json::json!({ "blocks": [] }),
+        ),
+        (
+            "GET",
+            "/xrpc/app.bsky.graph.getMutes",
+            serde_json::json!({ "mutes": [] }),
+        ),
+        (
+            "POST",
+            "/xrpc/app.bsky.graph.muteActor",
+            serde_json::json!({}),
+        ),
+        (
+            "POST",
+            "/xrpc/app.bsky.graph.unmuteActor",
+            serde_json::json!({}),
+        ),
+    ] {
+        // Without the header nothing matches, wiremock answers 404, and the
+        // call below errors — so this is a real assertion, not a formality.
+        Mock::given(method(m))
+            .and(path(p))
+            .and(header("atproto-proxy", APPVIEW_DID))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(&mock)
+            .await;
+    }
+
+    let c = client(&mock);
+    c.get_blocks().await.expect("getBlocks with proxy header");
+    c.get_mutes().await.expect("getMutes with proxy header");
+    c.mute_actor("did:plc:t")
+        .await
+        .expect("muteActor with proxy header");
+    c.unmute_actor("did:plc:t")
+        .await
+        .expect("unmuteActor with proxy header");
+}
+
+/// The mirror: `com.atproto.repo.applyWrites` is served by the PDS itself.
+/// Sending it with a proxy header would ask the PDS to forward a repo write
+/// to the AppView, which is wrong in principle and rejected in practice.
+#[tokio::test]
+async fn apply_writes_does_not_carry_the_atproto_proxy_header() {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/com.atproto.repo.applyWrites"))
+        .and(NoHeader("atproto-proxy"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "results": [] })),
+        )
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    client(&mock)
+        .apply_writes(&[PdsClient::block_delete("bbb")])
+        .await
+        .expect("applyWrites without proxy header");
 }
 
 /// Always returns a fresh, non-empty cursor so `paginate` never sees a

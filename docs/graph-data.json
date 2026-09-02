@@ -7237,6 +7237,138 @@
       "created_at": "2026-09-02T06:39:01.275342-07:00",
       "updated_at": "2026-09-02T06:39:01.275342-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"6a78a88\",\"confidence\":90}"
+    },
+    {
+      "id": 668,
+      "change_id": "34e2f48f-0529-42ca-b21f-68a7930cd3ec",
+      "node_type": "outcome",
+      "title": "CodeRabbit round 1 fixed: R1-R6 + N1-N4 in 4bed8ba..6a78a88 (+ doc trim). All gates green: pds 7, session 9, runner 17, web_actions 23, db_postgres 37 x2, vitest 94, clippy x2, fmt, build, autofixer clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T06:40:33.024415-07:00",
+      "updated_at": "2026-09-02T06:40:33.024415-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"f43fa9d\",\"confidence\":90}"
+    },
+    {
+      "id": 669,
+      "change_id": "e2aa3ba7-508f-452c-871c-8eba31ade820",
+      "node_type": "outcome",
+      "title": "PR #109 round 1 closed: CI green on f43fa9d, all 7 CodeRabbit threads accepted+resolved, PR body refreshed; awaiting re-review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T06:54:48.132176-07:00",
+      "updated_at": "2026-09-02T06:54:48.132176-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"f43fa9d\",\"confidence\":90}"
+    },
+    {
+      "id": 670,
+      "change_id": "9b9283c6-6271-42c0-8b53-09c773804387",
+      "node_type": "action",
+      "title": "Set CHARCOAL_TOKEN_KEY on staging charcoal-web (railway CLI, skip-deploys, prod untouched) ahead of PR #109 merge",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T07:11:57.677074-07:00",
+      "updated_at": "2026-09-02T07:11:57.677074-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"f43fa9d\",\"confidence\":90}"
+    },
+    {
+      "id": 671,
+      "change_id": "e962e0ce-b790-486a-b2df-a91bce4ee027",
+      "node_type": "outcome",
+      "title": "PR #109 APPROVED by CodeRabbit (16:45Z, same commit f43fa9d) and MERGED to staging as 046578d; staging deploy c56b0e15 building",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T09:48:05.856890-07:00",
+      "updated_at": "2026-09-02T09:48:05.856890-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"046578d\",\"confidence\":95}"
+    },
+    {
+      "id": 672,
+      "change_id": "64683499-0598-4518-8067-93c877682ccf",
+      "node_type": "outcome",
+      "title": "Staging deploy c56b0e15 SUCCESS on 046578d: schema_version 15, oauth_sessions/action_batches/actions present, root 200, /api/actions/status 401 unauthenticated as designed. Task 13 step 4 complete; step 5 (Bryan live spike) is next",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T09:52:10.105085-07:00",
+      "updated_at": "2026-09-02T09:52:10.105085-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"046578d\",\"confidence\":95}"
+    },
+    {
+      "id": 673,
+      "change_id": "b2576252-39ba-455b-bcbc-08d318b89718",
+      "node_type": "goal",
+      "title": "#322: mute/block fail 501 on self-hosted PDS — missing atproto-proxy header and rpc scopes for reconcile reads",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:14:51.125533-07:00",
+      "updated_at": "2026-09-02T11:14:51.125533-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":95,\"prompt\":\"we actually got a failure to mute after the permission went through.\"}"
+    },
+    {
+      "id": 674,
+      "change_id": "a5ca3575-efe1-4af0-b3f5-2cb88d84c96c",
+      "node_type": "observation",
+      "title": "Staging batches 1+2 failed 'getMutes: server error 501'. airlock.ltd (no default AppView) answers MethodNotImplemented without atproto-proxy header; with header it proxies (401 AuthMissing unauthenticated). PDS pipethrough also runs permissions.assertRpc({lxm,aud}) on proxied OAuth calls, so getMutes/getBlocks need rpc: scopes write_scope() never asked for",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:14:51.136158-07:00",
+      "updated_at": "2026-09-02T11:14:51.136158-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":95}"
+    },
+    {
+      "id": 675,
+      "change_id": "cc0d8813-2a58-461c-8f0e-a636c36fe4a0",
+      "node_type": "option",
+      "title": "Header only: send atproto-proxy, keep scope as-is",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:14:55.837360-07:00",
+      "updated_at": "2026-09-02T11:14:55.837360-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":20}"
+    },
+    {
+      "id": 676,
+      "change_id": "88066aab-064b-4129-b07d-2ebc7b339f79",
+      "node_type": "option",
+      "title": "Header + rpc:getMutes/getBlocks in write_scope + stale-scope sessions treated as not connected (one re-consent)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:14:55.847453-07:00",
+      "updated_at": "2026-09-02T11:14:55.847453-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":90}"
+    },
+    {
+      "id": 677,
+      "change_id": "41d99259-4242-4320-bdee-a07105ef8170",
+      "node_type": "option",
+      "title": "Header + read blocks via com.atproto.repo.listRecords (no scope) and only add rpc:getMutes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:14:55.857389-07:00",
+      "updated_at": "2026-09-02T11:14:55.857389-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":40}"
+    },
+    {
+      "id": 678,
+      "change_id": "5dfae00f-6c65-4861-81ae-22458c98e052",
+      "node_type": "decision",
+      "title": "Choose option 676: header + both read rpc scopes + stale-scope = not connected. 675 would trade the 501 for a 403 (assertRpc); 677 changes reconcile shape for one scope's worth of savings and splits blocks/mutes across two data paths",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:15:03.104114-07:00",
+      "updated_at": "2026-09-02T11:15:03.104114-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":90}"
+    },
+    {
+      "id": 679,
+      "change_id": "5570d50c-a57d-48fd-9ae1-9d243f6bd610",
+      "node_type": "action",
+      "title": "TDD fix on fix/322-atproto-proxy-header: failing tests first (pds header, scope strings, stale-session), then pds.rs/scope.rs/session.rs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T11:15:03.158573-07:00",
+      "updated_at": "2026-09-02T11:15:03.158573-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"f43fa9d\",\"confidence\":90,\"files\":[\"src/web/actions/pds.rs\",\"src/web/actions/scope.rs\",\"src/web/actions/session.rs\",\"tests/unit_actions_pds.rs\",\"tests/unit_actions_session.rs\"]}"
     }
   ],
   "edges": [
@@ -14620,6 +14752,149 @@
       "weight": 1.0,
       "rationale": "fix wave complete",
       "created_at": "2026-09-02T06:39:03.521949-07:00"
+    },
+    {
+      "id": 682,
+      "from_node_id": 665,
+      "to_node_id": 668,
+      "from_change_id": "bb7d8327-7ff7-417f-be58-61ad20aa56af",
+      "to_change_id": "34e2f48f-0529-42ca-b21f-68a7930cd3ec",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "controller verification of fixer's round-1 work",
+      "created_at": "2026-09-02T06:40:39.833626-07:00"
+    },
+    {
+      "id": 683,
+      "from_node_id": 668,
+      "to_node_id": 669,
+      "from_change_id": "34e2f48f-0529-42ca-b21f-68a7930cd3ec",
+      "to_change_id": "e2aa3ba7-508f-452c-871c-8eba31ade820",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "round-1 fixes verified upstream: CI + CodeRabbit acceptance",
+      "created_at": "2026-09-02T06:54:51.236466-07:00"
+    },
+    {
+      "id": 684,
+      "from_node_id": 669,
+      "to_node_id": 670,
+      "from_change_id": "e2aa3ba7-508f-452c-871c-8eba31ade820",
+      "to_change_id": "9b9283c6-6271-42c0-8b53-09c773804387",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rollout prep: staging key must exist before the merge deploy",
+      "created_at": "2026-09-02T07:12:00.421923-07:00"
+    },
+    {
+      "id": 685,
+      "from_node_id": 670,
+      "to_node_id": 671,
+      "from_change_id": "9b9283c6-6271-42c0-8b53-09c773804387",
+      "to_change_id": "e962e0ce-b790-486a-b2df-a91bce4ee027",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approval arrived; merge is the step the staging key was prepared for",
+      "created_at": "2026-09-02T09:48:05.864105-07:00"
+    },
+    {
+      "id": 686,
+      "from_node_id": 671,
+      "to_node_id": 672,
+      "from_change_id": "e962e0ce-b790-486a-b2df-a91bce4ee027",
+      "to_change_id": "64683499-0598-4518-8067-93c877682ccf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "deploy verified",
+      "created_at": "2026-09-02T09:52:10.111983-07:00"
+    },
+    {
+      "id": 687,
+      "from_node_id": 673,
+      "to_node_id": 674,
+      "from_change_id": "b2576252-39ba-455b-bcbc-08d318b89718",
+      "to_change_id": "a5ca3575-efe1-4af0-b3f5-2cb88d84c96c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "diagnosis",
+      "created_at": "2026-09-02T11:14:55.826439-07:00"
+    },
+    {
+      "id": 688,
+      "from_node_id": 673,
+      "to_node_id": 675,
+      "from_change_id": "b2576252-39ba-455b-bcbc-08d318b89718",
+      "to_change_id": "cc0d8813-2a58-461c-8f0e-a636c36fe4a0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approach",
+      "created_at": "2026-09-02T11:15:03.111021-07:00"
+    },
+    {
+      "id": 689,
+      "from_node_id": 673,
+      "to_node_id": 676,
+      "from_change_id": "b2576252-39ba-455b-bcbc-08d318b89718",
+      "to_change_id": "88066aab-064b-4129-b07d-2ebc7b339f79",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approach",
+      "created_at": "2026-09-02T11:15:03.117359-07:00"
+    },
+    {
+      "id": 690,
+      "from_node_id": 673,
+      "to_node_id": 677,
+      "from_change_id": "b2576252-39ba-455b-bcbc-08d318b89718",
+      "to_change_id": "41d99259-4242-4320-bdee-a07105ef8170",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approach",
+      "created_at": "2026-09-02T11:15:03.123970-07:00"
+    },
+    {
+      "id": 691,
+      "from_node_id": 676,
+      "to_node_id": 678,
+      "from_change_id": "88066aab-064b-4129-b07d-2ebc7b339f79",
+      "to_change_id": "5dfae00f-6c65-4861-81ae-22458c98e052",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen",
+      "created_at": "2026-09-02T11:15:03.131491-07:00"
+    },
+    {
+      "id": 692,
+      "from_node_id": 675,
+      "to_node_id": 678,
+      "from_change_id": "cc0d8813-2a58-461c-8f0e-a636c36fe4a0",
+      "to_change_id": "5dfae00f-6c65-4861-81ae-22458c98e052",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: would 403 next",
+      "created_at": "2026-09-02T11:15:03.137895-07:00"
+    },
+    {
+      "id": 693,
+      "from_node_id": 677,
+      "to_node_id": 678,
+      "from_change_id": "41d99259-4242-4320-bdee-a07105ef8170",
+      "to_change_id": "5dfae00f-6c65-4861-81ae-22458c98e052",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: two data paths",
+      "created_at": "2026-09-02T11:15:03.144077-07:00"
+    },
+    {
+      "id": 694,
+      "from_node_id": 678,
+      "to_node_id": 679,
+      "from_change_id": "5dfae00f-6c65-4861-81ae-22458c98e052",
+      "to_change_id": "5570d50c-a57d-48fd-9ae1-9d243f6bd610",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-09-02T11:15:11.445829-07:00"
     }
   ],
   "documents": [

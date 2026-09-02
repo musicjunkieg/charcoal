@@ -1,5 +1,21 @@
 [
   {
+    "hash": "046578d5994479a9683d653e76b3bfc9dcc4ebe0",
+    "short_hash": "046578d",
+    "author": "chaos gremlin",
+    "date": "2026-09-02T09:47:27-07:00",
+    "message": "Merge pull request #109 from musicjunkieg/feat/315-tier-actions\n\nfeat(315): tier-based mute/block with confidential OAuth client",
+    "files_changed": 0
+  },
+  {
+    "hash": "f43fa9d777312e5e0f1e968e9f5b659f969dac09",
+    "short_hash": "f43fa9d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T06:40:27-07:00",
+    "message": "docs(315): drop review-round provenance from outbound_http doc comment",
+    "files_changed": 3
+  },
+  {
     "hash": "6a78a886322abf66599089260e31a96ba7fde7ec",
     "short_hash": "6a78a88",
     "author": "Bryan Guffey",
