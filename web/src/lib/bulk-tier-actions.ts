@@ -15,19 +15,24 @@ export function bulkTierFor(selectedTier: string): string | null {
 /** Whether the bulk bar should render at all: a bulk-eligible tier is
  *  selected, actions are enabled server-side, the viewer is not
  *  impersonating someone else's account (admin impersonation is read-only,
- *  per the self-protective invariant), and there is at least one account in
- *  the tier to act on. */
+ *  per the self-protective invariant), there is at least one account in the
+ *  tier to act on, and no search filter is narrowing the list — `total`
+ *  reflects the search query but the bulk action itself (`loadTierAccounts`)
+ *  ignores it and always acts on the WHOLE tier, so the bar must hide rather
+ *  than preselect accounts the viewer never saw. */
 export function showBulkBar(args: {
 	bulkTier: string | null;
 	actionsStatus: ActionsStatus | null;
 	asUser: string | null;
 	total: number;
+	searchQuery: string;
 }): boolean {
 	return (
 		args.bulkTier !== null &&
 		args.actionsStatus?.enabled === true &&
 		args.asUser === null &&
-		args.total > 0
+		args.total > 0 &&
+		args.searchQuery === ''
 	);
 }
 

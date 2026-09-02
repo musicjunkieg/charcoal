@@ -44,7 +44,7 @@
 	let bulkBusy = $state(false);
 	let bulkError = $state('');
 	let bulkTier = $derived(bulkTierFor(selectedTier));
-	let showBulk = $derived(showBulkBar({ bulkTier, actionsStatus, asUser, total }));
+	let showBulk = $derived(showBulkBar({ bulkTier, actionsStatus, asUser, total, searchQuery }));
 
 	/** An expired cookie or a revoked grant is not a bulk-action error — it is
 	 *  the same "you are signed out" that `load()` handles. Returns true when

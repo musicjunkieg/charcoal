@@ -22,7 +22,7 @@ describe('bulkTierFor', () => {
 });
 
 describe('showBulkBar', () => {
-	const base = { bulkTier: 'High', actionsStatus: ENABLED, asUser: null, total: 12 };
+	const base = { bulkTier: 'High', actionsStatus: ENABLED, asUser: null, total: 12, searchQuery: '' };
 
 	it('shows when every condition holds', () => {
 		expect(showBulkBar(base)).toBe(true);
@@ -46,6 +46,18 @@ describe('showBulkBar', () => {
 
 	it('hides when the tier has no accounts', () => {
 		expect(showBulkBar({ ...base, total: 0 })).toBe(false);
+	});
+
+	// `total` reflects the search filter but `loadTierAccounts` (the bulk
+	// action itself) ignores it and always acts on the whole tier — the bar
+	// must hide under a search rather than preselect accounts the viewer
+	// never saw (#109 CodeRabbit R6).
+	it('hides while a search query narrows the list', () => {
+		expect(showBulkBar({ ...base, searchQuery: 'someuser' })).toBe(false);
+	});
+
+	it('shows again once the search query clears', () => {
+		expect(showBulkBar({ ...base, searchQuery: '' })).toBe(true);
 	});
 });
 
