@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8c0524ca924b2b2db40d0dfc473341a7f5255932",
+    "short_hash": "8c0524c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:54:42-07:00",
+    "message": "fix(315): PR #10 review round 1 - test coverage + resume=undo notice\n\nAdd tests for the NotConnectedError (409) and ActionsDisabledError (503)\napiFetch branches, following the existing sibling-branch test pattern.\n\nHandle ?resume=undo in ActionButtons.svelte: previously only mute/block\nwere recognized, leaving the user on a silent page after the consent\nround-trip for an undo. Surface a calm informational notice instead of\nauto-firing the undo (the round-trip does not carry which kind - mute or\nblock - was being undone, so re-firing on load would be unsafe).\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
     "hash": "78515227f4888f159d3e077434d71d71156a2ae1",
     "short_hash": "7851522",
     "author": "Bryan Guffey",

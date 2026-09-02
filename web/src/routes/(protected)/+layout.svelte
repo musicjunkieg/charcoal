@@ -79,6 +79,11 @@
 					class="nav-link"
 					class:active={$page.url.pathname === '/review'}
 				>Review</a>
+				<a
+					href="/actions{asUserSuffix}"
+					class="nav-link"
+					class:active={$page.url.pathname.startsWith('/actions')}
+				>Actions</a>
 				{#if identity?.is_admin}
 					<a
 						href="/admin"
