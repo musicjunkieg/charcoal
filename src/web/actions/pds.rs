@@ -4,8 +4,13 @@
 //! The only record this module ever creates is `app.bsky.graph.block` with
 //! `subject` + `createdAt` (the invariant, docs/self-protective-invariant.md);
 //! the only records it deletes are ones whose URI the caller stored.
-//! `app.bsky.graph.*` calls are proxied by the PDS to the AppView, which is
-//! why `getBlocks`/`getMutes`/`muteActor` are sent to the PDS base URL too.
+//! `app.bsky.graph.*` calls are sent to the PDS base URL too, for it to proxy
+//! to the AppView. Which AppView is NOT implicit: bsky.social fills in a
+//! default, but a PDS with none configured (every self-hosted reference PDS)
+//! answers 501 `MethodNotImplemented` unless the request names the service in
+//! an `atproto-proxy` header (#322). So every `app.bsky.*` call carries
+//! `atproto-proxy: <APPVIEW_DID>`, and the native `com.atproto.*` calls never
+//! do — they are served by the PDS itself.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,6 +18,26 @@ use atproto_identity::key::KeyData;
 use serde_json::{json, Value};
 
 use super::dpop_http::{send_dpop, DpopResponse};
+use super::scope::APPVIEW_DID;
+
+/// The header that tells a PDS which service to forward an XRPC call to.
+const PROXY_HEADER: &str = "atproto-proxy";
+
+/// Does the PDS proxy this method to the AppView (and so need the header)?
+/// The check is on the lexicon namespace, not a list of methods, so a new
+/// `app.bsky.*` call added later cannot silently ship without it.
+fn is_appview_method(nsid: &str) -> bool {
+    nsid.starts_with("app.bsky.")
+}
+
+/// Add `atproto-proxy` for AppView methods; leave PDS-native ones untouched.
+fn with_proxy(nsid: &str, r: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    if is_appview_method(nsid) {
+        r.header(PROXY_HEADER, APPVIEW_DID)
+    } else {
+        r
+    }
+}
 
 pub const BLOCK_COLLECTION: &str = "app.bsky.graph.block";
 /// applyWrites hard limit on the reference PDS.
@@ -208,7 +233,7 @@ impl PdsClient {
                     if let Some(c) = &c {
                         q.push(("cursor", c.clone()));
                     }
-                    r.query(&q)
+                    with_proxy(nsid, r).query(&q)
                 },
             )
             .await
@@ -239,7 +264,7 @@ impl PdsClient {
             "POST",
             &url,
             Some(&self.access_token),
-            |r| r.json(body),
+            |r| with_proxy(nsid, r).json(body),
         )
         .await
         .map_err(|e| PdsError::Transport(e.to_string()))?;

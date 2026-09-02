@@ -2049,13 +2049,14 @@ impl Database for PgDatabase {
         access_token_enc: &[u8],
         refresh_token_enc: &[u8],
         access_expires_at: i64,
+        scope: &str,
         expected_updated_at: &str,
         new_updated_at: &str,
     ) -> Result<bool> {
         let result = sqlx_core::query::query(
             "UPDATE oauth_sessions
              SET access_token_enc = $2, refresh_token_enc = $3, access_expires_at = $4,
-                 updated_at = $6
+                 scope = $7, updated_at = $6
              WHERE user_did = $1 AND updated_at = $5",
         )
         .bind(user_did)
@@ -2064,6 +2065,7 @@ impl Database for PgDatabase {
         .bind(access_expires_at)
         .bind(expected_updated_at)
         .bind(new_updated_at)
+        .bind(scope)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
@@ -2074,6 +2076,21 @@ impl Database for PgDatabase {
             .bind(user_did)
             .execute(&self.pool)
             .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn delete_oauth_session_if_unchanged(
+        &self,
+        user_did: &str,
+        expected_updated_at: &str,
+    ) -> Result<bool> {
+        let result = sqlx_core::query::query(
+            "DELETE FROM oauth_sessions WHERE user_did = $1 AND updated_at = $2",
+        )
+        .bind(user_did)
+        .bind(expected_updated_at)
+        .execute(&self.pool)
+        .await?;
         Ok(result.rows_affected() > 0)
     }
 

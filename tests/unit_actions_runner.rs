@@ -40,7 +40,10 @@ async fn harness() -> Harness {
                 access_token: "acc".into(),
                 token_type: "DPoP".into(),
                 refresh_token: Some("ref".into()),
-                scope: "atproto".into(),
+                // The runner loads sessions through the same usable-grant
+                // gate as production (#322), so the fixture must carry the
+                // real write grant, not a placeholder.
+                scope: charcoal::web::actions::scope::write_scope(),
                 expires_in: 3600,
                 sub: Some(ME.into()),
                 extra: Default::default(),

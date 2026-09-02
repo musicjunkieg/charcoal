@@ -6,14 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Mute/block failed with `getMutes: server error 501` on a self-hosted PDS
+  (#322). Two gaps behind one symptom. A PDS with no default AppView (every
+  self-hosted reference PDS; bsky.social fills one in) refuses `app.bsky.*`
+  calls that do not name the service in an `atproto-proxy` header, and
+  `PdsClient` never sent one — it now does on every `app.bsky.*` call and
+  never on `com.atproto.*`. And the PDS checks proxied *reads* against the
+  `rpc:` grant just as it does writes, so the consent scope now also asks for
+  `rpc:app.bsky.graph.getMutes` and `rpc:app.bsky.graph.getBlocks` (the
+  reconcile step needs both). Sessions stored under the original grant read
+  as not connected, so anyone who consented before this fix is asked once
+  more instead of watching every batch fail. The grant check itself got
+  stricter on review: an `rpc:` scope counts only for the AppView audience
+  (or `*`), the scope a token refresh reports is persisted with the rotated
+  tokens and a narrowed one disconnects the session, and a row written by
+  another replica during a lost refresh race is re-checked before use.
+  Every delete on that path is a compare-and-delete keyed on `updated_at`,
+  so a session replaced mid-refresh (a re-consent, or another replica) is
+  never removed on the strength of a stale read — it is reloaded and used.
+
 ### Added
 - Mute and block from Charcoal (#315): tier-wide and per-account mute/block,
   with undo, from the Accounts page. The tier-wide confirm sheet lists every
   account with a pre-checked box, its tier, and its top signal, so nothing
-  runs on a tier alone. Charcoal asks Bluesky for exactly three fine-grained
-  abilities (`repo:app.bsky.graph.block` create/delete,
-  `rpc:app.bsky.graph.muteActor`, `rpc:app.bsky.graph.unmuteActor`) on first
-  use — never `transition:generic`. Tokens are AES-256-GCM encrypted at rest
+  runs on a tier alone. Charcoal asks Bluesky for exactly the fine-grained
+  abilities it uses (`repo:app.bsky.graph.block` create/delete, and `rpc:`
+  for `muteActor`/`unmuteActor` plus the `getMutes`/`getBlocks` reads it
+  reconciles against — see #322) on first use — never `transition:generic`. Tokens are AES-256-GCM encrypted at rest
   under `CHARCOAL_TOKEN_KEY`; unset disables the feature. Every action is
   logged with the score and tier at the time, so a later drop to Watch shows
   as a note instead of vanishing. Nothing Charcoal writes to the PDS carries

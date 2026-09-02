@@ -9,6 +9,7 @@ use atproto_oauth::workflow::{OAuthClient, TokenResponse};
 use charcoal::config::Config;
 use charcoal::db::sqlite::SqliteDatabase;
 use charcoal::db::Database;
+use charcoal::web::actions::scope::write_scope;
 use charcoal::web::actions::session::{SessionError, SessionStore};
 use rusqlite::Connection;
 use wiremock::matchers::{body_string_contains, method, path};
@@ -36,11 +37,15 @@ fn oauth_client() -> OAuthClient {
 }
 
 fn tokens(access: &str, refresh: &str, expires_in: u32) -> TokenResponse {
+    tokens_with_scope(access, refresh, expires_in, &write_scope())
+}
+
+fn tokens_with_scope(access: &str, refresh: &str, expires_in: u32, scope: &str) -> TokenResponse {
     TokenResponse {
         access_token: access.to_string(),
         token_type: "DPoP".to_string(),
         refresh_token: Some(refresh.to_string()),
-        scope: "atproto repo:app.bsky.graph.block".to_string(),
+        scope: scope.to_string(),
         expires_in,
         sub: Some(DID.to_string()),
         extra: Default::default(),
@@ -129,7 +134,7 @@ async fn load_refreshes_when_expiring_and_persists_new_pair() {
         .and(body_string_contains("client_assertion_type=urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
-            "scope": "atproto", "expires_in": 3600, "sub": DID
+            "scope": write_scope(), "expires_in": 3600, "sub": DID
         })))
         .expect(1)
         .mount(&mock)
@@ -174,7 +179,7 @@ async fn concurrent_loads_refresh_exactly_once() {
                 .set_delay(std::time::Duration::from_millis(200))
                 .set_body_json(serde_json::json!({
                     "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
-                    "scope": "atproto", "expires_in": 3600, "sub": DID
+                    "scope": write_scope(), "expires_in": 3600, "sub": DID
                 })),
         )
         .expect(1)
@@ -362,7 +367,273 @@ async fn status_reports_scope_without_secrets() {
     .await
     .unwrap();
     let st = s.status(db.as_ref(), DID).await.unwrap().unwrap();
-    assert_eq!(st.scope, "atproto repo:app.bsky.graph.block");
+    assert_eq!(st.scope, write_scope());
     assert_eq!(st.pds_url, "https://pds.test");
     assert!(!st.connected_at.is_empty());
+}
+
+/// #322: a row stored under an older `write_scope()` (the #315 grant had no
+/// `rpc:` scopes for the reconcile reads) must read as NOT connected — from
+/// both `status` (so the UI offers consent again) and `load_for_write` (so
+/// the runner parks the batch as `not_connected` instead of failing it at
+/// the first proxied read with a 403).
+#[tokio::test]
+async fn row_with_insufficient_scope_reads_as_not_connected() {
+    let db = setup_db();
+    let s = store();
+    let key = generate_key(KeyType::P256Private).unwrap();
+    let pre_322 = "atproto repo:app.bsky.graph.block?action=create&action=delete \
+                   rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+                   rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview";
+    s.store(
+        db.as_ref(),
+        DID,
+        "https://pds.test",
+        &key,
+        &tokens_with_scope("acc1", "ref1", 3600, pre_322),
+    )
+    .await
+    .unwrap();
+
+    assert!(s.status(db.as_ref(), DID).await.unwrap().is_none());
+    let http = reqwest::Client::new();
+    let err = s
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "{err:?}");
+
+    // Re-consent overwrites the stale row and the DID is connected again.
+    s.store(
+        db.as_ref(),
+        DID,
+        "https://pds.test",
+        &key,
+        &tokens("acc2", "ref2", 3600),
+    )
+    .await
+    .unwrap();
+    assert!(s.status(db.as_ref(), DID).await.unwrap().is_some());
+}
+
+/// PR #110 review: the token endpoint reports the scope the rotated tokens
+/// carry. When a refresh comes back with a grant that no longer covers the
+/// writes (revoked or narrowed server-side), the session must be forgotten,
+/// not returned as connected — the runner would 403 on the first proxied
+/// call otherwise.
+#[tokio::test]
+async fn refresh_that_narrows_scope_disconnects() {
+    let db = setup_db();
+    let s = store();
+    let mock = mock_pds().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
+            "scope": "atproto", "expires_in": 3600, "sub": DID
+        })))
+        .mount(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let err = s
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+    assert!(db.get_oauth_session(DID).await.unwrap().is_none());
+}
+
+/// The scope the token endpoint reports on refresh is persisted with the
+/// rotated pair, so `status()` and later loads see the live grant rather
+/// than the one from the original consent.
+#[tokio::test]
+async fn refresh_persists_the_reported_scope() {
+    let db = setup_db();
+    let s = store();
+    let mock = mock_pds().await;
+    // Same grant, server-normalised into a different order.
+    let scope = write_scope();
+    let reordered = scope.split(' ').rev().collect::<Vec<_>>().join(" ");
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
+            "scope": reordered, "expires_in": 3600, "sub": DID
+        })))
+        .mount(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let ws = s
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap();
+    assert_eq!(ws.access_token, "acc2");
+    assert_eq!(ws.scope, reordered);
+    let st = s.status(db.as_ref(), DID).await.unwrap().unwrap();
+    assert_eq!(st.scope, reordered);
+}
+
+/// A lost refresh race re-reads the row the other writer left. If that row
+/// carries an insufficient grant it must NOT be handed back as a usable
+/// session. Simulated with a second store (a second replica) that replaces
+/// the row while the first store's refresh call is in flight.
+#[tokio::test]
+async fn lost_race_does_not_return_an_insufficient_replacement_row() {
+    let db = setup_db();
+    let s1 = Arc::new(store());
+    let s2 = store();
+    let mock = mock_pds().await;
+    // Scoped + expected, so the test can wait until the refresh request has
+    // actually reached the endpoint (the hit is recorded on arrival, before
+    // the response delay) rather than guessing with a sleep.
+    let token_call = Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(serde_json::json!({ "error": "invalid_grant" }))
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .expect(1)
+        .mount_as_scoped(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s1.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let loader = {
+        let s1 = Arc::clone(&s1);
+        let db = Arc::clone(&db);
+        let http = http.clone();
+        tokio::spawn(async move {
+            s1.load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+                .await
+        })
+    };
+    // Once s1 is waiting on the token endpoint, the other replica writes a
+    // row under the pre-#322 grant (the exact shape a stale replica would
+    // carry).
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        token_call.wait_until_satisfied(),
+    )
+    .await
+    .expect("refresh request never reached the token endpoint");
+    s2.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens_with_scope(
+            "acc-stale",
+            "ref-stale",
+            3600,
+            "atproto repo:app.bsky.graph.block?action=create&action=delete \
+             rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+             rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview",
+        ),
+    )
+    .await
+    .unwrap();
+
+    let err = loader.await.unwrap().unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+}
+
+/// A refresh that comes back narrowed forgets the session — but only the
+/// row it read. If the person re-consented (or another replica refreshed)
+/// while that request was in flight, the newer row is the live session and
+/// must survive; the loader hands it back instead of deleting it.
+#[tokio::test]
+async fn narrowed_refresh_does_not_delete_a_newer_session() {
+    let db = setup_db();
+    let s1 = Arc::new(store());
+    let s2 = store();
+    let mock = mock_pds().await;
+    let token_call = Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({
+                    "access_token": "acc-narrow", "token_type": "DPoP",
+                    "refresh_token": "ref-narrow", "scope": "atproto",
+                    "expires_in": 3600, "sub": DID
+                }))
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .expect(1)
+        .mount_as_scoped(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s1.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let loader = {
+        let s1 = Arc::clone(&s1);
+        let db = Arc::clone(&db);
+        let http = http.clone();
+        tokio::spawn(async move {
+            s1.load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+                .await
+        })
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        token_call.wait_until_satisfied(),
+    )
+    .await
+    .expect("refresh request never reached the token endpoint");
+    // Re-consent lands while the narrowed refresh is still in flight.
+    s2.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc-reconsent", "ref-reconsent", 3600),
+    )
+    .await
+    .unwrap();
+
+    let ws = loader.await.unwrap().unwrap();
+    assert_eq!(ws.access_token, "acc-reconsent");
+    assert_eq!(ws.scope, write_scope());
+    let st = s1.status(db.as_ref(), DID).await.unwrap();
+    assert!(st.is_some(), "the re-consented session must survive");
 }

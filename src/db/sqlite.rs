@@ -546,6 +546,7 @@ impl Database for SqliteDatabase {
         access_token_enc: &[u8],
         refresh_token_enc: &[u8],
         access_expires_at: i64,
+        scope: &str,
         expected_updated_at: &str,
         new_updated_at: &str,
     ) -> Result<bool> {
@@ -556,6 +557,7 @@ impl Database for SqliteDatabase {
             access_token_enc,
             refresh_token_enc,
             access_expires_at,
+            scope,
             expected_updated_at,
             new_updated_at,
         )
@@ -564,6 +566,15 @@ impl Database for SqliteDatabase {
     async fn delete_oauth_session(&self, user_did: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
         super::queries::delete_oauth_session(&conn, user_did)
+    }
+
+    async fn delete_oauth_session_if_unchanged(
+        &self,
+        user_did: &str,
+        expected_updated_at: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_oauth_session_if_unchanged(&conn, user_did, expected_updated_at)
     }
 
     // --- Action batches (#315) ---

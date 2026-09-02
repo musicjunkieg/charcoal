@@ -672,19 +672,33 @@ pub trait Database: Send + Sync {
     /// row's `updated_at` still equals `expected_updated_at`, and returns
     /// whether it did. AT Protocol refresh tokens are single-use, so two
     /// concurrent refreshes must never both persist — the loser sees `false`
-    /// and re-reads the winner's tokens (`web::actions::session`).
+    /// and re-reads the winner's tokens (`web::actions::session`). `scope`
+    /// is the grant the token endpoint reported with the rotated pair; it
+    /// travels with the tokens so the row never describes an older grant.
+    #[allow(clippy::too_many_arguments)]
     async fn update_oauth_tokens(
         &self,
         user_did: &str,
         access_token_enc: &[u8],
         refresh_token_enc: &[u8],
         access_expires_at: i64,
+        scope: &str,
         expected_updated_at: &str,
         new_updated_at: &str,
     ) -> Result<bool>;
 
     /// Returns whether a row existed.
     async fn delete_oauth_session(&self, user_did: &str) -> Result<bool>;
+
+    /// Compare-and-delete: remove the row only if its `updated_at` still
+    /// equals `expected_updated_at`. The refresh path uses this so a session
+    /// replaced mid-request (re-consent, another replica) is never deleted on
+    /// the strength of a stale read. Returns whether a row was deleted.
+    async fn delete_oauth_session_if_unchanged(
+        &self,
+        user_did: &str,
+        expected_updated_at: &str,
+    ) -> Result<bool>;
 
     // --- Action batches (#315) ---
 

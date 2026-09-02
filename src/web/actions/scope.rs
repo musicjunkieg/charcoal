@@ -4,12 +4,20 @@
 //! and never used as a fallback: least privilege is the whole point of
 //! running a confidential client.
 
-/// The Bluesky AppView service DID, URL-encoded for the `aud` parameter.
-/// `#` must be percent-encoded inside a scope string.
+/// The Bluesky AppView service DID. This is both the `atproto-proxy` header
+/// value on every `app.bsky.*` call (`pds.rs`) and the audience every `rpc:`
+/// scope below is granted for — the PDS checks that the two agree on each
+/// proxied request, so they are derived from one constant on purpose (#322).
+pub const APPVIEW_DID: &str = "did:web:api.bsky.app#bsky_appview";
+
+/// `APPVIEW_DID` with `#` percent-encoded, as the scope-string syntax needs.
 const APPVIEW_AUD: &str = "did:web:api.bsky.app%23bsky_appview";
 
 /// Scope requested on the write-consent round-trip: create/delete on the
-/// user's own block records, plus the mute/unmute RPCs proxied to the AppView.
+/// user's own block records, plus the four `app.bsky.graph.*` RPCs proxied to
+/// the AppView. The two reads (`getMutes`/`getBlocks`) are what the runner
+/// reconciles against before writing; the PDS checks proxied *reads* against
+/// the `rpc:` grant just as it does writes (#322).
 ///
 /// Spike note (spec §3.2): if a live Bluesky PDS answers `invalid_scope` to
 /// this exact string, the first thing to try is `aud=*` in place of the
@@ -18,7 +26,9 @@ pub fn write_scope() -> String {
     format!(
         "atproto repo:app.bsky.graph.block?action=create&action=delete \
          rpc:app.bsky.graph.muteActor?aud={APPVIEW_AUD} \
-         rpc:app.bsky.graph.unmuteActor?aud={APPVIEW_AUD}"
+         rpc:app.bsky.graph.unmuteActor?aud={APPVIEW_AUD} \
+         rpc:app.bsky.graph.getMutes?aud={APPVIEW_AUD} \
+         rpc:app.bsky.graph.getBlocks?aud={APPVIEW_AUD}"
     )
 }
 
@@ -29,9 +39,10 @@ pub fn client_scope() -> String {
 }
 
 /// Did the authorization server grant what we asked for? Servers may reorder
-/// or normalise the scope string. The mute/unmute RPC scopes carry only an
-/// `aud` parameter, so a prefix check is still safe for those. The block repo
-/// scope is different: a naive prefix check on `repo:app.bsky.graph.block`
+/// or normalise the scope string, so every scope is parsed and inspected
+/// rather than string-matched. The RPC scopes must name the method for an
+/// audience the PDS accepts (see `has_rpc` below). The block repo scope
+/// needs its actions checked: a naive prefix check on `repo:app.bsky.graph.block`
 /// would also accept a *downgraded* grant such as
 /// `repo:app.bsky.graph.block?action=create` (create only, no delete) — the
 /// first undo would then fail at the PDS with an authorization error instead
@@ -45,12 +56,34 @@ pub fn client_scope() -> String {
 /// unqualified repo scope is the maximal grant for that collection. That is
 /// a superset of create+delete, so it satisfies this check.
 pub fn scope_grants_write(granted: &str) -> bool {
-    use atproto_oauth::scopes::{RepoAction, RepoCollection, Scope};
-
-    let has = |prefix: &str| granted.split_whitespace().any(|s| s.starts_with(prefix));
+    use atproto_oauth::scopes::{RepoAction, RepoCollection, RpcAudience, RpcLexicon, Scope};
 
     let Ok(scopes) = Scope::parse_multiple(granted) else {
         return false;
+    };
+
+    // An `rpc:` grant counts only when it names the method AND an audience
+    // the PDS will accept for the proxied call: the AppView itself, or the
+    // wildcard. A grant for some other service passes a name-prefix check
+    // but fails the PDS's `assertRpc` with a 403 (PR #110 review). The
+    // vendored parser keeps `aud` as written (`%23` stays encoded), while a
+    // normalising server may decode it, so either spelling of the AppView
+    // DID is accepted.
+    let has_rpc = |method: &str| {
+        scopes.iter().any(|scope| match scope {
+            Scope::Rpc(rpc) => {
+                let names_method = rpc.lxm.iter().any(|l| match l {
+                    RpcLexicon::All => true,
+                    RpcLexicon::Nsid(nsid) => nsid == method,
+                });
+                let for_appview = rpc.aud.iter().any(|a| match a {
+                    RpcAudience::All => true,
+                    RpcAudience::Did(did) => did == APPVIEW_DID || did == APPVIEW_AUD,
+                });
+                names_method && for_appview
+            }
+            _ => false,
+        })
     };
 
     let block_scope_has_create_and_delete = scopes.iter().any(|scope| match scope {
@@ -66,9 +99,14 @@ pub fn scope_grants_write(granted: &str) -> bool {
         _ => false,
     });
 
+    // Also the gate that retires sessions stored under an older
+    // `write_scope()`: `SessionStore` reads a row that fails this check as
+    // "not connected", so the person consents again once (#322).
     block_scope_has_create_and_delete
-        && has("rpc:app.bsky.graph.muteActor")
-        && has("rpc:app.bsky.graph.unmuteActor")
+        && has_rpc("app.bsky.graph.muteActor")
+        && has_rpc("app.bsky.graph.unmuteActor")
+        && has_rpc("app.bsky.graph.getMutes")
+        && has_rpc("app.bsky.graph.getBlocks")
 }
 
 #[cfg(test)]
@@ -76,16 +114,24 @@ mod tests {
     use super::*;
     use atproto_oauth::scopes::Scope;
 
+    /// Every RPC grant the PDS will check, for the AppView audience.
+    const ALL_RPC: &str = "rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+         rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview \
+         rpc:app.bsky.graph.getMutes?aud=did:web:api.bsky.app%23bsky_appview \
+         rpc:app.bsky.graph.getBlocks?aud=did:web:api.bsky.app%23bsky_appview";
+
     #[test]
     fn write_scope_parses_as_granular_scopes() {
         let scopes = Scope::parse_multiple(&write_scope()).expect("scope string must parse");
-        // atproto + block repo + mute rpc + unmute rpc
-        assert_eq!(scopes.len(), 4);
+        // atproto + block repo + mute/unmute rpc + getMutes/getBlocks rpc
+        assert_eq!(scopes.len(), 6);
         let s = write_scope();
         assert!(s.starts_with("atproto "));
         assert!(s.contains("repo:app.bsky.graph.block?action=create&action=delete"));
         assert!(s.contains("rpc:app.bsky.graph.muteActor?aud="));
         assert!(s.contains("rpc:app.bsky.graph.unmuteActor?aud="));
+        assert!(s.contains("rpc:app.bsky.graph.getMutes?aud="));
+        assert!(s.contains("rpc:app.bsky.graph.getBlocks?aud="));
         assert!(!s.contains("transition:generic"));
     }
 
@@ -113,9 +159,7 @@ mod tests {
         assert!(!scope_grants_write(
             "atproto repo:app.bsky.graph.block?action=create&action=delete"
         ));
-        assert!(!scope_grants_write(
-            "atproto rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
-        ));
+        assert!(!scope_grants_write(&format!("atproto {ALL_RPC}")));
         assert!(!scope_grants_write("transition:generic"));
     }
 
@@ -139,29 +183,101 @@ mod tests {
     /// here.
     #[test]
     fn scope_grants_write_rejects_create_only_block_scope() {
-        assert!(!scope_grants_write(
-            "atproto repo:app.bsky.graph.block?action=create \
-             rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
-        ));
+        assert!(!scope_grants_write(&format!(
+            "atproto repo:app.bsky.graph.block?action=create {ALL_RPC}"
+        )));
     }
 
     /// The mirror case: delete-only, no create, must also fail.
     #[test]
     fn scope_grants_write_rejects_delete_only_block_scope() {
+        assert!(!scope_grants_write(&format!(
+            "atproto repo:app.bsky.graph.block?action=delete {ALL_RPC}"
+        )));
+    }
+
+    /// A full block grant with any one RPC missing must still fail — the PDS
+    /// checks every proxied call (reads included, #322) against the grant.
+    #[test]
+    fn scope_grants_write_rejects_any_missing_rpc() {
+        let block = "repo:app.bsky.graph.block?action=create&action=delete";
+        for missing in [
+            "rpc:app.bsky.graph.muteActor",
+            "rpc:app.bsky.graph.unmuteActor",
+            "rpc:app.bsky.graph.getMutes",
+            "rpc:app.bsky.graph.getBlocks",
+        ] {
+            let rest: Vec<&str> = ALL_RPC
+                .split_whitespace()
+                .filter(|s| !s.starts_with(missing))
+                .collect();
+            let granted = format!("atproto {block} {}", rest.join(" "));
+            assert!(
+                !scope_grants_write(&granted),
+                "should reject without {missing}"
+            );
+        }
+    }
+
+    /// PR #110 review: an RPC grant for the wrong audience is not a grant
+    /// the PDS will honour on a call proxied to the AppView — it fails
+    /// `assertRpc` with a 403 even though the method name matches. Such a
+    /// row must read as not connected, like any other insufficient grant.
+    #[test]
+    fn scope_grants_write_rejects_rpc_for_another_audience() {
+        let block = "repo:app.bsky.graph.block?action=create&action=delete";
+        let other = ALL_RPC.replace(
+            "did:web:api.bsky.app%23bsky_appview",
+            "did:web:other.example",
+        );
+        assert!(!scope_grants_write(&format!("atproto {block} {other}")));
+        // One wrong audience among four is still a rejection.
+        let one_wrong = ALL_RPC.replacen(
+            "getMutes?aud=did:web:api.bsky.app%23bsky_appview",
+            "getMutes?aud=did:web:other.example",
+            1,
+        );
+        assert!(!scope_grants_write(&format!("atproto {block} {one_wrong}")));
+    }
+
+    /// The wildcard audience (`aud=*`, the spec §3.2 fallback) covers the
+    /// AppView, so a server that normalises to it still grants the writes;
+    /// so does one that hands the DID back percent-decoded.
+    #[test]
+    fn scope_grants_write_accepts_wildcard_and_decoded_audience() {
+        let block = "repo:app.bsky.graph.block?action=create&action=delete";
+        let wildcard = ALL_RPC.replace("did:web:api.bsky.app%23bsky_appview", "*");
+        assert!(scope_grants_write(&format!("atproto {block} {wildcard}")));
+        let decoded = ALL_RPC.replace("%23", "#");
+        assert!(scope_grants_write(&format!("atproto {block} {decoded}")));
+    }
+
+    /// The write scope shipped in #315 (mute/unmute only) must now read as an
+    /// insufficient grant, so sessions stored under it are re-consented once
+    /// instead of failing every batch at the reconcile read (#322).
+    #[test]
+    fn scope_grants_write_rejects_the_pre_322_grant() {
         assert!(!scope_grants_write(
-            "atproto repo:app.bsky.graph.block?action=delete \
-             rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
+            "atproto repo:app.bsky.graph.block?action=create&action=delete \
+             rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+             rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview"
         ));
     }
 
-    /// A full block grant with the unmute RPC missing must still fail — all
-    /// three resources are required.
+    /// The `atproto-proxy` header value and the `aud` in every `rpc:` scope
+    /// must name the same service, or the PDS's `assertRpc` check fails even
+    /// though consent succeeded. `#` is literal in the header and
+    /// percent-encoded in the scope string.
     #[test]
-    fn scope_grants_write_rejects_missing_unmute() {
-        assert!(!scope_grants_write(
-            "atproto repo:app.bsky.graph.block?action=create&action=delete \
-             rpc:app.bsky.graph.muteActor?aud=x"
-        ));
+    fn appview_did_and_scope_aud_name_the_same_service() {
+        assert_eq!(APPVIEW_DID, "did:web:api.bsky.app#bsky_appview");
+        let encoded = APPVIEW_DID.replace('#', "%23");
+        for part in write_scope()
+            .split_whitespace()
+            .filter(|s| s.starts_with("rpc:"))
+        {
+            assert!(part.ends_with(&format!("?aud={encoded}")), "{part}");
+        }
     }
 
     /// `transition:generic` is never an acceptable substitute for the
@@ -177,9 +293,8 @@ mod tests {
     /// `scope_grants_write`), so it satisfies the create+delete requirement.
     #[test]
     fn scope_grants_write_accepts_bare_block_scope_as_full_grant() {
-        assert!(scope_grants_write(
-            "atproto repo:app.bsky.graph.block \
-             rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
-        ));
+        assert!(scope_grants_write(&format!(
+            "atproto repo:app.bsky.graph.block {ALL_RPC}"
+        )));
     }
 }

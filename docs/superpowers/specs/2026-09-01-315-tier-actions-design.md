@@ -80,6 +80,28 @@ persisted, and never refreshed. That slot is **removed** by this work.
   `pending_oauth` — so after consent the user lands back on the confirm sheet
   they started from.
 
+**Implementation notes (from the staging spike, 2026-09-02, #322):**
+
+- The reconcile reads (`app.bsky.graph.getMutes` / `getBlocks`) are proxied
+  calls too, and the PDS checks every proxied call — reads included — against
+  the `rpc:` grant (`permissions.assertRpc({lxm, aud})` in the reference
+  PDS's `pipethrough.ts`). So the write scope is five abilities, not three:
+  the block collection plus `rpc:` for `muteActor`, `unmuteActor`, `getMutes`
+  and `getBlocks`, every one with `aud=did:web:api.bsky.app%23bsky_appview`.
+- Which AppView a PDS proxies to is **not implicit**. bsky.social fills in a
+  default; a self-hosted reference PDS with no AppView configured (Bryan's
+  `airlock.ltd`) answers 501 `MethodNotImplemented` to any `app.bsky.*` call
+  that does not carry `atproto-proxy: did:web:api.bsky.app#bsky_appview`.
+  `PdsClient` sends that header on every `app.bsky.*` call and never on
+  `com.atproto.*` (those are served by the PDS itself). The header value and
+  the scope `aud` derive from one constant (`scope::APPVIEW_DID`) because the
+  PDS requires them to agree.
+- A stored session whose scope no longer satisfies `scope_grants_write()`
+  (rows written under the original three-ability grant) reads as *not
+  connected* from `SessionStore::status` and `load_for_write`, so the person
+  is sent through consent once more rather than failing every batch at the
+  first read.
+
 ### 3.3 When the PDS rejects granular scopes
 
 If authorization fails with `invalid_scope` (expected on some older self-hosted

@@ -1891,19 +1891,21 @@ pub fn upsert_oauth_session(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_oauth_tokens(
     conn: &Connection,
     user_did: &str,
     access_token_enc: &[u8],
     refresh_token_enc: &[u8],
     access_expires_at: i64,
+    scope: &str,
     expected_updated_at: &str,
     new_updated_at: &str,
 ) -> Result<bool> {
     let n = conn.execute(
         "UPDATE oauth_sessions
          SET access_token_enc = ?2, refresh_token_enc = ?3, access_expires_at = ?4,
-             updated_at = ?6
+             scope = ?7, updated_at = ?6
          WHERE user_did = ?1 AND updated_at = ?5",
         rusqlite::params![
             user_did,
@@ -1912,6 +1914,7 @@ pub fn update_oauth_tokens(
             access_expires_at,
             expected_updated_at,
             new_updated_at,
+            scope,
         ],
     )?;
     Ok(n > 0)
@@ -1921,6 +1924,20 @@ pub fn delete_oauth_session(conn: &Connection, user_did: &str) -> Result<bool> {
     let n = conn.execute(
         "DELETE FROM oauth_sessions WHERE user_did = ?1",
         rusqlite::params![user_did],
+    )?;
+    Ok(n > 0)
+}
+
+/// Delete only the row version the caller read (`updated_at` match). A row
+/// replaced under the caller is left alone and `false` is returned.
+pub fn delete_oauth_session_if_unchanged(
+    conn: &Connection,
+    user_did: &str,
+    expected_updated_at: &str,
+) -> Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM oauth_sessions WHERE user_did = ?1 AND updated_at = ?2",
+        rusqlite::params![user_did, expected_updated_at],
     )?;
     Ok(n > 0)
 }
