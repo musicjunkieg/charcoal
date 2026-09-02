@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e7d0d1437ee4a81a99744b47293f932cf990b5cf",
+    "short_hash": "e7d0d14",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T18:33:44-07:00",
+    "message": "docs(315): implementation plan for tier-based mute/block\n\n13 TDD tasks: scope + crypto + schema + DB (both backends) + AppState +\nSessionStore + PDS client/runner + HTTP endpoints with write-consent OAuth\nbranch + frontend client/buttons/log pages/bulk sheet + staging spike.\nSelf-reviewed against the spec (coverage, placeholders, type consistency).",
+    "files_changed": 3
+  },
+  {
     "hash": "6736d5d4076b29e4685e7e0fdd11f2f5348546f6",
     "short_hash": "6736d5d",
     "author": "Bryan Guffey",

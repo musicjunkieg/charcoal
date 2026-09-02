@@ -6478,6 +6478,28 @@
       "created_at": "2026-09-01T17:30:04.769413-07:00",
       "updated_at": "2026-09-01T17:30:04.769413-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"6736d5d\",\"confidence\":95}"
+    },
+    {
+      "id": 599,
+      "change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "node_type": "action",
+      "title": "Write #315 implementation plan: 13 TDD tasks (scope/crypto/schema/DB/AppState/SessionStore/runner/endpoints+consent branch/frontend/bulk/spike) to docs/superpowers/plans/2026-09-01-315-tier-actions.md",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T18:34:01.876059-07:00",
+      "updated_at": "2026-09-01T18:34:01.876059-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"e7d0d14\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-09-01-315-tier-actions.md\"]}"
+    },
+    {
+      "id": 600,
+      "change_id": "bc54d176-9315-446a-a1f1-89d736fefb58",
+      "node_type": "outcome",
+      "title": "Plan committed e7d0d14 and pushed to feat/315-tier-actions (ls-remote verified); self-review fixed two cross-task mismatches (AccountScore Option fields; parked batch is queued+not_connected, not failed)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T18:34:01.889801-07:00",
+      "updated_at": "2026-09-01T18:34:01.889801-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"e7d0d14\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -13003,6 +13025,61 @@
       "weight": 1.0,
       "rationale": "Spec written and pushed",
       "created_at": "2026-09-01T17:30:04.776376-07:00"
+    },
+    {
+      "id": 604,
+      "from_node_id": 598,
+      "to_node_id": 599,
+      "from_change_id": "1d044a81-c9a1-42eb-b092-26055e73eaa9",
+      "to_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approved spec drives the implementation plan",
+      "created_at": "2026-09-01T18:34:05.814444-07:00"
+    },
+    {
+      "id": 605,
+      "from_node_id": 599,
+      "to_node_id": 600,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "bc54d176-9315-446a-a1f1-89d736fefb58",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan written, self-reviewed, committed, pushed",
+      "created_at": "2026-09-01T18:34:05.821464-07:00"
+    },
+    {
+      "id": 606,
+      "from_node_id": 594,
+      "to_node_id": 599,
+      "from_change_id": "870ea4f0-ab88-4435-853b-7fc68854efb3",
+      "to_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Engine decisions encoded as Tasks 3-8",
+      "created_at": "2026-09-01T18:34:05.827877-07:00"
+    },
+    {
+      "id": 607,
+      "from_node_id": 595,
+      "to_node_id": 599,
+      "from_change_id": "08efc948-9728-45df-9a3d-c5d9222d1f5b",
+      "to_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "UI decisions encoded as Tasks 10-12",
+      "created_at": "2026-09-01T18:34:05.834561-07:00"
+    },
+    {
+      "id": 608,
+      "from_node_id": 596,
+      "to_node_id": 599,
+      "from_change_id": "e61b9f89-d5d2-41b7-9508-294d1f731c7d",
+      "to_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Failure/security/testing decisions encoded across Tasks 7-9, 13",
+      "created_at": "2026-09-01T18:34:05.840634-07:00"
     }
   ],
   "documents": [
