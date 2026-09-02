@@ -165,7 +165,7 @@ fn build_app_with_admins_state_and_db(
         sessions,
         action_wake: None,
         signing_key,
-        http: reqwest::Client::new(),
+        http: crate::web::outbound_http().expect("outbound HTTP client should build in tests"),
         typeahead_limiter: crate::web::handlers::typeahead::build_limiter(),
         models,
         // No admitter behind a test AppState — nothing to wake.
@@ -201,7 +201,7 @@ pub fn build_test_app_actions_disabled() -> Option<(axum::Router, Arc<dyn crate:
         sessions: None,
         action_wake: None,
         signing_key,
-        http: reqwest::Client::new(),
+        http: crate::web::outbound_http().expect("outbound HTTP client should build in tests"),
         typeahead_limiter: crate::web::handlers::typeahead::build_limiter(),
         models,
         scan_wake: None,

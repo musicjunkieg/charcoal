@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2b48b3beb4fdbdf4218b2e19edb9121b1a12a13e",
+    "short_hash": "2b48b3b",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T06:17:57-07:00",
+    "message": "fix(315): allow result_large_err module-wide for Response-typed helpers\n\nClippy 1.98 (CI) extended the lint to async fn; local 1.94 never saw it.\nThe Response is what the handler returns either way, so boxing only adds\nan indirection. Hoists the existing per-fn allow in handlers/actions.rs to\nthe module and adds one to begin_oauth (introduced on this branch).",
+    "files_changed": 4
+  },
+  {
     "hash": "9864b01726eb0a8154b9047fd1db10e69820e6be",
     "short_hash": "9864b01",
     "author": "Bryan Guffey",

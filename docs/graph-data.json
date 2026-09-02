@@ -7204,6 +7204,28 @@
       "created_at": "2026-09-02T06:03:28.575811-07:00",
       "updated_at": "2026-09-02T06:03:28.575811-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"9864b01\",\"confidence\":90}"
+    },
+    {
+      "id": 665,
+      "change_id": "bb7d8327-7ff7-417f-be58-61ad20aa56af",
+      "node_type": "action",
+      "title": "Fix result_large_err CI failure (2b48b3b) and dispatch CodeRabbit round-1 fixer for R1-R6 (timeout, page-cap error, pg test DIDs, drift copy, null-batch notice, bulk bar under search)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T06:19:00.538884-07:00",
+      "updated_at": "2026-09-02T06:19:00.538884-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"2b48b3b\",\"confidence\":85}"
+    },
+    {
+      "id": 666,
+      "change_id": "3a734e07-b8b8-43fa-b6bb-f202c26b9251",
+      "node_type": "action",
+      "title": "PR #109 CodeRabbit round 1 fixes R1-R6",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T06:19:08.786782-07:00",
+      "updated_at": "2026-09-02T06:19:08.786782-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"2b48b3b\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -14554,6 +14576,28 @@
       "weight": 1.0,
       "rationale": "merge-ready verdict → PR",
       "created_at": "2026-09-02T06:03:28.584335-07:00"
+    },
+    {
+      "id": 679,
+      "from_node_id": 664,
+      "to_node_id": 665,
+      "from_change_id": "e30496cf-881a-4a43-aeda-8cc4287a7895",
+      "to_change_id": "bb7d8327-7ff7-417f-be58-61ad20aa56af",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CI red + CodeRabbit round 1 on PR #109",
+      "created_at": "2026-09-02T06:19:00.545725-07:00"
+    },
+    {
+      "id": 680,
+      "from_node_id": 665,
+      "to_node_id": 666,
+      "from_change_id": "bb7d8327-7ff7-417f-be58-61ad20aa56af",
+      "to_change_id": "3a734e07-b8b8-43fa-b6bb-f202c26b9251",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review round 1",
+      "created_at": "2026-09-02T06:19:13.240092-07:00"
     }
   ],
   "documents": [

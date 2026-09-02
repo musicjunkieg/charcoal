@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
@@ -36,6 +37,24 @@ pub mod typeahead;
 // web/build/ must exist before `cargo build --features web` runs.
 // Run `cd web && npm ci && npm run build` first.
 static ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/build");
+
+/// Bounds every outbound OAuth/PDS call made through `AppState::http` — the
+/// connect/disconnect handlers, `SessionStore`, the action runner's
+/// `dpop_http::send_once`, and `session.rs` discovery/revocation requests.
+/// A hung PDS or authorization server must not hang a request handler
+/// forever. Mirrors `src/bluesky/client.rs::REQUEST_TIMEOUT`.
+const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build the shared outbound HTTP client used for OAuth/PDS calls.
+///
+/// Single source of truth for the client-level timeout so production and
+/// tests never drift (#315 CodeRabbit R1).
+pub(crate) fn outbound_http() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(OUTBOUND_HTTP_TIMEOUT)
+        .build()
+        .context("building the outbound HTTP client")
+}
 
 /// Shared application state threaded through all Axum handlers.
 #[derive(Clone)]
@@ -139,7 +158,7 @@ pub async fn run_server(
         sessions,
         action_wake: None,
         signing_key,
-        http: reqwest::Client::new(),
+        http: outbound_http().context("building shared outbound HTTP client")?,
         typeahead_limiter: handlers::typeahead::build_limiter(),
         models,
         scan_wake: None,
