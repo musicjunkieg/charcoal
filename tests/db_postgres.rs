@@ -1988,6 +1988,21 @@ async fn test_pg_oauth_session_parity() {
     assert_eq!(got.updated_at, "t3");
     assert_eq!(got.dpop_key_enc, vec![7, 8, 9]);
 
+    // Compare-and-delete: a stale expectation leaves the row alone.
+    assert!(!db
+        .delete_oauth_session_if_unchanged(OAUTH_DID, "t2")
+        .await
+        .unwrap());
+    assert!(db.get_oauth_session(OAUTH_DID).await.unwrap().is_some());
+    assert!(db
+        .delete_oauth_session_if_unchanged(OAUTH_DID, "t3")
+        .await
+        .unwrap());
+    assert!(db.get_oauth_session(OAUTH_DID).await.unwrap().is_none());
+
+    db.upsert_oauth_session(&pg_session_row(OAUTH_DID, "t4"))
+        .await
+        .unwrap();
     assert!(db.delete_oauth_session(OAUTH_DID).await.unwrap());
     assert!(!db.delete_oauth_session(OAUTH_DID).await.unwrap());
     delete_actions_rows(&url, OAUTH_DID).await;

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0e9e8e8e72e8e4681b4602f880292b0327a83d7b",
+    "short_hash": "0e9e8e8",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T13:42:56-07:00",
+    "message": "fix(322): PR #110 review round 1 - rpc audience check, refresh scope invariant\n\nscope_grants_write now parses each rpc: scope and requires the AppView\naudience (or *) rather than prefix-matching the method name, so a grant\nfor another service no longer reads as connected. Both %23-encoded and\ndecoded audience spellings are accepted because the vendored parser does\nnot percent-decode.\n\nThe scope a token refresh reports is checked before the rotated pair is\npersisted - a narrowed grant deletes the row and disconnects - and is\nwritten with the tokens (update_oauth_tokens gains a scope parameter on\nboth backends). A replacement row seen after a lost refresh race is\nre-checked with usable() before use.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 12
+  },
+  {
     "hash": "1b925851be2bcfe477bf6e84c6883459b633d9d1",
     "short_hash": "1b92585",
     "author": "Bryan Guffey",

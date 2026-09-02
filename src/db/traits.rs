@@ -690,6 +690,16 @@ pub trait Database: Send + Sync {
     /// Returns whether a row existed.
     async fn delete_oauth_session(&self, user_did: &str) -> Result<bool>;
 
+    /// Compare-and-delete: remove the row only if its `updated_at` still
+    /// equals `expected_updated_at`. The refresh path uses this so a session
+    /// replaced mid-request (re-consent, another replica) is never deleted on
+    /// the strength of a stale read. Returns whether a row was deleted.
+    async fn delete_oauth_session_if_unchanged(
+        &self,
+        user_did: &str,
+        expected_updated_at: &str,
+    ) -> Result<bool>;
+
     // --- Action batches (#315) ---
 
     /// One transaction: the batch (`queued`, `requested = rows.len()`) and

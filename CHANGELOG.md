@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (or `*`), the scope a token refresh reports is persisted with the rotated
   tokens and a narrowed one disconnects the session, and a row written by
   another replica during a lost refresh race is re-checked before use.
+  Every delete on that path is a compare-and-delete keyed on `updated_at`,
+  so a session replaced mid-refresh (a re-consent, or another replica) is
+  never removed on the strength of a stale read — it is reloaded and used.
 
 ### Added
 - Mute and block from Charcoal (#315): tier-wide and per-account mute/block,

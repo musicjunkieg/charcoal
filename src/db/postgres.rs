@@ -2079,6 +2079,21 @@ impl Database for PgDatabase {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn delete_oauth_session_if_unchanged(
+        &self,
+        user_did: &str,
+        expected_updated_at: &str,
+    ) -> Result<bool> {
+        let result = sqlx_core::query::query(
+            "DELETE FROM oauth_sessions WHERE user_did = $1 AND updated_at = $2",
+        )
+        .bind(user_did)
+        .bind(expected_updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     // --- Action batches (#315) ---
 
     async fn create_action_batch(

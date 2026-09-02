@@ -505,14 +505,18 @@ async fn lost_race_does_not_return_an_insufficient_replacement_row() {
     let s1 = Arc::new(store());
     let s2 = store();
     let mock = mock_pds().await;
-    Mock::given(method("POST"))
+    // Scoped + expected, so the test can wait until the refresh request has
+    // actually reached the endpoint (the hit is recorded on arrival, before
+    // the response delay) rather than guessing with a sleep.
+    let token_call = Mock::given(method("POST"))
         .and(path("/token"))
         .respond_with(
             ResponseTemplate::new(400)
                 .set_body_json(serde_json::json!({ "error": "invalid_grant" }))
                 .set_delay(std::time::Duration::from_millis(500)),
         )
-        .mount(&mock)
+        .expect(1)
+        .mount_as_scoped(&mock)
         .await;
     let key = generate_key(KeyType::P256Private).unwrap();
     s1.store(
@@ -535,9 +539,15 @@ async fn lost_race_does_not_return_an_insufficient_replacement_row() {
                 .await
         })
     };
-    // While s1 waits on the token endpoint, the other replica writes a row
-    // under the pre-#322 grant (the exact shape a stale replica would carry).
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    // Once s1 is waiting on the token endpoint, the other replica writes a
+    // row under the pre-#322 grant (the exact shape a stale replica would
+    // carry).
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        token_call.wait_until_satisfied(),
+    )
+    .await
+    .expect("refresh request never reached the token endpoint");
     s2.store(
         db.as_ref(),
         DID,
@@ -557,4 +567,73 @@ async fn lost_race_does_not_return_an_insufficient_replacement_row() {
 
     let err = loader.await.unwrap().unwrap_err();
     assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+}
+
+/// A refresh that comes back narrowed forgets the session — but only the
+/// row it read. If the person re-consented (or another replica refreshed)
+/// while that request was in flight, the newer row is the live session and
+/// must survive; the loader hands it back instead of deleting it.
+#[tokio::test]
+async fn narrowed_refresh_does_not_delete_a_newer_session() {
+    let db = setup_db();
+    let s1 = Arc::new(store());
+    let s2 = store();
+    let mock = mock_pds().await;
+    let token_call = Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({
+                    "access_token": "acc-narrow", "token_type": "DPoP",
+                    "refresh_token": "ref-narrow", "scope": "atproto",
+                    "expires_in": 3600, "sub": DID
+                }))
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .expect(1)
+        .mount_as_scoped(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s1.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let loader = {
+        let s1 = Arc::clone(&s1);
+        let db = Arc::clone(&db);
+        let http = http.clone();
+        tokio::spawn(async move {
+            s1.load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+                .await
+        })
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        token_call.wait_until_satisfied(),
+    )
+    .await
+    .expect("refresh request never reached the token endpoint");
+    // Re-consent lands while the narrowed refresh is still in flight.
+    s2.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc-reconsent", "ref-reconsent", 3600),
+    )
+    .await
+    .unwrap();
+
+    let ws = loader.await.unwrap().unwrap();
+    assert_eq!(ws.access_token, "acc-reconsent");
+    assert_eq!(ws.scope, write_scope());
+    let st = s1.status(db.as_ref(), DID).await.unwrap();
+    assert!(st.is_some(), "the re-consented session must survive");
 }

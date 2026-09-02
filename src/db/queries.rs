@@ -1928,6 +1928,20 @@ pub fn delete_oauth_session(conn: &Connection, user_did: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
+/// Delete only the row version the caller read (`updated_at` match). A row
+/// replaced under the caller is left alone and `false` is returned.
+pub fn delete_oauth_session_if_unchanged(
+    conn: &Connection,
+    user_did: &str,
+    expected_updated_at: &str,
+) -> Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM oauth_sessions WHERE user_did = ?1 AND updated_at = ?2",
+        rusqlite::params![user_did, expected_updated_at],
+    )?;
+    Ok(n > 0)
+}
+
 // --- Action batches (#315) ---
 
 const ACTION_BATCH_COLS: &str =

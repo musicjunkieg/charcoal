@@ -230,6 +230,12 @@ impl SessionStore {
                 // grant that no longer covers the writes is treated like a
                 // revoked refresh token — forget the session, so the person
                 // is re-consented rather than 403'd on the next proxied call.
+                //
+                // Forget only the row we read. The per-DID lock is local to
+                // this process, so a re-consent or another replica may have
+                // replaced the row while the request was in flight; that
+                // newer row is the live session and must not be deleted on
+                // the strength of our stale one.
                 let scope = if fresh.scope.is_empty() {
                     row.scope.clone()
                 } else {
@@ -240,10 +246,15 @@ impl SessionStore {
                         did,
                         "refresh narrowed the grant — deleting OAuth write session"
                     );
-                    db.delete_oauth_session(did)
+                    let deleted = db
+                        .delete_oauth_session_if_unchanged(did, &row.updated_at)
                         .await
                         .map_err(|e| SessionError::Db(e.to_string()))?;
-                    return Err(SessionError::NotConnected);
+                    if deleted {
+                        return Err(SessionError::NotConnected);
+                    }
+                    warn!(did, "row replaced during a narrowed refresh — using it");
+                    return self.reload_or_disconnect(db, did, &row.updated_at).await;
                 }
                 let new_refresh = fresh.refresh_token.as_deref().unwrap_or(&refresh_token);
                 let new_updated_at = chrono::Utc::now().to_rfc3339();
@@ -287,7 +298,8 @@ impl SessionStore {
     /// writer's tokens are good — return them, provided the grant they
     /// carry still covers the writes (a stale replica could have written an
     /// older one). If it did not change, the refresh token is genuinely
-    /// dead: forget the session (spec §3.7).
+    /// dead: forget the session (spec §3.7) — conditionally, since a
+    /// replacement can still land between this read and the delete.
     async fn reload_or_disconnect(
         &self,
         db: &dyn Database,
@@ -306,9 +318,15 @@ impl SessionStore {
             }
             Some(_) => {
                 warn!(did, "refresh token rejected — deleting OAuth write session");
-                db.delete_oauth_session(did)
+                let deleted = db
+                    .delete_oauth_session_if_unchanged(did, seen_updated_at)
                     .await
                     .map_err(|e| SessionError::Db(e.to_string()))?;
+                if !deleted {
+                    // A newer row arrived after the re-read; it survives and
+                    // the next call picks it up.
+                    warn!(did, "row replaced during disconnect — left in place");
+                }
                 Err(SessionError::NotConnected)
             }
             None => Err(SessionError::NotConnected),

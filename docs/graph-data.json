@@ -7413,6 +7413,39 @@
       "created_at": "2026-09-02T12:31:59.720063-07:00",
       "updated_at": "2026-09-02T12:31:59.720063-07:00",
       "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"1b92585\",\"confidence\":90}"
+    },
+    {
+      "id": 684,
+      "change_id": "319f605d-fb3a-4732-b981-3ae7ec2ed33e",
+      "node_type": "outcome",
+      "title": "PR #110 round 1 fixed in 0e9e8e8: rpc aud parsed (APPVIEW_DID or %23 spelling or *), refresh scope persisted + narrowed grant disconnects, lost-race row re-checked. web 927/0 skips 0, postgres 701/0, clippy clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T13:43:13.353783-07:00",
+      "updated_at": "2026-09-02T13:43:13.353783-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"0e9e8e8\",\"confidence\":90}"
+    },
+    {
+      "id": 685,
+      "change_id": "ad41db7a-ff65-4f8a-8bfc-e034870a70a8",
+      "node_type": "observation",
+      "title": "PR #110 CodeRabbit round 2: (Major) delete_oauth_session unconditional in refresh path can wipe a newer row written mid-refresh by re-consent/other replica; (Minor) lost-race test syncs on a 150ms sleep",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T13:50:12.232807-07:00",
+      "updated_at": "2026-09-02T13:50:12.232807-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":90}"
+    },
+    {
+      "id": 686,
+      "change_id": "09f57917-046d-4d3b-b029-26b5bd3bc4e6",
+      "node_type": "action",
+      "title": "Fix PR #110 round 2: compare-and-delete keyed on updated_at for both refresh-path deletes, reload on miss; wiremock scoped-expectation sync in the lost-race test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T13:50:12.248270-07:00",
+      "updated_at": "2026-09-02T13:50:12.248270-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"0e9e8e8\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -14983,6 +15016,39 @@
       "weight": 1.0,
       "rationale": "Both findings real; fix them",
       "created_at": "2026-09-02T12:32:03.162855-07:00"
+    },
+    {
+      "id": 699,
+      "from_node_id": 683,
+      "to_node_id": 684,
+      "from_change_id": "8ae3203d-a748-4c0b-a51d-540b77754096",
+      "to_change_id": "319f605d-fb3a-4732-b981-3ae7ec2ed33e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Round-1 fix commit and gate results",
+      "created_at": "2026-09-02T13:43:16.881907-07:00"
+    },
+    {
+      "id": 700,
+      "from_node_id": 684,
+      "to_node_id": 685,
+      "from_change_id": "319f605d-fb3a-4732-b981-3ae7ec2ed33e",
+      "to_change_id": "ad41db7a-ff65-4f8a-8bfc-e034870a70a8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Round-2 review arrived on the round-1 commit",
+      "created_at": "2026-09-02T13:50:15.431308-07:00"
+    },
+    {
+      "id": 701,
+      "from_node_id": 685,
+      "to_node_id": 686,
+      "from_change_id": "ad41db7a-ff65-4f8a-8bfc-e034870a70a8",
+      "to_change_id": "09f57917-046d-4d3b-b029-26b5bd3bc4e6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Both findings adjudicated real",
+      "created_at": "2026-09-02T13:50:15.438940-07:00"
     }
   ],
   "documents": [

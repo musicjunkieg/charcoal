@@ -105,6 +105,30 @@ async fn delete_oauth_session_reports_presence() {
     assert!(db.get_oauth_session(DID).await.unwrap().is_none());
 }
 
+/// The refresh path must only forget the row it actually read: a row
+/// replaced under it (re-consent, another replica) has to survive.
+#[tokio::test]
+async fn delete_oauth_session_if_unchanged_is_compare_and_delete() {
+    let db = setup_db().await;
+    assert!(!db
+        .delete_oauth_session_if_unchanged(DID, "t1")
+        .await
+        .unwrap());
+    db.upsert_oauth_session(&session_row("t2")).await.unwrap();
+    // Stale expectation: the row moved on, so nothing is deleted.
+    assert!(!db
+        .delete_oauth_session_if_unchanged(DID, "t1")
+        .await
+        .unwrap());
+    assert!(db.get_oauth_session(DID).await.unwrap().is_some());
+    // Matching expectation: deleted.
+    assert!(db
+        .delete_oauth_session_if_unchanged(DID, "t2")
+        .await
+        .unwrap());
+    assert!(db.get_oauth_session(DID).await.unwrap().is_none());
+}
+
 #[tokio::test]
 async fn delete_user_data_cascades_oauth_session() {
     let db = setup_db().await;
