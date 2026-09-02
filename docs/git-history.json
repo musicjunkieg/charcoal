@@ -1,5 +1,13 @@
 [
   {
+    "hash": "de9c38c287e53dad388b94b2031b1d0295bbd4f7",
+    "short_hash": "de9c38c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:22:43-07:00",
+    "message": "feat(315): action endpoints + write-consent OAuth branch\n\nGET/POST /api/actions/* behind require_auth: status, connect (write-scoped\nPAR via shared begin_oauth), disconnect, batch create/list/get, undo per\nbatch and per row, retry as a new batch, and /api/accounts/{handle}/actions.\nWrites refuse impersonation before anything else; reads use effective_did.\nThe OAuth callback recognises a pending write consent, checks the granted\nscope, stores the encrypted session, wakes the runner, and returns to the\npage the person started from.\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 9
+  },
+  {
     "hash": "468b5b4ae6ce1338b6e6d7f71edf2795b6e7fd52",
     "short_hash": "468b5b4",
     "author": "Bryan Guffey",

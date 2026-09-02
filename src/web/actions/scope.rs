@@ -29,11 +29,44 @@ pub fn client_scope() -> String {
 }
 
 /// Did the authorization server grant what we asked for? Servers may reorder
-/// or normalise the scope string, so this checks for the three resources by
-/// prefix rather than comparing the whole string.
+/// or normalise the scope string. The mute/unmute RPC scopes carry only an
+/// `aud` parameter, so a prefix check is still safe for those. The block repo
+/// scope is different: a naive prefix check on `repo:app.bsky.graph.block`
+/// would also accept a *downgraded* grant such as
+/// `repo:app.bsky.graph.block?action=create` (create only, no delete) — the
+/// first undo would then fail at the PDS with an authorization error instead
+/// of failing here, up front. So the block scope is parsed and its actions
+/// inspected directly, requiring BOTH `create` and `delete`.
+///
+/// Reading of a bare `repo:app.bsky.graph.block` (no `?action=` query at
+/// all): the vendored parser (`atproto_oauth::scopes::Scope::parse_repo`)
+/// treats an absent `action` param as "all actions" (create+update+delete),
+/// matching the AT Protocol scope spec's documented behavior that an
+/// unqualified repo scope is the maximal grant for that collection. That is
+/// a superset of create+delete, so it satisfies this check.
 pub fn scope_grants_write(granted: &str) -> bool {
+    use atproto_oauth::scopes::{RepoAction, RepoCollection, Scope};
+
     let has = |prefix: &str| granted.split_whitespace().any(|s| s.starts_with(prefix));
-    has("repo:app.bsky.graph.block")
+
+    let Ok(scopes) = Scope::parse_multiple(granted) else {
+        return false;
+    };
+
+    let block_scope_has_create_and_delete = scopes.iter().any(|scope| match scope {
+        Scope::Repo(repo) => {
+            let is_block_collection = match &repo.collection {
+                RepoCollection::Nsid(nsid) => nsid == "app.bsky.graph.block",
+                RepoCollection::All => true,
+            };
+            is_block_collection
+                && repo.actions.contains(&RepoAction::Create)
+                && repo.actions.contains(&RepoAction::Delete)
+        }
+        _ => false,
+    });
+
+    block_scope_has_create_and_delete
         && has("rpc:app.bsky.graph.muteActor")
         && has("rpc:app.bsky.graph.unmuteActor")
 }
@@ -84,5 +117,69 @@ mod tests {
             "atproto rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
         ));
         assert!(!scope_grants_write("transition:generic"));
+    }
+
+    /// #315 review, finding 1: the exact `write_scope()` string must pass.
+    #[test]
+    fn scope_grants_write_accepts_the_exact_write_scope_string() {
+        assert!(scope_grants_write(&write_scope()));
+    }
+
+    /// Token order within the space-separated scope string must not matter —
+    /// servers may reorder or renormalize.
+    #[test]
+    fn scope_grants_write_accepts_reordered_tokens() {
+        let scope = write_scope();
+        let reordered: Vec<&str> = scope.split(' ').rev().collect();
+        assert!(scope_grants_write(&reordered.join(" ")));
+    }
+
+    /// The regression this task fixes: a create-only block grant must NOT
+    /// pass, or the first undo (a delete) would fail at the PDS instead of
+    /// here.
+    #[test]
+    fn scope_grants_write_rejects_create_only_block_scope() {
+        assert!(!scope_grants_write(
+            "atproto repo:app.bsky.graph.block?action=create \
+             rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
+        ));
+    }
+
+    /// The mirror case: delete-only, no create, must also fail.
+    #[test]
+    fn scope_grants_write_rejects_delete_only_block_scope() {
+        assert!(!scope_grants_write(
+            "atproto repo:app.bsky.graph.block?action=delete \
+             rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
+        ));
+    }
+
+    /// A full block grant with the unmute RPC missing must still fail — all
+    /// three resources are required.
+    #[test]
+    fn scope_grants_write_rejects_missing_unmute() {
+        assert!(!scope_grants_write(
+            "atproto repo:app.bsky.graph.block?action=create&action=delete \
+             rpc:app.bsky.graph.muteActor?aud=x"
+        ));
+    }
+
+    /// `transition:generic` is never an acceptable substitute for the
+    /// granular scopes, even alongside `atproto`.
+    #[test]
+    fn scope_grants_write_rejects_transition_generic() {
+        assert!(!scope_grants_write("atproto transition:generic"));
+    }
+
+    /// A bare `repo:app.bsky.graph.block` (no `?action=` query at all) is
+    /// read as the maximal grant for that collection per the vendored
+    /// parser's documented behavior (see the comment on
+    /// `scope_grants_write`), so it satisfies the create+delete requirement.
+    #[test]
+    fn scope_grants_write_accepts_bare_block_scope_as_full_grant() {
+        assert!(scope_grants_write(
+            "atproto repo:app.bsky.graph.block \
+             rpc:app.bsky.graph.muteActor?aud=x rpc:app.bsky.graph.unmuteActor?aud=x"
+        ));
     }
 }

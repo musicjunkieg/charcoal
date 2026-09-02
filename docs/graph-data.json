@@ -6764,6 +6764,28 @@
       "created_at": "2026-09-02T00:57:58.035135-07:00",
       "updated_at": "2026-09-02T00:57:58.035135-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"468b5b4\",\"confidence\":85}"
+    },
+    {
+      "id": 625,
+      "change_id": "cf2819f3-df75-45e1-9e9c-1c91f260c495",
+      "node_type": "outcome",
+      "title": "Task 9 done: de9c38c, 19 web_actions + 22 web_oauth (1 ignored) + 12 unit_actions_runner + 9 unit_actions_session + 7 lib scope/actions tests pass; full --features web suite green; clippy clean web+postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:23:02.970760-07:00",
+      "updated_at": "2026-09-02T02:23:02.970760-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"de9c38c\",\"confidence\":90}"
+    },
+    {
+      "id": 626,
+      "change_id": "bcf337eb-2b4a-4533-b397-2e78c9275175",
+      "node_type": "observation",
+      "title": "Task 9 review: 9 endpoints + write-consent branch spec-complete; 1 Important (scope_grants_write prefix-match accepts create-only block grant) → fix wave; Minors: undo_action ownership field, Json extractor precedes impersonation check on bodied POSTs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T02:31:12.474054-07:00",
+      "updated_at": "2026-09-02T02:31:12.474054-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -13608,6 +13630,28 @@
       "weight": 1.0,
       "rationale": "Plan task 9 implementation",
       "created_at": "2026-09-02T00:57:58.042379-07:00"
+    },
+    {
+      "id": 633,
+      "from_node_id": 624,
+      "to_node_id": 625,
+      "from_change_id": "4a73f290-e930-47f5-a7d2-6ce7d8e2d788",
+      "to_change_id": "cf2819f3-df75-45e1-9e9c-1c91f260c495",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 result",
+      "created_at": "2026-09-02T02:23:06.698692-07:00"
+    },
+    {
+      "id": 634,
+      "from_node_id": 625,
+      "to_node_id": 626,
+      "from_change_id": "cf2819f3-df75-45e1-9e9c-1c91f260c495",
+      "to_change_id": "bcf337eb-2b4a-4533-b397-2e78c9275175",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task reviewer verdict on the Task 9 outcome",
+      "created_at": "2026-09-02T02:31:12.480519-07:00"
     }
   ],
   "documents": [

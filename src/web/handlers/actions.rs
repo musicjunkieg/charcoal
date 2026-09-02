@@ -639,7 +639,7 @@ pub async fn undo_action(
         Err(r) => return r,
     };
     let row = match state.db.get_action(action_id).await {
-        Ok(Some(r)) if r.user_did == auth.did => r,
+        Ok(Some(r)) if r.user_did == auth.effective_did => r,
         Ok(_) => return not_found(),
         Err(e) => return db_error(e),
     };
