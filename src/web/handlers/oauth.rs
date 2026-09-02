@@ -36,6 +36,19 @@ pub struct PendingOAuth {
     /// handle, authenticate as themselves, and get an access/users row that
     /// carries a handle they don't own.
     pub did: String,
+    /// Set when this round-trip is a write-consent grant (#315) rather than a
+    /// login. The callback stores the tokens and redirects to `return_to`
+    /// instead of issuing a cookie.
+    pub write_consent: Option<WriteConsent>,
+}
+
+/// Where a write-consent round-trip returns to, and which PDS the tokens
+/// belong to (#315).
+pub struct WriteConsent {
+    pub pds_url: String,
+    /// Relative path (always starts with `/`), computed server-side by
+    /// `handlers::actions::return_to` — never taken from the browser.
+    pub return_to: String,
 }
 
 // ---- Client metadata ----
@@ -77,7 +90,7 @@ pub async fn client_metadata(State(state): State<AppState>) -> Response {
         "client_name": "Charcoal",
         "client_uri": base_uri,
         "redirect_uris": [redirect_uri],
-        "scope": "atproto",
+        "scope": crate::web::actions::scope::client_scope(),
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "token_endpoint_auth_method": "private_key_jwt",
@@ -110,6 +123,16 @@ fn derive_base_url(client_id: &str) -> String {
 
 fn derive_redirect_uri(client_id: &str) -> String {
     format!("{}/api/auth/callback", derive_base_url(client_id))
+}
+
+/// The confidential-client identity used for every token-endpoint call:
+/// login (PAR + code exchange), write-consent, refresh, and revocation.
+pub(crate) fn oauth_client(state: &AppState) -> OAuthClient {
+    OAuthClient {
+        client_id: state.config.oauth_client_id.clone(),
+        redirect_uri: derive_redirect_uri(&state.config.oauth_client_id),
+        private_signing_key_data: state.signing_key.clone(),
+    }
 }
 
 // ---- Initiate ----
@@ -152,21 +175,47 @@ pub async fn initiate(
         },
     };
 
+    match begin_oauth(&state, &http_client, &handle, &did, "atproto", None).await {
+        Ok(auth_url) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "redirect_url": auth_url })),
+        )
+            .into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Steps 2–9 of the OAuth flow, shared by login (`initiate`) and write
+/// consent (`handlers::actions::connect`, #315): resolve the PDS for `did`,
+/// discover its authorization server, run PAR with `scope`, stash the
+/// pending state under the OAuth `state`, and return the authorization URL.
+/// `write_return_to` marks the round-trip as write consent.
+///
+/// The `Err` is the `Response` the caller sends as-is; boxing it would only
+/// add an indirection (same reasoning as `handlers::actions`).
+#[allow(clippy::result_large_err)]
+pub(crate) async fn begin_oauth(
+    state: &AppState,
+    http_client: &reqwest::Client,
+    handle: &str,
+    did: &str,
+    scope: &str,
+    write_return_to: Option<String>,
+) -> Result<String, Response> {
     // Step 2: Resolve DID to document to get PDS endpoint
-    let pds_endpoint = match resolve_did_to_pds(&http_client, &did).await {
-        Ok(pds) => pds,
-        Err(msg) => return api_error(StatusCode::BAD_REQUEST, &msg),
-    };
+    let pds_endpoint = resolve_did_to_pds(http_client, did)
+        .await
+        .map_err(|msg| api_error(StatusCode::BAD_REQUEST, &msg))?;
 
     // Step 3: Discover authorization server from PDS
-    let (_, authorization_server) = match pds_resources(&http_client, &pds_endpoint).await {
+    let (_, authorization_server) = match pds_resources(http_client, &pds_endpoint).await {
         Ok(r) => r,
         Err(e) => {
             tracing::error!("PDS resource discovery failed for '{pds_endpoint}': {e}");
-            return api_error(
+            return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Could not discover authorization server from PDS",
-            );
+            ));
         }
     };
 
@@ -179,34 +228,29 @@ pub async fn initiate(
         Ok(k) => k,
         Err(e) => {
             tracing::error!("DPoP key generation failed: {e}");
-            return api_error(
+            return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Could not generate security key",
-            );
+            ));
         }
     };
 
     // Step 5: Build OAuth client config
-    let redirect_uri = derive_redirect_uri(&state.config.oauth_client_id);
-    let oauth_client = OAuthClient {
-        client_id: state.config.oauth_client_id.clone(),
-        redirect_uri,
-        private_signing_key_data: state.signing_key.clone(),
-    };
+    let oauth_client = oauth_client(state);
 
     let oauth_request_state = OAuthRequestState {
         state: oauth_state.clone(),
         nonce: nonce.clone(),
         code_challenge,
-        scope: "atproto".to_string(),
+        scope: scope.to_string(),
     };
 
     // Step 6: Perform PAR (Pushed Authorization Request)
     let par_response = match oauth_init(
-        &http_client,
+        http_client,
         &oauth_client,
         &dpop_key,
-        Some(&handle),
+        Some(handle),
         &authorization_server,
         &oauth_request_state,
     )
@@ -215,10 +259,10 @@ pub async fn initiate(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("PAR request failed for '{handle}': {e}");
-            return api_error(
+            return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Could not start sign-in with Bluesky — please try again",
-            );
+            ));
         }
     };
 
@@ -227,10 +271,10 @@ pub async fn initiate(
         Ok(pk) => pk,
         Err(e) => {
             tracing::error!("Public key derivation failed: {e}");
-            return api_error(
+            return Err(api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Server key configuration error",
-            );
+            ));
         }
     };
 
@@ -253,24 +297,22 @@ pub async fn initiate(
         PendingOAuth {
             oauth_request,
             authorization_server: authorization_server.clone(),
-            handle: handle.clone(),
-            did: did.clone(),
+            handle: handle.to_string(),
+            did: did.to_string(),
+            write_consent: write_return_to.map(|return_to| WriteConsent {
+                pds_url: pds_endpoint.clone(),
+                return_to,
+            }),
         },
     );
 
-    // Step 9: Build authorization URL and return (percent-encode query params)
-    let auth_url = format!(
+    // Step 9: Build authorization URL (percent-encode query params)
+    Ok(format!(
         "{}?client_id={}&request_uri={}",
         authorization_server.authorization_endpoint,
         utf8_percent_encode(&oauth_client.client_id, NON_ALPHANUMERIC),
         utf8_percent_encode(&par_response.request_uri, NON_ALPHANUMERIC),
-    );
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({ "redirect_url": auth_url })),
-    )
-        .into_response()
+    ))
 }
 
 /// Resolve a handle to a DID via the public AppView API.
@@ -352,6 +394,22 @@ pub async fn callback(
             .error_description
             .as_deref()
             .unwrap_or("no description");
+        // A write-consent round-trip (#315) is a top-level navigation from a
+        // signed-in page: send the person back where they started with a code
+        // the page turns into one calm sentence. Consume the pending entry so
+        // the state cannot be replayed.
+        if let Some(state_param) = params.state.as_deref() {
+            let pending = state.pending_oauth.write().await.remove(state_param);
+            if let Some(consent) = pending.and_then(|p| p.write_consent) {
+                let code = match err.as_str() {
+                    "access_denied" => "denied",
+                    "invalid_scope" => "invalid_scope",
+                    _ => "failed",
+                };
+                tracing::warn!(error = %err, "write consent not granted: {desc}");
+                return Redirect::to(&with_actions_error(&consent.return_to, code)).into_response();
+            }
+        }
         return api_error(
             StatusCode::BAD_REQUEST,
             &format!("OAuth error from PDS: {err} — {desc}"),
@@ -396,12 +454,7 @@ pub async fn callback(
         };
 
     // Build the OAuth client config
-    let redirect_uri = derive_redirect_uri(&state.config.oauth_client_id);
-    let oauth_client = OAuthClient {
-        client_id: state.config.oauth_client_id.clone(),
-        redirect_uri,
-        private_signing_key_data: state.signing_key.clone(),
-    };
+    let oauth_client = oauth_client(&state);
 
     let http_client = reqwest::Client::new();
 
@@ -455,6 +508,19 @@ pub async fn callback(
         );
     }
 
+    // Write consent (#315): store tokens and return to the page the person
+    // started from. Everything below this line is login-only.
+    if let Some(consent) = pending.write_consent {
+        return complete_write_consent(
+            &state,
+            consent,
+            &authenticated_did,
+            &dpop_key,
+            &token_response,
+        )
+        .await;
+    }
+
     // Gate: env bootstrap OR admin OR DB allowlist row (#309).
     match crate::web::auth::check_access(&authenticated_did, &state.config, &*state.db).await {
         Ok(true) => {}
@@ -502,21 +568,48 @@ pub async fn callback(
         tracing::warn!("Failed to update last_login_at: {e}");
     }
 
-    // Store tokens in-memory for future XRPC calls (muting/blocking milestone).
-    // TokenResponse doesn't derive Serialize, so store the fields we need manually.
-    *state.oauth_tokens.write().await = Some(serde_json::json!({
-        "access_token": token_response.access_token,
-        "token_type": token_response.token_type,
-        "refresh_token": token_response.refresh_token,
-        "scope": token_response.scope,
-        "expires_in": token_response.expires_in,
-        "sub": token_response.sub,
-    }));
-
     // Issue session cookie with DID embedded
     let token = crate::web::auth::create_token(&state.config.session_secret, &authenticated_did);
     let cookie = crate::web::auth::set_cookie_header(&token, true);
 
     // Redirect to dashboard with session cookie set
     ([(header::SET_COOKIE, cookie)], Redirect::to("/dashboard")).into_response()
+}
+
+/// Append `actions_error=<code>` to a relative return path.
+fn with_actions_error(return_to: &str, code: &str) -> String {
+    let sep = if return_to.contains('?') { '&' } else { '?' };
+    format!("{return_to}{sep}actions_error={code}")
+}
+
+/// Finish a write-consent round-trip (#315): verify the grant, store the
+/// token pair, wake the runner, go back. No cookie, no access gate, no
+/// `upsert_user` — the person was already signed in when they started.
+async fn complete_write_consent(
+    state: &AppState,
+    consent: WriteConsent,
+    did: &str,
+    dpop_key: &atproto_identity::key::KeyData,
+    tokens: &atproto_oauth::workflow::TokenResponse,
+) -> Response {
+    let Some(sessions) = state.sessions.as_ref() else {
+        return Redirect::to(&with_actions_error(&consent.return_to, "disabled")).into_response();
+    };
+    if !crate::web::actions::scope::scope_grants_write(&tokens.scope) {
+        tracing::warn!(did, granted = %tokens.scope, "write consent came back without the write scopes");
+        return Redirect::to(&with_actions_error(&consent.return_to, "invalid_scope"))
+            .into_response();
+    }
+    if let Err(e) = sessions
+        .store(&*state.db, did, &consent.pds_url, dpop_key, tokens)
+        .await
+    {
+        tracing::error!(did, "could not store write session: {e}");
+        return Redirect::to(&with_actions_error(&consent.return_to, "failed")).into_response();
+    }
+    // Any batch parked as `not_connected` can move now.
+    if let Some(wake) = &state.action_wake {
+        let _ = wake.try_send(0);
+    }
+    Redirect::to(&consent.return_to).into_response()
 }

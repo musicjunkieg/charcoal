@@ -22,8 +22,8 @@ use super::models::{
     NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
-    eta_seconds, AccessRequestRow, Database, ScanClaim, ScanQueueDepth, ScanQueueEntry,
-    ScanQueueRow, ScanSkip,
+    eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, Database, NewAction, OauthSessionRow,
+    ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -170,6 +170,10 @@ impl PgDatabase {
                 (
                     14,
                     include_str!("../../migrations/postgres/0014_access_requests.sql"),
+                ),
+                (
+                    15,
+                    include_str!("../../migrations/postgres/0015_actions.sql"),
                 ),
             ];
 
@@ -1303,6 +1307,20 @@ impl Database for PgDatabase {
             .bind(user_did)
             .execute(&mut *tx)
             .await?;
+        // #315: the user's write grant and everything Charcoal did with it.
+        // actions references action_batches, so it goes first.
+        sqlx_core::query::query("DELETE FROM actions WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM action_batches WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("DELETE FROM oauth_sessions WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         sqlx_core::query::query("DELETE FROM users WHERE did = $1")
             .bind(user_did)
             .execute(&mut *tx)
@@ -1970,6 +1988,314 @@ impl Database for PgDatabase {
                 decided_by: r.get::<Option<String>, _>(5),
             })
             .collect())
+    }
+
+    // --- OAuth write sessions (#315) ---
+
+    async fn get_oauth_session(&self, user_did: &str) -> Result<Option<OauthSessionRow>> {
+        let row = sqlx_core::query::query(
+            "SELECT user_did, pds_url, scope, access_token_enc, refresh_token_enc,
+                    dpop_key_enc, access_expires_at, created_at, updated_at
+             FROM oauth_sessions WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| OauthSessionRow {
+            user_did: r.get::<String, _>(0),
+            pds_url: r.get::<String, _>(1),
+            scope: r.get::<String, _>(2),
+            access_token_enc: r.get::<Vec<u8>, _>(3),
+            refresh_token_enc: r.get::<Vec<u8>, _>(4),
+            dpop_key_enc: r.get::<Vec<u8>, _>(5),
+            access_expires_at: r.get::<i64, _>(6),
+            created_at: r.get::<String, _>(7),
+            updated_at: r.get::<String, _>(8),
+        }))
+    }
+
+    async fn upsert_oauth_session(&self, row: &OauthSessionRow) -> Result<()> {
+        // created_at is deliberately absent from the DO UPDATE list: re-consent
+        // rotates every secret but keeps the original connection date.
+        sqlx_core::query::query(
+            "INSERT INTO oauth_sessions (user_did, pds_url, scope, access_token_enc,
+                 refresh_token_enc, dpop_key_enc, access_expires_at, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (user_did) DO UPDATE SET
+                 pds_url = EXCLUDED.pds_url, scope = EXCLUDED.scope,
+                 access_token_enc = EXCLUDED.access_token_enc,
+                 refresh_token_enc = EXCLUDED.refresh_token_enc,
+                 dpop_key_enc = EXCLUDED.dpop_key_enc,
+                 access_expires_at = EXCLUDED.access_expires_at,
+                 updated_at = EXCLUDED.updated_at",
+        )
+        .bind(&row.user_did)
+        .bind(&row.pds_url)
+        .bind(&row.scope)
+        .bind(&row.access_token_enc)
+        .bind(&row.refresh_token_enc)
+        .bind(&row.dpop_key_enc)
+        .bind(row.access_expires_at)
+        .bind(&row.created_at)
+        .bind(&row.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn update_oauth_tokens(
+        &self,
+        user_did: &str,
+        access_token_enc: &[u8],
+        refresh_token_enc: &[u8],
+        access_expires_at: i64,
+        expected_updated_at: &str,
+        new_updated_at: &str,
+    ) -> Result<bool> {
+        let result = sqlx_core::query::query(
+            "UPDATE oauth_sessions
+             SET access_token_enc = $2, refresh_token_enc = $3, access_expires_at = $4,
+                 updated_at = $6
+             WHERE user_did = $1 AND updated_at = $5",
+        )
+        .bind(user_did)
+        .bind(access_token_enc)
+        .bind(refresh_token_enc)
+        .bind(access_expires_at)
+        .bind(expected_updated_at)
+        .bind(new_updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn delete_oauth_session(&self, user_did: &str) -> Result<bool> {
+        let result = sqlx_core::query::query("DELETE FROM oauth_sessions WHERE user_did = $1")
+            .bind(user_did)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    // --- Action batches (#315) ---
+
+    async fn create_action_batch(
+        &self,
+        user_did: &str,
+        kind: &str,
+        source: &str,
+        rows: &[NewAction],
+    ) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let batch_id: i64 = sqlx_core::query::query(
+            "INSERT INTO action_batches (user_did, kind, source, requested, status, created_at)
+             VALUES ($1, $2, $3, $4, 'queued', $5) RETURNING id",
+        )
+        .bind(user_did)
+        .bind(kind)
+        .bind(source)
+        .bind(rows.len() as i64)
+        .bind(&now)
+        .fetch_one(&mut *tx)
+        .await?
+        .get(0);
+        for a in rows {
+            sqlx_core::query::query(
+                "INSERT INTO actions (batch_id, user_did, target_did, kind, status, undo_of,
+                     score_at_action, tier_at_action)
+                 VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)",
+            )
+            .bind(batch_id)
+            .bind(user_did)
+            .bind(&a.target_did)
+            .bind(&a.kind)
+            .bind(a.undo_of)
+            .bind(a.score_at_action)
+            .bind(&a.tier_at_action)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(batch_id)
+    }
+
+    async fn get_action_batch(&self, id: i64) -> Result<Option<ActionBatchRow>> {
+        let row = sqlx_core::query::query(&format!(
+            "SELECT {ACTION_BATCH_COLS} FROM action_batches WHERE id = $1"
+        ))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.as_ref().map(read_action_batch))
+    }
+
+    async fn list_action_batches(
+        &self,
+        user_did: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ActionBatchRow>> {
+        let rows = sqlx_core::query::query(&format!(
+            "SELECT {ACTION_BATCH_COLS} FROM action_batches WHERE user_did = $1
+             ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3"
+        ))
+        .bind(user_did)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(read_action_batch).collect())
+    }
+
+    async fn list_actions_for_batch(&self, batch_id: i64) -> Result<Vec<ActionRow>> {
+        let rows = sqlx_core::query::query(&format!(
+            "SELECT {ACTION_COLS} FROM actions WHERE batch_id = $1 ORDER BY id ASC"
+        ))
+        .bind(batch_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(read_action).collect())
+    }
+
+    async fn list_unfinished_batches(&self) -> Result<Vec<i64>> {
+        let rows = sqlx_core::query::query(
+            "SELECT id FROM action_batches WHERE status IN ('queued','running') ORDER BY id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| r.get::<i64, _>(0)).collect())
+    }
+
+    async fn set_action_batch_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        // COALESCE keeps the first started_at across resumes; finished_at is
+        // stamped on every terminal transition (a retry-to-queued clears it).
+        sqlx_core::query::query(
+            "UPDATE action_batches SET
+                 status = $2,
+                 error = $3,
+                 started_at = CASE WHEN $2 = 'running' THEN COALESCE(started_at, $4) ELSE started_at END,
+                 finished_at = CASE WHEN $2 IN ('done','partial','failed') THEN $4 ELSE NULL END
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(status)
+        .bind(error)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn update_action(
+        &self,
+        id: i64,
+        status: &str,
+        record_uri: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx_core::query::query(
+            "UPDATE actions SET
+                 status = $2,
+                 record_uri = COALESCE($3, record_uri),
+                 error = $4,
+                 applied_at = CASE WHEN $2 IN ('applied','skipped_already_done') THEN $5 ELSE applied_at END,
+                 undone_at = CASE WHEN $2 = 'undone' THEN $5 ELSE undone_at END
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(status)
+        .bind(record_uri)
+        .bind(error)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_action(&self, id: i64) -> Result<Option<ActionRow>> {
+        let row =
+            sqlx_core::query::query(&format!("SELECT {ACTION_COLS} FROM actions WHERE id = $1"))
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.as_ref().map(read_action))
+    }
+
+    async fn active_actions(&self, user_did: &str) -> Result<Vec<ActionRow>> {
+        let rows = sqlx_core::query::query(&format!(
+            "SELECT {ACTION_COLS} FROM actions
+             WHERE user_did = $1 AND status IN ('applied','skipped_already_done')
+             ORDER BY id ASC"
+        ))
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(read_action).collect())
+    }
+
+    async fn list_score_snapshots(&self, user_did: &str) -> Result<Vec<ScoreSnapshot>> {
+        let rows = sqlx_core::query::query(
+            "SELECT did, handle, threat_score, threat_tier FROM account_scores WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| ScoreSnapshot {
+                did: r.get::<String, _>(0),
+                handle: r.get::<String, _>(1),
+                threat_score: r.get::<Option<f64>, _>(2),
+                threat_tier: r.get::<Option<String>, _>(3),
+            })
+            .collect())
+    }
+}
+
+/// Column list + row reader shared by every action_batches query (#315).
+const ACTION_BATCH_COLS: &str =
+    "id, user_did, kind, source, requested, status, error, created_at, started_at, finished_at";
+const ACTION_COLS: &str = "id, batch_id, user_did, target_did, kind, status, record_uri, undo_of, \
+     error, score_at_action, tier_at_action, applied_at, undone_at";
+
+fn read_action_batch(r: &sqlx_postgres::PgRow) -> ActionBatchRow {
+    ActionBatchRow {
+        id: r.get::<i64, _>(0),
+        user_did: r.get::<String, _>(1),
+        kind: r.get::<String, _>(2),
+        source: r.get::<String, _>(3),
+        requested: r.get::<i64, _>(4),
+        status: r.get::<String, _>(5),
+        error: r.get::<Option<String>, _>(6),
+        created_at: r.get::<String, _>(7),
+        started_at: r.get::<Option<String>, _>(8),
+        finished_at: r.get::<Option<String>, _>(9),
+    }
+}
+
+fn read_action(r: &sqlx_postgres::PgRow) -> ActionRow {
+    ActionRow {
+        id: r.get::<i64, _>(0),
+        batch_id: r.get::<i64, _>(1),
+        user_did: r.get::<String, _>(2),
+        target_did: r.get::<String, _>(3),
+        kind: r.get::<String, _>(4),
+        status: r.get::<String, _>(5),
+        record_uri: r.get::<Option<String>, _>(6),
+        undo_of: r.get::<Option<i64>, _>(7),
+        error: r.get::<Option<String>, _>(8),
+        score_at_action: r.get::<Option<f64>, _>(9),
+        tier_at_action: r.get::<Option<String>, _>(10),
+        applied_at: r.get::<Option<String>, _>(11),
+        undone_at: r.get::<Option<String>, _>(12),
     }
 }
 

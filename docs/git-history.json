@@ -1,5 +1,213 @@
 [
   {
+    "hash": "6a78a886322abf66599089260e31a96ba7fde7ec",
+    "short_hash": "6a78a88",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T06:38:40-07:00",
+    "message": "fix(315): restore focus when the confirm sheet closes\n\nCodeRabbit N4 (nitpick): opening the sheet moved focus to it but never gave\nit back, stranding keyboard/screen-reader focus at document body on close.\nCaptures document.activeElement before focusing the sheet and restores it in\nthe effect cleanup. No Tab trap added — that is the separately tracked\nfollow-up (#316). svelte-autofixer clean (issues: []; the remaining\nsuggestions are pre-existing, out of this scope, or explicitly caveated by\nthe tool as ignorable — see report).",
+    "files_changed": 1
+  },
+  {
+    "hash": "2b48b3beb4fdbdf4218b2e19edb9121b1a12a13e",
+    "short_hash": "2b48b3b",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T06:17:57-07:00",
+    "message": "fix(315): allow result_large_err module-wide for Response-typed helpers\n\nClippy 1.98 (CI) extended the lint to async fn; local 1.94 never saw it.\nThe Response is what the handler returns either way, so boxing only adds\nan indirection. Hoists the existing per-fn allow in handlers/actions.rs to\nthe module and adds one to begin_oauth (introduced on this branch).",
+    "files_changed": 4
+  },
+  {
+    "hash": "9864b01726eb0a8154b9047fd1db10e69820e6be",
+    "short_hash": "9864b01",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T04:55:58-07:00",
+    "message": "fix(315): refuse Retry on a batch that is still queued or running\n\nRetry now counts pending rows as work to redo (I2), so without this guard the\nAPI alone could clone a live batch into a second one over the same targets.\n409 batch_running; the UI already gated on !isRunning.",
+    "files_changed": 6
+  },
+  {
+    "hash": "7a214c214112c529af0ea9c9e9d3fccb9edf1f83",
+    "short_hash": "7a214c2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T04:42:29-07:00",
+    "message": "fix(315): frontend mirrors undo eligibility and stops latching on errors (I1, I2, I4, I5, M14)\n\nFinal-review fix wave, frontend half.\n\nI1: canUndo counts only applied rows, the per-row Undo appears only for\nstatus applied, and buttonState returns actionId null for a\nskipped_already_done row — it still reads \"Muted\", it just has nothing\nCharcoal may undo.\n\nI2: canRetry is true for a failed batch whose rows are all pending.\n\nI4: NotFoundError joins the sibling error classes in api.ts, and the\nbatch page resets notFound/error at the top of every load. Only a real\n404 renders \"Action not found\"; anything else shows the message and keeps\nthe last-good batch on screen, so a dropped 3 s poll no longer bricks the\npage mid-flight.\n\nI5: openSheet and confirmBulk route AuthError to /login and\nAccessRevokedError to /waitlist through one page-local helper, instead of\nrendering \"Authentication required\" as small red text.\n\nM14: the actions list clears error on every load. The consent-error\nmessage moves to its own state so a poll cannot wipe it.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 10
+  },
+  {
+    "hash": "419d78ec6f3c2039cdb939646cab863d25c13b93",
+    "short_hash": "419d78e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T04:05:53-07:00",
+    "message": "docs(315): CHARCOAL_TOKEN_KEY + changelog entry for mute/block",
+    "files_changed": 5
+  },
+  {
+    "hash": "98fb5587c383b6fd7abe7d8e2523c86c6ec1319a",
+    "short_hash": "98fb558",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:56:53-07:00",
+    "message": "feat(315): bulk confirm sheet lists accounts with checkboxes (spec §5.1)\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 14
+  },
+  {
+    "hash": "b758671f956652f74f5442beef5b93233bc21b26",
+    "short_hash": "b758671",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:24:13-07:00",
+    "message": "feat(315): tier-wide Mute all / Block all with confirm sheet\n\nBulk bar on the filtered Accounts page loads the whole tier (paged at the\nserver cap of 200), opens ConfirmSheet with the spec copy, and creates one\nbatch with source tier:<Tier>. Missing consent sends the person to Bluesky\nand ?resume= re-opens the same sheet on return.\n\nBulk-eligibility gating, error copy, and the already-done message are\nextracted into bulk-tier-actions.ts (TDD, 13 new vitest cases) rather than\ninlined in the page script, matching the project convention of keeping\nSvelte pages thin over pure, unit-testable logic modules (dashboard-state.ts,\naction-selection.ts, action-status.ts).\n\nConfirmSheet replaces the Task 10 stub wholesale per spec copy §5.1-5.2.\nFixed two real a11y violations the brief sample code did not have (dialog\nrole needs a tabindex; a clickable non-interactive container needs a\nmatching keyboard handler) by moving outside-click detection to the backdrop\nelement instead of stopPropagation on the sheet.",
+    "files_changed": 6
+  },
+  {
+    "hash": "df3b42099bf6227ae23192ae3a857465c2400565",
+    "short_hash": "df3b420",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:13:07-07:00",
+    "message": "fix(315): PR review round 2 - task 11 drift note, disconnect errors, ternary\n\nFixes three Task 11 findings: rowNote() prioritized the failure message\nover the drift note, so a row that was both failed and drifted showed\nthe failure text twice (Status + Tier then) and never showed the drift\ncopy. Split rowNote() into failureNote()/driftNote() and use driftNote()\nspecifically in the Tier-then cell; rowNote() keeps its old\nfailure-over-drift composition for existing callers/tests.\n\ndisconnect() on the actions list page had no try/catch, so a failed\ndisconnectActions() call became an unhandled rejection with no user\nfeedback; wrapped it to match the AuthError/AccessRevokedError handling\nused by load() elsewhere on the page.\n\nRemoved a redundant identity ternary (b.kind === 'undo' ? 'undo' : b.kind)\nin the batch detail retry button.",
+    "files_changed": 6
+  },
+  {
+    "hash": "f098c0562abd5d4298d41f3498cc8f4b37f48673",
+    "short_hash": "f098c05",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:02:47-07:00",
+    "message": "feat(315): /actions log and /actions/[id] detail pages\n\nConnection line with Disconnect/Reconnect, newest-first batches with\npinned headline copy, per-row status + drift note (\"since dropped to\nWatch\"), Undo all / Undo row / Retry failed, and 3s polling only while a\nbatch is queued or running. Presentation logic lives in action-status.ts\nunder vitest.\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 7
+  },
+  {
+    "hash": "8c0524ca924b2b2db40d0dfc473341a7f5255932",
+    "short_hash": "8c0524c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:54:42-07:00",
+    "message": "fix(315): PR #10 review round 1 - test coverage + resume=undo notice\n\nAdd tests for the NotConnectedError (409) and ActionsDisabledError (503)\napiFetch branches, following the existing sibling-branch test pattern.\n\nHandle ?resume=undo in ActionButtons.svelte: previously only mute/block\nwere recognized, leaving the user on a silent page after the consent\nround-trip for an undo. Surface a calm informational notice instead of\nauto-firing the undo (the round-trip does not carry which kind - mute or\nblock - was being undone, so re-firing on load would be unsafe).\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "78515227f4888f159d3e077434d71d71156a2ae1",
+    "short_hash": "7851522",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:47:38-07:00",
+    "message": "feat(315): typed actions client + per-account Mute/Block buttons\n\nClient functions for every /api/actions endpoint, NotConnectedError and\nActionsDisabledError, pure buttonState() with vitest, and ActionButtons\non the account page: available → confirm → batch → /actions/<id>;\ndone → \"Muted ✓ · Undo\". Missing consent redirects to the PDS and the\npage resumes the sheet from ?resume= afterwards.",
+    "files_changed": 9
+  },
+  {
+    "hash": "3ad5f52cd0c8d429e4f0fc1e4e9bdfbb335efdfa",
+    "short_hash": "3ad5f52",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:38:19-07:00",
+    "message": "fix(315): scope_grants_write requires block create+delete; normalize undo_action ownership check",
+    "files_changed": 4
+  },
+  {
+    "hash": "de9c38c287e53dad388b94b2031b1d0295bbd4f7",
+    "short_hash": "de9c38c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:22:43-07:00",
+    "message": "feat(315): action endpoints + write-consent OAuth branch\n\nGET/POST /api/actions/* behind require_auth: status, connect (write-scoped\nPAR via shared begin_oauth), disconnect, batch create/list/get, undo per\nbatch and per row, retry as a new batch, and /api/accounts/{handle}/actions.\nWrites refuse impersonation before anything else; reads use effective_did.\nThe OAuth callback recognises a pending write consent, checks the granted\nscope, stores the encrypted session, wakes the runner, and returns to the\npage the person started from.\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 9
+  },
+  {
+    "hash": "468b5b4ae6ce1338b6e6d7f71edf2795b6e7fd52",
+    "short_hash": "468b5b4",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T00:51:04-07:00",
+    "message": "feat(315): ActionRunner — reconcile-first mute/block/undo engine with retry policy",
+    "files_changed": 5
+  },
+  {
+    "hash": "9c6ab531ae699bc65b1f05eb2f15f693f22f5f5d",
+    "short_hash": "9c6ab53",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T00:28:35-07:00",
+    "message": "feat(315): SessionStore — encrypted OAuth sessions with serialized refresh and disconnect",
+    "files_changed": 4
+  },
+  {
+    "hash": "e0e579eb6a6213b38a105353b0216bd7c4cf2ef0",
+    "short_hash": "e0e579e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T00:03:08-07:00",
+    "message": "feat(315): PdsClient with DPoP nonce retry; AppState sessions + action_wake\n\nRemoves the in-memory oauth_tokens stash. Blocks are written with subject\nand createdAt only; deletes go only by rkey the caller stored.",
+    "files_changed": 11
+  },
+  {
+    "hash": "820c5f4a9a4b0faf142ff49dc7fd52e82a713668",
+    "short_hash": "820c5f4",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T23:24:11-07:00",
+    "message": "test(315): mirror every Task 5 SQLite assertion on Postgres\n\nCloses four Postgres coverage gaps found in review:\n- undo_rows_point_at_originals: add test_pg_undo_rows_point_at_originals\n- batch_status_transitions_stamp_timestamps: drive the failed transition\n  (stamps finished_at + error) and the queued transition that clears\n  both, inside test_pg_action_batches_parity\n- update_action_stamps_and_preserves_record_uri: mirror the final\n  update_action(..., \"failed\", None, Some(\"boom\")) call and its error\n  assertion\n- listing_and_active_and_unfinished: add test_pg_listing_and_active_and_unfinished\n  with cross-user isolation (active_actions on an unrelated DID, a third\n  DIDs batch in list_unfinished_batches, a \"done\" transition removing a\n  batch from that list) using exact list equality filtered to this\n  tests own batch ids, since list_unfinished_batches is a global query\n  against a shared database\n\nAlso: assert a queued transition clears finished_at (not just error) on\nboth backends, and assert applied_at survives the undone transition in\nthe SQLite update_action test (the Postgres mirror already asserted it).\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "8fe948d33da7f8ac7d843c1bf066d4be3c0ff7b0",
+    "short_hash": "8fe948d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T22:37:25-07:00",
+    "message": "feat(315): action_batches and actions trait methods on both backends",
+    "files_changed": 8
+  },
+  {
+    "hash": "1e384ebf94ddc219d52ec1cf38484c4b78e3f28e",
+    "short_hash": "1e384eb",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T22:02:14-07:00",
+    "message": "feat(315): migration v15 and oauth_sessions trait methods\n\noauth_sessions, action_batches, actions on both backends. Token rotation\nis compare-and-swap on updated_at so concurrent refreshes cannot both\npersist a single-use refresh token. delete_user_data cascades all three.",
+    "files_changed": 10
+  },
+  {
+    "hash": "8bd5d7e7ce8441343f1321dcd1c0ba11573c1561",
+    "short_hash": "8bd5d7e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T21:20:35-07:00",
+    "message": "feat(315): CHARCOAL_TOKEN_KEY config and AES-256-GCM TokenCrypto\n\nVersioned blob, column name bound as AAD, key never derived from the\nsession secret.",
+    "files_changed": 8
+  },
+  {
+    "hash": "47edf0aeebb5165002f5579e9043fb2924596ddc",
+    "short_hash": "47edf0a",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T21:07:00-07:00",
+    "message": "feat(315): write_scope() and client metadata scope union\n\nGranular scopes only; the string lives in one function.",
+    "files_changed": 7
+  },
+  {
+    "hash": "6aa88d1d542abe00718e152ee8ccf7832a06fd5f",
+    "short_hash": "6aa88d1",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T20:55:42-07:00",
+    "message": "docs(261): write the self-protective invariant\n\nCharcoal outputs act only on the user own experience and reach. Written\nfirst because #315 (tier actions) is bound by it.",
+    "files_changed": 4
+  },
+  {
+    "hash": "e7d0d1437ee4a81a99744b47293f932cf990b5cf",
+    "short_hash": "e7d0d14",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T18:33:44-07:00",
+    "message": "docs(315): implementation plan for tier-based mute/block\n\n13 TDD tasks: scope + crypto + schema + DB (both backends) + AppState +\nSessionStore + PDS client/runner + HTTP endpoints with write-consent OAuth\nbranch + frontend client/buttons/log pages/bulk sheet + staging spike.\nSelf-reviewed against the spec (coverage, placeholders, type consistency).",
+    "files_changed": 3
+  },
+  {
+    "hash": "6736d5d4076b29e4685e7e0fdd11f2f5348546f6",
+    "short_hash": "6736d5d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T17:29:51-07:00",
+    "message": "docs(315): design spec for tier-based mute/block actions\n\nManual bulk mute/block by tier, per-account actions, /actions log with\nundo, incremental OAuth consent with granular scopes only, per-user\nsessions encrypted at rest (AES-256-GCM, CHARCOAL_TOKEN_KEY), refresh\nrotation serialized per user, reconcile-first execution, #261 invariant\nas prerequisite doc.",
+    "files_changed": 3
+  },
+  {
+    "hash": "cf698202fcd73e279832598fa76acc68dcfe7571",
+    "short_hash": "cf69820",
+    "author": "chaos gremlin",
+    "date": "2026-08-27T11:06:21-07:00",
+    "message": "Merge pull request #107 from musicjunkieg/feat/allowlist-admin-ui",
+    "files_changed": 0
+  },
+  {
+    "hash": "602fb6baa8bdf745d5f8d06f9df0df9ee444ec8e",
+    "short_hash": "602fb6b",
+    "author": "Bryan Guffey",
+    "date": "2026-08-26T14:27:49-07:00",
+    "message": "fix(309): PR #106 review round 1 - three CodeRabbit findings\n\nGrant form stays reachable when the access list fails to load; dashboard\npolling routes access_revoked/auth errors instead of swallowing them;\napprove-scan logs the read-back failure case distinctly.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01Xuf7bp8FMb3ceiatu8L2VQ",
+    "files_changed": 5
+  },
+  {
     "hash": "3a3e5db3324830ec3e1cea4d0364a3eb8e75ccd0",
     "short_hash": "3a3e5db",
     "author": "Bryan Guffey",

@@ -166,6 +166,81 @@ pub struct AccessRequestRow {
     pub decided_by: Option<String>,
 }
 
+/// One write-scoped OAuth grant per user (#315). Every `*_enc` column is an
+/// AES-256-GCM blob produced by `web::actions::crypto::TokenCrypto`; the DB
+/// layer never sees plaintext. `access_expires_at` is unix seconds; the two
+/// timestamps are RFC3339 like every other table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OauthSessionRow {
+    pub user_did: String,
+    pub pds_url: String,
+    pub scope: String,
+    pub access_token_enc: Vec<u8>,
+    pub refresh_token_enc: Vec<u8>,
+    pub dpop_key_enc: Vec<u8>,
+    pub access_expires_at: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One user request (#315): a tier-wide mute, a single block, an undo, or a
+/// retry. `source` is free text for the log: `tier:High`, `single`,
+/// `undo:<batch_id>`, `retry:<batch_id>`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionBatchRow {
+    pub id: i64,
+    pub user_did: String,
+    pub kind: String,
+    pub source: String,
+    pub requested: i64,
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+/// One target account within a batch (#315). `record_uri` is the
+/// `app.bsky.graph.block` record Charcoal itself created — the ONLY thing an
+/// undo is allowed to delete. `score_at_action`/`tier_at_action` are snapshots
+/// so the log explains itself after later rescans.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionRow {
+    pub id: i64,
+    pub batch_id: i64,
+    pub user_did: String,
+    pub target_did: String,
+    pub kind: String,
+    pub status: String,
+    pub record_uri: Option<String>,
+    pub undo_of: Option<i64>,
+    pub error: Option<String>,
+    pub score_at_action: Option<f64>,
+    pub tier_at_action: Option<String>,
+    pub applied_at: Option<String>,
+    pub undone_at: Option<String>,
+}
+
+/// Input for `create_action_batch`; the DB assigns ids and `pending`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewAction {
+    pub target_did: String,
+    pub kind: String,
+    pub undo_of: Option<i64>,
+    pub score_at_action: Option<f64>,
+    pub tier_at_action: Option<String>,
+}
+
+/// The slice of `account_scores` the actions feature needs: enough to
+/// validate targets, snapshot score/tier, and compute tier drift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoreSnapshot {
+    pub did: String,
+    pub handle: String,
+    pub threat_score: Option<f64>,
+    pub threat_tier: Option<String>,
+}
+
 #[async_trait]
 pub trait Database: Send + Sync {
     // --- Lifecycle ---
@@ -584,6 +659,93 @@ pub trait Database: Send + Sync {
 
     /// All rows, oldest requested_at first.
     async fn list_access_requests(&self) -> Result<Vec<AccessRequestRow>>;
+
+    // --- OAuth write sessions (#315) ---
+
+    async fn get_oauth_session(&self, user_did: &str) -> Result<Option<OauthSessionRow>>;
+
+    /// Insert, or replace every column except `created_at` (re-consent keeps
+    /// the original connection date).
+    async fn upsert_oauth_session(&self, row: &OauthSessionRow) -> Result<()>;
+
+    /// Compare-and-swap token rotation. Writes the new pair ONLY when the
+    /// row's `updated_at` still equals `expected_updated_at`, and returns
+    /// whether it did. AT Protocol refresh tokens are single-use, so two
+    /// concurrent refreshes must never both persist — the loser sees `false`
+    /// and re-reads the winner's tokens (`web::actions::session`).
+    async fn update_oauth_tokens(
+        &self,
+        user_did: &str,
+        access_token_enc: &[u8],
+        refresh_token_enc: &[u8],
+        access_expires_at: i64,
+        expected_updated_at: &str,
+        new_updated_at: &str,
+    ) -> Result<bool>;
+
+    /// Returns whether a row existed.
+    async fn delete_oauth_session(&self, user_did: &str) -> Result<bool>;
+
+    // --- Action batches (#315) ---
+
+    /// One transaction: the batch (`queued`, `requested = rows.len()`) and
+    /// every action (`pending`). Returns the batch id.
+    async fn create_action_batch(
+        &self,
+        user_did: &str,
+        kind: &str,
+        source: &str,
+        rows: &[NewAction],
+    ) -> Result<i64>;
+
+    async fn get_action_batch(&self, id: i64) -> Result<Option<ActionBatchRow>>;
+
+    /// Newest first (`created_at DESC, id DESC`), scoped to one user.
+    async fn list_action_batches(
+        &self,
+        user_did: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<ActionBatchRow>>;
+
+    /// `id ASC`.
+    async fn list_actions_for_batch(&self, batch_id: i64) -> Result<Vec<ActionRow>>;
+
+    /// Every batch in `queued` or `running`, across all users, `id ASC`.
+    /// Boot-time resume (§4.5).
+    async fn list_unfinished_batches(&self) -> Result<Vec<i64>>;
+
+    /// Stamps `started_at` the first time a batch goes `running`, and
+    /// `finished_at` on any terminal status (`done`/`partial`/`failed`).
+    /// `error` replaces the stored error (pass `None` to clear it).
+    async fn set_action_batch_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()>;
+
+    /// Stamps `applied_at` on `applied`/`skipped_already_done` and `undone_at`
+    /// on `undone`. `record_uri` is written only when `Some` — an undo must
+    /// never erase the URI that proves what Charcoal created.
+    async fn update_action(
+        &self,
+        id: i64,
+        status: &str,
+        record_uri: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()>;
+
+    async fn get_action(&self, id: i64) -> Result<Option<ActionRow>>;
+
+    /// Rows currently in effect for a user: `applied` or
+    /// `skipped_already_done`, `id ASC`. Drives "already muted" in the confirm
+    /// sheet and the detail-page buttons.
+    async fn active_actions(&self, user_did: &str) -> Result<Vec<ActionRow>>;
+
+    /// `did, handle, threat_score, threat_tier` for every scored account of
+    /// the user. Target validation, snapshots, and drift all read this.
+    async fn list_score_snapshots(&self, user_did: &str) -> Result<Vec<ScoreSnapshot>>;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

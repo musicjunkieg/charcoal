@@ -1892,3 +1892,452 @@ async fn test_pg_access_requests_state_machine_parity() {
 
     delete_access_request(&url, DID).await;
 }
+
+// --- OAuth write sessions (#315) ---
+//
+// Each test below owns a private DID (rather than sharing one constant) so
+// that parallel test runs cannot delete each other's rows out from under a
+// concurrently-running test — the CodeRabbit R3 finding on PR #109.
+
+async fn delete_actions_rows(url: &str, did: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    for sql in [
+        "DELETE FROM actions WHERE user_did = $1",
+        "DELETE FROM action_batches WHERE user_did = $1",
+        "DELETE FROM oauth_sessions WHERE user_did = $1",
+    ] {
+        sqlx_core::query::query(sql)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
+fn pg_session_row(did: &str, updated_at: &str) -> charcoal::db::traits::OauthSessionRow {
+    charcoal::db::traits::OauthSessionRow {
+        user_did: did.to_string(),
+        pds_url: "https://pds.example".to_string(),
+        scope: "atproto repo:app.bsky.graph.block".to_string(),
+        access_token_enc: vec![1, 2, 3],
+        refresh_token_enc: vec![4, 5, 6],
+        dpop_key_enc: vec![7, 8, 9],
+        access_expires_at: 1_700_000_000,
+        created_at: "2026-09-01T00:00:00+00:00".to_string(),
+        updated_at: updated_at.to_string(),
+    }
+}
+
+/// Postgres side of `tests/unit_actions_db.rs` oauth_sessions tests.
+#[tokio::test]
+async fn test_pg_oauth_session_parity() {
+    const OAUTH_DID: &str = "did:plc:pgactionsoauth0000000000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, OAUTH_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    assert!(db.get_oauth_session(OAUTH_DID).await.unwrap().is_none());
+    db.upsert_oauth_session(&pg_session_row(OAUTH_DID, "t1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap(),
+        pg_session_row(OAUTH_DID, "t1")
+    );
+
+    let mut second = pg_session_row(OAUTH_DID, "t2");
+    second.created_at = "2026-09-02T00:00:00+00:00".to_string();
+    second.access_token_enc = vec![9, 9, 9];
+    db.upsert_oauth_session(&second).await.unwrap();
+    let got = db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap();
+    assert_eq!(got.created_at, "2026-09-01T00:00:00+00:00");
+    assert_eq!(got.access_token_enc, vec![9, 9, 9]);
+
+    assert!(!db
+        .update_oauth_tokens(OAUTH_DID, &[10], &[11], 2_000_000_000, "stale", "t3")
+        .await
+        .unwrap());
+    assert!(db
+        .update_oauth_tokens(OAUTH_DID, &[10], &[11], 2_000_000_000, "t2", "t3")
+        .await
+        .unwrap());
+    let got = db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap();
+    assert_eq!(got.access_token_enc, vec![10]);
+    assert_eq!(got.updated_at, "t3");
+    assert_eq!(got.dpop_key_enc, vec![7, 8, 9]);
+
+    assert!(db.delete_oauth_session(OAUTH_DID).await.unwrap());
+    assert!(!db.delete_oauth_session(OAUTH_DID).await.unwrap());
+    delete_actions_rows(&url, OAUTH_DID).await;
+}
+
+/// Postgres side of the action_batches/actions tests in tests/unit_actions_db.rs.
+#[tokio::test]
+async fn test_pg_action_batches_parity() {
+    const BATCHES_DID: &str = "did:plc:pgactionsbatches00000000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, BATCHES_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    let na = |t: &str, k: &str| NewAction {
+        target_did: t.to_string(),
+        kind: k.to_string(),
+        undo_of: None,
+        score_at_action: Some(41.5),
+        tier_at_action: Some("High".to_string()),
+    };
+
+    let first = db
+        .create_action_batch(
+            BATCHES_DID,
+            "mute",
+            "tier:High",
+            &[na("did:plc:a", "mute"), na("did:plc:b", "mute")],
+        )
+        .await
+        .unwrap();
+    let b = db.get_action_batch(first).await.unwrap().unwrap();
+    assert_eq!((b.status.as_str(), b.requested), ("queued", 2));
+    let rows = db.list_actions_for_batch(first).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].score_at_action, Some(41.5));
+
+    db.set_action_batch_status(first, "running", None)
+        .await
+        .unwrap();
+    let started = db
+        .get_action_batch(first)
+        .await
+        .unwrap()
+        .unwrap()
+        .started_at
+        .unwrap();
+    db.set_action_batch_status(first, "running", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_action_batch(first)
+            .await
+            .unwrap()
+            .unwrap()
+            .started_at
+            .unwrap(),
+        started
+    );
+
+    // "failed" stamps finished_at AND error; "queued" clears both (session
+    // reconnect / retry path) — mirrors batch_status_transitions_stamp_timestamps.
+    db.set_action_batch_status(first, "failed", Some("not_connected"))
+        .await
+        .unwrap();
+    let b = db.get_action_batch(first).await.unwrap().unwrap();
+    assert_eq!(b.status, "failed");
+    assert_eq!(b.error.as_deref(), Some("not_connected"));
+    assert!(b.finished_at.is_some());
+
+    db.set_action_batch_status(first, "queued", None)
+        .await
+        .unwrap();
+    let b = db.get_action_batch(first).await.unwrap().unwrap();
+    assert!(b.error.is_none());
+    assert!(
+        b.finished_at.is_none(),
+        "a queued transition must clear finished_at, not just error"
+    );
+
+    db.update_action(
+        rows[0].id,
+        "applied",
+        Some("at://x/app.bsky.graph.block/y"),
+        None,
+    )
+    .await
+    .unwrap();
+    db.update_action(rows[0].id, "undone", None, None)
+        .await
+        .unwrap();
+    let r = db.get_action(rows[0].id).await.unwrap().unwrap();
+    assert_eq!(
+        r.record_uri.as_deref(),
+        Some("at://x/app.bsky.graph.block/y")
+    );
+    assert!(r.undone_at.is_some() && r.applied_at.is_some());
+
+    db.update_action(rows[0].id, "failed", None, Some("boom"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_action(rows[0].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .error
+            .as_deref(),
+        Some("boom")
+    );
+
+    db.update_action(rows[1].id, "skipped_already_done", None, None)
+        .await
+        .unwrap();
+    assert_eq!(db.active_actions(BATCHES_DID).await.unwrap().len(), 1);
+
+    let second = db
+        .create_action_batch(BATCHES_DID, "block", "single", &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.list_action_batches(BATCHES_DID, 10, 0)
+            .await
+            .unwrap()
+            .iter()
+            .map(|b| b.id)
+            .collect::<Vec<_>>(),
+        vec![second, first]
+    );
+    let unfinished = db.list_unfinished_batches().await.unwrap();
+    assert!(unfinished.contains(&first) && unfinished.contains(&second));
+    db.set_action_batch_status(first, "partial", Some("1 failed"))
+        .await
+        .unwrap();
+    assert!(db
+        .get_action_batch(first)
+        .await
+        .unwrap()
+        .unwrap()
+        .finished_at
+        .is_some());
+    assert!(!db.list_unfinished_batches().await.unwrap().contains(&first));
+
+    delete_actions_rows(&url, BATCHES_DID).await;
+}
+
+/// Postgres side of `undo_rows_point_at_originals` in
+/// tests/unit_actions_db.rs: an undo row's `undo_of` must point back at the
+/// original action's id, surviving the round trip through `create_action_batch`.
+#[tokio::test]
+async fn test_pg_undo_rows_point_at_originals() {
+    const UNDO_DID: &str = "did:plc:pgactions_undo00000000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, UNDO_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    let na = |t: &str, k: &str| NewAction {
+        target_did: t.to_string(),
+        kind: k.to_string(),
+        undo_of: None,
+        score_at_action: Some(41.5),
+        tier_at_action: Some("High".to_string()),
+    };
+
+    let orig = db
+        .create_action_batch(UNDO_DID, "mute", "single", &[na("did:plc:a", "mute")])
+        .await
+        .unwrap();
+    let orig_row = db.list_actions_for_batch(orig).await.unwrap()[0].id;
+    let mut undo = na("did:plc:a", "mute");
+    undo.undo_of = Some(orig_row);
+    let undo_batch = db
+        .create_action_batch(UNDO_DID, "undo", &format!("undo:{orig}"), &[undo])
+        .await
+        .unwrap();
+    let rows = db.list_actions_for_batch(undo_batch).await.unwrap();
+    assert_eq!(rows[0].undo_of, Some(orig_row));
+    assert_eq!(rows[0].kind, "mute");
+
+    delete_actions_rows(&url, UNDO_DID).await;
+}
+
+/// Postgres side of `listing_and_active_and_unfinished` in
+/// tests/unit_actions_db.rs. `list_unfinished_batches` is a GLOBAL query (no
+/// user_did filter), unlike everything else this test checks — so unlike the
+/// SQLite version, which runs against a fresh in-memory database and can
+/// compare the returned Vec for exact equality outright, this test filters
+/// the result down to the three ids it created before comparing. That keeps
+/// the same "exact list, not just contains" assertion shape without assuming
+/// the whole `action_batches` table is empty, which isn't safe against a
+/// shared, persistent Postgres instance.
+#[tokio::test]
+async fn test_pg_listing_and_active_and_unfinished() {
+    const LST_DID: &str = "did:plc:pgactions_lst_first000";
+    const LST_OTHER_DID: &str = "did:plc:pgactions_lst_other000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, LST_DID).await;
+    delete_actions_rows(&url, LST_OTHER_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    let na = |t: &str, k: &str| NewAction {
+        target_did: t.to_string(),
+        kind: k.to_string(),
+        undo_of: None,
+        score_at_action: Some(41.5),
+        tier_at_action: Some("High".to_string()),
+    };
+
+    let first = db
+        .create_action_batch(LST_DID, "mute", "tier:High", &[na("did:plc:a", "mute")])
+        .await
+        .unwrap();
+    let second = db
+        .create_action_batch(LST_DID, "block", "single", &[na("did:plc:b", "block")])
+        .await
+        .unwrap();
+    let other = db
+        .create_action_batch(LST_OTHER_DID, "mute", "single", &[na("did:plc:c", "mute")])
+        .await
+        .unwrap();
+
+    // Newest first, scoped to the user, paginated.
+    let page = db.list_action_batches(LST_DID, 10, 0).await.unwrap();
+    assert_eq!(
+        page.iter().map(|b| b.id).collect::<Vec<_>>(),
+        vec![second, first]
+    );
+    assert_eq!(
+        db.list_action_batches(LST_DID, 1, 1).await.unwrap()[0].id,
+        first
+    );
+
+    // Unfinished across all users, id ascending (boot resume) — filtered to
+    // this test's own ids, see the doc comment above.
+    let ids_of_interest = [first, second, other];
+    let filtered = |all: Vec<i64>| -> Vec<i64> {
+        all.into_iter()
+            .filter(|id| ids_of_interest.contains(id))
+            .collect()
+    };
+    assert_eq!(
+        filtered(db.list_unfinished_batches().await.unwrap()),
+        vec![first, second, other]
+    );
+    db.set_action_batch_status(second, "done", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered(db.list_unfinished_batches().await.unwrap()),
+        vec![first, other]
+    );
+
+    // Active = applied or skipped_already_done, per user.
+    let a = db.list_actions_for_batch(first).await.unwrap()[0].id;
+    let b = db.list_actions_for_batch(second).await.unwrap()[0].id;
+    db.update_action(a, "skipped_already_done", None, None)
+        .await
+        .unwrap();
+    db.update_action(b, "applied", Some("at://x/app.bsky.graph.block/y"), None)
+        .await
+        .unwrap();
+    let active = db.active_actions(LST_DID).await.unwrap();
+    assert_eq!(active.iter().map(|r| r.id).collect::<Vec<_>>(), vec![a, b]);
+    db.update_action(b, "undone", None, None).await.unwrap();
+    assert_eq!(db.active_actions(LST_DID).await.unwrap().len(), 1);
+    assert!(db
+        .active_actions("did:plc:nobody")
+        .await
+        .unwrap()
+        .is_empty());
+
+    delete_actions_rows(&url, LST_DID).await;
+    delete_actions_rows(&url, LST_OTHER_DID).await;
+}
+
+/// Postgres side of the score-snapshot + cascade test in
+/// tests/unit_actions_db.rs (score_snapshots_and_cascade).
+#[tokio::test]
+async fn test_pg_action_score_snapshots_and_cascade() {
+    const CASCADE_DID: &str = "did:plc:pgactionscascade0000000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, CASCADE_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    db.upsert_user(CASCADE_DID, "actions.pgtest").await.unwrap();
+    let score = AccountScore {
+        did: "did:plc:a".to_string(),
+        handle: "a.test".to_string(),
+        toxicity_score: Some(0.5),
+        topic_overlap: Some(0.3),
+        overlap_legacy: None,
+        threat_score: Some(41.5),
+        threat_tier: Some("High".to_string()),
+        posts_analyzed: 10,
+        top_toxic_posts: vec![],
+        scored_at: "2026-09-01T12:00:00Z".to_string(),
+        behavioral_signals: None,
+        context_score: None,
+        graph_distance: None,
+        fingerprint_quality: None,
+        scoring_confidence: None,
+    };
+    db.upsert_account_score(CASCADE_DID, &score).await.unwrap();
+    let snaps = db.list_score_snapshots(CASCADE_DID).await.unwrap();
+    assert_eq!(snaps.len(), 1);
+    assert_eq!(snaps[0].did, "did:plc:a");
+    assert_eq!(snaps[0].handle, "a.test");
+    assert_eq!(snaps[0].threat_tier.as_deref(), Some("High"));
+
+    let id = db
+        .create_action_batch(
+            CASCADE_DID,
+            "mute",
+            "single",
+            &[NewAction {
+                target_did: "did:plc:a".to_string(),
+                kind: "mute".to_string(),
+                undo_of: None,
+                score_at_action: Some(41.5),
+                tier_at_action: Some("High".to_string()),
+            }],
+        )
+        .await
+        .unwrap();
+    // An OAuth write session is the other row `delete_user_data` has to clear
+    // on the backend that actually runs in production (#315).
+    db.upsert_oauth_session(&charcoal::db::traits::OauthSessionRow {
+        user_did: CASCADE_DID.to_string(),
+        pds_url: "https://pds.pgtest".to_string(),
+        scope: "atproto".to_string(),
+        access_token_enc: vec![1, 2, 3],
+        refresh_token_enc: vec![4, 5, 6],
+        dpop_key_enc: vec![7, 8, 9],
+        access_expires_at: 4_102_444_800,
+        created_at: "2026-09-01T12:00:00Z".to_string(),
+        updated_at: "2026-09-01T12:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+    assert!(db.get_oauth_session(CASCADE_DID).await.unwrap().is_some());
+
+    db.delete_user_data(CASCADE_DID).await.unwrap();
+    assert!(db.get_action_batch(id).await.unwrap().is_none());
+    // No ON DELETE CASCADE on `actions.batch_id`: deleting the batch alone
+    // would leave the target DIDs behind.
+    assert!(db.list_actions_for_batch(id).await.unwrap().is_empty());
+    assert!(db.get_oauth_session(CASCADE_DID).await.unwrap().is_none());
+    assert!(db
+        .list_score_snapshots(CASCADE_DID)
+        .await
+        .unwrap()
+        .is_empty());
+
+    delete_actions_rows(&url, CASCADE_DID).await;
+}

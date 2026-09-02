@@ -6,12 +6,15 @@
 	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import type { Account } from '$lib/types.js';
 	import LabelButtons from '$lib/components/LabelButtons.svelte';
+	import ActionButtons from '$lib/components/ActionButtons.svelte';
 	import { tierClass } from '$lib/tier-class';
 	import '$lib/website/styles/tokens.css';
 	import '$lib/website/styles/tiers.css';
 
 	let asUser = $derived($page.url.searchParams.get('as_user'));
 	let asUserSuffix = $derived(asUser ? `?as_user=${encodeURIComponent(asUser)}` : '');
+	let resume = $derived($page.url.searchParams.get('resume'));
+	let actionsError = $derived($page.url.searchParams.get('actions_error'));
 
 	let account = $state<Account | null>(null);
 	let loading = $state(true);
@@ -86,13 +89,21 @@
 			>View on Bluesky ↗</a>
 		</div>
 
-		<!-- Label -->
+		<!-- Label + actions -->
 		{#if account.did}
 			<div class="label-section">
 				<LabelButtons
 					targetDid={account.did}
 					currentLabel={(account as any).user_label?.label ?? null}
 					predictedTier={account.threat_tier}
+				/>
+				<ActionButtons
+					handle={account.handle}
+					did={account.did}
+					tier={account.threat_tier}
+					{resume}
+					{actionsError}
+					impersonating={asUser !== null}
 				/>
 			</div>
 		{/if}
@@ -291,6 +302,9 @@
 	.bsky-link:hover { background: rgb(var(--copper-rgb) / 0.18); }
 
 	.label-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
 		margin-bottom: 1.5rem;
 		padding: 1rem 1.25rem;
 		background: rgb(var(--charcoal-900-rgb) / 0.4);

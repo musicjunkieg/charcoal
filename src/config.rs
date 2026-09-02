@@ -68,6 +68,12 @@ pub struct Config {
     /// 0 disables the cooldown. Admin-triggered scans bypass it.
     #[cfg(feature = "web")]
     pub scan_cooldown_hours: u64,
+    /// 32-byte hex key for encrypting OAuth write-session secrets at rest
+    /// (`CHARCOAL_TOKEN_KEY`, #315). `None` when unset or empty: the actions
+    /// feature is disabled and everything else runs normally. Never derived
+    /// from `session_secret`, so the two rotate independently.
+    #[cfg(feature = "web")]
+    pub token_key: Option<String>,
 }
 
 impl Config {
@@ -103,6 +109,11 @@ impl Config {
             .unwrap_or(24)
             // chrono::Duration::hours panics on absurd magnitudes; a year is already "off".
             .min(24 * 365);
+        #[cfg(feature = "web")]
+        let token_key = env::var("CHARCOAL_TOKEN_KEY")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         Ok(Self {
             bluesky_handle: env::var("BLUESKY_HANDLE").unwrap_or_default(),
@@ -131,6 +142,8 @@ impl Config {
             session_secret,
             #[cfg(feature = "web")]
             scan_cooldown_hours,
+            #[cfg(feature = "web")]
+            token_key,
         })
     }
 
@@ -228,6 +241,10 @@ impl Config {
             session_secret: "test_session_secret_at_least_32_chars!".to_string(),
             #[cfg(feature = "web")]
             scan_cooldown_hours: 24,
+            #[cfg(feature = "web")]
+            token_key: Some(
+                "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".to_string(),
+            ),
         }
     }
 }

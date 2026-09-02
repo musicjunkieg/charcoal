@@ -2,9 +2,20 @@
 	import { onMount } from 'svelte';
 	import { goto, pushState } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getAccounts } from '$lib/api.js';
-	import { AuthError, AccessRevokedError } from '$lib/api.js';
-	import type { Account } from '$lib/types.js';
+	import {
+		getAccounts,
+		getActionsStatus,
+		getActiveActions,
+		createActionBatch,
+		startConsent,
+		NotConnectedError,
+		AuthError,
+		AccessRevokedError
+	} from '$lib/api.js';
+	import ConfirmSheet from '$lib/components/ConfirmSheet.svelte';
+	import { bulkTierFor, showBulkBar, bulkErrorMessage, alreadyDoneMessage } from '$lib/bulk-tier-actions.js';
+	import { buildSheetRows } from '$lib/sheet-rows.js';
+	import type { Account, ActionKind, ActionsStatus, SheetRow } from '$lib/types.js';
 	import { tierClass } from '$lib/tier-class';
 	import '$lib/website/styles/tokens.css';
 	import '$lib/website/styles/tiers.css';
@@ -21,6 +32,85 @@
 	let selectedTier = $state('All');
 	let searchQuery = $state('');
 	let draftSearch = $state('');
+
+	// Bulk tier actions (#315, spec §5.1).
+	let actionsStatus = $state<ActionsStatus | null>(null);
+	let sheet = $state<ActionKind | null>(null);
+	let sheetRows = $state<SheetRow[]>([]);
+	// The tier captured when the sheet opened, not the live filter — the tier
+	// pills can change while `loadTierAccounts`/`getActiveActions` are in
+	// flight, and the confirm/consent request must use what the person saw.
+	let sheetTier = $state('');
+	let bulkBusy = $state(false);
+	let bulkError = $state('');
+	let bulkTier = $derived(bulkTierFor(selectedTier));
+	let showBulk = $derived(showBulkBar({ bulkTier, actionsStatus, asUser, total, searchQuery }));
+
+	/** An expired cookie or a revoked grant is not a bulk-action error — it is
+	 *  the same "you are signed out" that `load()` handles. Returns true when
+	 *  it has taken over with a redirect. */
+	function redirectedForAuth(e: unknown): boolean {
+		if (e instanceof AuthError) {
+			goto('/login');
+			return true;
+		}
+		if (e instanceof AccessRevokedError) {
+			goto('/waitlist');
+			return true;
+		}
+		return false;
+	}
+
+	/** Every account in the given tier, across pages (server caps per_page at 200). */
+	async function loadTierAccounts(tier: string): Promise<Account[]> {
+		const got: Account[] = [];
+		for (let p = 1; ; p++) {
+			const res = await getAccounts({ tier, page: p, per_page: 200 });
+			got.push(...res.accounts);
+			if (res.accounts.length < 200 || got.length >= res.total) break;
+		}
+		return got;
+	}
+
+	async function openSheet(kind: ActionKind) {
+		const tier = bulkTier;
+		if (!tier) return;
+		bulkError = '';
+		bulkBusy = true;
+		try {
+			const [accounts, act] = await Promise.all([loadTierAccounts(tier), getActiveActions()]);
+			sheetRows = buildSheetRows(accounts, act.active, kind);
+			sheetTier = tier;
+			sheet = kind;
+		} catch (e) {
+			if (redirectedForAuth(e)) return;
+			bulkError = e instanceof Error ? e.message : 'Something went wrong';
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	async function confirmBulk(dids: string[]) {
+		const kind = sheet;
+		if (!kind || !sheetTier) return;
+		sheet = null;
+		bulkBusy = true;
+		bulkError = '';
+		try {
+			const res = await createActionBatch(kind, `tier:${sheetTier}`, dids);
+			if (res.batch_id !== null) await goto(`/actions/${res.batch_id}`);
+			else bulkError = alreadyDoneMessage(kind, res.skipped_active);
+		} catch (e) {
+			if (e instanceof NotConnectedError) {
+				await startConsent(kind, { tier: sheetTier });
+				return;
+			}
+			if (redirectedForAuth(e)) return;
+			bulkError = e instanceof Error ? e.message : 'Something went wrong';
+		} finally {
+			bulkBusy = false;
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -72,6 +162,16 @@
 		const q = u.get('q') ?? '';
 		draftSearch = q;
 		searchQuery = q;
+
+		getActionsStatus().then((s) => (actionsStatus = s)).catch(() => (actionsStatus = null));
+		const resume = u.get('resume');
+		const actionsError = u.get('actions_error');
+		if (actionsError) bulkError = bulkErrorMessage(actionsError);
+		else if ((resume === 'mute' || resume === 'block') && t !== 'All') {
+			// Back from consent: re-open the sheet the person was looking at.
+			load().then(() => openSheet(resume));
+			return;
+		}
 		load();
 	});
 </script>
@@ -115,6 +215,31 @@
 			</div>
 		</div>
 	</div>
+
+	{#if showBulk}
+		<div class="bulk-bar">
+			<span class="bulk-count">{total} {total === 1 ? 'account' : 'accounts'} in {bulkTier}</span>
+			<div class="bulk-buttons">
+				<button class="bulk-btn" onclick={() => openSheet('mute')} disabled={bulkBusy}>Mute all</button>
+				<button class="bulk-btn block" onclick={() => openSheet('block')} disabled={bulkBusy}>Block all</button>
+			</div>
+			{#if bulkError}
+				<p class="bulk-error">{bulkError}</p>
+			{/if}
+		</div>
+	{/if}
+
+	{#if sheet}
+		<ConfirmSheet
+			kind={sheet}
+			rows={sheetRows}
+			count={sheetRows.length}
+			label={sheetTier}
+			connected={actionsStatus?.connected ?? false}
+			onconfirm={confirmBulk}
+			oncancel={() => (sheet = null)}
+		/>
+	{/if}
 
 	{#if loading}
 		<div class="loading-state"><div class="spinner"></div></div>
@@ -218,6 +343,14 @@
 		margin-bottom: 1.5rem;
 		flex-wrap: wrap;
 	}
+
+	.bulk-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.625rem 0.875rem; margin-bottom: 1rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 10px; font-size: 0.875rem; }
+	.bulk-count { color: var(--charcoal-400); }
+	.bulk-buttons { display: flex; gap: 0.375rem; margin-left: auto; }
+	.bulk-btn { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
+	.bulk-btn.block { color: var(--tier-high); }
+	.bulk-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.bulk-error { width: 100%; margin: 0; font-size: 0.75rem; color: var(--status-error); }
 
 	.tier-pills { display: flex; gap: 0.375rem; flex-wrap: wrap; }
 

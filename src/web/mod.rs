@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
@@ -24,6 +25,7 @@ use tracing::info;
 use crate::config::Config;
 use crate::db::Database;
 
+pub mod actions;
 pub mod admitter;
 pub mod auth;
 pub mod handlers;
@@ -36,6 +38,24 @@ pub mod typeahead;
 // Run `cd web && npm ci && npm run build` first.
 static ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/build");
 
+/// Bounds every outbound OAuth/PDS call made through `AppState::http` — the
+/// connect/disconnect handlers, `SessionStore`, the action runner's
+/// `dpop_http::send_once`, and `session.rs` discovery/revocation requests.
+/// A hung PDS or authorization server must not hang a request handler
+/// forever. Mirrors `src/bluesky/client.rs::REQUEST_TIMEOUT`.
+const OUTBOUND_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build the shared outbound HTTP client used for OAuth/PDS calls.
+///
+/// Single source of truth for the client-level timeout so production and
+/// tests never drift.
+pub(crate) fn outbound_http() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .timeout(OUTBOUND_HTTP_TIMEOUT)
+        .build()
+        .context("building the outbound HTTP client")
+}
+
 /// Shared application state threaded through all Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -45,9 +65,14 @@ pub struct AppState {
     /// In-flight OAuth request states, keyed by the `state` parameter sent to the PDS.
     /// Populated by POST /api/auth/initiate; consumed by GET /api/auth/callback.
     pub pending_oauth: Arc<RwLock<HashMap<String, handlers::oauth::PendingOAuth>>>,
-    /// AT Protocol tokens for the authenticated user.
-    /// Stored in-memory for this milestone (lost on restart — user re-authenticates).
-    pub oauth_tokens: Arc<RwLock<Option<serde_json::Value>>>,
+    /// OAuth write sessions (#315): `Some` only when `CHARCOAL_TOKEN_KEY` is
+    /// valid. `None` means the actions feature is disabled — endpoints answer
+    /// 503 `actions_disabled` and nothing else changes.
+    pub sessions: Option<Arc<actions::session::SessionStore>>,
+    /// Wake channel for the background action runner (#315). Send a batch id
+    /// after inserting it so it runs now. `None` in test helpers that spawn
+    /// no runner, and when the feature is disabled.
+    pub action_wake: Option<tokio::sync::mpsc::Sender<i64>>,
     /// P-256 signing key for JWT client assertions. Generated at startup.
     pub signing_key: atproto_identity::key::KeyData,
     /// Shared HTTP client for outbound calls made by handlers (#227).
@@ -120,14 +145,20 @@ pub async fn run_server(
     );
     info!("Loaded ONNX models (toxicity + embedding + NLI) into shared state");
 
+    // Computed before `config` moves into `Arc::new` below — `from_config`
+    // only needs a borrow, and once wrapped in `Arc<Config>` a mutable move
+    // is not the point; we just need the read to happen first.
+    let sessions = actions::session::SessionStore::from_config(&config).map(Arc::new);
+
     let state = AppState {
         db,
         config: Arc::new(config),
         scan_manager: Arc::new(RwLock::new(scan_job::ScanManager::new())),
         pending_oauth: Arc::new(RwLock::new(HashMap::new())),
-        oauth_tokens: Arc::new(RwLock::new(None)),
+        sessions,
+        action_wake: None,
         signing_key,
-        http: reqwest::Client::new(),
+        http: outbound_http().context("building shared outbound HTTP client")?,
         typeahead_limiter: handlers::typeahead::build_limiter(),
         models,
         scan_wake: None,
@@ -139,6 +170,17 @@ pub async fn run_server(
     let scan_wake = admitter::spawn_admitter(state.clone());
     let state = AppState {
         scan_wake: Some(scan_wake),
+        ..state
+    };
+
+    // One action runner per process (#315). Only spawned when the feature is
+    // enabled; it resumes any batch left queued/running by the last deploy.
+    let action_wake = state
+        .sessions
+        .is_some()
+        .then(|| actions::runner::spawn_runner(state.clone()));
+    let state = AppState {
+        action_wake,
         ..state
     };
 
@@ -202,6 +244,40 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route(
             "/api/admin/access/{did}/approve-scan",
             post(handlers::access::approve_access_and_scan),
+        )
+        .route("/api/actions/status", get(handlers::actions::get_status))
+        .route("/api/actions/connect", post(handlers::actions::connect))
+        .route(
+            "/api/actions/disconnect",
+            post(handlers::actions::disconnect),
+        )
+        .route(
+            "/api/actions/batches",
+            get(handlers::actions::list_batches).post(handlers::actions::create_batch),
+        )
+        .route(
+            "/api/actions/batches/{id}",
+            get(handlers::actions::get_batch),
+        )
+        .route(
+            "/api/actions/batches/{id}/undo",
+            post(handlers::actions::undo_batch),
+        )
+        .route(
+            "/api/actions/batches/{id}/retry",
+            post(handlers::actions::retry_batch),
+        )
+        .route(
+            "/api/actions/{action_id}/undo",
+            post(handlers::actions::undo_action),
+        )
+        .route(
+            "/api/accounts/{handle}/actions",
+            get(handlers::actions::account_actions),
+        )
+        .route(
+            "/api/actions/active",
+            get(handlers::actions::active_actions),
         )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

@@ -1071,6 +1071,17 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
         "DELETE FROM topic_clusters WHERE user_did = ?1",
         params![user_did],
     )?;
+    // #315: the user's write grant and everything Charcoal did with it.
+    // actions references action_batches, so it goes first.
+    tx.execute("DELETE FROM actions WHERE user_did = ?1", params![user_did])?;
+    tx.execute(
+        "DELETE FROM action_batches WHERE user_did = ?1",
+        params![user_did],
+    )?;
+    tx.execute(
+        "DELETE FROM oauth_sessions WHERE user_did = ?1",
+        params![user_did],
+    )?;
     tx.execute("DELETE FROM users WHERE did = ?1", params![user_did])?;
     tx.commit()?;
     Ok(())
@@ -1811,6 +1822,314 @@ pub fn list_access_requests(conn: &Connection) -> Result<Vec<crate::db::traits::
                 requested_at: r.get(3)?,
                 decided_at: r.get(4)?,
                 decided_by: r.get(5)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+// --- OAuth write sessions (#315) ---
+
+const OAUTH_SESSION_COLS: &str = "user_did, pds_url, scope, access_token_enc, refresh_token_enc, \
+     dpop_key_enc, access_expires_at, created_at, updated_at";
+
+fn read_oauth_session(
+    r: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::db::traits::OauthSessionRow> {
+    Ok(crate::db::traits::OauthSessionRow {
+        user_did: r.get(0)?,
+        pds_url: r.get(1)?,
+        scope: r.get(2)?,
+        access_token_enc: r.get(3)?,
+        refresh_token_enc: r.get(4)?,
+        dpop_key_enc: r.get(5)?,
+        access_expires_at: r.get(6)?,
+        created_at: r.get(7)?,
+        updated_at: r.get(8)?,
+    })
+}
+
+pub fn get_oauth_session(
+    conn: &Connection,
+    user_did: &str,
+) -> Result<Option<crate::db::traits::OauthSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {OAUTH_SESSION_COLS} FROM oauth_sessions WHERE user_did = ?1"
+    ))?;
+    Ok(stmt.query_row([user_did], read_oauth_session).optional()?)
+}
+
+pub fn upsert_oauth_session(
+    conn: &Connection,
+    row: &crate::db::traits::OauthSessionRow,
+) -> Result<()> {
+    // created_at is deliberately absent from the DO UPDATE list: re-consent
+    // rotates every secret but keeps the original connection date.
+    conn.execute(
+        "INSERT INTO oauth_sessions (user_did, pds_url, scope, access_token_enc,
+             refresh_token_enc, dpop_key_enc, access_expires_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT (user_did) DO UPDATE SET
+             pds_url = excluded.pds_url, scope = excluded.scope,
+             access_token_enc = excluded.access_token_enc,
+             refresh_token_enc = excluded.refresh_token_enc,
+             dpop_key_enc = excluded.dpop_key_enc,
+             access_expires_at = excluded.access_expires_at,
+             updated_at = excluded.updated_at",
+        rusqlite::params![
+            row.user_did,
+            row.pds_url,
+            row.scope,
+            row.access_token_enc,
+            row.refresh_token_enc,
+            row.dpop_key_enc,
+            row.access_expires_at,
+            row.created_at,
+            row.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn update_oauth_tokens(
+    conn: &Connection,
+    user_did: &str,
+    access_token_enc: &[u8],
+    refresh_token_enc: &[u8],
+    access_expires_at: i64,
+    expected_updated_at: &str,
+    new_updated_at: &str,
+) -> Result<bool> {
+    let n = conn.execute(
+        "UPDATE oauth_sessions
+         SET access_token_enc = ?2, refresh_token_enc = ?3, access_expires_at = ?4,
+             updated_at = ?6
+         WHERE user_did = ?1 AND updated_at = ?5",
+        rusqlite::params![
+            user_did,
+            access_token_enc,
+            refresh_token_enc,
+            access_expires_at,
+            expected_updated_at,
+            new_updated_at,
+        ],
+    )?;
+    Ok(n > 0)
+}
+
+pub fn delete_oauth_session(conn: &Connection, user_did: &str) -> Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM oauth_sessions WHERE user_did = ?1",
+        rusqlite::params![user_did],
+    )?;
+    Ok(n > 0)
+}
+
+// --- Action batches (#315) ---
+
+const ACTION_BATCH_COLS: &str =
+    "id, user_did, kind, source, requested, status, error, created_at, started_at, finished_at";
+const ACTION_COLS: &str = "id, batch_id, user_did, target_did, kind, status, record_uri, undo_of, \
+     error, score_at_action, tier_at_action, applied_at, undone_at";
+
+fn read_action_batch(r: &rusqlite::Row<'_>) -> rusqlite::Result<crate::db::traits::ActionBatchRow> {
+    Ok(crate::db::traits::ActionBatchRow {
+        id: r.get(0)?,
+        user_did: r.get(1)?,
+        kind: r.get(2)?,
+        source: r.get(3)?,
+        requested: r.get(4)?,
+        status: r.get(5)?,
+        error: r.get(6)?,
+        created_at: r.get(7)?,
+        started_at: r.get(8)?,
+        finished_at: r.get(9)?,
+    })
+}
+
+fn read_action(r: &rusqlite::Row<'_>) -> rusqlite::Result<crate::db::traits::ActionRow> {
+    Ok(crate::db::traits::ActionRow {
+        id: r.get(0)?,
+        batch_id: r.get(1)?,
+        user_did: r.get(2)?,
+        target_did: r.get(3)?,
+        kind: r.get(4)?,
+        status: r.get(5)?,
+        record_uri: r.get(6)?,
+        undo_of: r.get(7)?,
+        error: r.get(8)?,
+        score_at_action: r.get(9)?,
+        tier_at_action: r.get(10)?,
+        applied_at: r.get(11)?,
+        undone_at: r.get(12)?,
+    })
+}
+
+pub fn create_action_batch(
+    conn: &Connection,
+    user_did: &str,
+    kind: &str,
+    source: &str,
+    rows: &[crate::db::traits::NewAction],
+) -> Result<i64> {
+    let tx = conn.unchecked_transaction()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    tx.execute(
+        "INSERT INTO action_batches (user_did, kind, source, requested, status, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'queued', ?5)",
+        rusqlite::params![user_did, kind, source, rows.len() as i64, now],
+    )?;
+    let batch_id = tx.last_insert_rowid();
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO actions (batch_id, user_did, target_did, kind, status, undo_of,
+                 score_at_action, tier_at_action)
+             VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7)",
+        )?;
+        for a in rows {
+            stmt.execute(rusqlite::params![
+                batch_id,
+                user_did,
+                a.target_did,
+                a.kind,
+                a.undo_of,
+                a.score_at_action,
+                a.tier_at_action,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(batch_id)
+}
+
+pub fn get_action_batch(
+    conn: &Connection,
+    id: i64,
+) -> Result<Option<crate::db::traits::ActionBatchRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ACTION_BATCH_COLS} FROM action_batches WHERE id = ?1"
+    ))?;
+    Ok(stmt.query_row([id], read_action_batch).optional()?)
+}
+
+pub fn list_action_batches(
+    conn: &Connection,
+    user_did: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<crate::db::traits::ActionBatchRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ACTION_BATCH_COLS} FROM action_batches WHERE user_did = ?1
+         ORDER BY created_at DESC, id DESC LIMIT ?2 OFFSET ?3"
+    ))?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![user_did, limit, offset],
+            read_action_batch,
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn list_actions_for_batch(
+    conn: &Connection,
+    batch_id: i64,
+) -> Result<Vec<crate::db::traits::ActionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ACTION_COLS} FROM actions WHERE batch_id = ?1 ORDER BY id ASC"
+    ))?;
+    let rows = stmt
+        .query_map([batch_id], read_action)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn list_unfinished_batches(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM action_batches WHERE status IN ('queued','running') ORDER BY id ASC",
+    )?;
+    let ids = stmt
+        .query_map([], |r| r.get::<_, i64>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+pub fn set_action_batch_status(
+    conn: &Connection,
+    id: i64,
+    status: &str,
+    error: Option<&str>,
+) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // COALESCE keeps the first started_at across resumes; finished_at is
+    // stamped on every terminal transition (a retry-to-queued clears it).
+    conn.execute(
+        "UPDATE action_batches SET
+             status = ?2,
+             error = ?3,
+             started_at = CASE WHEN ?2 = 'running' THEN COALESCE(started_at, ?4) ELSE started_at END,
+             finished_at = CASE WHEN ?2 IN ('done','partial','failed') THEN ?4 ELSE NULL END
+         WHERE id = ?1",
+        rusqlite::params![id, status, error, now],
+    )?;
+    Ok(())
+}
+
+pub fn update_action(
+    conn: &Connection,
+    id: i64,
+    status: &str,
+    record_uri: Option<&str>,
+    error: Option<&str>,
+) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE actions SET
+             status = ?2,
+             record_uri = COALESCE(?3, record_uri),
+             error = ?4,
+             applied_at = CASE WHEN ?2 IN ('applied','skipped_already_done') THEN ?5 ELSE applied_at END,
+             undone_at = CASE WHEN ?2 = 'undone' THEN ?5 ELSE undone_at END
+         WHERE id = ?1",
+        rusqlite::params![id, status, record_uri, error, now],
+    )?;
+    Ok(())
+}
+
+pub fn get_action(conn: &Connection, id: i64) -> Result<Option<crate::db::traits::ActionRow>> {
+    let mut stmt = conn.prepare(&format!("SELECT {ACTION_COLS} FROM actions WHERE id = ?1"))?;
+    Ok(stmt.query_row([id], read_action).optional()?)
+}
+
+pub fn active_actions(
+    conn: &Connection,
+    user_did: &str,
+) -> Result<Vec<crate::db::traits::ActionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {ACTION_COLS} FROM actions
+         WHERE user_did = ?1 AND status IN ('applied','skipped_already_done')
+         ORDER BY id ASC"
+    ))?;
+    let rows = stmt
+        .query_map([user_did], read_action)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn list_score_snapshots(
+    conn: &Connection,
+    user_did: &str,
+) -> Result<Vec<crate::db::traits::ScoreSnapshot>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, threat_score, threat_tier FROM account_scores WHERE user_did = ?1",
+    )?;
+    let rows = stmt
+        .query_map([user_did], |r| {
+            Ok(crate::db::traits::ScoreSnapshot {
+                did: r.get(0)?,
+                handle: r.get(1)?,
+                threat_score: r.get(2)?,
+                threat_tier: r.get(3)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;

@@ -16,7 +16,14 @@ import type {
 	AdminUsersResponse,
 	PreSeedResponse,
 	AccessListResponse,
-	ApproveScanResponse
+	ApproveScanResponse,
+	ActionsStatus,
+	ActionBatchSummary,
+	ActionBatchDetail,
+	ActionRowView,
+	CreateBatchResponse,
+	ActionKind,
+	ActiveActionRef
 } from './types.js';
 
 export class AuthError extends Error {
@@ -46,6 +53,34 @@ export class CooldownError extends Error {
 	}
 }
 
+/** 409 with code "not_connected": no write session for this account yet.
+ *  Callers open the consent interstitial rather than showing an error. */
+export class NotConnectedError extends Error {
+	constructor() {
+		super('Connect your Bluesky account before muting or blocking');
+		this.name = 'NotConnectedError';
+	}
+}
+
+/** 404: the thing asked for does not exist (or is not this account's).
+ *  Distinguished from a 500 or a dropped request so a page can render "not
+ *  found" for the first and a retryable error for the second. */
+export class NotFoundError extends Error {
+	constructor(message?: string) {
+		super(message ?? 'Not found');
+		this.name = 'NotFoundError';
+	}
+}
+
+/** 503 with code "actions_disabled": the server has no CHARCOAL_TOKEN_KEY.
+ *  Buttons are hidden from status; this only fires if one slips through. */
+export class ActionsDisabledError extends Error {
+	constructor() {
+		super('Mute and block actions are not enabled on this server');
+		this.name = 'ActionsDisabledError';
+	}
+}
+
 function getAsUser(): string | null {
 	if (typeof window === 'undefined') return null;
 	return new URLSearchParams(window.location.search).get('as_user');
@@ -71,6 +106,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 		}
 		if (res.status === 429 && typeof body.retry_at === 'string') {
 			throw new CooldownError(body.error ?? 'Scan cooldown active', body.retry_at);
+		}
+		if (res.status === 409 && body.code === 'not_connected') {
+			throw new NotConnectedError();
+		}
+		if (res.status === 503 && body.code === 'actions_disabled') {
+			throw new ActionsDisabledError();
+		}
+		if (res.status === 404 || body.code === 'not_found') {
+			throw new NotFoundError(body.error);
 		}
 		throw new Error(body.error ?? `HTTP ${res.status}`);
 	}
@@ -264,4 +308,89 @@ export async function approveAccessAndScan(did: string): Promise<ApproveScanResp
 
 export async function denyAccess(did: string): Promise<void> {
 	await apiFetch(`/api/admin/access/${encodeURIComponent(did)}/deny`, { method: 'POST' });
+}
+
+// ---- Mute / block actions (#315) ----
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+export async function getActionsStatus(): Promise<ActionsStatus> {
+	return apiFetch<ActionsStatus>('/api/actions/status');
+}
+
+export interface ConnectOptions {
+	tier?: string;
+	handle?: string;
+}
+
+/** Begin the write-consent round-trip. Resolves to the PDS authorization URL;
+ *  the caller navigates there with a full page load. */
+export async function connectActions(
+	kind: ActionKind | 'undo',
+	opts: ConnectOptions = {}
+): Promise<string> {
+	const data = await apiFetch<{ redirect_url?: unknown }>('/api/actions/connect', {
+		method: 'POST',
+		headers: JSON_HEADERS,
+		body: JSON.stringify({ kind, tier: opts.tier ?? null, handle: opts.handle ?? null })
+	});
+	if (typeof data.redirect_url !== 'string' || data.redirect_url.length === 0) {
+		throw new Error('Could not start the Bluesky permission step — please try again');
+	}
+	return data.redirect_url;
+}
+
+/** Ask for consent and leave the page. Never resolves on success. */
+export async function startConsent(kind: ActionKind | 'undo', opts: ConnectOptions = {}) {
+	const url = await connectActions(kind, opts);
+	window.location.assign(url);
+}
+
+export async function disconnectActions(): Promise<{ disconnected: boolean }> {
+	return apiFetch('/api/actions/disconnect', { method: 'POST' });
+}
+
+export async function createActionBatch(
+	kind: ActionKind,
+	source: string,
+	targets: string[]
+): Promise<CreateBatchResponse> {
+	return apiFetch<CreateBatchResponse>('/api/actions/batches', {
+		method: 'POST',
+		headers: JSON_HEADERS,
+		body: JSON.stringify({ kind, source, targets })
+	});
+}
+
+export async function listActionBatches(
+	limit = 20,
+	offset = 0
+): Promise<{ batches: ActionBatchSummary[]; limit: number; offset: number }> {
+	return apiFetch(`/api/actions/batches?limit=${limit}&offset=${offset}`);
+}
+
+export async function getActionBatch(id: number): Promise<ActionBatchDetail> {
+	return apiFetch<ActionBatchDetail>(`/api/actions/batches/${id}`);
+}
+
+export async function undoBatch(id: number): Promise<{ batch_id: number }> {
+	return apiFetch(`/api/actions/batches/${id}/undo`, { method: 'POST' });
+}
+
+export async function retryBatch(id: number): Promise<{ batch_id: number }> {
+	return apiFetch(`/api/actions/batches/${id}/retry`, { method: 'POST' });
+}
+
+export async function undoAction(id: number): Promise<{ batch_id: number }> {
+	return apiFetch(`/api/actions/${id}/undo`, { method: 'POST' });
+}
+
+export async function getAccountActions(
+	handle: string
+): Promise<{ did: string; actions: ActionRowView[] }> {
+	return apiFetch(`/api/accounts/${encodeURIComponent(handle)}/actions`);
+}
+
+export async function getActiveActions(): Promise<{ active: ActiveActionRef[] }> {
+	return apiFetch('/api/actions/active');
 }
