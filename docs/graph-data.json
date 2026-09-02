@@ -7160,6 +7160,17 @@
       "created_at": "2026-09-02T04:23:14.117566-07:00",
       "updated_at": "2026-09-02T04:23:14.117566-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"419d78e\",\"confidence\":85}"
+    },
+    {
+      "id": 661,
+      "change_id": "5e9f71ec-3277-4412-a3c1-5a17b113942b",
+      "node_type": "outcome",
+      "title": "Fix wave done: 43c9b4a + 7a214c2. I1-I5, I7, M1/M2/M14 fixed. unit_actions_runner 17/17 (6 new), web_actions 24/24 (2 new), unit_actions_db 22/22, unit_actions_pds 10/10, db_postgres 37/37, vitest 92/92 (3 new), 0 SKIP, clippy web+postgres+no-features clean, fmt clean, svelte-autofixer clean on all 4 components. I6 deferred as agreed.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:42:38.922432-07:00",
+      "updated_at": "2026-09-02T04:42:38.922432-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"7a214c2\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -14455,6 +14466,17 @@
       "weight": 1.0,
       "rationale": "implements decision",
       "created_at": "2026-09-02T04:23:16.174186-07:00"
+    },
+    {
+      "id": 674,
+      "from_node_id": 660,
+      "to_node_id": 661,
+      "from_change_id": "ae43e13d-9f6b-46c3-bbe4-7ce8c011a122",
+      "to_change_id": "5e9f71ec-3277-4412-a3c1-5a17b113942b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result of the fix wave",
+      "created_at": "2026-09-02T04:42:42.057975-07:00"
     }
   ],
   "documents": [

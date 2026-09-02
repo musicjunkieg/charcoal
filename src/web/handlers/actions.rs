@@ -602,6 +602,18 @@ pub async fn retry_batch(
     if let Err(r) = require_connected(&sessions, &state, &auth.did).await {
         return r;
     }
+    // Only a batch the runner has finished with can be retried. Because
+    // `pending` rows count as retryable (below), a batch that is still
+    // `queued`/`running` would otherwise be cloned into a second live batch
+    // over the same targets from the API alone — the UI gates on this too,
+    // but the server must not rely on that.
+    if matches!(batch.status.as_str(), "queued" | "running") {
+        return api_error_code(
+            StatusCode::CONFLICT,
+            "batch_running",
+            "This batch is still running",
+        );
+    }
     let rows = match rows_for(&state, id).await {
         Ok(r) => r,
         Err(r) => return r,

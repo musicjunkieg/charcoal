@@ -323,7 +323,7 @@ All under the existing `require_auth` layer.
 | `GET` | `/api/actions/batches?limit&offset` | list with counts and drift flags |
 | `GET` | `/api/actions/batches/{id}` | batch + rows |
 | `POST` | `/api/actions/batches/{id}/undo` | undo whole batch |
-| `POST` | `/api/actions/batches/{id}/retry` | new batch over failed rows |
+| `POST` | `/api/actions/batches/{id}/retry` | new batch over failed and never-run rows; 409 `batch_running` while the batch is still queued/running |
 | `POST` | `/api/actions/{action_id}/undo` | undo one row |
 | `GET` | `/api/accounts/{handle}/actions` | current mute/block state for the detail page |
 

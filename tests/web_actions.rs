@@ -768,6 +768,11 @@ async fn retry_creates_a_new_batch_over_failed_rows() {
         &[("applied", None)],
     )
     .await;
+    state
+        .db
+        .set_action_batch_status(settled, "done", None)
+        .await
+        .unwrap();
     let (status, body) = post(
         &app,
         &format!("/api/actions/batches/{settled}/retry"),
@@ -815,6 +820,42 @@ async fn retry_reaches_a_failed_batch_whose_rows_never_ran() {
     let rows = state.db.list_actions_for_batch(retry_id).await.unwrap();
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|r| r.status == "pending"));
+}
+
+/// Retry counts `pending` rows as work to redo, so a batch the runner has not
+/// finished with must be refused — otherwise the API alone could clone a live
+/// batch into a second one over the same targets.
+#[tokio::test]
+async fn retry_refuses_a_batch_that_is_still_running() {
+    let (app, state) = app();
+    seed_session(&state, TEST_DID, "https://pds.test").await;
+    let (orig, _) = seed_batch(
+        &*state.db,
+        TEST_DID,
+        "mute",
+        &[row(TARGET_A, "mute")],
+        &[("pending", None)],
+    )
+    .await;
+    for status in ["queued", "running"] {
+        state
+            .db
+            .set_action_batch_status(orig, status, None)
+            .await
+            .unwrap();
+        let (code, body) = post(
+            &app,
+            &format!("/api/actions/batches/{orig}/retry"),
+            TEST_DID,
+            None,
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "{status}: {body}");
+        assert_eq!(body["code"], "batch_running");
+    }
+    // No retry batch was created.
+    let batches = state.db.list_action_batches(TEST_DID, 50, 0).await.unwrap();
+    assert_eq!(batches.len(), 1);
 }
 
 // ---- account detail ----

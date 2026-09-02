@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7a214c214112c529af0ea9c9e9d3fccb9edf1f83",
+    "short_hash": "7a214c2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T04:42:29-07:00",
+    "message": "fix(315): frontend mirrors undo eligibility and stops latching on errors (I1, I2, I4, I5, M14)\n\nFinal-review fix wave, frontend half.\n\nI1: canUndo counts only applied rows, the per-row Undo appears only for\nstatus applied, and buttonState returns actionId null for a\nskipped_already_done row — it still reads \"Muted\", it just has nothing\nCharcoal may undo.\n\nI2: canRetry is true for a failed batch whose rows are all pending.\n\nI4: NotFoundError joins the sibling error classes in api.ts, and the\nbatch page resets notFound/error at the top of every load. Only a real\n404 renders \"Action not found\"; anything else shows the message and keeps\nthe last-good batch on screen, so a dropped 3 s poll no longer bricks the\npage mid-flight.\n\nI5: openSheet and confirmBulk route AuthError to /login and\nAccessRevokedError to /waitlist through one page-local helper, instead of\nrendering \"Authentication required\" as small red text.\n\nM14: the actions list clears error on every load. The consent-error\nmessage moves to its own state so a poll cannot wipe it.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 10
+  },
+  {
     "hash": "419d78ec6f3c2039cdb939646cab863d25c13b93",
     "short_hash": "419d78e",
     "author": "Bryan Guffey",
