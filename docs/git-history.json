@@ -1,5 +1,13 @@
 [
   {
+    "hash": "1b925851be2bcfe477bf6e84c6883459b633d9d1",
+    "short_hash": "1b92585",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T12:06:38-07:00",
+    "message": "fix(322): send atproto-proxy on app.bsky.* calls; grant rpc: scopes for the reconcile reads\n\nLive spike on staging failed with \"getMutes: server error 501\". Two gaps\nbehind one symptom:\n\n1. A PDS with no default AppView configured (every self-hosted reference\n   PDS; bsky.social fills one in) refuses app.bsky.* calls that do not name\n   the service in an atproto-proxy header. PdsClient never sent one. It now\n   does on every app.bsky.* call and never on com.atproto.* (served by the\n   PDS itself). The header value and the scope aud derive from one constant\n   (scope::APPVIEW_DID) because the PDS requires them to agree.\n\n2. The PDS checks proxied reads against the rpc: grant just as it does\n   writes (permissions.assertRpc in pipethrough.ts), so the consent scope\n   now also asks for rpc:app.bsky.graph.getMutes and getBlocks — the\n   reconcile step needs both before any write.\n\nSessions stored under the original three-ability grant read as not\nconnected from SessionStore::status and load_for_write, so anyone who\nconsented before this fix is sent through consent once more instead of\nfailing every batch at the first read.\n\nTests: two PdsClient header tests (each proven to fail under a broken\nimplementation), scope tests reworked for the five-ability grant plus a\nheader/aud consistency check, a stale-scope session test, and the runner\nfixture corrected to carry the real grant.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 10
+  },
+  {
     "hash": "046578d5994479a9683d653e76b3bfc9dcc4ebe0",
     "short_hash": "046578d",
     "author": "chaos gremlin",

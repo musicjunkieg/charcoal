@@ -39,9 +39,10 @@ pub fn client_scope() -> String {
 }
 
 /// Did the authorization server grant what we asked for? Servers may reorder
-/// or normalise the scope string. The RPC scopes carry only an `aud`
-/// parameter, so a prefix check is still safe for those. The block repo
-/// scope is different: a naive prefix check on `repo:app.bsky.graph.block`
+/// or normalise the scope string, so every scope is parsed and inspected
+/// rather than string-matched. The RPC scopes must name the method for an
+/// audience the PDS accepts (see `has_rpc` below). The block repo scope
+/// needs its actions checked: a naive prefix check on `repo:app.bsky.graph.block`
 /// would also accept a *downgraded* grant such as
 /// `repo:app.bsky.graph.block?action=create` (create only, no delete) — the
 /// first undo would then fail at the PDS with an authorization error instead
@@ -55,12 +56,34 @@ pub fn client_scope() -> String {
 /// unqualified repo scope is the maximal grant for that collection. That is
 /// a superset of create+delete, so it satisfies this check.
 pub fn scope_grants_write(granted: &str) -> bool {
-    use atproto_oauth::scopes::{RepoAction, RepoCollection, Scope};
-
-    let has = |prefix: &str| granted.split_whitespace().any(|s| s.starts_with(prefix));
+    use atproto_oauth::scopes::{RepoAction, RepoCollection, RpcAudience, RpcLexicon, Scope};
 
     let Ok(scopes) = Scope::parse_multiple(granted) else {
         return false;
+    };
+
+    // An `rpc:` grant counts only when it names the method AND an audience
+    // the PDS will accept for the proxied call: the AppView itself, or the
+    // wildcard. A grant for some other service passes a name-prefix check
+    // but fails the PDS's `assertRpc` with a 403 (PR #110 review). The
+    // vendored parser keeps `aud` as written (`%23` stays encoded), while a
+    // normalising server may decode it, so either spelling of the AppView
+    // DID is accepted.
+    let has_rpc = |method: &str| {
+        scopes.iter().any(|scope| match scope {
+            Scope::Rpc(rpc) => {
+                let names_method = rpc.lxm.iter().any(|l| match l {
+                    RpcLexicon::All => true,
+                    RpcLexicon::Nsid(nsid) => nsid == method,
+                });
+                let for_appview = rpc.aud.iter().any(|a| match a {
+                    RpcAudience::All => true,
+                    RpcAudience::Did(did) => did == APPVIEW_DID || did == APPVIEW_AUD,
+                });
+                names_method && for_appview
+            }
+            _ => false,
+        })
     };
 
     let block_scope_has_create_and_delete = scopes.iter().any(|scope| match scope {
@@ -80,10 +103,10 @@ pub fn scope_grants_write(granted: &str) -> bool {
     // `write_scope()`: `SessionStore` reads a row that fails this check as
     // "not connected", so the person consents again once (#322).
     block_scope_has_create_and_delete
-        && has("rpc:app.bsky.graph.muteActor")
-        && has("rpc:app.bsky.graph.unmuteActor")
-        && has("rpc:app.bsky.graph.getMutes")
-        && has("rpc:app.bsky.graph.getBlocks")
+        && has_rpc("app.bsky.graph.muteActor")
+        && has_rpc("app.bsky.graph.unmuteActor")
+        && has_rpc("app.bsky.graph.getMutes")
+        && has_rpc("app.bsky.graph.getBlocks")
 }
 
 #[cfg(test)]
@@ -91,11 +114,11 @@ mod tests {
     use super::*;
     use atproto_oauth::scopes::Scope;
 
-    /// Every RPC grant the PDS will check, with a placeholder audience.
-    const ALL_RPC: &str = "rpc:app.bsky.graph.muteActor?aud=x \
-         rpc:app.bsky.graph.unmuteActor?aud=x \
-         rpc:app.bsky.graph.getMutes?aud=x \
-         rpc:app.bsky.graph.getBlocks?aud=x";
+    /// Every RPC grant the PDS will check, for the AppView audience.
+    const ALL_RPC: &str = "rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+         rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview \
+         rpc:app.bsky.graph.getMutes?aud=did:web:api.bsky.app%23bsky_appview \
+         rpc:app.bsky.graph.getBlocks?aud=did:web:api.bsky.app%23bsky_appview";
 
     #[test]
     fn write_scope_parses_as_granular_scopes() {
@@ -194,6 +217,39 @@ mod tests {
                 "should reject without {missing}"
             );
         }
+    }
+
+    /// PR #110 review: an RPC grant for the wrong audience is not a grant
+    /// the PDS will honour on a call proxied to the AppView — it fails
+    /// `assertRpc` with a 403 even though the method name matches. Such a
+    /// row must read as not connected, like any other insufficient grant.
+    #[test]
+    fn scope_grants_write_rejects_rpc_for_another_audience() {
+        let block = "repo:app.bsky.graph.block?action=create&action=delete";
+        let other = ALL_RPC.replace(
+            "did:web:api.bsky.app%23bsky_appview",
+            "did:web:other.example",
+        );
+        assert!(!scope_grants_write(&format!("atproto {block} {other}")));
+        // One wrong audience among four is still a rejection.
+        let one_wrong = ALL_RPC.replacen(
+            "getMutes?aud=did:web:api.bsky.app%23bsky_appview",
+            "getMutes?aud=did:web:other.example",
+            1,
+        );
+        assert!(!scope_grants_write(&format!("atproto {block} {one_wrong}")));
+    }
+
+    /// The wildcard audience (`aud=*`, the spec §3.2 fallback) covers the
+    /// AppView, so a server that normalises to it still grants the writes;
+    /// so does one that hands the DID back percent-decoded.
+    #[test]
+    fn scope_grants_write_accepts_wildcard_and_decoded_audience() {
+        let block = "repo:app.bsky.graph.block?action=create&action=delete";
+        let wildcard = ALL_RPC.replace("did:web:api.bsky.app%23bsky_appview", "*");
+        assert!(scope_grants_write(&format!("atproto {block} {wildcard}")));
+        let decoded = ALL_RPC.replace("%23", "#");
+        assert!(scope_grants_write(&format!("atproto {block} {decoded}")));
     }
 
     /// The write scope shipped in #315 (mute/unmute only) must now read as an

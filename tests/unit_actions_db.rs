@@ -60,7 +60,7 @@ async fn update_oauth_tokens_is_compare_and_swap() {
 
     // Stale expectation: nothing written.
     let ok = db
-        .update_oauth_tokens(DID, &[10], &[11], 2_000_000_000, "t0", "t2")
+        .update_oauth_tokens(DID, &[10], &[11], 2_000_000_000, "atproto new", "t0", "t2")
         .await
         .unwrap();
     assert!(!ok);
@@ -70,7 +70,7 @@ async fn update_oauth_tokens_is_compare_and_swap() {
 
     // Matching expectation: written, updated_at advanced.
     let ok = db
-        .update_oauth_tokens(DID, &[10], &[11], 2_000_000_000, "t1", "t2")
+        .update_oauth_tokens(DID, &[10], &[11], 2_000_000_000, "atproto new", "t1", "t2")
         .await
         .unwrap();
     assert!(ok);
@@ -78,6 +78,10 @@ async fn update_oauth_tokens_is_compare_and_swap() {
     assert_eq!(got.access_token_enc, vec![10]);
     assert_eq!(got.refresh_token_enc, vec![11]);
     assert_eq!(got.access_expires_at, 2_000_000_000);
+    assert_eq!(
+        got.scope, "atproto new",
+        "scope travels with the rotated pair"
+    );
     assert_eq!(got.updated_at, "t2");
     assert_eq!(
         got.dpop_key_enc,
@@ -87,7 +91,7 @@ async fn update_oauth_tokens_is_compare_and_swap() {
 
     // Missing row: false, no error.
     assert!(!db
-        .update_oauth_tokens("did:plc:nobody", &[1], &[2], 0, "t2", "t3")
+        .update_oauth_tokens("did:plc:nobody", &[1], &[2], 0, "atproto", "t2", "t3")
         .await
         .unwrap());
 }

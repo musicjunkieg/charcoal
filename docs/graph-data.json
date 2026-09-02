@@ -7369,6 +7369,50 @@
       "created_at": "2026-09-02T11:15:03.158573-07:00",
       "updated_at": "2026-09-02T11:15:03.158573-07:00",
       "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"f43fa9d\",\"confidence\":90,\"files\":[\"src/web/actions/pds.rs\",\"src/web/actions/scope.rs\",\"src/web/actions/session.rs\",\"tests/unit_actions_pds.rs\",\"tests/unit_actions_session.rs\"]}"
+    },
+    {
+      "id": 680,
+      "change_id": "91e43f6a-c8b8-42e9-8820-904a88144eb1",
+      "node_type": "outcome",
+      "title": "Fix committed 1b92585: header on app.bsky.* only, five-ability write_scope, stale-scope rows read as not connected. Full web suite 922 pass / 0 fail / 0 SKIP; clippy web+postgres clean; both header tests proven to fail under a broken impl",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T12:06:48.545020-07:00",
+      "updated_at": "2026-09-02T12:06:48.545020-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"1b92585\",\"confidence\":92}"
+    },
+    {
+      "id": 681,
+      "change_id": "4890f5ac-7012-43fd-a2af-88734f5f3821",
+      "node_type": "action",
+      "title": "Opened PR #110 (fix/322 → staging) for CodeRabbit review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T12:08:47.289488-07:00",
+      "updated_at": "2026-09-02T12:08:47.289488-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"1b92585\",\"confidence\":90}"
+    },
+    {
+      "id": 682,
+      "change_id": "e4a3d61d-e635-4613-b5bf-2e94571d7c13",
+      "node_type": "observation",
+      "title": "PR #110 CodeRabbit round 1: 2 Major findings — rpc aud not checked (scope.rs), refresh/reload not re-checking scope (session.rs). Both adjudicated real.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T12:31:59.696083-07:00",
+      "updated_at": "2026-09-02T12:31:59.696083-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"confidence\":90}"
+    },
+    {
+      "id": 683,
+      "change_id": "8ae3203d-a748-4c0b-a51d-540b77754096",
+      "node_type": "action",
+      "title": "Fix PR #110 round 1: parse rpc aud in scope_grants_write; persist + gate scope on refresh; usable-filter after lost race",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T12:31:59.720063-07:00",
+      "updated_at": "2026-09-02T12:31:59.720063-07:00",
+      "metadata_json": "{\"branch\":\"fix/322-atproto-proxy-header\",\"commit\":\"1b92585\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -14895,6 +14939,50 @@
       "weight": 1.0,
       "rationale": "implementation",
       "created_at": "2026-09-02T11:15:11.445829-07:00"
+    },
+    {
+      "id": 695,
+      "from_node_id": 679,
+      "to_node_id": 680,
+      "from_change_id": "5570d50c-a57d-48fd-9ae1-9d243f6bd610",
+      "to_change_id": "91e43f6a-c8b8-42e9-8820-904a88144eb1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-09-02T12:06:51.909940-07:00"
+    },
+    {
+      "id": 696,
+      "from_node_id": 680,
+      "to_node_id": 681,
+      "from_change_id": "91e43f6a-c8b8-42e9-8820-904a88144eb1",
+      "to_change_id": "4890f5ac-7012-43fd-a2af-88734f5f3821",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix verified locally; next gate is CodeRabbit review on the PR",
+      "created_at": "2026-09-02T12:08:50.130965-07:00"
+    },
+    {
+      "id": 697,
+      "from_node_id": 681,
+      "to_node_id": 682,
+      "from_change_id": "4890f5ac-7012-43fd-a2af-88734f5f3821",
+      "to_change_id": "e4a3d61d-e635-4613-b5bf-2e94571d7c13",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review round 1 findings on the PR",
+      "created_at": "2026-09-02T12:32:03.153298-07:00"
+    },
+    {
+      "id": 698,
+      "from_node_id": 682,
+      "to_node_id": 683,
+      "from_change_id": "e4a3d61d-e635-4613-b5bf-2e94571d7c13",
+      "to_change_id": "8ae3203d-a748-4c0b-a51d-540b77754096",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Both findings real; fix them",
+      "created_at": "2026-09-02T12:32:03.162855-07:00"
     }
   ],
   "documents": [

@@ -546,6 +546,7 @@ impl Database for SqliteDatabase {
         access_token_enc: &[u8],
         refresh_token_enc: &[u8],
         access_expires_at: i64,
+        scope: &str,
         expected_updated_at: &str,
         new_updated_at: &str,
     ) -> Result<bool> {
@@ -556,6 +557,7 @@ impl Database for SqliteDatabase {
             access_token_enc,
             refresh_token_enc,
             access_expires_at,
+            scope,
             expected_updated_at,
             new_updated_at,
         )

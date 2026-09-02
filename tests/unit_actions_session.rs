@@ -134,7 +134,7 @@ async fn load_refreshes_when_expiring_and_persists_new_pair() {
         .and(body_string_contains("client_assertion_type=urn%3Aietf%3Aparams%3Aoauth%3Aclient-assertion-type%3Ajwt-bearer"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
-            "scope": "atproto", "expires_in": 3600, "sub": DID
+            "scope": write_scope(), "expires_in": 3600, "sub": DID
         })))
         .expect(1)
         .mount(&mock)
@@ -179,7 +179,7 @@ async fn concurrent_loads_refresh_exactly_once() {
                 .set_delay(std::time::Duration::from_millis(200))
                 .set_body_json(serde_json::json!({
                     "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
-                    "scope": "atproto", "expires_in": 3600, "sub": DID
+                    "scope": write_scope(), "expires_in": 3600, "sub": DID
                 })),
         )
         .expect(1)
@@ -414,4 +414,147 @@ async fn row_with_insufficient_scope_reads_as_not_connected() {
     .await
     .unwrap();
     assert!(s.status(db.as_ref(), DID).await.unwrap().is_some());
+}
+
+/// PR #110 review: the token endpoint reports the scope the rotated tokens
+/// carry. When a refresh comes back with a grant that no longer covers the
+/// writes (revoked or narrowed server-side), the session must be forgotten,
+/// not returned as connected — the runner would 403 on the first proxied
+/// call otherwise.
+#[tokio::test]
+async fn refresh_that_narrows_scope_disconnects() {
+    let db = setup_db();
+    let s = store();
+    let mock = mock_pds().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
+            "scope": "atproto", "expires_in": 3600, "sub": DID
+        })))
+        .mount(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let err = s
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+    assert!(db.get_oauth_session(DID).await.unwrap().is_none());
+}
+
+/// The scope the token endpoint reports on refresh is persisted with the
+/// rotated pair, so `status()` and later loads see the live grant rather
+/// than the one from the original consent.
+#[tokio::test]
+async fn refresh_persists_the_reported_scope() {
+    let db = setup_db();
+    let s = store();
+    let mock = mock_pds().await;
+    // Same grant, server-normalised into a different order.
+    let scope = write_scope();
+    let reordered = scope.split(' ').rev().collect::<Vec<_>>().join(" ");
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token": "acc2", "token_type": "DPoP", "refresh_token": "ref2",
+            "scope": reordered, "expires_in": 3600, "sub": DID
+        })))
+        .mount(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let ws = s
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap();
+    assert_eq!(ws.access_token, "acc2");
+    assert_eq!(ws.scope, reordered);
+    let st = s.status(db.as_ref(), DID).await.unwrap().unwrap();
+    assert_eq!(st.scope, reordered);
+}
+
+/// A lost refresh race re-reads the row the other writer left. If that row
+/// carries an insufficient grant it must NOT be handed back as a usable
+/// session. Simulated with a second store (a second replica) that replaces
+/// the row while the first store's refresh call is in flight.
+#[tokio::test]
+async fn lost_race_does_not_return_an_insufficient_replacement_row() {
+    let db = setup_db();
+    let s1 = Arc::new(store());
+    let s2 = store();
+    let mock = mock_pds().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(serde_json::json!({ "error": "invalid_grant" }))
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .mount(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    s1.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens("acc1", "ref1", 0),
+    )
+    .await
+    .unwrap();
+
+    let http = reqwest::Client::new();
+    let loader = {
+        let s1 = Arc::clone(&s1);
+        let db = Arc::clone(&db);
+        let http = http.clone();
+        tokio::spawn(async move {
+            s1.load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+                .await
+        })
+    };
+    // While s1 waits on the token endpoint, the other replica writes a row
+    // under the pre-#322 grant (the exact shape a stale replica would carry).
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    s2.store(
+        db.as_ref(),
+        DID,
+        &mock.uri(),
+        &key,
+        &tokens_with_scope(
+            "acc-stale",
+            "ref-stale",
+            3600,
+            "atproto repo:app.bsky.graph.block?action=create&action=delete \
+             rpc:app.bsky.graph.muteActor?aud=did:web:api.bsky.app%23bsky_appview \
+             rpc:app.bsky.graph.unmuteActor?aud=did:web:api.bsky.app%23bsky_appview",
+        ),
+    )
+    .await
+    .unwrap();
+
+    let err = loader.await.unwrap().unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
 }

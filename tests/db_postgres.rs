@@ -1959,15 +1959,32 @@ async fn test_pg_oauth_session_parity() {
     assert_eq!(got.access_token_enc, vec![9, 9, 9]);
 
     assert!(!db
-        .update_oauth_tokens(OAUTH_DID, &[10], &[11], 2_000_000_000, "stale", "t3")
+        .update_oauth_tokens(
+            OAUTH_DID,
+            &[10],
+            &[11],
+            2_000_000_000,
+            "atproto new",
+            "stale",
+            "t3"
+        )
         .await
         .unwrap());
     assert!(db
-        .update_oauth_tokens(OAUTH_DID, &[10], &[11], 2_000_000_000, "t2", "t3")
+        .update_oauth_tokens(
+            OAUTH_DID,
+            &[10],
+            &[11],
+            2_000_000_000,
+            "atproto new",
+            "t2",
+            "t3"
+        )
         .await
         .unwrap());
     let got = db.get_oauth_session(OAUTH_DID).await.unwrap().unwrap();
     assert_eq!(got.access_token_enc, vec![10]);
+    assert_eq!(got.scope, "atproto new");
     assert_eq!(got.updated_at, "t3");
     assert_eq!(got.dpop_key_enc, vec![7, 8, 9]);
 

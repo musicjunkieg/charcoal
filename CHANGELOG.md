@@ -17,7 +17,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `rpc:app.bsky.graph.getMutes` and `rpc:app.bsky.graph.getBlocks` (the
   reconcile step needs both). Sessions stored under the original grant read
   as not connected, so anyone who consented before this fix is asked once
-  more instead of watching every batch fail.
+  more instead of watching every batch fail. The grant check itself got
+  stricter on review: an `rpc:` scope counts only for the AppView audience
+  (or `*`), the scope a token refresh reports is persisted with the rotated
+  tokens and a narrowed one disconnects the session, and a row written by
+  another replica during a lost refresh race is re-checked before use.
 
 ### Added
 - Mute and block from Charcoal (#315): tier-wide and per-account mute/block,

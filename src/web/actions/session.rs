@@ -225,6 +225,26 @@ impl SessionStore {
         let refresh_token = self.decrypt_field(&row.refresh_token_enc, "refresh_token")?;
         match refresh(http, oauth_client, &current, &refresh_token).await {
             Ok(fresh) => {
+                // The token endpoint reports the grant the rotated pair
+                // carries (RFC 6749 §5.1: omitted only when unchanged). A
+                // grant that no longer covers the writes is treated like a
+                // revoked refresh token — forget the session, so the person
+                // is re-consented rather than 403'd on the next proxied call.
+                let scope = if fresh.scope.is_empty() {
+                    row.scope.clone()
+                } else {
+                    fresh.scope.clone()
+                };
+                if !scope_grants_write(&scope) {
+                    warn!(
+                        did,
+                        "refresh narrowed the grant — deleting OAuth write session"
+                    );
+                    db.delete_oauth_session(did)
+                        .await
+                        .map_err(|e| SessionError::Db(e.to_string()))?;
+                    return Err(SessionError::NotConnected);
+                }
                 let new_refresh = fresh.refresh_token.as_deref().unwrap_or(&refresh_token);
                 let new_updated_at = chrono::Utc::now().to_rfc3339();
                 let expires_at = chrono::Utc::now().timestamp() + i64::from(fresh.expires_in);
@@ -236,6 +256,7 @@ impl SessionStore {
                             .encrypt("access_token", fresh.access_token.as_bytes()),
                         &self.crypto.encrypt("refresh_token", new_refresh.as_bytes()),
                         expires_at,
+                        &scope,
                         &row.updated_at,
                         &new_updated_at,
                     )
@@ -244,6 +265,7 @@ impl SessionStore {
                 if swapped {
                     return Ok(WriteSession {
                         access_token: fresh.access_token,
+                        scope,
                         ..current
                     });
                 }
@@ -262,8 +284,10 @@ impl SessionStore {
     }
 
     /// After a lost refresh race: if the row changed under us, the other
-    /// writer's tokens are good — return them. If it did not, the refresh
-    /// token is genuinely dead: forget the session (spec §3.7).
+    /// writer's tokens are good — return them, provided the grant they
+    /// carry still covers the writes (a stale replica could have written an
+    /// older one). If it did not change, the refresh token is genuinely
+    /// dead: forget the session (spec §3.7).
     async fn reload_or_disconnect(
         &self,
         db: &dyn Database,
@@ -275,7 +299,11 @@ impl SessionStore {
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?;
         match row {
-            Some(r) if r.updated_at != seen_updated_at => self.decrypt(&r),
+            Some(r) if r.updated_at != seen_updated_at && usable(&r) => self.decrypt(&r),
+            Some(r) if r.updated_at != seen_updated_at => {
+                warn!(did, "replacement OAuth row has an insufficient grant");
+                Err(SessionError::NotConnected)
+            }
             Some(_) => {
                 warn!(did, "refresh token rejected — deleting OAuth write session");
                 db.delete_oauth_session(did)
