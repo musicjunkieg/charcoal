@@ -1,5 +1,13 @@
 [
   {
+    "hash": "df3b42099bf6227ae23192ae3a857465c2400565",
+    "short_hash": "df3b420",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:13:07-07:00",
+    "message": "fix(315): PR review round 2 - task 11 drift note, disconnect errors, ternary\n\nFixes three Task 11 findings: rowNote() prioritized the failure message\nover the drift note, so a row that was both failed and drifted showed\nthe failure text twice (Status + Tier then) and never showed the drift\ncopy. Split rowNote() into failureNote()/driftNote() and use driftNote()\nspecifically in the Tier-then cell; rowNote() keeps its old\nfailure-over-drift composition for existing callers/tests.\n\ndisconnect() on the actions list page had no try/catch, so a failed\ndisconnectActions() call became an unhandled rejection with no user\nfeedback; wrapped it to match the AuthError/AccessRevokedError handling\nused by load() elsewhere on the page.\n\nRemoved a redundant identity ternary (b.kind === 'undo' ? 'undo' : b.kind)\nin the batch detail retry button.",
+    "files_changed": 6
+  },
+  {
     "hash": "f098c0562abd5d4298d41f3498cc8f4b37f48673",
     "short_hash": "f098c05",
     "author": "Bryan Guffey",

@@ -2,9 +2,18 @@
 	import { onMount } from 'svelte';
 	import { goto, pushState } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getAccounts } from '$lib/api.js';
-	import { AuthError, AccessRevokedError } from '$lib/api.js';
-	import type { Account } from '$lib/types.js';
+	import {
+		getAccounts,
+		getActionsStatus,
+		createActionBatch,
+		startConsent,
+		NotConnectedError,
+		AuthError,
+		AccessRevokedError
+	} from '$lib/api.js';
+	import ConfirmSheet from '$lib/components/ConfirmSheet.svelte';
+	import { bulkTierFor, showBulkBar, bulkErrorMessage, alreadyDoneMessage } from '$lib/bulk-tier-actions.js';
+	import type { Account, ActionKind, ActionsStatus } from '$lib/types.js';
 	import { tierClass } from '$lib/tier-class';
 	import '$lib/website/styles/tokens.css';
 	import '$lib/website/styles/tiers.css';
@@ -21,6 +30,63 @@
 	let selectedTier = $state('All');
 	let searchQuery = $state('');
 	let draftSearch = $state('');
+
+	// Bulk tier actions (#315, spec §5.1).
+	let actionsStatus = $state<ActionsStatus | null>(null);
+	let sheet = $state<ActionKind | null>(null);
+	let sheetCount = $state(0);
+	let sheetTargets = $state<string[]>([]);
+	let bulkBusy = $state(false);
+	let bulkError = $state('');
+	let bulkTier = $derived(bulkTierFor(selectedTier));
+	let showBulk = $derived(showBulkBar({ bulkTier, actionsStatus, asUser, total }));
+
+	/** Every DID in the selected tier, across pages (server caps per_page at 200). */
+	async function loadTierDids(tier: string): Promise<string[]> {
+		const dids: string[] = [];
+		for (let p = 1; ; p++) {
+			const res = await getAccounts({ tier, page: p, per_page: 200 });
+			dids.push(...res.accounts.map((a) => a.did).filter((d): d is string => !!d));
+			if (res.accounts.length < 200 || dids.length >= res.total) break;
+		}
+		return dids;
+	}
+
+	async function openSheet(kind: ActionKind) {
+		if (!bulkTier) return;
+		bulkError = '';
+		bulkBusy = true;
+		try {
+			sheetTargets = await loadTierDids(bulkTier);
+			sheetCount = sheetTargets.length;
+			sheet = kind;
+		} catch (e) {
+			bulkError = e instanceof Error ? e.message : 'Something went wrong';
+		} finally {
+			bulkBusy = false;
+		}
+	}
+
+	async function confirmBulk() {
+		const kind = sheet;
+		if (!kind || !bulkTier) return;
+		sheet = null;
+		bulkBusy = true;
+		bulkError = '';
+		try {
+			const res = await createActionBatch(kind, `tier:${bulkTier}`, sheetTargets);
+			if (res.batch_id !== null) await goto(`/actions/${res.batch_id}`);
+			else bulkError = alreadyDoneMessage(kind, res.skipped_active);
+		} catch (e) {
+			if (e instanceof NotConnectedError) {
+				await startConsent(kind, { tier: bulkTier });
+				return;
+			}
+			bulkError = e instanceof Error ? e.message : 'Something went wrong';
+		} finally {
+			bulkBusy = false;
+		}
+	}
 
 	async function load() {
 		loading = true;
@@ -72,6 +138,16 @@
 		const q = u.get('q') ?? '';
 		draftSearch = q;
 		searchQuery = q;
+
+		getActionsStatus().then((s) => (actionsStatus = s)).catch(() => (actionsStatus = null));
+		const resume = u.get('resume');
+		const actionsError = u.get('actions_error');
+		if (actionsError) bulkError = bulkErrorMessage(actionsError);
+		else if ((resume === 'mute' || resume === 'block') && t !== 'All') {
+			// Back from consent: re-open the sheet the person was looking at.
+			load().then(() => openSheet(resume));
+			return;
+		}
 		load();
 	});
 </script>
@@ -115,6 +191,30 @@
 			</div>
 		</div>
 	</div>
+
+	{#if showBulk}
+		<div class="bulk-bar">
+			<span class="bulk-count">{total} {total === 1 ? 'account' : 'accounts'} in {bulkTier}</span>
+			<div class="bulk-buttons">
+				<button class="bulk-btn" onclick={() => openSheet('mute')} disabled={bulkBusy}>Mute all</button>
+				<button class="bulk-btn block" onclick={() => openSheet('block')} disabled={bulkBusy}>Block all</button>
+			</div>
+			{#if bulkError}
+				<p class="bulk-error">{bulkError}</p>
+			{/if}
+		</div>
+	{/if}
+
+	{#if sheet && bulkTier}
+		<ConfirmSheet
+			kind={sheet}
+			count={sheetCount}
+			label={bulkTier}
+			connected={actionsStatus?.connected ?? false}
+			onconfirm={confirmBulk}
+			oncancel={() => (sheet = null)}
+		/>
+	{/if}
 
 	{#if loading}
 		<div class="loading-state"><div class="spinner"></div></div>
@@ -218,6 +318,14 @@
 		margin-bottom: 1.5rem;
 		flex-wrap: wrap;
 	}
+
+	.bulk-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.625rem 0.875rem; margin-bottom: 1rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 10px; font-size: 0.875rem; }
+	.bulk-count { color: var(--charcoal-400); }
+	.bulk-buttons { display: flex; gap: 0.375rem; margin-left: auto; }
+	.bulk-btn { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
+	.bulk-btn.block { color: var(--tier-high); }
+	.bulk-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.bulk-error { width: 100%; margin: 0; font-size: 0.75rem; color: var(--status-error); }
 
 	.tier-pills { display: flex; gap: 0.375rem; flex-wrap: wrap; }
 

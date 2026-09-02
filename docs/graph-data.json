@@ -6940,6 +6940,61 @@
       "created_at": "2026-09-02T03:10:03.767317-07:00",
       "updated_at": "2026-09-02T03:10:03.767317-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":85}"
+    },
+    {
+      "id": 641,
+      "change_id": "105c76cf-f9a7-463e-9b0e-1878c3012d09",
+      "node_type": "action",
+      "title": "Task 11 fix: drift note, disconnect error handling, ternary",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:13:20.893399-07:00",
+      "updated_at": "2026-09-02T03:13:20.893399-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"df3b420\",\"confidence\":85}"
+    },
+    {
+      "id": 642,
+      "change_id": "5699e82d-a8cc-4be6-a622-8536b44b0ba9",
+      "node_type": "outcome",
+      "title": "Fix wave done: df3b420, vitest 65/65 (2 new driftNote tests), svelte build clean, autofixer clean on 2 modified files",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:13:27.894585-07:00",
+      "updated_at": "2026-09-02T03:13:27.894585-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"df3b420\"}"
+    },
+    {
+      "id": 643,
+      "change_id": "351bb8ff-83eb-4e4a-86a0-14275aeafb39",
+      "node_type": "observation",
+      "title": "Task 11 re-review approved: driftNote split verified red/green, disconnect handling consistent, no regressions; vitest 65/65",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:16:42.143853-07:00",
+      "updated_at": "2026-09-02T03:16:42.143853-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 644,
+      "change_id": "05ecda86-a299-4e14-a192-110b0c2c2045",
+      "node_type": "action",
+      "title": "Task 12: bulk tier actions + ConfirmSheet",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:16:45.333235-07:00",
+      "updated_at": "2026-09-02T03:16:45.333235-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"df3b420\",\"confidence\":85}"
+    },
+    {
+      "id": 645,
+      "change_id": "9d954041-8cbc-4f78-af68-4eb9bd8957dd",
+      "node_type": "action",
+      "title": "Task 12 impl: ConfirmSheet.svelte + bulk tier bar on accounts page",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:19:19.192201-07:00",
+      "updated_at": "2026-09-02T03:19:19.192201-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"df3b420\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13960,6 +14015,72 @@
       "weight": 1.0,
       "rationale": "review of Task 11 outcome",
       "created_at": "2026-09-02T03:10:06.503661-07:00"
+    },
+    {
+      "id": 649,
+      "from_node_id": 639,
+      "to_node_id": 641,
+      "from_change_id": "9b176a39-a3b6-476b-97a5-38b20afabed2",
+      "to_change_id": "105c76cf-f9a7-463e-9b0e-1878c3012d09",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review fix wave",
+      "created_at": "2026-09-02T03:13:24.243464-07:00"
+    },
+    {
+      "id": 650,
+      "from_node_id": 640,
+      "to_node_id": 641,
+      "from_change_id": "7e0df443-4522-42ea-87ec-2b0078f92ffa",
+      "to_change_id": "105c76cf-f9a7-463e-9b0e-1878c3012d09",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "addresses the three review findings",
+      "created_at": "2026-09-02T03:13:24.250570-07:00"
+    },
+    {
+      "id": 651,
+      "from_node_id": 641,
+      "to_node_id": 642,
+      "from_change_id": "105c76cf-f9a7-463e-9b0e-1878c3012d09",
+      "to_change_id": "5699e82d-a8cc-4be6-a622-8536b44b0ba9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "outcome of fix wave",
+      "created_at": "2026-09-02T03:13:31.069203-07:00"
+    },
+    {
+      "id": 652,
+      "from_node_id": 642,
+      "to_node_id": 643,
+      "from_change_id": "5699e82d-a8cc-4be6-a622-8536b44b0ba9",
+      "to_change_id": "351bb8ff-83eb-4e4a-86a0-14275aeafb39",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review of the fix wave",
+      "created_at": "2026-09-02T03:16:45.318985-07:00"
+    },
+    {
+      "id": 653,
+      "from_node_id": 599,
+      "to_node_id": 644,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "05ecda86-a299-4e14-a192-110b0c2c2045",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 12 implementation",
+      "created_at": "2026-09-02T03:16:48.038901-07:00"
+    },
+    {
+      "id": 654,
+      "from_node_id": 644,
+      "to_node_id": 645,
+      "from_change_id": "05ecda86-a299-4e14-a192-110b0c2c2045",
+      "to_change_id": "9d954041-8cbc-4f78-af68-4eb9bd8957dd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-09-02T03:19:22.166206-07:00"
     }
   ],
   "documents": [
