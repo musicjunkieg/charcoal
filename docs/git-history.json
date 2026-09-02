@@ -1,5 +1,13 @@
 [
   {
+    "hash": "78515227f4888f159d3e077434d71d71156a2ae1",
+    "short_hash": "7851522",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T02:47:38-07:00",
+    "message": "feat(315): typed actions client + per-account Mute/Block buttons\n\nClient functions for every /api/actions endpoint, NotConnectedError and\nActionsDisabledError, pure buttonState() with vitest, and ActionButtons\non the account page: available → confirm → batch → /actions/<id>;\ndone → \"Muted ✓ · Undo\". Missing consent redirects to the PDS and the\npage resumes the sheet from ?resume= afterwards.",
+    "files_changed": 9
+  },
+  {
     "hash": "3ad5f52cd0c8d429e4f0fc1e4e9bdfbb335efdfa",
     "short_hash": "3ad5f52",
     "author": "Bryan Guffey",

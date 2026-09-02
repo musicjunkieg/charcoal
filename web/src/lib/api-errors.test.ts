@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AccessRevokedError, AuthError, CooldownError, getStatus } from './api.js';
+import {
+	AccessRevokedError,
+	ActionsDisabledError,
+	AuthError,
+	CooldownError,
+	NotConnectedError,
+	getStatus
+} from './api.js';
 
 function mockFetch(status: number, body: unknown) {
 	vi.stubGlobal(
@@ -40,5 +47,15 @@ describe('apiFetch error classification', () => {
 		const err = await getStatus().catch((e) => e);
 		expect(err).toBeInstanceOf(Error);
 		expect(err).not.toBeInstanceOf(CooldownError);
+	});
+
+	it('throws NotConnectedError on 409 with code not_connected', async () => {
+		mockFetch(409, { error: 'Connect your Bluesky account', code: 'not_connected' });
+		await expect(getStatus()).rejects.toBeInstanceOf(NotConnectedError);
+	});
+
+	it('throws ActionsDisabledError on 503 with code actions_disabled', async () => {
+		mockFetch(503, { error: 'Actions are not enabled', code: 'actions_disabled' });
+		await expect(getStatus()).rejects.toBeInstanceOf(ActionsDisabledError);
 	});
 });

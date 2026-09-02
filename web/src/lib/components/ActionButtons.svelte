@@ -21,7 +21,9 @@
 		handle: string;
 		did: string;
 		tier: string | null;
-		/** `?resume=mute|block|undo` from a consent round-trip. */
+		/** `?resume=mute|block|undo` from a consent round-trip. `mute`/`block`
+		 *  reopen the confirm sheet; `undo` cannot (the round-trip doesn't carry
+		 *  which action was being undone), so it surfaces a notice instead. */
 		resume?: string | null;
 		/** `?actions_error=` from a failed consent round-trip. */
 		actionsError?: string | null;
@@ -34,6 +36,7 @@
 	let active = $state<ActiveRow[]>([]);
 	let busy = $state(false);
 	let error = $state('');
+	let notice = $state('');
 	let sheet = $state<ActionKind | null>(null);
 
 	const KINDS: ActionKind[] = ['mute', 'block'];
@@ -62,6 +65,7 @@
 		}
 		if (actionsError) error = ERROR_COPY[actionsError] ?? ERROR_COPY.failed;
 		else if (resume === 'mute' || resume === 'block') sheet = resume;
+		else if (resume === 'undo') notice = 'Connected to Bluesky. Click Undo again to finish.';
 	});
 
 	async function confirm(kind: ActionKind) {
@@ -118,6 +122,8 @@
 		{/each}
 		{#if error}
 			<p class="error">{error}</p>
+		{:else if notice}
+			<p class="notice">{notice}</p>
 		{/if}
 	</div>
 
@@ -172,5 +178,10 @@
 		width: 100%;
 		font-size: 0.75rem;
 		color: var(--status-error);
+	}
+	.notice {
+		width: 100%;
+		font-size: 0.75rem;
+		color: var(--charcoal-400);
 	}
 </style>
