@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { batchHeadline, rowNote, isRunning, isParked, canRetry, canUndo } from './action-status';
+import { batchHeadline, rowNote, driftNote, isRunning, isParked, canRetry, canUndo } from './action-status';
 import type { ActionBatchSummary, ActionRowView } from './types';
 
 function summary(over: Partial<ActionBatchSummary>): ActionBatchSummary {
@@ -78,6 +78,22 @@ describe('rowNote', () => {
 	});
 	it('surfaces a failure reason', () => {
 		expect(rowNote(row({ status: 'failed', error: 'PDS returned 500' }))).toBe('PDS returned 500');
+	});
+});
+
+describe('driftNote', () => {
+	// A row can be both failed AND drifted (the account's tier moved after the
+	// action failed). The Tier-then cell needs the drift copy specifically —
+	// rowNote() prioritises the failure message, which would otherwise show
+	// the same failure text twice (once under Status, again under Tier then)
+	// and hide the drift note entirely.
+	it('returns the drift copy even when the row also failed', () => {
+		expect(
+			driftNote(row({ status: 'failed', error: 'PDS returned 500', drifted: true, current_tier: 'Watch' }))
+		).toBe('since dropped to Watch');
+	});
+	it('is empty when not drifted', () => {
+		expect(driftNote(row({ status: 'failed', error: 'PDS returned 500' }))).toBe('');
 	});
 });
 

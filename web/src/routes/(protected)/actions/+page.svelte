@@ -54,8 +54,14 @@
 
 	async function disconnect() {
 		if (!confirm('Disconnect Charcoal from your Bluesky account? Existing mutes and blocks stay in place.')) return;
-		await disconnectActions();
-		await load();
+		try {
+			await disconnectActions();
+			await load();
+		} catch (err) {
+			if (err instanceof AuthError) return goto('/login');
+			if (err instanceof AccessRevokedError) return goto('/waitlist');
+			error = err instanceof Error ? err.message : 'Something went wrong';
+		}
 	}
 
 	function when(iso: string): string {

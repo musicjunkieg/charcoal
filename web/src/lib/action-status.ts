@@ -53,10 +53,27 @@ export function batchHeadline(b: ActionBatchSummary): string {
 	return failed ? `${head} · ${failed} failed` : head;
 }
 
-export function rowNote(r: ActionRowView): string {
+/** The failure reason, when the row failed. Empty otherwise. */
+export function failureNote(r: ActionRowView): string {
 	if (r.status === 'failed' && r.error) return r.error;
+	return '';
+}
+
+/** The tier-drift note, when the account's tier has since moved. Empty
+ *  otherwise. Kept independent of `failureNote` so a row that is both
+ *  failed and drifted can still show the drift copy in a cell of its own
+ *  (the Tier-then column) without repeating the failure text. */
+export function driftNote(r: ActionRowView): string {
 	if (r.drifted && r.current_tier) return `since dropped to ${r.current_tier}`;
 	return '';
+}
+
+/** Combined note for a single-note context: failure takes priority over
+ *  drift when a row is both. Callers that render failure and drift in
+ *  separate cells (e.g. the batch detail table) should use
+ *  `failureNote`/`driftNote` directly instead. */
+export function rowNote(r: ActionRowView): string {
+	return failureNote(r) || driftNote(r);
 }
 
 export function canRetry(b: ActionBatchSummary): boolean {

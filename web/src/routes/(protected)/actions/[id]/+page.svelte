@@ -13,7 +13,7 @@
 		AuthError,
 		AccessRevokedError
 	} from '$lib/api.js';
-	import { batchHeadline, rowNote, isRunning, isParked, canRetry, canUndo } from '$lib/action-status';
+	import { batchHeadline, driftNote, isRunning, isParked, canRetry, canUndo } from '$lib/action-status';
 	import { tierClass } from '$lib/tier-class';
 	import type { ActionBatchDetail, ActionRowView } from '$lib/types.js';
 	import '$lib/website/styles/tokens.css';
@@ -102,7 +102,7 @@
 						<button onclick={() => run(() => undoBatch(b.id), 'undo')} disabled={busy}>Undo all</button>
 					{/if}
 					{#if canRetry(b)}
-						<button onclick={() => run(() => retryBatch(b.id), b.kind === 'undo' ? 'undo' : b.kind)} disabled={busy}>Retry failed</button>
+						<button onclick={() => run(() => retryBatch(b.id), b.kind)} disabled={busy}>Retry failed</button>
 					{/if}
 					{#if isParked(b)}
 						<button onclick={() => startConsent('undo')} disabled={busy}>Reconnect</button>
@@ -134,8 +134,8 @@
 							{:else}
 								—
 							{/if}
-							{#if rowNote(r) && r.drifted}
-								<span class="note">{rowNote(r)}</span>
+							{#if driftNote(r)}
+								<span class="note">{driftNote(r)}</span>
 							{/if}
 						</td>
 						<td>

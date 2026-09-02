@@ -6918,6 +6918,28 @@
       "created_at": "2026-09-02T02:58:19.070108-07:00",
       "updated_at": "2026-09-02T02:58:19.070108-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"8c0524c\",\"confidence\":85}"
+    },
+    {
+      "id": 639,
+      "change_id": "9b176a39-a3b6-476b-97a5-38b20afabed2",
+      "node_type": "outcome",
+      "title": "Task 11 done: f098c05, vitest 63/63 (10 new action-status), svelte build clean, autofixer clean on 3 svelte files. Deviation: batchHeadline running-state count uses live row counts (sum of counts) with fallback to requested, not requested directly as brief's sample code showed — the brief's own undo-running test case required it.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:02:57.608548-07:00",
+      "updated_at": "2026-09-02T03:02:57.608548-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"f098c05\",\"confidence\":90}"
+    },
+    {
+      "id": 640,
+      "change_id": "7e0df443-4522-42ea-87ec-2b0078f92ffa",
+      "node_type": "observation",
+      "title": "Task 11 review: spec ✅ (batchHeadline live-count deviation correct vs brief's own test); Important: failed+drifted row duplicates failure text → fix; 'never undo skipped_already_done' was a controller-prompt error, code matches shipped server contract + spec §4.3 (nuance: undo of a skipped MUTE unmutes a user-made mute on explicit click); Minors: disconnect() no try/catch, identity ternary",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:10:03.767317-07:00",
+      "updated_at": "2026-09-02T03:10:03.767317-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -13916,6 +13938,28 @@
       "weight": 1.0,
       "rationale": "implementation",
       "created_at": "2026-09-02T02:58:22.118263-07:00"
+    },
+    {
+      "id": 647,
+      "from_node_id": 638,
+      "to_node_id": 639,
+      "from_change_id": "23df9d5d-9021-46a7-8f6f-b50fa0e42441",
+      "to_change_id": "9b176a39-a3b6-476b-97a5-38b20afabed2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "outcome of implementation",
+      "created_at": "2026-09-02T03:03:00.739695-07:00"
+    },
+    {
+      "id": 648,
+      "from_node_id": 639,
+      "to_node_id": 640,
+      "from_change_id": "9b176a39-a3b6-476b-97a5-38b20afabed2",
+      "to_change_id": "7e0df443-4522-42ea-87ec-2b0078f92ffa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review of Task 11 outcome",
+      "created_at": "2026-09-02T03:10:06.503661-07:00"
     }
   ],
   "documents": [

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f098c0562abd5d4298d41f3498cc8f4b37f48673",
+    "short_hash": "f098c05",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:02:47-07:00",
+    "message": "feat(315): /actions log and /actions/[id] detail pages\n\nConnection line with Disconnect/Reconnect, newest-first batches with\npinned headline copy, per-row status + drift note (\"since dropped to\nWatch\"), Undo all / Undo row / Retry failed, and 3s polling only while a\nbatch is queued or running. Presentation logic lives in action-status.ts\nunder vitest.\n\nCo-Authored-By: Claude Code <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 7
+  },
+  {
     "hash": "8c0524ca924b2b2db40d0dfc473341a7f5255932",
     "short_hash": "8c0524c",
     "author": "Bryan Guffey",
