@@ -251,6 +251,10 @@ impl ActionRunner {
         pds: &PdsClient,
         pending: &[ActionRow],
     ) -> anyhow::Result<Option<Halt>> {
+        // Reconcile set, capped at 100 pages x 100 items by
+        // PdsClient::paginate. 10k mutes is far beyond any current user; a
+        // truncated set here would read as "not muted" and re-mute someone
+        // the user already muted.
         let existing = match self.call(|| pds.get_mutes()).await {
             Ok(Ok(set)) => set,
             Ok(Err(e)) => anyhow::bail!("getMutes: {e}"),
@@ -282,6 +286,10 @@ impl ActionRunner {
         pds: &PdsClient,
         pending: &[ActionRow],
     ) -> anyhow::Result<Option<Halt>> {
+        // Reconcile set, capped at 100 pages x 100 items by
+        // PdsClient::paginate. 10k blocks is far beyond any current user; a
+        // truncated set here would read as "not blocked" and create a second
+        // block record for someone the user already blocked.
         let existing = match self.call(|| pds.get_blocks()).await {
             Ok(Ok(map)) => map,
             Ok(Err(e)) => anyhow::bail!("getBlocks: {e}"),
@@ -312,9 +320,10 @@ impl ActionRunner {
         own_did: &str,
         pending: &[ActionRow],
     ) -> anyhow::Result<Option<Halt>> {
-        // A user with >10k blocks/mutes gets a truncated reconcile set here
-        // (PdsClient::get_blocks/get_mutes cap pagination at 100 pages x 100
-        // items) — accepted per the #315 plan; see docs/self-protective-invariant.md.
+        // Reconcile sets, capped at 100 pages x 100 items by
+        // PdsClient::paginate. 10k blocks/mutes is far beyond any current
+        // user; a truncated set here would read as "already gone" and settle
+        // an undo that never removed anything.
         let blocks = if pending.iter().any(|a| a.kind == "block") {
             match self.call(|| pds.get_blocks()).await {
                 Ok(Ok(map)) => map,
@@ -346,6 +355,16 @@ impl ActionRunner {
                     .await?;
                 continue;
             };
+            // Belt and braces: the handlers only enqueue undos for rows
+            // Charcoal itself applied. A `skipped_already_done` original is
+            // the user's OWN mute or block, and mutes carry no record_uri, so
+            // this is the last place the two can still be told apart (#261).
+            if orig.status != "applied" {
+                self.db
+                    .update_action(a.id, "failed", None, Some("not created by Charcoal"))
+                    .await?;
+                continue;
+            }
             match a.kind.as_str() {
                 "mute" => {
                     if !mutes.contains(&a.target_did) {
@@ -364,27 +383,43 @@ impl ActionRunner {
                     }
                     tokio::time::sleep(self.cfg.pace).await;
                 }
-                "block" => {
-                    // Delete only a record Charcoal created (record_uri
-                    // stored) that is still the block in force. A block
-                    // the user made, or re-made, is never ours to touch.
-                    let ours = orig
-                        .record_uri
-                        .as_deref()
-                        .filter(|uri| blocks.get(&a.target_did).map(String::as_str) == Some(uri))
-                        .and_then(|uri| PdsClient::rkey_from_uri(own_did, uri));
-                    match ours {
-                        Some(rkey) => planned.push(Planned {
-                            action: a,
-                            write: PdsClient::block_delete(&rkey),
-                            undo_of: Some(orig.id),
-                        }),
-                        None => {
-                            self.mark_undone(a.id, "skipped_already_done", orig.id)
-                                .await?
+                "block" => match blocks.get(&a.target_did) {
+                    // Not blocked at all — reality already matches the undo.
+                    None => {
+                        self.mark_undone(a.id, "skipped_already_done", orig.id)
+                            .await?
+                    }
+                    Some(in_force) => {
+                        // Delete only a record Charcoal created (record_uri
+                        // stored) that is still the block in force.
+                        let ours = orig
+                            .record_uri
+                            .as_deref()
+                            .filter(|uri| *uri == in_force.as_str())
+                            .and_then(|uri| PdsClient::rkey_from_uri(own_did, uri));
+                        match ours {
+                            Some(rkey) => planned.push(Planned {
+                                action: a,
+                                write: PdsClient::block_delete(&rkey),
+                                undo_of: Some(orig.id),
+                            }),
+                            // Blocked, but by a record Charcoal did not
+                            // create (the user deleted ours and made their
+                            // own). Saying so beats stamping the original
+                            // `undone` over a block that is still live.
+                            None => {
+                                self.db
+                                    .update_action(
+                                        a.id,
+                                        "failed",
+                                        None,
+                                        Some("block was not created by Charcoal"),
+                                    )
+                                    .await?
+                            }
                         }
                     }
-                }
+                },
                 other => {
                     self.db
                         .update_action(
@@ -454,6 +489,22 @@ impl ActionRunner {
     async fn record_success(&self, p: &Planned<'_>, uri: Option<&str>) -> anyhow::Result<()> {
         match p.undo_of {
             Some(orig) => self.mark_undone(p.action.id, "applied", orig).await,
+            None if matches!(p.write, Write::Create { .. }) && uri.is_none() => {
+                // The record landed on the PDS but came back without a URI,
+                // so undo could never remove it. Recording `applied` here
+                // would silently cost the user the reversibility this whole
+                // feature promises; `failed` makes the batch `partial` and
+                // lets Retry re-attempt it (the reconcile step then finds the
+                // block and settles the row honestly).
+                self.db
+                    .update_action(
+                        p.action.id,
+                        "failed",
+                        None,
+                        Some("PDS returned no record URI"),
+                    )
+                    .await
+            }
             None => {
                 self.db
                     .update_action(p.action.id, "applied", uri, None)

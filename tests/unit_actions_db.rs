@@ -389,5 +389,9 @@ async fn score_snapshots_and_cascade() {
         .unwrap();
     db.delete_user_data(DID).await.unwrap();
     assert!(db.get_action_batch(id).await.unwrap().is_none());
+    // The `actions` rows hold target DIDs and there is no ON DELETE CASCADE
+    // on `actions.batch_id`, so deleting the batch alone would leave them
+    // behind — assert the rows themselves are gone, not just their parent.
+    assert!(db.list_actions_for_batch(id).await.unwrap().is_empty());
     assert!(db.list_score_snapshots(DID).await.unwrap().is_empty());
 }

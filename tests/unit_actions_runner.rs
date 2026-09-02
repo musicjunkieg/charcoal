@@ -209,6 +209,247 @@ async fn block_batch_uses_one_chunk_and_stores_record_uris() {
     );
 }
 
+/// `results` entries for chunk positions `start..start + len`, so a test can
+/// assert each row got the URI its own index produced.
+fn create_results(start: usize, len: usize) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = (start..start + len)
+        .map(|i| {
+            serde_json::json!({
+                "$type": "com.atproto.repo.applyWrites#createResult",
+                "uri": format!("at://{ME}/app.bsky.graph.block/r{i}"),
+                "cid": "c"
+            })
+        })
+        .collect();
+    serde_json::json!({ "results": items })
+}
+
+/// Spec §10: a batch larger than `APPLY_WRITES_MAX` must split, and the URIs
+/// must zip back to the right rows ACROSS the chunk boundary — the one place
+/// an off-by-one would silently hand row 200 row 0's record.
+#[tokio::test]
+async fn block_batch_over_two_hundred_splits_and_zips_uris_across_the_boundary() {
+    let h = harness().await;
+    mount_list(
+        &h.mock,
+        "app.bsky.graph.getBlocks",
+        "blocks",
+        serde_json::json!([]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/com.atproto.repo.applyWrites"))
+        .and(Writes {
+            len: 200,
+            containing: None,
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(create_results(0, 200)))
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/com.atproto.repo.applyWrites"))
+        .and(Writes {
+            len: 50,
+            containing: None,
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(create_results(200, 50)))
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+
+    let targets: Vec<NewAction> = (0..250)
+        .map(|i| new_action(&format!("did:plc:chunk{i:04}"), "block", None))
+        .collect();
+    let id =
+        h.db.create_action_batch(ME, "block", "tier:High", &targets)
+            .await
+            .unwrap();
+    h.runner.run_batch(id).await;
+
+    let rows = h.db.list_actions_for_batch(id).await.unwrap();
+    assert_eq!(rows.len(), 250);
+    assert!(
+        rows.iter().all(|r| r.status == "applied"),
+        "every row should be applied"
+    );
+    for (i, r) in rows.iter().enumerate() {
+        assert_eq!(
+            r.record_uri.as_deref(),
+            Some(format!("at://{ME}/app.bsky.graph.block/r{i}").as_str()),
+            "row {i} got the wrong record URI"
+        );
+    }
+    assert_eq!(
+        h.db.get_action_batch(id).await.unwrap().unwrap().status,
+        "done"
+    );
+}
+
+/// The highest-consequence idempotency claim in §4.5: resuming a half-applied
+/// BLOCK batch must not create a second record in the user's repo.
+#[tokio::test]
+async fn block_batch_resume_never_recreates_the_row_already_applied() {
+    let h = harness().await;
+    let ours = format!("at://{ME}/app.bsky.graph.block/r0");
+    let id =
+        h.db.create_action_batch(
+            ME,
+            "block",
+            "tier:High",
+            &[
+                new_action("did:plc:b1", "block", None),
+                new_action("did:plc:b2", "block", None),
+                new_action("did:plc:b3", "block", None),
+            ],
+        )
+        .await
+        .unwrap();
+    let rows = h.db.list_actions_for_batch(id).await.unwrap();
+    // Simulate a deploy that died after b1's create landed.
+    h.db.update_action(rows[0].id, "applied", Some(&ours), None)
+        .await
+        .unwrap();
+    h.db.set_action_batch_status(id, "running", None)
+        .await
+        .unwrap();
+
+    mount_list(
+        &h.mock,
+        "app.bsky.graph.getBlocks",
+        "blocks",
+        serde_json::json!([
+            { "did": "did:plc:b1", "handle": "b1", "viewer": { "blocking": ours.clone() } }
+        ]),
+    )
+    .await;
+    // Exactly two entries: a third would be the duplicate block record.
+    Mock::given(method("POST"))
+        .and(path("/xrpc/com.atproto.repo.applyWrites"))
+        .and(Writes {
+            len: 2,
+            containing: Some("did:plc:b2"),
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(create_results(2, 2)))
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+
+    h.runner.run_all_unfinished().await;
+
+    let rows = h.db.list_actions_for_batch(id).await.unwrap();
+    assert_eq!(rows[0].status, "applied");
+    assert_eq!(
+        rows[0].record_uri.as_deref(),
+        Some(ours.as_str()),
+        "the resumed row's stored URI must not be rewritten"
+    );
+    assert_eq!(
+        rows[1].record_uri.as_deref(),
+        Some(format!("at://{ME}/app.bsky.graph.block/r2").as_str())
+    );
+    assert_eq!(
+        h.db.get_action_batch(id).await.unwrap().unwrap().status,
+        "done"
+    );
+}
+
+/// A create the PDS accepted but answered without a URI is un-undoable. It is
+/// recorded `failed` so the batch reads `partial` and Retry can re-attempt it
+/// — never `applied` with a NULL `record_uri`.
+#[tokio::test]
+async fn create_with_no_returned_uri_is_recorded_failed() {
+    let h = harness().await;
+    mount_list(
+        &h.mock,
+        "app.bsky.graph.getBlocks",
+        "blocks",
+        serde_json::json!([]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/com.atproto.repo.applyWrites"))
+        .and(Writes {
+            len: 2,
+            containing: None,
+        })
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "results": [
+                { "$type": "com.atproto.repo.applyWrites#createResult", "uri": format!("at://{ME}/app.bsky.graph.block/r0"), "cid": "c" },
+                { "$type": "com.atproto.repo.applyWrites#createResult", "cid": "c" }
+            ]
+        })))
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+
+    let id =
+        h.db.create_action_batch(
+            ME,
+            "block",
+            "tier:High",
+            &[
+                new_action("did:plc:b1", "block", None),
+                new_action("did:plc:b2", "block", None),
+            ],
+        )
+        .await
+        .unwrap();
+    h.runner.run_batch(id).await;
+
+    let rows = h.db.list_actions_for_batch(id).await.unwrap();
+    assert_eq!(rows[0].status, "applied");
+    assert_eq!(rows[1].status, "failed");
+    assert_eq!(rows[1].error.as_deref(), Some("PDS returned no record URI"));
+    assert!(rows[1].record_uri.is_none());
+    assert_eq!(
+        h.db.get_action_batch(id).await.unwrap().unwrap().status,
+        "partial"
+    );
+}
+
+/// A reconcile read that never succeeds fails the BATCH and leaves every row
+/// `pending` — which is what Retry re-queues (I2).
+#[tokio::test]
+async fn reconcile_failure_fails_the_batch_and_leaves_rows_pending() {
+    let h = harness().await;
+    Mock::given(method("GET"))
+        .and(path("/xrpc/app.bsky.graph.getBlocks"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(4) // 1 + 3 transient retries
+        .mount(&h.mock)
+        .await;
+
+    let id =
+        h.db.create_action_batch(
+            ME,
+            "block",
+            "tier:High",
+            &[
+                new_action("did:plc:b1", "block", None),
+                new_action("did:plc:b2", "block", None),
+            ],
+        )
+        .await
+        .unwrap();
+    h.runner.run_batch(id).await;
+
+    let b = h.db.get_action_batch(id).await.unwrap().unwrap();
+    assert_eq!(b.status, "failed");
+    assert!(
+        b.error.as_deref().is_some_and(|e| e.contains("getBlocks")),
+        "the stored error should name the failed call: {:?}",
+        b.error
+    );
+    assert!(h
+        .db
+        .list_actions_for_batch(id)
+        .await
+        .unwrap()
+        .iter()
+        .all(|r| r.status == "pending"));
+}
+
 #[tokio::test]
 async fn block_chunk_4xx_falls_back_one_at_a_time_and_batch_is_partial() {
     let h = harness().await;
@@ -508,7 +749,8 @@ async fn finished_batch_is_a_noop() {
 async fn undo_block_deletes_only_charcoals_record() {
     let h = harness().await;
     let our_uri = format!("at://{ME}/app.bsky.graph.block/ours");
-    // Original batch: t1 blocked by us, t2 was already blocked by the user.
+    // Original batch: t1 blocked by us and still blocked, t2 blocked by us but
+    // since unblocked by hand.
     let orig =
         h.db.create_action_batch(
             ME,
@@ -525,17 +767,28 @@ async fn undo_block_deletes_only_charcoals_record() {
     h.db.update_action(orig_rows[0].id, "applied", Some(&our_uri), None)
         .await
         .unwrap();
-    h.db.update_action(orig_rows[1].id, "skipped_already_done", None, None)
-        .await
-        .unwrap();
+    h.db.update_action(
+        orig_rows[1].id,
+        "applied",
+        Some(&format!("at://{ME}/app.bsky.graph.block/gone")),
+        None,
+    )
+    .await
+    .unwrap();
     h.db.set_action_batch_status(orig, "done", None)
         .await
         .unwrap();
 
-    mount_list(&h.mock, "app.bsky.graph.getBlocks", "blocks", serde_json::json!([
-        { "did": "did:plc:t1", "handle": "t1", "viewer": { "blocking": our_uri } },
-        { "did": "did:plc:t2", "handle": "t2", "viewer": { "blocking": format!("at://{ME}/app.bsky.graph.block/theirs") } }
-    ])).await;
+    // t2 is absent from getBlocks entirely: reality already matches the undo.
+    mount_list(
+        &h.mock,
+        "app.bsky.graph.getBlocks",
+        "blocks",
+        serde_json::json!([
+            { "did": "did:plc:t1", "handle": "t1", "viewer": { "blocking": our_uri } }
+        ]),
+    )
+    .await;
     Mock::given(method("POST"))
         .and(path("/xrpc/com.atproto.repo.applyWrites"))
         .and(Writes {
@@ -576,8 +829,59 @@ async fn undo_block_deletes_only_charcoals_record() {
     );
 }
 
+/// The handlers no longer enqueue undos for rows Charcoal did not apply, but
+/// the runner refuses them anyway — mutes carry no `record_uri`, so this is
+/// the last guard between "Undo all" and the user's own mute list (#261).
 #[tokio::test]
-async fn undo_block_skips_when_record_is_not_ours_anymore() {
+async fn undo_refuses_an_original_charcoal_did_not_apply() {
+    let h = harness().await;
+    let orig =
+        h.db.create_action_batch(
+            ME,
+            "mute",
+            "tier:High",
+            &[new_action("did:plc:m1", "mute", None)],
+        )
+        .await
+        .unwrap();
+    let a1 = h.db.list_actions_for_batch(orig).await.unwrap()[0].id;
+    h.db.update_action(a1, "skipped_already_done", None, None)
+        .await
+        .unwrap();
+    // Still muted — but the user muted them, not Charcoal.
+    mount_list(
+        &h.mock,
+        "app.bsky.graph.getMutes",
+        "mutes",
+        serde_json::json!([{ "did": "did:plc:m1", "handle": "m1" }]),
+    )
+    .await;
+    // No unmuteActor mock: a call would 404 and change the error text below.
+
+    let undo =
+        h.db.create_action_batch(
+            ME,
+            "undo",
+            &format!("undo:{orig}"),
+            &[new_action("did:plc:m1", "mute", Some(a1))],
+        )
+        .await
+        .unwrap();
+    h.runner.run_batch(undo).await;
+
+    let u = &h.db.list_actions_for_batch(undo).await.unwrap()[0];
+    assert_eq!(u.status, "failed");
+    assert_eq!(u.error.as_deref(), Some("not created by Charcoal"));
+    let o = h.db.get_action(a1).await.unwrap().unwrap();
+    assert_eq!(
+        o.status, "skipped_already_done",
+        "the original is untouched"
+    );
+    assert!(o.undone_at.is_none());
+}
+
+#[tokio::test]
+async fn undo_block_fails_honestly_when_the_block_in_force_is_not_ours() {
     let h = harness().await;
     let orig =
         h.db.create_action_batch(
@@ -613,11 +917,17 @@ async fn undo_block_skips_when_record_is_not_ours_anymore() {
         .await
         .unwrap();
     h.runner.run_batch(undo).await;
+    // The block is still live, so "undone" would be a lie. The undo row
+    // carries the reason and the original keeps its status.
+    let u = &h.db.list_actions_for_batch(undo).await.unwrap()[0];
+    assert_eq!(u.status, "failed");
     assert_eq!(
-        h.db.list_actions_for_batch(undo).await.unwrap()[0].status,
-        "skipped_already_done"
+        u.error.as_deref(),
+        Some("block was not created by Charcoal")
     );
-    assert_eq!(h.db.get_action(a1).await.unwrap().unwrap().status, "undone");
+    let o = h.db.get_action(a1).await.unwrap().unwrap();
+    assert_eq!(o.status, "applied");
+    assert!(o.undone_at.is_none());
 }
 
 #[tokio::test]

@@ -7072,6 +7072,94 @@
       "created_at": "2026-09-02T04:03:36.753196-07:00",
       "updated_at": "2026-09-02T04:03:36.753196-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"98fb558\",\"confidence\":90}"
+    },
+    {
+      "id": 653,
+      "change_id": "c30efd84-65ae-4224-9231-c6cc5750fa97",
+      "node_type": "action",
+      "title": "Task 13 steps 1-2: README/CHANGELOG/.env.example document CHARCOAL_TOKEN_KEY + mute/block entry",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:06:06.182985-07:00",
+      "updated_at": "2026-09-02T04:06:06.182985-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"419d78e\",\"confidence\":90}"
+    },
+    {
+      "id": 654,
+      "change_id": "75d0557b-17b2-4892-bfc4-3ff8beb76a10",
+      "node_type": "outcome",
+      "title": "Final whole-branch review (opus) of #315: 0 Critical, 7 Important (I1 undo of skipped mute unmutes user's own; I2 reconcile/refresh failure strands batch; I3 undo honesty for blocks; I4 notFound latch; I5 bulk auth errors; I6 focus trap; I7 test gaps), 22 Minor; verdict With fixes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:20:48.076616-07:00",
+      "updated_at": "2026-09-02T04:20:48.076616-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"419d78e\",\"confidence\":90}"
+    },
+    {
+      "id": 655,
+      "change_id": "06437751-c248-42fc-ac5d-ca63398979dc",
+      "node_type": "option",
+      "title": "Undo eligibility = only rows Charcoal applied (status applied); skipped_already_done rows are in-force but never undoable",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:20:48.087902-07:00",
+      "updated_at": "2026-09-02T04:20:48.087902-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":85}"
+    },
+    {
+      "id": 656,
+      "change_id": "0e678221-4c51-4b3d-9201-cf3c4d292758",
+      "node_type": "option",
+      "title": "Keep skipped_already_done undoable; runner bails per-row with a no-op undo row",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:20:48.098464-07:00",
+      "updated_at": "2026-09-02T04:20:48.098464-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":40}"
+    },
+    {
+      "id": 657,
+      "change_id": "4f3d5ef3-ced6-4d73-8aaa-5a90055d686e",
+      "node_type": "option",
+      "title": "I2: park recoverable batch failures as queued + error for boot-resume (reviewer's preference)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:20:48.109282-07:00",
+      "updated_at": "2026-09-02T04:20:48.109282-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":50}"
+    },
+    {
+      "id": 658,
+      "change_id": "7c551767-4c19-4d80-bdbb-84478a51efff",
+      "node_type": "option",
+      "title": "I2: keep failed status; broaden retry_batch to re-queue pending rows so Retry button works",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:20:48.122471-07:00",
+      "updated_at": "2026-09-02T04:20:48.122471-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":80}"
+    },
+    {
+      "id": 659,
+      "change_id": "529925ae-fe36-46b0-9957-cc3d2d20fc23",
+      "node_type": "decision",
+      "title": "Fix wave for #315 final review: split is_active_forward into in-force vs undoable (applied only); I2 via broadened Retry (failed stays honest, no new background timing); fix I1-I5, I7, M2 now; I6 dialog focus-trap + follow-ups filed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:20:52.415858-07:00",
+      "updated_at": "2026-09-02T04:20:52.415858-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":85}"
+    },
+    {
+      "id": 660,
+      "change_id": "ae43e13d-9f6b-46c3-bbe4-7ce8c011a122",
+      "node_type": "action",
+      "title": "Fix wave: #315 final review I1-I5, I7, M2",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T04:23:14.117566-07:00",
+      "updated_at": "2026-09-02T04:23:14.117566-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"419d78e\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -14246,6 +14334,127 @@
       "weight": 1.0,
       "rationale": "Task review",
       "created_at": "2026-09-02T04:03:41.366367-07:00"
+    },
+    {
+      "id": 663,
+      "from_node_id": 599,
+      "to_node_id": 653,
+      "from_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "to_change_id": "c30efd84-65ae-4224-9231-c6cc5750fa97",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 13 docs step of the plan",
+      "created_at": "2026-09-02T04:06:10.421875-07:00"
+    },
+    {
+      "id": 664,
+      "from_node_id": 653,
+      "to_node_id": 654,
+      "from_change_id": "c30efd84-65ae-4224-9231-c6cc5750fa97",
+      "to_change_id": "75d0557b-17b2-4892-bfc4-3ff8beb76a10",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review followed the docs commit",
+      "created_at": "2026-09-02T04:20:57.228024-07:00"
+    },
+    {
+      "id": 665,
+      "from_node_id": 654,
+      "to_node_id": 655,
+      "from_change_id": "75d0557b-17b2-4892-bfc4-3ff8beb76a10",
+      "to_change_id": "06437751-c248-42fc-ac5d-ca63398979dc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-02T04:20:57.234533-07:00"
+    },
+    {
+      "id": 666,
+      "from_node_id": 654,
+      "to_node_id": 656,
+      "from_change_id": "75d0557b-17b2-4892-bfc4-3ff8beb76a10",
+      "to_change_id": "0e678221-4c51-4b3d-9201-cf3c4d292758",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-02T04:20:57.240662-07:00"
+    },
+    {
+      "id": 667,
+      "from_node_id": 654,
+      "to_node_id": 657,
+      "from_change_id": "75d0557b-17b2-4892-bfc4-3ff8beb76a10",
+      "to_change_id": "4f3d5ef3-ced6-4d73-8aaa-5a90055d686e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-02T04:20:57.246483-07:00"
+    },
+    {
+      "id": 668,
+      "from_node_id": 654,
+      "to_node_id": 658,
+      "from_change_id": "75d0557b-17b2-4892-bfc4-3ff8beb76a10",
+      "to_change_id": "7c551767-4c19-4d80-bdbb-84478a51efff",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-02T04:20:57.252891-07:00"
+    },
+    {
+      "id": 669,
+      "from_node_id": 655,
+      "to_node_id": 659,
+      "from_change_id": "06437751-c248-42fc-ac5d-ca63398979dc",
+      "to_change_id": "529925ae-fe36-46b0-9957-cc3d2d20fc23",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: selection rule matches spec §10 record_uri reading",
+      "created_at": "2026-09-02T04:20:57.259972-07:00"
+    },
+    {
+      "id": 670,
+      "from_node_id": 658,
+      "to_node_id": 659,
+      "from_change_id": "7c551767-4c19-4d80-bdbb-84478a51efff",
+      "to_change_id": "529925ae-fe36-46b0-9957-cc3d2d20fc23",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: user-driven retry, no timer",
+      "created_at": "2026-09-02T04:20:57.266320-07:00"
+    },
+    {
+      "id": 671,
+      "from_node_id": 656,
+      "to_node_id": 659,
+      "from_change_id": "0e678221-4c51-4b3d-9201-cf3c4d292758",
+      "to_change_id": "529925ae-fe36-46b0-9957-cc3d2d20fc23",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: perpetual Undo button producing junk rows",
+      "created_at": "2026-09-02T04:20:57.273034-07:00"
+    },
+    {
+      "id": 672,
+      "from_node_id": 657,
+      "to_node_id": 659,
+      "from_change_id": "4f3d5ef3-ced6-4d73-8aaa-5a90055d686e",
+      "to_change_id": "529925ae-fe36-46b0-9957-cc3d2d20fc23",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: frontend polls queued forever without a wake",
+      "created_at": "2026-09-02T04:20:57.279631-07:00"
+    },
+    {
+      "id": 673,
+      "from_node_id": 659,
+      "to_node_id": 660,
+      "from_change_id": "529925ae-fe36-46b0-9957-cc3d2d20fc23",
+      "to_change_id": "ae43e13d-9f6b-46c3-bbe4-7ce8c011a122",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implements decision",
+      "created_at": "2026-09-02T04:23:16.174186-07:00"
     }
   ],
   "documents": [

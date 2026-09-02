@@ -101,12 +101,25 @@ fn wake(state: &AppState, batch_id: i64) {
     }
 }
 
-/// A forward action Charcoal currently holds on a target: applied (or found
-/// already done) and not itself an undo. An undo row that succeeded is also
-/// `applied` with `kind = mute|block` — without the `undo_of` filter it would
-/// read as an active mute.
-fn is_active_forward(r: &ActionRow) -> bool {
+/// "The account is muted/blocked as far as Charcoal knows": a forward row
+/// Charcoal applied, or one whose target the user had already muted/blocked
+/// themselves. Used for dedup and for the button/greying state — both of
+/// which care about reality, not about who made it.
+///
+/// An undo row that succeeded is also `applied` with `kind = mute|block` —
+/// without the `undo_of` filter it would read as an active mute.
+fn is_in_force(r: &ActionRow) -> bool {
     r.undo_of.is_none() && matches!(r.status.as_str(), "applied" | "skipped_already_done")
+}
+
+/// "Charcoal did this, so Charcoal may undo it." Strictly narrower than
+/// `is_in_force`: a `skipped_already_done` row is the user's OWN mute or
+/// block, and Charcoal never removes one it did not create (#261,
+/// docs/self-protective-invariant.md). Mutes carry no `record_uri`, so the
+/// runner cannot tell the two apart at the write boundary — the distinction
+/// has to be made here, when the undo row is enqueued.
+fn is_undoable(r: &ActionRow) -> bool {
+    r.undo_of.is_none() && r.status == "applied"
 }
 
 fn accepted(batch_id: i64) -> Response {
@@ -407,7 +420,7 @@ pub async fn create_batch(
     let active: HashSet<String> = match state.db.active_actions(&auth.did).await {
         Ok(rows) => rows
             .into_iter()
-            .filter(|r| r.kind == body.kind && is_active_forward(r))
+            .filter(|r| r.kind == body.kind && is_in_force(r))
             .map(|r| r.target_did)
             .collect(),
         Err(e) => return db_error(e),
@@ -544,7 +557,7 @@ pub async fn undo_batch(
         Vec::new()
     } else {
         rows.iter()
-            .filter(|r| is_active_forward(r))
+            .filter(|r| is_undoable(r))
             .map(undo_row)
             .collect()
     };
@@ -593,9 +606,15 @@ pub async fn retry_batch(
         Ok(r) => r,
         Err(r) => return r,
     };
+    // `pending` counts as retryable, not just `failed`: when the runner gives
+    // up before the write step (a `getBlocks`/`getMutes` 5xx, a transient
+    // token refresh failure) it marks the BATCH `failed` and leaves every row
+    // `pending`. Those rows are exactly the work that never happened, and
+    // without them here the Retry button is inert on the one failure shape
+    // the user can actually recover from.
     let again: Vec<NewAction> = rows
         .iter()
-        .filter(|r| r.status == "failed")
+        .filter(|r| matches!(r.status.as_str(), "failed" | "pending"))
         .map(|r| NewAction {
             target_did: r.target_did.clone(),
             kind: r.kind.clone(),
@@ -608,7 +627,7 @@ pub async fn retry_batch(
         return api_error_code(
             StatusCode::BAD_REQUEST,
             "nothing_to_retry",
-            "This batch has no failed rows",
+            "This batch has no rows left to try",
         );
     }
     let source = format!("retry:{id}");
@@ -646,11 +665,11 @@ pub async fn undo_action(
     if let Err(r) = require_connected(&sessions, &state, &auth.did).await {
         return r;
     }
-    if !is_active_forward(&row) {
+    if !is_undoable(&row) {
         return api_error_code(
             StatusCode::BAD_REQUEST,
             "nothing_to_undo",
-            "This action is not currently in effect",
+            "This action is not one Charcoal can undo",
         );
     }
     let source = format!("undo:action:{action_id}");
@@ -695,7 +714,7 @@ pub async fn account_actions(
     };
     let actions: Vec<Value> = rows
         .iter()
-        .filter(|r| r.target_did == account.did && is_active_forward(r))
+        .filter(|r| r.target_did == account.did && is_in_force(r))
         .map(|r| action_json(r, Some(&snap)))
         .collect();
     Json(json!({ "did": account.did, "actions": actions })).into_response()
@@ -714,7 +733,7 @@ pub async fn active_actions(
     };
     let active: Vec<Value> = rows
         .iter()
-        .filter(|r| is_active_forward(r))
+        .filter(|r| is_in_force(r))
         .map(|r| json!({ "did": r.target_did, "kind": r.kind }))
         .collect();
     Json(json!({ "active": active })).into_response()

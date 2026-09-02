@@ -197,8 +197,11 @@ The runner, per batch:
    shows as live progress.
 4. Each row is written as it settles. A failure on one account never aborts the
    batch. The batch ends `done` (all applied/skipped), `partial` (some failed),
-   or `failed` (nothing could be attempted, e.g. auth). `partial` batches expose
-   **Retry failed**, which creates a new batch over the failed rows.
+   or `failed` (nothing could be attempted, e.g. a reconcile read that never
+   succeeded). `partial` and `failed` batches expose **Retry failed**, which
+   creates a new batch over the rows that failed *or* never ran — a batch that
+   died before the write step leaves every row `pending`, and those are exactly
+   the work still outstanding.
 
 ### 4.3 Undo
 
@@ -209,8 +212,12 @@ row's `kind` and points at it via `undo_of`.
   over anything discovered via `getBlocks`.
 - Mutes: `unmuteActor` per target. If the user already unmuted them, it is a
   no-op success, not an error.
-- Original rows flip to `undone` with `undone_at`. Undo is available per row
-  and per batch.
+- Original rows flip to `undone` with `undone_at` only when something was
+  actually removed.
+- **Undo is offered only for rows with status `applied`** — the ones Charcoal
+  itself applied. A `skipped_already_done` row is the user's own mute or
+  block: it is shown as in force (it greys the button and dedupes new
+  batches), but it is never undone. Undo is available per row and per batch.
 
 ### 4.4 Tier drift
 
@@ -279,7 +286,7 @@ Copy tone: quiet-hearth, no exclamation points.
 |---|---|
 | Consent denied, or `invalid_scope` | Return to origin page with the one-line message; no session row. |
 | Refresh token expired / revoked (`invalid_grant`) | Session row deleted before any write. Batch stays `queued`; `/actions` shows *"Not connected — reconnect to continue"*; batch resumes after reconnect. |
-| 429 mid-batch | Back off using the PDS `ratelimit-reset` header, then continue. A 429 never fails a row. |
+| 429 mid-batch | Back off using the PDS `ratelimit-reset` header, then continue. A 429 never fails a row until the retry ceiling (`RATE_LIMIT_MAX_WAITS`). |
 | Per-row 4xx (e.g. target DID gone) | Row `failed` with the error; batch continues. |
 | Transport error / 5xx | Retry the row up to 3× with backoff, then `failed`. |
 | Server restart | §4.5. |
@@ -337,7 +344,8 @@ All under the existing `require_auth` layer.
 
 - **Unit:** encrypt/decrypt round-trip; tamper and wrong-column AAD rejection;
   `write_scope()` string; chunking at 200; reconcile marks existing as skipped;
-  undo selects only rows with a stored `record_uri`; drift comparison.
+  undo selects only rows with status `applied`, and for blocks only a stored
+  `record_uri` that is still the block in force; drift comparison.
 - **Integration (fake PDS):** an in-test axum server serving `applyWrites`,
   `muteActor`, `unmuteActor`, `getBlocks`, `getMutes`, and the token endpoint.
   Cases: happy path both kinds; partial failure; 429 with `ratelimit-reset`;

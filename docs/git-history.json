@@ -1,5 +1,13 @@
 [
   {
+    "hash": "419d78ec6f3c2039cdb939646cab863d25c13b93",
+    "short_hash": "419d78e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T04:05:53-07:00",
+    "message": "docs(315): CHARCOAL_TOKEN_KEY + changelog entry for mute/block",
+    "files_changed": 5
+  },
+  {
     "hash": "98fb5587c383b6fd7abe7d8e2523c86c6ec1319a",
     "short_hash": "98fb558",
     "author": "Bryan Guffey",

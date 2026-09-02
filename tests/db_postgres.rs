@@ -2302,8 +2302,29 @@ async fn test_pg_action_score_snapshots_and_cascade() {
         )
         .await
         .unwrap();
+    // An OAuth write session is the other row `delete_user_data` has to clear
+    // on the backend that actually runs in production (#315).
+    db.upsert_oauth_session(&charcoal::db::traits::OauthSessionRow {
+        user_did: ACTIONS_DID.to_string(),
+        pds_url: "https://pds.pgtest".to_string(),
+        scope: "atproto".to_string(),
+        access_token_enc: vec![1, 2, 3],
+        refresh_token_enc: vec![4, 5, 6],
+        dpop_key_enc: vec![7, 8, 9],
+        access_expires_at: 4_102_444_800,
+        created_at: "2026-09-01T12:00:00Z".to_string(),
+        updated_at: "2026-09-01T12:00:00Z".to_string(),
+    })
+    .await
+    .unwrap();
+    assert!(db.get_oauth_session(ACTIONS_DID).await.unwrap().is_some());
+
     db.delete_user_data(ACTIONS_DID).await.unwrap();
     assert!(db.get_action_batch(id).await.unwrap().is_none());
+    // No ON DELETE CASCADE on `actions.batch_id`: deleting the batch alone
+    // would leave the target DIDs behind.
+    assert!(db.list_actions_for_batch(id).await.unwrap().is_empty());
+    assert!(db.get_oauth_session(ACTIONS_DID).await.unwrap().is_none());
     assert!(db
         .list_score_snapshots(ACTIONS_DID)
         .await

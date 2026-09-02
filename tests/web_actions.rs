@@ -532,7 +532,7 @@ async fn batches_are_scoped_to_their_owner() {
 // ---- undo / retry ----
 
 #[tokio::test]
-async fn undo_batch_targets_applied_and_skipped_rows_only() {
+async fn undo_batch_targets_only_rows_charcoal_applied() {
     let (app, state) = app();
     seed_session(&state, TEST_DID, "https://pds.test").await;
     let (orig, ids) = seed_batch(
@@ -568,7 +568,12 @@ async fn undo_batch_targets_applied_and_skipped_rows_only() {
     assert_eq!(batch.kind, "undo");
     assert_eq!(batch.source, format!("undo:batch:{orig}"));
     let rows = state.db.list_actions_for_batch(undo_id).await.unwrap();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.len(),
+        1,
+        "only the applied row: the failed row did nothing and the \
+         skipped_already_done row is the user's own block (#261)"
+    );
     assert_eq!(rows[0].target_did, TARGET_A);
     assert_eq!(rows[0].undo_of, Some(ids[0]));
     assert_eq!(rows[0].kind, "block");
@@ -578,7 +583,6 @@ async fn undo_batch_targets_applied_and_skipped_rows_only() {
         Some("High"),
         "snapshot copied"
     );
-    assert_eq!(rows[1].undo_of, Some(ids[2]));
 
     // An undo batch cannot itself be undone.
     let (status, body) = post(
@@ -593,15 +597,23 @@ async fn undo_batch_targets_applied_and_skipped_rows_only() {
 }
 
 #[tokio::test]
-async fn undo_single_action_needs_an_active_forward_row() {
+async fn undo_single_action_needs_a_row_charcoal_applied() {
     let (app, state) = app();
     seed_session(&state, TEST_DID, "https://pds.test").await;
     let (_, ids) = seed_batch(
         &*state.db,
         TEST_DID,
         "mute",
-        &[row(TARGET_A, "mute"), row(TARGET_B, "mute")],
-        &[("applied", None), ("failed", None)],
+        &[
+            row(TARGET_A, "mute"),
+            row(TARGET_B, "mute"),
+            row(TARGET_C, "mute"),
+        ],
+        &[
+            ("applied", None),
+            ("failed", None),
+            ("skipped_already_done", None),
+        ],
     )
     .await;
 
@@ -630,8 +642,59 @@ async fn undo_single_action_needs_an_active_forward_row() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], "nothing_to_undo");
 
+    // The mute the user made themselves: in force, but not Charcoal's to
+    // remove (#261).
+    let (status, body) = post(
+        &app,
+        &format!("/api/actions/{}/undo", ids[2]),
+        TEST_DID,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "nothing_to_undo");
+
     let (status, _) = post(&app, "/api/actions/999/undo", TEST_DID, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A batch that only ever found things already done has nothing Charcoal may
+/// undo — but those rows are still IN FORCE, so `/api/actions/active` must
+/// keep listing them for the confirm sheet's greying (spec §5.1).
+#[tokio::test]
+async fn undo_batch_of_only_already_done_rows_is_refused_but_stays_active() {
+    let (app, state) = app();
+    seed_scores(&*state.db, TEST_DID).await;
+    seed_session(&state, TEST_DID, "https://pds.test").await;
+    let (orig, _) = seed_batch(
+        &*state.db,
+        TEST_DID,
+        "mute",
+        &[row(TARGET_A, "mute"), row(TARGET_B, "mute")],
+        &[
+            ("skipped_already_done", None),
+            ("skipped_already_done", None),
+        ],
+    )
+    .await;
+
+    let (status, body) = post(
+        &app,
+        &format!("/api/actions/batches/{orig}/undo"),
+        TEST_DID,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "nothing_to_undo");
+
+    let (status, body) = get(&app, "/api/actions/active", TEST_DID).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["active"].as_array().map(Vec::len),
+        Some(2),
+        "already-done rows are in force even though they cannot be undone"
+    );
 }
 
 #[tokio::test]
@@ -696,15 +759,62 @@ async fn retry_creates_a_new_batch_over_failed_rows() {
     let orig_rows = state.db.list_actions_for_batch(orig).await.unwrap();
     assert_eq!(orig_rows[0].status, "failed");
 
+    // A batch with nothing left to try — every row settled — is refused.
+    let (settled, _) = seed_batch(
+        &*state.db,
+        TEST_DID,
+        "mute",
+        &[row(TARGET_C, "mute")],
+        &[("applied", None)],
+    )
+    .await;
     let (status, body) = post(
         &app,
-        &format!("/api/actions/batches/{retry_id}/retry"),
+        &format!("/api/actions/batches/{settled}/retry"),
         TEST_DID,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], "nothing_to_retry");
+}
+
+/// A batch the runner gave up on before writing anything is stored `failed`
+/// with every row still `pending`. Retry has to reach exactly those rows —
+/// otherwise the one recoverable failure shape is a dead end (I2).
+#[tokio::test]
+async fn retry_reaches_a_failed_batch_whose_rows_never_ran() {
+    let (app, state) = app();
+    seed_session(&state, TEST_DID, "https://pds.test").await;
+    let (orig, _) = seed_batch(
+        &*state.db,
+        TEST_DID,
+        "block",
+        &[row(TARGET_A, "block"), row(TARGET_B, "block")],
+        &[("pending", None), ("pending", None)],
+    )
+    .await;
+    state
+        .db
+        .set_action_batch_status(orig, "failed", Some("getBlocks: server error 503"))
+        .await
+        .unwrap();
+
+    let (status, body) = post(
+        &app,
+        &format!("/api/actions/batches/{orig}/retry"),
+        TEST_DID,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let retry_id = body["batch_id"].as_i64().unwrap();
+    let batch = state.db.get_action_batch(retry_id).await.unwrap().unwrap();
+    assert_eq!(batch.status, "queued");
+    assert_eq!(batch.kind, "block");
+    let rows = state.db.list_actions_for_batch(retry_id).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|r| r.status == "pending"));
 }
 
 // ---- account detail ----
