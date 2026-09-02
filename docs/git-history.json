@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8fe948d33da7f8ac7d843c1bf066d4be3c0ff7b0",
+    "short_hash": "8fe948d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-01T22:37:25-07:00",
+    "message": "feat(315): action_batches and actions trait methods on both backends",
+    "files_changed": 8
+  },
+  {
     "hash": "1e384ebf94ddc219d52ec1cf38484c4b78e3f28e",
     "short_hash": "1e384eb",
     "author": "Bryan Guffey",

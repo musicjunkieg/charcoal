@@ -6610,6 +6610,17 @@
       "created_at": "2026-09-01T22:37:12.264615-07:00",
       "updated_at": "2026-09-01T22:37:12.264615-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"1e384eb\",\"confidence\":85}"
+    },
+    {
+      "id": 611,
+      "change_id": "9bee8c20-881d-4b2b-b2c1-0855228f8752",
+      "node_type": "outcome",
+      "title": "Task 5 done: 8fe948d, 10 sqlite + 35 pg tests green, clippy clean web+postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-01T22:37:38.863447-07:00",
+      "updated_at": "2026-09-01T22:37:38.863447-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"8fe948d\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -13300,6 +13311,17 @@
       "weight": 1.0,
       "rationale": "Task 5 of #315 plan",
       "created_at": "2026-09-01T22:37:15.478780-07:00"
+    },
+    {
+      "id": 619,
+      "from_node_id": 610,
+      "to_node_id": 611,
+      "from_change_id": "8281045b-677c-43fc-81d6-6adaf91900c7",
+      "to_change_id": "9bee8c20-881d-4b2b-b2c1-0855228f8752",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 implementation outcome",
+      "created_at": "2026-09-01T22:37:41.902650-07:00"
     }
   ],
   "documents": [

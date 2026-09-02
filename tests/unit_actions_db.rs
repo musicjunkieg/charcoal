@@ -223,13 +223,12 @@ async fn batch_status_transitions_stamp_timestamps() {
     db.set_action_batch_status(id, "queued", None)
         .await
         .unwrap();
-    assert!(db
-        .get_action_batch(id)
-        .await
-        .unwrap()
-        .unwrap()
-        .error
-        .is_none());
+    let b = db.get_action_batch(id).await.unwrap().unwrap();
+    assert!(b.error.is_none());
+    assert!(
+        b.finished_at.is_none(),
+        "a queued transition must clear finished_at, not just error"
+    );
 }
 
 #[tokio::test]
@@ -264,6 +263,10 @@ async fn update_action_stamps_and_preserves_record_uri() {
     let r = db.get_action(row_id).await.unwrap().unwrap();
     assert_eq!(r.status, "undone");
     assert!(r.undone_at.is_some());
+    assert!(
+        r.applied_at.is_some(),
+        "applied_at must survive the undone transition"
+    );
     assert_eq!(
         r.record_uri.as_deref(),
         Some("at://did:plc:me/app.bsky.graph.block/abc")

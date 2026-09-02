@@ -2028,6 +2028,26 @@ async fn test_pg_action_batches_parity() {
         started
     );
 
+    // "failed" stamps finished_at AND error; "queued" clears both (session
+    // reconnect / retry path) — mirrors batch_status_transitions_stamp_timestamps.
+    db.set_action_batch_status(first, "failed", Some("not_connected"))
+        .await
+        .unwrap();
+    let b = db.get_action_batch(first).await.unwrap().unwrap();
+    assert_eq!(b.status, "failed");
+    assert_eq!(b.error.as_deref(), Some("not_connected"));
+    assert!(b.finished_at.is_some());
+
+    db.set_action_batch_status(first, "queued", None)
+        .await
+        .unwrap();
+    let b = db.get_action_batch(first).await.unwrap().unwrap();
+    assert!(b.error.is_none());
+    assert!(
+        b.finished_at.is_none(),
+        "a queued transition must clear finished_at, not just error"
+    );
+
     db.update_action(
         rows[0].id,
         "applied",
@@ -2045,6 +2065,19 @@ async fn test_pg_action_batches_parity() {
         Some("at://x/app.bsky.graph.block/y")
     );
     assert!(r.undone_at.is_some() && r.applied_at.is_some());
+
+    db.update_action(rows[0].id, "failed", None, Some("boom"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_action(rows[0].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .error
+            .as_deref(),
+        Some("boom")
+    );
 
     db.update_action(rows[1].id, "skipped_already_done", None, None)
         .await
@@ -2079,6 +2112,143 @@ async fn test_pg_action_batches_parity() {
     assert!(!db.list_unfinished_batches().await.unwrap().contains(&first));
 
     delete_actions_rows(&url, ACTIONS_DID).await;
+}
+
+/// Postgres side of `undo_rows_point_at_originals` in
+/// tests/unit_actions_db.rs: an undo row's `undo_of` must point back at the
+/// original action's id, surviving the round trip through `create_action_batch`.
+#[tokio::test]
+async fn test_pg_undo_rows_point_at_originals() {
+    const UNDO_DID: &str = "did:plc:pgactions_undo00000000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, UNDO_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    let na = |t: &str, k: &str| NewAction {
+        target_did: t.to_string(),
+        kind: k.to_string(),
+        undo_of: None,
+        score_at_action: Some(41.5),
+        tier_at_action: Some("High".to_string()),
+    };
+
+    let orig = db
+        .create_action_batch(UNDO_DID, "mute", "single", &[na("did:plc:a", "mute")])
+        .await
+        .unwrap();
+    let orig_row = db.list_actions_for_batch(orig).await.unwrap()[0].id;
+    let mut undo = na("did:plc:a", "mute");
+    undo.undo_of = Some(orig_row);
+    let undo_batch = db
+        .create_action_batch(UNDO_DID, "undo", &format!("undo:{orig}"), &[undo])
+        .await
+        .unwrap();
+    let rows = db.list_actions_for_batch(undo_batch).await.unwrap();
+    assert_eq!(rows[0].undo_of, Some(orig_row));
+    assert_eq!(rows[0].kind, "mute");
+
+    delete_actions_rows(&url, UNDO_DID).await;
+}
+
+/// Postgres side of `listing_and_active_and_unfinished` in
+/// tests/unit_actions_db.rs. `list_unfinished_batches` is a GLOBAL query (no
+/// user_did filter), unlike everything else this test checks — so unlike the
+/// SQLite version, which runs against a fresh in-memory database and can
+/// compare the returned Vec for exact equality outright, this test filters
+/// the result down to the three ids it created before comparing. That keeps
+/// the same "exact list, not just contains" assertion shape without assuming
+/// the whole `action_batches` table is empty, which isn't safe against a
+/// shared, persistent Postgres instance.
+#[tokio::test]
+async fn test_pg_listing_and_active_and_unfinished() {
+    const LST_DID: &str = "did:plc:pgactions_lst_first000";
+    const LST_OTHER_DID: &str = "did:plc:pgactions_lst_other000";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    delete_actions_rows(&url, LST_DID).await;
+    delete_actions_rows(&url, LST_OTHER_DID).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    use charcoal::db::traits::NewAction;
+
+    let na = |t: &str, k: &str| NewAction {
+        target_did: t.to_string(),
+        kind: k.to_string(),
+        undo_of: None,
+        score_at_action: Some(41.5),
+        tier_at_action: Some("High".to_string()),
+    };
+
+    let first = db
+        .create_action_batch(LST_DID, "mute", "tier:High", &[na("did:plc:a", "mute")])
+        .await
+        .unwrap();
+    let second = db
+        .create_action_batch(LST_DID, "block", "single", &[na("did:plc:b", "block")])
+        .await
+        .unwrap();
+    let other = db
+        .create_action_batch(LST_OTHER_DID, "mute", "single", &[na("did:plc:c", "mute")])
+        .await
+        .unwrap();
+
+    // Newest first, scoped to the user, paginated.
+    let page = db.list_action_batches(LST_DID, 10, 0).await.unwrap();
+    assert_eq!(
+        page.iter().map(|b| b.id).collect::<Vec<_>>(),
+        vec![second, first]
+    );
+    assert_eq!(
+        db.list_action_batches(LST_DID, 1, 1).await.unwrap()[0].id,
+        first
+    );
+
+    // Unfinished across all users, id ascending (boot resume) — filtered to
+    // this test's own ids, see the doc comment above.
+    let ids_of_interest = [first, second, other];
+    let filtered = |all: Vec<i64>| -> Vec<i64> {
+        all.into_iter()
+            .filter(|id| ids_of_interest.contains(id))
+            .collect()
+    };
+    assert_eq!(
+        filtered(db.list_unfinished_batches().await.unwrap()),
+        vec![first, second, other]
+    );
+    db.set_action_batch_status(second, "done", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered(db.list_unfinished_batches().await.unwrap()),
+        vec![first, other]
+    );
+
+    // Active = applied or skipped_already_done, per user.
+    let a = db.list_actions_for_batch(first).await.unwrap()[0].id;
+    let b = db.list_actions_for_batch(second).await.unwrap()[0].id;
+    db.update_action(a, "skipped_already_done", None, None)
+        .await
+        .unwrap();
+    db.update_action(b, "applied", Some("at://x/app.bsky.graph.block/y"), None)
+        .await
+        .unwrap();
+    let active = db.active_actions(LST_DID).await.unwrap();
+    assert_eq!(active.iter().map(|r| r.id).collect::<Vec<_>>(), vec![a, b]);
+    db.update_action(b, "undone", None, None).await.unwrap();
+    assert_eq!(db.active_actions(LST_DID).await.unwrap().len(), 1);
+    assert!(db
+        .active_actions("did:plc:nobody")
+        .await
+        .unwrap()
+        .is_empty());
+
+    delete_actions_rows(&url, LST_DID).await;
+    delete_actions_rows(&url, LST_OTHER_DID).await;
 }
 
 /// Postgres side of the score-snapshot + cascade test in
