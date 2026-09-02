@@ -5,6 +5,7 @@
 	import {
 		getAccounts,
 		getActionsStatus,
+		getActiveActions,
 		createActionBatch,
 		startConsent,
 		NotConnectedError,
@@ -13,7 +14,8 @@
 	} from '$lib/api.js';
 	import ConfirmSheet from '$lib/components/ConfirmSheet.svelte';
 	import { bulkTierFor, showBulkBar, bulkErrorMessage, alreadyDoneMessage } from '$lib/bulk-tier-actions.js';
-	import type { Account, ActionKind, ActionsStatus } from '$lib/types.js';
+	import { buildSheetRows } from '$lib/sheet-rows.js';
+	import type { Account, ActionKind, ActionsStatus, SheetRow } from '$lib/types.js';
 	import { tierClass } from '$lib/tier-class';
 	import '$lib/website/styles/tokens.css';
 	import '$lib/website/styles/tiers.css';
@@ -34,31 +36,36 @@
 	// Bulk tier actions (#315, spec §5.1).
 	let actionsStatus = $state<ActionsStatus | null>(null);
 	let sheet = $state<ActionKind | null>(null);
-	let sheetCount = $state(0);
-	let sheetTargets = $state<string[]>([]);
+	let sheetRows = $state<SheetRow[]>([]);
+	// The tier captured when the sheet opened, not the live filter — the tier
+	// pills can change while `loadTierAccounts`/`getActiveActions` are in
+	// flight, and the confirm/consent request must use what the person saw.
+	let sheetTier = $state('');
 	let bulkBusy = $state(false);
 	let bulkError = $state('');
 	let bulkTier = $derived(bulkTierFor(selectedTier));
 	let showBulk = $derived(showBulkBar({ bulkTier, actionsStatus, asUser, total }));
 
-	/** Every DID in the selected tier, across pages (server caps per_page at 200). */
-	async function loadTierDids(tier: string): Promise<string[]> {
-		const dids: string[] = [];
+	/** Every account in the given tier, across pages (server caps per_page at 200). */
+	async function loadTierAccounts(tier: string): Promise<Account[]> {
+		const got: Account[] = [];
 		for (let p = 1; ; p++) {
 			const res = await getAccounts({ tier, page: p, per_page: 200 });
-			dids.push(...res.accounts.map((a) => a.did).filter((d): d is string => !!d));
-			if (res.accounts.length < 200 || dids.length >= res.total) break;
+			got.push(...res.accounts);
+			if (res.accounts.length < 200 || got.length >= res.total) break;
 		}
-		return dids;
+		return got;
 	}
 
 	async function openSheet(kind: ActionKind) {
-		if (!bulkTier) return;
+		const tier = bulkTier;
+		if (!tier) return;
 		bulkError = '';
 		bulkBusy = true;
 		try {
-			sheetTargets = await loadTierDids(bulkTier);
-			sheetCount = sheetTargets.length;
+			const [accounts, act] = await Promise.all([loadTierAccounts(tier), getActiveActions()]);
+			sheetRows = buildSheetRows(accounts, act.active, kind);
+			sheetTier = tier;
 			sheet = kind;
 		} catch (e) {
 			bulkError = e instanceof Error ? e.message : 'Something went wrong';
@@ -67,19 +74,19 @@
 		}
 	}
 
-	async function confirmBulk() {
+	async function confirmBulk(dids: string[]) {
 		const kind = sheet;
-		if (!kind || !bulkTier) return;
+		if (!kind || !sheetTier) return;
 		sheet = null;
 		bulkBusy = true;
 		bulkError = '';
 		try {
-			const res = await createActionBatch(kind, `tier:${bulkTier}`, sheetTargets);
+			const res = await createActionBatch(kind, `tier:${sheetTier}`, dids);
 			if (res.batch_id !== null) await goto(`/actions/${res.batch_id}`);
 			else bulkError = alreadyDoneMessage(kind, res.skipped_active);
 		} catch (e) {
 			if (e instanceof NotConnectedError) {
-				await startConsent(kind, { tier: bulkTier });
+				await startConsent(kind, { tier: sheetTier });
 				return;
 			}
 			bulkError = e instanceof Error ? e.message : 'Something went wrong';
@@ -205,11 +212,12 @@
 		</div>
 	{/if}
 
-	{#if sheet && bulkTier}
+	{#if sheet}
 		<ConfirmSheet
 			kind={sheet}
-			count={sheetCount}
-			label={bulkTier}
+			rows={sheetRows}
+			count={sheetRows.length}
+			label={sheetTier}
 			connected={actionsStatus?.connected ?? false}
 			onconfirm={confirmBulk}
 			oncancel={() => (sheet = null)}

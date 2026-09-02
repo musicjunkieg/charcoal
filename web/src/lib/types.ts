@@ -305,3 +305,20 @@ export interface CreateBatchResponse {
 	requested: number;
 	skipped_active: number;
 }
+
+/** One active mute/block Charcoal currently holds, from GET /api/actions/active. */
+export interface ActiveActionRef {
+	did: string;
+	kind: ActionKind;
+}
+
+/** One row of the bulk confirm sheet's account list (spec §5.1). */
+export interface SheetRow {
+	did: string;
+	handle: string;
+	tier: string | null;
+	/** Plain-language top signal — never a bare number (PRODUCT principle 1). */
+	signal: string;
+	/** Charcoal already holds this kind on this account: greyed, unchecked, not counted. */
+	done: boolean;
+}

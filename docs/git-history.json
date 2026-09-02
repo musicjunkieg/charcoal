@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b758671f956652f74f5442beef5b93233bc21b26",
+    "short_hash": "b758671",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T03:24:13-07:00",
+    "message": "feat(315): tier-wide Mute all / Block all with confirm sheet\n\nBulk bar on the filtered Accounts page loads the whole tier (paged at the\nserver cap of 200), opens ConfirmSheet with the spec copy, and creates one\nbatch with source tier:<Tier>. Missing consent sends the person to Bluesky\nand ?resume= re-opens the same sheet on return.\n\nBulk-eligibility gating, error copy, and the already-done message are\nextracted into bulk-tier-actions.ts (TDD, 13 new vitest cases) rather than\ninlined in the page script, matching the project convention of keeping\nSvelte pages thin over pure, unit-testable logic modules (dashboard-state.ts,\naction-selection.ts, action-status.ts).\n\nConfirmSheet replaces the Task 10 stub wholesale per spec copy §5.1-5.2.\nFixed two real a11y violations the brief sample code did not have (dialog\nrole needs a tabindex; a clickable non-interactive container needs a\nmatching keyboard handler) by moving outside-click detection to the backdrop\nelement instead of stopPropagation on the sheet.",
+    "files_changed": 6
+  },
+  {
     "hash": "df3b42099bf6227ae23192ae3a857465c2400565",
     "short_hash": "df3b420",
     "author": "Bryan Guffey",

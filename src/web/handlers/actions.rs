@@ -701,6 +701,25 @@ pub async fn account_actions(
     Json(json!({ "did": account.did, "actions": actions })).into_response()
 }
 
+/// GET /api/actions/active — every target Charcoal currently holds a mute or
+/// block on, for the bulk confirm sheet to grey out "already muted" rows
+/// before the user confirms (spec §5.1). Read-only, so impersonation is fine.
+pub async fn active_actions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Response {
+    let rows = match state.db.active_actions(&auth.effective_did).await {
+        Ok(r) => r,
+        Err(e) => return db_error(e),
+    };
+    let active: Vec<Value> = rows
+        .iter()
+        .filter(|r| is_active_forward(r))
+        .map(|r| json!({ "did": r.target_did, "kind": r.kind }))
+        .collect();
+    Json(json!({ "active": active })).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

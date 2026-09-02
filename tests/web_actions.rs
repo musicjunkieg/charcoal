@@ -196,6 +196,7 @@ async fn every_actions_endpoint_requires_auth() {
         ("POST", "/api/actions/batches/1/retry", None),
         ("POST", "/api/actions/1/undo", None),
         ("GET", "/api/accounts/a.test/actions", None),
+        ("GET", "/api/actions/active", None),
     ] {
         let (status, _, _) = send(&app, m, u, None, b).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "{m} {u}");
@@ -753,6 +754,76 @@ async fn account_actions_lists_active_forward_rows_for_that_target() {
     let (status, body) = get(&app, "/api/accounts/nobody.test/actions", TEST_DID).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["code"], "not_found");
+}
+
+#[tokio::test]
+async fn active_actions_lists_every_active_forward_row() {
+    let (app, state) = app();
+    seed_scores(&*state.db, TEST_DID).await;
+    seed_batch(
+        &*state.db,
+        TEST_DID,
+        "mute",
+        &[row(TARGET_A, "mute")],
+        &[("applied", None)],
+    )
+    .await;
+    seed_batch(
+        &*state.db,
+        TEST_DID,
+        "block",
+        &[row(TARGET_A, "block"), row(TARGET_B, "block")],
+        &[
+            ("applied", Some("at://x/app.bsky.graph.block/1")),
+            ("failed", None),
+        ],
+    )
+    .await;
+    seed_batch(
+        &*state.db,
+        TEST_DID,
+        "mute",
+        &[row(TARGET_B, "mute")],
+        &[("skipped_already_done", None)],
+    )
+    .await;
+
+    let (status, body) = get(&app, "/api/actions/active", TEST_DID).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut pairs: Vec<(String, String)> = body["active"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| {
+            (
+                a["did"].as_str().unwrap().to_string(),
+                a["kind"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    pairs.sort();
+    assert_eq!(
+        pairs,
+        vec![
+            (TARGET_A.to_string(), "block".to_string()),
+            (TARGET_A.to_string(), "mute".to_string()),
+            (TARGET_B.to_string(), "mute".to_string()),
+        ],
+        "failed rows are not active; skipped_already_done rows are"
+    );
+
+    // Another user sees nothing of this. (OTHER needs an access grant to pass
+    // the auth gate at all — the endpoint under test isn't reachable through
+    // `allowed_did`/admin like TEST_DID is, so this is setup, not the thing
+    // being asserted.)
+    state
+        .db
+        .grant_access(OTHER, "other.test", TEST_DID)
+        .await
+        .expect("grant access");
+    let (status, body) = get(&app, "/api/actions/active", OTHER).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["active"], json!([]));
 }
 
 // ---- write-consent callback ----

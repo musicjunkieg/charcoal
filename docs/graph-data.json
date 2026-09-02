@@ -6995,6 +6995,61 @@
       "created_at": "2026-09-02T03:19:19.192201-07:00",
       "updated_at": "2026-09-02T03:19:19.192201-07:00",
       "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"df3b420\",\"confidence\":85}"
+    },
+    {
+      "id": 646,
+      "change_id": "6f2fec00-a749-413c-b27e-9d7b2b29f828",
+      "node_type": "outcome",
+      "title": "Task 12 done: b758671, vitest 78/78 (13 new bulk-tier-actions), svelte build+check clean (5 pre-existing errors in accounts/[handle] confirmed unrelated via git stash diff), autofixer clean on both svelte files, deviation: bulk gating/copy extracted to tested bulk-tier-actions.ts + 2 a11y fixes to ConfirmSheet's backdrop/dialog beyond brief's sample code",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:24:23.460890-07:00",
+      "updated_at": "2026-09-02T03:24:23.460890-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"b758671\",\"confidence\":90}"
+    },
+    {
+      "id": 647,
+      "change_id": "d061e348-c51c-489b-8d1c-ae61014cc86e",
+      "node_type": "outcome",
+      "title": "Task 12 review approved; reviewer found plan gap: spec §5.1 per-account checkbox list (PRODUCT principle 2) missing from bulk sheet",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:33:42.307439-07:00",
+      "updated_at": "2026-09-02T03:33:42.307439-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"b758671\",\"confidence\":90}"
+    },
+    {
+      "id": 648,
+      "change_id": "a6846b2f-2807-4f02-948a-f607f6cc0751",
+      "node_type": "revisit",
+      "title": "Plan Task 12 dropped spec §5.1 checkbox list — plan defect vs approved spec; add Task 12b",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:33:42.318100-07:00",
+      "updated_at": "2026-09-02T03:33:42.318100-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"confidence\":90}"
+    },
+    {
+      "id": 649,
+      "change_id": "8e474fa8-8a4b-4076-844e-1153732c0dfe",
+      "node_type": "action",
+      "title": "Task 12b: bulk confirm sheet account list w/ checkboxes (spec §5.1) + GET /api/actions/active",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:35:59.990521-07:00",
+      "updated_at": "2026-09-02T03:35:59.990521-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"b758671\",\"confidence\":85}"
+    },
+    {
+      "id": 650,
+      "change_id": "1074f735-198e-49c5-88a2-ffb73c87c401",
+      "node_type": "action",
+      "title": "Task 12b impl: GET /api/actions/active + sheet-rows/top-signal + ConfirmSheet rows list",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-02T03:37:14.766307-07:00",
+      "updated_at": "2026-09-02T03:37:14.766307-07:00",
+      "metadata_json": "{\"branch\":\"feat/315-tier-actions\",\"commit\":\"b758671\",\"confidence\":85,\"files\":[\"src/web/handlers/actions.rs src/web/mod.rs tests/web_actions.rs web/src/lib/api.ts web/src/lib/types.ts web/src/lib/top-signal.ts web/src/lib/sheet-rows.ts web/src/lib/components/ConfirmSheet.svelte web/src/routes/(protected)/accounts/+page.svelte\"]}"
     }
   ],
   "edges": [
@@ -14081,6 +14136,72 @@
       "weight": 1.0,
       "rationale": "implementation",
       "created_at": "2026-09-02T03:19:22.166206-07:00"
+    },
+    {
+      "id": 655,
+      "from_node_id": 645,
+      "to_node_id": 646,
+      "from_change_id": "9d954041-8cbc-4f78-af68-4eb9bd8957dd",
+      "to_change_id": "6f2fec00-a749-413c-b27e-9d7b2b29f828",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "outcome",
+      "created_at": "2026-09-02T03:24:26.444489-07:00"
+    },
+    {
+      "id": 656,
+      "from_node_id": 646,
+      "to_node_id": 647,
+      "from_change_id": "6f2fec00-a749-413c-b27e-9d7b2b29f828",
+      "to_change_id": "d061e348-c51c-489b-8d1c-ae61014cc86e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task review",
+      "created_at": "2026-09-02T03:33:48.486767-07:00"
+    },
+    {
+      "id": 657,
+      "from_node_id": 647,
+      "to_node_id": 648,
+      "from_change_id": "d061e348-c51c-489b-8d1c-ae61014cc86e",
+      "to_change_id": "a6846b2f-2807-4f02-948a-f607f6cc0751",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review finding reopens plan Task 12",
+      "created_at": "2026-09-02T03:33:48.494022-07:00"
+    },
+    {
+      "id": 658,
+      "from_node_id": 648,
+      "to_node_id": 599,
+      "from_change_id": "a6846b2f-2807-4f02-948a-f607f6cc0751",
+      "to_change_id": "81f6e465-2706-4417-a008-bdcccd868908",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan amended with Task 12b",
+      "created_at": "2026-09-02T03:33:48.500403-07:00"
+    },
+    {
+      "id": 659,
+      "from_node_id": 648,
+      "to_node_id": 649,
+      "from_change_id": "a6846b2f-2807-4f02-948a-f607f6cc0751",
+      "to_change_id": "8e474fa8-8a4b-4076-844e-1153732c0dfe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 12b closes the plan gap",
+      "created_at": "2026-09-02T03:36:05.591359-07:00"
+    },
+    {
+      "id": 660,
+      "from_node_id": 649,
+      "to_node_id": 650,
+      "from_change_id": "8e474fa8-8a4b-4076-844e-1153732c0dfe",
+      "to_change_id": "1074f735-198e-49c5-88a2-ffb73c87c401",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-09-02T03:37:17.864185-07:00"
     }
   ],
   "documents": [

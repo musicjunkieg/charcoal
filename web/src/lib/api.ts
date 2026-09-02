@@ -22,7 +22,8 @@ import type {
 	ActionBatchDetail,
 	ActionRowView,
 	CreateBatchResponse,
-	ActionKind
+	ActionKind,
+	ActiveActionRef
 } from './types.js';
 
 export class AuthError extends Error {
@@ -375,4 +376,8 @@ export async function getAccountActions(
 	handle: string
 ): Promise<{ did: string; actions: ActionRowView[] }> {
 	return apiFetch(`/api/accounts/${encodeURIComponent(handle)}/actions`);
+}
+
+export async function getActiveActions(): Promise<{ active: ActiveActionRef[] }> {
+	return apiFetch('/api/actions/active');
 }

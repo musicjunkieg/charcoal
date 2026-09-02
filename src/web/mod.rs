@@ -256,6 +256,10 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/accounts/{handle}/actions",
             get(handlers::actions::account_actions),
         )
+        .route(
+            "/api/actions/active",
+            get(handlers::actions::active_actions),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
