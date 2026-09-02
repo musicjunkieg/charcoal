@@ -73,7 +73,7 @@ describe('batchHeadline', () => {
 
 describe('rowNote', () => {
 	it('mentions drift with the current tier', () => {
-		expect(rowNote(row({ current_tier: 'Watch', drifted: true }))).toBe('since dropped to Watch');
+		expect(rowNote(row({ current_tier: 'Watch', drifted: true }))).toBe('now Watch');
 		expect(rowNote(row({}))).toBe('');
 	});
 	it('surfaces a failure reason', () => {
@@ -90,7 +90,7 @@ describe('driftNote', () => {
 	it('returns the drift copy even when the row also failed', () => {
 		expect(
 			driftNote(row({ status: 'failed', error: 'PDS returned 500', drifted: true, current_tier: 'Watch' }))
-		).toBe('since dropped to Watch');
+		).toBe('now Watch');
 	});
 	it('is empty when not drifted', () => {
 		expect(driftNote(row({ status: 'failed', error: 'PDS returned 500' }))).toBe('');

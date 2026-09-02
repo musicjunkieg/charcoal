@@ -64,7 +64,7 @@ export function failureNote(r: ActionRowView): string {
  *  failed and drifted can still show the drift copy in a cell of its own
  *  (the Tier-then column) without repeating the failure text. */
 export function driftNote(r: ActionRowView): string {
-	if (r.drifted && r.current_tier) return `since dropped to ${r.current_tier}`;
+	if (r.drifted && r.current_tier) return `now ${r.current_tier}`;
 	return '';
 }
 
