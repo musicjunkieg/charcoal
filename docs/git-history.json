@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9864b01726eb0a8154b9047fd1db10e69820e6be",
+    "short_hash": "9864b01",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T04:55:58-07:00",
+    "message": "fix(315): refuse Retry on a batch that is still queued or running\n\nRetry now counts pending rows as work to redo (I2), so without this guard the\nAPI alone could clone a live batch into a second one over the same targets.\n409 batch_running; the UI already gated on !isRunning.",
+    "files_changed": 6
+  },
+  {
     "hash": "7a214c214112c529af0ea9c9e9d3fccb9edf1f83",
     "short_hash": "7a214c2",
     "author": "Bryan Guffey",

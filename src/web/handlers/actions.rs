@@ -4,6 +4,13 @@
 //! person's action log through `?as_user=`. Writes refuse impersonation
 //! before doing anything else: nobody acts with someone else's credentials.
 
+// `Response` is the error type for nearly every fallible function in this
+// file (async helpers included) — it is what an axum handler must return
+// either way, so boxing it would only add an indirection at every call site
+// without shrinking anything that matters. Clippy 1.98 extended the lint to
+// `async fn`, hence the module-wide allow rather than one per helper.
+#![allow(clippy::result_large_err)]
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
@@ -36,17 +43,11 @@ fn disabled() -> Response {
     )
 }
 
-// `Response` is the error type for nearly every fallible function in this
-// file (async handlers included) — it is what an axum handler must return
-// either way, so boxing it here would only add an indirection at every call
-// site without shrinking anything that matters.
-#[allow(clippy::result_large_err)]
 fn sessions(state: &AppState) -> Result<Arc<SessionStore>, Response> {
     state.sessions.clone().ok_or_else(disabled)
 }
 
 /// Writes act with the caller's own credentials only.
-#[allow(clippy::result_large_err)]
 fn writer(auth: &AuthUser) -> Result<(), Response> {
     if auth.is_impersonating() {
         return Err(api_error_code(

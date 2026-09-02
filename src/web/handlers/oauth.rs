@@ -190,6 +190,10 @@ pub async fn initiate(
 /// discover its authorization server, run PAR with `scope`, stash the
 /// pending state under the OAuth `state`, and return the authorization URL.
 /// `write_return_to` marks the round-trip as write consent.
+///
+/// The `Err` is the `Response` the caller sends as-is; boxing it would only
+/// add an indirection (same reasoning as `handlers::actions`).
+#[allow(clippy::result_large_err)]
 pub(crate) async fn begin_oauth(
     state: &AppState,
     http_client: &reqwest::Client,
