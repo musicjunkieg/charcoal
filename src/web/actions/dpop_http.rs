@@ -20,41 +20,84 @@ pub struct DpopResponse {
     pub body: String,
 }
 
+/// The last `DPoP-Nonce` a server handed us (#333). Servers return one on
+/// every response and rotate it now and then; sending it in the first proof
+/// turns the usual two round trips per call into one. A plain `Mutex` — the
+/// critical section is one small string and the runner is single-flight per
+/// batch, so there is nothing for a `RwLock` or an atomic to win.
+#[derive(Default)]
+pub struct NonceCache(std::sync::Mutex<Option<String>>);
+
+impl NonceCache {
+    pub fn get(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn set(&self, nonce: &str) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(nonce.to_owned());
+    }
+
+    /// Cache whatever nonce this response carries, whatever its status.
+    fn remember(&self, r: &DpopResponse) {
+        if let Some(n) = r.headers.get("DPoP-Nonce").and_then(|v| v.to_str().ok()) {
+            self.set(n);
+        }
+    }
+}
+
 /// Send `method url` with a fresh DPoP proof (bound to `access_token` when
-/// given). `build` adds body/query/headers to the request. If the server
-/// answers 400/401 with a `DPoP-Nonce` header and a `use_dpop_nonce` /
-/// `invalid_dpop_proof` signal (WWW-Authenticate or JSON body), the request
-/// is re-signed with the nonce and sent exactly once more.
+/// given). `build` adds body/query/headers to the request. The proof carries
+/// the cached nonce when there is one. If the server still answers 400/401
+/// with a `DPoP-Nonce` header and a `use_dpop_nonce` / `invalid_dpop_proof`
+/// signal (WWW-Authenticate or JSON body), the request is re-signed with
+/// that nonce and sent exactly once more. Every response's `DPoP-Nonce` is
+/// cached for the next call.
 pub async fn send_dpop(
     http: &reqwest::Client,
     key: &KeyData,
     method: &str,
     url: &str,
     access_token: Option<&str>,
+    nonce: &NonceCache,
     build: impl Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
 ) -> Result<DpopResponse> {
-    let (proof, header, claims) = match access_token {
+    let (mut proof, header, mut claims) = match access_token {
         Some(t) => request_dpop(key, method, url, t),
         None => auth_dpop(key, method, url),
     }
     .context("mint DPoP proof")?;
 
+    if let Some(cached) = nonce.get() {
+        claims
+            .private
+            .insert("nonce".to_string(), serde_json::Value::String(cached));
+        proof = mint(key, &header, &claims).context("mint DPoP proof with cached nonce")?;
+    }
+
     let first = send_once(http, method, url, access_token, &proof, &build).await?;
-    let nonce = first
+    nonce.remember(&first);
+    let fresh = first
         .headers
         .get("DPoP-Nonce")
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-    let (Some(nonce), true) = (nonce, is_nonce_challenge(&first)) else {
+    let (Some(fresh), true) = (fresh, is_nonce_challenge(&first)) else {
         return Ok(first);
     };
 
-    let mut claims = claims;
     claims
         .private
-        .insert("nonce".to_string(), serde_json::Value::String(nonce));
+        .insert("nonce".to_string(), serde_json::Value::String(fresh));
     let proof = mint(key, &header, &claims).context("mint DPoP proof with nonce")?;
-    send_once(http, method, url, access_token, &proof, &build).await
+    let second = send_once(http, method, url, access_token, &proof, &build).await?;
+    nonce.remember(&second);
+    Ok(second)
 }
 
 fn is_nonce_challenge(r: &DpopResponse) -> bool {

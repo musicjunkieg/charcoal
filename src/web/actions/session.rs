@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use super::crypto::TokenCrypto;
-use super::dpop_http::send_dpop;
+use super::dpop_http::{send_dpop, NonceCache};
 use super::pds::PdsClient;
 use super::scope::scope_grants_write;
 use crate::config::Config;
@@ -463,12 +463,15 @@ async fn refresh(
         ),
         ("client_assertion", assertion.as_str()),
     ];
+    // The authorization server's nonce is not the resource server's, so the
+    // refresh never shares a cache with the PDS client.
     let resp = send_dpop(
         http,
         &session.dpop_key,
         "POST",
         &authz.token_endpoint,
         None,
+        &NonceCache::default(),
         |r| r.form(&form),
     )
     .await

@@ -7809,6 +7809,17 @@
       "created_at": "2026-09-04T11:26:55.048701-07:00",
       "updated_at": "2026-09-04T11:26:55.048701-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
+    },
+    {
+      "id": 720,
+      "change_id": "bbf6a524-cc06-4ee6-ac6a-4f8fa9f115ac",
+      "node_type": "action",
+      "title": "Tasks 4-6 landed via SDD: ActionButtons toast (bc4a1ce), batch banner + 1s poll (17cc9e4..8384bf1), runner timing spans (b182a29)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T11:41:43.115966-07:00",
+      "updated_at": "2026-09-04T11:41:43.115966-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"b182a29\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -15852,6 +15863,17 @@
       "weight": 1.0,
       "rationale": "Observed during Task 5 stop-hook review; changes Task 8 scope",
       "created_at": "2026-09-04T11:27:01.026843-07:00"
+    },
+    {
+      "id": 742,
+      "from_node_id": 716,
+      "to_node_id": 720,
+      "from_change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "to_change_id": "bbf6a524-cc06-4ee6-ac6a-4f8fa9f115ac",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Execution progress: tasks 4-6 reviewed clean",
+      "created_at": "2026-09-04T11:41:45.857708-07:00"
     }
   ],
   "documents": [

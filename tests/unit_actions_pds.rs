@@ -18,6 +18,31 @@ impl Match for NoHeader {
     }
 }
 
+use base64::Engine as _;
+
+/// Matches requests whose DPoP proof carries exactly this `nonce` claim
+/// (`None` = no nonce claim at all). Decodes the JWT payload segment; the
+/// signature is not checked — this is a routing matcher, not a verifier.
+struct ProofNonce(Option<&'static str>);
+
+impl Match for ProofNonce {
+    fn matches(&self, request: &Request) -> bool {
+        let Some(proof) = request.headers.get("DPoP").and_then(|v| v.to_str().ok()) else {
+            return false;
+        };
+        let Some(payload) = proof.split('.').nth(1) else {
+            return false;
+        };
+        let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) else {
+            return false;
+        };
+        let Ok(claims) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            return false;
+        };
+        claims.get("nonce").and_then(|n| n.as_str()) == self.0
+    }
+}
+
 const ME: &str = "did:plc:me00000000000000000000";
 
 fn client(mock: &MockServer) -> PdsClient {
@@ -106,6 +131,133 @@ async fn dpop_nonce_challenge_is_retried_once() {
         .await;
 
     client(&mock).mute_actor("did:plc:target1").await.unwrap();
+}
+
+/// Spec §5.2: the first call pays the challenge, the second does not.
+#[tokio::test]
+async fn cached_nonce_skips_the_challenge_on_the_second_call() {
+    let mock = MockServer::start().await;
+    // No nonce → challenge.
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(None))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .insert_header("WWW-Authenticate", "DPoP error=\"use_dpop_nonce\"")
+                .insert_header("DPoP-Nonce", "n1")
+                .set_body_json(serde_json::json!({ "error": "use_dpop_nonce" })),
+        )
+        .expect(1)
+        .mount(&mock)
+        .await;
+    // Right nonce → success (the server echoes the same nonce back).
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("n1")))
+        .respond_with(ResponseTemplate::new(200).insert_header("DPoP-Nonce", "n1"))
+        .expect(2)
+        .mount(&mock)
+        .await;
+
+    let c = client(&mock);
+    c.mute_actor("did:plc:t1").await.unwrap();
+    c.mute_actor("did:plc:t2").await.unwrap();
+
+    // Two round trips for the first call, one for the second.
+    assert_eq!(mock.received_requests().await.unwrap().len(), 3);
+}
+
+/// A 200 that carries a rotated `DPoP-Nonce` updates the cache, so the next
+/// proof uses the new one.
+#[tokio::test]
+async fn rotated_nonce_on_success_updates_cache() {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(None))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .insert_header("WWW-Authenticate", "DPoP error=\"use_dpop_nonce\"")
+                .insert_header("DPoP-Nonce", "n1")
+                .set_body_json(serde_json::json!({ "error": "use_dpop_nonce" })),
+        )
+        .expect(1)
+        .mount(&mock)
+        .await;
+    // n1 is accepted, but the server hands out n2 on the way back.
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("n1")))
+        .respond_with(ResponseTemplate::new(200).insert_header("DPoP-Nonce", "n2"))
+        .expect(1)
+        .mount(&mock)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("n2")))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    let c = client(&mock);
+    c.mute_actor("did:plc:t1").await.unwrap();
+    c.mute_actor("did:plc:t2").await.unwrap();
+    assert_eq!(mock.received_requests().await.unwrap().len(), 3);
+}
+
+/// A cached nonce the server no longer accepts falls back to the existing
+/// challenge path and still succeeds — the worst case is unchanged.
+#[tokio::test]
+async fn stale_cached_nonce_falls_back_to_the_challenge() {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(None))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .insert_header("WWW-Authenticate", "DPoP error=\"use_dpop_nonce\"")
+                .insert_header("DPoP-Nonce", "n1")
+                .set_body_json(serde_json::json!({ "error": "use_dpop_nonce" })),
+        )
+        .expect(1)
+        .mount(&mock)
+        .await;
+    // n1 works once (first call's retry), then the server has rotated: the
+    // second call's cached n1 is challenged with n2. Order matters — the
+    // `up_to_n_times(1)` mock is consumed first, then the 401 takes over.
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("n1")))
+        .respond_with(ResponseTemplate::new(200).insert_header("DPoP-Nonce", "n1"))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&mock)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("n1")))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .insert_header("WWW-Authenticate", "DPoP error=\"use_dpop_nonce\"")
+                .insert_header("DPoP-Nonce", "n2")
+                .set_body_json(serde_json::json!({ "error": "use_dpop_nonce" })),
+        )
+        .expect(1)
+        .mount(&mock)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("n2")))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    let c = client(&mock);
+    c.mute_actor("did:plc:t1").await.unwrap();
+    c.mute_actor("did:plc:t2").await.unwrap();
+    assert_eq!(mock.received_requests().await.unwrap().len(), 4);
 }
 
 #[tokio::test]
