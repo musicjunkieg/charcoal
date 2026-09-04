@@ -7908,6 +7908,17 @@
       "created_at": "2026-09-04T12:55:59.817536-07:00",
       "updated_at": "2026-09-04T12:55:59.817536-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
+    },
+    {
+      "id": 729,
+      "change_id": "62e411d4-6a9c-4a34-9bd4-bc30c6371ad5",
+      "node_type": "action",
+      "title": "Fix wave applied: I1 undo-banner pending rows, T3a/T7 comment+import, T1a eviction-timer test, T3b focus-visible, M5 single live region, M6 expoOut, M11 POLL_INTERVAL_MS comment",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T13:05:50.957353-07:00",
+      "updated_at": "2026-09-04T13:05:50.957353-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"d127dbf\",\"confidence\":90,\"files\":[\"web/src/lib/action-status.ts\",\"web/src/lib/action-status.test.ts\",\"web/src/lib/components/Toast.svelte\",\"web/src/lib/toast.test.ts\",\"web/src/lib/action-progress.ts\",\"tests/unit_actions_pds.rs\"]}"
     }
   ],
   "edges": [
@@ -16072,6 +16083,17 @@
       "weight": 1.0,
       "rationale": "M1 flagged the stripe removal as a deviation; 719 already decided it",
       "created_at": "2026-09-04T12:56:03.713601-07:00"
+    },
+    {
+      "id": 753,
+      "from_node_id": 728,
+      "to_node_id": 729,
+      "from_change_id": "a8e1e6f1-9d6b-42a0-8396-951b48c70786",
+      "to_change_id": "62e411d4-6a9c-4a34-9bd4-bc30c6371ad5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix wave implements the chosen scope",
+      "created_at": "2026-09-04T13:05:53.856721-07:00"
     }
   ],
   "documents": [

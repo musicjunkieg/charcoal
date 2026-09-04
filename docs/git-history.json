@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d127dbf445be4381ecb749eb0532dfc9ec98f2e9",
+    "short_hash": "d127dbf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T13:02:54-07:00",
+    "message": "fix(332): final-review fixes — undo banner pending rows, toast a11y/focus, tests\n\nI1: bannerSummary undo branch no longer counts pending rows as undone\n(a batch that dies before the write step is failed with every row\npending; the toast already says \"Couldnt unmute\" for that batch, now\nthe banner agrees). T3a: fix stale column-reverse comment in\nToast.svelte. T7: move base64::Engine import into the top block of\nunit_actions_pds.rs. T1a: cap-eviction timer cleanup regression test\nin toast.test.ts. T3b: themed focus-visible ring on toast controls.\nM5: drop the redundant aria-live on .stack, keep per-toast role.\nM6: replace local easeOutExpo with svelte/easing expoOut. M11: note\nthat POLL_INTERVAL_MS is shared with the batch page poll.",
+    "files_changed": 8
+  },
+  {
     "hash": "24f7b0d575c5ce0094a0983606156cc7aceb90d4",
     "short_hash": "24f7b0d",
     "author": "Bryan Guffey",

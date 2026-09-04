@@ -101,6 +101,12 @@ describe('toast store', () => {
 		raise({ tone: 'ok', text: 'evicted', actions: [], ttlMs: 1000 });
 		const survivors = [1, 2, 3].map((i) => raise({ tone: 'ok', text: `t${i}`, actions: [] }));
 		expect(get(toasts).map((t) => t.id)).toEqual(survivors);
+		// Only the evicted toast had a ttl, so a leaked timer is the ONLY
+		// thing that could still be pending here. Asserting on store
+		// contents alone can't catch the leak: ids are never reused and
+		// `dismiss` of an unknown id is a no-op, so the store looks the
+		// same either way.
+		expect(vi.getTimerCount()).toBe(0);
 		vi.advanceTimersByTime(1000);
 		expect(get(toasts)).toHaveLength(MAX_TOASTS);
 		expect(get(toasts).map((t) => t.id)).toEqual(survivors);
