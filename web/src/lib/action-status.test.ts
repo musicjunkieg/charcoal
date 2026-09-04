@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { batchHeadline, rowNote, driftNote, isRunning, isParked, canRetry, canUndo } from './action-status';
+import {
+	batchHeadline,
+	rowNote,
+	driftNote,
+	isRunning,
+	isParked,
+	canRetry,
+	canUndo,
+	bannerSummary,
+	returnPath
+} from './action-status';
 import type { ActionBatchSummary, ActionRowView } from './types';
 
 function summary(over: Partial<ActionBatchSummary>): ActionBatchSummary {
@@ -125,5 +135,73 @@ describe('flags', () => {
 		// remove (#261).
 		expect(canUndo(summary({ counts: { skipped_already_done: 3 } }))).toBe(false);
 		expect(canUndo(summary({ counts: { applied: 1, skipped_already_done: 3 } }))).toBe(true);
+	});
+});
+
+describe('bannerSummary', () => {
+	it('done mute batch', () => {
+		const b = summary({ kind: 'mute', status: 'done', counts: { applied: 12, skipped_already_done: 2 } });
+		expect(bannerSummary(b, [])).toEqual({ title: 'Done', detail: '14 muted, 0 failed', tone: 'ok' });
+	});
+
+	it('done block batch of one', () => {
+		const b = summary({ kind: 'block', status: 'done', counts: { applied: 1 } });
+		expect(bannerSummary(b, [])).toEqual({ title: 'Done', detail: '1 blocked, 0 failed', tone: 'ok' });
+	});
+
+	it('partial batch is a problem', () => {
+		const b = summary({ kind: 'mute', status: 'partial', counts: { applied: 12, failed: 2 } });
+		expect(bannerSummary(b, [])).toEqual({ title: 'Finished with problems', detail: '12 muted, 2 failed', tone: 'error' });
+	});
+
+	it('failed batch that never wrote is a problem with zero done', () => {
+		const b = summary({ kind: 'block', status: 'failed', counts: { pending: 3 } });
+		expect(bannerSummary(b, [])).toEqual({ title: 'Finished with problems', detail: '0 blocked, 0 failed', tone: 'error' });
+	});
+
+	it('undo batch counts rows by the kind undone', () => {
+		const b = summary({ kind: 'undo', status: 'done', counts: { undone: 3, skipped_already_done: 1 } });
+		const rows = [
+			row({ kind: 'mute', status: 'undone' }),
+			row({ kind: 'mute', status: 'undone' }),
+			row({ kind: 'block', status: 'undone' }),
+			row({ kind: 'mute', status: 'skipped_already_done' })
+		];
+		expect(bannerSummary(b, rows)).toEqual({ title: 'Undone', detail: '3 unmuted, 1 unblocked', tone: 'ok' });
+	});
+
+	it('undo batch with a failure', () => {
+		const b = summary({ kind: 'undo', status: 'partial', counts: { undone: 1, failed: 1 } });
+		const rows = [row({ kind: 'mute', status: 'undone' }), row({ kind: 'block', status: 'failed' })];
+		expect(bannerSummary(b, rows)).toEqual({ title: 'Finished with problems', detail: '1 unmuted, 0 unblocked, 1 failed', tone: 'error' });
+	});
+});
+
+describe('returnPath', () => {
+	it('tier source goes back to the filtered list', () => {
+		expect(returnPath('tier:Watch', '')).toEqual({ href: '/accounts?tier=Watch', label: '← Back to Watch accounts' });
+	});
+
+	it('account source goes back to the account', () => {
+		expect(returnPath('account:alice.bsky.social', '')).toEqual({
+			href: '/accounts/alice.bsky.social',
+			label: '← Back to @alice.bsky.social'
+		});
+	});
+
+	it('anything else goes back to the list', () => {
+		expect(returnPath('', '')).toEqual({ href: '/accounts', label: '← Back to accounts' });
+		expect(returnPath('retry:12', '')).toEqual({ href: '/accounts', label: '← Back to accounts' });
+	});
+
+	it('appends the as_user suffix, joining with & when there is already a query', () => {
+		expect(returnPath('tier:High', '?as_user=x').href).toBe('/accounts?tier=High&as_user=x');
+		expect(returnPath('account:bob', '?as_user=x').href).toBe('/accounts/bob?as_user=x');
+		expect(returnPath('', '?as_user=x').href).toBe('/accounts?as_user=x');
+	});
+
+	it('encodes the tier and handle', () => {
+		expect(returnPath('tier:Very High', '').href).toBe('/accounts?tier=Very%20High');
+		expect(returnPath('account:a b', '').href).toBe('/accounts/a%20b');
 	});
 });
