@@ -26,6 +26,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   so a session replaced mid-refresh (a re-consent, or another replica) is
   never removed on the strength of a stale read — it is reloaded and used.
 
+### Changed
+- Muting or blocking one account now finishes where you are (#332). The
+  button reads `Muting…`, a toast at the bottom of the page follows the
+  batch, and it settles to `Muted @handle` with Undo and a link to the
+  record — no more detour to the action page and back. Undo works the same
+  way. A failure keeps the toast up with Retry; a lost connection offers
+  Reconnect; after 60 s of silence it points you at the record instead of
+  guessing.
+- The action page finishes properly (#332): a `Done · 14 muted, 0 failed`
+  banner (or `Finished with problems`) with Undo all / Retry failed and a
+  `← Back to Watch accounts` link that returns to where the batch was
+  started. It polls every second while running instead of every three.
+- Actions are faster on the wire (#333): the runner remembers the DPoP nonce
+  a PDS hands back, so the steady state is one round trip per call instead
+  of two. It also logs how long the session load, the reconcile read, each
+  PDS call, and the whole batch took, so the next round of speed work is
+  measured rather than guessed.
+- Design-hook findings on the account page and the confirm sheet (#318):
+  signal bars animate with `transform` instead of `width`, the sheet uses
+  palette tokens with no hex fallbacks, three radii snapped to 8 px, and the
+  type sizes the site already ships (0.75 / 0.875 / 0.9375 / 1.125 /
+  1.875 rem) are now in DESIGN.md's ramp. The consent sentence's side rule
+  is kept on purpose and waived for that one file.
+
 ### Added
 - Mute and block from Charcoal (#315): tier-wide and per-account mute/block,
   with undo, from the Accounts page. The tier-wide confirm sheet lists every

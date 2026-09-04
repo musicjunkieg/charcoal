@@ -1,5 +1,13 @@
 [
   {
+    "hash": "17c640265d1edf1ab9a21d4d92a78f387a4bba1f",
+    "short_hash": "17c6402",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T12:03:51-07:00",
+    "message": "fix(318): move design literals onto the ramp, waive consent side-tab",
+    "files_changed": 8
+  },
+  {
     "hash": "e7f95c355094f619e564f188bb2ea50dbdb94770",
     "short_hash": "e7f95c3",
     "author": "Bryan Guffey",

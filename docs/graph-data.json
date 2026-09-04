@@ -7842,6 +7842,50 @@
       "created_at": "2026-09-04T11:56:00.376120-07:00",
       "updated_at": "2026-09-04T11:56:00.376120-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"e7f95c3\",\"confidence\":90}"
+    },
+    {
+      "id": 723,
+      "change_id": "a73209cb-ddf7-4971-be99-a2768c37fd76",
+      "node_type": "action",
+      "title": "Task 8 (#318): scaleX signal bars, radius snaps, ConfirmSheet tokens, banner border-left removal, headline snap, DESIGN.md type ramp + design.json meta, one side-tab waiver for ConfirmSheet .consent",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T12:04:21.274578-07:00",
+      "updated_at": "2026-09-04T12:04:21.274578-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"17c6402\",\"confidence\":90,\"files\":[\"web/src/routes/(protected)/accounts/[handle]/+page.svelte\",\"web/src/lib/components/ConfirmSheet.svelte\",\"web/src/routes/(protected)/actions/[id]/+page.svelte\",\"DESIGN.md\",\".impeccable/design.json\",\".impeccable/config.json\"]}"
+    },
+    {
+      "id": 724,
+      "change_id": "ee4addef-27f5-412a-b14e-1b42733f192f",
+      "node_type": "outcome",
+      "title": "Task 8 verified: impeccable detect zero findings on all 4 files (layout-transition + 2 side-tab fixed/waived), svelte-autofixer clean (accounts page, ConfirmSheet, actions/[id]), npm run check shows only the 5 known pre-existing errors, npm run build succeeds, 128 vitest pass. Discovered web/package.json blocks impeccable's DESIGN.md walk from web/ files (pre-existing tool boundary quirk, out of scope) — the interactive PostToolUse hook resolves DESIGN.md correctly via session cwd and did enforce the type-ramp findings live.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T12:04:32.509060-07:00",
+      "updated_at": "2026-09-04T12:04:32.509060-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"17c6402\",\"confidence\":90}"
+    },
+    {
+      "id": 725,
+      "change_id": "6fe1a8b0-767c-40d5-918d-1e29b2d491a3",
+      "node_type": "action",
+      "title": "Task 8 (#318): design literals onto DESIGN.md ramp, scaleX signal bars, ConfirmSheet tokens, single side-tab waiver",
+      "description": null,
+      "status": "superseded",
+      "created_at": "2026-09-04T12:06:07.346656-07:00",
+      "updated_at": "2026-09-04T12:06:15.669593-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"17c6402\",\"confidence\":90,\"files\":[\"DESIGN.md\",\".impeccable/design.json\",\".impeccable/config.json\",\"web/src/lib/components/ConfirmSheet.svelte\",\"web/src/routes/(protected)/accounts/[handle]/+page.svelte\",\"web/src/routes/(protected)/actions/[id]/+page.svelte\"]}"
+    },
+    {
+      "id": 726,
+      "change_id": "e4de9d37-b87f-45b2-b169-384cbf77abd3",
+      "node_type": "observation",
+      "title": "impeccable CLI is vacuous for web/ ramp rules: findDesignRoot stops at web/package.json before reaching root DESIGN.md; only the live hook (session-cwd load) enforces type/radius/color. Verified with explicit-DS run + negative control.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T12:08:06.407193-07:00",
+      "updated_at": "2026-09-04T12:08:06.407193-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -15918,6 +15962,61 @@
       "weight": 1.0,
       "rationale": "Review verdict for the nonce-cache implementation",
       "created_at": "2026-09-04T11:56:03.358968-07:00"
+    },
+    {
+      "id": 745,
+      "from_node_id": 719,
+      "to_node_id": 723,
+      "from_change_id": "83879445-b268-401e-8497-c50a23a05e9f",
+      "to_change_id": "a73209cb-ddf7-4971-be99-a2768c37fd76",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observation anticipated this exact fix; Task 8 implements it",
+      "created_at": "2026-09-04T12:04:26.765181-07:00"
+    },
+    {
+      "id": 746,
+      "from_node_id": 723,
+      "to_node_id": 724,
+      "from_change_id": "a73209cb-ddf7-4971-be99-a2768c37fd76",
+      "to_change_id": "ee4addef-27f5-412a-b14e-1b42733f192f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Action produced this outcome",
+      "created_at": "2026-09-04T12:04:36.064062-07:00"
+    },
+    {
+      "id": 747,
+      "from_node_id": 716,
+      "to_node_id": 723,
+      "from_change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "to_change_id": "a73209cb-ddf7-4971-be99-a2768c37fd76",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 is the #318 leg of the #332/#333/#318 decision",
+      "created_at": "2026-09-04T12:06:15.675863-07:00"
+    },
+    {
+      "id": 748,
+      "from_node_id": 725,
+      "to_node_id": 723,
+      "from_change_id": "6fe1a8b0-767c-40d5-918d-1e29b2d491a3",
+      "to_change_id": "a73209cb-ddf7-4971-be99-a2768c37fd76",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Duplicate controller node; 723 is canonical",
+      "created_at": "2026-09-04T12:06:15.681999-07:00"
+    },
+    {
+      "id": 749,
+      "from_node_id": 723,
+      "to_node_id": 726,
+      "from_change_id": "a73209cb-ddf7-4971-be99-a2768c37fd76",
+      "to_change_id": "e4de9d37-b87f-45b2-b169-384cbf77abd3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Discovered while gating Task 8; explains why hook and CLI disagreed",
+      "created_at": "2026-09-04T12:08:06.413400-07:00"
     }
   ],
   "documents": [
