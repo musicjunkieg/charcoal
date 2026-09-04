@@ -8,6 +8,7 @@
 	import { getStatus, logout, getIdentity } from '$lib/api.js';
 	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import type { Identity } from '$lib/types.js';
+	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
 	let checking = $state(true);
@@ -108,6 +109,7 @@
 		<main class="main">
 			{@render children()}
 		</main>
+		<Toast />
 	</div>
 {/if}
 
