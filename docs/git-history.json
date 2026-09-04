@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0124b4dc61be482abb51ed3ca0ad9793c7ddfbf9",
+    "short_hash": "0124b4d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T10:48:07-07:00",
+    "message": "docs(332): implementation plan for #332/#333/#318, spec fix for the missing --charcoal-100 token\n\nNine tasks: toast store, progress helpers, Toast.svelte, ActionButtons\nin-place settle, batch page banner, runner timing spans, DPoP nonce\ncache, #318 design fixes, CHANGELOG. Spec section 6 corrected: the\nConfirmSheet fallback was the only thing painting the sheet colour\nbecause --charcoal-100 does not exist; use --cream-50.",
+    "files_changed": 4
+  },
+  {
     "hash": "4342ef5691164efffb49447062df5b29ef1376b5",
     "short_hash": "4342ef5",
     "author": "Bryan Guffey",

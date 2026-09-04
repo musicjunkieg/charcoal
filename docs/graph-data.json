@@ -7743,6 +7743,39 @@
       "created_at": "2026-09-04T10:12:50.226071-07:00",
       "updated_at": "2026-09-04T10:12:53.417812-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"4342ef5\",\"confidence\":90}"
+    },
+    {
+      "id": 714,
+      "change_id": "5f0c9957-6fc1-42de-aa44-dc30b8f18f4e",
+      "node_type": "action",
+      "title": "Wrote #332/#333/#318 implementation plan docs/superpowers/plans/2026-09-04-332-single-action-toast.md (9 tasks); fixed spec §6 — --charcoal-100 token does not exist, use --cream-50",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T10:48:16.684577-07:00",
+      "updated_at": "2026-09-04T10:48:16.684577-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"0124b4d\",\"confidence\":90}"
+    },
+    {
+      "id": 715,
+      "change_id": "97bd77d0-90fa-4e26-9088-1a43df3bf6f6",
+      "node_type": "observation",
+      "title": "PostHog Rust SDK deferred to #334: privacy (every event carries a DID/handle, #259 privacy page is the go-live gate), thin posthog-rs crate, and #333 tracing spans are the seam a later tracing-layer forwarder can hook. Bryan agreed 2026-09-04.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T10:59:30.597826-07:00",
+      "updated_at": "2026-09-04T10:59:30.597826-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
+    },
+    {
+      "id": 716,
+      "change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "node_type": "action",
+      "title": "Executing #332/#333/#318 plan via subagent-driven development (9 tasks, fresh implementer + reviewer per task); PostHog filed as #334 first",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T11:00:12.110454-07:00",
+      "updated_at": "2026-09-04T11:00:12.110454-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"0124b4d\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -15698,6 +15731,61 @@
       "weight": 1.0,
       "rationale": "spec §6",
       "created_at": "2026-09-04T10:12:53.412199-07:00"
+    },
+    {
+      "id": 734,
+      "from_node_id": 713,
+      "to_node_id": 714,
+      "from_change_id": "424e53ec-09e7-4ec6-8902-3c50821721a1",
+      "to_change_id": "5f0c9957-6fc1-42de-aa44-dc30b8f18f4e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan follows the committed spec",
+      "created_at": "2026-09-04T10:48:19.940820-07:00"
+    },
+    {
+      "id": 735,
+      "from_node_id": 711,
+      "to_node_id": 714,
+      "from_change_id": "bee6ccff-96e5-464a-89a5-42a7eb939a11",
+      "to_change_id": "5f0c9957-6fc1-42de-aa44-dc30b8f18f4e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Tasks 6-7 implement the #333 instrument+nonce decision",
+      "created_at": "2026-09-04T10:48:19.947852-07:00"
+    },
+    {
+      "id": 736,
+      "from_node_id": 712,
+      "to_node_id": 714,
+      "from_change_id": "e9b8a960-d399-4934-9e59-4de175156d56",
+      "to_change_id": "5f0c9957-6fc1-42de-aa44-dc30b8f18f4e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 implements the #318 decision",
+      "created_at": "2026-09-04T10:48:19.954007-07:00"
+    },
+    {
+      "id": 737,
+      "from_node_id": 711,
+      "to_node_id": 715,
+      "from_change_id": "bee6ccff-96e5-464a-89a5-42a7eb939a11",
+      "to_change_id": "97bd77d0-90fa-4e26-9088-1a43df3bf6f6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Timing spans are the forwarder seam; observability follow-up filed as #334",
+      "created_at": "2026-09-04T10:59:33.446533-07:00"
+    },
+    {
+      "id": 738,
+      "from_node_id": 714,
+      "to_node_id": 716,
+      "from_change_id": "5f0c9957-6fc1-42de-aa44-dc30b8f18f4e",
+      "to_change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan → execution",
+      "created_at": "2026-09-04T11:00:14.646275-07:00"
     }
   ],
   "documents": [
