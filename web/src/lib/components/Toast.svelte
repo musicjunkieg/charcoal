@@ -1,8 +1,10 @@
 <script lang="ts">
 	// Renders the toast store (#332, spec §3.2). Mounted once in the
 	// protected layout; every page raises through `$lib/toast`. Newest is
-	// last in the store and sits nearest the viewport edge (column-reverse).
+	// last in the store and sits nearest the viewport edge (flex-direction:
+	// column, so new toasts stack downward below the earlier ones).
 	import { fly } from 'svelte/transition';
+	import { expoOut } from 'svelte/easing';
 	import { toasts, dismiss } from '$lib/toast';
 	import '$lib/website/styles/tokens.css';
 
@@ -10,16 +12,10 @@
 	// the markup — one code path, same DOM either way.
 	const reduced =
 		typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-	const flyOpts = { y: reduced ? 0 : 16, duration: reduced ? 0 : 320, easing: easeOutExpo };
-
-	function easeOutExpo(t: number): number {
-		// cubic-bezier(0.16, 1, 0.3, 1) ≈ 1 - 2^(-10t); `--ease-out-expo` in
-		// tokens.css is the CSS twin for hover/transform transitions.
-		return t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
-	}
+	const flyOpts = { y: reduced ? 0 : 16, duration: reduced ? 0 : 320, easing: expoOut };
 </script>
 
-<div class="stack" aria-live="polite">
+<div class="stack">
 	{#each $toasts as t (t.id)}
 		<div
 			class="toast"
@@ -100,6 +96,12 @@
 	.action:hover,
 	.link:hover {
 		text-decoration: underline;
+	}
+	.action:focus-visible,
+	.close:focus-visible,
+	.link:focus-visible {
+		outline: 2px solid var(--copper);
+		outline-offset: 2px;
 	}
 	.close {
 		font: inherit;

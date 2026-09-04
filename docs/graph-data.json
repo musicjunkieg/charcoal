@@ -7886,6 +7886,28 @@
       "created_at": "2026-09-04T12:08:06.407193-07:00",
       "updated_at": "2026-09-04T12:08:06.407193-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":95}"
+    },
+    {
+      "id": 727,
+      "change_id": "147d4ddf-49f5-4125-b97e-39b0cc7001a1",
+      "node_type": "outcome",
+      "title": "Final whole-branch review (opus, 24f7b0d): 0 Critical, 1 Important (undo banner counts pending rows as undone — contradicts toast on a failed-before-write undo batch), 11 new Minors; privacy + NonceCache concurrency verified clean; verdict WITH FIXES",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T12:55:59.806368-07:00",
+      "updated_at": "2026-09-04T12:55:59.806368-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"24f7b0d\",\"confidence\":90}"
+    },
+    {
+      "id": 728,
+      "change_id": "a8e1e6f1-9d6b-42a0-8396-951b48c70786",
+      "node_type": "decision",
+      "title": "Fix wave scope: I1 + T3a/T7 must-fix + T1a/T3b/M5/M6/M11 cheap a11y-and-hygiene; M1 banner stripe stays REMOVED (node 719 decision, hook rule); M2/M3/M4/M7-M10 + T4a/T8 → follow-ups/PR notes",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T12:55:59.817536-07:00",
+      "updated_at": "2026-09-04T12:55:59.817536-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -16017,6 +16039,39 @@
       "weight": 1.0,
       "rationale": "Discovered while gating Task 8; explains why hook and CLI disagreed",
       "created_at": "2026-09-04T12:08:06.413400-07:00"
+    },
+    {
+      "id": 750,
+      "from_node_id": 716,
+      "to_node_id": 727,
+      "from_change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "to_change_id": "147d4ddf-49f5-4125-b97e-39b0cc7001a1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review of the whole #332/#333/#318 branch",
+      "created_at": "2026-09-04T12:56:03.696820-07:00"
+    },
+    {
+      "id": 751,
+      "from_node_id": 727,
+      "to_node_id": 728,
+      "from_change_id": "147d4ddf-49f5-4125-b97e-39b0cc7001a1",
+      "to_change_id": "a8e1e6f1-9d6b-42a0-8396-951b48c70786",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review findings triaged into a bounded fix wave",
+      "created_at": "2026-09-04T12:56:03.703747-07:00"
+    },
+    {
+      "id": 752,
+      "from_node_id": 719,
+      "to_node_id": 728,
+      "from_change_id": "83879445-b268-401e-8497-c50a23a05e9f",
+      "to_change_id": "a8e1e6f1-9d6b-42a0-8396-951b48c70786",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "M1 flagged the stripe removal as a deviation; 719 already decided it",
+      "created_at": "2026-09-04T12:56:03.713601-07:00"
     }
   ],
   "documents": [

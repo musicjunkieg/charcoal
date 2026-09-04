@@ -1,5 +1,13 @@
 [
   {
+    "hash": "24f7b0d575c5ce0094a0983606156cc7aceb90d4",
+    "short_hash": "24f7b0d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T12:08:37-07:00",
+    "message": "docs: CHANGELOG entries for #332, #333, #318",
+    "files_changed": 3
+  },
+  {
     "hash": "17c640265d1edf1ab9a21d4d92a78f387a4bba1f",
     "short_hash": "17c6402",
     "author": "Bryan Guffey",

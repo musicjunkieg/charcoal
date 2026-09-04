@@ -93,4 +93,16 @@ describe('toast store', () => {
 		expect(get(toasts)).toHaveLength(MAX_TOASTS);
 		expect(get(toasts).map((t) => t.id)).toEqual(ids.slice(1));
 	});
+
+	it('a toast evicted for capacity does not leave a stale ttl timer running', () => {
+		// The evicted toast carried a ttl; `raise` must clear its timer on
+		// eviction (not just on `dismiss`), or the timer fires later and
+		// touches a store that no longer has that id.
+		raise({ tone: 'ok', text: 'evicted', actions: [], ttlMs: 1000 });
+		const survivors = [1, 2, 3].map((i) => raise({ tone: 'ok', text: `t${i}`, actions: [] }));
+		expect(get(toasts).map((t) => t.id)).toEqual(survivors);
+		vi.advanceTimersByTime(1000);
+		expect(get(toasts)).toHaveLength(MAX_TOASTS);
+		expect(get(toasts).map((t) => t.id)).toEqual(survivors);
+	});
 });

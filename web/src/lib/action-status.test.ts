@@ -175,6 +175,20 @@ describe('bannerSummary', () => {
 		const rows = [row({ kind: 'mute', status: 'undone' }), row({ kind: 'block', status: 'failed' })];
 		expect(bannerSummary(b, rows)).toEqual({ title: 'Finished with problems', detail: '1 unmuted, 0 unblocked, 1 failed', tone: 'error' });
 	});
+
+	it('undo batch that never wrote is a problem with zero done, not zero failed', () => {
+		// A batch that dies before the write step leaves every row `pending`
+		// and the batch `failed` — `pending` must not count as undone, or the
+		// banner would say "Undone" while the toast for the same batch says
+		// "Couldn't unmute" (I1).
+		const b = summary({ kind: 'undo', status: 'failed', counts: { pending: 2 } });
+		const rows = [row({ kind: 'mute', status: 'pending' }), row({ kind: 'block', status: 'pending' })];
+		expect(bannerSummary(b, rows)).toEqual({
+			title: 'Finished with problems',
+			detail: '0 unmuted, 0 unblocked, 0 failed',
+			tone: 'error'
+		});
+	});
 });
 
 describe('returnPath', () => {

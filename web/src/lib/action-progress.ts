@@ -67,6 +67,10 @@ export function toastCopy(kind: ToastKind, handle: string, phase: ToastPhase): s
 	}
 }
 
+// Also imported by web/src/routes/(protected)/actions/[id]/+page.svelte,
+// which polls the same batch endpoint at this cadence — the single-action
+// toast poll and the batch page poll are deliberately kept in lockstep, not
+// coincidentally equal. Retune both together, or split them on purpose.
 export const POLL_INTERVAL_MS = 1000;
 export const POLL_TIMEOUT_MS = 60000;
 

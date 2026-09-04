@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use atproto_identity::key::{generate_key, KeyType};
+use base64::Engine as _;
 use charcoal::web::actions::pds::{PdsClient, PdsError, Write, MAX_LIST_PAGES};
 use charcoal::web::actions::scope::APPVIEW_DID;
 use wiremock::matchers::{body_partial_json, header, header_exists, method, path, query_param};
@@ -17,8 +18,6 @@ impl Match for NoHeader {
         !request.headers.contains_key(self.0)
     }
 }
-
-use base64::Engine as _;
 
 /// Matches requests whose DPoP proof carries exactly this `nonce` claim
 /// (`None` = no nonce claim at all). Decodes the JWT payload segment; the
