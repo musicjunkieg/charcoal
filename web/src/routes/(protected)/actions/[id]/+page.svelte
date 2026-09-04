@@ -203,13 +203,13 @@
 	.page { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
 	.back-link { font-size: 0.875rem; color: var(--charcoal-500); text-decoration: none; }
 	.header { margin: 1rem 0 1.5rem; }
-	.headline { font-family: 'Outfit', system-ui, sans-serif; font-size: 1.375rem; margin: 0; }
+	.headline { font-family: 'Outfit', system-ui, sans-serif; font-size: 1.25rem; margin: 0; }
 	.meta { font-size: 0.8125rem; color: var(--charcoal-500); margin: 0.25rem 0 0.75rem; }
 	.controls { display: flex; gap: 0.5rem; }
 	.controls button { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
 	.controls button:disabled, .link:disabled { opacity: 0.5; cursor: not-allowed; }
-	.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 1.25rem; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--status-ok-rgb) / 0.3); border-left: 3px solid var(--status-ok); background: rgb(var(--status-ok-rgb) / 0.06); font-size: 0.875rem; }
-	.banner[data-tone='error'] { border-color: rgb(var(--status-error-rgb) / 0.3); border-left-color: var(--status-error); background: rgb(var(--status-error-rgb) / 0.06); }
+	.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 1.25rem; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--status-ok-rgb) / 0.3); background: rgb(var(--status-ok-rgb) / 0.06); font-size: 0.875rem; }
+	.banner[data-tone='error'] { border-color: rgb(var(--status-error-rgb) / 0.3); background: rgb(var(--status-error-rgb) / 0.06); }
 	.banner-text strong { font-weight: 500; }
 	.banner-detail { color: var(--charcoal-400); }
 	.banner-actions { display: flex; align-items: center; gap: 0.5rem; }

@@ -156,14 +156,14 @@
 					<div class="signal-row">
 						<span class="signal-label">Quote ratio</span>
 						<div class="signal-bar-wrap">
-							<div class="signal-bar" style="width: {scoreBar(b.quote_ratio)}%"></div>
+							<div class="signal-bar" style="transform: scaleX({scoreBar(b.quote_ratio) / 100})"></div>
 						</div>
 						<span class="signal-value">{formatPct(b.quote_ratio ?? null)}</span>
 					</div>
 					<div class="signal-row">
 						<span class="signal-label">Reply ratio</span>
 						<div class="signal-bar-wrap">
-							<div class="signal-bar" style="width: {scoreBar(b.reply_ratio)}%"></div>
+							<div class="signal-bar" style="transform: scaleX({scoreBar(b.reply_ratio) / 100})"></div>
 						</div>
 						<span class="signal-value">{formatPct(b.reply_ratio ?? null)}</span>
 					</div>
@@ -259,7 +259,7 @@
 		margin-bottom: 1.5rem;
 		background: rgb(var(--amber-500-rgb) / 0.08);
 		border: 1px solid rgb(var(--amber-500-rgb) / 0.2);
-		border-radius: 10px;
+		border-radius: 8px;
 		color: var(--tier-watch);
 		font-size: 0.875rem;
 		line-height: 1.5;
@@ -396,9 +396,12 @@
 
 	.signal-bar {
 		height: 100%;
+		width: 100%;
 		background: linear-gradient(90deg, var(--copper), var(--amber-500));
 		border-radius: 2px;
-		transition: width 0.5s ease;
+		/* Scale, not width: same motion, no layout on each frame (#318). */
+		transform-origin: left;
+		transition: transform 0.5s ease;
 	}
 
 	.signal-value {
@@ -420,7 +423,7 @@
 		padding: 1rem;
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.08);
-		border-radius: 10px;
+		border-radius: 8px;
 	}
 
 	.post-header {
@@ -435,7 +438,7 @@
 		font-weight: 500;
 		color: var(--status-error);
 		padding: 0.25rem 0.625rem;
-		border-radius: 6px;
+		border-radius: 8px;
 		border: 1px solid rgb(var(--status-error-rgb) / 0.2);
 	}
 

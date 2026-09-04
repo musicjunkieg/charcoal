@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e7f95c355094f619e564f188bb2ea50dbdb94770",
+    "short_hash": "e7f95c3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T11:51:55-07:00",
+    "message": "feat(333): cache the DPoP nonce per PdsClient so steady state is one round trip",
+    "files_changed": 6
+  },
+  {
     "hash": "b182a2903efae307947b237aeac568724236a3b2",
     "short_hash": "b182a29",
     "author": "Bryan Guffey",

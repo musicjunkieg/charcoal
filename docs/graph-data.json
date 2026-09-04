@@ -7820,6 +7820,28 @@
       "created_at": "2026-09-04T11:41:43.115966-07:00",
       "updated_at": "2026-09-04T11:41:43.115966-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"b182a29\",\"confidence\":90}"
+    },
+    {
+      "id": 721,
+      "change_id": "ca05ed7c-465f-4cf2-a053-b7516e80b3b2",
+      "node_type": "action",
+      "title": "Task 7: DPoP nonce cache landed (NonceCache Mutex, send_dpop pre-arms nonce, retry-once preserved)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T11:55:56.870768-07:00",
+      "updated_at": "2026-09-04T11:55:56.870768-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"e7f95c3\",\"confidence\":90,\"files\":[\"src/web/actions/dpop_http.rs\",\"src/web/actions/pds.rs\",\"src/web/actions/session.rs\",\"tests/unit_actions_pds.rs\"]}"
+    },
+    {
+      "id": 722,
+      "change_id": "6f490661-95f2-40a2-aed9-03bf0d4edce4",
+      "node_type": "outcome",
+      "title": "Task 7 review clean: guard never across .await, poison recovered, 3 falsifiable wiremock tests (pds 12/12, runner 17/17)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T11:56:00.376120-07:00",
+      "updated_at": "2026-09-04T11:56:00.376120-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"e7f95c3\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -15874,6 +15896,28 @@
       "weight": 1.0,
       "rationale": "Execution progress: tasks 4-6 reviewed clean",
       "created_at": "2026-09-04T11:41:45.857708-07:00"
+    },
+    {
+      "id": 743,
+      "from_node_id": 716,
+      "to_node_id": 721,
+      "from_change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "to_change_id": "ca05ed7c-465f-4cf2-a053-b7516e80b3b2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of the #333 instrumentation decision: nonce cache halves PDS round-trips per call",
+      "created_at": "2026-09-04T11:56:00.366120-07:00"
+    },
+    {
+      "id": 744,
+      "from_node_id": 721,
+      "to_node_id": 722,
+      "from_change_id": "ca05ed7c-465f-4cf2-a053-b7516e80b3b2",
+      "to_change_id": "6f490661-95f2-40a2-aed9-03bf0d4edce4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review verdict for the nonce-cache implementation",
+      "created_at": "2026-09-04T11:56:03.358968-07:00"
     }
   ],
   "documents": [
