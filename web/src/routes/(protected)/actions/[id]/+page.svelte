@@ -14,7 +14,16 @@
 		AuthError,
 		AccessRevokedError
 	} from '$lib/api.js';
-	import { batchHeadline, driftNote, isRunning, isParked, canRetry, canUndo } from '$lib/action-status';
+	import {
+		batchHeadline,
+		driftNote,
+		isRunning,
+		isParked,
+		canRetry,
+		canUndo,
+		bannerSummary,
+		returnPath
+	} from '$lib/action-status';
 	import { tierClass } from '$lib/tier-class';
 	import type { ActionBatchDetail, ActionRowView } from '$lib/types.js';
 	import '$lib/website/styles/tokens.css';
@@ -30,6 +39,13 @@
 	let error = $state('');
 	let timer: ReturnType<typeof setInterval> | null = null;
 
+	/** 1 s: one small JSON read; the old 3 s made a 1 s action read as 3 s+ (#332). */
+	const POLL_MS = 1000;
+
+	/** The banner replaces the header controls once the runner is done and
+	 *  nobody is waiting on a reconnect (spec §4). */
+	let finished = $derived(detail ? !isRunning(detail.batch) && !isParked(detail.batch) : false);
+
 	const STATUS_LABEL: Record<ActionRowView['status'], string> = {
 		pending: 'Pending',
 		applied: 'Done',
@@ -39,9 +55,9 @@
 	};
 
 	async function load() {
-		// Reset both first: this runs every 3 s while a batch is in flight, and
-		// a single dropped poll must not latch the page into an error state
-		// while the runner is still applying blocks behind it.
+		// Reset both first: this runs every second while a batch is in
+		// flight, and a single dropped poll must not latch the page into an
+		// error state while the runner is still applying blocks behind it.
 		notFound = false;
 		error = '';
 		try {
@@ -57,7 +73,7 @@
 			loading = false;
 		}
 		const running = detail ? isRunning(detail.batch) : false;
-		if (running && !timer) timer = setInterval(load, 3000);
+		if (running && !timer) timer = setInterval(load, POLL_MS);
 		if (!running && timer) {
 			clearInterval(timer);
 			timer = null;
@@ -111,20 +127,34 @@
 		<div class="header">
 			<h1 class="headline">{batchHeadline(b)}</h1>
 			<p class="meta">{b.source} · {new Date(b.created_at).toLocaleString()}</p>
-			{#if !asUser}
+			{#if !asUser && !finished}
 				<div class="controls">
-					{#if canUndo(b)}
-						<button onclick={() => run(() => undoBatch(b.id), 'undo')} disabled={busy}>Undo all</button>
-					{/if}
-					{#if canRetry(b)}
-						<button onclick={() => run(() => retryBatch(b.id), b.kind)} disabled={busy}>Retry failed</button>
-					{/if}
 					{#if isParked(b)}
 						<button onclick={() => startConsent('undo')} disabled={busy}>Reconnect</button>
 					{/if}
 				</div>
 			{/if}
 		</div>
+
+		{#if finished}
+			{@const s = bannerSummary(b, detail.actions)}
+			{@const back = returnPath(b.source, asUserSuffix)}
+			<div class="banner" data-tone={s.tone} role="status">
+				<div class="banner-text">
+					<strong>{s.title}</strong>
+					<span class="banner-detail">· {s.detail}</span>
+				</div>
+				<div class="banner-actions">
+					{#if !asUser && canRetry(b)}
+						<button onclick={() => run(() => retryBatch(b.id), b.kind)} disabled={busy}>Retry failed</button>
+					{/if}
+					{#if !asUser && canUndo(b)}
+						<button onclick={() => run(() => undoBatch(b.id), 'undo')} disabled={busy}>Undo all</button>
+					{/if}
+					<a class="banner-back" href={back.href}>{back.label}</a>
+				</div>
+			</div>
+		{/if}
 
 		<table class="rows">
 			<thead>
@@ -179,6 +209,15 @@
 	.controls { display: flex; gap: 0.5rem; }
 	.controls button { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
 	.controls button:disabled, .link:disabled { opacity: 0.5; cursor: not-allowed; }
+	.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 1.25rem; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--status-ok-rgb) / 0.3); border-left: 3px solid var(--status-ok); background: rgb(var(--status-ok-rgb) / 0.06); font-size: 0.875rem; }
+	.banner[data-tone='error'] { border-color: rgb(var(--status-error-rgb) / 0.3); border-left-color: var(--status-error); background: rgb(var(--status-error-rgb) / 0.06); }
+	.banner-text strong { font-weight: 500; }
+	.banner-detail { color: var(--charcoal-400); }
+	.banner-actions { display: flex; align-items: center; gap: 0.5rem; }
+	.banner-actions button { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
+	.banner-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+	.banner-back { font-size: 0.8125rem; color: var(--copper); text-decoration: none; }
+	.banner-back:hover { text-decoration: underline; }
 	.link { background: none; border: 0; padding: 0; color: var(--charcoal-400); text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.8125rem; }
 	.rows { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 	.rows th { text-align: left; font-weight: 500; color: var(--charcoal-500); padding: 0.5rem 0.75rem; border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); }
