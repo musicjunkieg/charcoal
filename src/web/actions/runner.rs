@@ -5,7 +5,7 @@
 //! (after a deploy, a 401, a retry click) never duplicates anything.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use atproto_oauth::workflow::OAuthClient;
 use tokio::sync::mpsc;
@@ -138,15 +138,24 @@ impl ActionRunner {
         if !matches!(batch.status.as_str(), "queued" | "running") {
             return Ok(());
         }
+        let batch_started = Instant::now();
         self.db
             .set_action_batch_status(batch_id, "running", None)
             .await?;
 
-        let session = match self
+        // Includes any token refresh the session store does on the way.
+        let load_started = Instant::now();
+        let loaded = self
             .sessions
             .load_for_write(&*self.db, &self.http, &self.oauth_client, &batch.user_did)
-            .await
-        {
+            .await;
+        info!(
+            batch_id,
+            span = "load_session",
+            elapsed_ms = load_started.elapsed().as_millis() as u64,
+            "timing"
+        );
+        let session = match loaded {
             Ok(s) => s,
             Err(SessionError::NotConnected) => {
                 self.db
@@ -182,10 +191,10 @@ impl ActionRunner {
                 .await?;
             return Ok(());
         }
-        self.finalize(batch_id).await
+        self.finalize(batch_id, batch_started).await
     }
 
-    async fn finalize(&self, batch_id: i64) -> anyhow::Result<()> {
+    async fn finalize(&self, batch_id: i64, started: Instant) -> anyhow::Result<()> {
         let rows = self.db.list_actions_for_batch(batch_id).await?;
         let failed = rows.iter().filter(|a| a.status == "failed").count();
         let ok = rows
@@ -204,23 +213,44 @@ impl ActionRunner {
         } else {
             "partial"
         };
-        info!(batch_id, status, ok, failed, "action batch finished");
+        info!(
+            batch_id,
+            status,
+            ok,
+            failed,
+            span = "batch",
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "action batch finished"
+        );
         self.db
             .set_action_batch_status(batch_id, status, None)
             .await
     }
 
     /// One PDS call under the retry policy. `Err(Halt)` stops the batch;
-    /// `Ok(Err(_))` fails this action only.
-    async fn call<T, F, Fut>(&self, mut op: F) -> Result<Result<T, PdsError>, Halt>
+    /// `Ok(Err(_))` fails this action only. `op` is the nsid-ish label for
+    /// the timing line (`"muteActor"`, `"applyWrites"`, …) — #333 needs to
+    /// see where the seconds go, per attempt.
+    async fn call<T, F, Fut>(&self, op: &'static str, mut f: F) -> Result<Result<T, PdsError>, Halt>
     where
         F: FnMut() -> Fut,
         Fut: std::future::Future<Output = Result<T, PdsError>>,
     {
         let mut transient = 0u32;
         let mut limited = 0u32;
+        let mut attempt = 0u32;
         loop {
-            match op().await {
+            attempt += 1;
+            let started = Instant::now();
+            let result = f().await;
+            info!(
+                span = "pds_call",
+                op,
+                attempt,
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "timing"
+            );
+            match result {
                 Ok(v) => return Ok(Ok(v)),
                 Err(PdsError::Auth) => return Err(Halt::NotConnected),
                 Err(PdsError::RateLimited { reset_at }) if limited < RATE_LIMIT_MAX_WAITS => {
@@ -256,7 +286,15 @@ impl ActionRunner {
         // fails this batch and leaves its rows pending for Retry, instead of
         // reading a truncated set as "not muted" and re-muting someone the
         // user already muted.
-        let existing = match self.call(|| pds.get_mutes()).await {
+        let started = Instant::now();
+        let existing = self.call("getMutes", || pds.get_mutes()).await;
+        info!(
+            span = "reconcile",
+            op = "getMutes",
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "timing"
+        );
+        let existing = match existing {
             Ok(Ok(set)) => set,
             Ok(Err(e)) => anyhow::bail!("getMutes: {e}"),
             Err(h) => return Ok(Some(h)),
@@ -268,7 +306,10 @@ impl ActionRunner {
                     .await?;
                 continue;
             }
-            match self.call(|| pds.mute_actor(&a.target_did)).await {
+            match self
+                .call("muteActor", || pds.mute_actor(&a.target_did))
+                .await
+            {
                 Ok(Ok(())) => self.db.update_action(a.id, "applied", None, None).await?,
                 Ok(Err(e)) => {
                     self.db
@@ -292,7 +333,15 @@ impl ActionRunner {
         // fails this batch and leaves its rows pending for Retry, instead of
         // reading a truncated set as "not blocked" and creating a second
         // block record for someone the user already blocked.
-        let existing = match self.call(|| pds.get_blocks()).await {
+        let started = Instant::now();
+        let existing = self.call("getBlocks", || pds.get_blocks()).await;
+        info!(
+            span = "reconcile",
+            op = "getBlocks",
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "timing"
+        );
+        let existing = match existing {
             Ok(Ok(map)) => map,
             Ok(Err(e)) => anyhow::bail!("getBlocks: {e}"),
             Err(h) => return Ok(Some(h)),
@@ -328,7 +377,15 @@ impl ActionRunner {
         // truncated set as "already gone" and settling an undo that never
         // removed anything.
         let blocks = if pending.iter().any(|a| a.kind == "block") {
-            match self.call(|| pds.get_blocks()).await {
+            let started = Instant::now();
+            let got = self.call("getBlocks", || pds.get_blocks()).await;
+            info!(
+                span = "reconcile",
+                op = "getBlocks",
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "timing"
+            );
+            match got {
                 Ok(Ok(map)) => map,
                 Ok(Err(e)) => anyhow::bail!("getBlocks: {e}"),
                 Err(h) => return Ok(Some(h)),
@@ -337,7 +394,15 @@ impl ActionRunner {
             Default::default()
         };
         let mutes = if pending.iter().any(|a| a.kind == "mute") {
-            match self.call(|| pds.get_mutes()).await {
+            let started = Instant::now();
+            let got = self.call("getMutes", || pds.get_mutes()).await;
+            info!(
+                span = "reconcile",
+                op = "getMutes",
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "timing"
+            );
+            match got {
                 Ok(Ok(set)) => set,
                 Ok(Err(e)) => anyhow::bail!("getMutes: {e}"),
                 Err(h) => return Ok(Some(h)),
@@ -375,7 +440,10 @@ impl ActionRunner {
                             .await?;
                         continue;
                     }
-                    match self.call(|| pds.unmute_actor(&a.target_did)).await {
+                    match self
+                        .call("unmuteActor", || pds.unmute_actor(&a.target_did))
+                        .await
+                    {
                         Ok(Ok(())) => self.mark_undone(a.id, "applied", orig.id).await?,
                         Ok(Err(e)) => {
                             self.db
@@ -447,7 +515,7 @@ impl ActionRunner {
     ) -> anyhow::Result<Option<Halt>> {
         for chunk in planned.chunks(APPLY_WRITES_MAX) {
             let writes: Vec<Write> = chunk.iter().map(|p| p.write.clone()).collect();
-            match self.call(|| pds.apply_writes(&writes)).await {
+            match self.call("applyWrites", || pds.apply_writes(&writes)).await {
                 Ok(Ok(uris)) => {
                     for (p, uri) in chunk.iter().zip(uris) {
                         self.record_success(p, uri.as_deref()).await?;
@@ -456,7 +524,7 @@ impl ActionRunner {
                 Ok(Err(PdsError::Client { .. })) if chunk.len() > 1 => {
                     for p in chunk {
                         let one = [p.write.clone()];
-                        match self.call(|| pds.apply_writes(&one)).await {
+                        match self.call("applyWrites", || pds.apply_writes(&one)).await {
                             Ok(Ok(uris)) => {
                                 self.record_success(p, uris.first().cloned().flatten().as_deref())
                                     .await?
