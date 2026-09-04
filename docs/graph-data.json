@@ -7798,6 +7798,17 @@
       "created_at": "2026-09-04T11:11:38.705353-07:00",
       "updated_at": "2026-09-04T11:11:38.705353-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"a76f11f\",\"confidence\":95}"
+    },
+    {
+      "id": 719,
+      "change_id": "83879445-b268-401e-8497-c50a23a05e9f",
+      "node_type": "observation",
+      "title": "Batch banner border-left triggers impeccable side-tab; headline 1.375rem off-ramp — resolve in Task 8 by removing stripe + snapping to 1.25rem, not a second waiver",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T11:26:55.048701-07:00",
+      "updated_at": "2026-09-04T11:26:55.048701-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -15830,6 +15841,17 @@
       "weight": 1.0,
       "rationale": "Implementation produced this verified outcome",
       "created_at": "2026-09-04T11:11:40.266796-07:00"
+    },
+    {
+      "id": 741,
+      "from_node_id": 716,
+      "to_node_id": 719,
+      "from_change_id": "ef6253ab-1a5c-4f12-afd9-0ba745d5de47",
+      "to_change_id": "83879445-b268-401e-8497-c50a23a05e9f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observed during Task 5 stop-hook review; changes Task 8 scope",
+      "created_at": "2026-09-04T11:27:01.026843-07:00"
     }
   ],
   "documents": [

@@ -24,6 +24,7 @@
 		bannerSummary,
 		returnPath
 	} from '$lib/action-status';
+	import { POLL_INTERVAL_MS } from '$lib/action-progress';
 	import { tierClass } from '$lib/tier-class';
 	import type { ActionBatchDetail, ActionRowView } from '$lib/types.js';
 	import '$lib/website/styles/tokens.css';
@@ -38,9 +39,6 @@
 	let busy = $state(false);
 	let error = $state('');
 	let timer: ReturnType<typeof setInterval> | null = null;
-
-	/** 1 s: one small JSON read; the old 3 s made a 1 s action read as 3 s+ (#332). */
-	const POLL_MS = 1000;
 
 	/** The banner replaces the header controls once the runner is done and
 	 *  nobody is waiting on a reconnect (spec §4). */
@@ -73,7 +71,8 @@
 			loading = false;
 		}
 		const running = detail ? isRunning(detail.batch) : false;
-		if (running && !timer) timer = setInterval(load, POLL_MS);
+		// 1 s: one small JSON read; the old 3 s made a 1 s action read as 3 s+ (#332).
+		if (running && !timer) timer = setInterval(load, POLL_INTERVAL_MS);
 		if (!running && timer) {
 			clearInterval(timer);
 			timer = null;
