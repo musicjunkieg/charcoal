@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { settle, toastCopy, pollUntilSettled, POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from './action-progress.js';
 import type { ActionBatchDetail, ActionBatchSummary, ActionRowView } from './types.js';
 
@@ -155,8 +155,46 @@ describe('pollUntilSettled', () => {
 		};
 		const out = await pollUntilSettled(fetch, { sleep: c.sleep, now: c.now, intervalMs: 1000, timeoutMs: 5000 });
 		expect(out).toBe('timeout');
-		// t=0,1,2,3,4,5 → six fetches; the 6th sees now >= timeout and stops.
-		expect(calls).toBe(6);
+		// t=0,1,2,3,4 → five fetches. At t=5 the deadline has elapsed, so no
+		// sixth fetch starts: the deadline is checked before each fetch, not
+		// only after.
+		expect(calls).toBe(5);
+		expect(c.sleeps).toEqual([1000, 1000, 1000, 1000, 1000]);
+	});
+
+	it('a fetch that never settles still times out, and no further fetch starts', async () => {
+		// Real timers here (faked): the deadline must be enforced WHILE a
+		// fetch is pending, not only between fetches — otherwise a hung
+		// request pins the working toast forever.
+		vi.useFakeTimers();
+		try {
+			let calls = 0;
+			const fetch = () => {
+				calls++;
+				return new Promise<never>(() => {});
+			};
+			const pending = pollUntilSettled(fetch);
+			await vi.advanceTimersByTimeAsync(POLL_TIMEOUT_MS);
+			await expect(pending).resolves.toBe('timeout');
+			expect(calls).toBe(1);
+			// Nothing left armed: the deadline timer is the only one and it fired.
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('the deadline timer is cleared when the fetch wins the race', async () => {
+		vi.useFakeTimers();
+		try {
+			const fetch = async () => detail({ status: 'done' }, [row({ status: 'applied' })]);
+			const out = await pollUntilSettled(fetch);
+			expect(out).toMatchObject({ kind: 'applied' });
+			// A leaked 60 s deadline timer per poll would show up here.
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('a failed fetch is a blip: keep polling', async () => {

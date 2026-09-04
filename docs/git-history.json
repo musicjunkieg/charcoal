@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f54ec020fe724a5021309a59756473f3ac32f205",
+    "short_hash": "f54ec02",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T13:07:58-07:00",
+    "message": "test(332): make eviction-timer test able to fail\n\nAssert vi.getTimerCount() is 0 after the ttl toast is evicted. The\nprevious assertions on store contents held whether or not the timer was\ncleared (ids are never reused; dismiss of an unknown id is a no-op).\nNegative control: commenting out clearTimer(dropped.id) in raise() now\nfails this test with \"expected 1 to be +0\".",
+    "files_changed": 3
+  },
+  {
     "hash": "d127dbf445be4381ecb749eb0532dfc9ec98f2e9",
     "short_hash": "d127dbf",
     "author": "Bryan Guffey",

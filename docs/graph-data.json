@@ -7919,6 +7919,28 @@
       "created_at": "2026-09-04T13:05:50.957353-07:00",
       "updated_at": "2026-09-04T13:05:50.957353-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"d127dbf\",\"confidence\":90,\"files\":[\"web/src/lib/action-status.ts\",\"web/src/lib/action-status.test.ts\",\"web/src/lib/components/Toast.svelte\",\"web/src/lib/toast.test.ts\",\"web/src/lib/action-progress.ts\",\"tests/unit_actions_pds.rs\"]}"
+    },
+    {
+      "id": 730,
+      "change_id": "d925445e-f263-4b82-8194-135e519e68c9",
+      "node_type": "outcome",
+      "title": "Fix wave re-review APPROVED (sonnet). All 8 items addressed; one Minor (T1a test couldn't fail) fixed inline at f54ec02 with negative control proving it now detects a leaked timer. vitest 130/130.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T13:08:10.324297-07:00",
+      "updated_at": "2026-09-04T13:08:10.324297-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"f54ec02\",\"confidence\":92}"
+    },
+    {
+      "id": 731,
+      "change_id": "4e3d7900-6158-46e5-b002-e6d5f5df0790",
+      "node_type": "outcome",
+      "title": "PR #111 opened: feat/332-single-action-toast → staging at f54ec02. All gates green (vitest 130, web 932/0 SKIP, postgres 701/0, clippy ×3 clean). CodeRabbit loop next.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T13:22:36.408558-07:00",
+      "updated_at": "2026-09-04T13:22:36.408558-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"f54ec02\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -16094,6 +16116,28 @@
       "weight": 1.0,
       "rationale": "Fix wave implements the chosen scope",
       "created_at": "2026-09-04T13:05:53.856721-07:00"
+    },
+    {
+      "id": 754,
+      "from_node_id": 729,
+      "to_node_id": 730,
+      "from_change_id": "62e411d4-6a9c-4a34-9bd4-bc30c6371ad5",
+      "to_change_id": "d925445e-f263-4b82-8194-135e519e68c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review verdict on the fix wave",
+      "created_at": "2026-09-04T13:08:12.802341-07:00"
+    },
+    {
+      "id": 755,
+      "from_node_id": 730,
+      "to_node_id": 731,
+      "from_change_id": "d925445e-f263-4b82-8194-135e519e68c9",
+      "to_change_id": "4e3d7900-6158-46e5-b002-e6d5f5df0790",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approved branch pushed and PR opened",
+      "created_at": "2026-09-04T13:22:36.414632-07:00"
     }
   ],
   "documents": [

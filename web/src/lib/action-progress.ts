@@ -83,9 +83,28 @@ export interface PollOptions {
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const DEADLINE = Symbol('deadline');
+
+/** Resolve to `p`'s value, or to `DEADLINE` if `ms` passes first. The timer
+ *  is cleared either way — sixty polls must not leave sixty armed timers. */
+function raceDeadline<T>(p: Promise<T>, ms: number): Promise<T | typeof DEADLINE> {
+	let handle: ReturnType<typeof setTimeout> | undefined;
+	const deadline = new Promise<typeof DEADLINE>((resolve) => {
+		handle = setTimeout(() => resolve(DEADLINE), ms);
+	});
+	return Promise.race([p, deadline]).finally(() => clearTimeout(handle));
+}
+
 /** Fetch until `settle()` is non-null or `timeoutMs` has elapsed. A fetch
  *  that throws is a dropped poll, not a verdict — the runner is still
- *  working behind it, so keep going. */
+ *  working behind it, so keep going.
+ *
+ *  The deadline is enforced in two places on purpose: before each fetch, so
+ *  no new request starts once time is up, and *during* each fetch, so a
+ *  request that never settles cannot pin the working toast open forever.
+ *  The between-fetch wait goes through `opts.sleep`/`opts.now` (fakeable
+ *  clock); the in-flight race uses a real timer, so tests for it use fake
+ *  timers instead. */
 export async function pollUntilSettled(
 	fetch: () => Promise<ActionBatchDetail>,
 	opts: PollOptions = {}
@@ -96,13 +115,16 @@ export async function pollUntilSettled(
 	const now = opts.now ?? Date.now;
 	const started = now();
 	for (;;) {
+		const remaining = timeoutMs - (now() - started);
+		if (remaining <= 0) return 'timeout';
 		try {
-			const settled = settle(await fetch());
+			const detail = await raceDeadline(fetch(), remaining);
+			if (detail === DEADLINE) return 'timeout';
+			const settled = settle(detail);
 			if (settled) return settled;
 		} catch {
 			// blip — fall through to the sleep
 		}
-		if (now() - started >= timeoutMs) return 'timeout';
 		await sleep(intervalMs);
 	}
 }

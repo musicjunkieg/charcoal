@@ -38,7 +38,10 @@
 	let notFound = $state(false);
 	let busy = $state(false);
 	let error = $state('');
-	let timer: ReturnType<typeof setInterval> | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	let inflight: Promise<void> | null = null;
+	let inflightFor: number | null = null;
+	let destroyed = false;
 
 	/** The banner replaces the header controls once the runner is done and
 	 *  nobody is waiting on a reconnect (spec §4). */
@@ -52,14 +55,35 @@
 		undone: 'Undone'
 	};
 
-	async function load() {
+	/** One read of the batch, then — if it is still running — schedule the
+	 *  next one. Only ever one request in flight: a caller that arrives
+	 *  while a read is pending (the poll timer, or `run()` after an undo)
+	 *  joins that read instead of starting a second, so an older response
+	 *  can never land after a newer one and flip a finished batch back to
+	 *  running. */
+	function load(): Promise<void> {
+		const id = Number($page.params.id);
+		if (inflight && inflightFor === id) return inflight;
+		// A read for a different batch is still pending (Undo all / Retry
+		// just navigated here): let it land, then read this one.
+		if (inflight) return inflight.then(load);
+		inflightFor = id;
+		inflight = loadOnce(id).finally(() => (inflight = null));
+		return inflight;
+	}
+
+	async function loadOnce(id: number) {
+		if (timer) {
+			clearTimeout(timer);
+			timer = null;
+		}
 		// Reset both first: this runs every second while a batch is in
 		// flight, and a single dropped poll must not latch the page into an
 		// error state while the runner is still applying blocks behind it.
 		notFound = false;
 		error = '';
 		try {
-			detail = await getActionBatch(Number($page.params.id));
+			detail = await getActionBatch(id);
 		} catch (err) {
 			if (err instanceof AuthError) return goto('/login');
 			if (err instanceof AccessRevokedError) return goto('/waitlist');
@@ -72,11 +96,9 @@
 		}
 		const running = detail ? isRunning(detail.batch) : false;
 		// 1 s: one small JSON read; the old 3 s made a 1 s action read as 3 s+ (#332).
-		if (running && !timer) timer = setInterval(load, POLL_INTERVAL_MS);
-		if (!running && timer) {
-			clearInterval(timer);
-			timer = null;
-		}
+		// setTimeout, not setInterval: the next poll is armed only after this
+		// one has finished, so a slow response can't stack requests.
+		if (running && !destroyed) timer = setTimeout(load, POLL_INTERVAL_MS);
 	}
 
 	async function run(op: () => Promise<{ batch_id: number }>, kind: 'undo' | 'mute' | 'block') {
@@ -100,7 +122,8 @@
 
 	onMount(load);
 	onDestroy(() => {
-		if (timer) clearInterval(timer);
+		destroyed = true;
+		if (timer) clearTimeout(timer);
 	});
 </script>
 
