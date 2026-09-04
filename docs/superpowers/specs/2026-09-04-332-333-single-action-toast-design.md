@@ -182,7 +182,7 @@ chainlink #333 result comment.
 | Finding | Action |
 |---|---|
 | `.signal-bar` `transition: width` (accounts/[handle] L397-402) | `transform: scaleX(<ratio>)` with `transform-origin: left`; markup passes `style="transform: scaleX({scoreBar(x) / 100})"`; `transition: transform 0.5s ease`. Same motion, no layout on each frame. |
-| ConfirmSheet `var(--charcoal-100, #f5f5f4)` ×2, `var(--charcoal-900, #1c1917)` | Drop the fallbacks — `tokens.css` is imported by every consumer. |
+| ConfirmSheet `var(--charcoal-100, #f5f5f4)` ×2, `var(--charcoal-900, #1c1917)` | `--charcoal-100` does not exist in `tokens.css` (the palette stops at `--charcoal-300`), so the fallback was the only thing painting that colour. Replace with `var(--cream-50)` — the site's existing off-white (headings use it) — and drop the `--charcoal-900` fallback, which does exist. Found while planning; the "drop the fallbacks" wording was wrong. |
 | ConfirmSheet backdrop `rgb(0 0 0 / 0.4)` | `rgb(var(--charcoal-950-rgb) / 0.4)` — visually identical (#0c0a09 vs #000 at 40 %). |
 | Font sizes 0.75 / 0.875 / 0.9375 / 1.125 / 1.875 rem | **Promote to the DESIGN.md ramp** (front-matter `typography:`): `caption` 0.75, `small` 0.875, `body-sm` 0.9375, `subtitle` 1.125, `stat` 1.875 (the score-card figure). Docs change; nothing visual moves. Rationale: 36 / 24 / 17 / 5 uses — these are the shipped system, the doc was behind. |
 | Radius `10px` ×2, `6px` | Snap to `8px` (`rounded.sm`). |

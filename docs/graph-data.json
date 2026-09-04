@@ -7732,6 +7732,17 @@
       "created_at": "2026-09-04T10:11:00.239319-07:00",
       "updated_at": "2026-09-04T10:11:05.658979-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":90}"
+    },
+    {
+      "id": 713,
+      "change_id": "424e53ec-09e7-4ec6-8902-3c50821721a1",
+      "node_type": "action",
+      "title": "Wrote + committed spec docs/superpowers/specs/2026-09-04-332-333-single-action-toast-design.md",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-04T10:12:50.226071-07:00",
+      "updated_at": "2026-09-04T10:12:53.417812-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"4342ef5\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -15654,6 +15665,39 @@
       "weight": 1.0,
       "rationale": "#318 folded into the same branch (same files)",
       "created_at": "2026-09-04T10:11:05.641652-07:00"
+    },
+    {
+      "id": 731,
+      "from_node_id": 708,
+      "to_node_id": 713,
+      "from_change_id": "c610c9f9-f1ed-4818-a0d5-7eda9181425e",
+      "to_change_id": "424e53ec-09e7-4ec6-8902-3c50821721a1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "spec from the chosen design",
+      "created_at": "2026-09-04T10:12:53.400194-07:00"
+    },
+    {
+      "id": 732,
+      "from_node_id": 711,
+      "to_node_id": 713,
+      "from_change_id": "bee6ccff-96e5-464a-89a5-42a7eb939a11",
+      "to_change_id": "424e53ec-09e7-4ec6-8902-3c50821721a1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "spec §5",
+      "created_at": "2026-09-04T10:12:53.406364-07:00"
+    },
+    {
+      "id": 733,
+      "from_node_id": 712,
+      "to_node_id": 713,
+      "from_change_id": "e9b8a960-d399-4934-9e59-4de175156d56",
+      "to_change_id": "424e53ec-09e7-4ec6-8902-3c50821721a1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "spec §6",
+      "created_at": "2026-09-04T10:12:53.412199-07:00"
     }
   ],
   "documents": [

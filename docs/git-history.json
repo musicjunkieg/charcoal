@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4342ef5691164efffb49447062df5b29ef1376b5",
+    "short_hash": "4342ef5",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T10:12:44-07:00",
+    "message": "docs(332): design spec — single-action toast, bulk Done banner, runner timing + DPoP nonce cache, #318 disposition",
+    "files_changed": 3
+  },
+  {
     "hash": "8021245f8d1ea3fb409307171a02101f0b7dfb58",
     "short_hash": "8021245",
     "author": "Bryan Guffey",
