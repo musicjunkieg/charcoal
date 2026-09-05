@@ -128,9 +128,9 @@
 </div>
 
 <style>
-	.backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.4); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+	.backdrop { position: fixed; inset: 0; background: rgb(var(--charcoal-950-rgb) / 0.4); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
 	@media (min-width: 40rem) { .backdrop { align-items: center; } }
-	.sheet { width: 100%; max-width: 26rem; background: var(--charcoal-900, #1c1917); color: var(--charcoal-100, #f5f5f4); border-radius: 16px 16px 0 0; padding: 1.25rem 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
+	.sheet { width: 100%; max-width: 26rem; background: var(--charcoal-900); color: var(--cream-50); border-radius: 16px 16px 0 0; padding: 1.25rem 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
 	@media (min-width: 40rem) { .sheet { border-radius: 16px; } }
 	h2 { font-family: 'Outfit', system-ui, sans-serif; font-size: 1.125rem; margin: 0; }
 	.body { margin: 0; line-height: 1.5; }
@@ -145,7 +145,7 @@
 	.footer { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
 	.footer button { padding: 0.5rem 0.9rem; font: inherit; font-size: 0.875rem; border-radius: 8px; cursor: pointer; }
 	.cancel { background: transparent; color: inherit; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.25); }
-	.confirm { background: var(--charcoal-100, #f5f5f4); color: var(--charcoal-900, #1c1917); border: 0; }
+	.confirm { background: var(--cream-50); color: var(--charcoal-900); border: 0; }
 	.confirm[data-kind='block'] { background: var(--tier-high); color: white; }
 	.confirm:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

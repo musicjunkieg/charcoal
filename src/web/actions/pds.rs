@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use atproto_identity::key::KeyData;
 use serde_json::{json, Value};
 
-use super::dpop_http::{send_dpop, DpopResponse};
+use super::dpop_http::{send_dpop, DpopResponse, NonceCache};
 use super::scope::APPVIEW_DID;
 
 /// The header that tells a PDS which service to forward an XRPC call to.
@@ -87,6 +87,9 @@ pub struct PdsClient {
     did: String,
     dpop_key: KeyData,
     access_token: String,
+    /// One per client, i.e. one per batch — the same granularity as the
+    /// session load (#333).
+    nonce: NonceCache,
 }
 
 impl PdsClient {
@@ -103,6 +106,7 @@ impl PdsClient {
             did,
             dpop_key,
             access_token,
+            nonce: NonceCache::default(),
         }
     }
 
@@ -228,6 +232,7 @@ impl PdsClient {
                 "GET",
                 &url,
                 Some(&self.access_token),
+                &self.nonce,
                 |r| {
                     let mut q = vec![("limit", "100".to_string())];
                     if let Some(c) = &c {
@@ -264,6 +269,7 @@ impl PdsClient {
             "POST",
             &url,
             Some(&self.access_token),
+            &self.nonce,
             |r| with_proxy(nsid, r).json(body),
         )
         .await

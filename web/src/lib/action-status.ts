@@ -93,3 +93,75 @@ export function canUndo(b: ActionBatchSummary): boolean {
 	if (b.kind === 'undo' || isRunning(b) || isParked(b)) return false;
 	return (b.counts.applied ?? 0) > 0;
 }
+
+export interface BannerSummary {
+	title: 'Done' | 'Undone' | 'Finished with problems';
+	detail: string;
+	tone: 'ok' | 'error';
+}
+
+/** The finished-batch banner on the batch page (#332, spec §4). Only
+ *  meaningful once `!isRunning(b) && !isParked(b)`. An undo batch's counts
+ *  are by row status, not by the kind undone, so the rows are needed to say
+ *  what was undone: every row that settled as `undone` or the user's own
+ *  already-gone mute/block (`skipped_already_done`) counts toward its kind.
+ *  A row still `pending` is NOT settled — a batch that dies before the write
+ *  step (a PDS 5xx on the reconcile read, a transient token refresh failure)
+ *  leaves every row `pending` and the batch `failed`, and `settle()` in
+ *  action-progress.ts reads that as a failure for the toast ("Couldn't
+ *  unmute…"). Counting `pending` as undone here would make the banner say
+ *  "Undone" for the same batch the toast just called a failure. */
+export function bannerSummary(b: ActionBatchSummary, rows: ActionRowView[]): BannerSummary {
+	const c = b.counts;
+	const failed = c.failed ?? 0;
+	const problem = b.status === 'partial' || b.status === 'failed';
+	const tone = problem ? 'error' : 'ok';
+	if (b.kind === 'undo') {
+		const settled = rows.filter(
+			(r) => r.status === 'undone' || r.status === 'applied' || r.status === 'skipped_already_done'
+		);
+		const unmuted = settled.filter((r) => r.kind === 'mute').length;
+		const unblocked = settled.filter((r) => r.kind === 'block').length;
+		let detail = `${unmuted} unmuted, ${unblocked} unblocked`;
+		if (problem) detail += `, ${failed} failed`;
+		return { title: problem ? 'Finished with problems' : 'Undone', detail, tone };
+	}
+	const done = (c.applied ?? 0) + (c.skipped_already_done ?? 0);
+	const past = b.kind === 'mute' ? 'muted' : 'blocked';
+	return {
+		title: problem ? 'Finished with problems' : 'Done',
+		detail: `${done} ${past}, ${failed} failed`,
+		tone
+	};
+}
+
+export interface ReturnPath {
+	href: string;
+	label: string;
+}
+
+/** Where "← Back" goes from a finished batch: the place the batch was
+ *  started from, read off `batch.source` (#332, spec §4). `asUserSuffix` is
+ *  the page's existing `?as_user=…` string or ''. */
+export function returnPath(source: string, asUserSuffix: string): ReturnPath {
+	const tier = source.startsWith('tier:') ? source.slice('tier:'.length) : '';
+	const handle = source.startsWith('account:') ? source.slice('account:'.length) : '';
+	let href: string;
+	let label: string;
+	if (tier) {
+		href = `/accounts?tier=${encodeURIComponent(tier)}`;
+		label = `← Back to ${tier} accounts`;
+	} else if (handle) {
+		href = `/accounts/${encodeURIComponent(handle)}`;
+		label = `← Back to @${handle}`;
+	} else {
+		href = '/accounts';
+		label = '← Back to accounts';
+	}
+	if (asUserSuffix) {
+		// The suffix already starts with '?'; when the href has a query of
+		// its own, join with '&' instead.
+		href += href.includes('?') ? `&${asUserSuffix.slice(1)}` : asUserSuffix;
+	}
+	return { href, label };
+}

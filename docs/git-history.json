@@ -1,5 +1,109 @@
 [
   {
+    "hash": "f54ec020fe724a5021309a59756473f3ac32f205",
+    "short_hash": "f54ec02",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T13:07:58-07:00",
+    "message": "test(332): make eviction-timer test able to fail\n\nAssert vi.getTimerCount() is 0 after the ttl toast is evicted. The\nprevious assertions on store contents held whether or not the timer was\ncleared (ids are never reused; dismiss of an unknown id is a no-op).\nNegative control: commenting out clearTimer(dropped.id) in raise() now\nfails this test with \"expected 1 to be +0\".",
+    "files_changed": 3
+  },
+  {
+    "hash": "d127dbf445be4381ecb749eb0532dfc9ec98f2e9",
+    "short_hash": "d127dbf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T13:02:54-07:00",
+    "message": "fix(332): final-review fixes — undo banner pending rows, toast a11y/focus, tests\n\nI1: bannerSummary undo branch no longer counts pending rows as undone\n(a batch that dies before the write step is failed with every row\npending; the toast already says \"Couldnt unmute\" for that batch, now\nthe banner agrees). T3a: fix stale column-reverse comment in\nToast.svelte. T7: move base64::Engine import into the top block of\nunit_actions_pds.rs. T1a: cap-eviction timer cleanup regression test\nin toast.test.ts. T3b: themed focus-visible ring on toast controls.\nM5: drop the redundant aria-live on .stack, keep per-toast role.\nM6: replace local easeOutExpo with svelte/easing expoOut. M11: note\nthat POLL_INTERVAL_MS is shared with the batch page poll.",
+    "files_changed": 8
+  },
+  {
+    "hash": "24f7b0d575c5ce0094a0983606156cc7aceb90d4",
+    "short_hash": "24f7b0d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T12:08:37-07:00",
+    "message": "docs: CHANGELOG entries for #332, #333, #318",
+    "files_changed": 3
+  },
+  {
+    "hash": "17c640265d1edf1ab9a21d4d92a78f387a4bba1f",
+    "short_hash": "17c6402",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T12:03:51-07:00",
+    "message": "fix(318): move design literals onto the ramp, waive consent side-tab",
+    "files_changed": 8
+  },
+  {
+    "hash": "e7f95c355094f619e564f188bb2ea50dbdb94770",
+    "short_hash": "e7f95c3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T11:51:55-07:00",
+    "message": "feat(333): cache the DPoP nonce per PdsClient so steady state is one round trip",
+    "files_changed": 6
+  },
+  {
+    "hash": "b182a2903efae307947b237aeac568724236a3b2",
+    "short_hash": "b182a29",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T11:38:51-07:00",
+    "message": "feat(333): elapsed_ms timing spans for load_session, reconcile, pds_call, batch",
+    "files_changed": 1
+  },
+  {
+    "hash": "a76f11f57398b3803902fdab05b489410c6016d0",
+    "short_hash": "a76f11f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T11:11:20-07:00",
+    "message": "feat(332): Toast renderer mounted once in the protected layout",
+    "files_changed": 2
+  },
+  {
+    "hash": "0124b4dc61be482abb51ed3ca0ad9793c7ddfbf9",
+    "short_hash": "0124b4d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T10:48:07-07:00",
+    "message": "docs(332): implementation plan for #332/#333/#318, spec fix for the missing --charcoal-100 token\n\nNine tasks: toast store, progress helpers, Toast.svelte, ActionButtons\nin-place settle, batch page banner, runner timing spans, DPoP nonce\ncache, #318 design fixes, CHANGELOG. Spec section 6 corrected: the\nConfirmSheet fallback was the only thing painting the sheet colour\nbecause --charcoal-100 does not exist; use --cream-50.",
+    "files_changed": 4
+  },
+  {
+    "hash": "4342ef5691164efffb49447062df5b29ef1376b5",
+    "short_hash": "4342ef5",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T10:12:44-07:00",
+    "message": "docs(332): design spec — single-action toast, bulk Done banner, runner timing + DPoP nonce cache, #318 disposition",
+    "files_changed": 3
+  },
+  {
+    "hash": "8021245f8d1ea3fb409307171a02101f0b7dfb58",
+    "short_hash": "8021245",
+    "author": "Bryan Guffey",
+    "date": "2026-09-03T19:00:24-07:00",
+    "message": "chore(330): drop hickory-dns from the binary via atproto-crates fork rev bump\n\nBump the three atproto-* git deps to fork rev 9a91b19, where hickory-dns\nis an opt-in feature instead of a default (and hickory-resolver is\noptional in atproto-oauth-axum). Charcoal only uses HTTP handle\nresolution, so no behaviour changes; hickory-proto/hickory-resolver\nleave Cargo.lock entirely, which retires Dependabot #32/#33 by removal\nrather than by an unavailable 0.25.x patch.\n\nGates: clippy clean (web/postgres/default), 929 web + 701 postgres tests,\n0 model-gated skips.",
+    "files_changed": 4
+  },
+  {
+    "hash": "550ace009395cd8aba495a9460eb3aa44a59ea09",
+    "short_hash": "550ace0",
+    "author": "Bryan Guffey",
+    "date": "2026-09-03T18:08:44-07:00",
+    "message": "chore(329): bump Dependabot-flagged crates and npm devDependencies\n\ncargo update: openssl 0.10.75->0.10.81 (build-only dep of ort-sys),\nrustls-webpki 0.103.9->0.103.15, rand 0.8.5/0.9.2->0.8.8/0.9.5,\nquinn-proto 0.11.13->0.11.17 (inactive optional dep of reqwest).\nnpm update: svelte 5.57.0, @sveltejs/kit 2.70.3, vite 7.3.6, esbuild\n0.28.2, postcss 8.5.28, js-yaml 4.3.2, flatted 3.4.4, brace-expansion\n1.1.18/5.0.9, picomatch 4.0.7, @humanfs/node 0.16.8, devalue 5.9.2.\n\nExposure audit on #328 found none of these reachable in the running\nservice; this clears the alerts. web 929/0 (0 skips), postgres 701/0,\nclippy clean on web/postgres/default.",
+    "files_changed": 5
+  },
+  {
+    "hash": "458e5cbb710f9abe729b5fc4e9df93cdaa4c8a58",
+    "short_hash": "458e5cb",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T16:04:41-07:00",
+    "message": "Merge pull request #110 from musicjunkieg/fix/322-atproto-proxy-header\n\nfix(322): atproto-proxy header + rpc read scopes so mute works on a self-hosted PDS",
+    "files_changed": 0
+  },
+  {
+    "hash": "a7d6a3df1aec4ea66fceca8e181b9447c457bd1a",
+    "short_hash": "a7d6a3d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-02T15:59:00-07:00",
+    "message": "fix(322): PR #110 review round 2 - compare-and-delete in the refresh path, wiremock sync in the race test\n\nThe per-DID refresh lock is process-local, so a session row can be\nreplaced (re-consent, another replica) between the read that decided to\ndelete it and the delete itself. Every delete on the refresh path is now\ndelete_oauth_session_if_unchanged, keyed on updated_at: a narrowed grant\ndeletes only the row it observed and otherwise reloads the replacement;\nreload_or_disconnect does the same. Both backends implement it; parity\ntest extended.\n\nThe lost-race test no longer sleeps a fixed 100ms hoping the refresh has\nreached the token endpoint - it waits on the scoped mock via\nwait_until_satisfied under a 5s timeout.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 11
+  },
+  {
     "hash": "0e9e8e8e72e8e4681b4602f880292b0327a83d7b",
     "short_hash": "0e9e8e8",
     "author": "Bryan Guffey",
@@ -1256,14 +1360,6 @@
     "files_changed": 5
   },
   {
-    "hash": "dc3edcc5310900966967e1b0556d01764ec5be7a",
-    "short_hash": "dc3edcc",
-    "author": "Bryan Guffey",
-    "date": "2026-06-19T10:36:54-07:00",
-    "message": "ci(cope-b): pin free-disk-space action to commit SHA (v1.3.1)\n\nReplaces the @main mutable branch ref with the full commit SHA\n54081f1 (v1.3.1, verified via the GitHub tags API). A third-party\naction on a moving branch is a supply-chain risk — pin it.\n\nHeld back from triggering an immediate rebuild: committed locally and\npushed alongside the next build iteration so it does not spawn a\nredundant concurrent ~50GB build while one is already running.\n\nChainlink #193.\n\nCo-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>",
-    "files_changed": 2
-  },
-  {
     "hash": "81b10853f0d62e7ec99cf6bac77cf7f7ce458ac5",
     "short_hash": "81b1085",
     "author": "Bryan Guffey",
@@ -1390,14 +1486,6 @@
     "date": "2026-04-28T00:10:05-07:00",
     "message": "fix: address PR #46 round-3 CodeRabbit findings\n\nFour findings from the third review pass. All real, all fixed.\n\nFixed:\n\n- topic_search.rs (discover_by_topic error swallowing): the loop over\n  keywords previously logged each `search_posts_for_authors` failure\n  via `tracing::warn!` and continued. If every keyword search failed\n  (e.g., AT Proto outage), the function returned `Ok(vec![])` —\n  indistinguishable from a clean topic neighborhood with no matches.\n  Now tracks a `successful_searches` counter and a `last_error` chain;\n  if the keyword list was non-empty and zero searches succeeded, returns\n  an `Err` so callers can react to the outage. Single-keyword failures\n  still fall through (best-effort across the cycle).\n\n- profile.rs (Stage 1 vacuous-pass guard): the round-2 fix excluded\n  reply scores from `stage1_clean_pass_scores`, but a reply-only or\n  reply-heavy sample (e.g., 1 original + 24 replies) could still pass\n  vacuously because `iter().all()` returns true for empty slices and\n  for tiny \"all 1 entry below threshold\" slices that didn't actually\n  inspect the bulk of the content. Added\n  `MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT = 5` constant and a guard in\n  `should_early_exit_stage1`: samples with fewer than 5 originals+quotes\n  always proceed to Stage 2, where Zentropi can do pair classification\n  with parent context. New tests pin both the empty-slice and the\n  too-few-entries cases.\n\n- profile.rs (graph_distance dropped on early returns): the\n  \"Insufficient Data\" early return and the Stage 1 early-exit return\n  both set `graph_distance: None`, throwing away the value the caller\n  had computed. `GraphDistance` is `Copy` so the same value is reachable\n  from all three return sites; both early returns now set\n  `graph_distance: graph_distance.map(|d| d.as_str().to_string())`,\n  matching the full-pipeline branch. Downstream consumers (sweep\n  ranking, UI) preserve the signal even on insufficient-data and\n  early-exit accounts.\n\n- zentropi.rs (module-doc clarity): the doc comment didn't make clear\n  that `refs/labeler_prompt.txt` is a checked-in reference snapshot\n  rather than the runtime source. Added an explicit \"Policy source of\n  truth\" section: the active policy lives on Zentropi's side,\n  identified by `ZENTROPI_LABELER_ID` and pinned by\n  `ZENTROPI_LABELER_VERSION_ID`; runtime behavior changes only after\n  re-uploading the policy and bumping the version env var. Maintainers\n  who edit the reference file should now know it has no runtime effect\n  on its own.\n\nTests: 419 passing (was 417 — gained 2 new tests for the early-exit\nguards). Clippy `-D warnings` clean across `--features web`,\n`--features postgres`, and no-features. Rustfmt clean.\n\nRefs: #173, #175",
     "files_changed": 5
-  },
-  {
-    "hash": "06e1e483c93d9e32bfee24b60aad9d259c687d0b",
-    "short_hash": "06e1e48",
-    "author": "Bryan Guffey",
-    "date": "2026-04-27T22:00:32-07:00",
-    "message": "security: remove leaked Zentropi credentials and gitignore the file\n\nrefs/zentropi_info.txt was committed in d4394f9 with live API key and\nlabeler IDs. Code never read this file — credentials come from env vars\nexclusively (see .env.example). Treat the API key as compromised: rotate\nin the Zentropi dashboard, then update local .env. The file path is now\ngitignored to prevent reintroduction.\n\nRefs: #173",
-    "files_changed": 3
   },
   {
     "hash": "9656c2c1a31c83d5b6bbafd00e998c3066e98a82",
