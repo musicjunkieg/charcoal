@@ -998,3 +998,100 @@ async fn undo_mute_unmutes_when_still_muted() {
         .iter()
         .all(|r| r.status == "undone"));
 }
+
+/// Collects every `db_write` timing event the runner emits, as
+/// `field -> value` maps. #335: the runner's DB writes are suspected of
+/// costing ~400 ms each on Railway; this is the span that proves or
+/// disproves it, so the test pins its shape (`op` + `elapsed_ms`).
+#[derive(Clone, Default)]
+struct DbWriteSpans(Arc<std::sync::Mutex<Vec<std::collections::HashMap<String, String>>>>);
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for DbWriteSpans {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        struct Fields(std::collections::HashMap<String, String>);
+        impl tracing::field::Visit for Fields {
+            fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
+                self.0.insert(f.name().to_string(), format!("{v:?}"));
+            }
+            fn record_str(&mut self, f: &tracing::field::Field, v: &str) {
+                self.0.insert(f.name().to_string(), v.to_string());
+            }
+            fn record_u64(&mut self, f: &tracing::field::Field, v: u64) {
+                self.0.insert(f.name().to_string(), v.to_string());
+            }
+        }
+        let mut fields = Fields(Default::default());
+        event.record(&mut fields);
+        if fields.0.get("span").map(String::as_str) == Some("db_write") {
+            self.0.lock().unwrap().push(fields.0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn every_runner_db_write_emits_a_timed_db_write_span() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let h = harness().await;
+    mount_list(
+        &h.mock,
+        "app.bsky.graph.getMutes",
+        "mutes",
+        serde_json::json!([]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(2)
+        .mount(&h.mock)
+        .await;
+    let id =
+        h.db.create_action_batch(
+            ME,
+            "mute",
+            "tier:High",
+            &[
+                new_action("did:plc:m1", "mute", None),
+                new_action("did:plc:m2", "mute", None),
+            ],
+        )
+        .await
+        .unwrap();
+
+    // tracing caches each callsite's interest the first time ANY thread hits
+    // it, and while only one subscriber is registered that check runs against
+    // the hitting thread's default — which for a parallel test is "none", so
+    // the runner's `info!` sites get cached as never-interested and this
+    // thread is never asked (tracing-core 0.1.36 `callsite.rs`, `has_just_one`).
+    // A bare global Registry pins the cache to "always"; it drops events itself
+    // and the scoped layer below still sees only this thread's.
+    let _ = tracing_subscriber::registry().try_init();
+    let spans = DbWriteSpans::default();
+    let subscriber = tracing_subscriber::registry().with(spans.clone());
+    // Thread-local default: #[tokio::test] is a current-thread runtime, so
+    // everything the runner awaits stays under this subscriber.
+    let _guard = tracing::subscriber::set_default(subscriber);
+    h.runner.run_batch(id).await;
+    drop(_guard);
+
+    let seen = spans.0.lock().unwrap().clone();
+    let ops = |op: &str| {
+        seen.iter()
+            .filter(|s| s.get("op").map(String::as_str) == Some(op))
+            .count()
+    };
+    // One row update per muted actor …
+    assert_eq!(ops("update_action"), 2, "{seen:?}");
+    // … and the batch status flips running → done.
+    assert_eq!(ops("set_action_batch_status"), 2, "{seen:?}");
+    assert!(
+        seen.iter().all(|s| s["elapsed_ms"].parse::<u64>().is_ok()),
+        "every db_write span carries elapsed_ms: {seen:?}"
+    );
+}

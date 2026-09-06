@@ -8003,9 +8003,9 @@
       "node_type": "goal",
       "title": "Land #329/#330 dependency sweep PR to staging",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-05T13:17:30.034379-07:00",
-      "updated_at": "2026-09-05T13:17:30.034379-07:00",
+      "updated_at": "2026-09-06T11:58:44.785429-07:00",
       "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":90,\"prompt\":\"1\"}"
     },
     {
@@ -8040,6 +8040,127 @@
       "created_at": "2026-09-05T13:17:41.684608-07:00",
       "updated_at": "2026-09-05T13:17:41.684608-07:00",
       "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":85}"
+    },
+    {
+      "id": 741,
+      "change_id": "3bd2110c-e630-4ed0-a614-358185424ef0",
+      "node_type": "action",
+      "title": "Rebuilt dependency sweep on chore/329-330-deps: rev bump 9a91b19, cargo update ×5, npm update, CHANGELOG",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T14:24:26.564690-07:00",
+      "updated_at": "2026-09-05T14:24:26.564690-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"commit\":\"ee68059\",\"confidence\":90,\"files\":[\"Cargo.toml\",\"Cargo.lock\",\"web/package-lock.json\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 742,
+      "change_id": "ac289ebd-a007-4935-aff8-6989c3da796c",
+      "node_type": "outcome",
+      "title": "All gates green: clippy ×3 clean, 932 web + 701 postgres, 0 model skips, vitest 132/132, build OK, hickory absent from lockfile",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T14:24:36.515269-07:00",
+      "updated_at": "2026-09-05T14:24:36.515269-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"commit\":\"ee68059\",\"confidence\":95}"
+    },
+    {
+      "id": 743,
+      "change_id": "e9d3e286-0f31-4440-9348-d111db05df50",
+      "node_type": "outcome",
+      "title": "PR #112 CodeRabbit APPROVED round 1, zero inline threads, zero nitpicks",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T14:28:23.056381-07:00",
+      "updated_at": "2026-09-05T14:28:23.056381-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"commit\":\"ee68059\",\"confidence\":95}"
+    },
+    {
+      "id": 744,
+      "change_id": "3331cd04-496b-461f-b1f6-6aeecf60e375",
+      "node_type": "observation",
+      "title": "No scheduler exists: 14d fingerprint/score staleness is evaluated only when POST /api/scan runs (Bryan expected auto-refresh). Filed #342 sweep + #343 scalability story",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T17:58:03.490457-07:00",
+      "updated_at": "2026-09-05T17:58:03.490457-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":95}"
+    },
+    {
+      "id": 745,
+      "change_id": "d475f498-5ef3-430b-8955-3b36b5780587",
+      "node_type": "outcome",
+      "title": "PR #112 merged to staging a317f0f; #329/#330 closed --no-changelog",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T11:58:44.776959-07:00",
+      "updated_at": "2026-09-06T11:58:44.776959-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"a317f0f\",\"confidence\":95}"
+    },
+    {
+      "id": 746,
+      "change_id": "90af3761-d113-41bc-a770-23e95d34a2a2",
+      "node_type": "goal",
+      "title": "#335 spike: db_write span to measure per-row DB write latency in the action runner",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T12:01:58.581388-07:00",
+      "updated_at": "2026-09-06T12:01:58.581388-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"confidence\":90,\"prompt\":\"What about 335\"}"
+    },
+    {
+      "id": 747,
+      "change_id": "0fb9400e-373e-4943-9fac-2884f421bc90",
+      "node_type": "option",
+      "title": "Instrument: db_write span around runner DB writes (timed wrapper methods), deploy, measure on a real batch",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T12:02:04.143276-07:00",
+      "updated_at": "2026-09-06T12:02:04.143276-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"confidence\":85}"
+    },
+    {
+      "id": 748,
+      "change_id": "7e9cb466-b537-4cde-ab7c-9955dacd80f2",
+      "node_type": "option",
+      "title": "Bench locally against Homebrew Postgres to split code vs Railway network without a deploy",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T12:02:04.153440-07:00",
+      "updated_at": "2026-09-06T12:02:04.153440-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"confidence\":60}"
+    },
+    {
+      "id": 749,
+      "change_id": "8dd70b22-1a9e-4108-ae44-da9839fc9a49",
+      "node_type": "decision",
+      "title": "Instrument in-code via timed wrapper methods on ActionRunner: measures the real environment, and the wrapper stays useful after the spike",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T12:02:04.164511-07:00",
+      "updated_at": "2026-09-06T12:02:04.164511-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"confidence\":85}"
+    },
+    {
+      "id": 750,
+      "change_id": "068f75b9-d397-4c78-8dc8-0431e7fa0eba",
+      "node_type": "action",
+      "title": "Add db_write timing span: ActionRunner::update_action / set_batch_status wrappers around the two DB writes; test with a scoped tracing layer (global Registry pinned so parallel tests cannot cache callsite interest as never)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T12:12:56.816943-07:00",
+      "updated_at": "2026-09-06T12:12:56.816943-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"commit\":\"a317f0f\",\"confidence\":90,\"files\":[\"src/web/actions/runner.rs\",\"tests/unit_actions_runner.rs\"]}"
+    },
+    {
+      "id": 751,
+      "change_id": "dacf62f6-6379-4429-8ffc-0fae6901955b",
+      "node_type": "observation",
+      "title": "tracing-core 0.1.36 has_just_one: with a single registered (scoped) subscriber, callsite interest is computed on whichever thread hits the callsite first; parallel tests without a subscriber cache never. Fix: try_init a bare global Registry",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T12:12:56.838778-07:00",
+      "updated_at": "2026-09-06T12:12:56.838778-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -16336,6 +16457,127 @@
       "weight": 1.0,
       "rationale": "rejected: conflicts in Cargo.lock/package-lock/graph JSON",
       "created_at": "2026-09-05T13:17:47.401572-07:00"
+    },
+    {
+      "id": 765,
+      "from_node_id": 740,
+      "to_node_id": 741,
+      "from_change_id": "9dbcee43-750a-4715-9acd-6d9378dc9588",
+      "to_change_id": "3bd2110c-e630-4ed0-a614-358185424ef0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implements decision",
+      "created_at": "2026-09-05T14:24:36.522543-07:00"
+    },
+    {
+      "id": 766,
+      "from_node_id": 741,
+      "to_node_id": 742,
+      "from_change_id": "3bd2110c-e630-4ed0-a614-358185424ef0",
+      "to_change_id": "ac289ebd-a007-4935-aff8-6989c3da796c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "gate results",
+      "created_at": "2026-09-05T14:24:45.464200-07:00"
+    },
+    {
+      "id": 767,
+      "from_node_id": 741,
+      "to_node_id": 743,
+      "from_change_id": "3bd2110c-e630-4ed0-a614-358185424ef0",
+      "to_change_id": "e9d3e286-0f31-4440-9348-d111db05df50",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review of the sweep commit",
+      "created_at": "2026-09-05T14:28:34.771578-07:00"
+    },
+    {
+      "id": 768,
+      "from_node_id": 737,
+      "to_node_id": 744,
+      "from_change_id": "92b239c6-520f-4c9f-b503-78f093203aac",
+      "to_change_id": "3331cd04-496b-461f-b1f6-6aeecf60e375",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "surfaced during the chore PR wait",
+      "created_at": "2026-09-05T17:58:08.540255-07:00"
+    },
+    {
+      "id": 769,
+      "from_node_id": 743,
+      "to_node_id": 745,
+      "from_change_id": "e9d3e286-0f31-4440-9348-d111db05df50",
+      "to_change_id": "d475f498-5ef3-430b-8955-3b36b5780587",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approved → merged",
+      "created_at": "2026-09-06T11:58:48.090230-07:00"
+    },
+    {
+      "id": 770,
+      "from_node_id": 746,
+      "to_node_id": 747,
+      "from_change_id": "90af3761-d113-41bc-a770-23e95d34a2a2",
+      "to_change_id": "0fb9400e-373e-4943-9fac-2884f421bc90",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approach",
+      "created_at": "2026-09-06T12:02:04.171083-07:00"
+    },
+    {
+      "id": 771,
+      "from_node_id": 746,
+      "to_node_id": 748,
+      "from_change_id": "90af3761-d113-41bc-a770-23e95d34a2a2",
+      "to_change_id": "7e9cb466-b537-4cde-ab7c-9955dacd80f2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approach",
+      "created_at": "2026-09-06T12:02:04.177146-07:00"
+    },
+    {
+      "id": 772,
+      "from_node_id": 747,
+      "to_node_id": 749,
+      "from_change_id": "0fb9400e-373e-4943-9fac-2884f421bc90",
+      "to_change_id": "8dd70b22-1a9e-4108-ae44-da9839fc9a49",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: local bench cannot see Railway-side latency",
+      "created_at": "2026-09-06T12:02:04.183516-07:00"
+    },
+    {
+      "id": 773,
+      "from_node_id": 748,
+      "to_node_id": 749,
+      "from_change_id": "7e9cb466-b537-4cde-ab7c-9955dacd80f2",
+      "to_change_id": "8dd70b22-1a9e-4108-ae44-da9839fc9a49",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected for now; fallback if staging numbers are ambiguous",
+      "created_at": "2026-09-06T12:02:04.190074-07:00"
+    },
+    {
+      "id": 774,
+      "from_node_id": 749,
+      "to_node_id": 750,
+      "from_change_id": "8dd70b22-1a9e-4108-ae44-da9839fc9a49",
+      "to_change_id": "068f75b9-d397-4c78-8dc8-0431e7fa0eba",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-09-06T12:12:56.826379-07:00"
+    },
+    {
+      "id": 775,
+      "from_node_id": 750,
+      "to_node_id": 751,
+      "from_change_id": "068f75b9-d397-4c78-8dc8-0431e7fa0eba",
+      "to_change_id": "dacf62f6-6379-4429-8ffc-0fae6901955b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "found while making the span test parallel-safe",
+      "created_at": "2026-09-06T12:12:56.847122-07:00"
     }
   ],
   "documents": [

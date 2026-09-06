@@ -1,5 +1,21 @@
 [
   {
+    "hash": "a317f0f7982a39f86d3c02fef955bb33476b70f5",
+    "short_hash": "a317f0f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-06T01:10:30-07:00",
+    "message": "Merge pull request #112 from musicjunkieg/chore/329-330-deps",
+    "files_changed": 0
+  },
+  {
+    "hash": "ee680596285154ae6720a6c13bafcee78ab24e5f",
+    "short_hash": "ee68059",
+    "author": "Bryan Guffey",
+    "date": "2026-09-05T14:24:09-07:00",
+    "message": "chore(329,330): Dependabot sweep - bump flagged crates and npm devDependencies, drop hickory-dns\n\ncargo update on openssl, openssl-sys, quinn-proto, rustls-webpki and rand;\nnpm update on the web devDependencies. None of the alerts reached the\nrunning service (analysis in CHANGELOG), bumped so they clear.\n\natproto-crates rev d2457ee -> 9a91b19 makes DNS handle resolution an\nopt-in feature there; Charcoal only ever used HTTP/AppView resolution,\nso hickory-proto and hickory-resolver leave Cargo.lock entirely.\n\nThe three low npm audit findings that remain are the cookie advisory\nvia @sveltejs/kit (#137) - only fix offered is a pre-1.0 downgrade.",
+    "files_changed": 6
+  },
+  {
     "hash": "80d0574f1bcd69aad1f6a2abb5350ee55827d35f",
     "short_hash": "80d0574",
     "author": "Bryan Guffey",

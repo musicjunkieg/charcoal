@@ -122,8 +122,7 @@ impl ActionRunner {
         if let Err(e) = self.run_batch_inner(batch_id).await {
             error!(batch_id, "action batch failed: {e:#}");
             if let Err(e2) = self
-                .db
-                .set_action_batch_status(batch_id, "failed", Some(&format!("{e:#}")))
+                .set_batch_status(batch_id, "failed", Some(&format!("{e:#}")))
                 .await
             {
                 error!(batch_id, "could not record batch failure: {e2:#}");
@@ -139,9 +138,7 @@ impl ActionRunner {
             return Ok(());
         }
         let batch_started = Instant::now();
-        self.db
-            .set_action_batch_status(batch_id, "running", None)
-            .await?;
+        self.set_batch_status(batch_id, "running", None).await?;
 
         // Includes any token refresh the session store does on the way.
         let load_started = Instant::now();
@@ -158,8 +155,7 @@ impl ActionRunner {
         let session = match loaded {
             Ok(s) => s,
             Err(SessionError::NotConnected) => {
-                self.db
-                    .set_action_batch_status(batch_id, "queued", Some("not_connected"))
+                self.set_batch_status(batch_id, "queued", Some("not_connected"))
                     .await?;
                 return Ok(());
             }
@@ -186,8 +182,7 @@ impl ActionRunner {
         if let Some(Halt::NotConnected) = halt {
             warn!(batch_id, "PDS rejected the access token — disconnecting");
             self.db.delete_oauth_session(&batch.user_did).await?;
-            self.db
-                .set_action_batch_status(batch_id, "queued", Some("not_connected"))
+            self.set_batch_status(batch_id, "queued", Some("not_connected"))
                 .await?;
             return Ok(());
         }
@@ -222,9 +217,49 @@ impl ActionRunner {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "action batch finished"
         );
-        self.db
-            .set_action_batch_status(batch_id, status, None)
-            .await
+        self.set_batch_status(batch_id, status, None).await
+    }
+
+    /// `Database::update_action` with a `db_write` timing line. #335: on
+    /// staging the gap between consecutive PDS calls was ~4× the PDS call
+    /// itself, and the only thing in that gap is this UPDATE — so it gets
+    /// the same per-op timing the PDS calls got in #333.
+    async fn update_action(
+        &self,
+        id: i64,
+        status: &str,
+        record_uri: Option<&str>,
+        error: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let started = Instant::now();
+        let result = self.db.update_action(id, status, record_uri, error).await;
+        info!(
+            span = "db_write",
+            op = "update_action",
+            action_id = id,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "timing"
+        );
+        result
+    }
+
+    /// `Database::set_action_batch_status` with a `db_write` timing line.
+    async fn set_batch_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let started = Instant::now();
+        let result = self.db.set_action_batch_status(id, status, error).await;
+        info!(
+            span = "db_write",
+            op = "set_action_batch_status",
+            batch_id = id,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "timing"
+        );
+        result
     }
 
     /// One PDS call under the retry policy. `Err(Halt)` stops the batch;
@@ -301,8 +336,7 @@ impl ActionRunner {
         };
         for a in pending {
             if existing.contains(&a.target_did) {
-                self.db
-                    .update_action(a.id, "skipped_already_done", None, None)
+                self.update_action(a.id, "skipped_already_done", None, None)
                     .await?;
                 continue;
             }
@@ -310,10 +344,9 @@ impl ActionRunner {
                 .call("muteActor", || pds.mute_actor(&a.target_did))
                 .await
             {
-                Ok(Ok(())) => self.db.update_action(a.id, "applied", None, None).await?,
+                Ok(Ok(())) => self.update_action(a.id, "applied", None, None).await?,
                 Ok(Err(e)) => {
-                    self.db
-                        .update_action(a.id, "failed", None, Some(&e.to_string()))
+                    self.update_action(a.id, "failed", None, Some(&e.to_string()))
                         .await?
                 }
                 Err(h) => return Ok(Some(h)),
@@ -351,8 +384,7 @@ impl ActionRunner {
             if existing.contains_key(&a.target_did) {
                 // A block the user already holds. Left alone and never
                 // recorded as ours, so undo can never remove it (#261).
-                self.db
-                    .update_action(a.id, "skipped_already_done", None, None)
+                self.update_action(a.id, "skipped_already_done", None, None)
                     .await?;
             } else {
                 planned.push(Planned {
@@ -418,8 +450,7 @@ impl ActionRunner {
                 None => None,
             };
             let Some(orig) = orig else {
-                self.db
-                    .update_action(a.id, "failed", None, Some("undo row has no original"))
+                self.update_action(a.id, "failed", None, Some("undo row has no original"))
                     .await?;
                 continue;
             };
@@ -428,8 +459,7 @@ impl ActionRunner {
             // the user's OWN mute or block, and mutes carry no record_uri, so
             // this is the last place the two can still be told apart (#261).
             if orig.status != "applied" {
-                self.db
-                    .update_action(a.id, "failed", None, Some("not created by Charcoal"))
+                self.update_action(a.id, "failed", None, Some("not created by Charcoal"))
                     .await?;
                 continue;
             }
@@ -446,8 +476,7 @@ impl ActionRunner {
                     {
                         Ok(Ok(())) => self.mark_undone(a.id, "applied", orig.id).await?,
                         Ok(Err(e)) => {
-                            self.db
-                                .update_action(a.id, "failed", None, Some(&e.to_string()))
+                            self.update_action(a.id, "failed", None, Some(&e.to_string()))
                                 .await?
                         }
                         Err(h) => return Ok(Some(h)),
@@ -479,27 +508,25 @@ impl ActionRunner {
                             // own). Saying so beats stamping the original
                             // `undone` over a block that is still live.
                             None => {
-                                self.db
-                                    .update_action(
-                                        a.id,
-                                        "failed",
-                                        None,
-                                        Some("block was not created by Charcoal"),
-                                    )
-                                    .await?
+                                self.update_action(
+                                    a.id,
+                                    "failed",
+                                    None,
+                                    Some("block was not created by Charcoal"),
+                                )
+                                .await?
                             }
                         }
                     }
                 },
                 other => {
-                    self.db
-                        .update_action(
-                            a.id,
-                            "failed",
-                            None,
-                            Some(&format!("unknown kind {other:?}")),
-                        )
-                        .await?
+                    self.update_action(
+                        a.id,
+                        "failed",
+                        None,
+                        Some(&format!("unknown kind {other:?}")),
+                    )
+                    .await?
                 }
             }
         }
@@ -530,14 +557,13 @@ impl ActionRunner {
                                     .await?
                             }
                             Ok(Err(e)) => {
-                                self.db
-                                    .update_action(
-                                        p.action.id,
-                                        "failed",
-                                        None,
-                                        Some(&e.to_string()),
-                                    )
-                                    .await?
+                                self.update_action(
+                                    p.action.id,
+                                    "failed",
+                                    None,
+                                    Some(&e.to_string()),
+                                )
+                                .await?
                             }
                             Err(h) => return Ok(Some(h)),
                         }
@@ -546,8 +572,7 @@ impl ActionRunner {
                 }
                 Ok(Err(e)) => {
                     for p in chunk {
-                        self.db
-                            .update_action(p.action.id, "failed", None, Some(&e.to_string()))
+                        self.update_action(p.action.id, "failed", None, Some(&e.to_string()))
                             .await?;
                     }
                 }
@@ -567,20 +592,15 @@ impl ActionRunner {
                 // feature promises; `failed` makes the batch `partial` and
                 // lets Retry re-attempt it (the reconcile step then finds the
                 // block and settles the row honestly).
-                self.db
-                    .update_action(
-                        p.action.id,
-                        "failed",
-                        None,
-                        Some("PDS returned no record URI"),
-                    )
-                    .await
+                self.update_action(
+                    p.action.id,
+                    "failed",
+                    None,
+                    Some("PDS returned no record URI"),
+                )
+                .await
             }
-            None => {
-                self.db
-                    .update_action(p.action.id, "applied", uri, None)
-                    .await
-            }
+            None => self.update_action(p.action.id, "applied", uri, None).await,
         }
     }
 
@@ -590,10 +610,8 @@ impl ActionRunner {
         undo_status: &str,
         orig_id: i64,
     ) -> anyhow::Result<()> {
-        self.db
-            .update_action(undo_id, undo_status, None, None)
-            .await?;
-        self.db.update_action(orig_id, "undone", None, None).await
+        self.update_action(undo_id, undo_status, None, None).await?;
+        self.update_action(orig_id, "undone", None, None).await
     }
 }
 

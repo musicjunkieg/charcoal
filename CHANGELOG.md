@@ -27,6 +27,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   never removed on the strength of a stale read — it is reloaded and used.
 
 ### Changed
+- The action runner now logs a `db_write` timing line (`op`, `action_id` /
+  `batch_id`, `elapsed_ms`) around every row and batch-status write, next to
+  the `pds_call` lines from #333 (#335). On staging the gap between
+  consecutive PDS calls was ~600–800 ms against a ~140 ms PDS call plus a
+  100 ms pace, and the only thing in that gap is one primary-key `UPDATE`.
+  This is the instrument, not the fix: the next bulk mute on staging says
+  whether the time is in Charcoal's write path or in the network to
+  Postgres.
 - Dependabot sweep (#328, #329, #330). Every open alert was checked for
   actual exposure and none reached the running service: `openssl` is a
   build-time dependency of `ort-sys` (it downloads the ONNX Runtime archive
