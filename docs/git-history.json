@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3f5ba01107ed3c1f47bfa1e68b2e918b3ca2336f",
+    "short_hash": "3f5ba01",
+    "author": "Bryan Guffey",
+    "date": "2026-09-06T13:14:57-07:00",
+    "message": "feat(335): db_write timing span around action-runner DB writes\n\nWraps update_action and set_action_batch_status in ActionRunner with a\ndb_write timing line (op, action_id/batch_id, elapsed_ms) matching the\n#333 pds_call spans. On staging the gap between consecutive PDS calls was\n~600-800ms against a ~140ms call + 100ms pace; the only thing in the gap\nis one primary-key UPDATE. This is the instrument, not the fix.\n\nTest uses a scoped tracing layer; a bare global Registry is pinned first\nbecause tracing-core caches callsite interest on whichever thread hits\nthe callsite first, and a parallel test with no subscriber would cache\nit as never.",
+    "files_changed": 5
+  },
+  {
     "hash": "a317f0f7982a39f86d3c02fef955bb33476b70f5",
     "short_hash": "a317f0f",
     "author": "Bryan Guffey",

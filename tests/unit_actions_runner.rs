@@ -1,7 +1,7 @@
 //! ActionRunner against a wiremock PDS (#315, spec §4 + §6 failure table).
 #![cfg(feature = "web")]
 
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 
 use atproto_identity::key::{generate_key, KeyType};
 use atproto_oauth::workflow::{OAuthClient, TokenResponse};
@@ -1027,7 +1027,12 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for DbWriteSpans {
         let mut fields = Fields(Default::default());
         event.record(&mut fields);
         if fields.0.get("span").map(String::as_str) == Some("db_write") {
-            self.0.lock().unwrap().push(fields.0);
+            // A poisoned lock still holds a valid Vec (push cannot half-apply),
+            // so recover rather than let a second panic mask the first.
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(fields.0);
         }
     }
 }
@@ -1080,7 +1085,11 @@ async fn every_runner_db_write_emits_a_timed_db_write_span() {
     h.runner.run_batch(id).await;
     drop(_guard);
 
-    let seen = spans.0.lock().unwrap().clone();
+    let seen = spans
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
     let ops = |op: &str| {
         seen.iter()
             .filter(|s| s.get("op").map(String::as_str) == Some(op))
