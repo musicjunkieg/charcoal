@@ -1,5 +1,21 @@
 [
   {
+    "hash": "80d0574f1bcd69aad1f6a2abb5350ee55827d35f",
+    "short_hash": "80d0574",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T20:47:04-07:00",
+    "message": "Merge pull request #111 from musicjunkieg/feat/332-single-action-toast",
+    "files_changed": 0
+  },
+  {
+    "hash": "dbaff5291d6c1e0596ff92ce8569758ab7ad22a5",
+    "short_hash": "dbaff52",
+    "author": "Bryan Guffey",
+    "date": "2026-09-04T13:30:27-07:00",
+    "message": "fix(332): CodeRabbit round 1 — enforce poll deadline in flight, no overlapping batch polls\n\npollUntilSettled now races each fetch against the remaining deadline (timer\ncleared when the fetch wins) and checks the deadline before starting a\nfetch, so a request that never settles cannot pin the working toast open\nand no new request starts once time is up. Tests: hung fetch times out\nwith exactly one call and no armed timers; settled fetch leaves no timer;\nthe existing timeout case now stops at 5 fetches, not 6.\n\nThe batch page schedules its next poll with setTimeout after load()\nfinishes instead of a setInterval that could stack requests, and dedupes\nconcurrent loads through one in-flight promise keyed by batch id, so an\nolder response can never land after a newer one and flip a finished batch\nback to running.",
+    "files_changed": 5
+  },
+  {
     "hash": "f54ec020fe724a5021309a59756473f3ac32f205",
     "short_hash": "f54ec02",
     "author": "Bryan Guffey",

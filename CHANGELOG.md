@@ -27,6 +27,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   never removed on the strength of a stale read — it is reloaded and used.
 
 ### Changed
+- Dependabot sweep (#328, #329, #330). Every open alert was checked for
+  actual exposure and none reached the running service: `openssl` is a
+  build-time dependency of `ort-sys` (it downloads the ONNX Runtime archive
+  at compile time), `quinn-proto` is an inactive optional dependency of
+  `reqwest` (`http3` is off), `rustls-webpki`'s CRL bugs need a CRL and we
+  load none, every npm alert is a devDependency of a static SPA with no
+  server-side rendering, and the vLLM advisories need inputs (images, audio,
+  regex grammars, prompt lists) a Charcoal user cannot send to a private
+  endpoint. The Rust crates and npm devDependencies were bumped anyway
+  (`cargo update` on the five flagged crates, `npm update`), so the alerts
+  clear. `hickory-dns` (the DNS resolver used for TXT-record handle
+  resolution, with an unpatched NSEC3 advisory on the 0.25 line) was never
+  called by Charcoal — only HTTP handle resolution is — so it is now an
+  opt-in feature in the `atproto-crates` mirror instead of a default, and
+  no longer compiled into the binary at all. The vLLM bump (#331) waits for
+  the next RunPod image rebuild because the pin must match the base image.
+  The three `low` findings `npm audit` still reports are the `cookie`
+  advisory reached through `@sveltejs/kit` (#137); the only offered fix is
+  a downgrade to a pre-1.0 kit, so they stay.
 - Muting or blocking one account now finishes where you are (#332). The
   button reads `Muting…`, a toast at the bottom of the page follows the
   batch, and it settles to `Muted @handle` with Undo and a link to the

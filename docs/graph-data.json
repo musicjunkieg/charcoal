@@ -7640,9 +7640,9 @@
       "node_type": "goal",
       "title": "#332/#333: single actions finish in place with a toast; bulk batch page gains a Done banner + way back; runner timing + DPoP nonce cache; #318 design-hook findings resolved in the same branch",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T10:11:00.159140-07:00",
-      "updated_at": "2026-09-04T10:11:00.159140-07:00",
+      "updated_at": "2026-09-05T12:57:18.022231-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":90,\"prompt\":\"Why don't you work on 332 and 333 to improve and then we'll look at 329/330 when done\"}"
     },
     {
@@ -7750,9 +7750,9 @@
       "node_type": "action",
       "title": "Wrote #332/#333/#318 implementation plan docs/superpowers/plans/2026-09-04-332-single-action-toast.md (9 tasks); fixed spec §6 — --charcoal-100 token does not exist, use --cream-50",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T10:48:16.684577-07:00",
-      "updated_at": "2026-09-04T10:48:16.684577-07:00",
+      "updated_at": "2026-09-05T12:57:18.028147-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"0124b4d\",\"confidence\":90}"
     },
     {
@@ -7772,9 +7772,9 @@
       "node_type": "action",
       "title": "Executing #332/#333/#318 plan via subagent-driven development (9 tasks, fresh implementer + reviewer per task); PostHog filed as #334 first",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T11:00:12.110454-07:00",
-      "updated_at": "2026-09-04T11:00:12.110454-07:00",
+      "updated_at": "2026-09-05T12:57:18.033908-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"0124b4d\",\"confidence\":90}"
     },
     {
@@ -7783,9 +7783,9 @@
       "node_type": "action",
       "title": "Task 3: implemented Toast.svelte renderer + protected layout mount",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T11:11:36.074967-07:00",
-      "updated_at": "2026-09-04T11:11:36.074967-07:00",
+      "updated_at": "2026-09-05T12:57:18.039393-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"a76f11f\",\"confidence\":95,\"files\":[\"web/src/lib/components/Toast.svelte\",\"web/src/routes/(protected)/+layout.svelte\"]}"
     },
     {
@@ -7794,9 +7794,9 @@
       "node_type": "outcome",
       "title": "Toast.svelte + layout mount verified: svelte-autofixer clean both files, npm run check shows only the 5 pre-existing accounts/[handle] errors, npm run build succeeds, committed a76f11f",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T11:11:38.705353-07:00",
-      "updated_at": "2026-09-04T11:11:38.705353-07:00",
+      "updated_at": "2026-09-05T12:57:18.045038-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"a76f11f\",\"confidence\":95}"
     },
     {
@@ -7816,9 +7816,9 @@
       "node_type": "action",
       "title": "Tasks 4-6 landed via SDD: ActionButtons toast (bc4a1ce), batch banner + 1s poll (17cc9e4..8384bf1), runner timing spans (b182a29)",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T11:41:43.115966-07:00",
-      "updated_at": "2026-09-04T11:41:43.115966-07:00",
+      "updated_at": "2026-09-05T12:57:18.051058-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"b182a29\",\"confidence\":90}"
     },
     {
@@ -7827,9 +7827,9 @@
       "node_type": "action",
       "title": "Task 7: DPoP nonce cache landed (NonceCache Mutex, send_dpop pre-arms nonce, retry-once preserved)",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T11:55:56.870768-07:00",
-      "updated_at": "2026-09-04T11:55:56.870768-07:00",
+      "updated_at": "2026-09-05T12:57:18.056858-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"e7f95c3\",\"confidence\":90,\"files\":[\"src/web/actions/dpop_http.rs\",\"src/web/actions/pds.rs\",\"src/web/actions/session.rs\",\"tests/unit_actions_pds.rs\"]}"
     },
     {
@@ -7838,9 +7838,9 @@
       "node_type": "outcome",
       "title": "Task 7 review clean: guard never across .await, poison recovered, 3 falsifiable wiremock tests (pds 12/12, runner 17/17)",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T11:56:00.376120-07:00",
-      "updated_at": "2026-09-04T11:56:00.376120-07:00",
+      "updated_at": "2026-09-05T12:57:18.062482-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"e7f95c3\",\"confidence\":90}"
     },
     {
@@ -7849,9 +7849,9 @@
       "node_type": "action",
       "title": "Task 8 (#318): scaleX signal bars, radius snaps, ConfirmSheet tokens, banner border-left removal, headline snap, DESIGN.md type ramp + design.json meta, one side-tab waiver for ConfirmSheet .consent",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T12:04:21.274578-07:00",
-      "updated_at": "2026-09-04T12:04:21.274578-07:00",
+      "updated_at": "2026-09-05T12:57:18.068356-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"17c6402\",\"confidence\":90,\"files\":[\"web/src/routes/(protected)/accounts/[handle]/+page.svelte\",\"web/src/lib/components/ConfirmSheet.svelte\",\"web/src/routes/(protected)/actions/[id]/+page.svelte\",\"DESIGN.md\",\".impeccable/design.json\",\".impeccable/config.json\"]}"
     },
     {
@@ -7860,9 +7860,9 @@
       "node_type": "outcome",
       "title": "Task 8 verified: impeccable detect zero findings on all 4 files (layout-transition + 2 side-tab fixed/waived), svelte-autofixer clean (accounts page, ConfirmSheet, actions/[id]), npm run check shows only the 5 known pre-existing errors, npm run build succeeds, 128 vitest pass. Discovered web/package.json blocks impeccable's DESIGN.md walk from web/ files (pre-existing tool boundary quirk, out of scope) — the interactive PostToolUse hook resolves DESIGN.md correctly via session cwd and did enforce the type-ramp findings live.",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T12:04:32.509060-07:00",
-      "updated_at": "2026-09-04T12:04:32.509060-07:00",
+      "updated_at": "2026-09-05T12:57:18.074-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"17c6402\",\"confidence\":90}"
     },
     {
@@ -7893,9 +7893,9 @@
       "node_type": "outcome",
       "title": "Final whole-branch review (opus, 24f7b0d): 0 Critical, 1 Important (undo banner counts pending rows as undone — contradicts toast on a failed-before-write undo batch), 11 new Minors; privacy + NonceCache concurrency verified clean; verdict WITH FIXES",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T12:55:59.806368-07:00",
-      "updated_at": "2026-09-04T12:55:59.806368-07:00",
+      "updated_at": "2026-09-05T12:57:18.079466-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"24f7b0d\",\"confidence\":90}"
     },
     {
@@ -7904,9 +7904,9 @@
       "node_type": "decision",
       "title": "Fix wave scope: I1 + T3a/T7 must-fix + T1a/T3b/M5/M6/M11 cheap a11y-and-hygiene; M1 banner stripe stays REMOVED (node 719 decision, hook rule); M2/M3/M4/M7-M10 + T4a/T8 → follow-ups/PR notes",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T12:55:59.817536-07:00",
-      "updated_at": "2026-09-04T12:55:59.817536-07:00",
+      "updated_at": "2026-09-05T12:57:18.085581-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
     },
     {
@@ -7915,9 +7915,9 @@
       "node_type": "action",
       "title": "Fix wave applied: I1 undo-banner pending rows, T3a/T7 comment+import, T1a eviction-timer test, T3b focus-visible, M5 single live region, M6 expoOut, M11 POLL_INTERVAL_MS comment",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T13:05:50.957353-07:00",
-      "updated_at": "2026-09-04T13:05:50.957353-07:00",
+      "updated_at": "2026-09-05T12:57:18.091516-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"d127dbf\",\"confidence\":90,\"files\":[\"web/src/lib/action-status.ts\",\"web/src/lib/action-status.test.ts\",\"web/src/lib/components/Toast.svelte\",\"web/src/lib/toast.test.ts\",\"web/src/lib/action-progress.ts\",\"tests/unit_actions_pds.rs\"]}"
     },
     {
@@ -7926,9 +7926,9 @@
       "node_type": "outcome",
       "title": "Fix wave re-review APPROVED (sonnet). All 8 items addressed; one Minor (T1a test couldn't fail) fixed inline at f54ec02 with negative control proving it now detects a leaked timer. vitest 130/130.",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T13:08:10.324297-07:00",
-      "updated_at": "2026-09-04T13:08:10.324297-07:00",
+      "updated_at": "2026-09-05T12:57:18.097196-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"f54ec02\",\"confidence\":92}"
     },
     {
@@ -7937,10 +7937,109 @@
       "node_type": "outcome",
       "title": "PR #111 opened: feat/332-single-action-toast → staging at f54ec02. All gates green (vitest 130, web 932/0 SKIP, postgres 701/0, clippy ×3 clean). CodeRabbit loop next.",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-04T13:22:36.408558-07:00",
-      "updated_at": "2026-09-04T13:22:36.408558-07:00",
+      "updated_at": "2026-09-05T12:57:18.103333-07:00",
       "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"f54ec02\",\"confidence\":92}"
+    },
+    {
+      "id": 732,
+      "change_id": "a773d829-420c-4d76-919c-68760c204984",
+      "node_type": "action",
+      "title": "CodeRabbit round 1 on PR #111: two Majors (poll deadline not enforced during a hung fetch; batch-page setInterval overlap) — both were final-review minors M9/M10 deferred as follow-ups; fixed now at dbaff52 with TDD (hung-fetch + timer-leak tests, fetch count 6→5)",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-04T13:31:44.222533-07:00",
+      "updated_at": "2026-09-05T12:57:18.109921-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"dbaff52\",\"confidence\":90,\"files\":[\"web/src/lib/action-progress.ts\",\"web/src/lib/action-progress.test.ts\",\"web/src/routes/(protected)/actions/[id]/+page.svelte\"]}"
+    },
+    {
+      "id": 733,
+      "change_id": "b1e3c987-29b8-4fe9-a47b-1a9e5150a0aa",
+      "node_type": "outcome",
+      "title": "CodeRabbit APPROVED PR #111 (round 2, review 5117559019) — empty body, 0 unresolved threads. vitest 132/132 after round 1 fix. Ready for Bryan's merge to staging; §7 staging verification queued after.",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-04T13:35:36.676111-07:00",
+      "updated_at": "2026-09-05T12:57:03.141655-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"dbaff52\",\"confidence\":95}"
+    },
+    {
+      "id": 734,
+      "change_id": "c536096e-7650-4033-b6cd-89d67da19d19",
+      "node_type": "outcome",
+      "title": "Staging §7 verification: PR #111 merged 80d0574, deploy 589461a3. Batches 9–12 (mute, unmute, bulk mute ×20, bulk unmute ×19) all done, 0 failed; four spans live. #333 gate: reconcile=168ms of batch=3965ms (~4%) → close on measurements, no getProfiles follow-up. Block/unblock not exercised in logs.",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-04T21:40:19.004836-07:00",
+      "updated_at": "2026-09-05T12:57:03.147652-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"commit\":\"dbaff52\",\"confidence\":95}"
+    },
+    {
+      "id": 735,
+      "change_id": "8a996edb-64dc-4f3f-8b7b-675cecebbbd4",
+      "node_type": "observation",
+      "title": "Runner wall clock dominated by DB writes, not PDS: ~400ms per update_action over private network (mute row ~700ms vs 140ms PDS + 100ms pace; undo row ~1.4s). Filed #335 — add db_write span before fixing. Follow-ups #336–#341 filed from PR #111 body.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-04T21:40:23.828122-07:00",
+      "updated_at": "2026-09-04T21:40:23.828122-07:00",
+      "metadata_json": "{\"branch\":\"feat/332-single-action-toast\",\"confidence\":85}"
+    },
+    {
+      "id": 736,
+      "change_id": "54bf713b-263c-42c4-be48-c62ac509ddb1",
+      "node_type": "outcome",
+      "title": "Block+undo exercised on staging (batches 13/14, applyWrites 105/60ms, 0 failed). Batch 12 ok=19 explained: batch 11 had one skipped_already_done (user's own mute), Undo all correctly enqueued 19 (#261 rule). #332 and #318 CLOSED --no-changelog; #333 closed on gate. Run #332/#333/#318 complete.",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-05T12:56:56.294828-07:00",
+      "updated_at": "2026-09-05T12:57:03.135343-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"80d0574\",\"confidence\":95}"
+    },
+    {
+      "id": 737,
+      "change_id": "92b239c6-520f-4c9f-b503-78f093203aac",
+      "node_type": "goal",
+      "title": "Land #329/#330 dependency sweep PR to staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T13:17:30.034379-07:00",
+      "updated_at": "2026-09-05T13:17:30.034379-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":90,\"prompt\":\"1\"}"
+    },
+    {
+      "id": 738,
+      "change_id": "de139226-38de-44d0-88e9-6a5b4abe5546",
+      "node_type": "option",
+      "title": "Merge stale chore/329-dependency-updates into staging (lockfile + JSON conflicts)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T13:17:35.226068-07:00",
+      "updated_at": "2026-09-05T13:17:35.226068-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":40}"
+    },
+    {
+      "id": 739,
+      "change_id": "a121f16f-3347-4e48-95da-7d1d00aa418c",
+      "node_type": "option",
+      "title": "Rebuild on fresh branch off staging: rev bump + cargo/npm update + CHANGELOG text",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T13:17:35.238140-07:00",
+      "updated_at": "2026-09-05T13:17:35.238140-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":85}"
+    },
+    {
+      "id": 740,
+      "change_id": "9dbcee43-750a-4715-9acd-6d9378dc9588",
+      "node_type": "decision",
+      "title": "Rebuild chore branch fresh off staging; old branch was never pushed so its history has no value and lockfile merges are all-conflict",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-05T13:17:41.684608-07:00",
+      "updated_at": "2026-09-05T13:17:41.684608-07:00",
+      "metadata_json": "{\"branch\":\"chore/329-330-deps\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -16138,6 +16237,105 @@
       "weight": 1.0,
       "rationale": "Approved branch pushed and PR opened",
       "created_at": "2026-09-04T13:22:36.414632-07:00"
+    },
+    {
+      "id": 756,
+      "from_node_id": 731,
+      "to_node_id": 732,
+      "from_change_id": "4e3d7900-6158-46e5-b002-e6d5f5df0790",
+      "to_change_id": "a773d829-420c-4d76-919c-68760c204984",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR review loop round 1",
+      "created_at": "2026-09-04T13:31:44.228584-07:00"
+    },
+    {
+      "id": 757,
+      "from_node_id": 732,
+      "to_node_id": 733,
+      "from_change_id": "a773d829-420c-4d76-919c-68760c204984",
+      "to_change_id": "b1e3c987-29b8-4fe9-a47b-1a9e5150a0aa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Round 1 fixes led to approval on round 2",
+      "created_at": "2026-09-04T13:35:40.833267-07:00"
+    },
+    {
+      "id": 758,
+      "from_node_id": 733,
+      "to_node_id": 734,
+      "from_change_id": "b1e3c987-29b8-4fe9-a47b-1a9e5150a0aa",
+      "to_change_id": "c536096e-7650-4033-b6cd-89d67da19d19",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Merge + staging clicks produced the §7 evidence",
+      "created_at": "2026-09-04T21:40:23.817378-07:00"
+    },
+    {
+      "id": 759,
+      "from_node_id": 734,
+      "to_node_id": 735,
+      "from_change_id": "c536096e-7650-4033-b6cd-89d67da19d19",
+      "to_change_id": "8a996edb-64dc-4f3f-8b7b-675cecebbbd4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Spans revealed the overhead",
+      "created_at": "2026-09-04T21:40:29.202276-07:00"
+    },
+    {
+      "id": 760,
+      "from_node_id": 734,
+      "to_node_id": 736,
+      "from_change_id": "c536096e-7650-4033-b6cd-89d67da19d19",
+      "to_change_id": "54bf713b-263c-42c4-be48-c62ac509ddb1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Block step completed the §7 checklist",
+      "created_at": "2026-09-05T12:57:03.128081-07:00"
+    },
+    {
+      "id": 761,
+      "from_node_id": 737,
+      "to_node_id": 738,
+      "from_change_id": "92b239c6-520f-4c9f-b503-78f093203aac",
+      "to_change_id": "de139226-38de-44d0-88e9-6a5b4abe5546",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-05T13:17:41.693176-07:00"
+    },
+    {
+      "id": 762,
+      "from_node_id": 737,
+      "to_node_id": 739,
+      "from_change_id": "92b239c6-520f-4c9f-b503-78f093203aac",
+      "to_change_id": "a121f16f-3347-4e48-95da-7d1d00aa418c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-05T13:17:41.700539-07:00"
+    },
+    {
+      "id": 763,
+      "from_node_id": 739,
+      "to_node_id": 740,
+      "from_change_id": "a121f16f-3347-4e48-95da-7d1d00aa418c",
+      "to_change_id": "9dbcee43-750a-4715-9acd-6d9378dc9588",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen",
+      "created_at": "2026-09-05T13:17:47.394712-07:00"
+    },
+    {
+      "id": 764,
+      "from_node_id": 738,
+      "to_node_id": 740,
+      "from_change_id": "de139226-38de-44d0-88e9-6a5b4abe5546",
+      "to_change_id": "9dbcee43-750a-4715-9acd-6d9378dc9588",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: conflicts in Cargo.lock/package-lock/graph JSON",
+      "created_at": "2026-09-05T13:17:47.401572-07:00"
     }
   ],
   "documents": [

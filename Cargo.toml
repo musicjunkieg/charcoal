@@ -126,17 +126,17 @@ optional = true
 # AT Protocol OAuth (required for the web feature — backend-driven OAuth flow)
 [dependencies.atproto-oauth]
 git = "https://github.com/musicjunkieg/atproto-crates"
-rev = "d2457eecc6814e8351486df3a3608542bae848a7"
+rev = "9a91b19395694589d7d6c2406ea98f7d53321528"
 optional = true
 
 [dependencies.atproto-oauth-axum]
 git = "https://github.com/musicjunkieg/atproto-crates"
-rev = "d2457eecc6814e8351486df3a3608542bae848a7"
+rev = "9a91b19395694589d7d6c2406ea98f7d53321528"
 optional = true
 
 [dependencies.atproto-identity]
 git = "https://github.com/musicjunkieg/atproto-crates"
-rev = "d2457eecc6814e8351486df3a3608542bae848a7"
+rev = "9a91b19395694589d7d6c2406ea98f7d53321528"
 optional = true
 
 # base64 encoding for DID in session tokens
