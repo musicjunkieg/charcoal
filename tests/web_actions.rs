@@ -391,7 +391,7 @@ async fn create_batch_snapshots_scores_skips_active_and_reports_drift() {
     seed_session(&state, TEST_DID, "https://pds.test").await;
     seed_scores(&*state.db, TEST_DID).await;
     // B already muted by Charcoal; a successful UNDO row for C must NOT count as active.
-    seed_batch(
+    let (_, muted_ids) = seed_batch(
         &*state.db,
         TEST_DID,
         "mute",
@@ -400,7 +400,7 @@ async fn create_batch_snapshots_scores_skips_active_and_reports_drift() {
     )
     .await;
     let undo_c = NewAction {
-        undo_of: Some(1),
+        undo_of: Some(muted_ids[0]),
         ..row(TARGET_C, "mute")
     };
     seed_batch(
@@ -559,6 +559,12 @@ async fn undo_batch_targets_only_rows_charcoal_applied() {
         ],
     )
     .await;
+    // The runner has finished with it — undo refuses a live batch outright.
+    state
+        .db
+        .set_action_batch_status(orig, "partial", None)
+        .await
+        .unwrap();
 
     let (status, body) = post(
         &app,
@@ -589,7 +595,12 @@ async fn undo_batch_targets_only_rows_charcoal_applied() {
         "snapshot copied"
     );
 
-    // An undo batch cannot itself be undone.
+    // An undo batch cannot itself be undone — even once it has settled.
+    state
+        .db
+        .set_action_batch_status(undo_id, "done", None)
+        .await
+        .unwrap();
     let (status, body) = post(
         &app,
         &format!("/api/actions/batches/{undo_id}/undo"),
@@ -682,6 +693,12 @@ async fn undo_batch_of_only_already_done_rows_is_refused_but_stays_active() {
         ],
     )
     .await;
+    // The runner has finished with it — undo refuses a live batch outright.
+    state
+        .db
+        .set_action_batch_status(orig, "done", None)
+        .await
+        .unwrap();
 
     let (status, body) = post(
         &app,
@@ -859,6 +876,43 @@ async fn retry_refuses_a_batch_that_is_still_running() {
         assert_eq!(body["code"], "batch_running");
     }
     // No retry batch was created.
+    let batches = state.db.list_action_batches(TEST_DID, 50, 0).await.unwrap();
+    assert_eq!(batches.len(), 1);
+}
+
+/// Undo reads the original's rows and keeps only `applied` ones. While the
+/// runner is still working through the batch, rows keep flipping to
+/// `applied` after that read — an undo built then would silently leave them
+/// in force. The UI hides Undo on a live batch; the API must refuse too.
+#[tokio::test]
+async fn undo_refuses_a_batch_that_is_still_running() {
+    let (app, state) = app();
+    seed_session(&state, TEST_DID, "https://pds.test").await;
+    let (orig, _) = seed_batch(
+        &*state.db,
+        TEST_DID,
+        "mute",
+        &[row(TARGET_A, "mute"), row(TARGET_B, "mute")],
+        &[("applied", None), ("pending", None)],
+    )
+    .await;
+    for status in ["queued", "running"] {
+        state
+            .db
+            .set_action_batch_status(orig, status, None)
+            .await
+            .unwrap();
+        let (code, body) = post(
+            &app,
+            &format!("/api/actions/batches/{orig}/undo"),
+            TEST_DID,
+            None,
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "{status}: {body}");
+        assert_eq!(body["code"], "batch_running");
+    }
+    // No undo batch was created, and the applied row is still in force.
     let batches = state.db.list_action_batches(TEST_DID, 50, 0).await.unwrap();
     assert_eq!(batches.len(), 1);
 }

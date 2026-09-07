@@ -42,6 +42,47 @@ impl Match for ProofNonce {
     }
 }
 
+/// Records the `(nonce, jti)` claims of every DPoP proof it sees (always
+/// matches). Lets a test assert that a nonce retry minted a NEW proof rather
+/// than re-sending the first one with only the nonce swapped (RFC 9449 §4.2:
+/// `jti` is unique per proof, and servers may reject a repeat as a replay).
+/// Keyed by nonce rather than call order because wiremock may evaluate this
+/// matcher more than once per request (once per mounted mock).
+#[derive(Clone, Default)]
+struct RecordJti(std::sync::Arc<std::sync::Mutex<Vec<SeenProof>>>);
+
+/// `(nonce claim, jti claim)` of one DPoP proof.
+type SeenProof = (Option<String>, String);
+
+impl Match for RecordJti {
+    fn matches(&self, request: &Request) -> bool {
+        let claims = request
+            .headers
+            .get("DPoP")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|proof| proof.split('.').nth(1))
+            .and_then(|payload| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(payload)
+                    .ok()
+            })
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        if let Some(claims) = claims {
+            let nonce = claims
+                .get("nonce")
+                .and_then(|n| n.as_str())
+                .map(str::to_owned);
+            if let Some(jti) = claims.get("jti").and_then(|j| j.as_str()) {
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((nonce, jti.to_owned()));
+            }
+        }
+        true
+    }
+}
+
 const ME: &str = "did:plc:me00000000000000000000";
 
 fn client(mock: &MockServer) -> PdsClient {
@@ -130,6 +171,54 @@ async fn dpop_nonce_challenge_is_retried_once() {
         .await;
 
     client(&mock).mute_actor("did:plc:target1").await.unwrap();
+}
+
+/// The retry after a nonce challenge must be a NEW proof: same key, new
+/// nonce, and a fresh `jti`. Re-signing the first claims with only the nonce
+/// swapped keeps the old `jti`, which a replay-tracking PDS may reject.
+#[tokio::test]
+async fn dpop_nonce_retry_mints_a_fresh_jti() {
+    let mock = MockServer::start().await;
+    let seen = RecordJti::default();
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(None))
+        .and(seen.clone())
+        .respond_with(
+            ResponseTemplate::new(401)
+                .insert_header("WWW-Authenticate", "DPoP error=\"use_dpop_nonce\"")
+                .insert_header("DPoP-Nonce", "server-nonce-1")
+                .set_body_json(serde_json::json!({ "error": "use_dpop_nonce" })),
+        )
+        .expect(1)
+        .mount(&mock)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/xrpc/app.bsky.graph.muteActor"))
+        .and(ProofNonce(Some("server-nonce-1")))
+        .and(seen.clone())
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&mock)
+        .await;
+
+    client(&mock).mute_actor("did:plc:target1").await.unwrap();
+
+    let seen = seen
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let jti_for = |nonce: Option<&str>| {
+        seen.iter()
+            .find(|(n, _)| n.as_deref() == nonce)
+            .map(|(_, j)| j.clone())
+            .unwrap_or_else(|| panic!("no proof with nonce {nonce:?} seen: {seen:?}"))
+    };
+    let first = jti_for(None);
+    let retry = jti_for(Some("server-nonce-1"));
+    assert!(!first.is_empty());
+    assert_ne!(first, retry, "retry re-used the first proof's jti");
 }
 
 /// Spec §5.2: the first call pays the challenge, the second does not.

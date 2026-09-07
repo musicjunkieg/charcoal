@@ -28,7 +28,8 @@
 	 *  separate because it describes something that already happened — a poll
 	 *  clearing `error` must not wipe it off the screen. */
 	let consentError = $state('');
-	let timer: ReturnType<typeof setInterval> | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	let destroyed = false;
 
 	const ERROR_COPY: Record<string, string> = {
 		denied: "Bluesky didn't grant permission. Nothing was changed.",
@@ -51,13 +52,16 @@
 		} finally {
 			loading = false;
 		}
-		// Poll while anything is in flight; stop as soon as nothing is.
-		const active = batches.some((b) => isRunning(b));
-		if (active && !timer) timer = setInterval(load, 3000);
-		if (!active && timer) {
-			clearInterval(timer);
+		// Poll while anything is in flight; stop as soon as nothing is. The
+		// next poll is armed only after this one finishes (self-arming
+		// `setTimeout`, like the batch detail page) so two reads never overlap
+		// and a slow older response cannot land over a newer one.
+		if (timer) {
+			clearTimeout(timer);
 			timer = null;
 		}
+		const active = batches.some((b) => isRunning(b));
+		if (active && !destroyed) timer = setTimeout(load, 3000);
 	}
 
 	async function disconnect() {
@@ -81,7 +85,8 @@
 		load();
 	});
 	onDestroy(() => {
-		if (timer) clearInterval(timer);
+		destroyed = true;
+		if (timer) clearTimeout(timer);
 	});
 </script>
 

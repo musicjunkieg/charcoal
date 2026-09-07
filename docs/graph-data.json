@@ -8227,6 +8227,83 @@
       "created_at": "2026-09-07T02:14:54.110645-07:00",
       "updated_at": "2026-09-07T02:14:54.124747-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 758,
+      "change_id": "b7772839-077d-40fa-99b6-d4b9fc3c45f8",
+      "node_type": "action",
+      "title": "Docs PR #114: CHANGELOG amended with the #335 finding and resolution (docs/335-finding b5534f2)",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-07T02:15:52.074121-07:00",
+      "updated_at": "2026-09-07T02:34:55.956582-07:00",
+      "metadata_json": "{\"branch\":\"docs/335-finding\",\"commit\":\"b5534f2\",\"confidence\":90}"
+    },
+    {
+      "id": 759,
+      "change_id": "24b05766-93a6-4e15-b6f9-ce158697d9b9",
+      "node_type": "outcome",
+      "title": "PR #114 CodeRabbit APPROVED round 1 (empty body, 0 threads); waiting on CI, then Bryan merges",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-07T02:18:06.449345-07:00",
+      "updated_at": "2026-09-07T02:34:55.950775-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"ae973e3\",\"confidence\":95}"
+    },
+    {
+      "id": 760,
+      "change_id": "5c261bf2-9f63-43db-9b06-2aaaabe6e5d9",
+      "node_type": "action",
+      "title": "Open staging→main promotion PR: #309 allowlist, #315 tier actions, #322, #332/#333/#318 toast+spans, #329/#330 deps, #335 db_write span + region finding",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T02:35:37.273092-07:00",
+      "updated_at": "2026-09-07T02:35:37.273092-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"50d44dc\",\"confidence\":90}"
+    },
+    {
+      "id": 761,
+      "change_id": "9fe98520-ddf5-472b-b20b-1b283fa7432d",
+      "node_type": "outcome",
+      "title": "PR #115 staging→main promotion opened (86 commits, 8 PRs); awaiting CodeRabbit + CI, then Bryan merges → prod deploy",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T02:36:04.203368-07:00",
+      "updated_at": "2026-09-07T02:36:04.203368-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"50d44dc\",\"confidence\":90}"
+    },
+    {
+      "id": 762,
+      "change_id": "5caa6d93-8d56-4485-96b2-e99515edfc37",
+      "node_type": "action",
+      "title": "Set CHARCOAL_TOKEN_KEY on production via railway variables --set (value never in transcript); prod actions go live with the #115 deploy",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T02:39:54.524132-07:00",
+      "updated_at": "2026-09-07T02:39:54.524132-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"50d44dc\",\"confidence\":95}"
+    },
+    {
+      "id": 763,
+      "change_id": "c97bf630-5ccb-45b5-b160-9ce5c12063c1",
+      "node_type": "action",
+      "title": "Fix PR #115 whole-branch review: fresh jti on DPoP nonce retry, undo_batch queued/running guard, ConfirmSheet focus trap, poll sleep clamp, actions-list self-arming poll, test seed id (#345); decline applyWrites length check (atomic commit)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T02:49:35.616577-07:00",
+      "updated_at": "2026-09-07T02:49:35.616577-07:00",
+      "metadata_json": "{\"branch\":\"fix/115-promotion-review\",\"commit\":\"50d44dc\",\"confidence\":88}"
+    },
+    {
+      "id": 764,
+      "change_id": "4ab6b5f9-99c5-4f58-8e29-e3db15007173",
+      "node_type": "action",
+      "title": "Implemented #345 fixes TDD: dpop fresh jti (rand Alphanumeric 30), undo_batch 409 batch_running guard, poll sleep clamp, ConfirmSheet Tab trap, actions list self-arming setTimeout, seed id in test; CHANGELOG entry; clippy 0 warnings, vitest 133, targeted cargo tests green",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T03:11:30.654957-07:00",
+      "updated_at": "2026-09-07T03:11:30.654957-07:00",
+      "metadata_json": "{\"branch\":\"fix/115-promotion-review\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -16710,6 +16787,83 @@
       "weight": 1.0,
       "rationale": "Region-mismatch observation led to Bryan's infra fix; re-measured with the same spans",
       "created_at": "2026-09-07T02:14:54.118345-07:00"
+    },
+    {
+      "id": 782,
+      "from_node_id": 757,
+      "to_node_id": 758,
+      "from_change_id": "cd0da005-9120-407b-8f8a-eaf7bc25097e",
+      "to_change_id": "b7772839-077d-40fa-99b6-d4b9fc3c45f8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Resolution recorded in CHANGELOG for readers",
+      "created_at": "2026-09-07T02:15:52.080457-07:00"
+    },
+    {
+      "id": 783,
+      "from_node_id": 758,
+      "to_node_id": 759,
+      "from_change_id": "b7772839-077d-40fa-99b6-d4b9fc3c45f8",
+      "to_change_id": "24b05766-93a6-4e15-b6f9-ce158697d9b9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Docs PR review result",
+      "created_at": "2026-09-07T02:18:10.211865-07:00"
+    },
+    {
+      "id": 784,
+      "from_node_id": 757,
+      "to_node_id": 760,
+      "from_change_id": "cd0da005-9120-407b-8f8a-eaf7bc25097e",
+      "to_change_id": "5c261bf2-9f63-43db-9b06-2aaaabe6e5d9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Promotion follows #335 resolution",
+      "created_at": "2026-09-07T02:36:07.467249-07:00"
+    },
+    {
+      "id": 785,
+      "from_node_id": 760,
+      "to_node_id": 761,
+      "from_change_id": "5c261bf2-9f63-43db-9b06-2aaaabe6e5d9",
+      "to_change_id": "9fe98520-ddf5-472b-b20b-1b283fa7432d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR opened",
+      "created_at": "2026-09-07T02:36:07.473702-07:00"
+    },
+    {
+      "id": 786,
+      "from_node_id": 760,
+      "to_node_id": 762,
+      "from_change_id": "5c261bf2-9f63-43db-9b06-2aaaabe6e5d9",
+      "to_change_id": "5caa6d93-8d56-4485-96b2-e99515edfc37",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Deploy prerequisite for #315 on prod",
+      "created_at": "2026-09-07T02:39:57.860664-07:00"
+    },
+    {
+      "id": 787,
+      "from_node_id": 761,
+      "to_node_id": 763,
+      "from_change_id": "9fe98520-ddf5-472b-b20b-1b283fa7432d",
+      "to_change_id": "c97bf630-5ccb-45b5-b160-9ce5c12063c1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit CHANGES_REQUESTED on promotion PR",
+      "created_at": "2026-09-07T02:49:38.758736-07:00"
+    },
+    {
+      "id": 788,
+      "from_node_id": 763,
+      "to_node_id": 764,
+      "from_change_id": "c97bf630-5ccb-45b5-b160-9ce5c12063c1",
+      "to_change_id": "4ab6b5f9-99c5-4f58-8e29-e3db15007173",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of the triaged fix list",
+      "created_at": "2026-09-07T03:11:33.469888-07:00"
     }
   ],
   "documents": [

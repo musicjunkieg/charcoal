@@ -162,6 +162,21 @@ describe('pollUntilSettled', () => {
 		expect(c.sleeps).toEqual([1000, 1000, 1000, 1000, 1000]);
 	});
 
+	it('the between-fetch sleep never runs past the deadline', async () => {
+		const c = clock();
+		// A 900 ms fetch against a 1 s budget leaves 100 ms — the sleep must
+		// be clamped to that, not the full 1 s interval, or the working toast
+		// hangs around for almost a second after the deadline.
+		const fetch = async () => {
+			await c.sleep(900);
+			return detail({ status: 'running' }, [row()]);
+		};
+		const out = await pollUntilSettled(fetch, { sleep: c.sleep, now: c.now, intervalMs: 1000, timeoutMs: 1000 });
+		expect(out).toBe('timeout');
+		expect(c.sleeps).toEqual([900, 100]);
+		expect(c.now()).toBe(1000);
+	});
+
 	it('a fetch that never settles still times out, and no further fetch starts', async () => {
 		// Real timers here (faked): the deadline must be enforced WHILE a
 		// fetch is pending, not only between fetches — otherwise a hung

@@ -53,8 +53,39 @@
 			: `${VERB[kind]} ${liveCount} ${liveCount === 1 ? 'account' : 'accounts'} in ${label}?`
 	);
 
+	// Anything a keyboard can land on inside the sheet. Disabled controls
+	// (already-done rows, the empty-selection Confirm button) are skipped, as
+	// the browser itself would skip them.
+	const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
 	function onkeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') oncancel();
+		if (e.key === 'Escape') {
+			oncancel();
+			return;
+		}
+		// Focus trap: `aria-modal` tells assistive tech the page behind is
+		// inert, but it does not stop Tab from reaching it. Wrap at both ends
+		// so keyboard users cannot leave the sheet without choosing.
+		if (e.key !== 'Tab' || !sheetEl) return;
+		const focusable = Array.from(sheetEl.querySelectorAll<HTMLElement>(FOCUSABLE));
+		if (focusable.length === 0) {
+			e.preventDefault();
+			sheetEl.focus();
+			return;
+		}
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		const active = document.activeElement;
+		const inside = active instanceof HTMLElement && sheetEl.contains(active);
+		if (e.shiftKey) {
+			if (!inside || active === first || active === sheetEl) {
+				e.preventDefault();
+				last.focus();
+			}
+		} else if (!inside || active === last) {
+			e.preventDefault();
+			first.focus();
+		}
 	}
 
 	// Cancel only when the backdrop itself is clicked, not a click that
