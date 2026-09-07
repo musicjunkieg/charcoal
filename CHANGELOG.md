@@ -32,9 +32,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the `pds_call` lines from #333 (#335). On staging the gap between
   consecutive PDS calls was ~600–800 ms against a ~140 ms PDS call plus a
   100 ms pace, and the only thing in that gap is one primary-key `UPDATE`.
-  This is the instrument, not the fix: the next bulk mute on staging says
-  whether the time is in Charcoal's write path or in the network to
-  Postgres.
+  The spans answered it in one run: `update_action` took 356 ms at p50 with
+  a p90 of 359 — a fixed cost, not a slow query — and 356 is two ~178 ms
+  network round-trips (sqlx's pre-acquire ping plus the statement). The
+  Postgres service had been provisioned in Railway's `asia-southeast1`
+  region while `charcoal-web` runs in `us-west2`, in both environments, so
+  every query in production was paying a Los Angeles–Singapore round-trip
+  twice. Moving Postgres to `us-west2` (2026-09-07, infra, no code change)
+  took the same write from 356 ms to 5 ms and a 45-account bulk mute from
+  31 s to 10.7 s; a row is now the PDS call plus the pace and nothing else.
+  The `db_write` line stays so a regression of this kind is a log search,
+  not a spike.
 - Dependabot sweep (#328, #329, #330). Every open alert was checked for
   actual exposure and none reached the running service: `openssl` is a
   build-time dependency of `ort-sys` (it downloads the ONNX Runtime archive

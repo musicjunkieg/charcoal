@@ -1,5 +1,21 @@
 [
   {
+    "hash": "ae973e3d0869d335ce66a619ae71bab92c1a3500",
+    "short_hash": "ae973e3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-06T13:38:11-07:00",
+    "message": "Merge pull request #113 from musicjunkieg/fix/335-db-write-span",
+    "files_changed": 0
+  },
+  {
+    "hash": "4dcc52172e668ea378ac080ca8586aea5c162014",
+    "short_hash": "4dcc521",
+    "author": "Bryan Guffey",
+    "date": "2026-09-06T13:20:57-07:00",
+    "message": "fix(335): PR #113 review round 1 - recover poisoned collector mutex\n\nBoth locks on the DbWriteSpans collector now use\nunwrap_or_else(PoisonError::into_inner): a poisoned lock still holds a\nvalid Vec, so recovering keeps the original panic visible instead of\nmasking it with a second one.",
+    "files_changed": 3
+  },
+  {
     "hash": "3f5ba01107ed3c1f47bfa1e68b2e918b3ca2336f",
     "short_hash": "3f5ba01",
     "author": "Bryan Guffey",
