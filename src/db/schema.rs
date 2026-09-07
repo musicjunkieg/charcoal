@@ -451,6 +451,84 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // v14 (#309): access_requests — DB-backed allowlist for gated onboarding.
+    // One row per DID, ever. 'denied' covers both "denied from waitlist" and
+    // "revoked after having access"; the waitlist page never distinguishes.
+    // Deliberately NOT touched by delete_user_data: this is the admin's
+    // grant/deny record (DID + public handle), not user content.
+    run_migration(conn, 14, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS access_requests (
+                 did TEXT PRIMARY KEY,
+                 handle TEXT NOT NULL,
+                 status TEXT NOT NULL CHECK (status IN ('pending','allowed','denied')),
+                 requested_at TEXT NOT NULL,
+                 decided_at TEXT,
+                 decided_by TEXT
+             );
+             COMMIT;",
+        )
+    })?;
+
+    // v15 (#315): tier-based mute/block actions.
+    // oauth_sessions — one write-scoped OAuth grant per user; every secret is
+    //   an AES-256-GCM blob (see web::actions::crypto), never plaintext.
+    // action_batches / actions — the user-facing log of everything Charcoal
+    //   did on the user's behalf, with score/tier snapshots so the log can
+    //   still explain itself after later rescans move accounts between tiers.
+    // Statuses are TEXT with CHECK constraints rather than enums so both
+    // backends store identical strings.
+    run_migration(conn, 15, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS oauth_sessions (
+                 user_did TEXT PRIMARY KEY,
+                 pds_url TEXT NOT NULL,
+                 scope TEXT NOT NULL,
+                 access_token_enc BLOB NOT NULL,
+                 refresh_token_enc BLOB NOT NULL,
+                 dpop_key_enc BLOB NOT NULL,
+                 access_expires_at INTEGER NOT NULL,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS action_batches (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 user_did TEXT NOT NULL,
+                 kind TEXT NOT NULL CHECK (kind IN ('mute','block','undo')),
+                 source TEXT NOT NULL,
+                 requested INTEGER NOT NULL,
+                 status TEXT NOT NULL CHECK (status IN ('queued','running','done','partial','failed')),
+                 error TEXT,
+                 created_at TEXT NOT NULL,
+                 started_at TEXT,
+                 finished_at TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_action_batches_user_created
+                 ON action_batches (user_did, created_at);
+             CREATE TABLE IF NOT EXISTS actions (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 batch_id INTEGER NOT NULL REFERENCES action_batches(id),
+                 user_did TEXT NOT NULL,
+                 target_did TEXT NOT NULL,
+                 kind TEXT NOT NULL CHECK (kind IN ('mute','block')),
+                 status TEXT NOT NULL CHECK (status IN ('pending','applied','skipped_already_done','failed','undone')),
+                 record_uri TEXT,
+                 undo_of INTEGER REFERENCES actions(id),
+                 error TEXT,
+                 score_at_action REAL,
+                 tier_at_action TEXT,
+                 applied_at TEXT,
+                 undone_at TEXT
+             );
+             CREATE INDEX IF NOT EXISTS idx_actions_user_target_kind
+                 ON actions (user_did, target_did, kind);
+             CREATE INDEX IF NOT EXISTS idx_actions_batch ON actions (batch_id);
+             COMMIT;",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -507,8 +585,9 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips, scan_queue, topic_clusters = 13 tables (v13)
-        assert_eq!(count, 13i64);
+        // scan_skips, scan_queue, topic_clusters, access_requests,
+        // oauth_sessions, action_batches, actions = 17 tables (v15)
+        assert_eq!(count, 17i64);
     }
 
     #[test]
@@ -572,7 +651,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v13
+        // Verify schema_version has all versions through v15
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -580,7 +659,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(versions, (1..=15).collect::<Vec<i64>>());
     }
 
     #[test]
@@ -682,10 +761,11 @@ mod tests {
         // schema_version, topic_fingerprint, account_scores,
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
-        // scan_skips, scan_queue, topic_clusters = 13 tables (v13)
-        assert_eq!(count, 13i64);
+        // scan_skips, scan_queue, topic_clusters, access_requests,
+        // oauth_sessions, action_batches, actions = 17 tables (v15)
+        assert_eq!(count, 17i64);
 
-        // Verify schema_version includes v4 through v13
+        // Verify schema_version includes v4 through v15
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -693,7 +773,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(versions, (1..=15).collect::<Vec<i64>>());
     }
 
     /// Does `scan_queue` currently have a `claim_id` column?
@@ -836,5 +916,25 @@ mod tests {
             )
             .unwrap();
         assert!(recorded, "v12 should still record itself as applied");
+    }
+
+    #[test]
+    fn test_migration_v14_creates_access_requests() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        // Insert exercises every column and the CHECK constraint's happy path.
+        conn.execute(
+            "INSERT INTO access_requests (did, handle, status, requested_at)
+             VALUES ('did:plc:waitlisted', 'w.bsky.social', 'pending', '2026-08-24T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // The CHECK constraint rejects unknown statuses.
+        let err = conn.execute(
+            "INSERT INTO access_requests (did, handle, status, requested_at)
+             VALUES ('did:plc:bad', 'b.bsky.social', 'banana', '2026-08-24T00:00:00Z')",
+            [],
+        );
+        assert!(err.is_err(), "CHECK constraint must reject invalid status");
     }
 }

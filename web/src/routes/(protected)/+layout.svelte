@@ -6,8 +6,9 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { getStatus, logout, getIdentity } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import type { Identity } from '$lib/types.js';
+	import Toast from '$lib/components/Toast.svelte';
 
 	let { children } = $props();
 	let checking = $state(true);
@@ -24,6 +25,9 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			} else if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 				return;
 			}
 			// Non-auth error (network, server error) — still allow through;
@@ -76,6 +80,11 @@
 					class="nav-link"
 					class:active={$page.url.pathname === '/review'}
 				>Review</a>
+				<a
+					href="/actions{asUserSuffix}"
+					class="nav-link"
+					class:active={$page.url.pathname.startsWith('/actions')}
+				>Actions</a>
 				{#if identity?.is_admin}
 					<a
 						href="/admin"
@@ -100,6 +109,7 @@
 		<main class="main">
 			{@render children()}
 		</main>
+		<Toast />
 	</div>
 {/if}
 

@@ -211,9 +211,114 @@ export interface Identity {
 	did: string;
 	handle: string;
 	is_admin: boolean;
+	/** False when CHARCOAL_ALLOWED_DID is unset (open access) — access-table
+	 *  decisions are inert in that mode and the admin UI warns about it. */
+	access_gate_active: boolean;
 }
 
 export interface PreSeedResponse {
 	did: string;
 	handle: string;
+}
+
+export interface AccessRequest {
+	did: string;
+	handle: string;
+	status: 'pending' | 'allowed' | 'denied';
+	requested_at: string;
+	decided_at: string | null;
+	decided_by: string | null;
+}
+
+export interface AccessListResponse {
+	pending: AccessRequest[];
+	allowed: AccessRequest[];
+	denied: AccessRequest[];
+}
+
+export interface ApproveScanResponse {
+	did: string;
+	access: string;
+	/** "queued" on full success; anything else is an honest partial failure. */
+	scan: string;
+}
+
+// ---- Mute / block actions (#315) ----
+
+export type ActionKind = 'mute' | 'block';
+export type ActionBatchKind = ActionKind | 'undo';
+export type ActionBatchStatus = 'queued' | 'running' | 'done' | 'partial' | 'failed';
+export type ActionRowStatus =
+	| 'pending'
+	| 'applied'
+	| 'skipped_already_done'
+	| 'failed'
+	| 'undone';
+
+export interface ActionsStatus {
+	enabled: boolean;
+	connected: boolean;
+	scope?: string;
+	pds_url?: string;
+	connected_at?: string;
+}
+
+export interface ActionBatchSummary {
+	id: number;
+	kind: ActionBatchKind;
+	source: string;
+	requested: number;
+	status: ActionBatchStatus;
+	error: string | null;
+	created_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+	counts: Partial<Record<ActionRowStatus, number>>;
+	drifted: boolean;
+}
+
+export interface ActionRowView {
+	id: number;
+	batch_id: number;
+	target_did: string;
+	handle: string | null;
+	kind: ActionKind;
+	status: ActionRowStatus;
+	record_uri: string | null;
+	undo_of: number | null;
+	error: string | null;
+	score_at_action: number | null;
+	tier_at_action: string | null;
+	current_tier: string | null;
+	drifted: boolean;
+	applied_at: string | null;
+	undone_at: string | null;
+}
+
+export interface ActionBatchDetail {
+	batch: ActionBatchSummary;
+	actions: ActionRowView[];
+}
+
+export interface CreateBatchResponse {
+	batch_id: number | null;
+	requested: number;
+	skipped_active: number;
+}
+
+/** One active mute/block Charcoal currently holds, from GET /api/actions/active. */
+export interface ActiveActionRef {
+	did: string;
+	kind: ActionKind;
+}
+
+/** One row of the bulk confirm sheet's account list (spec §5.1). */
+export interface SheetRow {
+	did: string;
+	handle: string;
+	tier: string | null;
+	/** Plain-language top signal — never a bare number (PRODUCT principle 1). */
+	signal: string;
+	/** Charcoal already holds this kind on this account: greyed, unchecked, not counted. */
+	done: boolean;
 }

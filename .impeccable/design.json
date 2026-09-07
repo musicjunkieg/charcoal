@@ -59,7 +59,12 @@
       "title": { "displayName": "Title", "purpose": "Card titles and panel headers." },
       "body": { "displayName": "Body", "purpose": "All running text. Weight 300 for descriptions, 400 default." },
       "label": { "displayName": "Label", "purpose": "Uppercase form labels, 0.03em tracking." },
-      "eyebrow": { "displayName": "Eyebrow", "purpose": "Section kickers in copper, 0.15em tracking, uppercase." }
+      "eyebrow": { "displayName": "Eyebrow", "purpose": "Section kickers in copper, 0.15em tracking, uppercase." },
+      "subtitle": { "displayName": "Subtitle", "purpose": "Sheet and dialog headings. Outfit 1.125rem." },
+      "body-sm": { "displayName": "Body small", "purpose": "Secondary running text and empty-state copy. 0.9375rem." },
+      "small": { "displayName": "Small", "purpose": "Table cells, meta lines, signal labels. 0.875rem." },
+      "caption": { "displayName": "Caption", "purpose": "Notes, DIDs, inline errors under controls. 0.75rem." },
+      "stat": { "displayName": "Stat", "purpose": "The account handle on the detail page. Libre Baskerville 1.875rem." }
     },
     "shadows": [
       { "name": "featured-glow", "value": "0 0 0 1px rgba(0,0,0,0.25), 0 20px 50px -10px rgba(0,0,0,0.5), 0 0 80px -20px rgba(201,149,108,0.3)", "purpose": "Copper halo under featured and CTA cards. Atmosphere, not rank." },

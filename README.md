@@ -247,6 +247,10 @@ You need three additional environment variables (see `.env.example`):
 - `CHARCOAL_OAUTH_CLIENT_ID` — URL of your OAuth client metadata document
 - `CHARCOAL_SESSION_SECRET` — HMAC signing key for session cookies (generate
   with `openssl rand -hex 32`)
+- `CHARCOAL_TOKEN_KEY` — optional; 64 hex chars (32 bytes). Encrypts stored
+  OAuth write sessions for mute/block. Generate with `openssl rand -hex 32`.
+  **Unset = mute/block disabled**; rotating it invalidates every stored
+  session (people reconnect once).
 
 For local development, use Tailscale Funnel to get a public HTTPS URL:
 

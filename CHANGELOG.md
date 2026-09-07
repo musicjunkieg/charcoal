@@ -6,7 +6,137 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Review fixes from the staging→main promotion PR (#345, PR #115). The DPoP
+  nonce retry re-signed the *same* proof with the new nonce, so the retry
+  carried the jti the server had already seen — RFC 9449 makes `jti` a
+  per-proof replay guard, and a PDS that tracks them would reject the
+  retry outright; the retry now mints a fresh one. `POST
+  …/batches/{id}/undo` accepted a batch the runner was still working on,
+  and an undo built then only covers the rows that were `applied` at that
+  instant — the rest land afterwards and stay in force with no undo. It now
+  answers `409 batch_running`, the guard `retry` already had; the UI never
+  offered the button, but the server must not rely on that. The single-
+  action working toast could outlive its 60 s deadline by almost a full
+  poll interval when the last fetch was slow (the between-fetch sleep is
+  now clamped to the time left). The confirm sheet's `aria-modal` dialog
+  did not keep keyboard focus inside it — Tab reached the navigation
+  behind — and now wraps at both ends. The actions list polls with a
+  self-arming timeout, as the batch page already did, so a slow response
+  can no longer land over a newer one. One test bound an undo row to a
+  hard-coded action id instead of the seeded one.
+- Mute/block failed with `getMutes: server error 501` on a self-hosted PDS
+  (#322). Two gaps behind one symptom. A PDS with no default AppView (every
+  self-hosted reference PDS; bsky.social fills one in) refuses `app.bsky.*`
+  calls that do not name the service in an `atproto-proxy` header, and
+  `PdsClient` never sent one — it now does on every `app.bsky.*` call and
+  never on `com.atproto.*`. And the PDS checks proxied *reads* against the
+  `rpc:` grant just as it does writes, so the consent scope now also asks for
+  `rpc:app.bsky.graph.getMutes` and `rpc:app.bsky.graph.getBlocks` (the
+  reconcile step needs both). Sessions stored under the original grant read
+  as not connected, so anyone who consented before this fix is asked once
+  more instead of watching every batch fail. The grant check itself got
+  stricter on review: an `rpc:` scope counts only for the AppView audience
+  (or `*`), the scope a token refresh reports is persisted with the rotated
+  tokens and a narrowed one disconnects the session, and a row written by
+  another replica during a lost refresh race is re-checked before use.
+  Every delete on that path is a compare-and-delete keyed on `updated_at`,
+  so a session replaced mid-refresh (a re-consent, or another replica) is
+  never removed on the strength of a stale read — it is reloaded and used.
+
+### Changed
+- The action runner now logs a `db_write` timing line (`op`, `action_id` /
+  `batch_id`, `elapsed_ms`) around every row and batch-status write, next to
+  the `pds_call` lines from #333 (#335). On staging the gap between
+  consecutive PDS calls was ~600–800 ms against a ~140 ms PDS call plus a
+  100 ms pace, and the only thing in that gap is one primary-key `UPDATE`.
+  The spans answered it in one run: `update_action` took 356 ms at p50 with
+  a p90 of 359 — a fixed cost, not a slow query — and 356 is two ~178 ms
+  network round-trips (sqlx's pre-acquire ping plus the statement). The
+  Postgres service had been provisioned in Railway's `asia-southeast1`
+  region while `charcoal-web` runs in `us-west2`, in both environments, so
+  every query in production was paying a Los Angeles–Singapore round-trip
+  twice. Moving Postgres to `us-west2` (2026-09-07, infra, no code change)
+  took the same write from 356 ms to 5 ms and a 45-account bulk mute from
+  31 s to 10.7 s; a row is now the PDS call plus the pace and nothing else.
+  The `db_write` line stays so a regression of this kind is a log search,
+  not a spike.
+- Dependabot sweep (#328, #329, #330). Every open alert was checked for
+  actual exposure and none reached the running service: `openssl` is a
+  build-time dependency of `ort-sys` (it downloads the ONNX Runtime archive
+  at compile time), `quinn-proto` is an inactive optional dependency of
+  `reqwest` (`http3` is off), `rustls-webpki`'s CRL bugs need a CRL and we
+  load none, every npm alert is a devDependency of a static SPA with no
+  server-side rendering, and the vLLM advisories need inputs (images, audio,
+  regex grammars, prompt lists) a Charcoal user cannot send to a private
+  endpoint. The Rust crates and npm devDependencies were bumped anyway
+  (`cargo update` on the five flagged crates, `npm update`), so the alerts
+  clear. `hickory-dns` (the DNS resolver used for TXT-record handle
+  resolution, with an unpatched NSEC3 advisory on the 0.25 line) was never
+  called by Charcoal — only HTTP handle resolution is — so it is now an
+  opt-in feature in the `atproto-crates` mirror instead of a default, and
+  no longer compiled into the binary at all. The vLLM bump (#331) waits for
+  the next RunPod image rebuild because the pin must match the base image.
+  The three `low` findings `npm audit` still reports are the `cookie`
+  advisory reached through `@sveltejs/kit` (#137); the only offered fix is
+  a downgrade to a pre-1.0 kit, so they stay.
+- Muting or blocking one account now finishes where you are (#332). The
+  button reads `Muting…`, a toast at the bottom of the page follows the
+  batch, and it settles to `Muted @handle` with Undo and a link to the
+  record — no more detour to the action page and back. Undo works the same
+  way. A failure keeps the toast up with Retry; a lost connection offers
+  Reconnect; after 60 s of silence it points you at the record instead of
+  guessing.
+- The action page finishes properly (#332): a `Done · 14 muted, 0 failed`
+  banner (or `Finished with problems`) with Undo all / Retry failed and a
+  `← Back to Watch accounts` link that returns to where the batch was
+  started. It polls every second while running instead of every three.
+- Actions are faster on the wire (#333): the runner remembers the DPoP nonce
+  a PDS hands back, so the steady state is one round trip per call instead
+  of two. It also logs how long the session load, the reconcile read, each
+  PDS call, and the whole batch took, so the next round of speed work is
+  measured rather than guessed.
+- Design-hook findings on the account page and the confirm sheet (#318):
+  signal bars animate with `transform` instead of `width`, the sheet uses
+  palette tokens with no hex fallbacks, three radii snapped to 8 px, and the
+  type sizes the site already ships (0.75 / 0.875 / 0.9375 / 1.125 /
+  1.875 rem) are now in DESIGN.md's ramp. The consent sentence's side rule
+  is kept on purpose and waived for that one file.
+
 ### Added
+- Mute and block from Charcoal (#315): tier-wide and per-account mute/block,
+  with undo, from the Accounts page. The tier-wide confirm sheet lists every
+  account with a pre-checked box, its tier, and its top signal, so nothing
+  runs on a tier alone. Charcoal asks Bluesky for exactly the fine-grained
+  abilities it uses (`repo:app.bsky.graph.block` create/delete, and `rpc:`
+  for `muteActor`/`unmuteActor` plus the `getMutes`/`getBlocks` reads it
+  reconciles against — see #322) on first use — never `transition:generic`. Tokens are AES-256-GCM encrypted at rest
+  under `CHARCOAL_TOKEN_KEY`; unset disables the feature. Every action is
+  logged with the score and tier at the time, so a later drop to Watch shows
+  as a note instead of vanishing. Nothing Charcoal writes to the PDS carries
+  a label, list, reason, or Charcoal's name.
+- Allowlist admin UI + auto-waitlist (#309): gated onboarding no longer
+  means editing a Railway env var. A Bluesky sign-in that fails the access
+  gate now records a pending request (verified DID + handle) and lands on a
+  styled /waitlist page — previously it dead-ended on raw JSON. Admins
+  manage access from the dashboard's new Access section: approve, approve +
+  first scan (pre-seed + enqueue, partial failure reported honestly), deny,
+  grant by handle. Denial is sticky and indistinguishable from pending by
+  design, and revoking keeps the person's data. The gate itself became
+  three OR'd clauses — `CHARCOAL_ALLOWED_DID` env bootstrap (lockout-proof,
+  empty still means open access), admin DIDs implicitly allowed, or an
+  `allowed` row in the new `access_requests` table (schema v14, both
+  backends) — checked per-request, failing closed on DB errors. A session
+  revoked mid-flight now routes to /waitlist instead of a broken dashboard.
+  When the env gate is unset (open access), table decisions are inert by
+  design — the admin Access section shows a warning banner for exactly that
+  state (surfaced via a new `access_gate_active` field on /api/me).
+- Per-user scan cooldown (#258, minimal): one successful scan per user per
+  `CHARCOAL_SCAN_COOLDOWN_HOURS` (default 24, 0 disables), enforced at
+  enqueue with a friendly 429 carrying `retry_at`. Failed scans retry
+  immediately; admin-triggered scans bypass the cooldown deliberately.
+  Also documents the previously-undocumented `CHARCOAL_ADMIN_DIDS` in
+  .env.example.
 - Multi-interest topic fingerprint (#297, spike #295 BETTER tier): the
   protected user's posts are now clustered in embedding space into up to 12
   weighted topic centroids (greedy agglomerative, centroid linkage,

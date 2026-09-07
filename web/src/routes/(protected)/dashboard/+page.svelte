@@ -15,7 +15,7 @@
 		triggerScan,
 		getAccuracy
 	} from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError, CooldownError } from '$lib/api.js';
 	import { TIER_DESCRIPTIONS } from '$lib/tiers.js';
 	import { dashboardView, isQueued } from '$lib/dashboard-state.js';
 	import { topKeywords } from '$lib/fingerprint-keywords.js';
@@ -45,6 +45,8 @@
 	let loading = $state(true);
 	let loadError = $state('');
 	let scanError = $state('');
+	// Cooldown 429 is not an error state — a calm notice with the retry instant.
+	let scanNotice = $state('');
 	let searchQuery = $state('');
 
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -107,6 +109,10 @@
 				await goto('/login');
 				return;
 			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
 			loadError = err instanceof Error ? err.message : 'Failed to load dashboard';
 		} finally {
 			loading = false;
@@ -125,7 +131,16 @@
 			const prevRunning = status.scan_running;
 			try {
 				status = await getStatus();
-			} catch {
+			} catch (err) {
+				// Transient poll failures are ignored (the view keeps its last
+				// data), but auth-terminal errors are not transient: a session
+				// revoked or expired mid-poll must route away, not leave the
+				// user on a dashboard that silently stopped updating.
+				if (err instanceof AccessRevokedError) {
+					await goto('/waitlist');
+				} else if (err instanceof AuthError) {
+					await goto('/login');
+				}
 				return;
 			}
 			// Refresh partial results while running; on the falling edge (scan
@@ -149,6 +164,7 @@
 
 	async function handleScan() {
 		scanError = '';
+		scanNotice = '';
 		scanning = true;
 		try {
 			await triggerScan();
@@ -156,6 +172,14 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+				return;
+			}
+			if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
+				return;
+			}
+			if (err instanceof CooldownError) {
+				scanNotice = `Next scan available at ${new Date(err.retry_at).toLocaleString()}`;
 				return;
 			}
 			scanError = err instanceof Error ? err.message : 'Scan failed to start';
@@ -259,6 +283,9 @@
 			{#if scanError}
 				<p class="scan-error">{scanError}</p>
 			{/if}
+			{#if scanNotice}
+				<p class="scan-notice">{scanNotice}</p>
+			{/if}
 		</div>
 	</div>
 
@@ -293,6 +320,9 @@
 				{#if scanError}
 					<p class="scan-error">{scanError}</p>
 				{/if}
+				{#if scanNotice}
+					<p class="scan-notice">{scanNotice}</p>
+				{/if}
 				{#if status.last_error}
 					<p class="scan-error">{status.last_error}</p>
 				{/if}
@@ -326,6 +356,9 @@
 				{/if}
 				{#if scanError}
 					<p class="scan-error">{scanError}</p>
+				{/if}
+				{#if scanNotice}
+					<p class="scan-notice">{scanNotice}</p>
 				{/if}
 			</div>
 		{:else}
@@ -610,6 +643,14 @@
 	.scan-error {
 		font-size: 0.8125rem;
 		color: var(--status-error);
+		text-align: right;
+	}
+
+	/* Cooldown 429 is a calm notice, not an error — quiet on the ramp,
+	   no red, no border. */
+	.scan-notice {
+		font-size: 0.8125rem;
+		color: var(--charcoal-300);
 		text-align: right;
 	}
 

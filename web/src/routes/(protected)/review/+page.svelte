@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { getReviewQueue } from '$lib/api.js';
-	import { AuthError } from '$lib/api.js';
+	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import LabelButtons from '$lib/components/LabelButtons.svelte';
 	import type { ReviewAccount } from '$lib/types.js';
 	import { tierClass } from '$lib/tier-class';
@@ -22,6 +22,8 @@
 		} catch (err) {
 			if (err instanceof AuthError) {
 				await goto('/login');
+			} else if (err instanceof AccessRevokedError) {
+				await goto('/waitlist');
 			}
 		} finally {
 			loading = false;

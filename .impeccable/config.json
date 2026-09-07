@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/src/lib/components/ConfirmSheet.svelte"
+        ],
+        "createdAt": "2026-09-04T19:00:02.586Z",
+        "reason": "Consent-terms rule, confirmed intentional 2026-09-04 (#318)"
+      }
+    ]
+  }
+}

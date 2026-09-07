@@ -178,6 +178,51 @@ async fn status_reports_the_queue_position_only_while_queued() {
     assert_eq!(running["scan_running"], true);
 }
 
+/// #258/#309: a successful scan starts a per-user cooldown window. The 429
+/// carries a `retry_at` so the client can tell the caller when to come back.
+#[tokio::test]
+async fn a_completed_scan_starts_the_cooldown() {
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
+    db.enqueue_scan(USER_A).await.expect("enqueue");
+    let claim = db
+        .claim_next_scan(1, 600)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    db.finish_queued_scan(USER_A, &claim.claim_id, None)
+        .await
+        .expect("finish");
+
+    let (status, body) = post_scan(&app, USER_A).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert!(body["retry_at"].is_string(), "retry_at present: {body}");
+}
+
+/// A failed scan is not a "successful scan" for cooldown purposes — the user
+/// should be able to retry immediately.
+#[tokio::test]
+async fn a_failed_scan_does_not_start_the_cooldown() {
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
+    db.enqueue_scan(USER_A).await.expect("enqueue");
+    let claim = db
+        .claim_next_scan(1, 600)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    db.finish_queued_scan(USER_A, &claim.claim_id, Some("boom"))
+        .await
+        .expect("finish");
+
+    let (status, _) = post_scan(&app, USER_A).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "failed scans may retry immediately"
+    );
+}
+
 /// The queue row is the authority on whether a scan is live (#257/#274). A
 /// process that never registered the scan in memory — a restart, or another
 /// replica — must still report it as running rather than idle.

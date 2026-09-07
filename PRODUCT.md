@@ -151,6 +151,10 @@ Absent — future work must not fabricate these:
 5. **A stranger must be able to start.** Any user can sign in, so first run has
    to carry someone with no prior context through a long job to a result they
    understand.
+6. **Outputs act only on the user's own experience and reach.** Charcoal
+   mutes and blocks for the user, privately or as the user's own self-scoped
+   record, and never creates a list, label, reason, or share surface from a
+   prediction. Full statement: [docs/self-protective-invariant.md](docs/self-protective-invariant.md).
 
 ## Accessibility & Inclusion
 

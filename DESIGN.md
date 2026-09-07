@@ -52,7 +52,33 @@ typography:
     fontSize: "0.8125rem"
     fontWeight: 500
     letterSpacing: "0.15em"
+  subtitle:
+    fontFamily: "Outfit, system-ui, sans-serif"
+    fontSize: "1.125rem"
+    fontWeight: 400
+    lineHeight: 1.3
+  body-sm:
+    fontFamily: "Outfit, system-ui, sans-serif"
+    fontSize: "0.9375rem"
+    fontWeight: 300
+    lineHeight: 1.6
+  small:
+    fontFamily: "Outfit, system-ui, sans-serif"
+    fontSize: "0.875rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  caption:
+    fontFamily: "Outfit, system-ui, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 400
+    lineHeight: 1.4
+  stat:
+    fontFamily: "Libre Baskerville, Georgia, serif"
+    fontSize: "1.875rem"
+    fontWeight: 400
+    lineHeight: 1.1
 rounded:
+  xs: "2px"
   sm: "8px"
   md: "12px"
   lg: "16px"
