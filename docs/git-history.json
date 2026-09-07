@@ -1,5 +1,13 @@
 [
   {
+    "hash": "48384191e01ebaf9950ea194817bba0ffe6e0d51",
+    "short_hash": "4838419",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T03:45:57-07:00",
+    "message": "fix(345): PR #115 review fixes - fresh DPoP jti on retry, undo guard, poll clamp, focus trap\n\n- dpop_http: the nonce retry re-signed the same proof, so the second\n  request carried the jti the server had already seen. RFC 9449 makes jti\n  a per-proof replay guard; mint a fresh one before the retry.\n- undo_batch: refuse queued/running batches with 409 batch_running, the\n  guard retry_batch already had. An undo built mid-run only covers rows\n  applied at that instant; the rest land afterwards with no undo.\n- action-progress: clamp the between-fetch sleep to the time left so a\n  slow last fetch cannot hold the working toast past its deadline.\n- ConfirmSheet: Tab/Shift+Tab wrap inside the aria-modal dialog.\n- actions list: self-arming setTimeout instead of setInterval so polls\n  never overlap (matches the batch detail page).\n- tests/web_actions: bind undo_of to the seeded id, not Some(1).\n\nDeclined (on the PR thread): applyWrites result-length check - the call\nis atomic and the lexicon marks results optional.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 11
+  },
+  {
     "hash": "50d44dcd3f6d174a4e9de745edf454b59a5ac815",
     "short_hash": "50d44dc",
     "author": "Bryan Guffey",

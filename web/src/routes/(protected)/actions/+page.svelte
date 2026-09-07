@@ -12,6 +12,7 @@
 		AccessRevokedError
 	} from '$lib/api.js';
 	import { batchHeadline, isRunning, isParked } from '$lib/action-status';
+	import { generation } from '$lib/generation';
 	import type { ActionsStatus, ActionBatchSummary } from '$lib/types.js';
 	import '$lib/website/styles/tokens.css';
 
@@ -30,6 +31,7 @@
 	let consentError = $state('');
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let destroyed = false;
+	const loads = generation();
 
 	const ERROR_COPY: Record<string, string> = {
 		denied: "Bluesky didn't grant permission. Nothing was changed.",
@@ -39,23 +41,32 @@
 	};
 
 	async function load() {
+		// The poll timer and `disconnect()` can both call this, so two loads
+		// may overlap; only the newest one is allowed to write state or re-arm
+		// the timer. Otherwise a pre-disconnect read that resolves late puts
+		// "connected" back on screen and restarts polling from stale rows.
+		const ticket = loads.next();
 		// This polls every 3 s while a batch is in flight; one failed poll must
 		// not leave a red banner standing over a list that has since updated.
 		error = '';
 		try {
-			status = await getActionsStatus();
-			batches = (await listActionBatches(50, 0)).batches;
+			const s = await getActionsStatus();
+			const b = (await listActionBatches(50, 0)).batches;
+			if (!loads.isCurrent(ticket)) return;
+			status = s;
+			batches = b;
 		} catch (err) {
+			if (!loads.isCurrent(ticket)) return;
 			if (err instanceof AuthError) return goto('/login');
 			if (err instanceof AccessRevokedError) return goto('/waitlist');
 			error = err instanceof Error ? err.message : 'Something went wrong';
 		} finally {
-			loading = false;
+			if (loads.isCurrent(ticket)) loading = false;
 		}
 		// Poll while anything is in flight; stop as soon as nothing is. The
 		// next poll is armed only after this one finishes (self-arming
-		// `setTimeout`, like the batch detail page) so two reads never overlap
-		// and a slow older response cannot land over a newer one.
+		// `setTimeout`, like the batch detail page) so the timer itself never
+		// starts two reads at once.
 		if (timer) {
 			clearTimeout(timer);
 			timer = null;

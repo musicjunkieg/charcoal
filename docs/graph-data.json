@@ -8304,6 +8304,28 @@
       "created_at": "2026-09-07T03:11:30.654957-07:00",
       "updated_at": "2026-09-07T03:11:30.654957-07:00",
       "metadata_json": "{\"branch\":\"fix/115-promotion-review\",\"confidence\":90}"
+    },
+    {
+      "id": 765,
+      "change_id": "62e6a390-3bae-45d7-903a-462068b9475a",
+      "node_type": "outcome",
+      "title": "Committed 4838419 on fix/115-promotion-review: all #345 fixes + CHANGELOG; full web suite green (0 failed), clippy 0, vitest 133/133",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T03:46:07.847087-07:00",
+      "updated_at": "2026-09-07T03:46:07.847087-07:00",
+      "metadata_json": "{\"branch\":\"fix/115-promotion-review\",\"commit\":\"4838419\",\"confidence\":95}"
+    },
+    {
+      "id": 766,
+      "change_id": "001274e8-6d48-4439-bd19-70d1ece64b06",
+      "node_type": "action",
+      "title": "Latest-wins generation guard for overlapping actions-list loads (CodeRabbit #116 round 2)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-07T03:56:00.636360-07:00",
+      "updated_at": "2026-09-07T03:56:00.636360-07:00",
+      "metadata_json": "{\"branch\":\"fix/115-promotion-review\",\"confidence\":90,\"files\":[\"web/src/lib/generation.ts\",\"web/src/lib/generation.test.ts\",\"web/src/routes/(protected)/actions/+page.svelte\"]}"
     }
   ],
   "edges": [
@@ -16864,6 +16886,28 @@
       "weight": 1.0,
       "rationale": "Implementation of the triaged fix list",
       "created_at": "2026-09-07T03:11:33.469888-07:00"
+    },
+    {
+      "id": 789,
+      "from_node_id": 764,
+      "to_node_id": 765,
+      "from_change_id": "4ab6b5f9-99c5-4f58-8e29-e3db15007173",
+      "to_change_id": "62e6a390-3bae-45d7-903a-462068b9475a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the implementation",
+      "created_at": "2026-09-07T03:46:12.071816-07:00"
+    },
+    {
+      "id": 790,
+      "from_node_id": 765,
+      "to_node_id": 766,
+      "from_change_id": "62e6a390-3bae-45d7-903a-462068b9475a",
+      "to_change_id": "001274e8-6d48-4439-bd19-70d1ece64b06",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit round 2 on PR #116: timer-fired load() can race disconnect()'s refresh; a generation counter is the minimal fix",
+      "created_at": "2026-09-07T03:56:08.619596-07:00"
     }
   ],
   "documents": [
