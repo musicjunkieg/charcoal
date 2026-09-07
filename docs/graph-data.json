@@ -8102,9 +8102,9 @@
       "node_type": "goal",
       "title": "#335 spike: db_write span to measure per-row DB write latency in the action runner",
       "description": null,
-      "status": "pending",
+      "status": "done",
       "created_at": "2026-09-06T12:01:58.581388-07:00",
-      "updated_at": "2026-09-06T12:01:58.581388-07:00",
+      "updated_at": "2026-09-07T02:14:54.130923-07:00",
       "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"confidence\":90,\"prompt\":\"What about 335\"}"
     },
     {
@@ -8172,6 +8172,61 @@
       "created_at": "2026-09-06T13:15:41.123574-07:00",
       "updated_at": "2026-09-06T13:15:41.123574-07:00",
       "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"commit\":\"3f5ba01\",\"confidence\":90}"
+    },
+    {
+      "id": 753,
+      "change_id": "2f736aa1-aebe-42d7-874a-811335ba203c",
+      "node_type": "action",
+      "title": "PR #113 review round 1: recover poisoned DbWriteSpans mutex via PoisonError::into_inner (CodeRabbit Minor)",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-06T13:21:13.118852-07:00",
+      "updated_at": "2026-09-06T13:23:53.067974-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"commit\":\"4dcc521\",\"confidence\":90,\"files\":[\"tests/unit_actions_runner.rs\"]}"
+    },
+    {
+      "id": 754,
+      "change_id": "f6e3781e-12bd-49e1-8db6-9f4577121c65",
+      "node_type": "outcome",
+      "title": "PR #113 CodeRabbit APPROVED on 4dcc521 (round 1: 1 Minor, fixed; 2 review slots used)",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-06T13:23:50.250615-07:00",
+      "updated_at": "2026-09-06T13:23:53.073824-07:00",
+      "metadata_json": "{\"branch\":\"fix/335-db-write-span\",\"commit\":\"4dcc521\",\"confidence\":95}"
+    },
+    {
+      "id": 755,
+      "change_id": "e1158ca8-40fc-4e7c-a440-f32fa6a66e67",
+      "node_type": "outcome",
+      "title": "PR #113 merged to staging ae973e3; staging deploy cc816417 building",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-06T13:39:09.889031-07:00",
+      "updated_at": "2026-09-06T13:39:09.905700-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"ae973e3\",\"confidence\":95}"
+    },
+    {
+      "id": 756,
+      "change_id": "48ca61fb-9a75-4cbb-9d3d-8a78cddefd0c",
+      "node_type": "observation",
+      "title": "#335 spike result: db_write update_action p50=356ms (n=135, p90=359), set_action_batch_status 533ms; both = whole multiples of ~178ms RTT. Cause: Railway Postgres in asia-southeast1, charcoal-web in us-west2, BOTH envs. Every query = 2 RTT (sqlx test_before_acquire ping + execute).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-06T14:00:47.834505-07:00",
+      "updated_at": "2026-09-06T14:00:47.834505-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 757,
+      "change_id": "cd0da005-9120-407b-8f8a-eaf7bc25097e",
+      "node_type": "outcome",
+      "title": "#335 RESOLVED by Postgres region move to us-west2 (2026-09-07): update_action 356ms -> 5ms p50 (n=135), set_action_batch_status 533 -> 7ms, load_session 356 -> 4ms; 45-mute batch 31s -> 10.7s. test_before_acquire(false) follow-up declined: saves ~2ms/query now.",
+      "description": null,
+      "status": "done",
+      "created_at": "2026-09-07T02:14:54.110645-07:00",
+      "updated_at": "2026-09-07T02:14:54.124747-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -16600,6 +16655,61 @@
       "weight": 1.0,
       "rationale": "gates + PR",
       "created_at": "2026-09-06T13:15:41.129796-07:00"
+    },
+    {
+      "id": 777,
+      "from_node_id": 752,
+      "to_node_id": 753,
+      "from_change_id": "764b37a8-fd9a-4121-8bc0-84795faede6e",
+      "to_change_id": "2f736aa1-aebe-42d7-874a-811335ba203c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review fix",
+      "created_at": "2026-09-06T13:21:13.129348-07:00"
+    },
+    {
+      "id": 778,
+      "from_node_id": 753,
+      "to_node_id": 754,
+      "from_change_id": "2f736aa1-aebe-42d7-874a-811335ba203c",
+      "to_change_id": "f6e3781e-12bd-49e1-8db6-9f4577121c65",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fix push triggered re-review; CodeRabbit approved same commit",
+      "created_at": "2026-09-06T13:23:53.061583-07:00"
+    },
+    {
+      "id": 779,
+      "from_node_id": 754,
+      "to_node_id": 755,
+      "from_change_id": "f6e3781e-12bd-49e1-8db6-9f4577121c65",
+      "to_change_id": "e1158ca8-40fc-4e7c-a440-f32fa6a66e67",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approval led to Bryan's merge",
+      "created_at": "2026-09-06T13:39:09.896917-07:00"
+    },
+    {
+      "id": 780,
+      "from_node_id": 755,
+      "to_node_id": 756,
+      "from_change_id": "e1158ca8-40fc-4e7c-a440-f32fa6a66e67",
+      "to_change_id": "48ca61fb-9a75-4cbb-9d3d-8a78cddefd0c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bulk mute+undo on staging deploy cc816417 produced the spans",
+      "created_at": "2026-09-06T14:00:47.840567-07:00"
+    },
+    {
+      "id": 781,
+      "from_node_id": 756,
+      "to_node_id": 757,
+      "from_change_id": "48ca61fb-9a75-4cbb-9d3d-8a78cddefd0c",
+      "to_change_id": "cd0da005-9120-407b-8f8a-eaf7bc25097e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Region-mismatch observation led to Bryan's infra fix; re-measured with the same spans",
+      "created_at": "2026-09-07T02:14:54.118345-07:00"
     }
   ],
   "documents": [
