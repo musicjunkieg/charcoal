@@ -550,6 +550,18 @@ pub async fn undo_batch(
     if let Err(r) = require_connected(&sessions, &state, &auth.did).await {
         return r;
     }
+    // Same gate as `retry_batch`: an undo is built from the rows that are
+    // `applied` at the moment we read them. While the runner is still
+    // working, rows keep flipping to `applied` after that read, so an undo
+    // started now would silently leave the rest in force. The UI hides Undo
+    // on a live batch; the server must not rely on that.
+    if matches!(batch.status.as_str(), "queued" | "running") {
+        return api_error_code(
+            StatusCode::CONFLICT,
+            "batch_running",
+            "This batch is still running",
+        );
+    }
     let rows = match rows_for(&state, id).await {
         Ok(r) => r,
         Err(r) => return r,

@@ -125,6 +125,10 @@ export async function pollUntilSettled(
 		} catch {
 			// blip — fall through to the sleep
 		}
-		await sleep(intervalMs);
+		// The fetch itself took time off the budget; never sleep past what is
+		// left, or a slow last poll keeps the toast open beyond the deadline.
+		const left = timeoutMs - (now() - started);
+		if (left <= 0) return 'timeout';
+		await sleep(Math.min(intervalMs, left));
 	}
 }

@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use atproto_identity::key::KeyData;
 use atproto_oauth::dpop::{auth_dpop, request_dpop};
 use atproto_oauth::jwt::mint;
+use rand::distr::{Alphanumeric, SampleString};
 use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
 
@@ -94,6 +95,13 @@ pub async fn send_dpop(
     claims
         .private
         .insert("nonce".to_string(), serde_json::Value::String(fresh));
+    // RFC 9449 §4.2: `jti` is a replay guard, unique per proof. The first
+    // proof has already reached the server, so the retry needs its own —
+    // a server that tracks seen jtis would reject the re-signed copy. (The
+    // cached-nonce re-mint above keeps its jti because that proof was never
+    // sent.) Same alphabet and length as the session-state token in
+    // `session.rs`.
+    claims.jose.json_web_token_id = Some(Alphanumeric.sample_string(&mut rand::rng(), 30));
     let proof = mint(key, &header, &claims).context("mint DPoP proof with nonce")?;
     let second = send_once(http, method, url, access_token, &proof, &build).await?;
     nonce.remember(&second);

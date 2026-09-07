@@ -1,5 +1,29 @@
 [
   {
+    "hash": "48384191e01ebaf9950ea194817bba0ffe6e0d51",
+    "short_hash": "4838419",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T03:45:57-07:00",
+    "message": "fix(345): PR #115 review fixes - fresh DPoP jti on retry, undo guard, poll clamp, focus trap\n\n- dpop_http: the nonce retry re-signed the same proof, so the second\n  request carried the jti the server had already seen. RFC 9449 makes jti\n  a per-proof replay guard; mint a fresh one before the retry.\n- undo_batch: refuse queued/running batches with 409 batch_running, the\n  guard retry_batch already had. An undo built mid-run only covers rows\n  applied at that instant; the rest land afterwards with no undo.\n- action-progress: clamp the between-fetch sleep to the time left so a\n  slow last fetch cannot hold the working toast past its deadline.\n- ConfirmSheet: Tab/Shift+Tab wrap inside the aria-modal dialog.\n- actions list: self-arming setTimeout instead of setInterval so polls\n  never overlap (matches the batch detail page).\n- tests/web_actions: bind undo_of to the seeded id, not Some(1).\n\nDeclined (on the PR thread): applyWrites result-length check - the call\nis atomic and the lexicon marks results optional.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 11
+  },
+  {
+    "hash": "50d44dcd3f6d174a4e9de745edf454b59a5ac815",
+    "short_hash": "50d44dc",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T02:34:31-07:00",
+    "message": "Merge pull request #114 from musicjunkieg/docs/335-finding",
+    "files_changed": 0
+  },
+  {
+    "hash": "b5534f2ba33bc25235653ec16e01c25c097449c1",
+    "short_hash": "b5534f2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T02:15:21-07:00",
+    "message": "docs(335): record the spike finding - Postgres was in asia-southeast1, moved to us-west2\n\nThe db_write span found a fixed 356 ms per row = 2 x ~178 ms RTT between\ncharcoal-web (us-west2) and Postgres (asia-southeast1), both envs. After the\nregion move: 5 ms per write, 45-mute batch 31 s -> 10.7 s.",
+    "files_changed": 3
+  },
+  {
     "hash": "ae973e3d0869d335ce66a619ae71bab92c1a3500",
     "short_hash": "ae973e3",
     "author": "Bryan Guffey",

@@ -7,6 +7,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Review fixes from the staging→main promotion PR (#345, PR #115). The DPoP
+  nonce retry re-signed the *same* proof with the new nonce, so the retry
+  carried the jti the server had already seen — RFC 9449 makes `jti` a
+  per-proof replay guard, and a PDS that tracks them would reject the
+  retry outright; the retry now mints a fresh one. `POST
+  …/batches/{id}/undo` accepted a batch the runner was still working on,
+  and an undo built then only covers the rows that were `applied` at that
+  instant — the rest land afterwards and stay in force with no undo. It now
+  answers `409 batch_running`, the guard `retry` already had; the UI never
+  offered the button, but the server must not rely on that. The single-
+  action working toast could outlive its 60 s deadline by almost a full
+  poll interval when the last fetch was slow (the between-fetch sleep is
+  now clamped to the time left). The confirm sheet's `aria-modal` dialog
+  did not keep keyboard focus inside it — Tab reached the navigation
+  behind — and now wraps at both ends. The actions list polls with a
+  self-arming timeout, as the batch page already did, so a slow response
+  can no longer land over a newer one. One test bound an undo row to a
+  hard-coded action id instead of the seeded one.
 - Mute/block failed with `getMutes: server error 501` on a self-hosted PDS
   (#322). Two gaps behind one symptom. A PDS with no default AppView (every
   self-hosted reference PDS; bsky.social fills one in) refuses `app.bsky.*`
