@@ -70,40 +70,60 @@ Three approaches were weighed (deciduous 780–783):
 
 ### 4.1 Shared cache (S1)
 
-Two new tables, both **keyed by DID/post — no `user_did`** — because a
-post's toxicity is a property of the post, not of who is being protected.
-Only topic overlap, graph distance and targeting are per-user, and those
-stay in the existing `(user_did, account_did, …)` tables.
+Three new tables, all **keyed by DID or by scored text — no `user_did`** —
+because a post's toxicity is a property of the post, not of who is being
+protected. Only topic overlap, graph distance and targeting are per-user,
+and those stay in the existing `(user_did, account_did, …)` tables.
 
 ```
 account_feed_snapshots
   did          TEXT PRIMARY KEY
   handle       TEXT NOT NULL
-  posts_json   TEXT NOT NULL      -- the getAuthorFeed page(s) as fetched
+  posts_json   TEXT NOT NULL      -- Vec<FeedPost>, the ordered getAuthorFeed sample
   fetched_at   TIMESTAMP NOT NULL
   source       TEXT NOT NULL      -- 'bluesky' | 'soot'
 
-post_classifications
-  post_uri        TEXT NOT NULL
-  cid             TEXT NOT NULL
-  model_id        TEXT NOT NULL    -- ONNX model identity
-  policy_version  TEXT NOT NULL    -- classifier policy identity
-  onnx_score      REAL NOT NULL
-  toxic_token     TEXT             -- NULL until the burst has run
-  confidence      REAL             -- NULL until the burst has run
+onnx_scores                       -- stage-1 / clean-pass primary-scorer output
+  text_sha256  TEXT NOT NULL      -- SHA-256 (hex) of the exact text the model saw
+  model_id     TEXT NOT NULL      -- ONNX model identity
+  score        REAL NOT NULL
+  scored_at    TIMESTAMP NOT NULL
+  PRIMARY KEY (text_sha256, model_id)
+
+classifier_verdicts               -- burst (CoPE-B / stub) output
+  text_sha256     TEXT NOT NULL
+  model_id        TEXT NOT NULL
+  policy_version  TEXT NOT NULL
+  toxic_token     BOOLEAN NOT NULL
+  confidence      REAL NOT NULL
   classified_at   TIMESTAMP NOT NULL
-  PRIMARY KEY (post_uri, cid, model_id, policy_version)
+  PRIMARY KEY (text_sha256, model_id, policy_version)
 ```
 
-- **Read-through in the gather.** For each candidate: if a snapshot exists
-  with `fetched_at > now − SNAPSHOT_TTL` (24 h), use it; otherwise fetch,
-  then upsert. For each post in the snapshot: if a
-  `post_classifications` row exists for the current `(model_id,
-  policy_version)`, use it; otherwise run stage-1 and insert. The burst
-  fills `toxic_token`/`confidence` on the same row.
+**Why text hashes, not `(post_uri, cid)`** (amended 2026-09-08 while
+planning): `Post` carries no cid, and the same post is scored as **two
+different texts** — stage 1 scores the raw text, the clean pass scores the
+`format_parent_reply(parent, reply)` envelope for replies. A post-URI key
+would have to store both, and would silently serve a raw-text score for an
+envelope lookup. The hash is the exact identity of what the model saw: a
+missing parent produces a different envelope and therefore a different key,
+which is the correct behaviour. It also stores **no readable post text** —
+a privacy improvement over `posts_json`, which is the only place the text
+itself is persisted.
+
+- **Read-through as decorators.** The gather/burst scoring code does not
+  change. `CachedPostFetcher` wraps the Bluesky feed source: if a snapshot
+  exists with `fetched_at > now − SNAPSHOT_TTL` (24 h) and decodes, use it;
+  otherwise fetch once (50 posts — removing today's 25-then-50 double
+  fetch), upsert, and sample from it. `CachedToxicityScorer` wraps the ONNX
+  scorer's `score_batch` with an `onnx_scores` lookup by hash; misses are
+  scored and inserted. `CachedClassifier` wraps the classifier's
+  `classify_batch` with a `classifier_verdicts` lookup by
+  `(hash, model_id, policy_version)`; only successful verdicts are cached.
 - **Per-user tables are populated from the cache**, never the other way
-  round. `classification_queue` and `scan_account_input` keep their shape;
-  they become views of cached data plus the per-user decision.
+  round. `classification_queue` and `scan_account_input` keep their shape.
+- **`delete_user_data` does not touch these tables** — they hold nothing
+  about the protected user.
 - **Migration v16**, both backends. Postgres migration self-records its
   version (`INSERT INTO schema_version … ON CONFLICT DO NOTHING`).
   **No backfill** — existing rows in `classification_queue` are not copied;

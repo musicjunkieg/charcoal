@@ -1,5 +1,13 @@
 [
   {
+    "hash": "5d5355b5427ff728d49739d5d1a77c193d70fbe0",
+    "short_hash": "5d5355b",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T00:53:32-07:00",
+    "message": "docs(343): scalability & onboarding design spec\n\nAnswers #343: measured scan breakdown, 10x15-min wave target, shared\nuser-independent cache, worker role + semaphores, Bluesky token bucket\nwith 429 handling (#182), score expiry + top-tier refresh (#344, unblocks\n#342), CandidateSource trait for soot, hosting matrix with live Railway\nrates, phased plan with pass numbers.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
     "hash": "946de942062867cc542fa634bb0dd2064447e0fd",
     "short_hash": "946de94",
     "author": "Bryan Guffey",
