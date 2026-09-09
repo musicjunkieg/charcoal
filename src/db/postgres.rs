@@ -175,6 +175,10 @@ impl PgDatabase {
                     15,
                     include_str!("../../migrations/postgres/0015_actions.sql"),
                 ),
+                (
+                    16,
+                    include_str!("../../migrations/postgres/0016_shared_cache.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {

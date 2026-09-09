@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c6523483772be64bb0da8930eb8b22b2ce2eba5d",
+    "short_hash": "c652348",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T21:04:03-07:00",
+    "message": "refactor(343): split feed fetch from sampling; PostFetcher takes the DID\n\ncollect_feed_posts + pure sample_from_feed replace the fused loop so a cached\nfeed can be re-partitioned. FeedSource is the raw network trait; PostFetcher\ngains did for the cache key. No behaviour change.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 5
+  },
+  {
     "hash": "30f95d3f40752765e9120264dd1f1b327f7a7b6d",
     "short_hash": "30f95d3",
     "author": "Bryan Guffey",

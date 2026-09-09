@@ -8674,10 +8674,32 @@
       "node_type": "action",
       "title": "Task 4 (#346): FeedKind/FeedPost/collect_feed_posts/sample_from_feed + FeedSource trait; PostFetcher::fetch_sample gains did",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T20:48:12.501247-07:00",
-      "updated_at": "2026-09-08T20:48:12.501247-07:00",
+      "updated_at": "2026-09-08T21:06:30.173395-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"30f95d3\",\"confidence\":90}"
+    },
+    {
+      "id": 799,
+      "change_id": "bb87e718-f2d3-400b-a487-c8ee01be63ed",
+      "node_type": "outcome",
+      "title": "Task 4 (#346) done: feed fetch/partition split, FeedSource trait, fetch_sample(did) — partition equivalence verified, review clean",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T21:06:25.526401-07:00",
+      "updated_at": "2026-09-08T21:06:30.179633-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"c652348\",\"confidence\":90}"
+    },
+    {
+      "id": 800,
+      "change_id": "dc5d89ac-1964-4992-a905-21b2b6cc2863",
+      "node_type": "action",
+      "title": "Task 5 (#346): migration v16 shared cache tables (SQLite + Postgres 0016_shared_cache.sql, self-recording)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T21:06:30.193600-07:00",
+      "updated_at": "2026-09-08T21:06:30.193600-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"c652348\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17678,6 +17700,28 @@
       "weight": 1.0,
       "rationale": "Plan task 4 of 10",
       "created_at": "2026-09-08T20:48:16.522526-07:00"
+    },
+    {
+      "id": 829,
+      "from_node_id": 798,
+      "to_node_id": 799,
+      "from_change_id": "2509c8f2-8065-4ed5-ace9-a641541d2722",
+      "to_change_id": "bb87e718-f2d3-400b-a487-c8ee01be63ed",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 implementation outcome",
+      "created_at": "2026-09-08T21:06:30.166252-07:00"
+    },
+    {
+      "id": 830,
+      "from_node_id": 788,
+      "to_node_id": 800,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "dc5d89ac-1964-4992-a905-21b2b6cc2863",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 5 of 10",
+      "created_at": "2026-09-08T21:06:34.029940-07:00"
     }
   ],
   "documents": [

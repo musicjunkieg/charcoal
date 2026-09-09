@@ -2373,3 +2373,91 @@ async fn test_pg_action_score_snapshots_and_cascade() {
 
     delete_actions_rows(&url, CASCADE_DID).await;
 }
+
+/// v16 (#343): fresh connect creates the three cache tables and records 16.
+#[tokio::test]
+async fn test_pg_migration_v16_creates_cache_tables() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    let names: Vec<String> = sqlx_core::query::query(
+        "SELECT table_name::text FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name IN ('account_feed_snapshots','onnx_scores','classifier_verdicts')
+         ORDER BY table_name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| r.get::<String, _>(0))
+    .collect();
+    assert_eq!(
+        names,
+        [
+            "account_feed_snapshots",
+            "classifier_verdicts",
+            "onnx_scores"
+        ]
+    );
+
+    let recorded: bool =
+        sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = 16")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(recorded, "0016 must self-record its version");
+}
+
+/// Simulate a v15 database (drop the v16 tables and version row), reconnect,
+/// and prove the migration re-applies exactly once.
+#[tokio::test]
+async fn test_pg_migration_v16_upgrades_from_v15() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    // Two statements in one string: the simple prepared-statement path
+    // (`query()`) rejects multi-command strings, so use raw_sql like the
+    // migration runner itself does (src/db/postgres.rs).
+    sqlx_core::raw_sql::raw_sql(
+        "DROP TABLE IF EXISTS account_feed_snapshots, onnx_scores, classifier_verdicts;
+         DELETE FROM schema_version WHERE version = 16;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let count: i64 = sqlx_core::query::query(
+        "SELECT COUNT(*) FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name IN ('account_feed_snapshots','onnx_scores','classifier_verdicts')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(count, 3);
+    let versions: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 16")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(versions, 1);
+}

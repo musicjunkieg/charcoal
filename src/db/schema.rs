@@ -529,6 +529,42 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // v16 (#343 §4.1): the shared cache. None of these tables carry a
+    // user_did — a post's toxicity is a property of the post, so one user's
+    // scan can serve the next. Scores and verdicts are keyed by the SHA-256
+    // of the exact text the model saw (stage 1 scores raw text, the clean
+    // pass scores the parent+reply envelope, so post_uri is not a valid key)
+    // and store no readable text. delete_user_data does not touch them.
+    run_migration(conn, 16, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS account_feed_snapshots (
+                 did TEXT PRIMARY KEY,
+                 handle TEXT NOT NULL,
+                 posts_json TEXT NOT NULL,
+                 fetched_at TEXT NOT NULL,
+                 source TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS onnx_scores (
+                 text_sha256 TEXT NOT NULL,
+                 model_id TEXT NOT NULL,
+                 score REAL NOT NULL,
+                 scored_at TEXT NOT NULL,
+                 PRIMARY KEY (text_sha256, model_id)
+             );
+             CREATE TABLE IF NOT EXISTS classifier_verdicts (
+                 text_sha256 TEXT NOT NULL,
+                 model_id TEXT NOT NULL,
+                 policy_version TEXT NOT NULL,
+                 toxic_token INTEGER NOT NULL,
+                 confidence REAL NOT NULL,
+                 classified_at TEXT NOT NULL,
+                 PRIMARY KEY (text_sha256, model_id, policy_version)
+             );
+             COMMIT;",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -586,8 +622,9 @@ mod tests {
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
         // scan_skips, scan_queue, topic_clusters, access_requests,
-        // oauth_sessions, action_batches, actions = 17 tables (v15)
-        assert_eq!(count, 17i64);
+        // oauth_sessions, action_batches, actions, account_feed_snapshots,
+        // onnx_scores, classifier_verdicts = 20 tables (v16)
+        assert_eq!(count, 20i64);
     }
 
     #[test]
@@ -659,7 +696,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=15).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=16).collect::<Vec<i64>>());
     }
 
     #[test]
@@ -762,10 +799,11 @@ mod tests {
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
         // scan_skips, scan_queue, topic_clusters, access_requests,
-        // oauth_sessions, action_batches, actions = 17 tables (v15)
-        assert_eq!(count, 17i64);
+        // oauth_sessions, action_batches, actions, account_feed_snapshots,
+        // onnx_scores, classifier_verdicts = 20 tables (v16)
+        assert_eq!(count, 20i64);
 
-        // Verify schema_version includes v4 through v15
+        // Verify schema_version includes v4 through v16
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -773,7 +811,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=15).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=16).collect::<Vec<i64>>());
     }
 
     /// Does `scan_queue` currently have a `claim_id` column?
@@ -936,5 +974,62 @@ mod tests {
             [],
         );
         assert!(err.is_err(), "CHECK constraint must reject invalid status");
+    }
+
+    #[test]
+    fn test_migration_v16_creates_cache_tables_on_a_fresh_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO account_feed_snapshots (did, handle, posts_json, fetched_at, source)
+             VALUES ('did:plc:snap', 's.bsky.social', '[]', '2026-09-08T00:00:00Z', 'bluesky')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+             VALUES ('ab', 'm1', 0.42, '2026-09-08T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO classifier_verdicts
+                (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+             VALUES ('ab', 'cope-b', 'v3', 1, 0.9, '2026-09-08T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // Composite primary keys reject duplicates.
+        assert!(conn
+            .execute(
+                "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+                 VALUES ('ab', 'm1', 0.5, '2026-09-08T00:00:01Z')",
+                [],
+            )
+            .is_err());
+    }
+
+    /// Simulate a database that stopped at v15: drop the v16 tables and the
+    /// version row, then re-run `create_tables` — the migration must apply.
+    #[test]
+    fn test_migration_v16_upgrades_a_v15_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute_batch(
+            "DROP TABLE account_feed_snapshots;
+             DROP TABLE onnx_scores;
+             DROP TABLE classifier_verdicts;
+             DELETE FROM schema_version WHERE version = 16;",
+        )
+        .unwrap();
+        assert_eq!(table_count(&conn).unwrap(), 17i64, "v15 shape");
+
+        create_tables(&conn).unwrap();
+
+        assert_eq!(table_count(&conn).unwrap(), 20i64);
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(max, 16);
     }
 }
