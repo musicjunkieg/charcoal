@@ -464,4 +464,27 @@ mod retry_tests {
             .unwrap();
         assert_eq!(client.observed_rate_limit(), None);
     }
+
+    #[tokio::test]
+    async fn malformed_ratelimit_header_stays_none_and_request_still_succeeds() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("RateLimit-Limit", "abc")
+                    .set_body_json(serde_json::json!({"did": "did:plc:abc"})),
+            )
+            .mount(&server)
+            .await;
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+
+        let got: serde_json::Value = client
+            .xrpc_get("app.bsky.actor.getProfile", &[("actor", "did:plc:abc")])
+            .await
+            .expect("an unparseable RateLimit-Limit header must not fail the request");
+
+        assert_eq!(got["did"], "did:plc:abc");
+        assert_eq!(client.observed_rate_limit(), None);
+    }
 }

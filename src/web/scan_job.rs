@@ -1068,6 +1068,16 @@ async fn run_scan(
         {
             tracing::warn!(error = %e, "could not record bluesky_ratelimit_limit");
         }
+    } else {
+        // No RateLimit-Limit header was ever observed this scan — either every
+        // request omitted it or every value failed to parse. Either way the
+        // Phase 0 pass number depends on this measurement, so its absence from
+        // scan_state must be diagnosable rather than silent. One line per scan,
+        // not per request.
+        tracing::warn!(
+            user_did,
+            "no RateLimit-Limit header observed during this scan; bluesky_ratelimit_limit will be missing from scan_state"
+        );
     }
 
     finish_scan(&scan_manager, user_did, claim_id, result).await
