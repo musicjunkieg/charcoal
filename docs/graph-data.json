@@ -8564,9 +8564,9 @@
       "node_type": "action",
       "title": "Write Phase 0+1 implementation plan for #343 (measure + shared cache)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T10:37:17.934610-07:00",
-      "updated_at": "2026-09-08T10:37:17.934610-07:00",
+      "updated_at": "2026-09-08T11:16:17.156709-07:00",
       "metadata_json": "{\"branch\":\"docs/343-scalability-design\",\"commit\":\"5d5355b\",\"confidence\":85}"
     },
     {
@@ -8579,6 +8579,39 @@
       "created_at": "2026-09-08T10:46:22.008056-07:00",
       "updated_at": "2026-09-08T10:46:22.008056-07:00",
       "metadata_json": "{\"branch\":\"docs/343-scalability-design\",\"confidence\":95}"
+    },
+    {
+      "id": 790,
+      "change_id": "957dae48-65a1-4adc-bdd2-84951d07eb63",
+      "node_type": "outcome",
+      "title": "Plan committed b0ed949: 10 TDD tasks (Phase 0 measure: batched stage-1, CPU sampler, rate-limit header, CHARCOAL_ONNX_SESSIONS; Phase 1 cache: 3 tables v16, 6 trait methods, 3 decorators, cache stats) + 2 runbooks; self-review fixed a duplicate-import trap and the file map",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T11:16:13.830317-07:00",
+      "updated_at": "2026-09-08T11:16:17.163841-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-scalability-design\",\"commit\":\"b0ed949\",\"confidence\":90}"
+    },
+    {
+      "id": 791,
+      "change_id": "b0b82c53-d35f-4113-85ff-ddba98aa1944",
+      "node_type": "action",
+      "title": "Opened PR #117 (docs/343-scalability-design → staging): spec + Phase 0/1 plan, docs-only; awaiting CodeRabbit",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T11:16:44.271223-07:00",
+      "updated_at": "2026-09-08T11:16:44.271223-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-scalability-design\",\"commit\":\"b0ed949\",\"confidence\":90}"
+    },
+    {
+      "id": 792,
+      "change_id": "211ccf08-f5b1-4973-a952-6dd4c3c760a2",
+      "node_type": "action",
+      "title": "Task 1 (#346): score_batch override on TwoStageToxicityScorer — one stage-1 forward pass per batch",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T18:37:11.456927-07:00",
+      "updated_at": "2026-09-08T18:37:11.456927-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"d27b199\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17469,6 +17502,50 @@
       "weight": 1.0,
       "rationale": "found while reading code for the Phase 0+1 plan; becomes the plan's first task",
       "created_at": "2026-09-08T10:46:22.029420-07:00"
+    },
+    {
+      "id": 819,
+      "from_node_id": 788,
+      "to_node_id": 790,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "957dae48-65a1-4adc-bdd2-84951d07eb63",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan-writing action produced the committed plan",
+      "created_at": "2026-09-08T11:16:17.143630-07:00"
+    },
+    {
+      "id": 820,
+      "from_node_id": 789,
+      "to_node_id": 788,
+      "from_change_id": "3edfef82-600a-4b22-a9d3-4cfcb8c94822",
+      "to_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observation that motivated Task 1 (score_batch override) in the plan",
+      "created_at": "2026-09-08T11:16:17.150009-07:00"
+    },
+    {
+      "id": 821,
+      "from_node_id": 790,
+      "to_node_id": 791,
+      "from_change_id": "957dae48-65a1-4adc-bdd2-84951d07eb63",
+      "to_change_id": "b0b82c53-d35f-4113-85ff-ddba98aa1944",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Committed plan goes to review via PR",
+      "created_at": "2026-09-08T11:16:44.277702-07:00"
+    },
+    {
+      "id": 822,
+      "from_node_id": 788,
+      "to_node_id": 792,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "211ccf08-f5b1-4973-a952-6dd4c3c760a2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Executing the Phase 0+1 plan task by task",
+      "created_at": "2026-09-08T18:37:11.464345-07:00"
     }
   ],
   "documents": [

@@ -1,5 +1,21 @@
 [
   {
+    "hash": "d27b19983148d5433af0831936cb4c01ab188630",
+    "short_hash": "d27b199",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T18:36:25-07:00",
+    "message": "Merge pull request #117 from musicjunkieg/docs/343-scalability-design\n\ndocs(343): scalability & onboarding design spec + Phase 0/1 implementation plan",
+    "files_changed": 0
+  },
+  {
+    "hash": "b0ed9499c0ee6ac2883538a2dc1ff38e64dc2784",
+    "short_hash": "b0ed949",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T11:16:01-07:00",
+    "message": "docs(343): Phase 0+1 implementation plan; spec §4.1 three-table cache keyed by text hash\n\nPlan covers Phase 0 (measurement: batched stage-1 forward pass, CPU\nsampler, rate-limit header capture, CHARCOAL_ONNX_SESSIONS pool) and\nPhase 1 (shared cache: account_feed_snapshots / onnx_scores /\nclassifier_verdicts tables, migration v16, six Database trait methods,\nCachedPostFetcher / CachedToxicityScorer / CachedClassifier decorators,\ncache hit/miss stats in scan_state) as ten TDD tasks plus two runbooks.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
     "hash": "5d5355b5427ff728d49739d5d1a77c193d70fbe0",
     "short_hash": "5d5355b",
     "author": "Bryan Guffey",
