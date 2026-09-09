@@ -1007,8 +1007,10 @@ mod tests {
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
         // scan_queue, topic_clusters, access_requests,
-        // oauth_sessions, action_batches, actions = 17 tables (v15)
-        assert_eq!(count, 17);
+        // oauth_sessions, action_batches, actions (v15),
+        // account_feed_snapshots, onnx_scores, classifier_verdicts (v16)
+        // = 20 tables
+        assert_eq!(count, 20);
     }
 
     #[tokio::test]
