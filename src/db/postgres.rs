@@ -22,8 +22,9 @@ use super::models::{
     NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
-    eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, Database, NewAction, OauthSessionRow,
-    ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
+    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
+    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -2278,6 +2279,159 @@ impl Database for PgDatabase {
                 threat_tier: r.get::<Option<String>, _>(3),
             })
             .collect())
+    }
+
+    // --- Shared cache (#343 §4.1) ---
+
+    async fn get_feed_snapshot(&self, did: &str) -> Result<Option<FeedSnapshot>> {
+        let row = sqlx_core::query::query(
+            "SELECT did, handle, posts_json, fetched_at, source
+             FROM account_feed_snapshots WHERE did = $1",
+        )
+        .bind(did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| FeedSnapshot {
+            did: r.get::<String, _>(0),
+            handle: r.get::<String, _>(1),
+            posts_json: r.get::<String, _>(2),
+            fetched_at: r.get::<String, _>(3),
+            source: r.get::<String, _>(4),
+        }))
+    }
+
+    async fn upsert_feed_snapshot(&self, s: &FeedSnapshot) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO account_feed_snapshots (did, handle, posts_json, fetched_at, source)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (did) DO UPDATE SET
+                 handle = EXCLUDED.handle,
+                 posts_json = EXCLUDED.posts_json,
+                 fetched_at = EXCLUDED.fetched_at,
+                 source = EXCLUDED.source",
+        )
+        .bind(&s.did)
+        .bind(&s.handle)
+        .bind(&s.posts_json)
+        .bind(&s.fetched_at)
+        .bind(&s.source)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_onnx_scores(
+        &self,
+        model_id: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, f64>> {
+        if hashes.is_empty() {
+            return Ok(Default::default());
+        }
+        let rows = sqlx_core::query::query(
+            "SELECT text_sha256, score FROM onnx_scores
+             WHERE model_id = $1 AND text_sha256 = ANY($2)",
+        )
+        .bind(model_id)
+        .bind(hashes.to_vec())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get::<String, _>(0), r.get::<f64, _>(1)))
+            .collect())
+    }
+
+    async fn upsert_onnx_scores(&self, model_id: &str, rows: &[OnnxScoreRow]) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self.pool.begin().await?;
+        for r in rows {
+            sqlx_core::query::query(
+                "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (text_sha256, model_id) DO UPDATE SET
+                     score = EXCLUDED.score, scored_at = EXCLUDED.scored_at",
+            )
+            .bind(&r.text_sha256)
+            .bind(model_id)
+            .bind(r.score)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn get_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, ClassifierVerdictRow>> {
+        if hashes.is_empty() {
+            return Ok(Default::default());
+        }
+        let rows = sqlx_core::query::query(
+            "SELECT text_sha256, toxic_token, confidence FROM classifier_verdicts
+             WHERE model_id = $1 AND policy_version = $2 AND text_sha256 = ANY($3)",
+        )
+        .bind(model_id)
+        .bind(policy_version)
+        .bind(hashes.to_vec())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let h = r.get::<String, _>(0);
+                (
+                    h.clone(),
+                    ClassifierVerdictRow {
+                        text_sha256: h,
+                        toxic_token: r.get::<bool, _>(1),
+                        confidence: r.get::<f64, _>(2),
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn upsert_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        rows: &[ClassifierVerdictRow],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self.pool.begin().await?;
+        for r in rows {
+            sqlx_core::query::query(
+                "INSERT INTO classifier_verdicts
+                     (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (text_sha256, model_id, policy_version) DO UPDATE SET
+                     toxic_token = EXCLUDED.toxic_token,
+                     confidence = EXCLUDED.confidence,
+                     classified_at = EXCLUDED.classified_at",
+            )
+            .bind(&r.text_sha256)
+            .bind(model_id)
+            .bind(policy_version)
+            .bind(r.toxic_token)
+            .bind(r.confidence)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 }
 

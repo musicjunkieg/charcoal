@@ -17,7 +17,7 @@ pub mod schema;
 pub mod sqlite;
 pub mod traits;
 
-pub use traits::Database;
+pub use traits::{ClassifierVerdictRow, Database, FeedSnapshot, OnnxScoreRow};
 
 use anyhow::Result;
 use std::sync::Arc;

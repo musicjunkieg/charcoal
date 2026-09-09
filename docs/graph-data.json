@@ -8696,10 +8696,32 @@
       "node_type": "action",
       "title": "Task 5 (#346): migration v16 shared cache tables (SQLite + Postgres 0016_shared_cache.sql, self-recording)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T21:06:30.193600-07:00",
-      "updated_at": "2026-09-08T21:06:30.193600-07:00",
+      "updated_at": "2026-09-08T21:57:22.942589-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"c652348\",\"confidence\":90}"
+    },
+    {
+      "id": 801,
+      "change_id": "fd4fe124-6208-4cd7-b301-547cd297223b",
+      "node_type": "outcome",
+      "title": "Task 5 (#346) done: migration v16 on both backends, self-recording pg migration, fresh+upgrade tests 13/13 sqlite + 39/39 pg; brief's pg test needed raw_sql()",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T21:57:16.869613-07:00",
+      "updated_at": "2026-09-08T21:57:22.948989-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"5b2f84c\",\"confidence\":90}"
+    },
+    {
+      "id": 802,
+      "change_id": "1a9d914b-f6a6-4f08-b561-0b390aeac2a7",
+      "node_type": "action",
+      "title": "Task 6 (#346): cache row types + six Database trait methods on SqliteDatabase and PgDatabase",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T21:57:22.964407-07:00",
+      "updated_at": "2026-09-08T21:57:22.964407-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"5b2f84c\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17722,6 +17744,28 @@
       "weight": 1.0,
       "rationale": "Plan task 5 of 10",
       "created_at": "2026-09-08T21:06:34.029940-07:00"
+    },
+    {
+      "id": 831,
+      "from_node_id": 800,
+      "to_node_id": 801,
+      "from_change_id": "dc5d89ac-1964-4992-a905-21b2b6cc2863",
+      "to_change_id": "fd4fe124-6208-4cd7-b301-547cd297223b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 implementation outcome",
+      "created_at": "2026-09-08T21:57:22.935333-07:00"
+    },
+    {
+      "id": 832,
+      "from_node_id": 788,
+      "to_node_id": 802,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "1a9d914b-f6a6-4f08-b561-0b390aeac2a7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 6 of 10",
+      "created_at": "2026-09-08T21:57:26.239549-07:00"
     }
   ],
   "documents": [

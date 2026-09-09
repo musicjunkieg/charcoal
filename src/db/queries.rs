@@ -7,6 +7,8 @@
 // protected user. This enables multi-user support where each user's threat
 // data is isolated.
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -14,7 +16,10 @@ use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
 };
-use super::traits::{ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip};
+use super::traits::{
+    ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow, ScanClaim, ScanQueueDepth, ScanQueueEntry,
+    ScanQueueRow, ScanSkip,
+};
 
 // --- Users ---
 
@@ -2151,6 +2156,148 @@ pub fn list_score_snapshots(
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+// --- Shared cache (#343 §4.1) ---
+
+pub fn get_feed_snapshot(conn: &Connection, did: &str) -> Result<Option<FeedSnapshot>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, posts_json, fetched_at, source
+         FROM account_feed_snapshots WHERE did = ?1",
+    )?;
+    let row = stmt
+        .query_row(params![did], |r| {
+            Ok(FeedSnapshot {
+                did: r.get(0)?,
+                handle: r.get(1)?,
+                posts_json: r.get(2)?,
+                fetched_at: r.get(3)?,
+                source: r.get(4)?,
+            })
+        })
+        .optional()?;
+    Ok(row)
+}
+
+pub fn upsert_feed_snapshot(conn: &Connection, s: &FeedSnapshot) -> Result<()> {
+    conn.execute(
+        "INSERT INTO account_feed_snapshots (did, handle, posts_json, fetched_at, source)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(did) DO UPDATE SET
+             handle = excluded.handle,
+             posts_json = excluded.posts_json,
+             fetched_at = excluded.fetched_at,
+             source = excluded.source",
+        params![s.did, s.handle, s.posts_json, s.fetched_at, s.source],
+    )?;
+    Ok(())
+}
+
+/// One prepared statement, looped under the caller's lock. Batches are ≤ 50
+/// hashes (one account's sample), so a `WHERE IN (...)` builder buys nothing.
+pub fn get_onnx_scores(
+    conn: &Connection,
+    model_id: &str,
+    hashes: &[String],
+) -> Result<HashMap<String, f64>> {
+    let mut out = HashMap::with_capacity(hashes.len());
+    if hashes.is_empty() {
+        return Ok(out);
+    }
+    let mut stmt =
+        conn.prepare("SELECT score FROM onnx_scores WHERE text_sha256 = ?1 AND model_id = ?2")?;
+    for h in hashes {
+        if let Some(score) = stmt
+            .query_row(params![h, model_id], |r| r.get::<_, f64>(0))
+            .optional()?
+        {
+            out.insert(h.clone(), score);
+        }
+    }
+    Ok(out)
+}
+
+pub fn upsert_onnx_scores(conn: &Connection, model_id: &str, rows: &[OnnxScoreRow]) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut stmt = conn.prepare(
+        "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(text_sha256, model_id) DO UPDATE SET
+             score = excluded.score, scored_at = excluded.scored_at",
+    )?;
+    for r in rows {
+        stmt.execute(params![r.text_sha256, model_id, r.score, now])?;
+    }
+    Ok(())
+}
+
+pub fn get_classifier_verdicts(
+    conn: &Connection,
+    model_id: &str,
+    policy_version: &str,
+    hashes: &[String],
+) -> Result<HashMap<String, ClassifierVerdictRow>> {
+    let mut out = HashMap::with_capacity(hashes.len());
+    if hashes.is_empty() {
+        return Ok(out);
+    }
+    let mut stmt = conn.prepare(
+        "SELECT toxic_token, confidence FROM classifier_verdicts
+         WHERE text_sha256 = ?1 AND model_id = ?2 AND policy_version = ?3",
+    )?;
+    for h in hashes {
+        if let Some((toxic, conf)) = stmt
+            .query_row(params![h, model_id, policy_version], |r| {
+                Ok((r.get::<_, bool>(0)?, r.get::<_, f64>(1)?))
+            })
+            .optional()?
+        {
+            out.insert(
+                h.clone(),
+                ClassifierVerdictRow {
+                    text_sha256: h.clone(),
+                    toxic_token: toxic,
+                    confidence: conf,
+                },
+            );
+        }
+    }
+    Ok(out)
+}
+
+pub fn upsert_classifier_verdicts(
+    conn: &Connection,
+    model_id: &str,
+    policy_version: &str,
+    rows: &[ClassifierVerdictRow],
+) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut stmt = conn.prepare(
+        "INSERT INTO classifier_verdicts
+             (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(text_sha256, model_id, policy_version) DO UPDATE SET
+             toxic_token = excluded.toxic_token,
+             confidence = excluded.confidence,
+             classified_at = excluded.classified_at",
+    )?;
+    for r in rows {
+        stmt.execute(params![
+            r.text_sha256,
+            model_id,
+            policy_version,
+            r.toxic_token,
+            r.confidence,
+            now
+        ])?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

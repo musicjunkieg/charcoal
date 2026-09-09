@@ -973,6 +973,17 @@ fn scan_queue_test_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// Sibling to `scan_queue_test_lock` for the #343 shared-cache tables
+/// (`account_feed_snapshots`, `onnx_scores`, `classifier_verdicts`). The two
+/// migration tests DROP/reconnect against those tables, and the round-trip
+/// test below writes into them; none of that overlaps scan_queue, so this is
+/// a separate lock rather than reusing `scan_queue_test_lock` and serializing
+/// against unrelated work.
+fn cache_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Every DID used by the scan_queue tests, so they can be cleared wholesale.
 const SCAN_QUEUE_DID_PREFIX: &str = "did:plc:pgtest_q_%";
 
@@ -2377,6 +2388,7 @@ async fn test_pg_action_score_snapshots_and_cascade() {
 /// v16 (#343): fresh connect creates the three cache tables and records 16.
 #[tokio::test]
 async fn test_pg_migration_v16_creates_cache_tables() {
+    let _guard = cache_test_lock().lock().await;
     let Some(url) = database_url() else {
         return;
     };
@@ -2421,6 +2433,7 @@ async fn test_pg_migration_v16_creates_cache_tables() {
 /// and prove the migration re-applies exactly once.
 #[tokio::test]
 async fn test_pg_migration_v16_upgrades_from_v15() {
+    let _guard = cache_test_lock().lock().await;
     let Some(url) = database_url() else {
         return;
     };
@@ -2460,4 +2473,93 @@ async fn test_pg_migration_v16_upgrades_from_v15() {
             .unwrap()
             .get(0);
     assert_eq!(versions, 1);
+}
+
+/// Parity with tests/unit_feed_cache.rs against Postgres.
+#[tokio::test]
+async fn test_pg_shared_cache_round_trips() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use charcoal::db::{ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow};
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let snap = FeedSnapshot {
+        did: "did:plc:pgcache_snap000000000000".into(),
+        handle: "cache.bsky.social".into(),
+        posts_json: "[]".into(),
+        fetched_at: "2026-09-08T00:00:00+00:00".into(),
+        source: "bluesky".into(),
+    };
+    db.upsert_feed_snapshot(&snap).await.unwrap();
+    let newer = FeedSnapshot {
+        handle: "renamed.bsky.social".into(),
+        ..snap.clone()
+    };
+    db.upsert_feed_snapshot(&newer).await.unwrap();
+    assert_eq!(db.get_feed_snapshot(&snap.did).await.unwrap(), Some(newer));
+
+    db.upsert_onnx_scores(
+        "pgtest-model",
+        &[
+            OnnxScoreRow {
+                text_sha256: "pgh1".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "pgh2".into(),
+                score: 0.9,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_onnx_scores(
+        "pgtest-model",
+        &[OnnxScoreRow {
+            text_sha256: "pgh2".into(),
+            score: 0.8,
+        }],
+    )
+    .await
+    .unwrap();
+    let got = db
+        .get_onnx_scores(
+            "pgtest-model",
+            &["pgh1".into(), "pgh2".into(), "nope".into()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 2);
+    assert_eq!(got["pgh2"], 0.8);
+    assert!(db
+        .get_onnx_scores("other-model", &["pgh1".into()])
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(db
+        .get_onnx_scores("pgtest-model", &[])
+        .await
+        .unwrap()
+        .is_empty());
+
+    let v = ClassifierVerdictRow {
+        text_sha256: "pgh1".into(),
+        toxic_token: true,
+        confidence: 0.95,
+    };
+    db.upsert_classifier_verdicts("pgtest-clf", "v1", std::slice::from_ref(&v))
+        .await
+        .unwrap();
+    let got = db
+        .get_classifier_verdicts("pgtest-clf", "v1", &["pgh1".into(), "nope".into()])
+        .await
+        .unwrap();
+    assert_eq!(got.get("pgh1"), Some(&v));
+    assert!(db
+        .get_classifier_verdicts("pgtest-clf", "v2", &["pgh1".into()])
+        .await
+        .unwrap()
+        .is_empty());
 }

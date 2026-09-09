@@ -1,5 +1,13 @@
 [
   {
+    "hash": "5b2f84ce8c793333a50498a2e1451ccc971a9053",
+    "short_hash": "5b2f84c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T21:54:03-07:00",
+    "message": "feat(343): migration v16 - shared cache tables on both backends\n\naccount_feed_snapshots, onnx_scores, classifier_verdicts. No user_did;\nkeyed by DID or text SHA-256. Fresh + upgrade-from-v15 tests on SQLite and\nPostgres; 0016 self-records its version.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
     "hash": "c6523483772be64bb0da8930eb8b22b2ce2eba5d",
     "short_hash": "c652348",
     "author": "Bryan Guffey",

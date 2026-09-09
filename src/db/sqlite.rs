@@ -18,9 +18,9 @@ use super::models::{
     NewAmplificationEvent, UserLabel, UserRow,
 };
 use super::traits::{
-    validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, Database, NewAction,
-    OauthSessionRow, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
-    ScoreSnapshot,
+    validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
+    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
+    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -649,6 +649,52 @@ impl Database for SqliteDatabase {
     async fn list_score_snapshots(&self, user_did: &str) -> Result<Vec<ScoreSnapshot>> {
         let conn = self.conn.lock().await;
         super::queries::list_score_snapshots(&conn, user_did)
+    }
+
+    // --- Shared cache (#343 §4.1) ---
+
+    async fn get_feed_snapshot(&self, did: &str) -> Result<Option<FeedSnapshot>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_feed_snapshot(&conn, did)
+    }
+
+    async fn upsert_feed_snapshot(&self, snapshot: &FeedSnapshot) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_feed_snapshot(&conn, snapshot)
+    }
+
+    async fn get_onnx_scores(
+        &self,
+        model_id: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, f64>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_onnx_scores(&conn, model_id, hashes)
+    }
+
+    async fn upsert_onnx_scores(&self, model_id: &str, rows: &[OnnxScoreRow]) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_onnx_scores(&conn, model_id, rows)
+    }
+
+    async fn get_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, ClassifierVerdictRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_classifier_verdicts(&conn, model_id, policy_version, hashes)
+    }
+
+    async fn upsert_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        rows: &[ClassifierVerdictRow],
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_classifier_verdicts(&conn, model_id, policy_version, rows)
     }
 }
 
