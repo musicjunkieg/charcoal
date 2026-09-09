@@ -8806,10 +8806,54 @@
       "node_type": "action",
       "title": "Task 10 (#346): docs - CHANGELOG, README knobs, two runbooks",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-09T00:26:18.955476-07:00",
-      "updated_at": "2026-09-09T00:26:18.955476-07:00",
+      "updated_at": "2026-09-09T00:29:22.956851-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"9c176f3\",\"confidence\":90}"
+    },
+    {
+      "id": 811,
+      "change_id": "3b018488-4c3e-44d5-8313-80ea49c4ae54",
+      "node_type": "outcome",
+      "title": "Task 10 (#346) approved: CHANGELOG Added block, README CHARCOAL_ONNX_SESSIONS knob, Phase 0 session-experiment + Phase 1 hit-rate runbooks; all names verified against src",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-09T00:29:17.511811-07:00",
+      "updated_at": "2026-09-09T00:29:22.962547-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"529adf0\",\"confidence\":90}"
+    },
+    {
+      "id": 812,
+      "change_id": "caa7400b-6c69-4c72-be14-4e33867d270c",
+      "node_type": "action",
+      "title": "Final whole-branch review (#346): d27b199..529adf0, 13 commits, triage carried minors",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T00:29:22.975832-07:00",
+      "updated_at": "2026-09-09T00:29:22.975832-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"529adf0\",\"confidence\":90}"
+    },
+    {
+      "id": 813,
+      "change_id": "8d394bef-150d-49ce-8dc4-0ccd62466185",
+      "node_type": "decision",
+      "title": "Final review I-1/I-2: resolve plan-internal inconsistencies toward spec §4.1 (per-candidate hit rate) and plan L469 (diagnostics never fail the scan); code fix for feed counting + runbook correction + warn-on-error feed stats",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T00:38:05.083101-07:00",
+      "updated_at": "2026-09-09T00:38:05.083101-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"confidence\":85}"
+    },
+    {
+      "id": 814,
+      "change_id": "cc3682ca-cff2-4769-8efd-0a2aa0e18fdc",
+      "node_type": "action",
+      "title": "Fix wave (#346): I-1 per-DID feed hit counting + runbook, I-2 warn-on-error feed stats x2, Minor 3 comment, M-e test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T00:38:09.088446-07:00",
+      "updated_at": "2026-09-09T00:38:09.088446-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"529adf0\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17942,6 +17986,50 @@
       "weight": 1.0,
       "rationale": "Plan Task 10: docs and runbooks",
       "created_at": "2026-09-09T00:26:24.180543-07:00"
+    },
+    {
+      "id": 841,
+      "from_node_id": 810,
+      "to_node_id": 811,
+      "from_change_id": "83e8cc8c-6dee-4544-8826-7be78e8939bf",
+      "to_change_id": "3b018488-4c3e-44d5-8313-80ea49c4ae54",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 10 review approved",
+      "created_at": "2026-09-09T00:29:22.950517-07:00"
+    },
+    {
+      "id": 842,
+      "from_node_id": 788,
+      "to_node_id": 812,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "caa7400b-6c69-4c72-be14-4e33867d270c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan complete; final review gate before PR",
+      "created_at": "2026-09-09T00:29:26.474328-07:00"
+    },
+    {
+      "id": 843,
+      "from_node_id": 812,
+      "to_node_id": 813,
+      "from_change_id": "caa7400b-6c69-4c72-be14-4e33867d270c",
+      "to_change_id": "8d394bef-150d-49ce-8dc4-0ccd62466185",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Final review findings needed a call on plan-internal contradictions",
+      "created_at": "2026-09-09T00:38:09.073213-07:00"
+    },
+    {
+      "id": 844,
+      "from_node_id": 813,
+      "to_node_id": 814,
+      "from_change_id": "8d394bef-150d-49ce-8dc4-0ccd62466185",
+      "to_change_id": "cc3682ca-cff2-4769-8efd-0a2aa0e18fdc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implement the chosen fixes",
+      "created_at": "2026-09-09T00:38:13.013986-07:00"
     }
   ],
   "documents": [

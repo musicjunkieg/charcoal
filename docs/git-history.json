@@ -1,5 +1,13 @@
 [
   {
+    "hash": "529adf0f81e4cf71e2745cf14c68c75d3caa6a1a",
+    "short_hash": "529adf0",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:27:41-07:00",
+    "message": "docs(343): CHANGELOG, README knob, Phase 0/1 runbooks\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
     "hash": "9c176f3c03d93e3e00c534774d5a04529a2034d3",
     "short_hash": "9c176f3",
     "author": "Bryan Guffey",

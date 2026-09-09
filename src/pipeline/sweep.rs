@@ -353,7 +353,9 @@ async fn run_sweep_phased(
     };
 
     let summary = run_phased_scan(db, user_did, candidates, &deps).await?;
-    record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await?;
+    if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
+        warn!(error = %e, "could not record feed cache stats");
+    }
     Ok((summary.accounts_scored, summary.degraded))
 }
 

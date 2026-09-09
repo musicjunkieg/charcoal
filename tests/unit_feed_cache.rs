@@ -261,7 +261,38 @@ async fn second_call_is_served_from_the_snapshot() {
     assert_eq!(source.calls.load(Ordering::SeqCst), 1);
     assert_eq!(first.total_posts, 25);
     assert_eq!(second.total_posts, 50);
-    assert_eq!((stats.hits(), stats.misses()), (1, 1));
+    // Per-candidate, not per-fetch (spec §4.1): the second call for the same
+    // DID is a real cache hit, but it must not be counted — it would inflate
+    // the gate. Only the first call ever touches the counters.
+    assert_eq!((stats.hits(), stats.misses()), (0, 1));
+}
+
+#[tokio::test]
+async fn distinct_dids_each_count_once() {
+    let db = setup_db();
+    let source = FakeSource::new();
+    let stats = Arc::new(CacheStats::default());
+    let fetcher = CachedPostFetcher::new(&source, Arc::clone(&db), Arc::clone(&stats));
+
+    fetcher
+        .fetch_sample("did:plc:a", "a.bsky.social", 25)
+        .await
+        .unwrap();
+    fetcher
+        .fetch_sample("did:plc:a", "a.bsky.social", 50)
+        .await
+        .unwrap();
+    fetcher
+        .fetch_sample("did:plc:b", "b.bsky.social", 25)
+        .await
+        .unwrap();
+    fetcher
+        .fetch_sample("did:plc:b", "b.bsky.social", 50)
+        .await
+        .unwrap();
+
+    assert_eq!(source.calls.load(Ordering::SeqCst), 2);
+    assert_eq!((stats.hits(), stats.misses()), (0, 2));
 }
 
 #[tokio::test]
@@ -318,6 +349,38 @@ async fn undecodable_snapshot_is_treated_as_a_miss() {
     // And the bad row was repaired.
     let snap = db.get_feed_snapshot("did:plc:a").await.unwrap().unwrap();
     assert!(serde_json::from_str::<Vec<FeedPost>>(&snap.posts_json).is_ok());
+}
+
+/// A `FeedSource` that always errors — for the "network failure must not
+/// leave a partial/decoy snapshot" test below.
+struct ErrSource;
+
+#[async_trait]
+impl FeedSource for ErrSource {
+    async fn fetch_feed(&self, _handle: &str, _max_posts: usize) -> anyhow::Result<Vec<FeedPost>> {
+        Err(anyhow::anyhow!("network exploded"))
+    }
+
+    async fn fetch_parents(&self, _uris: &[String]) -> anyhow::Result<HashMap<String, String>> {
+        Ok(HashMap::new())
+    }
+}
+
+#[tokio::test]
+async fn source_error_propagates_before_any_upsert() {
+    let db = setup_db();
+    let source = ErrSource;
+    let stats = Arc::new(CacheStats::default());
+    let fetcher = CachedPostFetcher::new(&source, Arc::clone(&db), Arc::clone(&stats));
+
+    let result = fetcher.fetch_sample("did:plc:a", "a.bsky.social", 25).await;
+
+    assert!(result.is_err());
+    assert!(db.get_feed_snapshot("did:plc:a").await.unwrap().is_none());
+    // The miss is counted at the decision point (before the network call),
+    // not after a successful upsert — so it's still recorded even though
+    // the fetch itself failed.
+    assert_eq!((stats.hits(), stats.misses()), (0, 1));
 }
 
 #[test]

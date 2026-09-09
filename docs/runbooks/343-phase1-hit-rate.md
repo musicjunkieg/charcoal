@@ -23,7 +23,13 @@ pass/fail.
    ```
 
 2. Scan **A**. Wait for `scan_queue.status = 'done'`. Record its wall and
-   its cache counters — expect misses only:
+   its cache counters. The **feed** counter should be ≈ 0 hits on a cold
+   cache — it counts once per candidate (see `CachedPostFetcher`), so a
+   truly cold run has nothing to hit. The **onnx** counter WILL show hits
+   even on a cold cache: originals scored during stage 1 are re-scored in
+   the clean pass, which is an intra-scan hit, not a cross-scan one. Record
+   A's onnx rate as the intra-scan floor — it is not evidence the cache
+   failed to cold-start.
 
    ```sql
    SELECT finished_at::timestamptz - started_at::timestamptz AS wall
@@ -53,8 +59,12 @@ pass/fail.
 
 | | wall | feed hit rate | onnx hit rate | classifier hit rate |
 |---|---|---|---|---|
-| A (cold) | | 0 | 0 | 0 |
+| A (cold) | | ≈ 0 | (floor) | ≈ 0 |
 | B (warm) | | | | |
+
+For onnx and classifier, the intra-scan re-score inflates a raw B number
+too, so compute the cross-scan rate as `(B − A) / (1 − A)`. The feed rate
+needs no correction — it is already per-candidate.
 
 **Pass:** feed hit rate ≥ 0.50 and B's wall ≤ 0.60 × A's wall.
 **Re-cost:** feed hit rate < 0.20 — write the number into spec §4.1 and

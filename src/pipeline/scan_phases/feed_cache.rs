@@ -7,8 +7,8 @@
 //! account within [`SNAPSHOT_TTL`]) is served from Postgres instead of
 //! Bluesky. The cache is keyed by DID, not handle: handles change.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -47,11 +47,30 @@ pub struct CachedPostFetcher<'a> {
     source: &'a dyn FeedSource,
     db: Arc<dyn Database>,
     stats: Arc<CacheStats>,
+    /// DIDs already counted toward `stats` this scan. The gather calls
+    /// `fetch_sample` twice per candidate that reaches stage 2 (limit 25,
+    /// then 50) — the second call is always served from the snapshot the
+    /// first call just wrote, so counting both would inflate the hit rate.
+    /// The Phase 1 gate (spec §4.1) is defined per candidate, not per fetch,
+    /// so only the first call for a given DID updates `stats`; later calls
+    /// still read/refetch normally, they just don't recount.
+    seen: Mutex<HashSet<String>>,
 }
 
 impl<'a> CachedPostFetcher<'a> {
     pub fn new(source: &'a dyn FeedSource, db: Arc<dyn Database>, stats: Arc<CacheStats>) -> Self {
-        Self { source, db, stats }
+        Self {
+            source,
+            db,
+            stats,
+            seen: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// True the first time this DID is seen this scan (and records it).
+    /// Lock scope is intentionally tiny — never held across an `.await`.
+    fn first_time_seeing(&self, did: &str) -> bool {
+        self.seen.lock().unwrap().insert(did.to_string())
     }
 
     /// Fresh, decodable snapshot for `did`, or `None` (a stale or corrupt row
@@ -77,12 +96,19 @@ impl<'a> CachedPostFetcher<'a> {
 #[async_trait]
 impl PostFetcher for CachedPostFetcher<'_> {
     async fn fetch_sample(&self, did: &str, handle: &str, limit: usize) -> Result<PostSample> {
+        // Count only the first call for this DID this scan — see `seen` doc comment.
+        let first_time = self.first_time_seeing(did);
+
         if let Some(feed) = self.fresh_feed(did).await? {
-            self.stats.hit(1);
+            if first_time {
+                self.stats.hit(1);
+            }
             return Ok(sample_from_feed(&feed, limit));
         }
 
-        self.stats.miss(1);
+        if first_time {
+            self.stats.miss(1);
+        }
         let feed = self
             .source
             .fetch_feed(handle, limit.max(SNAPSHOT_FETCH_LIMIT))

@@ -688,7 +688,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v15
+        // Verify schema_version has all versions through v16
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
