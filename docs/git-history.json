@@ -1,5 +1,13 @@
 [
   {
+    "hash": "30f95d3f40752765e9120264dd1f1b327f7a7b6d",
+    "short_hash": "30f95d3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T20:45:40-07:00",
+    "message": "feat(343): CHARCOAL_ONNX_SESSIONS session pool for the Phase 0 experiment\n\nDefault 1, clamp 1..=8, round-robin selection. Adds ONNX_MODEL_ID for the\nPhase 1 cache key.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
     "hash": "fd123b34589e5dc237f45c6d9b2041fa8af5807a",
     "short_hash": "fd123b3",
     "author": "Bryan Guffey",

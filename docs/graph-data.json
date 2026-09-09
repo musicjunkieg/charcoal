@@ -8652,10 +8652,32 @@
       "node_type": "action",
       "title": "Task 3 (#346): ONNX_MODEL_ID + CHARCOAL_ONNX_SESSIONS session pool (default 1, clamp 1..=8, round-robin)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T20:35:24.551308-07:00",
-      "updated_at": "2026-09-08T20:35:24.551308-07:00",
+      "updated_at": "2026-09-08T20:48:12.479701-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"fd123b3\",\"confidence\":90}"
+    },
+    {
+      "id": 797,
+      "change_id": "e4d5079d-0406-4a45-92c3-67da58d5600f",
+      "node_type": "outcome",
+      "title": "Task 3 (#346) done: CHARCOAL_ONNX_SESSIONS pool + ONNX_MODEL_ID, equality test green, review clean",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T20:48:06.593694-07:00",
+      "updated_at": "2026-09-08T20:48:12.485860-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"30f95d3\",\"confidence\":90}"
+    },
+    {
+      "id": 798,
+      "change_id": "2509c8f2-8065-4ed5-ace9-a641541d2722",
+      "node_type": "action",
+      "title": "Task 4 (#346): FeedKind/FeedPost/collect_feed_posts/sample_from_feed + FeedSource trait; PostFetcher::fetch_sample gains did",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T20:48:12.501247-07:00",
+      "updated_at": "2026-09-08T20:48:12.501247-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"30f95d3\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17634,6 +17656,28 @@
       "weight": 1.0,
       "rationale": "Plan task 3 of 10",
       "created_at": "2026-09-08T20:35:28.208947-07:00"
+    },
+    {
+      "id": 827,
+      "from_node_id": 796,
+      "to_node_id": 797,
+      "from_change_id": "b63281da-8868-4169-95bc-5b1652ac0a05",
+      "to_change_id": "e4d5079d-0406-4a45-92c3-67da58d5600f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 implementation outcome",
+      "created_at": "2026-09-08T20:48:12.473378-07:00"
+    },
+    {
+      "id": 828,
+      "from_node_id": 788,
+      "to_node_id": 798,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "2509c8f2-8065-4ed5-ace9-a641541d2722",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 4 of 10",
+      "created_at": "2026-09-08T20:48:16.522526-07:00"
     }
   ],
   "documents": [

@@ -25,7 +25,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::bluesky::client::PublicAtpClient;
-use crate::bluesky::posts::{self, PostSample};
+use crate::bluesky::posts::{self, FeedPost, PostSample};
 use crate::bluesky::relationships::GraphDistance;
 use crate::db::Database;
 use crate::scoring::profile::{select_fingerprint_posts, stage1_outcome_timed, Stage1Outcome};
@@ -108,30 +108,52 @@ pub enum GatherOutcome {
     Enqueued,
 }
 
-/// Minimal post-fetch seam so Phase A's I/O can be exercised with canned data.
-///
-/// `posts::fetch_posts_with_replies` / `fetch_parent_posts` take a concrete
-/// `&PublicAtpClient`, which can't be mocked. This trait wraps exactly those
-/// two calls; the production [`AtpPostFetcher`] forwards to the real functions,
-/// and tests supply a canned double. Kept deliberately small and local to this
-/// task — it covers only the two fetches `gather_account` performs.
+/// The raw feed reads `gather_account` needs, over the concrete
+/// `&PublicAtpClient` (which can't be mocked). The production
+/// [`AtpPostFetcher`] forwards to `posts::collect_feed_posts` /
+/// `posts::fetch_parent_posts`; the cache layer (`feed_cache.rs`) wraps this
+/// and exposes [`PostFetcher`] to the gather.
 #[async_trait]
-pub trait PostFetcher: Send + Sync {
-    /// Fetch up to `limit` recent posts (with replies/quotes partitioned).
-    async fn fetch_sample(&self, handle: &str, limit: usize) -> Result<PostSample>;
+pub trait FeedSource: Send + Sync {
+    /// Fetch up to `max_posts` authored posts in feed order.
+    async fn fetch_feed(&self, handle: &str, max_posts: usize) -> Result<Vec<FeedPost>>;
 
     /// Fetch parent post texts for the given AT URIs, keyed by URI.
     async fn fetch_parents(&self, uris: &[String]) -> Result<HashMap<String, String>>;
 }
 
-/// Production [`PostFetcher`] backed by the public AT Protocol client.
+/// What `gather_account` consumes: a partitioned sample for a given account.
+/// `did` is the cache key (#343 §4.1) — handles change, DIDs don't.
+#[async_trait]
+pub trait PostFetcher: Send + Sync {
+    /// Fetch up to `limit` recent posts (with replies/quotes partitioned).
+    async fn fetch_sample(&self, did: &str, handle: &str, limit: usize) -> Result<PostSample>;
+
+    /// Fetch parent post texts for the given AT URIs, keyed by URI.
+    async fn fetch_parents(&self, uris: &[String]) -> Result<HashMap<String, String>>;
+}
+
+/// Production [`FeedSource`] backed by the public AT Protocol client.
 pub struct AtpPostFetcher<'a> {
     pub client: &'a PublicAtpClient,
 }
 
 #[async_trait]
+impl FeedSource for AtpPostFetcher<'_> {
+    async fn fetch_feed(&self, handle: &str, max_posts: usize) -> Result<Vec<FeedPost>> {
+        posts::collect_feed_posts(self.client, handle, max_posts).await
+    }
+
+    async fn fetch_parents(&self, uris: &[String]) -> Result<HashMap<String, String>> {
+        posts::fetch_parent_posts(self.client, uris).await
+    }
+}
+
+// TEMPORARY until Task 7 lands `CachedPostFetcher`: keeps sweep.rs and
+// amplification.rs compiling with today's uncached behaviour.
+#[async_trait]
 impl PostFetcher for AtpPostFetcher<'_> {
-    async fn fetch_sample(&self, handle: &str, limit: usize) -> Result<PostSample> {
+    async fn fetch_sample(&self, _did: &str, handle: &str, limit: usize) -> Result<PostSample> {
         posts::fetch_posts_with_replies(self.client, handle, limit).await
     }
 
@@ -294,7 +316,9 @@ pub async fn gather_account(
     // ── Stage 1: quick check with 25 posts ──
     let stage1_sample = {
         let t = std::time::Instant::now();
-        let r = fetcher.fetch_sample(inputs.account_handle, 25).await?;
+        let r = fetcher
+            .fetch_sample(inputs.account_did, inputs.account_handle, 25)
+            .await?;
         timing.fetch_ms += t.elapsed().as_millis() as u64;
         r
     };
@@ -324,7 +348,9 @@ pub async fn gather_account(
     // ── Stage 2: full I/O with 50 posts (no classification — that's Phase B) ──
     let sample = {
         let t = std::time::Instant::now();
-        let r = fetcher.fetch_sample(inputs.account_handle, 50).await?;
+        let r = fetcher
+            .fetch_sample(inputs.account_did, inputs.account_handle, 50)
+            .await?;
         timing.fetch_ms += t.elapsed().as_millis() as u64;
         r
     };
