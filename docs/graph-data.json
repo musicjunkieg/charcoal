@@ -8762,10 +8762,32 @@
       "node_type": "action",
       "title": "Task 8 (#346): sha2 non-optional + text_sha256 + CachedToxicityScorer + scan_job wiring",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T22:46:59.309402-07:00",
-      "updated_at": "2026-09-08T22:46:59.309402-07:00",
+      "updated_at": "2026-09-08T23:24:06.036054-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"2b3f144\",\"confidence\":90}"
+    },
+    {
+      "id": 807,
+      "change_id": "ca802135-f22c-4a46-9a54-b999a399d3b6",
+      "node_type": "outcome",
+      "title": "Task 8 (#346) approved: sha2 non-optional, text_sha256 + CachedToxicityScorer (dedup within batch, caller order preserved), onnx_cache_hits/misses recorded in scan_job",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T23:24:00.915539-07:00",
+      "updated_at": "2026-09-08T23:24:06.042896-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"4a92394\",\"confidence\":95}"
+    },
+    {
+      "id": 808,
+      "change_id": "fa31dd59-1439-417c-a830-0dfeedbd3391",
+      "node_type": "action",
+      "title": "Task 9 (#346): CachedClassifier (classifier_verdicts by text hash + model + policy version)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T23:24:06.061921-07:00",
+      "updated_at": "2026-09-08T23:24:06.061921-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"4a92394\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17854,6 +17876,28 @@
       "weight": 1.0,
       "rationale": "Task 8 of the Phase 0+1 plan",
       "created_at": "2026-09-08T22:47:02.529690-07:00"
+    },
+    {
+      "id": 837,
+      "from_node_id": 806,
+      "to_node_id": 807,
+      "from_change_id": "31a6fcff-84f1-4943-abb4-7205186ebafd",
+      "to_change_id": "ca802135-f22c-4a46-9a54-b999a399d3b6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 implementation reviewed and approved",
+      "created_at": "2026-09-08T23:24:06.028659-07:00"
+    },
+    {
+      "id": 838,
+      "from_node_id": 788,
+      "to_node_id": 808,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "fa31dd59-1439-417c-a830-0dfeedbd3391",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 of the Phase 0+1 plan",
+      "created_at": "2026-09-08T23:24:09.462976-07:00"
     }
   ],
   "documents": [

@@ -704,7 +704,14 @@ async fn run_scan(
     // configured Stage-2 classifier (CHARCOAL_CLASSIFIER) for a binary verdict.
     // The classifier is required — build_from_env errors (and the scan fails
     // loudly) if unconfigured; there is no silent ONNX-only fallback.
-    let classifier = crate::toxicity::classifier::build_from_env()?;
+    // #343 Phase 1: stage-2 verdicts are cached by (text hash, model, policy).
+    let classifier_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());
+    let classifier: Arc<dyn crate::toxicity::classifier::ToxicityClassifier> =
+        Arc::new(crate::toxicity::cached_classifier::CachedClassifier::new(
+            crate::toxicity::classifier::build_from_env()?,
+            Arc::clone(&db),
+            Arc::clone(&classifier_cache_stats),
+        ));
     info!(
         backend = classifier.name(),
         "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
@@ -1102,6 +1109,17 @@ async fn run_scan(
     .await
     {
         tracing::warn!(error = %e, "could not record onnx cache stats");
+    }
+
+    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
+        db.as_ref(),
+        user_did,
+        "classifier",
+        &classifier_cache_stats,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, "could not record classifier cache stats");
     }
 
     finish_scan(&scan_manager, user_did, claim_id, result).await

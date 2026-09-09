@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4a9239452dd18478efa8f460c73cc3bcb109097a",
+    "short_hash": "4a92394",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T23:20:44-07:00",
+    "message": "feat(343): CachedToxicityScorer — ONNX scores cached by text SHA-256\n\nDistinct misses go to the model in one batch; hits return the cached\ntoxicity with default attributes. Keyed by (text hash, model id), shared\nacross users. Counts land in scan_state onnx_cache_hits/misses.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 7
+  },
+  {
     "hash": "2b3f14458e379b12fdb3a7d66e43148014e95da8",
     "short_hash": "2b3f144",
     "author": "Bryan Guffey",

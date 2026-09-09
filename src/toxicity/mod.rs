@@ -5,6 +5,7 @@
 // available as a fallback via CHARCOAL_SCORER=perspective.
 
 pub mod cached;
+pub mod cached_classifier;
 pub mod classifier;
 pub mod cost_meter;
 pub mod download;
