@@ -8630,10 +8630,32 @@
       "node_type": "action",
       "title": "Task 2 (#346): Phase 0 measurement — CPU sampler (/proc/self/stat), RateLimit-Limit capture, persist bluesky_ratelimit_limit to scan_state",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T18:44:30.326310-07:00",
-      "updated_at": "2026-09-08T18:44:30.326310-07:00",
+      "updated_at": "2026-09-08T20:35:24.530786-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"ceac618\",\"confidence\":90}"
+    },
+    {
+      "id": 795,
+      "change_id": "ccd63ce5-4d98-49b6-a1a4-b32f03b39e5f",
+      "node_type": "outcome",
+      "title": "Task 2 (#346) done: CPU sampler + RateLimit-Limit capture, two review rounds fixed (warn-branch now unit-tested via record_observed_rate_limit)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T20:35:19.269104-07:00",
+      "updated_at": "2026-09-08T20:35:24.537302-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"fd123b3\",\"confidence\":90}"
+    },
+    {
+      "id": 796,
+      "change_id": "b63281da-8868-4169-95bc-5b1652ac0a05",
+      "node_type": "action",
+      "title": "Task 3 (#346): ONNX_MODEL_ID + CHARCOAL_ONNX_SESSIONS session pool (default 1, clamp 1..=8, round-robin)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T20:35:24.551308-07:00",
+      "updated_at": "2026-09-08T20:35:24.551308-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"fd123b3\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17590,6 +17612,28 @@
       "weight": 1.0,
       "rationale": "Plan task 2",
       "created_at": "2026-09-08T18:44:30.333254-07:00"
+    },
+    {
+      "id": 825,
+      "from_node_id": 794,
+      "to_node_id": 795,
+      "from_change_id": "57cf0ead-1c1b-4ade-be16-7fa8d2ee28c0",
+      "to_change_id": "ccd63ce5-4d98-49b6-a1a4-b32f03b39e5f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 implementation produced this outcome after two review rounds",
+      "created_at": "2026-09-08T20:35:24.524100-07:00"
+    },
+    {
+      "id": 826,
+      "from_node_id": 788,
+      "to_node_id": 796,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "b63281da-8868-4169-95bc-5b1652ac0a05",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 3 of 10",
+      "created_at": "2026-09-08T20:35:28.208947-07:00"
     }
   ],
   "documents": [
