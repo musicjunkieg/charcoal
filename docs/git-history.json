@@ -1,5 +1,29 @@
 [
   {
+    "hash": "5d5355b5427ff728d49739d5d1a77c193d70fbe0",
+    "short_hash": "5d5355b",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T00:53:32-07:00",
+    "message": "docs(343): scalability & onboarding design spec\n\nAnswers #343: measured scan breakdown, 10x15-min wave target, shared\nuser-independent cache, worker role + semaphores, Bluesky token bucket\nwith 429 handling (#182), score expiry + top-tier refresh (#344, unblocks\n#342), CandidateSource trait for soot, hosting matrix with live Railway\nrates, phased plan with pass numbers.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
+    "hash": "946de942062867cc542fa634bb0dd2064447e0fd",
+    "short_hash": "946de94",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T13:44:43-07:00",
+    "message": "Merge branch 'main' into staging",
+    "files_changed": 0
+  },
+  {
+    "hash": "acd98e0c79aaf20f7d6c0452052ad6b3d8784b9e",
+    "short_hash": "acd98e0",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T03:56:08-07:00",
+    "message": "fix(345): latest-wins guard for overlapping actions-list loads\n\nThe poll timer and disconnect() can both call load(), and whichever\nresolves last writes state. A pre-disconnect read that finishes late\nput \"connected\" back on screen and re-armed polling from stale rows\n(CodeRabbit, PR #116). Each load now takes a ticket from a small\ngeneration() helper and drops its result if a newer load started\nsince. Covered by a reverse-completion vitest.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 5
+  },
+  {
     "hash": "48384191e01ebaf9950ea194817bba0ffe6e0d51",
     "short_hash": "4838419",
     "author": "Bryan Guffey",
