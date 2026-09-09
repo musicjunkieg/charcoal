@@ -8784,10 +8784,32 @@
       "node_type": "action",
       "title": "Task 9 (#346): CachedClassifier (classifier_verdicts by text hash + model + policy version)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T23:24:06.061921-07:00",
-      "updated_at": "2026-09-08T23:24:06.061921-07:00",
+      "updated_at": "2026-09-09T00:26:18.933608-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"4a92394\",\"confidence\":90}"
+    },
+    {
+      "id": 809,
+      "change_id": "ec3ea55e-4726-4312-8a75-e9bf29aa9fdf",
+      "node_type": "outcome",
+      "title": "Task 9 (#346) approved: CachedClassifier caches only Verdict outcomes, errors pass through, scan_job records classifier cache stats",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-09T00:26:15.597976-07:00",
+      "updated_at": "2026-09-09T00:26:18.939858-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"9c176f3\",\"confidence\":90}"
+    },
+    {
+      "id": 810,
+      "change_id": "83e8cc8c-6dee-4544-8826-7be78e8939bf",
+      "node_type": "action",
+      "title": "Task 10 (#346): docs - CHANGELOG, README knobs, two runbooks",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T00:26:18.955476-07:00",
+      "updated_at": "2026-09-09T00:26:18.955476-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"9c176f3\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17898,6 +17920,28 @@
       "weight": 1.0,
       "rationale": "Task 9 of the Phase 0+1 plan",
       "created_at": "2026-09-08T23:24:09.462976-07:00"
+    },
+    {
+      "id": 839,
+      "from_node_id": 808,
+      "to_node_id": 809,
+      "from_change_id": "fa31dd59-1439-417c-a830-0dfeedbd3391",
+      "to_change_id": "ec3ea55e-4726-4312-8a75-e9bf29aa9fdf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 review approved",
+      "created_at": "2026-09-09T00:26:18.926670-07:00"
+    },
+    {
+      "id": 840,
+      "from_node_id": 788,
+      "to_node_id": 810,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "83e8cc8c-6dee-4544-8826-7be78e8939bf",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan Task 10: docs and runbooks",
+      "created_at": "2026-09-09T00:26:24.180543-07:00"
     }
   ],
   "documents": [

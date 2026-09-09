@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9c176f3c03d93e3e00c534774d5a04529a2034d3",
+    "short_hash": "9c176f3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:20:39-07:00",
+    "message": "feat(343): CachedClassifier — stage-2 verdicts cached by (hash, model, policy)\n\nOnly decodable verdicts are stored; slot errors and request errors pass\nthrough untouched so the burst downcasts still work. Counts land in\nscan_state classifier_cache_hits/misses.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
     "hash": "4a9239452dd18478efa8f460c73cc3bcb109097a",
     "short_hash": "4a92394",
     "author": "Bryan Guffey",
