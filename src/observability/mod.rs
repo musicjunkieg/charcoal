@@ -5,5 +5,6 @@
 //! human-readable message strings. See `classifier_metrics` for the
 //! Stage-2 toxicity classifier metric set (spec §"Monitoring").
 
+pub mod cache_stats;
 pub mod classifier_metrics;
 pub mod cpu_sample;

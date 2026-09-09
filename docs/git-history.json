@@ -1,5 +1,13 @@
 [
   {
+    "hash": "73033da26b3e1b86819ee959f753200a031a232d",
+    "short_hash": "73033da",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T22:14:09-07:00",
+    "message": "feat(343): Database trait methods for the shared cache\n\nget/upsert feed snapshots, onnx scores and classifier verdicts on SQLite\nand Postgres. Batch lookups return only hits; empty inputs are no-ops.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 9
+  },
+  {
     "hash": "5b2f84ce8c793333a50498a2e1451ccc971a9053",
     "short_hash": "5b2f84c",
     "author": "Bryan Guffey",

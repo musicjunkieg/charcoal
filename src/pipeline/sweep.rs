@@ -30,6 +30,8 @@ use crate::pipeline::scan_phases::burst;
 // `TwoStageToxicityScorer` impls both `ToxicityScorer` and `CleanPassScorer`
 // (the gather seam). The phased pipeline needs both views plus the classifier,
 // so sweep takes the concrete scorer and coerces it into the two `&dyn` views.
+use crate::observability::cache_stats::{record_cache_stats, CacheStats};
+use crate::pipeline::scan_phases::feed_cache::CachedPostFetcher;
 use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
 use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
 use crate::scoring::threat::ThreatWeights;
@@ -326,7 +328,9 @@ async fn run_sweep_phased(
     concurrency: usize,
     candidates: &[CandidateInput],
 ) -> Result<(usize, bool)> {
-    let fetcher = AtpPostFetcher { client };
+    let source = AtpPostFetcher { client };
+    let feed_stats = Arc::new(CacheStats::default());
+    let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
     let classifier = scorer.classifier();
 
     let deps = PhasedScanDeps {
@@ -349,6 +353,7 @@ async fn run_sweep_phased(
     };
 
     let summary = run_phased_scan(db, user_did, candidates, &deps).await?;
+    record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await?;
     Ok((summary.accounts_scored, summary.degraded))
 }
 

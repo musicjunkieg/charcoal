@@ -149,19 +149,6 @@ impl FeedSource for AtpPostFetcher<'_> {
     }
 }
 
-// TEMPORARY until Task 7 lands `CachedPostFetcher`: keeps sweep.rs and
-// amplification.rs compiling with today's uncached behaviour.
-#[async_trait]
-impl PostFetcher for AtpPostFetcher<'_> {
-    async fn fetch_sample(&self, _did: &str, handle: &str, limit: usize) -> Result<PostSample> {
-        posts::fetch_posts_with_replies(self.client, handle, limit).await
-    }
-
-    async fn fetch_parents(&self, uris: &[String]) -> Result<HashMap<String, String>> {
-        posts::fetch_parent_posts(self.client, uris).await
-    }
-}
-
 /// The ONNX clean-pass seam used by Phase A's clean/survivor split.
 ///
 /// Phase A must score the *exact same envelope* Stage 2's ONNX would, so it

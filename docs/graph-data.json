@@ -8718,10 +8718,32 @@
       "node_type": "action",
       "title": "Task 6 (#346): cache row types + six Database trait methods on SqliteDatabase and PgDatabase",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T21:57:22.964407-07:00",
-      "updated_at": "2026-09-08T21:57:22.964407-07:00",
+      "updated_at": "2026-09-08T22:18:49.128654-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"5b2f84c\",\"confidence\":90}"
+    },
+    {
+      "id": 803,
+      "change_id": "4127b41d-329a-4b5a-b5f2-e16886be6eb8",
+      "node_type": "outcome",
+      "title": "Task 6 (#346) approved: FeedSnapshot/OnnxScoreRow/ClassifierVerdictRow + six Database trait methods on both backends, review clean",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T22:18:43.781324-07:00",
+      "updated_at": "2026-09-08T22:18:49.135255-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"73033da\",\"confidence\":95}"
+    },
+    {
+      "id": 804,
+      "change_id": "ecc8553b-a42f-42a4-b132-8574ba3ce65e",
+      "node_type": "action",
+      "title": "Task 7 (#346): cache_stats + CachedPostFetcher (feed_cache.rs) + sweep/amplification wiring",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T22:18:49.150634-07:00",
+      "updated_at": "2026-09-08T22:18:49.150634-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"73033da\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17766,6 +17788,28 @@
       "weight": 1.0,
       "rationale": "Plan task 6 of 10",
       "created_at": "2026-09-08T21:57:26.239549-07:00"
+    },
+    {
+      "id": 833,
+      "from_node_id": 802,
+      "to_node_id": 803,
+      "from_change_id": "1a9d914b-f6a6-4f08-b561-0b390aeac2a7",
+      "to_change_id": "4127b41d-329a-4b5a-b5f2-e16886be6eb8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 implementation reviewed and approved",
+      "created_at": "2026-09-08T22:18:49.121922-07:00"
+    },
+    {
+      "id": 834,
+      "from_node_id": 788,
+      "to_node_id": 804,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "ecc8553b-a42f-42a4-b132-8574ba3ce65e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 7 of the Phase 0+1 plan",
+      "created_at": "2026-09-08T22:18:52.337299-07:00"
     }
   ],
   "documents": [
