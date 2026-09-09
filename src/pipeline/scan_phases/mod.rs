@@ -368,6 +368,10 @@ async fn run_gather(
     candidates: &[CandidateInput],
     deps: &PhasedScanDeps<'_>,
 ) -> Result<GatherSweep> {
+    // Phase 0 measurement (#343): sample our own CPU time while the gather
+    // runs. The guard aborts the sampler when this function returns.
+    let _cpu_sampler = crate::observability::cpu_sample::spawn_cpu_sampler();
+
     // Map over owned indices (not `&CandidateInput` iterator items) and re-index
     // inside the `async move`. Mapping the borrowing items directly trips the
     // compiler's `FnOnce is not general enough` HRTB inference when this future

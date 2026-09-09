@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ceac618e44fd1ac482a0919876fac04789d760ef",
+    "short_hash": "ceac618",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T18:42:59-07:00",
+    "message": "perf(343): forward stage-1 batches to the primary scorer intact\n\nTwoStageToxicityScorer had no score_batch override, so stage 1 ran one\nONNX forward pass per post. Delegate to primary.score_batch.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
     "hash": "d27b19983148d5433af0831936cb4c01ab188630",
     "short_hash": "d27b199",
     "author": "Bryan Guffey",

@@ -8608,10 +8608,32 @@
       "node_type": "action",
       "title": "Task 1 (#346): score_batch override on TwoStageToxicityScorer — one stage-1 forward pass per batch",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T18:37:11.456927-07:00",
-      "updated_at": "2026-09-08T18:37:11.456927-07:00",
+      "updated_at": "2026-09-08T18:44:30.303850-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"d27b199\",\"confidence\":90}"
+    },
+    {
+      "id": 793,
+      "change_id": "a242b555-2cfa-4639-a87e-a66ef73c4f5e",
+      "node_type": "outcome",
+      "title": "Task 1 done ceac618: TwoStageToxicityScorer::score_batch delegates to primary.score_batch — 25 forward passes → 1 per stage-1 batch; 15/15 unit_ensemble, review clean",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T18:44:30.291147-07:00",
+      "updated_at": "2026-09-08T18:44:30.310138-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"ceac618\",\"confidence\":95}"
+    },
+    {
+      "id": 794,
+      "change_id": "57cf0ead-1c1b-4ade-be16-7fa8d2ee28c0",
+      "node_type": "action",
+      "title": "Task 2 (#346): Phase 0 measurement — CPU sampler (/proc/self/stat), RateLimit-Limit capture, persist bluesky_ratelimit_limit to scan_state",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T18:44:30.326310-07:00",
+      "updated_at": "2026-09-08T18:44:30.326310-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"ceac618\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17546,6 +17568,28 @@
       "weight": 1.0,
       "rationale": "Executing the Phase 0+1 plan task by task",
       "created_at": "2026-09-08T18:37:11.464345-07:00"
+    },
+    {
+      "id": 823,
+      "from_node_id": 792,
+      "to_node_id": 793,
+      "from_change_id": "211ccf08-f5b1-4973-a952-6dd4c3c760a2",
+      "to_change_id": "a242b555-2cfa-4639-a87e-a66ef73c4f5e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 1 implementation result",
+      "created_at": "2026-09-08T18:44:30.297497-07:00"
+    },
+    {
+      "id": 824,
+      "from_node_id": 788,
+      "to_node_id": 794,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "57cf0ead-1c1b-4ade-be16-7fa8d2ee28c0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan task 2",
+      "created_at": "2026-09-08T18:44:30.333254-07:00"
     }
   ],
   "documents": [

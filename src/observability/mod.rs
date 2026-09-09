@@ -6,3 +6,4 @@
 //! Stage-2 toxicity classifier metric set (spec §"Monitoring").
 
 pub mod classifier_metrics;
+pub mod cpu_sample;

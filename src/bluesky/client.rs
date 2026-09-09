@@ -5,6 +5,7 @@
 // pipeline — auth is only needed for write operations (blocking/muting),
 // which is a future feature.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -74,6 +75,9 @@ impl XrpcAttemptError {
 pub struct PublicAtpClient {
     client: reqwest::Client,
     base_url: String,
+    /// Last `RateLimit-Limit` value the public API told us (#343 Phase 0).
+    /// 0 means "not observed yet" — the API never advertises a zero limit.
+    rate_limit_limit: AtomicU64,
 }
 
 impl PublicAtpClient {
@@ -98,7 +102,19 @@ impl PublicAtpClient {
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
+            rate_limit_limit: AtomicU64::new(0),
         })
+    }
+
+    /// The most recent `RateLimit-Limit` header seen on any response, if any.
+    /// Bluesky advertises its per-window request budget on every reply; we
+    /// record it so a scan can persist the number the spec asks for without
+    /// anyone reading Railway logs.
+    pub fn observed_rate_limit(&self) -> Option<u64> {
+        match self.rate_limit_limit.load(Ordering::Relaxed) {
+            0 => None,
+            n => Some(n),
+        }
     }
 
     /// Make a GET request to an XRPC endpoint and deserialize the response.
@@ -130,6 +146,16 @@ impl PublicAtpClient {
                 })?;
 
             let status = response.status();
+            // Headers are available before the body; read the limit even on
+            // a 429 so a throttled scan still reports the number.
+            if let Some(limit) = response
+                .headers()
+                .get("ratelimit-limit")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+            {
+                self.rate_limit_limit.store(limit, Ordering::Relaxed);
+            }
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
                 let err = anyhow::anyhow!("XRPC {nsid} returned {status}: {body}");
@@ -394,5 +420,48 @@ mod retry_tests {
             .await
             .expect("a prompt response must not be cut short by the timeout");
         assert!(got.ok);
+    }
+
+    #[tokio::test]
+    async fn captures_ratelimit_limit_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("RateLimit-Limit", "3000")
+                    .set_body_json(serde_json::json!({"did": "did:plc:abc"})),
+            )
+            .mount(&server)
+            .await;
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+        assert_eq!(
+            client.observed_rate_limit(),
+            None,
+            "nothing observed before a call"
+        );
+
+        let _: serde_json::Value = client
+            .xrpc_get("app.bsky.actor.getProfile", &[("actor", "did:plc:abc")])
+            .await
+            .unwrap();
+
+        assert_eq!(client.observed_rate_limit(), Some(3000));
+    }
+
+    #[tokio::test]
+    async fn missing_ratelimit_header_stays_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"did": "x"})))
+            .mount(&server)
+            .await;
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+        let _: serde_json::Value = client
+            .xrpc_get("app.bsky.actor.getProfile", &[("actor", "x")])
+            .await
+            .unwrap();
+        assert_eq!(client.observed_rate_limit(), None);
     }
 }

@@ -1059,6 +1059,17 @@ async fn run_scan(
     )
     .await;
 
+    // Phase 0 (#343): one number per scan, read from scan_state, not logs.
+    // Best-effort — a failure to record a diagnostic must not fail the scan.
+    if let Some(limit) = client.observed_rate_limit() {
+        if let Err(e) = db
+            .set_scan_state(user_did, "bluesky_ratelimit_limit", &limit.to_string())
+            .await
+        {
+            tracing::warn!(error = %e, "could not record bluesky_ratelimit_limit");
+        }
+    }
+
     finish_scan(&scan_manager, user_did, claim_id, result).await
 }
 
