@@ -8740,10 +8740,32 @@
       "node_type": "action",
       "title": "Task 7 (#346): cache_stats + CachedPostFetcher (feed_cache.rs) + sweep/amplification wiring",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-08T22:18:49.150634-07:00",
-      "updated_at": "2026-09-08T22:18:49.150634-07:00",
+      "updated_at": "2026-09-08T22:46:59.287291-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"73033da\",\"confidence\":90}"
+    },
+    {
+      "id": 805,
+      "change_id": "b4f63aa7-b9d3-438e-b19a-39f62019b5c0",
+      "node_type": "outcome",
+      "title": "Task 7 (#346) approved: CacheStats + CachedPostFetcher (24h feed snapshots) wired into sweep/amplification; temporary AtpPostFetcher PostFetcher impl removed; stale sqlite table-count test fixed (2b3f144)",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-08T22:46:54.044300-07:00",
+      "updated_at": "2026-09-08T22:46:59.293526-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"2b3f144\",\"confidence\":95}"
+    },
+    {
+      "id": 806,
+      "change_id": "31a6fcff-84f1-4943-abb4-7205186ebafd",
+      "node_type": "action",
+      "title": "Task 8 (#346): sha2 non-optional + text_sha256 + CachedToxicityScorer + scan_job wiring",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-08T22:46:59.309402-07:00",
+      "updated_at": "2026-09-08T22:46:59.309402-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"2b3f144\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -17810,6 +17832,28 @@
       "weight": 1.0,
       "rationale": "Task 7 of the Phase 0+1 plan",
       "created_at": "2026-09-08T22:18:52.337299-07:00"
+    },
+    {
+      "id": 835,
+      "from_node_id": 804,
+      "to_node_id": 805,
+      "from_change_id": "ecc8553b-a42f-42a4-b132-8574ba3ce65e",
+      "to_change_id": "b4f63aa7-b9d3-438e-b19a-39f62019b5c0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 7 implementation reviewed and approved",
+      "created_at": "2026-09-08T22:46:59.280561-07:00"
+    },
+    {
+      "id": 836,
+      "from_node_id": 788,
+      "to_node_id": 806,
+      "from_change_id": "b6dab814-6e10-4890-a38a-806ff837c9cc",
+      "to_change_id": "31a6fcff-84f1-4943-abb4-7205186ebafd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 of the Phase 0+1 plan",
+      "created_at": "2026-09-08T22:47:02.529690-07:00"
     }
   ],
   "documents": [

@@ -688,7 +688,16 @@ async fn run_scan(
     )
     .await;
 
-    let primary_scorer: Box<dyn ToxicityScorer> = Box::new(Arc::clone(&models.toxicity));
+    // #343 Phase 1: stage-1 / clean-pass ONNX scores are cached by text hash
+    // across users. Hit/miss counts are persisted at the end of the scan.
+    let onnx_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());
+    let primary_scorer: Box<dyn ToxicityScorer> =
+        Box::new(crate::toxicity::cached::CachedToxicityScorer::new(
+            Box::new(Arc::clone(&models.toxicity)),
+            Arc::clone(&db),
+            crate::toxicity::onnx::ONNX_MODEL_ID,
+            Arc::clone(&onnx_cache_stats),
+        ));
 
     // Wrap in the two-stage scorer. ONNX runs as a clean-pass filter
     // (< 0.10 = cleared); posts at or above the threshold are sent to the
@@ -1083,6 +1092,17 @@ async fn run_scan(
     .await;
 
     record_observed_rate_limit(db.as_ref(), user_did, client.observed_rate_limit()).await;
+
+    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
+        db.as_ref(),
+        user_did,
+        "onnx",
+        &onnx_cache_stats,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, "could not record onnx cache stats");
+    }
 
     finish_scan(&scan_manager, user_did, claim_id, result).await
 }
