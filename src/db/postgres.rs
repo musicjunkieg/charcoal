@@ -2350,23 +2350,44 @@ impl Database for PgDatabase {
         if rows.is_empty() {
             return Ok(());
         }
+        // One UNNEST round trip instead of one per row (CodeRabbit, PR #118),
+        // the same shape as insert_amplification_events_batch. `model_id` and
+        // `scored_at` are scalars broadcast to every row, so the statement
+        // binds four parameters at any batch size.
+        //
+        // Deduplicating first is load-bearing, not tidiness: a single
+        // INSERT ... ON CONFLICT DO UPDATE cannot touch the same row twice
+        // ("command cannot affect row a second time"). The old per-row loop
+        // simply let a later duplicate overwrite an earlier one, so collapse
+        // to last-write-wins here and keep that behaviour. Today's callers
+        // (CachedToxicityScorer) already pass distinct hashes; the trait is
+        // public and the next one might not.
         let now = chrono::Utc::now().to_rfc3339();
-        let mut tx = self.pool.begin().await?;
+        let mut last: std::collections::HashMap<&str, f64> =
+            std::collections::HashMap::with_capacity(rows.len());
         for r in rows {
-            sqlx_core::query::query(
-                "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (text_sha256, model_id) DO UPDATE SET
-                     score = EXCLUDED.score, scored_at = EXCLUDED.scored_at",
-            )
-            .bind(&r.text_sha256)
-            .bind(model_id)
-            .bind(r.score)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
+            last.insert(r.text_sha256.as_str(), r.score);
         }
-        tx.commit().await?;
+        let (hashes, scores): (Vec<String>, Vec<f64>) = last
+            .into_iter()
+            .map(|(h, score)| (h.to_string(), score))
+            .unzip();
+
+        // Explicit ::text[] / ::float8[] casts so Postgres can type UNNEST's
+        // output columns without inspecting values.
+        sqlx_core::query::query(
+            "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+             SELECT t.text_sha256, $1, t.score, $2
+             FROM UNNEST($3::text[], $4::float8[]) AS t(text_sha256, score)
+             ON CONFLICT (text_sha256, model_id) DO UPDATE SET
+                 score = EXCLUDED.score, scored_at = EXCLUDED.scored_at",
+        )
+        .bind(model_id)
+        .bind(&now)
+        .bind(&hashes)
+        .bind(&scores)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -2413,28 +2434,42 @@ impl Database for PgDatabase {
         if rows.is_empty() {
             return Ok(());
         }
+        // One UNNEST round trip, deduplicated last-write-wins — see
+        // upsert_onnx_scores above for why both of those are required.
         let now = chrono::Utc::now().to_rfc3339();
-        let mut tx = self.pool.begin().await?;
+        let mut last: std::collections::HashMap<&str, (bool, f64)> =
+            std::collections::HashMap::with_capacity(rows.len());
         for r in rows {
-            sqlx_core::query::query(
-                "INSERT INTO classifier_verdicts
-                     (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (text_sha256, model_id, policy_version) DO UPDATE SET
-                     toxic_token = EXCLUDED.toxic_token,
-                     confidence = EXCLUDED.confidence,
-                     classified_at = EXCLUDED.classified_at",
-            )
-            .bind(&r.text_sha256)
-            .bind(model_id)
-            .bind(policy_version)
-            .bind(r.toxic_token)
-            .bind(r.confidence)
-            .bind(&now)
-            .execute(&mut *tx)
-            .await?;
+            last.insert(r.text_sha256.as_str(), (r.toxic_token, r.confidence));
         }
-        tx.commit().await?;
+        let mut hashes: Vec<String> = Vec::with_capacity(last.len());
+        let mut toxic_tokens: Vec<bool> = Vec::with_capacity(last.len());
+        let mut confidences: Vec<f64> = Vec::with_capacity(last.len());
+        for (hash, (toxic, confidence)) in last {
+            hashes.push(hash.to_string());
+            toxic_tokens.push(toxic);
+            confidences.push(confidence);
+        }
+
+        sqlx_core::query::query(
+            "INSERT INTO classifier_verdicts
+                 (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+             SELECT t.text_sha256, $1, $2, t.toxic_token, t.confidence, $3
+             FROM UNNEST($4::text[], $5::bool[], $6::float8[])
+                  AS t(text_sha256, toxic_token, confidence)
+             ON CONFLICT (text_sha256, model_id, policy_version) DO UPDATE SET
+                 toxic_token = EXCLUDED.toxic_token,
+                 confidence = EXCLUDED.confidence,
+                 classified_at = EXCLUDED.classified_at",
+        )
+        .bind(model_id)
+        .bind(policy_version)
+        .bind(&now)
+        .bind(&hashes)
+        .bind(&toxic_tokens)
+        .bind(&confidences)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 

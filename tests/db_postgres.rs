@@ -2815,3 +2815,141 @@ async fn test_pg_evict_stale_cache() {
         CacheEviction::default()
     );
 }
+
+/// The UNNEST-batched cache upserts (CodeRabbit, PR #118): a multi-row batch
+/// round-trips, a second upsert of the same keys updates in place, and
+/// duplicate keys inside one batch collapse last-write-wins instead of
+/// tripping "ON CONFLICT DO UPDATE command cannot affect row a second time".
+#[tokio::test]
+async fn test_pg_cache_batch_upserts_round_trip_and_update() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use charcoal::db::{ClassifierVerdictRow, OnnxScoreRow};
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let keys = ["batch1", "batch2", "batch3"];
+    let scores: Vec<OnnxScoreRow> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, h)| OnnxScoreRow {
+            text_sha256: (*h).into(),
+            score: i as f64 / 10.0,
+        })
+        .collect();
+    db.upsert_onnx_scores("batch-model", &scores).await.unwrap();
+    let got = db
+        .get_onnx_scores("batch-model", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    assert_eq!(got["batch1"], 0.0);
+    assert_eq!(got["batch3"], 0.2);
+
+    // Same keys, new values: the ON CONFLICT path runs inside the UNNEST.
+    let bumped: Vec<OnnxScoreRow> = keys
+        .iter()
+        .map(|h| OnnxScoreRow {
+            text_sha256: (*h).into(),
+            score: 0.75,
+        })
+        .collect();
+    db.upsert_onnx_scores("batch-model", &bumped).await.unwrap();
+    let got = db
+        .get_onnx_scores("batch-model", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    assert!(got.values().all(|v| *v == 0.75));
+
+    // Duplicate keys in one batch: the last value wins, no error.
+    db.upsert_onnx_scores(
+        "batch-model",
+        &[
+            OnnxScoreRow {
+                text_sha256: "batch1".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "batch1".into(),
+                score: 0.6,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        db.get_onnx_scores("batch-model", &["batch1".to_string()])
+            .await
+            .unwrap()["batch1"],
+        0.6
+    );
+
+    let verdicts: Vec<ClassifierVerdictRow> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, h)| ClassifierVerdictRow {
+            text_sha256: (*h).into(),
+            toxic_token: i % 2 == 0,
+            confidence: 0.5,
+        })
+        .collect();
+    db.upsert_classifier_verdicts("batch-clf", "v1", &verdicts)
+        .await
+        .unwrap();
+    let got = db
+        .get_classifier_verdicts("batch-clf", "v1", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    assert_eq!(got["batch1"], verdicts[0]);
+    assert_eq!(got["batch2"], verdicts[1]);
+
+    // Flip every verdict through the conflict path.
+    let flipped: Vec<ClassifierVerdictRow> = verdicts
+        .iter()
+        .map(|v| ClassifierVerdictRow {
+            toxic_token: !v.toxic_token,
+            confidence: 0.99,
+            ..v.clone()
+        })
+        .collect();
+    db.upsert_classifier_verdicts("batch-clf", "v1", &flipped)
+        .await
+        .unwrap();
+    let got = db
+        .get_classifier_verdicts("batch-clf", "v1", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    for v in &flipped {
+        assert_eq!(got[&v.text_sha256], *v);
+    }
+
+    // Duplicate keys in one verdict batch.
+    db.upsert_classifier_verdicts(
+        "batch-clf",
+        "v1",
+        &[
+            ClassifierVerdictRow {
+                text_sha256: "batch1".into(),
+                toxic_token: true,
+                confidence: 0.1,
+            },
+            ClassifierVerdictRow {
+                text_sha256: "batch1".into(),
+                toxic_token: false,
+                confidence: 0.2,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    let got = db
+        .get_classifier_verdicts("batch-clf", "v1", &["batch1".to_string()])
+        .await
+        .unwrap();
+    assert!(!got["batch1"].toxic_token);
+    assert_eq!(got["batch1"].confidence, 0.2);
+}
