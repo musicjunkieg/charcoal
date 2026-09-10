@@ -1,5 +1,13 @@
 [
   {
+    "hash": "60584140e57bd569f9ae9c991014fcb24795da48",
+    "short_hash": "6058414",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T19:27:32-07:00",
+    "message": "docs(343): correct the RFC3339 ordering rationale; remove clock-tie in eviction test\n\nchrono to_rfc3339() is not fixed-width (0/3/6/9 fractional digits). The\nlexicographic sweep is still sound because every writer emits +00:00 and\n\"+\" sorts below \".\" and digits — say that, once, on the trait doc, and\npoint the other four sites at it. Test feed cutoff moves to now+1s so the\nseed row stamped in the same instant cannot tie.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 8
+  },
+  {
     "hash": "2a8aea356f8f5a9b2b3ea203be5bc34c7d419c0c",
     "short_hash": "2a8aea3",
     "author": "Bryan Guffey",

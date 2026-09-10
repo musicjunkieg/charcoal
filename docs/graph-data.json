@@ -8942,6 +8942,39 @@
       "created_at": "2026-09-09T19:15:36.201793-07:00",
       "updated_at": "2026-09-09T19:15:36.201793-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"2a8aea3\",\"confidence\":85}"
+    },
+    {
+      "id": 823,
+      "change_id": "4adb1903-5411-47d8-b596-43ac722f6801",
+      "node_type": "action",
+      "title": "Round-1 reviewer Minors: rewrite RFC3339 'fixed-width' rationale at 5 sites; +1s feed cutoff in eviction test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T19:27:44.092335-07:00",
+      "updated_at": "2026-09-09T19:27:44.092335-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"6058414\",\"confidence\":90,\"files\":[\"src/db/traits.rs\",\"src/db/cache_retention.rs\",\"src/db/postgres.rs\",\"src/db/queries.rs\",\"migrations/postgres/0017_cache_indexes.sql\",\"tests/unit_feed_cache.rs\"]}"
+    },
+    {
+      "id": 824,
+      "change_id": "4acbe658-b9fa-4799-a8fe-211481d7124b",
+      "node_type": "outcome",
+      "title": "Comments corrected, unit_feed_cache 15/15 green, fmt clean (6058414)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T19:27:47.775348-07:00",
+      "updated_at": "2026-09-09T19:27:47.775348-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"6058414\",\"confidence\":95}"
+    },
+    {
+      "id": 825,
+      "change_id": "c709d9cd-f172-4e67-b3d3-4f67efeaecb8",
+      "node_type": "outcome",
+      "title": "Round-1 single push 23de7f7..6058414 landed; both threads replied+resolved; summary comment posted; awaiting CodeRabbit re-review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T21:01:25.595747-07:00",
+      "updated_at": "2026-09-09T21:01:25.595747-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"6058414\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -18228,6 +18261,39 @@
       "weight": 1.0,
       "rationale": "Implementer report DONE_WITH_CONCERNS; concerns are observations, none block",
       "created_at": "2026-09-09T19:15:36.209858-07:00"
+    },
+    {
+      "id": 855,
+      "from_node_id": 822,
+      "to_node_id": 823,
+      "from_change_id": "b04c8c39-461c-40cd-93b0-5e301095352e",
+      "to_change_id": "4adb1903-5411-47d8-b596-43ac722f6801",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "task review of round-1 wave returned 5 Minors; two cheap enough to take before the single push",
+      "created_at": "2026-09-09T19:27:47.760361-07:00"
+    },
+    {
+      "id": 856,
+      "from_node_id": 823,
+      "to_node_id": 824,
+      "from_change_id": "4adb1903-5411-47d8-b596-43ac722f6801",
+      "to_change_id": "4acbe658-b9fa-4799-a8fe-211481d7124b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result of the Minor fixes",
+      "created_at": "2026-09-09T19:27:50.028182-07:00"
+    },
+    {
+      "id": 857,
+      "from_node_id": 824,
+      "to_node_id": 825,
+      "from_change_id": "4acbe658-b9fa-4799-a8fe-211481d7124b",
+      "to_change_id": "c709d9cd-f172-4e67-b3d3-4f67efeaecb8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "gates green enabled the single round-1 push",
+      "created_at": "2026-09-09T21:01:29.834036-07:00"
     }
   ],
   "documents": [
