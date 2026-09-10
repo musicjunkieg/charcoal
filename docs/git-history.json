@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7063776b0de425a86c63d5b99ceac86a358ed95b",
+    "short_hash": "7063776",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T17:47:18-07:00",
+    "message": "fix(343): wrap SQLite cache batch upserts in one transaction\n\nCodeRabbit on PR #118: SqliteDatabase called upsert_onnx_scores and\nupsert_classifier_verdicts without a transaction, so each row was its\nown autocommit - a mid-batch error left earlier rows behind, unlike the\nPostgres backend which wraps the batch. Now unchecked_transaction +\ncommit around the loop in both, matching delete_user_data.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
     "hash": "23de7f7b244acc48a1ab9f7b0085ac721a5e85fd",
     "short_hash": "23de7f7",
     "author": "Bryan Guffey",

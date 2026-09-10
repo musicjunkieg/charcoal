@@ -2429,6 +2429,99 @@ async fn test_pg_migration_v16_creates_cache_tables() {
     assert!(recorded, "0016 must self-record its version");
 }
 
+/// The three timestamp indexes `evict_stale_cache` sweeps on (#343 / PR #118).
+const PG_CACHE_INDEXES: [&str; 3] = [
+    "idx_account_feed_snapshots_fetched_at",
+    "idx_classifier_verdicts_classified_at",
+    "idx_onnx_scores_scored_at",
+];
+
+/// v17 (#343, PR #118 review): the eviction indexes exist and 17 is recorded.
+#[tokio::test]
+async fn test_pg_migration_v17_creates_cache_indexes() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    let names: Vec<String> = sqlx_core::query::query(
+        "SELECT indexname::text FROM pg_indexes
+         WHERE schemaname = 'public'
+           AND indexname IN ('idx_account_feed_snapshots_fetched_at',
+                             'idx_onnx_scores_scored_at',
+                             'idx_classifier_verdicts_classified_at')
+         ORDER BY indexname",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| r.get::<String, _>(0))
+    .collect();
+    assert_eq!(names, PG_CACHE_INDEXES);
+
+    let recorded: bool =
+        sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = 17")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(recorded, "0017 must self-record its version");
+}
+
+/// Simulate a v16 database (indexes dropped, 17 unrecorded) and prove 0017
+/// re-applies exactly once.
+#[tokio::test]
+async fn test_pg_migration_v17_upgrades_from_v16() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::raw_sql::raw_sql(
+        "DROP INDEX IF EXISTS idx_account_feed_snapshots_fetched_at;
+         DROP INDEX IF EXISTS idx_onnx_scores_scored_at;
+         DROP INDEX IF EXISTS idx_classifier_verdicts_classified_at;
+         DELETE FROM schema_version WHERE version = 17;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let count: i64 = sqlx_core::query::query(
+        "SELECT COUNT(*) FROM pg_indexes
+         WHERE schemaname = 'public'
+           AND indexname IN ('idx_account_feed_snapshots_fetched_at',
+                             'idx_onnx_scores_scored_at',
+                             'idx_classifier_verdicts_classified_at')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(count, 3);
+    let versions: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 17")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(versions, 1);
+}
+
 /// Simulate a v15 database (drop the v16 tables and version row), reconnect,
 /// and prove the migration re-applies exactly once.
 #[tokio::test]
@@ -2446,9 +2539,12 @@ async fn test_pg_migration_v16_upgrades_from_v15() {
     // Two statements in one string: the simple prepared-statement path
     // (`query()`) rejects multi-command strings, so use raw_sql like the
     // migration runner itself does (src/db/postgres.rs).
+    // v17 goes too: its indexes live on the v16 tables and vanish with them,
+    // so leaving 17 recorded would skip re-creating them and strand the next
+    // test (and a real v15 database has neither row anyway).
     sqlx_core::raw_sql::raw_sql(
         "DROP TABLE IF EXISTS account_feed_snapshots, onnx_scores, classifier_verdicts;
-         DELETE FROM schema_version WHERE version = 16;",
+         DELETE FROM schema_version WHERE version IN (16, 17);",
     )
     .execute(&pool)
     .await
@@ -2562,4 +2658,160 @@ async fn test_pg_shared_cache_round_trips() {
         .await
         .unwrap()
         .is_empty());
+}
+
+/// Retention parity with tests/unit_feed_cache.rs (#343 / PR #118 review):
+/// each cutoff applies to its own tables, and only rows past it go.
+#[tokio::test]
+async fn test_pg_evict_stale_cache() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use charcoal::db::{CacheEviction, ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow};
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    const ANCIENT: &str = "2020-01-01T00:00:00+00:00";
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    // Start from a known-empty cache: the counts below are exact, and this
+    // suite's other cache tests leave rows behind. Safe because every cache
+    // test seeds whatever it asserts on, and they all serialize on this lock.
+    sqlx_core::raw_sql::raw_sql(
+        "TRUNCATE account_feed_snapshots, onnx_scores, classifier_verdicts;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let now = chrono::Utc::now();
+    for (did, fetched_at) in [
+        ("did:plc:pgevict_old", ANCIENT.to_string()),
+        ("did:plc:pgevict_fresh", now.to_rfc3339()),
+    ] {
+        db.upsert_feed_snapshot(&FeedSnapshot {
+            did: did.into(),
+            handle: format!("{did}.bsky.social"),
+            posts_json: "[]".into(),
+            fetched_at,
+            source: "bluesky".into(),
+        })
+        .await
+        .unwrap();
+    }
+    db.upsert_onnx_scores(
+        "evict-m",
+        &[
+            OnnxScoreRow {
+                text_sha256: "old".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "fresh".into(),
+                score: 0.2,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_classifier_verdicts(
+        "evict-m",
+        "v1",
+        &[
+            ClassifierVerdictRow {
+                text_sha256: "old".into(),
+                toxic_token: true,
+                confidence: 0.9,
+            },
+            ClassifierVerdictRow {
+                text_sha256: "fresh".into(),
+                toxic_token: false,
+                confidence: 0.1,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    // The upserts stamp scored_at/classified_at themselves — age the "old"
+    // rows behind their back, the only way to test a backend-set timestamp.
+    for sql in [
+        "UPDATE onnx_scores SET scored_at = $1 WHERE text_sha256 = 'old'",
+        "UPDATE classifier_verdicts SET classified_at = $1 WHERE text_sha256 = 'old'",
+    ] {
+        sqlx_core::query::query(sql)
+            .bind(ANCIENT)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // A score cutoff that predates even the ancient rows must leave the
+    // scoring tables alone while the feed cutoff still bites.
+    let feed_only = db
+        .evict_stale_cache(
+            &(now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339(),
+            "1999-01-01T00:00:00+00:00",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        feed_only,
+        CacheEviction {
+            feed_snapshots: 1,
+            onnx_scores: 0,
+            classifier_verdicts: 0,
+        }
+    );
+
+    let evicted = db
+        .evict_stale_cache(
+            &(now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339(),
+            &(now - charcoal::db::cache_retention::SCORE_RETENTION).to_rfc3339(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        evicted,
+        CacheEviction {
+            feed_snapshots: 0,
+            onnx_scores: 1,
+            classifier_verdicts: 1,
+        }
+    );
+
+    // Fresh rows survive, stale ones are gone, and a repeat sweep is a no-op.
+    assert!(db
+        .get_feed_snapshot("did:plc:pgevict_old")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(db
+        .get_feed_snapshot("did:plc:pgevict_fresh")
+        .await
+        .unwrap()
+        .is_some());
+    let scores = db
+        .get_onnx_scores("evict-m", &["old".into(), "fresh".into()])
+        .await
+        .unwrap();
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores["fresh"], 0.2);
+    let verdicts = db
+        .get_classifier_verdicts("evict-m", "v1", &["old".into(), "fresh".into()])
+        .await
+        .unwrap();
+    assert_eq!(verdicts.len(), 1);
+    assert!(verdicts.contains_key("fresh"));
+
+    assert_eq!(
+        db.evict_stale_cache(
+            &(now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339(),
+            &(now - charcoal::db::cache_retention::SCORE_RETENTION).to_rfc3339(),
+        )
+        .await
+        .unwrap(),
+        CacheEviction::default()
+    );
 }

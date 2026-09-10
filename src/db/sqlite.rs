@@ -696,6 +696,15 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::upsert_classifier_verdicts(&conn, model_id, policy_version, rows)
     }
+
+    async fn evict_stale_cache(
+        &self,
+        feed_cutoff: &str,
+        score_cutoff: &str,
+    ) -> Result<super::cache_retention::CacheEviction> {
+        let conn = self.conn.lock().await;
+        super::queries::evict_stale_cache(&conn, feed_cutoff, score_cutoff)
+    }
 }
 
 #[cfg(test)]

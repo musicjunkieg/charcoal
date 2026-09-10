@@ -8876,6 +8876,61 @@
       "created_at": "2026-09-09T02:10:16.311500-07:00",
       "updated_at": "2026-09-09T02:10:22.764574-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"23de7f7\",\"confidence\":90}"
+    },
+    {
+      "id": 817,
+      "change_id": "ba99db7f-cbaa-41c4-9e32-9ae7785012ca",
+      "node_type": "action",
+      "title": "PR #118 CodeRabbit round 1: SQLite cache upserts in one transaction (Minor, valid)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T17:47:34.982085-07:00",
+      "updated_at": "2026-09-09T17:47:34.982085-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"7063776\",\"confidence\":90}"
+    },
+    {
+      "id": 818,
+      "change_id": "337b00ee-457c-42a7-ad9e-e076574b41fb",
+      "node_type": "option",
+      "title": "Eviction: defer to #347 as planned (bounded-retention later)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T17:47:34.993366-07:00",
+      "updated_at": "2026-09-09T17:47:34.993366-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"confidence\":40}"
+    },
+    {
+      "id": 819,
+      "change_id": "8a07044d-b113-4e67-abc0-bbddcef1fde1",
+      "node_type": "option",
+      "title": "Eviction: implement now - migration v17 timestamp indexes + best-effort evict_stale_cache at scan start (feed 7d, scores/verdicts 90d)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T17:47:35.005307-07:00",
+      "updated_at": "2026-09-09T17:47:35.005307-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"confidence\":85}"
+    },
+    {
+      "id": 820,
+      "change_id": "ea839104-6a07-4060-861b-0b1c03de8748",
+      "node_type": "decision",
+      "title": "Implement all round-1 CodeRabbit findings in one push: eviction + UNNEST batching, not deferred (Bryan 2026-09-09: validate and implement ALL before pushing)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T17:47:35.018465-07:00",
+      "updated_at": "2026-09-09T17:47:35.060463-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"confidence\":90,\"prompt\":\"Also just a note, always take all of the fixes that CodeRabbit has, validate them, and then implement them ALL before pushing. This way you keep CodeRabbit from doing so many incremental reviews\"}"
+    },
+    {
+      "id": 821,
+      "change_id": "da2b4a83-e7f3-47b7-8307-15992ac852e0",
+      "node_type": "action",
+      "title": "PR #118 CR round 1 fix wave dispatched: migration v17 timestamp indexes + evict_stale_cache (feed 7d, scores 90d) at scan start + UNNEST batching for both pg cache upserts",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T17:48:53.417473-07:00",
+      "updated_at": "2026-09-09T17:48:53.417473-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"7063776\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -18074,6 +18129,83 @@
       "weight": 1.0,
       "rationale": "Fixes approved, gates green, PR opened",
       "created_at": "2026-09-09T02:10:22.757231-07:00"
+    },
+    {
+      "id": 847,
+      "from_node_id": 816,
+      "to_node_id": 817,
+      "from_change_id": "1403fb7e-816d-4387-aa50-081047bfda20",
+      "to_change_id": "ba99db7f-cbaa-41c4-9e32-9ae7785012ca",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit round 1 on PR #118",
+      "created_at": "2026-09-09T17:47:35.026876-07:00"
+    },
+    {
+      "id": 848,
+      "from_node_id": 816,
+      "to_node_id": 818,
+      "from_change_id": "1403fb7e-816d-4387-aa50-081047bfda20",
+      "to_change_id": "337b00ee-457c-42a7-ad9e-e076574b41fb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Eviction option: defer",
+      "created_at": "2026-09-09T17:47:35.034116-07:00"
+    },
+    {
+      "id": 849,
+      "from_node_id": 816,
+      "to_node_id": 819,
+      "from_change_id": "1403fb7e-816d-4387-aa50-081047bfda20",
+      "to_change_id": "8a07044d-b113-4e67-abc0-bbddcef1fde1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Eviction option: implement now",
+      "created_at": "2026-09-09T17:47:35.040593-07:00"
+    },
+    {
+      "id": 850,
+      "from_node_id": 819,
+      "to_node_id": 820,
+      "from_change_id": "8a07044d-b113-4e67-abc0-bbddcef1fde1",
+      "to_change_id": "ea839104-6a07-4060-861b-0b1c03de8748",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Chosen: Bryan's one-push rule; both findings validated against code",
+      "created_at": "2026-09-09T17:47:35.048287-07:00"
+    },
+    {
+      "id": 851,
+      "from_node_id": 818,
+      "to_node_id": 820,
+      "from_change_id": "337b00ee-457c-42a7-ad9e-e076574b41fb",
+      "to_change_id": "ea839104-6a07-4060-861b-0b1c03de8748",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Rejected: deferral burns review slots and leaves tables unbounded",
+      "created_at": "2026-09-09T17:47:35.054364-07:00"
+    },
+    {
+      "id": 852,
+      "from_node_id": 820,
+      "to_node_id": 821,
+      "from_change_id": "ea839104-6a07-4060-861b-0b1c03de8748",
+      "to_change_id": "da2b4a83-e7f3-47b7-8307-15992ac852e0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements the one-push decision",
+      "created_at": "2026-09-09T17:48:53.424752-07:00"
+    },
+    {
+      "id": 853,
+      "from_node_id": 817,
+      "to_node_id": 821,
+      "from_change_id": "ba99db7f-cbaa-41c4-9e32-9ae7785012ca",
+      "to_change_id": "da2b4a83-e7f3-47b7-8307-15992ac852e0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Same round; sqlite tx fix already committed",
+      "created_at": "2026-09-09T17:48:53.431324-07:00"
     }
   ],
   "documents": [

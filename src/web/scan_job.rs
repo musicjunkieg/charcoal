@@ -688,6 +688,12 @@ async fn run_scan(
     )
     .await;
 
+    // #343 Phase 1 (CodeRabbit, PR #118): nothing else deletes from the shared
+    // cache tables — no user_did means delete_user_data skips them — so bound
+    // them here, once per scan. Best-effort by construction: a cache is an
+    // optimisation, and a failed sweep must never abort a scan.
+    crate::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
+
     // #343 Phase 1: stage-1 / clean-pass ONNX scores are cached by text hash
     // across users. Hit/miss counts are persisted at the end of the scan.
     let onnx_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());

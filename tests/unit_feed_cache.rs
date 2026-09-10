@@ -157,6 +157,191 @@ async fn classifier_verdicts_scoped_by_model_and_policy() {
         .unwrap();
 }
 
+// --- Retention (#343 / PR #118 review) ---
+
+/// Older than any retention window we will ever set.
+const ANCIENT: &str = "2020-01-01T00:00:00+00:00";
+
+/// A file-backed database plus a second connection to it.
+///
+/// File-backed, not `:memory:`, on purpose: `scored_at` / `classified_at` are
+/// stamped by the backend and are deliberately not part of the row types the
+/// trait accepts, so the only way to age a scoring row is raw SQL — which needs
+/// a connection the `SqliteDatabase` does not own.
+fn file_db() -> (tempfile::TempDir, Arc<dyn Database>, Connection) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cache.db");
+    let conn = Connection::open(&path).unwrap();
+    charcoal::db::schema::create_tables(&conn).unwrap();
+    let side = Connection::open(&path).unwrap();
+    (dir, Arc::new(SqliteDatabase::new(conn)), side)
+}
+
+/// Seed one ancient and one fresh row in each of the three cache tables.
+async fn seed_old_and_fresh(db: &Arc<dyn Database>, side: &Connection) {
+    let now = Utc::now().to_rfc3339();
+    for (did, fetched_at) in [("did:plc:old", ANCIENT), ("did:plc:fresh", now.as_str())] {
+        db.upsert_feed_snapshot(&FeedSnapshot {
+            did: did.into(),
+            handle: format!("{did}.bsky.social"),
+            posts_json: "[]".into(),
+            fetched_at: fetched_at.into(),
+            source: SNAPSHOT_SOURCE_BLUESKY.into(),
+        })
+        .await
+        .unwrap();
+    }
+
+    db.upsert_onnx_scores(
+        "m",
+        &[
+            OnnxScoreRow {
+                text_sha256: "old".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "fresh".into(),
+                score: 0.2,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_classifier_verdicts(
+        "m",
+        "v1",
+        &[
+            ClassifierVerdictRow {
+                text_sha256: "old".into(),
+                toxic_token: true,
+                confidence: 0.9,
+            },
+            ClassifierVerdictRow {
+                text_sha256: "fresh".into(),
+                toxic_token: false,
+                confidence: 0.1,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Backdate the rows the upserts stamped with "now".
+    side.execute(
+        "UPDATE onnx_scores SET scored_at = ?1 WHERE text_sha256 = 'old'",
+        [ANCIENT],
+    )
+    .unwrap();
+    side.execute(
+        "UPDATE classifier_verdicts SET classified_at = ?1 WHERE text_sha256 = 'old'",
+        [ANCIENT],
+    )
+    .unwrap();
+}
+
+/// Every fresh row must still be readable through the normal accessors.
+async fn assert_only_fresh_survives(db: &Arc<dyn Database>) {
+    assert!(db.get_feed_snapshot("did:plc:old").await.unwrap().is_none());
+    assert!(db
+        .get_feed_snapshot("did:plc:fresh")
+        .await
+        .unwrap()
+        .is_some());
+    let scores = db
+        .get_onnx_scores("m", &["old".into(), "fresh".into()])
+        .await
+        .unwrap();
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores["fresh"], 0.2);
+    let verdicts = db
+        .get_classifier_verdicts("m", "v1", &["old".into(), "fresh".into()])
+        .await
+        .unwrap();
+    assert_eq!(verdicts.len(), 1);
+    assert!(verdicts.contains_key("fresh"));
+}
+
+#[tokio::test]
+async fn evict_stale_cache_removes_only_rows_past_the_cutoff() {
+    let (_dir, db, side) = file_db();
+    seed_old_and_fresh(&db, &side).await;
+
+    let now = Utc::now();
+    let feed_cutoff = (now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339();
+    let score_cutoff = (now - charcoal::db::cache_retention::SCORE_RETENTION).to_rfc3339();
+    let evicted = db
+        .evict_stale_cache(&feed_cutoff, &score_cutoff)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        evicted,
+        charcoal::db::CacheEviction {
+            feed_snapshots: 1,
+            onnx_scores: 1,
+            classifier_verdicts: 1,
+        }
+    );
+    assert_only_fresh_survives(&db).await;
+}
+
+/// The two cutoffs are independent: a feed sweep must not touch scores.
+#[tokio::test]
+async fn evict_stale_cache_applies_each_cutoff_to_its_own_tables() {
+    let (_dir, db, side) = file_db();
+    seed_old_and_fresh(&db, &side).await;
+
+    // Feed cutoff evicts; score cutoff predates even the ancient rows.
+    let evicted = db
+        .evict_stale_cache(&Utc::now().to_rfc3339(), "1999-01-01T00:00:00+00:00")
+        .await
+        .unwrap();
+    assert_eq!(
+        evicted,
+        charcoal::db::CacheEviction {
+            feed_snapshots: 2,
+            onnx_scores: 0,
+            classifier_verdicts: 0,
+        }
+    );
+    assert_eq!(
+        db.get_onnx_scores("m", &["old".into(), "fresh".into()])
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn evict_stale_cache_on_an_empty_database_is_a_no_op() {
+    let db = setup_db();
+    let now = Utc::now();
+    let evicted = db
+        .evict_stale_cache(
+            &(now - ChronoDuration::days(7)).to_rfc3339(),
+            &(now - ChronoDuration::days(90)).to_rfc3339(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(evicted, charcoal::db::CacheEviction::default());
+}
+
+/// The best-effort wrapper sweeps with the module's own cutoffs and returns
+/// unit — a caller can never be forced to handle a cache error.
+#[tokio::test]
+async fn best_effort_eviction_sweeps_and_is_repeatable() {
+    let (_dir, db, side) = file_db();
+    seed_old_and_fresh(&db, &side).await;
+
+    charcoal::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
+    assert_only_fresh_survives(&db).await;
+
+    // A second sweep against the now-clean database still succeeds.
+    charcoal::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
+    assert_only_fresh_survives(&db).await;
+}
+
 fn make_post(n: usize) -> Post {
     Post {
         uri: format!("at://did:plc:a/app.bsky.feed.post/{n}"),

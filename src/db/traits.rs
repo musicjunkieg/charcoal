@@ -826,6 +826,20 @@ pub trait Database: Send + Sync {
         policy_version: &str,
         rows: &[ClassifierVerdictRow],
     ) -> Result<()>;
+
+    /// Delete cache rows older than the given RFC3339 cutoffs — `feed_cutoff`
+    /// for `account_feed_snapshots`, `score_cutoff` for both scoring tables.
+    /// Returns how many rows went, per table.
+    ///
+    /// Comparisons are lexicographic on the stored RFC3339 TEXT, which is
+    /// exact for `chrono::Utc::now().to_rfc3339()` (fixed-width UTC). Callers
+    /// compute the cutoffs in Rust; see [`crate::db::cache_retention`], which
+    /// also wraps this so a failed sweep never fails a scan.
+    async fn evict_stale_cache(
+        &self,
+        feed_cutoff: &str,
+        score_cutoff: &str,
+    ) -> Result<crate::db::cache_retention::CacheEviction>;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

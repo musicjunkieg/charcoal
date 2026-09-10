@@ -21,7 +21,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   cache alone because none of it belongs to a user. The two-stage scorer
   also gained a `score_batch` override — stage 1 was doing 25 single
   forward passes per account. Hit/miss counts land in `scan_state` as
-  `{feed,onnx,classifier}_cache_{hits,misses}`.
+  `{feed,onnx,classifier}_cache_{hits,misses}`. The cache tables are
+  bounded: every scan starts by evicting feed snapshots older than 7 days
+  and scores/verdicts older than 90 days, so a DID that is never sampled
+  again and a text hash from a retired model or policy generation both age
+  out instead of living forever. Schema v17 adds the timestamp indexes that
+  sweep reads. Eviction is best-effort — it is an optimisation, and a
+  failed sweep warns and lets the scan continue.
 
 ### Fixed
 - Review fixes from the staging→main promotion PR (#345, PR #115). The DPoP

@@ -180,6 +180,10 @@ impl PgDatabase {
                     16,
                     include_str!("../../migrations/postgres/0016_shared_cache.sql"),
                 ),
+                (
+                    17,
+                    include_str!("../../migrations/postgres/0017_cache_indexes.sql"),
+                ),
             ];
 
             for (version, sql) in migrations {
@@ -2432,6 +2436,43 @@ impl Database for PgDatabase {
         }
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn evict_stale_cache(
+        &self,
+        feed_cutoff: &str,
+        score_cutoff: &str,
+    ) -> Result<super::cache_retention::CacheEviction> {
+        // One transaction for all three tables so a mid-sweep failure leaves
+        // the cache internally consistent, matching the SQLite backend.
+        //
+        // The `<` comparisons are lexicographic on RFC3339 TEXT, which is exact
+        // for the fixed-width UTC strings we store (see the trait doc). The v17
+        // indexes keep this off a sequential scan.
+        let mut tx = self.pool.begin().await?;
+        let feed_snapshots =
+            sqlx_core::query::query("DELETE FROM account_feed_snapshots WHERE fetched_at < $1")
+                .bind(feed_cutoff)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        let onnx_scores = sqlx_core::query::query("DELETE FROM onnx_scores WHERE scored_at < $1")
+            .bind(score_cutoff)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        let classifier_verdicts =
+            sqlx_core::query::query("DELETE FROM classifier_verdicts WHERE classified_at < $1")
+                .bind(score_cutoff)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        tx.commit().await?;
+        Ok(super::cache_retention::CacheEviction {
+            feed_snapshots,
+            onnx_scores,
+            classifier_verdicts,
+        })
     }
 }
 

@@ -22,6 +22,12 @@ pass/fail.
    TRUNCATE account_feed_snapshots, onnx_scores, classifier_verdicts;
    ```
 
+   Automatic eviction will not interfere with this. Every scan starts by
+   deleting feed snapshots older than 7 days and scores/verdicts older than
+   90 days; an A/B run finished within a day writes nothing old enough to
+   qualify, so the only thing that empties these tables mid-run is the
+   TRUNCATE above.
+
 2. Scan **A**. Wait for `scan_queue.status = 'done'`. Record its wall and
    its cache counters. The **feed** counter should be ≈ 0 hits on a cold
    cache — it counts once per candidate (see `CachedPostFetcher`), so a

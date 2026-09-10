@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::cache_retention::CacheEviction;
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
     ThreatTier, ToxicPost, UserLabel, UserRow,
@@ -2312,6 +2313,41 @@ pub fn upsert_classifier_verdicts(
     }
     tx.commit()?;
     Ok(())
+}
+
+/// Delete cache rows older than the cutoffs, all three tables in one
+/// transaction so a mid-sweep failure leaves the cache internally consistent
+/// (and pays one fsync instead of three). `unchecked_transaction` because this
+/// takes `&Connection` — same reasoning as `delete_user_data`.
+///
+/// The `<` comparisons are lexicographic on RFC3339 TEXT, which is exact for
+/// the fixed-width UTC strings both backends store (see the trait doc). The v17
+/// indexes on `fetched_at` / `scored_at` / `classified_at` keep this off a full
+/// table scan.
+pub fn evict_stale_cache(
+    conn: &Connection,
+    feed_cutoff: &str,
+    score_cutoff: &str,
+) -> Result<CacheEviction> {
+    let tx = conn.unchecked_transaction()?;
+    let feed_snapshots = tx.execute(
+        "DELETE FROM account_feed_snapshots WHERE fetched_at < ?1",
+        params![feed_cutoff],
+    )? as u64;
+    let onnx_scores = tx.execute(
+        "DELETE FROM onnx_scores WHERE scored_at < ?1",
+        params![score_cutoff],
+    )? as u64;
+    let classifier_verdicts = tx.execute(
+        "DELETE FROM classifier_verdicts WHERE classified_at < ?1",
+        params![score_cutoff],
+    )? as u64;
+    tx.commit()?;
+    Ok(CacheEviction {
+        feed_snapshots,
+        onnx_scores,
+        classifier_verdicts,
+    })
 }
 
 #[cfg(test)]
