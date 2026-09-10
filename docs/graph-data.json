@@ -8931,6 +8931,17 @@
       "created_at": "2026-09-09T17:48:53.417473-07:00",
       "updated_at": "2026-09-09T17:48:53.417473-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"7063776\",\"confidence\":85}"
+    },
+    {
+      "id": 822,
+      "change_id": "b04c8c39-461c-40cd-93b0-5e301095352e",
+      "node_type": "outcome",
+      "title": "CR round-1 fix wave landed: 5f98587 eviction (v17 indexes, cache_retention.rs 7d/90d, 3 call sites: scan_job + CLI scan + CLI sweep) + 2a8aea3 UNNEST batching w/ last-write-wins dedup; 987 web pass 0 SKIP, 44 pg pass, clippy x3 clean; task review dispatched",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-09T19:15:36.201793-07:00",
+      "updated_at": "2026-09-09T19:15:36.201793-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"2a8aea3\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -18206,6 +18217,17 @@
       "weight": 1.0,
       "rationale": "Same round; sqlite tx fix already committed",
       "created_at": "2026-09-09T17:48:53.431324-07:00"
+    },
+    {
+      "id": 854,
+      "from_node_id": 821,
+      "to_node_id": 822,
+      "from_change_id": "da2b4a83-e7f3-47b7-8307-15992ac852e0",
+      "to_change_id": "b04c8c39-461c-40cd-93b0-5e301095352e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementer report DONE_WITH_CONCERNS; concerns are observations, none block",
+      "created_at": "2026-09-09T19:15:36.209858-07:00"
     }
   ],
   "documents": [

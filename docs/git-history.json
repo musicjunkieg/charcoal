@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2a8aea356f8f5a9b2b3ea203be5bc34c7d419c0c",
+    "short_hash": "2a8aea3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T19:09:54-07:00",
+    "message": "perf(343): batch the Postgres cache upserts with UNNEST\n\nCodeRabbit on PR #118: upsert_onnx_scores and upsert_classifier_verdicts\nexecuted one round trip per miss inside a transaction. Both now use a\nsingle UNNEST INSERT ... SELECT, the shape insert_amplification_events_batch\nalready uses — model_id, policy_version and the timestamp are scalars\nbroadcast to every row, so the statement binds a fixed number of\nparameters at any batch size.\n\nRows are deduplicated last-write-wins first, and that is load-bearing:\none INSERT ... ON CONFLICT DO UPDATE cannot touch the same row twice\n(\"command cannot affect row a second time\"), where the per-row loop\nsimply let a later duplicate overwrite an earlier one. Todays callers\nalready pass distinct hashes, but the trait is public.\n\nNo WITH ORDINALITY here — unlike the amplification batch these tables\nhave no serial id whose order is part of the contract.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 2
+  },
+  {
     "hash": "7063776b0de425a86c63d5b99ceac86a358ed95b",
     "short_hash": "7063776",
     "author": "Bryan Guffey",

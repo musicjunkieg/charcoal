@@ -831,10 +831,19 @@ pub trait Database: Send + Sync {
     /// for `account_feed_snapshots`, `score_cutoff` for both scoring tables.
     /// Returns how many rows went, per table.
     ///
-    /// Comparisons are lexicographic on the stored RFC3339 TEXT, which is
-    /// exact for `chrono::Utc::now().to_rfc3339()` (fixed-width UTC). Callers
-    /// compute the cutoffs in Rust; see [`crate::db::cache_retention`], which
-    /// also wraps this so a failed sweep never fails a scan.
+    /// Comparisons are lexicographic on the stored RFC3339 TEXT. That is sound
+    /// for one reason only: **every writer stamps these columns with
+    /// `DateTime<Utc>::to_rfc3339()`**, which always ends in `+00:00` (never
+    /// `Z`). Its fractional-seconds part is *not* fixed width (0, 3, 6 or 9
+    /// digits), but a shorter fraction terminates in `+` (0x2B), which sorts
+    /// below `.` (0x2E) and every digit, so a truncated stamp never outranks a
+    /// longer one in the same second. A future writer that emits `Z` (0x5A,
+    /// above the digits) would silently make stale rows survive the sweep —
+    /// keep using `to_rfc3339()`. Postgres compares TEXT under the database
+    /// collation rather than byte order, so the worst case there is a
+    /// sub-second boundary error against a 7-/90-day window. Callers compute
+    /// the cutoffs in Rust; see [`crate::db::cache_retention`], which also
+    /// wraps this so a failed sweep never fails a scan.
     async fn evict_stale_cache(
         &self,
         feed_cutoff: &str,

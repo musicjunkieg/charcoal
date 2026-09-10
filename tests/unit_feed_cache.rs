@@ -291,9 +291,12 @@ async fn evict_stale_cache_applies_each_cutoff_to_its_own_tables() {
     let (_dir, db, side) = file_db();
     seed_old_and_fresh(&db, &side).await;
 
-    // Feed cutoff evicts; score cutoff predates even the ancient rows.
+    // Feed cutoff evicts everything, including the row stamped `Utc::now()` by
+    // the seed — one second ahead so the seed's stamp can't tie the cutoff in
+    // the same instant. Score cutoff predates even the ancient rows.
+    let feed_cutoff = (Utc::now() + chrono::Duration::seconds(1)).to_rfc3339();
     let evicted = db
-        .evict_stale_cache(&Utc::now().to_rfc3339(), "1999-01-01T00:00:00+00:00")
+        .evict_stale_cache(&feed_cutoff, "1999-01-01T00:00:00+00:00")
         .await
         .unwrap();
     assert_eq!(

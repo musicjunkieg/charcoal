@@ -3,9 +3,10 @@
 -- Nothing else deletes from account_feed_snapshots / onnx_scores /
 -- classifier_verdicts, so without a retention sweep every distinct DID and
 -- every text hash a model or policy generation ever saw is permanent.
--- `evict_stale_cache` filters on the timestamp columns (RFC3339 TEXT computed
--- in Rust — lexicographic comparison is correct for fixed-width UTC offsets);
--- these indexes keep that sweep off a full table scan as the cache grows.
+-- `evict_stale_cache` filters on the timestamp columns (RFC3339 TEXT, always
+-- written by `DateTime<Utc>::to_rfc3339()` so the text order matches time
+-- order — see the trait doc on `Database::evict_stale_cache`); these indexes
+-- keep that sweep off a full table scan as the cache grows.
 
 CREATE INDEX IF NOT EXISTS idx_account_feed_snapshots_fetched_at
     ON account_feed_snapshots (fetched_at);

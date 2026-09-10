@@ -2320,10 +2320,11 @@ pub fn upsert_classifier_verdicts(
 /// (and pays one fsync instead of three). `unchecked_transaction` because this
 /// takes `&Connection` — same reasoning as `delete_user_data`.
 ///
-/// The `<` comparisons are lexicographic on RFC3339 TEXT, which is exact for
-/// the fixed-width UTC strings both backends store (see the trait doc). The v17
-/// indexes on `fetched_at` / `scored_at` / `classified_at` keep this off a full
-/// table scan.
+/// The `<` comparisons are lexicographic on RFC3339 TEXT, sound only because
+/// every writer uses `DateTime<Utc>::to_rfc3339()` (the ordering argument lives
+/// on the trait doc; SQLite's default BINARY collation makes it exact here).
+/// The v17 indexes on `fetched_at` / `scored_at` / `classified_at` keep this
+/// off a full table scan.
 pub fn evict_stale_cache(
     conn: &Connection,
     feed_cutoff: &str,

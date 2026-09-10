@@ -49,8 +49,9 @@ impl CacheEviction {
 pub async fn evict_stale_cache_best_effort(db: &dyn Database) {
     // Cutoffs are computed here, in Rust, and passed as bound parameters:
     // the timestamp columns are RFC3339 TEXT on both backends, so the
-    // comparison is lexicographic. That is exact for `to_rfc3339()` output
-    // because it is fixed-width UTC (`+00:00`). Using SQL `NOW()` would
+    // comparison is lexicographic. That is only sound because every writer
+    // stamps them with `DateTime<Utc>::to_rfc3339()` — see the ordering
+    // argument on `Database::evict_stale_cache`. Using SQL `NOW()` would
     // compare a timestamptz against text and break on both backends.
     let now = Utc::now();
     let feed_cutoff = (now - FEED_SNAPSHOT_RETENTION).to_rfc3339();

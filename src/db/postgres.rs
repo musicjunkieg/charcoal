@@ -2481,9 +2481,10 @@ impl Database for PgDatabase {
         // One transaction for all three tables so a mid-sweep failure leaves
         // the cache internally consistent, matching the SQLite backend.
         //
-        // The `<` comparisons are lexicographic on RFC3339 TEXT, which is exact
-        // for the fixed-width UTC strings we store (see the trait doc). The v17
-        // indexes keep this off a sequential scan.
+        // The `<` comparisons are lexicographic on RFC3339 TEXT, sound only
+        // because every writer uses `DateTime<Utc>::to_rfc3339()` (the ordering
+        // argument lives on the trait doc). The v17 indexes keep this off a
+        // sequential scan.
         let mut tx = self.pool.begin().await?;
         let feed_snapshots =
             sqlx_core::query::query("DELETE FROM account_feed_snapshots WHERE fetched_at < $1")
