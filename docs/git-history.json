@@ -1,5 +1,13 @@
 [
   {
+    "hash": "23de7f7b244acc48a1ab9f7b0085ac721a5e85fd",
+    "short_hash": "23de7f7",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:48:31-07:00",
+    "message": "fix(343): final-review fixes - per-candidate feed hit counting, feed stats never fail the scan\n\nFeed cache hits/misses now count once per DID per scan so the Phase 1 gate\nmatches spec §4.1 (per candidate, not per fetch); runbook corrected to\nmatch. The feed stats write after a successful scan is warn-on-error like\nthe onnx/classifier writes - a diagnostic must not fail the scan.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 8
+  },
+  {
     "hash": "529adf0f81e4cf71e2745cf14c68c75d3caa6a1a",
     "short_hash": "529adf0",
     "author": "Bryan Guffey",

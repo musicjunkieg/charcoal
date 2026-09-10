@@ -2222,15 +2222,24 @@ pub fn upsert_onnx_scores(conn: &Connection, model_id: &str, rows: &[OnnxScoreRo
         return Ok(());
     }
     let now = chrono::Utc::now().to_rfc3339();
-    let mut stmt = conn.prepare(
-        "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(text_sha256, model_id) DO UPDATE SET
-             score = excluded.score, scored_at = excluded.scored_at",
-    )?;
-    for r in rows {
-        stmt.execute(params![r.text_sha256, model_id, r.score, now])?;
+    // One transaction for the whole batch so a mid-batch error leaves nothing
+    // behind, matching the Postgres backend. Without it every `execute` is its
+    // own autocommit — and its own fsync, which also makes this much slower.
+    // `unchecked_transaction` because this takes `&Connection` (see
+    // delete_user_data for the reasoning).
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(text_sha256, model_id) DO UPDATE SET
+                 score = excluded.score, scored_at = excluded.scored_at",
+        )?;
+        for r in rows {
+            stmt.execute(params![r.text_sha256, model_id, r.score, now])?;
+        }
     }
+    tx.commit()?;
     Ok(())
 }
 
@@ -2278,25 +2287,30 @@ pub fn upsert_classifier_verdicts(
         return Ok(());
     }
     let now = chrono::Utc::now().to_rfc3339();
-    let mut stmt = conn.prepare(
-        "INSERT INTO classifier_verdicts
-             (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(text_sha256, model_id, policy_version) DO UPDATE SET
-             toxic_token = excluded.toxic_token,
-             confidence = excluded.confidence,
-             classified_at = excluded.classified_at",
-    )?;
-    for r in rows {
-        stmt.execute(params![
-            r.text_sha256,
-            model_id,
-            policy_version,
-            r.toxic_token,
-            r.confidence,
-            now
-        ])?;
+    // Same all-or-nothing batch as upsert_onnx_scores.
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO classifier_verdicts
+                 (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(text_sha256, model_id, policy_version) DO UPDATE SET
+                 toxic_token = excluded.toxic_token,
+                 confidence = excluded.confidence,
+                 classified_at = excluded.classified_at",
+        )?;
+        for r in rows {
+            stmt.execute(params![
+                r.text_sha256,
+                model_id,
+                policy_version,
+                r.toxic_token,
+                r.confidence,
+                now
+            ])?;
+        }
     }
+    tx.commit()?;
     Ok(())
 }
 

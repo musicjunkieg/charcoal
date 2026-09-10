@@ -8828,9 +8828,9 @@
       "node_type": "action",
       "title": "Final whole-branch review (#346): d27b199..529adf0, 13 commits, triage carried minors",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-09T00:29:22.975832-07:00",
-      "updated_at": "2026-09-09T00:29:22.975832-07:00",
+      "updated_at": "2026-09-09T00:59:47.778305-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"529adf0\",\"confidence\":90}"
     },
     {
@@ -8850,10 +8850,32 @@
       "node_type": "action",
       "title": "Fix wave (#346): I-1 per-DID feed hit counting + runbook, I-2 warn-on-error feed stats x2, Minor 3 comment, M-e test",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-09T00:38:09.088446-07:00",
-      "updated_at": "2026-09-09T00:38:09.088446-07:00",
+      "updated_at": "2026-09-09T00:59:47.765745-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"529adf0\",\"confidence\":90}"
+    },
+    {
+      "id": 815,
+      "change_id": "36bd5134-db5d-4ae1-826a-2921744d8fc1",
+      "node_type": "outcome",
+      "title": "Fix wave approved at 23de7f7: per-DID feed hit counting (0,1) + runbook cross-scan formula, feed stats warn-on-error x2, schema comment v16, error-before-upsert test; unit_feed_cache 11/11, clippy x3 clean",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-09T00:59:42.990654-07:00",
+      "updated_at": "2026-09-09T00:59:47.772384-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"23de7f7\",\"confidence\":90}"
+    },
+    {
+      "id": 816,
+      "change_id": "1403fb7e-816d-4387-aa50-081047bfda20",
+      "node_type": "outcome",
+      "title": "PR #118 opened: feat/343-phase1-cache -> staging at 23de7f7; gates: web 981 pass 0 SKIP, pg --all-targets 748 pass, clippy x3, fmt",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-09T02:10:16.311500-07:00",
+      "updated_at": "2026-09-09T02:10:22.764574-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase1-cache\",\"commit\":\"23de7f7\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -18030,6 +18052,28 @@
       "weight": 1.0,
       "rationale": "Implement the chosen fixes",
       "created_at": "2026-09-09T00:38:13.013986-07:00"
+    },
+    {
+      "id": 845,
+      "from_node_id": 814,
+      "to_node_id": 815,
+      "from_change_id": "cc3682ca-cff2-4769-8efd-0a2aa0e18fdc",
+      "to_change_id": "36bd5134-db5d-4ae1-826a-2921744d8fc1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review approved",
+      "created_at": "2026-09-09T00:59:47.759116-07:00"
+    },
+    {
+      "id": 846,
+      "from_node_id": 815,
+      "to_node_id": 816,
+      "from_change_id": "36bd5134-db5d-4ae1-826a-2921744d8fc1",
+      "to_change_id": "1403fb7e-816d-4387-aa50-081047bfda20",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixes approved, gates green, PR opened",
+      "created_at": "2026-09-09T02:10:22.757231-07:00"
     }
   ],
   "documents": [
