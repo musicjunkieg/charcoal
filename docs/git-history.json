@@ -1,5 +1,29 @@
 [
   {
+    "hash": "102dd65e05123680b88ec867a2b6d01df83d8e8d",
+    "short_hash": "102dd65",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T21:21:05-07:00",
+    "message": "docs(343): record Phase 0/1 staging results; fix both runbooks\n\nPhase 0: one ONNX session already drives 13-15 cores; a 4-session pool\nchanged the gather wall by 0% (129 s vs 137/120 s) for +1.5 GB, so\nCHARCOAL_ONNX_SESSIONS stays at 1. The gather is fetch-bound with a\n5-8 minute near-idle tail on larger accounts. The public AppView sends\nno RateLimit-* headers at all.\n\nPhase 1: feed cache hit 6.6% on the best available second account,\nwhich equals the measured community overlap (7.9% predicted) - the\nmechanism works but the >=50% pass is untestable until an overlapping\naccount exists on staging.\n\nRunbook corrections: total_ms is worker-seconds, not wall; a same-account\nrerun inside 7 days drops every candidate it scored (#344), so runs must\nreset account_scores between them; add the psql enqueue recipe.\n\nRefs #346, #350, #351, #352.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 6
+  },
+  {
+    "hash": "593c40d279c8c8802fc1da745ca8f09e4d81de00",
+    "short_hash": "593c40d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T19:57:37-07:00",
+    "message": "Merge pull request #118 from musicjunkieg/feat/343-phase1-cache\n\nfeat(343): Phase 0 measurement + Phase 1 shared feed/score cache",
+    "files_changed": 0
+  },
+  {
+    "hash": "fb39f7841b073b8dedbabff5723200896b5af993",
+    "short_hash": "fb39f78",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T21:11:41-07:00",
+    "message": "docs(343): say why v17 uses plain CREATE INDEX, not CONCURRENTLY\n\nv16 tables and v17 indexes ship in the same release, migrations run in\ndb::open() before the server takes traffic, and the runner wraps each\nmigration in a transaction. The indexes are always built on empty tables.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
     "hash": "60584140e57bd569f9ae9c991014fcb24795da48",
     "short_hash": "6058414",
     "author": "Bryan Guffey",

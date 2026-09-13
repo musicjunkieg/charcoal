@@ -39,6 +39,32 @@ Memory: 0.7 GB idle, 1.9 GB peak. vCPU during the gather is **unmeasured**
 (Railway's metrics API reports 0.012 max during a known 10-minute gather —
 unusable; Phase 0 fixes this).
 
+**Measured 2026-09-13 (Phase 0, staging `593c40d`; runbooks
+`docs/runbooks/343-phase0-session-experiment.md` and `…-phase1-hit-rate.md`,
+deciduous 846–858):**
+
+- **Inference cores.** One ONNX session drives **13–15 cores** during a
+  gather (`cpu_cores_busy` median ≈ 13 on Bryan's account, ≈ 8 on a
+  3 630-candidate account; Railway's metrics API now agrees, 15.3 peak). That
+  is ort's intra-op parallelism on a single session, not eight workers each
+  using one core — so "inference cores per worker" is ~1.7 and the 24 vCPU
+  cap is one scan's headroom, not ten's.
+- **`RateLimit-Limit`: none.** `public.api.bsky.app` sends no `RateLimit-*`
+  headers (see 4.3).
+- **Session pool: no.** N=4 sessions vs N=1 on the same 464-candidate set:
+  gather wall 129 s vs 137 s / 120 s (N=1 twice) — a 0 % change against a
+  25 % bar, for +1.5 GB RSS. Stage-1 ONNX worker-seconds do halve
+  (172/213 → 90 s), but the gather is fetch-bound: `fetch_ms` is 46–84 % of
+  worker time depending on the account, and larger accounts end with a
+  **5–8 minute tail at ≈ 0 cores** waiting on a few straggler fetches.
+  `CHARCOAL_ONNX_SESSIONS` stays at 1.
+- **Freshness filter halves the population.** A rescan within 7 days drops
+  every candidate scored last time (`get_fresh_scored_dids`, #344): Bryan's
+  "cold" run saw 469 candidates, not 934. Per-candidate throughput on that
+  set was 0.59 s (cold) and 0.37 s on a 3 095-candidate warm run.
+- **Burst cold start.** The first RunPod burst of the session took 127 s;
+  the next took 11 s. `scan_queue` wall is not a gather measure.
+
 What this means for ten users at once, unshared: ~22 Bluesky requests/s from
 one IP and ~20 cores of inference. With realistic community overlap (three
 users share roughly a third of their candidates) that is ~7 req/s and ~6
@@ -157,9 +183,15 @@ itself is persisted.
 
 ### 4.3 Bluesky rate-limit strategy (S3)
 
-Facts: `public.api.bsky.app` publishes no numeric limit ("generous") but
-returns IETF draft `RateLimit-Limit/-Remaining/-Reset` headers; the 3 000
-per 5 min figure in the docs is the PDS limit, not the AppView's.
+Facts: `public.api.bsky.app` publishes no numeric limit ("generous"); the
+3 000 per 5 min figure in the docs is the PDS limit, not the AppView's.
+**Corrected 2026-09-13:** the AppView returns **no** `RateLimit-*` headers
+at all — verified with a bare `curl` (responses come from a BunnyCDN edge
+with `cache-control: public, max-age=30`), and the Phase 0 scan logged
+"no RateLimit-Limit header observed". The "adaptive" bullet below therefore
+has nothing to read; the bucket is sized by hand and 429s are the only
+feedback. The 30 s CDN cache also means repeated fetches of the same feed
+inside that window never reach the origin.
 `PublicAtpClient` (`src/bluesky/client.rs:74`) has **no 429 handling**
 (#182); the only existing limiter is `src/toxicity/rate_limiter.rs`, used
 by Perspective and Zentropi.
@@ -284,10 +316,26 @@ before the next starts.
    gather wall drops ≥ 25 %; otherwise the mutex stays and CPU headroom is
    spent on more concurrent scans instead.
 
+*Result 2026-09-13:* (1) ≈ 1.7 cores per worker, 13–15 per gather — done.
+(2) No number: the AppView sends no header (4.3). (3) **Pool rejected**:
+0 % gather-wall change on a 464-candidate set; default stays 1. Headroom
+goes to Phase 3 concurrency. Numbers in §1 and the runbook.
+
 **Phase 1 — Shared cache (4.1)**
 *Pass:* second staging account with overlapping community: snapshot hit rate
 ≥ 50 % **and** scan wall ≤ 60 % of the cold baseline (13 m 42 s → ≤ 8 m).
 Hit rate < 20 % → re-cost before Phase 2.
+
+*Result 2026-09-13:* **untestable as specified — no overlapping pair
+exists on staging.** Against the best available second account
+(brookie.blog, predicted 7.9 % overlap) the feed hit rate was **6.6 %**,
+onnx 8.4 % cross-scan, classifier 7.8 % — i.e. the cache hits exactly the
+overlap that exists, which validates the mechanism but says nothing about
+the ≥ 50 % claim. The re-cost clause is **not** triggered on this pair: it
+assumed an overlapping community. Phase 2 may proceed; the pass test is
+re-run when an account from Bryan's community is granted on staging.
+Also learned: the same-user 7-day freshness filter and RunPod cold start
+both distort wall comparisons — see the runbook.
 
 **Phase 2 — Expiry + refresh (4.4)**
 *Pass:* bump the generation on staging → every row expired and hidden; the

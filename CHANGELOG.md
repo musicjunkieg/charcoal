@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- #343 Phase 0/1 measured on staging (2026-09-13, #346). One ONNX session
+  already drives 13–15 cores through ort's intra-op threads, so a pool of
+  four changed the gather wall by 0 % for +1.5 GB RSS and
+  `CHARCOAL_ONNX_SESSIONS` stays at 1; the gather is fetch-bound, with a 5–8 minute near-idle tail
+  on larger accounts. The public AppView sends no `RateLimit-*` headers at
+  all, so §4.3's adaptive limiter has nothing to read. The shared cache hit
+  6.6 % of a second account's candidates — exactly the measured community
+  overlap between the two, which validates the mechanism but leaves the
+  ≥ 50 % pass untested until an account from the protected user's community
+  is on staging. Both runbooks corrected: `total_ms` is worker-seconds, not
+  wall; a same-account rerun inside 7 days drops every candidate it scored
+  last time (#344), so runs must reset `account_scores` between them.
+
 ### Added
 - #343 Phase 0 + Phase 1 — measurement hooks and the shared cache. The
   gather now logs `cpu_cores_busy` once a minute and records the observed
