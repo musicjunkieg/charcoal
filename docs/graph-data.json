@@ -9360,6 +9360,72 @@
       "created_at": "2026-09-12T21:22:10.832805-07:00",
       "updated_at": "2026-09-12T21:22:10.832805-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":92}"
+    },
+    {
+      "id": 861,
+      "change_id": "f029d550-a71d-4e1d-a862-9cfc0376aef2",
+      "node_type": "action",
+      "title": "PR #121 CodeRabbit round 1: one Minor (label +1.5 GB as RSS in CHANGELOG) fixed in 573540e, thread replied+resolved; CI green, mergeable; awaiting re-review",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-12T22:34:08.974397-07:00",
+      "updated_at": "2026-09-12T22:39:28.396493-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"commit\":\"573540e\",\"confidence\":90,\"files\":[\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 862,
+      "change_id": "ef3b373a-940c-4740-bc16-97a637c78084",
+      "node_type": "outcome",
+      "title": "PR #121 CodeRabbit APPROVED at 573540e 2026-09-13 05:39Z; 6/6 checks SUCCESS; mergeStateStatus CLEAN; 0 unresolved threads. Merge is Bryan's click",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-12T22:39:28.384151-07:00",
+      "updated_at": "2026-09-12T22:39:28.384151-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":95}"
+    },
+    {
+      "id": 863,
+      "change_id": "c2d1c271-c466-4172-b6db-49263ebd7f7f",
+      "node_type": "goal",
+      "title": "Redefine #343 Phase 1 pass test: overlap is candidate-set overlap (unguessable, cheaply measurable) — add enumerate-only probe, measure the distribution over real onboardings, and target the Phase 2 refresh job as the cache's main beneficiary",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T00:29:10.217954-07:00",
+      "updated_at": "2026-09-13T00:29:10.217954-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":90,\"prompt\":\"Bryan (2026-09-13): What's the definition of my community? / Yeah, but isn't that a very difficult thing to determine? That candidate set is hard to align on, unless you can do some surveying / Write it up\"}"
+    },
+    {
+      "id": 864,
+      "change_id": "1cff761f-42db-4717-9b5b-567ffc945395",
+      "node_type": "option",
+      "title": "Keep spec as-is: ≥50% pass on a hand-picked overlapping account (#351)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T00:29:10.229892-07:00",
+      "updated_at": "2026-09-13T00:29:10.229892-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":30}"
+    },
+    {
+      "id": 865,
+      "change_id": "ff18dab1-5816-40c8-9807-dc54a9623f89",
+      "node_type": "option",
+      "title": "Replace with measured overlap distribution over first N onboardings + enumerate-only probe + refresh-job hit-rate target under Phase 2",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T00:29:10.239666-07:00",
+      "updated_at": "2026-09-13T00:29:10.239666-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":85}"
+    },
+    {
+      "id": 866,
+      "change_id": "d5ebe7db-e0af-4069-ab58-c95b071a06e8",
+      "node_type": "decision",
+      "title": "Bryan chose the measured approach ('Write it up'): probe issue + spec §4.1/§6 amendment; no code yet",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T00:29:10.249571-07:00",
+      "updated_at": "2026-09-13T00:29:10.249571-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -19163,6 +19229,83 @@
       "weight": 1.0,
       "rationale": "PR opened from the commit",
       "created_at": "2026-09-12T21:22:10.840117-07:00"
+    },
+    {
+      "id": 902,
+      "from_node_id": 860,
+      "to_node_id": 861,
+      "from_change_id": "4db04017-87fb-4475-8ba0-d0845a254af3",
+      "to_change_id": "f029d550-a71d-4e1d-a862-9cfc0376aef2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review loop on the PR",
+      "created_at": "2026-09-12T22:34:08.980999-07:00"
+    },
+    {
+      "id": 903,
+      "from_node_id": 861,
+      "to_node_id": 862,
+      "from_change_id": "f029d550-a71d-4e1d-a862-9cfc0376aef2",
+      "to_change_id": "ef3b373a-940c-4740-bc16-97a637c78084",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review loop closed",
+      "created_at": "2026-09-12T22:39:28.390457-07:00"
+    },
+    {
+      "id": 904,
+      "from_node_id": 863,
+      "to_node_id": 864,
+      "from_change_id": "c2d1c271-c466-4172-b6db-49263ebd7f7f",
+      "to_change_id": "1cff761f-42db-4717-9b5b-567ffc945395",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-13T00:30:15.252346-07:00"
+    },
+    {
+      "id": 905,
+      "from_node_id": 863,
+      "to_node_id": 865,
+      "from_change_id": "c2d1c271-c466-4172-b6db-49263ebd7f7f",
+      "to_change_id": "ff18dab1-5816-40c8-9807-dc54a9623f89",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-09-13T00:30:15.259697-07:00"
+    },
+    {
+      "id": 906,
+      "from_node_id": 864,
+      "to_node_id": 866,
+      "from_change_id": "1cff761f-42db-4717-9b5b-567ffc945395",
+      "to_change_id": "d5ebe7db-e0af-4069-ab58-c95b071a06e8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: unguessable pair, blocks on a human",
+      "created_at": "2026-09-13T00:30:15.265812-07:00"
+    },
+    {
+      "id": 907,
+      "from_node_id": 865,
+      "to_node_id": 866,
+      "from_change_id": "ff18dab1-5816-40c8-9807-dc54a9623f89",
+      "to_change_id": "d5ebe7db-e0af-4069-ab58-c95b071a06e8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen",
+      "created_at": "2026-09-13T00:30:15.271744-07:00"
+    },
+    {
+      "id": 908,
+      "from_node_id": 849,
+      "to_node_id": 863,
+      "from_change_id": "50ea6498-fab0-4899-8c7c-4cee74acd293",
+      "to_change_id": "c2d1c271-c466-4172-b6db-49263ebd7f7f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Phase 1 result prompted the redefinition",
+      "created_at": "2026-09-13T00:30:15.277996-07:00"
     }
   ],
   "documents": [

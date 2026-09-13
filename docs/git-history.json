@@ -1,5 +1,13 @@
 [
   {
+    "hash": "573540efcc4cd5c20858b3066b9445fb13919ae5",
+    "short_hash": "573540e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T22:33:52-07:00",
+    "message": "docs(343): label the +1.5 GB session-pool cost as RSS (CodeRabbit)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
     "hash": "102dd65e05123680b88ec867a2b6d01df83d8e8d",
     "short_hash": "102dd65",
     "author": "Bryan Guffey",

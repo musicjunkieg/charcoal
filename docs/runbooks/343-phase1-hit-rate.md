@@ -31,7 +31,12 @@ SELECT u.handle, count(*) AS n,
 
 On 2026-09-13 the best existing staging user scored 7.9 % — nobody who
 shares Bryan's community has signed up on staging, so the ≥ 50 % claim
-cannot be tested until one does.
+cannot be tested until one does. The query above only works for accounts
+that have already been scanned; the enumerate-only probe (#353, spec
+Phase 1b) gives the same number for *any* handle in under a minute and
+supersedes this step once it lands. The spec's ≥ 50 % / < 20 % pass was
+withdrawn the same day in favour of measuring the overlap distribution
+over real onboardings (spec §4.1 "What overlap means").
 
 **Triggering a scan without the dashboard.** The admin endpoint
 (`POST /api/admin/scan/{did}`) runs exactly this statement; from psql it
