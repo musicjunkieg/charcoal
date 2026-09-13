@@ -8566,7 +8566,7 @@
       "description": null,
       "status": "completed",
       "created_at": "2026-09-08T10:37:17.934610-07:00",
-      "updated_at": "2026-09-08T11:16:17.156709-07:00",
+      "updated_at": "2026-09-13T03:26:57.897260-07:00",
       "metadata_json": "{\"branch\":\"docs/343-scalability-design\",\"commit\":\"5d5355b\",\"confidence\":85}"
     },
     {
@@ -9389,9 +9389,9 @@
       "node_type": "goal",
       "title": "Redefine #343 Phase 1 pass test: overlap is candidate-set overlap (unguessable, cheaply measurable) — add enumerate-only probe, measure the distribution over real onboardings, and target the Phase 2 refresh job as the cache's main beneficiary",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-13T00:29:10.217954-07:00",
-      "updated_at": "2026-09-13T00:29:10.217954-07:00",
+      "updated_at": "2026-09-13T03:26:57.891319-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":90,\"prompt\":\"Bryan (2026-09-13): What's the definition of my community? / Yeah, but isn't that a very difficult thing to determine? That candidate set is hard to align on, unless you can do some surveying / Write it up\"}"
     },
     {
@@ -9448,6 +9448,50 @@
       "created_at": "2026-09-13T00:31:01.945967-07:00",
       "updated_at": "2026-09-13T00:31:01.945967-07:00",
       "metadata_json": "{\"branch\":\"docs/343-overlap-probe\",\"confidence\":92}"
+    },
+    {
+      "id": 869,
+      "change_id": "5cadc308-f344-4ff9-a87b-ee2c059fbaa6",
+      "node_type": "action",
+      "title": "PR #122 CodeRabbit round 1: 2 inline (CHANGELOG still called ≥50% a pass; total_ms units ambiguous) + 1 outside-diff (runbook header thresholds) fixed; threads replied+resolved",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-13T00:37:37.141791-07:00",
+      "updated_at": "2026-09-13T01:03:49.005343-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-overlap-probe\",\"commit\":\"bd4812d\",\"confidence\":90,\"files\":[\"CHANGELOG.md\",\"docs/runbooks/343-phase1-hit-rate.md\"]}"
+    },
+    {
+      "id": 870,
+      "change_id": "f0701abb-a35a-41c3-8c6c-7d3ef4d2687b",
+      "node_type": "outcome",
+      "title": "PR #122 CodeRabbit APPROVED at bd4812d (07:42Z); CI 7/7 pass; CLEAN; 0 open threads. Stacked on #121 — both await Bryan's merge clicks (#121 first)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T01:03:48.992411-07:00",
+      "updated_at": "2026-09-13T01:03:48.992411-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-overlap-probe\",\"confidence\":95}"
+    },
+    {
+      "id": 871,
+      "change_id": "6a22def4-11f6-4938-a518-b8ac61130a4b",
+      "node_type": "outcome",
+      "title": "Bryan merged #121 (88a23ac) and #122 (b24765e) to staging 2026-09-13 ~08:10Z. #343 Phase 0/1 measurement + overlap redefinition are on staging; local staging synced",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T03:26:57.871287-07:00",
+      "updated_at": "2026-09-13T03:26:57.871287-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"confidence\":95}"
+    },
+    {
+      "id": 872,
+      "change_id": "5fd4e75d-1ff1-41c1-a3ad-9b3d31901139",
+      "node_type": "action",
+      "title": "Write #343 Phase 2 implementation plan: score expiry (scoring_generation + valid_until, migration v18) + nightly High/Elevated refresh job on the admitter tick (spec §4.4; closes #344, unblocks #342)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T03:37:12.155890-07:00",
+      "updated_at": "2026-09-13T03:37:12.155890-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"b24765e\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19350,6 +19394,72 @@
       "weight": 1.0,
       "rationale": "PR opened",
       "created_at": "2026-09-13T00:31:01.952157-07:00"
+    },
+    {
+      "id": 911,
+      "from_node_id": 868,
+      "to_node_id": 869,
+      "from_change_id": "29faa18f-5b46-43d1-ae1a-108ffdbaad55",
+      "to_change_id": "5cadc308-f344-4ff9-a87b-ee2c059fbaa6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review loop",
+      "created_at": "2026-09-13T00:37:37.147670-07:00"
+    },
+    {
+      "id": 912,
+      "from_node_id": 869,
+      "to_node_id": 870,
+      "from_change_id": "5cadc308-f344-4ff9-a87b-ee2c059fbaa6",
+      "to_change_id": "f0701abb-a35a-41c3-8c6c-7d3ef4d2687b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review loop closed",
+      "created_at": "2026-09-13T01:03:48.999384-07:00"
+    },
+    {
+      "id": 913,
+      "from_node_id": 862,
+      "to_node_id": 871,
+      "from_change_id": "ef3b373a-940c-4740-bc16-97a637c78084",
+      "to_change_id": "6a22def4-11f6-4938-a518-b8ac61130a4b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "merged",
+      "created_at": "2026-09-13T03:26:57.878527-07:00"
+    },
+    {
+      "id": 914,
+      "from_node_id": 870,
+      "to_node_id": 871,
+      "from_change_id": "f0701abb-a35a-41c3-8c6c-7d3ef4d2687b",
+      "to_change_id": "6a22def4-11f6-4938-a518-b8ac61130a4b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "merged",
+      "created_at": "2026-09-13T03:26:57.884974-07:00"
+    },
+    {
+      "id": 915,
+      "from_node_id": 777,
+      "to_node_id": 872,
+      "from_change_id": "0c79fd38-5c39-479e-a847-01bb73cee140",
+      "to_change_id": "5fd4e75d-1ff1-41c1-a3ad-9b3d31901139",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Phase 2 implements the #344 expiry/refresh policy",
+      "created_at": "2026-09-13T03:37:12.163078-07:00"
+    },
+    {
+      "id": 916,
+      "from_node_id": 773,
+      "to_node_id": 872,
+      "from_change_id": "eebdf6b0-0878-41e6-bd67-f57502e0dd6c",
+      "to_change_id": "5fd4e75d-1ff1-41c1-a3ad-9b3d31901139",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Phase 2 of the #343 phased plan",
+      "created_at": "2026-09-13T03:37:12.169742-07:00"
     }
   ],
   "documents": [

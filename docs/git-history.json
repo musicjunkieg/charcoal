@@ -1,5 +1,21 @@
 [
   {
+    "hash": "b24765e9f312cd814ab51764d9b25eb226f3e708",
+    "short_hash": "b24765e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T03:24:51-07:00",
+    "message": "Merge pull request #122 from musicjunkieg/docs/343-overlap-probe",
+    "files_changed": 0
+  },
+  {
+    "hash": "bd4812d2f012f2d87e27ab9faa3d4b866ad953cd",
+    "short_hash": "bd4812d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T00:37:15-07:00",
+    "message": "docs(343): drop the last single-pair threshold wording; state total_ms units (CodeRabbit)\n\nCHANGELOG: record 6.6% as one onboarding observation under the\nten-onboarding rule; total_ms is summed per-account milliseconds\n(829992 ms ~= 830 worker-seconds), not wall. Phase 1 runbook: the\nheader, the pass block and the result verdict now read as the mechanism\ncheck (hit rate ~= measured overlap) with no per-pair pass/re-cost.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "45b637e659d7858bbae209a8e0ad229f345a804d",
     "short_hash": "45b637e",
     "author": "Bryan Guffey",
