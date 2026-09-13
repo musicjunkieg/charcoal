@@ -1,9 +1,15 @@
 # #343 Phase 1 — shared-cache pass test (staging)
 
-**Pass (spec §6, Phase 1):** a second staging account whose community
-overlaps the first shows a feed-snapshot hit rate ≥ 50 % **and** a scan
-wall ≤ 60 % of the cold baseline (13 m 42 s → ≤ 8 m). Hit rate < 20 % →
-re-cost before Phase 2.
+**Pass (spec §6, Phase 1, amended 2026-09-13):** this runbook is the
+*mechanism* check — a second account's feed-snapshot hit rate should equal
+its measured candidate-set overlap with the prior scan (spec §4.1, "What
+overlap means"). The original single-pair thresholds (hit rate ≥ 50 % and
+wall ≤ 60 % of baseline to pass; < 20 % to re-cost) are **withdrawn**: no
+one pair can answer how much real onboardings share. That decision is made
+from the probe overlap (#353, Phase 1b) recorded for each real onboarding,
+after the first ten — median < 15 % → size Phase 3 for zero sharing and
+pull Phase 4 forward; a clear high mode ≥ 40 % → use it as the wave
+assumption.
 
 Everything below is read from the DB. Railway logs are not part of the
 pass/fail.
@@ -31,7 +37,12 @@ SELECT u.handle, count(*) AS n,
 
 On 2026-09-13 the best existing staging user scored 7.9 % — nobody who
 shares Bryan's community has signed up on staging, so the ≥ 50 % claim
-cannot be tested until one does.
+cannot be tested until one does. The query above only works for accounts
+that have already been scanned; the enumerate-only probe (#353, spec
+Phase 1b) gives the same number for *any* handle in under a minute and
+supersedes this step once it lands. The spec's ≥ 50 % / < 20 % pass was
+withdrawn the same day in favour of measuring the overlap distribution
+over real onboardings (spec §4.1 "What overlap means").
 
 **Triggering a scan without the dashboard.** The admin endpoint
 (`POST /api/admin/scan/{did}`) runs exactly this statement; from psql it
@@ -118,9 +129,13 @@ For onnx and classifier, the intra-scan re-score inflates a raw B number
 too, so compute the cross-scan rate as `(B − A) / (1 − A)`. The feed rate
 needs no correction — it is already per-candidate.
 
-**Pass:** feed hit rate ≥ 0.50 and B's wall ≤ 0.60 × A's wall.
-**Re-cost:** feed hit rate < 0.20 — write the number into spec §4.1 and
-stop before planning Phase 2.
+**Mechanism pass:** B's feed hit rate is within a few points of B's
+measured candidate-set overlap with A (from the overlap query above, or
+the #353 probe). A hit rate far *below* the overlap means the cache is
+missing rows it should have; far *above* means the overlap estimate is
+stale. Record B's overlap and hit rate as one onboarding observation for
+the ten-onboarding decision (spec §6, Phase 1b). There is no per-pair
+pass/re-cost threshold any more.
 
 Record the table as a deciduous outcome under node 788 and in the PR body.
 Also note `bluesky_ratelimit_limit` from either account's `scan_state` in
@@ -139,12 +154,12 @@ brookie.blog (3 095 candidates; predicted overlap 7.9 %).
 Per candidate: A 0.59 s, B 0.37 s. Cache after B: 3 355 snapshots,
 101 446 onnx scores, 1 976 verdicts; `text_sha256` values are 64 hex chars.
 
-**Verdict: re-cost band (< 20 %) — but read it correctly.** The hit rate
-equals the measured community overlap almost exactly (6.6 % measured vs
-7.9 % predicted), so the cache mechanics are doing what they should; the
-number is low because no current staging user shares Bryan's community.
-The ≥ 50 % pass needs a genuinely overlapping pair and stays untested. Do
-not re-cost the design on this pair; re-run when such an account exists.
+**Verdict: mechanism pass.** The hit rate equals the measured
+candidate-set overlap almost exactly (6.6 % measured vs 7.9 % predicted),
+so the cache serves what it holds. This is **one onboarding observation**
+(overlap 6.6 %) toward the ten-onboarding decision in spec §6 Phase 1b;
+it is not a pass or a re-cost on its own. The ≥ 50 % / < 20 % thresholds
+this runbook originally carried were withdrawn the same day (spec §4.1).
 
 `bluesky_ratelimit_limit` was **not** recorded: `public.api.bsky.app`
 returns no `RateLimit-*` headers at all (verified with a bare `curl`; the

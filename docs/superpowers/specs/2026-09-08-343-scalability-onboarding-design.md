@@ -154,9 +154,50 @@ itself is persisted.
   version (`INSERT INTO schema_version … ON CONFLICT DO NOTHING`).
   **No backfill** — existing rows in `classification_queue` are not copied;
   the cache fills on the next scan.
-- **Claim to verify:** the second user in a community sees ≥ 50 % of
+- ~~**Claim to verify:** the second user in a community sees ≥ 50 % of
   candidates hit the snapshot cache. Below 20 % the cache is not paying for
-  its writes and the plan is re-costed before Phase 2.
+  its writes and the plan is re-costed before Phase 2.~~ **Withdrawn
+  2026-09-13** — replaced by the measurement plan below.
+
+**What "overlap" means here (amended 2026-09-13, deciduous 863–866).**
+This spec used "community" loosely. The only thing the cache can see is
+the **candidate set**: for a protected user, the accounts that quoted or
+reposted them (Constellation) plus a capped number of each amplifier's
+followers, minus anything scored for that user in the last 7 days
+(`src/pipeline/amplification.rs`). Two users' *overlap* is the share of
+the second user's candidate DIDs that the first user's scan already
+fetched. It is a property of who happened to amplify each of them lately,
+not of who they are friends with or what they post about — so it cannot be
+guessed from the outside, and surveying people about their circles does
+not predict it. Measured on 2026-09-13, the best pair available on
+staging overlapped 6.6 % and the cache hit exactly that.
+
+Three consequences:
+
+1. **Measure, don't guess.** The candidate set is the *enumeration*
+   step, which uses only public data and took 27 s in the §1 baseline
+   (the gather that follows is the expensive part). An **enumerate-only
+   probe** (#353) computes any handle's candidate DIDs, intersects them
+   with `account_feed_snapshots`, and reports count + overlap % in under a
+   minute with no login, no scoring and no cache writes. Used before
+   granting access, it answers "will this person's scan share anything?"
+   with a number instead of a hunch, and doubles as the wave-composition
+   check for the Phase 3 test.
+2. **The pass criterion is a distribution, not a threshold on one pair.**
+   Record the probe overlap for every real onboarding. If the distribution
+   sits near the 6.6 % measured today, the cache buys little *between*
+   users, Phase 3 sizing must assume ~zero sharing, and soot (4.5) is the
+   real lever. If it is bimodal — friends who invite friends share a lot,
+   strangers share nothing — the cache earns its keep for the first group
+   and the 4.3 arithmetic should use the measured lower mode.
+3. **Time matters as much as people.** Snapshots are reused only inside
+   the 24 h `SNAPSHOT_TTL`, so onboardings a day apart never share
+   regardless of overlap. The one consumer guaranteed to hit inside the
+   TTL is the **Phase 2 refresh job** (4.4), which re-scores the *same*
+   user's high/elevated set nightly — those DIDs were fetched hours
+   earlier. That hit rate is measurable today with no second account and
+   is likely the cache's largest payoff; it gets its own target under
+   Phase 2.
 
 ### 4.2 Worker role and concurrency knobs (S2)
 
@@ -322,9 +363,9 @@ before the next starts.
 goes to Phase 3 concurrency. Numbers in §1 and the runbook.
 
 **Phase 1 — Shared cache (4.1)**
-*Pass:* second staging account with overlapping community: snapshot hit rate
-≥ 50 % **and** scan wall ≤ 60 % of the cold baseline (13 m 42 s → ≤ 8 m).
-Hit rate < 20 % → re-cost before Phase 2.
+*Original pass (withdrawn 2026-09-13):* second staging account with
+overlapping community: snapshot hit rate ≥ 50 % **and** scan wall ≤ 60 %
+of the cold baseline. Hit rate < 20 % → re-cost before Phase 2.
 
 *Result 2026-09-13:* **untestable as specified — no overlapping pair
 exists on staging.** Against the best available second account
@@ -332,21 +373,48 @@ exists on staging.** Against the best available second account
 onnx 8.4 % cross-scan, classifier 7.8 % — i.e. the cache hits exactly the
 overlap that exists, which validates the mechanism but says nothing about
 the ≥ 50 % claim. The re-cost clause is **not** triggered on this pair: it
-assumed an overlapping community. Phase 2 may proceed; the pass test is
-re-run when an account from Bryan's community is granted on staging.
+assumed an overlapping community. Phase 2 may proceed.
 Also learned: the same-user 7-day freshness filter and RunPod cold start
 both distort wall comparisons — see the runbook.
+
+*Amended pass (4.1, "What overlap means"):* the mechanism is verified
+(hit rate = measured overlap). The remaining question — how much real
+onboardings share — is answered by data, not by a hand-picked pair:
+
+**Phase 1b — Overlap probe (#353)** — small, no schema change.
+Enumerate-only endpoint/subcommand: candidate DIDs for any handle
+(public data), intersected with `account_feed_snapshots`, returning
+`{candidates, cached, overlap_pct, snapshot_age_max}`. *Pass:* any handle
+in ≤ 60 s with zero cache writes and zero scoring; the probe's candidate
+count matches a subsequent real scan's `candidates_total` for the same
+handle on the same day. Then record the probe result for every onboarding
+in `scan_state` (`probe_overlap_pct`) so the distribution accumulates
+for free. *Decision point, after the first ten real onboardings:* median
+overlap < 15 % → Phase 3 sizes for zero sharing and Phase 4 moves up;
+a clear high mode ≥ 40 % → use its size as the Phase 3 wave assumption.
 
 **Phase 2 — Expiry + refresh (4.4)**
 *Pass:* bump the generation on staging → every row expired and hidden; the
 nightly refresh re-scores exactly the high/elevated set; no `legacy` row in
 any tier list after one nightly.
+*Added 2026-09-13:* the refresh job is the cache consumer that always runs
+inside the 24 h `SNAPSHOT_TTL`. Record its `feed_cache_hits/misses` per
+run; *pass:* feed hit rate ≥ 80 % on the refresh set (misses are only
+accounts whose snapshot aged out or was evicted). Below 50 % means the TTL
+or the refresh cadence is misaligned, and that — not user-to-user sharing —
+is where to tune first.
 
 **Phase 3 — Rate limiting + worker role (4.2, 4.3)**
 *Pass — the #343 acceptance test:* ten gated staging accounts whose
-communities overlap (the realistic onboarding case: friends invite friends)
-enqueued together, with the cache holding at least one prior scan from that
-community; all ten `done` in ≤ 15 min; zero 429s; web p95 unchanged.
+candidate sets overlap (the realistic onboarding case: friends invite
+friends) enqueued together, with the cache holding at least one prior scan
+from that group; all ten `done` in ≤ 15 min; zero 429s; web p95 unchanged.
+"Overlap" is the probe's number (Phase 1b), not a judgement: run the probe
+on all ten before enqueueing and record the ten values with the result, so
+the wall time is read against the sharing that actually existed. If the
+Phase 1b decision point landed on "zero sharing", this test is run as-is
+and its ≤ 15 min is expected to fail on 4.3's arithmetic — that is the
+signal to pull Phase 4 forward, not a Phase 3 defect.
 Ten accounts with **no** overlap and a cold cache is not the target — 4.3's
 arithmetic puts that at ~19 min on Bluesky alone, and Phase 4 is what
 fixes it. If Phase 0's observed `RateLimit-Limit` supports it, raise

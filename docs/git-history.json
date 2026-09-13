@@ -1,5 +1,21 @@
 [
   {
+    "hash": "45b637e659d7858bbae209a8e0ad229f345a804d",
+    "short_hash": "45b637e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T00:30:23-07:00",
+    "message": "docs(343): define overlap as candidate-set overlap; replace the Phase 1 pass with a measured distribution\n\n\"Community overlap\" was never defined. The cache can only see the\ncandidate set (Constellation amplifiers + amplifier followers), whose\noverlap between two users depends on who amplified each of them lately,\nnot on friendship or topic - so it cannot be guessed and surveying does\nnot predict it. Measured 2026-09-13: 6.6% on the best pair available.\n\nWithdraw the >=50% / <20% one-pair pass. Add Phase 1b: an enumerate-only\noverlap probe (#353) that reports any handle's candidate count and cache\noverlap in under a minute from public data, records it per onboarding,\nand drives a decision point after ten real onboardings. Add a refresh-job\nfeed hit-rate target (>=80%) under Phase 2, since the nightly refresh is\nthe one consumer guaranteed to run inside the 24h snapshot TTL. Phase 3\nwave test now records the probe values instead of asserting overlap.\n\nRefs #351, #353.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "573540efcc4cd5c20858b3066b9445fb13919ae5",
+    "short_hash": "573540e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T22:33:52-07:00",
+    "message": "docs(343): label the +1.5 GB session-pool cost as RSS (CodeRabbit)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
     "hash": "102dd65e05123680b88ec867a2b6d01df83d8e8d",
     "short_hash": "102dd65",
     "author": "Bryan Guffey",
