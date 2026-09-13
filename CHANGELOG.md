@@ -13,11 +13,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `CHARCOAL_ONNX_SESSIONS` stays at 1; the gather is fetch-bound, with a 5–8 minute near-idle tail
   on larger accounts. The public AppView sends no `RateLimit-*` headers at
   all, so §4.3's adaptive limiter has nothing to read. The shared cache hit
-  6.6 % of a second account's candidates — exactly the measured community
-  overlap between the two, which validates the mechanism but leaves the
-  ≥ 50 % pass untested until an account from the protected user's community
-  is on staging. Both runbooks corrected: `total_ms` is worker-seconds, not
-  wall; a same-account rerun inside 7 days drops every candidate it scored
+  6.6 % of the one onboarding measured so far — exactly that account's
+  candidate-set overlap with the prior scan, which validates the mechanism.
+  The single-pair ≥ 50 % / < 20 % thresholds are withdrawn: the spec now
+  defines overlap as candidate-set overlap, records it per onboarding via
+  an enumerate-only probe (#353), and decides Phase 3 sizing after ten real
+  onboardings (spec §4.1, Phase 1b). Both runbooks corrected: the gather's
+  `total_ms` is the sum of per-account milliseconds across all workers
+  (aggregate worker time — `829992` ms ≈ 830 worker-seconds), not wall
+  time; a same-account rerun inside 7 days drops every candidate it scored
   last time (#344), so runs must reset `account_scores` between them.
 
 ### Added

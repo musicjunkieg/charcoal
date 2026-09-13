@@ -9422,10 +9422,32 @@
       "node_type": "decision",
       "title": "Bryan chose the measured approach ('Write it up'): probe issue + spec §4.1/§6 amendment; no code yet",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-13T00:29:10.249571-07:00",
-      "updated_at": "2026-09-13T00:29:10.249571-07:00",
+      "updated_at": "2026-09-13T00:31:01.957718-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":90}"
+    },
+    {
+      "id": 867,
+      "change_id": "f570d0f2-49e3-432c-8b93-84ab4db2698f",
+      "node_type": "action",
+      "title": "Committed spec §4.1/§6 amendment + runbook pointer on docs/343-overlap-probe (stacked on docs/343-phase0-1-results); #353 filed; #351 downgraded to optional",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T00:30:38.332814-07:00",
+      "updated_at": "2026-09-13T00:30:38.332814-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-overlap-probe\",\"commit\":\"45b637e\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-09-08-343-scalability-onboarding-design.md\",\"docs/runbooks/343-phase1-hit-rate.md\"]}"
+    },
+    {
+      "id": 868,
+      "change_id": "29faa18f-5b46-43d1-ae1a-108ffdbaad55",
+      "node_type": "outcome",
+      "title": "PR #122 docs/343-overlap-probe → staging opened (45b637e), stacked on #121; awaiting CodeRabbit → Bryan merge after #121",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T00:31:01.945967-07:00",
+      "updated_at": "2026-09-13T00:31:01.945967-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-overlap-probe\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -19306,6 +19328,28 @@
       "weight": 1.0,
       "rationale": "Phase 1 result prompted the redefinition",
       "created_at": "2026-09-13T00:30:15.277996-07:00"
+    },
+    {
+      "id": 909,
+      "from_node_id": 866,
+      "to_node_id": 867,
+      "from_change_id": "d5ebe7db-e0af-4069-ab58-c95b071a06e8",
+      "to_change_id": "f570d0f2-49e3-432c-8b93-84ab4db2698f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "write-up",
+      "created_at": "2026-09-13T00:30:38.339594-07:00"
+    },
+    {
+      "id": 910,
+      "from_node_id": 867,
+      "to_node_id": 868,
+      "from_change_id": "f570d0f2-49e3-432c-8b93-84ab4db2698f",
+      "to_change_id": "29faa18f-5b46-43d1-ae1a-108ffdbaad55",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR opened",
+      "created_at": "2026-09-13T00:31:01.952157-07:00"
     }
   ],
   "documents": [
