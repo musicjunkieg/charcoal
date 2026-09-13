@@ -9136,9 +9136,9 @@
       "node_type": "action",
       "title": "Run 343 runbooks on staging: phase1 hit-rate (A cold vs B warm) then phase0 ONNX session experiment; record under 788 + spec",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-12T20:03:49.294491-07:00",
-      "updated_at": "2026-09-12T20:03:49.294491-07:00",
+      "updated_at": "2026-09-12T21:22:10.858969-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"593c40d\",\"confidence\":85}"
     },
     {
@@ -9235,9 +9235,9 @@
       "node_type": "outcome",
       "title": "Phase1 B (brookie.blog, warm cache) 03:12:37→03:31:32 wall 18m55s; candidates 3095; feed 204/3095 = 6.6% hit; onnx 16093/101510 = 15.9% raw → 8.4% cross-scan after 8.2% floor; classifier 133/1716 = 7.8%; per-candidate 0.37 s vs A 0.59 s; gather total_ms 5091s worker-sec over ~1028s gather wall (≈5 effective workers); cache after 3355/101446/1976. VERDICT: feed hit < 20% → runbook says re-cost — but hit rate equals the measured community overlap (predicted 7.9%), so the cache mechanics work; the ≥50% claim needs a genuinely overlapping pair, which no current staging signup provides",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-12T20:32:54.884211-07:00",
-      "updated_at": "2026-09-12T20:32:54.884211-07:00",
+      "updated_at": "2026-09-12T21:22:10.852575-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":90}"
     },
     {
@@ -9334,10 +9334,32 @@
       "node_type": "outcome",
       "title": "PHASE 0 DECISION: N=4 gather wall 129s vs mean N=1 128.5s (137, 120) = 0% change; threshold was ≤96s. Pool FAILS. stage1_onnx worker-seconds do halve (172/213 → 90) but the gather is fetch-bound (fetch 46–62% of worker time, plus a 5–8 min idle tail on larger accounts) and run-to-run noise (±7%) exceeds the effect. Keep CHARCOAL_ONNX_SESSIONS=1 (left explicitly =1 on staging); CPU headroom (15 cores at N=1) goes to scan concurrency in Phase 3",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-12T21:19:42.509508-07:00",
-      "updated_at": "2026-09-12T21:19:42.509508-07:00",
+      "updated_at": "2026-09-12T21:22:10.846683-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"confidence\":92}"
+    },
+    {
+      "id": 859,
+      "change_id": "1cbd7dd0-ef90-4792-9b66-f4bd143132d5",
+      "node_type": "action",
+      "title": "Committed docs(343) Phase 0/1 results + runbook fixes on docs/343-phase0-1-results",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-12T21:21:20.710951-07:00",
+      "updated_at": "2026-09-12T21:21:20.710951-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"commit\":\"102dd65\",\"confidence\":90,\"files\":[\"docs/runbooks/343-phase0-session-experiment.md\",\"docs/runbooks/343-phase1-hit-rate.md\",\"docs/superpowers/specs/2026-09-08-343-scalability-onboarding-design.md\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 860,
+      "change_id": "4db04017-87fb-4475-8ba0-d0845a254af3",
+      "node_type": "outcome",
+      "title": "PR #121 docs/343-phase0-1-results → staging opened (102dd65); #346 closed --no-changelog; follow-ups #350 idle tail (high), #351 phase1 re-run needs community account, #352 no RateLimit headers; CHARCOAL_ONNX_SESSIONS=1 explicit on staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-12T21:22:10.832805-07:00",
+      "updated_at": "2026-09-12T21:22:10.832805-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase0-1-results\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -19108,6 +19130,39 @@
       "weight": 1.0,
       "rationale": "Phase 0 item 2 answered: no header exists",
       "created_at": "2026-09-12T21:20:55.588612-07:00"
+    },
+    {
+      "id": 899,
+      "from_node_id": 858,
+      "to_node_id": 859,
+      "from_change_id": "b0c6573b-fd34-4dcb-a88b-272ff96b9742",
+      "to_change_id": "1cbd7dd0-ef90-4792-9b66-f4bd143132d5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "results written up",
+      "created_at": "2026-09-12T21:21:20.717271-07:00"
+    },
+    {
+      "id": 900,
+      "from_node_id": 849,
+      "to_node_id": 859,
+      "from_change_id": "50ea6498-fab0-4899-8c7c-4cee74acd293",
+      "to_change_id": "1cbd7dd0-ef90-4792-9b66-f4bd143132d5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "results written up",
+      "created_at": "2026-09-12T21:21:20.724020-07:00"
+    },
+    {
+      "id": 901,
+      "from_node_id": 859,
+      "to_node_id": 860,
+      "from_change_id": "1cbd7dd0-ef90-4792-9b66-f4bd143132d5",
+      "to_change_id": "4db04017-87fb-4475-8ba0-d0845a254af3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR opened from the commit",
+      "created_at": "2026-09-12T21:22:10.840117-07:00"
     }
   ],
   "documents": [

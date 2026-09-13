@@ -9,8 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - #343 Phase 0/1 measured on staging (2026-09-13, #346). One ONNX session
   already drives 13–15 cores through ort's intra-op threads, so a pool of
-  four changed the gather wall by 0 % for +1.5 GB and `CHARCOAL_ONNX_SESSIONS`
-  stays at 1; the gather is fetch-bound, with a 5–8 minute near-idle tail
+  four changed the gather wall by 0 % for +1.5 GB RSS and
+  `CHARCOAL_ONNX_SESSIONS` stays at 1; the gather is fetch-bound, with a 5–8 minute near-idle tail
   on larger accounts. The public AppView sends no `RateLimit-*` headers at
   all, so §4.3's adaptive limiter has nothing to read. The shared cache hit
   6.6 % of a second account's candidates — exactly the measured community
