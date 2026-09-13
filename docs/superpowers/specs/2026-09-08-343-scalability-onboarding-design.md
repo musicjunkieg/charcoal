@@ -286,6 +286,53 @@ in the freshness read silently re-scores everything via
   `scoring_generation = 'legacy'`. Legacy rows expire naturally and are
   refreshed by the job; nothing is deleted.
 
+*Amended 2026-09-14 (Phase 2 plan rev 2, after Astra's plan review; deciduous
+877/878):*
+
+- The migration is **v18** (v17 shipped with Phase 1's cache indexes).
+- **Due-ness is generation-driven, not stamped.** `users.refreshed_generation`
+  records the generation under which a user's High/Elevated set was last
+  refreshed or fully scanned; a user with scores is due when
+  `next_refresh_at` has passed **or** `refreshed_generation` is not the
+  current generation. Migration v18 leaves it NULL, so the first tick after
+  the deploy — and after every later bump — refreshes everyone. There is no
+  one-off `next_refresh_at = NOW()` backfill.
+- **Scheduling is one bounded transaction per tick** (25 users): select due
+  users with no queued/running work, create their refresh rows, advance
+  `next_refresh_at` — together. A failure advances nothing.
+- **Staging carries its owner.** `scan_state.scan_run_kind` and
+  `scan_run_generation` are written at every fresh start. A refresh resumes
+  its own interrupted work; it defers (retry in 1 h) when the staging belongs
+  to a full scan; a full scan drains a refresh's leftovers before gathering;
+  staging from another generation is discarded.
+- **Compatibility contract.** A current-generation score is published only
+  from a fingerprint whose `embedding_model_id` matches the binary's
+  `EMBEDDING_MODEL_ID` (or a keyword-only fingerprint), an `AccountInput`
+  blob stamped with the current generation, and verdict rows whose
+  `policy_version` matches the running classifier. `SCORING_GENERATION` is
+  bumped only for formula/format/policy changes — model changes are carried
+  by their own identities and never require a bump or invalidate the caches.
+  A refresh never rebuilds a fingerprint; a missing or incompatible one makes
+  the refresh defer and request a full scan.
+- **The user's request always wins.** A full enqueue over a queued refresh
+  upgrades it in place (queue position kept); a full request during a running
+  refresh is recorded in `scan_queue.full_requested_at` and becomes the
+  user's queued full scan when the refresh finishes. Queue order stays FIFO
+  across kinds (#271). The 24 h cooldown anchors on
+  `scan_state.last_full_scan_finished_at`, backfilled by v18 from done rows.
+- **`charcoal migrate` is lossless:** `export_scores`/`import_score` copy every
+  row (expired, legacy, NotAssessed) with its original `scored_at`,
+  generation and expiry; importing never renews expiry.
+- **Missing context is an error, not an absence:** a refresh that cannot load
+  stored events, protected posts or embeddings fails and retries; it never
+  overwrites a High/Elevated row with a score computed without them.
+- SQLite `valid_until` stays nullable; NULL and malformed values read as
+  expired everywhere (COALESCE), and malformed rows are refresh-eligible.
+- Refresh candidates are selected by score (`threat_score ≥
+  ThreatTier::ELEVATED_MIN`), not the stored tier string. Index:
+  `(user_did, threat_score)`, measured (runbook).
+- "Full fortnightly" is **not** in Phase 2 — it is #342's remaining scope.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust
@@ -394,15 +441,24 @@ overlap < 15 % → Phase 3 sizes for zero sharing and Phase 4 moves up;
 a clear high mode ≥ 40 % → use its size as the Phase 3 wave assumption.
 
 **Phase 2 — Expiry + refresh (4.4)**
-*Pass:* bump the generation on staging → every row expired and hidden; the
-nightly refresh re-scores exactly the high/elevated set; no `legacy` row in
-any tier list after one nightly.
-*Added 2026-09-13:* the refresh job is the cache consumer that always runs
-inside the 24 h `SNAPSHOT_TTL`. Record its `feed_cache_hits/misses` per
-run; *pass:* feed hit rate ≥ 80 % on the refresh set (misses are only
-accounts whose snapshot aged out or was evicted). Below 50 % means the TTL
-or the refresh cadence is misaligned, and that — not user-to-user sharing —
-is where to tune first.
+*Pass:* deploy → every pre-existing row hidden and `tier_counts.expired`
+equals the row count; the first ticks enqueue a refresh for every user with
+scores (via `refreshed_generation`); each refresh re-scores exactly that
+user's High/Elevated set; no `legacy` row at or above Elevated remains after
+one refresh per user; an interrupted refresh resumes itself on its retry;
+a user's full-scan request during a refresh runs afterwards; `charcoal
+migrate` rehearsal on a prod copy preserves row counts and provenance.
+Plan: `docs/superpowers/plans/2026-09-13-343-phase2-expiry-refresh.md`.
+*Withdrawn 2026-09-14 (deciduous 878):* the ≥ 80 % refresh feed-hit target
+added on 2026-09-13. The arithmetic does not support it: High rows (14 d)
+enter the 2 d refresh horizon ~12 d after scoring while feed snapshots live
+24 h, so a steady-state refresh misses the cache for every candidate that
+was not active in the last day — by design, not by defect. The refresh job
+is therefore **not** the cache's main beneficiary. Phase 2 keeps a
+*functional* cache test (warm eligible candidate → hit; cold → miss;
+nothing due → not applicable, counters zeroed per run) and records the
+steady-state hit share as a number with no threshold. `SNAPSHOT_TTL` is not
+raised to move that number.
 
 **Phase 3 — Rate limiting + worker role (4.2, 4.3)**
 *Pass — the #343 acceptance test:* ten gated staging accounts whose

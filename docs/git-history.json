@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c91afb85a5bdab4b284c01b1256b485802504e85",
+    "short_hash": "c91afb8",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T03:55:08-07:00",
+    "message": "docs(343): Phase 2 implementation plan — score expiry + nightly refresh (#344)\n\nTen TDD tasks: SCORING_GENERATION + confidence label parsing; migration v18\n(scoring_generation, valid_until, scan_queue.kind, users.next_refresh_at,\nlegacy backfill) on both backends; fresh-only reads with hard-error\nfreshness in the pipeline; tier_counts.expired in the UI; refresh queue\nkind with upgrade/no-downgrade rules, full-only ETA median and a cooldown\nanchor; the refresh schedule on the admitter tick (one UPDATE … RETURNING,\nCHARCOAL_REFRESH_INTERVAL_HOURS); list_refresh_candidates from the table;\nshared-setup extraction; run_refresh through the unchanged run_phased_scan;\ndocs, runbook and spec §4.4 amendment (v18 not v17, FIFO across kinds,\nfortnightly full stays with #342).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
     "hash": "b24765e9f312cd814ab51764d9b25eb226f3e708",
     "short_hash": "b24765e",
     "author": "Bryan Guffey",

@@ -9492,6 +9492,72 @@
       "created_at": "2026-09-13T03:37:12.155890-07:00",
       "updated_at": "2026-09-13T03:37:12.155890-07:00",
       "metadata_json": "{\"branch\":\"staging\",\"commit\":\"b24765e\",\"confidence\":85}"
+    },
+    {
+      "id": 873,
+      "change_id": "029e97a9-8c50-4a5a-afc9-82db3e801db8",
+      "node_type": "outcome",
+      "title": "Phase 2 plan committed c91afb8 on docs/343-phase2-plan: 10 TDD tasks — generation constant, migration v18 (not v17: v17 shipped with Phase 1), fresh-only reads + hard-error freshness, tier_counts.expired, scan_queue.kind with upgrade/no-downgrade + full-only ETA median + cooldown anchor, refresh tick on the admitter (UPDATE…RETURNING claim, CHARCOAL_REFRESH_INTERVAL_HOURS), list_refresh_candidates by score >= ELEVATED_MIN, setup-helper extraction, run_refresh via unchanged run_phased_scan (deferred if a full scan is mid-resume), docs/runbook/spec amendment. Fortnightly full rescan stays with #342",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T03:55:26.034408-07:00",
+      "updated_at": "2026-09-13T03:55:26.034408-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"c91afb8\",\"confidence\":88}"
+    },
+    {
+      "id": 874,
+      "change_id": "a20c4f4e-cad0-4512-aeb6-bfefe967a601",
+      "node_type": "action",
+      "title": "Opened PR #123 docs/343-phase2-plan → staging (c91afb8): Phase 2 plan, docs-only; awaiting CodeRabbit → Bryan's merge click; then execute the plan on feat/343-phase2-expiry-refresh",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T03:56:03.779485-07:00",
+      "updated_at": "2026-09-13T03:56:03.779485-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"c91afb8\",\"confidence\":85}"
+    },
+    {
+      "id": 875,
+      "change_id": "b2844ca6-f8e8-44a3-806d-96f9b6697e74",
+      "node_type": "goal",
+      "title": "Triage Astra staging review handoff: verify findings #1-#15 against staging b24765e and file chainlink issues for the confirmed ones (queued after the #343 Phase 2 work)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T12:06:25.228663-07:00",
+      "updated_at": "2026-09-13T12:06:25.228663-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"confidence\":90,\"prompt\":\"I need you to take a look at this review by Astra and make issues for all of the things we need to fix that you can verify. This will be what we do once we finish this set of work. (attached: ~/.claude/uploads/.../93979eee-charcoal-fable-5.1-handoff.md — \\\"Charcoal: staging remediation handoff for Fable 5.1\\\", reviewed staging b24765e, findings #1-#15)\"}"
+    },
+    {
+      "id": 876,
+      "change_id": "fc646699-fa68-4e1b-9210-857bc7411f46",
+      "node_type": "outcome",
+      "title": "Astra review triaged: 14/15 findings confirmed on b24765e by code inspection (+ npm run check reproduced 5 errors/1 warning); #2 already fixed. Filed #355-#366, commented on existing #236 (=#1) and #237 (=#4, raised to high), turned #354 into the remediation tracker with suggested order (CI gates #357 first; #236+#355+#237 together; #358 needs Bryan's policy call). All sequenced after #343 Phase 2 (#344)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T12:11:03.211568-07:00",
+      "updated_at": "2026-09-13T12:11:03.211568-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"c91afb8\",\"confidence\":90}"
+    },
+    {
+      "id": 877,
+      "change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "node_type": "action",
+      "title": "Revise the Phase 2 plan per Astra plan review R01-R13 (REQUEST CHANGES on c91afb8): lossless score export/import for migrate, refresh resume ownership + outcome types, input-compatibility contract (embedding model id, blob generation, verdict policy), transactional claim+enqueue with generation-aware due query, error-vs-absence for context helpers, null-safe SQLite expiry, pending_full for user scans during refresh, cooldown backfill, measured index, valid test commands, hit-rate gate replaced",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T13:24:29.049099-07:00",
+      "updated_at": "2026-09-13T13:24:29.049099-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"c91afb8\",\"confidence\":85}"
+    },
+    {
+      "id": 878,
+      "change_id": "07f5e8ae-9ac9-45e6-9042-f2b538117db6",
+      "node_type": "revisit",
+      "title": "Spec §6 Phase 2 '≥80% refresh feed-hit rate' target (added 2026-09-13, node 867) is unsupported: High rows refresh ~12 d after scoring, snapshots live 24 h, so steady-state refresh MISSES the feed cache by design; the refresh job is not the cache's main beneficiary. Replace with a functional warm/cold test + recorded (not gated) hit share",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T13:24:29.060270-07:00",
+      "updated_at": "2026-09-13T13:24:29.060270-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19460,6 +19526,72 @@
       "weight": 1.0,
       "rationale": "Phase 2 of the #343 phased plan",
       "created_at": "2026-09-13T03:37:12.169742-07:00"
+    },
+    {
+      "id": 917,
+      "from_node_id": 872,
+      "to_node_id": 873,
+      "from_change_id": "5fd4e75d-1ff1-41c1-a3ad-9b3d31901139",
+      "to_change_id": "029e97a9-8c50-4a5a-afc9-82db3e801db8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan written and committed",
+      "created_at": "2026-09-13T03:55:29.291707-07:00"
+    },
+    {
+      "id": 918,
+      "from_node_id": 873,
+      "to_node_id": 874,
+      "from_change_id": "029e97a9-8c50-4a5a-afc9-82db3e801db8",
+      "to_change_id": "a20c4f4e-cad0-4512-aeb6-bfefe967a601",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan goes through the normal PR/CodeRabbit gate before execution",
+      "created_at": "2026-09-13T03:56:03.785702-07:00"
+    },
+    {
+      "id": 919,
+      "from_node_id": 875,
+      "to_node_id": 876,
+      "from_change_id": "b2844ca6-f8e8-44a3-806d-96f9b6697e74",
+      "to_change_id": "fc646699-fa68-4e1b-9210-857bc7411f46",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Triage result",
+      "created_at": "2026-09-13T12:11:03.218408-07:00"
+    },
+    {
+      "id": 920,
+      "from_node_id": 872,
+      "to_node_id": 877,
+      "from_change_id": "5fd4e75d-1ff1-41c1-a3ad-9b3d31901139",
+      "to_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Astra plan review requested changes on the first draft",
+      "created_at": "2026-09-13T13:25:23.244661-07:00"
+    },
+    {
+      "id": 921,
+      "from_node_id": 867,
+      "to_node_id": 878,
+      "from_change_id": "f570d0f2-49e3-432c-8b93-84ab4db2698f",
+      "to_change_id": "07f5e8ae-9ac9-45e6-9042-f2b538117db6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "The hit-rate target added in the overlap amendment does not survive the cadence arithmetic",
+      "created_at": "2026-09-13T13:25:23.251277-07:00"
+    },
+    {
+      "id": 922,
+      "from_node_id": 878,
+      "to_node_id": 877,
+      "from_change_id": "07f5e8ae-9ac9-45e6-9042-f2b538117db6",
+      "to_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Revision drops the gate",
+      "created_at": "2026-09-13T13:25:23.257039-07:00"
     }
   ],
   "documents": [
