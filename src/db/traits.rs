@@ -166,6 +166,36 @@ pub struct AccessRequestRow {
     pub decided_by: Option<String>,
 }
 
+/// One `account_feed_snapshots` row (#343 §4.1): an account's recent feed as
+/// fetched, so the next scan that meets this account can skip Bluesky.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeedSnapshot {
+    pub did: String,
+    pub handle: String,
+    /// `serde_json` of `Vec<bluesky::posts::FeedPost>`.
+    pub posts_json: String,
+    /// RFC3339, like every other timestamp on this trait.
+    pub fetched_at: String,
+    /// "bluesky" today; "soot" once Phase 4 lands.
+    pub source: String,
+}
+
+/// One `onnx_scores` row minus the key columns the caller already holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OnnxScoreRow {
+    /// Lowercase hex SHA-256 of the exact text the model scored.
+    pub text_sha256: String,
+    pub score: f64,
+}
+
+/// One `classifier_verdicts` row minus the key columns the caller holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassifierVerdictRow {
+    pub text_sha256: String,
+    pub toxic_token: bool,
+    pub confidence: f64,
+}
+
 /// One write-scoped OAuth grant per user (#315). Every `*_enc` column is an
 /// AES-256-GCM blob produced by `web::actions::crypto::TokenCrypto`; the DB
 /// layer never sees plaintext. `access_expires_at` is unix seconds; the two
@@ -760,6 +790,65 @@ pub trait Database: Send + Sync {
     /// `did, handle, threat_score, threat_tier` for every scored account of
     /// the user. Target validation, snapshots, and drift all read this.
     async fn list_score_snapshots(&self, user_did: &str) -> Result<Vec<ScoreSnapshot>>;
+
+    // --- Shared cache (#343 §4.1) ---
+    //
+    // None of these take a user_did: a post's toxicity is a property of the
+    // post. Lookups take a batch of hashes and return only the hits, so a
+    // decorator can score the misses in one pass.
+
+    async fn get_feed_snapshot(&self, did: &str) -> Result<Option<FeedSnapshot>>;
+
+    /// Insert or replace every column for `snapshot.did`.
+    async fn upsert_feed_snapshot(&self, snapshot: &FeedSnapshot) -> Result<()>;
+
+    /// Scores for `model_id` keyed by hash — absent hashes are simply absent.
+    async fn get_onnx_scores(
+        &self,
+        model_id: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, f64>>;
+
+    /// Insert or replace; `scored_at` is set by the backend.
+    async fn upsert_onnx_scores(&self, model_id: &str, rows: &[OnnxScoreRow]) -> Result<()>;
+
+    async fn get_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, ClassifierVerdictRow>>;
+
+    /// Insert or replace; `classified_at` is set by the backend.
+    async fn upsert_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        rows: &[ClassifierVerdictRow],
+    ) -> Result<()>;
+
+    /// Delete cache rows older than the given RFC3339 cutoffs — `feed_cutoff`
+    /// for `account_feed_snapshots`, `score_cutoff` for both scoring tables.
+    /// Returns how many rows went, per table.
+    ///
+    /// Comparisons are lexicographic on the stored RFC3339 TEXT. That is sound
+    /// for one reason only: **every writer stamps these columns with
+    /// `DateTime<Utc>::to_rfc3339()`**, which always ends in `+00:00` (never
+    /// `Z`). Its fractional-seconds part is *not* fixed width (0, 3, 6 or 9
+    /// digits), but a shorter fraction terminates in `+` (0x2B), which sorts
+    /// below `.` (0x2E) and every digit, so a truncated stamp never outranks a
+    /// longer one in the same second. A future writer that emits `Z` (0x5A,
+    /// above the digits) would silently make stale rows survive the sweep —
+    /// keep using `to_rfc3339()`. Postgres compares TEXT under the database
+    /// collation rather than byte order, so the worst case there is a
+    /// sub-second boundary error against a 7-/90-day window. Callers compute
+    /// the cutoffs in Rust; see [`crate::db::cache_retention`], which also
+    /// wraps this so a failed sweep never fails a scan.
+    async fn evict_stale_cache(
+        &self,
+        feed_cutoff: &str,
+        score_cutoff: &str,
+    ) -> Result<crate::db::cache_retention::CacheEviction>;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

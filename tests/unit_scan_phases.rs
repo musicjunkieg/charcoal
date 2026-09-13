@@ -638,7 +638,12 @@ mod gather_tests {
 
     #[async_trait]
     impl PostFetcher for CannedFetcher {
-        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            _handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
             // Returns the same canned sample regardless of `limit`. The Stage-1
             // (25-post) vs Stage-2 (50-post) sample-size distinction is
             // intentionally not exercised by these unit tests; the PostFetcher
@@ -1120,7 +1125,12 @@ mod gather_tests {
 
     #[async_trait]
     impl PostFetcher for TwoStageFetcher {
-        async fn fetch_sample(&self, _handle: &str, limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            _handle: &str,
+            limit: usize,
+        ) -> Result<PostSample> {
             Ok(if limit <= 25 {
                 self.stage1.clone()
             } else {
@@ -1237,7 +1247,12 @@ mod gather_tests {
 
     #[async_trait]
     impl PostFetcher for DelayedFetcher {
-        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            _handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             Ok(self.sample.clone())
         }
@@ -2866,7 +2881,12 @@ mod orchestration_tests {
 
     #[async_trait]
     impl PostFetcher for MapFetcher {
-        async fn fetch_sample(&self, handle: &str, _limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
             Ok(self
                 .by_handle
                 .get(handle)
@@ -2891,7 +2911,12 @@ mod orchestration_tests {
 
     #[async_trait]
     impl PostFetcher for FailingFetcher {
-        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            _handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
             anyhow::bail!("simulated fetch failure")
         }
         async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
@@ -2904,7 +2929,12 @@ mod orchestration_tests {
 
     #[async_trait]
     impl PostFetcher for PanicFetcher {
-        async fn fetch_sample(&self, _handle: &str, _limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            _handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
             panic!("fetch_sample called — gather must be skipped on resume");
         }
         async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
@@ -3491,7 +3521,12 @@ mod orchestration_tests {
 
     #[async_trait]
     impl PostFetcher for PartialPanicFetcher {
-        async fn fetch_sample(&self, handle: &str, _limit: usize) -> Result<PostSample> {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
             if handle == self.panicking_handle {
                 panic!("simulated atrium-api unwrap panic: premature end of input");
             }

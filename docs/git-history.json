@@ -1,5 +1,133 @@
 [
   {
+    "hash": "60584140e57bd569f9ae9c991014fcb24795da48",
+    "short_hash": "6058414",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T19:27:32-07:00",
+    "message": "docs(343): correct the RFC3339 ordering rationale; remove clock-tie in eviction test\n\nchrono to_rfc3339() is not fixed-width (0/3/6/9 fractional digits). The\nlexicographic sweep is still sound because every writer emits +00:00 and\n\"+\" sorts below \".\" and digits — say that, once, on the trait doc, and\npoint the other four sites at it. Test feed cutoff moves to now+1s so the\nseed row stamped in the same instant cannot tie.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 8
+  },
+  {
+    "hash": "2a8aea356f8f5a9b2b3ea203be5bc34c7d419c0c",
+    "short_hash": "2a8aea3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T19:09:54-07:00",
+    "message": "perf(343): batch the Postgres cache upserts with UNNEST\n\nCodeRabbit on PR #118: upsert_onnx_scores and upsert_classifier_verdicts\nexecuted one round trip per miss inside a transaction. Both now use a\nsingle UNNEST INSERT ... SELECT, the shape insert_amplification_events_batch\nalready uses — model_id, policy_version and the timestamp are scalars\nbroadcast to every row, so the statement binds a fixed number of\nparameters at any batch size.\n\nRows are deduplicated last-write-wins first, and that is load-bearing:\none INSERT ... ON CONFLICT DO UPDATE cannot touch the same row twice\n(\"command cannot affect row a second time\"), where the per-row loop\nsimply let a later duplicate overwrite an earlier one. Todays callers\nalready pass distinct hashes, but the trait is public.\n\nNo WITH ORDINALITY here — unlike the amplification batch these tables\nhave no serial id whose order is part of the contract.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 2
+  },
+  {
+    "hash": "7063776b0de425a86c63d5b99ceac86a358ed95b",
+    "short_hash": "7063776",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T17:47:18-07:00",
+    "message": "fix(343): wrap SQLite cache batch upserts in one transaction\n\nCodeRabbit on PR #118: SqliteDatabase called upsert_onnx_scores and\nupsert_classifier_verdicts without a transaction, so each row was its\nown autocommit - a mid-batch error left earlier rows behind, unlike the\nPostgres backend which wraps the batch. Now unchecked_transaction +\ncommit around the loop in both, matching delete_user_data.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
+    "hash": "23de7f7b244acc48a1ab9f7b0085ac721a5e85fd",
+    "short_hash": "23de7f7",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:48:31-07:00",
+    "message": "fix(343): final-review fixes - per-candidate feed hit counting, feed stats never fail the scan\n\nFeed cache hits/misses now count once per DID per scan so the Phase 1 gate\nmatches spec §4.1 (per candidate, not per fetch); runbook corrected to\nmatch. The feed stats write after a successful scan is warn-on-error like\nthe onnx/classifier writes - a diagnostic must not fail the scan.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 8
+  },
+  {
+    "hash": "529adf0f81e4cf71e2745cf14c68c75d3caa6a1a",
+    "short_hash": "529adf0",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:27:41-07:00",
+    "message": "docs(343): CHANGELOG, README knob, Phase 0/1 runbooks\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
+    "hash": "9c176f3c03d93e3e00c534774d5a04529a2034d3",
+    "short_hash": "9c176f3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:20:39-07:00",
+    "message": "feat(343): CachedClassifier — stage-2 verdicts cached by (hash, model, policy)\n\nOnly decodable verdicts are stored; slot errors and request errors pass\nthrough untouched so the burst downcasts still work. Counts land in\nscan_state classifier_cache_hits/misses.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
+    "hash": "4a9239452dd18478efa8f460c73cc3bcb109097a",
+    "short_hash": "4a92394",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T23:20:44-07:00",
+    "message": "feat(343): CachedToxicityScorer — ONNX scores cached by text SHA-256\n\nDistinct misses go to the model in one batch; hits return the cached\ntoxicity with default attributes. Keyed by (text hash, model id), shared\nacross users. Counts land in scan_state onnx_cache_hits/misses.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 7
+  },
+  {
+    "hash": "2b3f14458e379b12fdb3a7d66e43148014e95da8",
+    "short_hash": "2b3f144",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T22:46:44-07:00",
+    "message": "test(343): update sqlite trait table-count assertion for v16 cache tables\n\nTask 5 added three tables in migration v16 but only refreshed the\nschema.rs assertions; the sibling assertion in sqlite.rs still expected\n17 and failed on the full --lib run.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 1
+  },
+  {
+    "hash": "73033da26b3e1b86819ee959f753200a031a232d",
+    "short_hash": "73033da",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T22:14:09-07:00",
+    "message": "feat(343): Database trait methods for the shared cache\n\nget/upsert feed snapshots, onnx scores and classifier verdicts on SQLite\nand Postgres. Batch lookups return only hits; empty inputs are no-ops.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 9
+  },
+  {
+    "hash": "5b2f84ce8c793333a50498a2e1451ccc971a9053",
+    "short_hash": "5b2f84c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T21:54:03-07:00",
+    "message": "feat(343): migration v16 - shared cache tables on both backends\n\naccount_feed_snapshots, onnx_scores, classifier_verdicts. No user_did;\nkeyed by DID or text SHA-256. Fresh + upgrade-from-v15 tests on SQLite and\nPostgres; 0016 self-records its version.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
+    "hash": "c6523483772be64bb0da8930eb8b22b2ce2eba5d",
+    "short_hash": "c652348",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T21:04:03-07:00",
+    "message": "refactor(343): split feed fetch from sampling; PostFetcher takes the DID\n\ncollect_feed_posts + pure sample_from_feed replace the fused loop so a cached\nfeed can be re-partitioned. FeedSource is the raw network trait; PostFetcher\ngains did for the cache key. No behaviour change.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 5
+  },
+  {
+    "hash": "30f95d3f40752765e9120264dd1f1b327f7a7b6d",
+    "short_hash": "30f95d3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T20:45:40-07:00",
+    "message": "feat(343): CHARCOAL_ONNX_SESSIONS session pool for the Phase 0 experiment\n\nDefault 1, clamp 1..=8, round-robin selection. Adds ONNX_MODEL_ID for the\nPhase 1 cache key.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "fd123b34589e5dc237f45c6d9b2041fa8af5807a",
+    "short_hash": "fd123b3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T20:33:28-07:00",
+    "message": "test(343): cover the missing-RateLimit-Limit warn branch\n\nExtract record_observed_rate_limit so the Some/None persistence paths are unit-testable; the None branch now has a tracing-capture test proving one warn per scan and no scan_state row.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 1
+  },
+  {
+    "hash": "ceac618e44fd1ac482a0919876fac04789d760ef",
+    "short_hash": "ceac618",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T18:42:59-07:00",
+    "message": "perf(343): forward stage-1 batches to the primary scorer intact\n\nTwoStageToxicityScorer had no score_batch override, so stage 1 ran one\nONNX forward pass per post. Delegate to primary.score_batch.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "d27b19983148d5433af0831936cb4c01ab188630",
+    "short_hash": "d27b199",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T18:36:25-07:00",
+    "message": "Merge pull request #117 from musicjunkieg/docs/343-scalability-design\n\ndocs(343): scalability & onboarding design spec + Phase 0/1 implementation plan",
+    "files_changed": 0
+  },
+  {
+    "hash": "b0ed9499c0ee6ac2883538a2dc1ff38e64dc2784",
+    "short_hash": "b0ed949",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T11:16:01-07:00",
+    "message": "docs(343): Phase 0+1 implementation plan; spec §4.1 three-table cache keyed by text hash\n\nPlan covers Phase 0 (measurement: batched stage-1 forward pass, CPU\nsampler, rate-limit header capture, CHARCOAL_ONNX_SESSIONS pool) and\nPhase 1 (shared cache: account_feed_snapshots / onnx_scores /\nclassifier_verdicts tables, migration v16, six Database trait methods,\nCachedPostFetcher / CachedToxicityScorer / CachedClassifier decorators,\ncache hit/miss stats in scan_state) as ten TDD tasks plus two runbooks.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
     "hash": "5d5355b5427ff728d49739d5d1a77c193d70fbe0",
     "short_hash": "5d5355b",
     "author": "Bryan Guffey",

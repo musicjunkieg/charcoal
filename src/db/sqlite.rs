@@ -18,9 +18,9 @@ use super::models::{
     NewAmplificationEvent, UserLabel, UserRow,
 };
 use super::traits::{
-    validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, Database, NewAction,
-    OauthSessionRow, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
-    ScoreSnapshot,
+    validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
+    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
+    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -650,6 +650,61 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::list_score_snapshots(&conn, user_did)
     }
+
+    // --- Shared cache (#343 §4.1) ---
+
+    async fn get_feed_snapshot(&self, did: &str) -> Result<Option<FeedSnapshot>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_feed_snapshot(&conn, did)
+    }
+
+    async fn upsert_feed_snapshot(&self, snapshot: &FeedSnapshot) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_feed_snapshot(&conn, snapshot)
+    }
+
+    async fn get_onnx_scores(
+        &self,
+        model_id: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, f64>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_onnx_scores(&conn, model_id, hashes)
+    }
+
+    async fn upsert_onnx_scores(&self, model_id: &str, rows: &[OnnxScoreRow]) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_onnx_scores(&conn, model_id, rows)
+    }
+
+    async fn get_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, ClassifierVerdictRow>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_classifier_verdicts(&conn, model_id, policy_version, hashes)
+    }
+
+    async fn upsert_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        rows: &[ClassifierVerdictRow],
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::upsert_classifier_verdicts(&conn, model_id, policy_version, rows)
+    }
+
+    async fn evict_stale_cache(
+        &self,
+        feed_cutoff: &str,
+        score_cutoff: &str,
+    ) -> Result<super::cache_retention::CacheEviction> {
+        let conn = self.conn.lock().await;
+        super::queries::evict_stale_cache(&conn, feed_cutoff, score_cutoff)
+    }
 }
 
 #[cfg(test)]
@@ -961,8 +1016,10 @@ mod tests {
         // scan_state, users, user_labels, inferred_pairs,
         // classification_queue, scan_account_input, scan_skips,
         // scan_queue, topic_clusters, access_requests,
-        // oauth_sessions, action_batches, actions = 17 tables (v15)
-        assert_eq!(count, 17);
+        // oauth_sessions, action_batches, actions (v15),
+        // account_feed_snapshots, onnx_scores, classifier_verdicts (v16)
+        // = 20 tables
+        assert_eq!(count, 20);
     }
 
     #[tokio::test]

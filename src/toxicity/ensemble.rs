@@ -235,6 +235,14 @@ impl ToxicityScorer for TwoStageToxicityScorer {
         self.primary.score_text(text).await
     }
 
+    /// Stage 1 hands us the whole 25-post sample at once. Without this
+    /// override the trait default would call `score_text` per post — 25
+    /// separate ONNX forward passes and 25 mutex acquisitions on the
+    /// session — so we forward the batch to the primary scorer intact.
+    async fn score_batch(&self, texts: &[String]) -> Result<Vec<ToxicityResult>> {
+        self.primary.score_batch(texts).await
+    }
+
     async fn score_with_context(
         &self,
         text: &str,

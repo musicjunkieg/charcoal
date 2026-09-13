@@ -22,8 +22,9 @@ use super::models::{
     NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
-    eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, Database, NewAction, OauthSessionRow,
-    ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
+    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
+    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -174,6 +175,14 @@ impl PgDatabase {
                 (
                     15,
                     include_str!("../../migrations/postgres/0015_actions.sql"),
+                ),
+                (
+                    16,
+                    include_str!("../../migrations/postgres/0016_shared_cache.sql"),
+                ),
+                (
+                    17,
+                    include_str!("../../migrations/postgres/0017_cache_indexes.sql"),
                 ),
             ];
 
@@ -2274,6 +2283,232 @@ impl Database for PgDatabase {
                 threat_tier: r.get::<Option<String>, _>(3),
             })
             .collect())
+    }
+
+    // --- Shared cache (#343 §4.1) ---
+
+    async fn get_feed_snapshot(&self, did: &str) -> Result<Option<FeedSnapshot>> {
+        let row = sqlx_core::query::query(
+            "SELECT did, handle, posts_json, fetched_at, source
+             FROM account_feed_snapshots WHERE did = $1",
+        )
+        .bind(did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| FeedSnapshot {
+            did: r.get::<String, _>(0),
+            handle: r.get::<String, _>(1),
+            posts_json: r.get::<String, _>(2),
+            fetched_at: r.get::<String, _>(3),
+            source: r.get::<String, _>(4),
+        }))
+    }
+
+    async fn upsert_feed_snapshot(&self, s: &FeedSnapshot) -> Result<()> {
+        sqlx_core::query::query(
+            "INSERT INTO account_feed_snapshots (did, handle, posts_json, fetched_at, source)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (did) DO UPDATE SET
+                 handle = EXCLUDED.handle,
+                 posts_json = EXCLUDED.posts_json,
+                 fetched_at = EXCLUDED.fetched_at,
+                 source = EXCLUDED.source",
+        )
+        .bind(&s.did)
+        .bind(&s.handle)
+        .bind(&s.posts_json)
+        .bind(&s.fetched_at)
+        .bind(&s.source)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_onnx_scores(
+        &self,
+        model_id: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, f64>> {
+        if hashes.is_empty() {
+            return Ok(Default::default());
+        }
+        let rows = sqlx_core::query::query(
+            "SELECT text_sha256, score FROM onnx_scores
+             WHERE model_id = $1 AND text_sha256 = ANY($2)",
+        )
+        .bind(model_id)
+        .bind(hashes.to_vec())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.get::<String, _>(0), r.get::<f64, _>(1)))
+            .collect())
+    }
+
+    async fn upsert_onnx_scores(&self, model_id: &str, rows: &[OnnxScoreRow]) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        // One UNNEST round trip instead of one per row (CodeRabbit, PR #118),
+        // the same shape as insert_amplification_events_batch. `model_id` and
+        // `scored_at` are scalars broadcast to every row, so the statement
+        // binds four parameters at any batch size.
+        //
+        // Deduplicating first is load-bearing, not tidiness: a single
+        // INSERT ... ON CONFLICT DO UPDATE cannot touch the same row twice
+        // ("command cannot affect row a second time"). The old per-row loop
+        // simply let a later duplicate overwrite an earlier one, so collapse
+        // to last-write-wins here and keep that behaviour. Today's callers
+        // (CachedToxicityScorer) already pass distinct hashes; the trait is
+        // public and the next one might not.
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut last: std::collections::HashMap<&str, f64> =
+            std::collections::HashMap::with_capacity(rows.len());
+        for r in rows {
+            last.insert(r.text_sha256.as_str(), r.score);
+        }
+        let (hashes, scores): (Vec<String>, Vec<f64>) = last
+            .into_iter()
+            .map(|(h, score)| (h.to_string(), score))
+            .unzip();
+
+        // Explicit ::text[] / ::float8[] casts so Postgres can type UNNEST's
+        // output columns without inspecting values.
+        sqlx_core::query::query(
+            "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+             SELECT t.text_sha256, $1, t.score, $2
+             FROM UNNEST($3::text[], $4::float8[]) AS t(text_sha256, score)
+             ON CONFLICT (text_sha256, model_id) DO UPDATE SET
+                 score = EXCLUDED.score, scored_at = EXCLUDED.scored_at",
+        )
+        .bind(model_id)
+        .bind(&now)
+        .bind(&hashes)
+        .bind(&scores)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        hashes: &[String],
+    ) -> Result<std::collections::HashMap<String, ClassifierVerdictRow>> {
+        if hashes.is_empty() {
+            return Ok(Default::default());
+        }
+        let rows = sqlx_core::query::query(
+            "SELECT text_sha256, toxic_token, confidence FROM classifier_verdicts
+             WHERE model_id = $1 AND policy_version = $2 AND text_sha256 = ANY($3)",
+        )
+        .bind(model_id)
+        .bind(policy_version)
+        .bind(hashes.to_vec())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let h = r.get::<String, _>(0);
+                (
+                    h.clone(),
+                    ClassifierVerdictRow {
+                        text_sha256: h,
+                        toxic_token: r.get::<bool, _>(1),
+                        confidence: r.get::<f64, _>(2),
+                    },
+                )
+            })
+            .collect())
+    }
+
+    async fn upsert_classifier_verdicts(
+        &self,
+        model_id: &str,
+        policy_version: &str,
+        rows: &[ClassifierVerdictRow],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        // One UNNEST round trip, deduplicated last-write-wins — see
+        // upsert_onnx_scores above for why both of those are required.
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut last: std::collections::HashMap<&str, (bool, f64)> =
+            std::collections::HashMap::with_capacity(rows.len());
+        for r in rows {
+            last.insert(r.text_sha256.as_str(), (r.toxic_token, r.confidence));
+        }
+        let mut hashes: Vec<String> = Vec::with_capacity(last.len());
+        let mut toxic_tokens: Vec<bool> = Vec::with_capacity(last.len());
+        let mut confidences: Vec<f64> = Vec::with_capacity(last.len());
+        for (hash, (toxic, confidence)) in last {
+            hashes.push(hash.to_string());
+            toxic_tokens.push(toxic);
+            confidences.push(confidence);
+        }
+
+        sqlx_core::query::query(
+            "INSERT INTO classifier_verdicts
+                 (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+             SELECT t.text_sha256, $1, $2, t.toxic_token, t.confidence, $3
+             FROM UNNEST($4::text[], $5::bool[], $6::float8[])
+                  AS t(text_sha256, toxic_token, confidence)
+             ON CONFLICT (text_sha256, model_id, policy_version) DO UPDATE SET
+                 toxic_token = EXCLUDED.toxic_token,
+                 confidence = EXCLUDED.confidence,
+                 classified_at = EXCLUDED.classified_at",
+        )
+        .bind(model_id)
+        .bind(policy_version)
+        .bind(&now)
+        .bind(&hashes)
+        .bind(&toxic_tokens)
+        .bind(&confidences)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn evict_stale_cache(
+        &self,
+        feed_cutoff: &str,
+        score_cutoff: &str,
+    ) -> Result<super::cache_retention::CacheEviction> {
+        // One transaction for all three tables so a mid-sweep failure leaves
+        // the cache internally consistent, matching the SQLite backend.
+        //
+        // The `<` comparisons are lexicographic on RFC3339 TEXT, sound only
+        // because every writer uses `DateTime<Utc>::to_rfc3339()` (the ordering
+        // argument lives on the trait doc). The v17 indexes keep this off a
+        // sequential scan.
+        let mut tx = self.pool.begin().await?;
+        let feed_snapshots =
+            sqlx_core::query::query("DELETE FROM account_feed_snapshots WHERE fetched_at < $1")
+                .bind(feed_cutoff)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        let onnx_scores = sqlx_core::query::query("DELETE FROM onnx_scores WHERE scored_at < $1")
+            .bind(score_cutoff)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        let classifier_verdicts =
+            sqlx_core::query::query("DELETE FROM classifier_verdicts WHERE classified_at < $1")
+                .bind(score_cutoff)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        tx.commit().await?;
+        Ok(super::cache_retention::CacheEviction {
+            feed_snapshots,
+            onnx_scores,
+            classifier_verdicts,
+        })
     }
 }
 

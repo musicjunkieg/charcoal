@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- #343 Phase 0 + Phase 1 — measurement hooks and the shared cache. The
+  gather now logs `cpu_cores_busy` once a minute and records the observed
+  Bluesky `RateLimit-Limit` to `scan_state` once per scan, so the first
+  real numbers on inference headroom and the API ceiling come from the DB
+  rather than guesses. `CHARCOAL_ONNX_SESSIONS` (default 1, clamp 1–8)
+  builds a round-robin pool of ONNX sessions for the session experiment.
+  Three new user-independent tables (schema v16) cache what never changes
+  between users: an account's recent feed for 24 h keyed by DID, stage-1
+  ONNX scores keyed by the SHA-256 of the exact text scored, and stage-2
+  verdicts keyed by (text hash, model, policy version). No readable post
+  text is stored in the score tables, and `delete_user_data` leaves the
+  cache alone because none of it belongs to a user. The two-stage scorer
+  also gained a `score_batch` override — stage 1 was doing 25 single
+  forward passes per account. Hit/miss counts land in `scan_state` as
+  `{feed,onnx,classifier}_cache_{hits,misses}`. The cache tables are
+  bounded: every scan starts by evicting feed snapshots older than 7 days
+  and scores/verdicts older than 90 days, so a DID that is never sampled
+  again and a text hash from a retired model or policy generation both age
+  out instead of living forever. Schema v17 adds the timestamp indexes that
+  sweep reads. Eviction is best-effort — it is an optimisation, and a
+  failed sweep warns and lets the scan continue.
+
 ### Fixed
 - Review fixes from the staging→main promotion PR (#345, PR #115). The DPoP
   nonce retry re-signed the *same* proof with the new nonce, so the retry

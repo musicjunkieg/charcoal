@@ -27,6 +27,8 @@ use crate::scoring::language::{assess_language, Assessability};
 // (the gather seam). The phased pipeline needs both views plus the classifier,
 // so amplification takes the concrete scorer and coerces it into the two `&dyn`
 // views — same pattern as the sweep rewire (Task 6.2).
+use crate::observability::cache_stats::{record_cache_stats, CacheStats};
+use crate::pipeline::scan_phases::feed_cache::CachedPostFetcher;
 use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
 use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
 use crate::scoring::nli::NliScorer;
@@ -520,7 +522,9 @@ pub async fn run(
             db.set_scan_state(user_did, "candidates_total", &candidates.len().to_string())
                 .await?;
 
-            let fetcher = AtpPostFetcher { client };
+            let source = AtpPostFetcher { client };
+            let feed_stats = Arc::new(CacheStats::default());
+            let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
             let classifier = scorer.classifier();
 
             let deps = PhasedScanDeps {
@@ -547,6 +551,9 @@ pub async fn run(
             };
 
             let summary = run_phased_scan(db, user_did, &candidates, &deps).await?;
+            if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
+                warn!(error = %e, "could not record feed cache stats");
+            }
             (summary.accounts_scored, summary.degraded)
         }
     };

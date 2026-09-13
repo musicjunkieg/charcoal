@@ -52,6 +52,9 @@ Optional settings (see `.env.example` for details):
 - `CHARCOAL_MODEL_DIR` — custom path for ONNX model files
 - `CHARCOAL_DB_PATH` — custom path for the SQLite database
 - `RUST_LOG` — log level (default: `charcoal=info`)
+- `CHARCOAL_ONNX_SESSIONS` — number of ONNX toxicity sessions to pool
+  (default `1`, clamped to 1–8; each is a separate ~126 MB model load).
+  Only worth raising if the #343 Phase 0 runbook shows a gain.
 
 ### 3. Initialize
 

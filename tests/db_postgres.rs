@@ -973,6 +973,17 @@ fn scan_queue_test_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// Sibling to `scan_queue_test_lock` for the #343 shared-cache tables
+/// (`account_feed_snapshots`, `onnx_scores`, `classifier_verdicts`). The two
+/// migration tests DROP/reconnect against those tables, and the round-trip
+/// test below writes into them; none of that overlaps scan_queue, so this is
+/// a separate lock rather than reusing `scan_queue_test_lock` and serializing
+/// against unrelated work.
+fn cache_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Every DID used by the scan_queue tests, so they can be cleared wholesale.
 const SCAN_QUEUE_DID_PREFIX: &str = "did:plc:pgtest_q_%";
 
@@ -2372,4 +2383,573 @@ async fn test_pg_action_score_snapshots_and_cascade() {
         .is_empty());
 
     delete_actions_rows(&url, CASCADE_DID).await;
+}
+
+/// v16 (#343): fresh connect creates the three cache tables and records 16.
+#[tokio::test]
+async fn test_pg_migration_v16_creates_cache_tables() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    let names: Vec<String> = sqlx_core::query::query(
+        "SELECT table_name::text FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name IN ('account_feed_snapshots','onnx_scores','classifier_verdicts')
+         ORDER BY table_name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| r.get::<String, _>(0))
+    .collect();
+    assert_eq!(
+        names,
+        [
+            "account_feed_snapshots",
+            "classifier_verdicts",
+            "onnx_scores"
+        ]
+    );
+
+    let recorded: bool =
+        sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = 16")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(recorded, "0016 must self-record its version");
+}
+
+/// The three timestamp indexes `evict_stale_cache` sweeps on (#343 / PR #118).
+const PG_CACHE_INDEXES: [&str; 3] = [
+    "idx_account_feed_snapshots_fetched_at",
+    "idx_classifier_verdicts_classified_at",
+    "idx_onnx_scores_scored_at",
+];
+
+/// v17 (#343, PR #118 review): the eviction indexes exist and 17 is recorded.
+#[tokio::test]
+async fn test_pg_migration_v17_creates_cache_indexes() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    let names: Vec<String> = sqlx_core::query::query(
+        "SELECT indexname::text FROM pg_indexes
+         WHERE schemaname = 'public'
+           AND indexname IN ('idx_account_feed_snapshots_fetched_at',
+                             'idx_onnx_scores_scored_at',
+                             'idx_classifier_verdicts_classified_at')
+         ORDER BY indexname",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| r.get::<String, _>(0))
+    .collect();
+    assert_eq!(names, PG_CACHE_INDEXES);
+
+    let recorded: bool =
+        sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = 17")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(recorded, "0017 must self-record its version");
+}
+
+/// Simulate a v16 database (indexes dropped, 17 unrecorded) and prove 0017
+/// re-applies exactly once.
+#[tokio::test]
+async fn test_pg_migration_v17_upgrades_from_v16() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::raw_sql::raw_sql(
+        "DROP INDEX IF EXISTS idx_account_feed_snapshots_fetched_at;
+         DROP INDEX IF EXISTS idx_onnx_scores_scored_at;
+         DROP INDEX IF EXISTS idx_classifier_verdicts_classified_at;
+         DELETE FROM schema_version WHERE version = 17;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let count: i64 = sqlx_core::query::query(
+        "SELECT COUNT(*) FROM pg_indexes
+         WHERE schemaname = 'public'
+           AND indexname IN ('idx_account_feed_snapshots_fetched_at',
+                             'idx_onnx_scores_scored_at',
+                             'idx_classifier_verdicts_classified_at')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(count, 3);
+    let versions: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 17")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(versions, 1);
+}
+
+/// Simulate a v15 database (drop the v16 tables and version row), reconnect,
+/// and prove the migration re-applies exactly once.
+#[tokio::test]
+async fn test_pg_migration_v16_upgrades_from_v15() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    // Two statements in one string: the simple prepared-statement path
+    // (`query()`) rejects multi-command strings, so use raw_sql like the
+    // migration runner itself does (src/db/postgres.rs).
+    // v17 goes too: its indexes live on the v16 tables and vanish with them,
+    // so leaving 17 recorded would skip re-creating them and strand the next
+    // test (and a real v15 database has neither row anyway).
+    sqlx_core::raw_sql::raw_sql(
+        "DROP TABLE IF EXISTS account_feed_snapshots, onnx_scores, classifier_verdicts;
+         DELETE FROM schema_version WHERE version IN (16, 17);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let count: i64 = sqlx_core::query::query(
+        "SELECT COUNT(*) FROM information_schema.tables
+         WHERE table_schema = 'public'
+           AND table_name IN ('account_feed_snapshots','onnx_scores','classifier_verdicts')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(count, 3);
+    let versions: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 16")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(versions, 1);
+}
+
+/// Parity with tests/unit_feed_cache.rs against Postgres.
+#[tokio::test]
+async fn test_pg_shared_cache_round_trips() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use charcoal::db::{ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow};
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let snap = FeedSnapshot {
+        did: "did:plc:pgcache_snap000000000000".into(),
+        handle: "cache.bsky.social".into(),
+        posts_json: "[]".into(),
+        fetched_at: "2026-09-08T00:00:00+00:00".into(),
+        source: "bluesky".into(),
+    };
+    db.upsert_feed_snapshot(&snap).await.unwrap();
+    let newer = FeedSnapshot {
+        handle: "renamed.bsky.social".into(),
+        ..snap.clone()
+    };
+    db.upsert_feed_snapshot(&newer).await.unwrap();
+    assert_eq!(db.get_feed_snapshot(&snap.did).await.unwrap(), Some(newer));
+
+    db.upsert_onnx_scores(
+        "pgtest-model",
+        &[
+            OnnxScoreRow {
+                text_sha256: "pgh1".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "pgh2".into(),
+                score: 0.9,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_onnx_scores(
+        "pgtest-model",
+        &[OnnxScoreRow {
+            text_sha256: "pgh2".into(),
+            score: 0.8,
+        }],
+    )
+    .await
+    .unwrap();
+    let got = db
+        .get_onnx_scores(
+            "pgtest-model",
+            &["pgh1".into(), "pgh2".into(), "nope".into()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 2);
+    assert_eq!(got["pgh2"], 0.8);
+    assert!(db
+        .get_onnx_scores("other-model", &["pgh1".into()])
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(db
+        .get_onnx_scores("pgtest-model", &[])
+        .await
+        .unwrap()
+        .is_empty());
+
+    let v = ClassifierVerdictRow {
+        text_sha256: "pgh1".into(),
+        toxic_token: true,
+        confidence: 0.95,
+    };
+    db.upsert_classifier_verdicts("pgtest-clf", "v1", std::slice::from_ref(&v))
+        .await
+        .unwrap();
+    let got = db
+        .get_classifier_verdicts("pgtest-clf", "v1", &["pgh1".into(), "nope".into()])
+        .await
+        .unwrap();
+    assert_eq!(got.get("pgh1"), Some(&v));
+    assert!(db
+        .get_classifier_verdicts("pgtest-clf", "v2", &["pgh1".into()])
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+/// Retention parity with tests/unit_feed_cache.rs (#343 / PR #118 review):
+/// each cutoff applies to its own tables, and only rows past it go.
+#[tokio::test]
+async fn test_pg_evict_stale_cache() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use charcoal::db::{CacheEviction, ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow};
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    const ANCIENT: &str = "2020-01-01T00:00:00+00:00";
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    // Start from a known-empty cache: the counts below are exact, and this
+    // suite's other cache tests leave rows behind. Safe because every cache
+    // test seeds whatever it asserts on, and they all serialize on this lock.
+    sqlx_core::raw_sql::raw_sql(
+        "TRUNCATE account_feed_snapshots, onnx_scores, classifier_verdicts;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let now = chrono::Utc::now();
+    for (did, fetched_at) in [
+        ("did:plc:pgevict_old", ANCIENT.to_string()),
+        ("did:plc:pgevict_fresh", now.to_rfc3339()),
+    ] {
+        db.upsert_feed_snapshot(&FeedSnapshot {
+            did: did.into(),
+            handle: format!("{did}.bsky.social"),
+            posts_json: "[]".into(),
+            fetched_at,
+            source: "bluesky".into(),
+        })
+        .await
+        .unwrap();
+    }
+    db.upsert_onnx_scores(
+        "evict-m",
+        &[
+            OnnxScoreRow {
+                text_sha256: "old".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "fresh".into(),
+                score: 0.2,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_classifier_verdicts(
+        "evict-m",
+        "v1",
+        &[
+            ClassifierVerdictRow {
+                text_sha256: "old".into(),
+                toxic_token: true,
+                confidence: 0.9,
+            },
+            ClassifierVerdictRow {
+                text_sha256: "fresh".into(),
+                toxic_token: false,
+                confidence: 0.1,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    // The upserts stamp scored_at/classified_at themselves — age the "old"
+    // rows behind their back, the only way to test a backend-set timestamp.
+    for sql in [
+        "UPDATE onnx_scores SET scored_at = $1 WHERE text_sha256 = 'old'",
+        "UPDATE classifier_verdicts SET classified_at = $1 WHERE text_sha256 = 'old'",
+    ] {
+        sqlx_core::query::query(sql)
+            .bind(ANCIENT)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    // A score cutoff that predates even the ancient rows must leave the
+    // scoring tables alone while the feed cutoff still bites.
+    let feed_only = db
+        .evict_stale_cache(
+            &(now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339(),
+            "1999-01-01T00:00:00+00:00",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        feed_only,
+        CacheEviction {
+            feed_snapshots: 1,
+            onnx_scores: 0,
+            classifier_verdicts: 0,
+        }
+    );
+
+    let evicted = db
+        .evict_stale_cache(
+            &(now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339(),
+            &(now - charcoal::db::cache_retention::SCORE_RETENTION).to_rfc3339(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        evicted,
+        CacheEviction {
+            feed_snapshots: 0,
+            onnx_scores: 1,
+            classifier_verdicts: 1,
+        }
+    );
+
+    // Fresh rows survive, stale ones are gone, and a repeat sweep is a no-op.
+    assert!(db
+        .get_feed_snapshot("did:plc:pgevict_old")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(db
+        .get_feed_snapshot("did:plc:pgevict_fresh")
+        .await
+        .unwrap()
+        .is_some());
+    let scores = db
+        .get_onnx_scores("evict-m", &["old".into(), "fresh".into()])
+        .await
+        .unwrap();
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores["fresh"], 0.2);
+    let verdicts = db
+        .get_classifier_verdicts("evict-m", "v1", &["old".into(), "fresh".into()])
+        .await
+        .unwrap();
+    assert_eq!(verdicts.len(), 1);
+    assert!(verdicts.contains_key("fresh"));
+
+    assert_eq!(
+        db.evict_stale_cache(
+            &(now - charcoal::db::cache_retention::FEED_SNAPSHOT_RETENTION).to_rfc3339(),
+            &(now - charcoal::db::cache_retention::SCORE_RETENTION).to_rfc3339(),
+        )
+        .await
+        .unwrap(),
+        CacheEviction::default()
+    );
+}
+
+/// The UNNEST-batched cache upserts (CodeRabbit, PR #118): a multi-row batch
+/// round-trips, a second upsert of the same keys updates in place, and
+/// duplicate keys inside one batch collapse last-write-wins instead of
+/// tripping "ON CONFLICT DO UPDATE command cannot affect row a second time".
+#[tokio::test]
+async fn test_pg_cache_batch_upserts_round_trip_and_update() {
+    let _guard = cache_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    use charcoal::db::{ClassifierVerdictRow, OnnxScoreRow};
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let keys = ["batch1", "batch2", "batch3"];
+    let scores: Vec<OnnxScoreRow> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, h)| OnnxScoreRow {
+            text_sha256: (*h).into(),
+            score: i as f64 / 10.0,
+        })
+        .collect();
+    db.upsert_onnx_scores("batch-model", &scores).await.unwrap();
+    let got = db
+        .get_onnx_scores("batch-model", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    assert_eq!(got["batch1"], 0.0);
+    assert_eq!(got["batch3"], 0.2);
+
+    // Same keys, new values: the ON CONFLICT path runs inside the UNNEST.
+    let bumped: Vec<OnnxScoreRow> = keys
+        .iter()
+        .map(|h| OnnxScoreRow {
+            text_sha256: (*h).into(),
+            score: 0.75,
+        })
+        .collect();
+    db.upsert_onnx_scores("batch-model", &bumped).await.unwrap();
+    let got = db
+        .get_onnx_scores("batch-model", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    assert!(got.values().all(|v| *v == 0.75));
+
+    // Duplicate keys in one batch: the last value wins, no error.
+    db.upsert_onnx_scores(
+        "batch-model",
+        &[
+            OnnxScoreRow {
+                text_sha256: "batch1".into(),
+                score: 0.1,
+            },
+            OnnxScoreRow {
+                text_sha256: "batch1".into(),
+                score: 0.6,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        db.get_onnx_scores("batch-model", &["batch1".to_string()])
+            .await
+            .unwrap()["batch1"],
+        0.6
+    );
+
+    let verdicts: Vec<ClassifierVerdictRow> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, h)| ClassifierVerdictRow {
+            text_sha256: (*h).into(),
+            toxic_token: i % 2 == 0,
+            confidence: 0.5,
+        })
+        .collect();
+    db.upsert_classifier_verdicts("batch-clf", "v1", &verdicts)
+        .await
+        .unwrap();
+    let got = db
+        .get_classifier_verdicts("batch-clf", "v1", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    assert_eq!(got["batch1"], verdicts[0]);
+    assert_eq!(got["batch2"], verdicts[1]);
+
+    // Flip every verdict through the conflict path.
+    let flipped: Vec<ClassifierVerdictRow> = verdicts
+        .iter()
+        .map(|v| ClassifierVerdictRow {
+            toxic_token: !v.toxic_token,
+            confidence: 0.99,
+            ..v.clone()
+        })
+        .collect();
+    db.upsert_classifier_verdicts("batch-clf", "v1", &flipped)
+        .await
+        .unwrap();
+    let got = db
+        .get_classifier_verdicts("batch-clf", "v1", &keys.map(String::from))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 3);
+    for v in &flipped {
+        assert_eq!(got[&v.text_sha256], *v);
+    }
+
+    // Duplicate keys in one verdict batch.
+    db.upsert_classifier_verdicts(
+        "batch-clf",
+        "v1",
+        &[
+            ClassifierVerdictRow {
+                text_sha256: "batch1".into(),
+                toxic_token: true,
+                confidence: 0.1,
+            },
+            ClassifierVerdictRow {
+                text_sha256: "batch1".into(),
+                toxic_token: false,
+                confidence: 0.2,
+            },
+        ],
+    )
+    .await
+    .unwrap();
+    let got = db
+        .get_classifier_verdicts("batch-clf", "v1", &["batch1".to_string()])
+        .await
+        .unwrap();
+    assert!(!got["batch1"].toxic_token);
+    assert_eq!(got["batch1"].confidence, 0.2);
 }

@@ -646,6 +646,29 @@ async fn finish_scan(
     result.map(|_| ())
 }
 
+/// Phase 0 (#343): one number per scan, read from scan_state, not logs.
+/// Best-effort — a failure to record a diagnostic must not fail the scan.
+async fn record_observed_rate_limit(db: &dyn Database, user_did: &str, observed: Option<u64>) {
+    if let Some(limit) = observed {
+        if let Err(e) = db
+            .set_scan_state(user_did, "bluesky_ratelimit_limit", &limit.to_string())
+            .await
+        {
+            tracing::warn!(error = %e, "could not record bluesky_ratelimit_limit");
+        }
+    } else {
+        // No RateLimit-Limit header was ever observed this scan — either every
+        // request omitted it or every value failed to parse. Either way the
+        // Phase 0 pass number depends on this measurement, so its absence from
+        // scan_state must be diagnosable rather than silent. One line per scan,
+        // not per request.
+        tracing::warn!(
+            user_did,
+            "no RateLimit-Limit header observed during this scan; bluesky_ratelimit_limit will be missing from scan_state"
+        );
+    }
+}
+
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
@@ -665,14 +688,36 @@ async fn run_scan(
     )
     .await;
 
-    let primary_scorer: Box<dyn ToxicityScorer> = Box::new(Arc::clone(&models.toxicity));
+    // #343 Phase 1 (CodeRabbit, PR #118): nothing else deletes from the shared
+    // cache tables — no user_did means delete_user_data skips them — so bound
+    // them here, once per scan. Best-effort by construction: a cache is an
+    // optimisation, and a failed sweep must never abort a scan.
+    crate::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
+
+    // #343 Phase 1: stage-1 / clean-pass ONNX scores are cached by text hash
+    // across users. Hit/miss counts are persisted at the end of the scan.
+    let onnx_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());
+    let primary_scorer: Box<dyn ToxicityScorer> =
+        Box::new(crate::toxicity::cached::CachedToxicityScorer::new(
+            Box::new(Arc::clone(&models.toxicity)),
+            Arc::clone(&db),
+            crate::toxicity::onnx::ONNX_MODEL_ID,
+            Arc::clone(&onnx_cache_stats),
+        ));
 
     // Wrap in the two-stage scorer. ONNX runs as a clean-pass filter
     // (< 0.10 = cleared); posts at or above the threshold are sent to the
     // configured Stage-2 classifier (CHARCOAL_CLASSIFIER) for a binary verdict.
     // The classifier is required — build_from_env errors (and the scan fails
     // loudly) if unconfigured; there is no silent ONNX-only fallback.
-    let classifier = crate::toxicity::classifier::build_from_env()?;
+    // #343 Phase 1: stage-2 verdicts are cached by (text hash, model, policy).
+    let classifier_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());
+    let classifier: Arc<dyn crate::toxicity::classifier::ToxicityClassifier> =
+        Arc::new(crate::toxicity::cached_classifier::CachedClassifier::new(
+            crate::toxicity::classifier::build_from_env()?,
+            Arc::clone(&db),
+            Arc::clone(&classifier_cache_stats),
+        ));
     info!(
         backend = classifier.name(),
         "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
@@ -1058,6 +1103,30 @@ async fn run_scan(
         &graph_distances,
     )
     .await;
+
+    record_observed_rate_limit(db.as_ref(), user_did, client.observed_rate_limit()).await;
+
+    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
+        db.as_ref(),
+        user_did,
+        "onnx",
+        &onnx_cache_stats,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, "could not record onnx cache stats");
+    }
+
+    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
+        db.as_ref(),
+        user_did,
+        "classifier",
+        &classifier_cache_stats,
+    )
+    .await
+    {
+        tracing::warn!(error = %e, "could not record classifier cache stats");
+    }
 
     finish_scan(&scan_manager, user_did, claim_id, result).await
 }
@@ -1623,5 +1692,121 @@ mod fingerprint_staleness_tests {
         assert!(fingerprint_needs_rebuild_for_format(true, 2, 3));
         // Healthy clustered generation: no rebuild.
         assert!(!fingerprint_needs_rebuild_for_format(true, 3, 3));
+    }
+}
+
+/// `record_observed_rate_limit`'s two branches — the `Some` persistence path
+/// and the `None` warn-only path — were split out of `run_scan` (review
+/// finding, PR round 2) specifically so both are unit-testable without
+/// running a whole scan.
+#[cfg(test)]
+mod rate_limit_persistence_tests {
+    use super::*;
+
+    use std::sync::{Mutex, PoisonError};
+
+    use crate::db::schema::create_tables;
+    use crate::db::sqlite::SqliteDatabase;
+
+    const DID: &str = "did:plc:ratelimit";
+
+    fn test_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+        create_tables(&conn).expect("schema");
+        Arc::new(SqliteDatabase::new(conn))
+    }
+
+    /// Collects every event's rendered field set, keyed by field name. Mirrors
+    /// the `DbWriteSpans` layer in `tests/unit_actions_runner.rs` — same
+    /// callsite-interest-caching quirk applies (see the comment on
+    /// `try_init()` below), so the pattern is copied rather than reinvented.
+    #[derive(Clone, Default)]
+    struct CapturedEvents(Arc<Mutex<Vec<String>>>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CapturedEvents {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if *event.metadata().level() != tracing::Level::WARN {
+                return;
+            }
+            struct MessageOnly(Option<String>);
+            impl tracing::field::Visit for MessageOnly {
+                fn record_debug(&mut self, f: &tracing::field::Field, v: &dyn std::fmt::Debug) {
+                    if f.name() == "message" {
+                        self.0 = Some(format!("{v:?}"));
+                    }
+                }
+            }
+            let mut msg = MessageOnly(None);
+            event.record(&mut msg);
+            if let Some(m) = msg.0 {
+                self.0
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(m);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn observed_rate_limit_is_persisted_to_scan_state() {
+        let db = test_db();
+
+        record_observed_rate_limit(db.as_ref(), DID, Some(3000)).await;
+
+        assert_eq!(
+            db.get_scan_state(DID, "bluesky_ratelimit_limit")
+                .await
+                .expect("scan_state read"),
+            Some("3000".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_rate_limit_warns_once_and_writes_nothing() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        let db = test_db();
+
+        // tracing caches each callsite's interest the first time ANY thread
+        // hits it, against whichever subscriber is the *global* default at
+        // that moment. Without this, a parallel test run can cache this
+        // warn!() site as never-interested before this test's scoped
+        // subscriber is installed, and the event never reaches our layer.
+        // A bare global Registry pins the cache to "always"; it drops events
+        // itself and the scoped layer below still sees only this thread's
+        // events, since `set_default` only affects the current thread and
+        // `#[tokio::test]` is a current-thread runtime.
+        let _ = tracing_subscriber::registry().try_init();
+        let captured = CapturedEvents::default();
+        let subscriber = tracing_subscriber::registry().with(captured.clone());
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        record_observed_rate_limit(db.as_ref(), DID, None).await;
+
+        drop(_guard);
+
+        let seen = captured
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        assert_eq!(seen.len(), 1, "expected exactly one warn event: {seen:?}");
+        assert!(
+            seen[0].contains("no RateLimit-Limit header observed"),
+            "unexpected warn message: {seen:?}"
+        );
+
+        assert_eq!(
+            db.get_scan_state(DID, "bluesky_ratelimit_limit")
+                .await
+                .expect("scan_state read"),
+            None,
+            "the None branch must not write a scan_state row"
+        );
     }
 }

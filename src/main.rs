@@ -279,6 +279,10 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             config.require_bluesky()?;
             let db = open_database(&config).await?;
+            // #343 / PR #118: the CLI never goes through `web::scan_job`, but
+            // it does write feed snapshots (`CachedPostFetcher` in
+            // pipeline::amplification), so it needs its own retention sweep.
+            charcoal::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
 
             println!("Scanning for amplification events...");
 
@@ -390,6 +394,9 @@ async fn main() -> Result<()> {
             config.require_bluesky()?;
             config.require_scorer()?;
             let db = open_database(&config).await?;
+            // Same as `scan` above: sweep writes feed snapshots too (#343 /
+            // PR #118), and never touches web::scan_job.
+            charcoal::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
 
             let client = charcoal::bluesky::client::PublicAtpClient::new(&config.public_api_url)?;
             let did = resolve_and_register_user(&client, &config, db.as_ref()).await?;

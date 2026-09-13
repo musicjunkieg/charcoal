@@ -6,6 +6,7 @@
 // The database file lives wherever CHARCOAL_DB_PATH points (defaults to
 // ./charcoal.db) for SQLite. PostgreSQL uses DATABASE_URL.
 
+pub mod cache_retention;
 pub mod models;
 #[cfg(feature = "postgres")]
 pub mod postgres;
@@ -17,7 +18,8 @@ pub mod schema;
 pub mod sqlite;
 pub mod traits;
 
-pub use traits::Database;
+pub use cache_retention::CacheEviction;
+pub use traits::{ClassifierVerdictRow, Database, FeedSnapshot, OnnxScoreRow};
 
 use anyhow::Result;
 use std::sync::Arc;

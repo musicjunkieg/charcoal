@@ -237,3 +237,43 @@ async fn embedder_also_survives_overlong_input() {
         result.err()
     );
 }
+
+/// Two sessions must score exactly like one — the pool changes throughput,
+/// never results. Model-gated; prints the `SKIP:` sentinel when absent.
+#[tokio::test]
+async fn session_pool_scores_identically_to_single_session() {
+    let Some(dir) = model_dir_or_skip("session pool equality") else {
+        eprintln!("SKIP: session pool equality — toxicity model not present");
+        return;
+    };
+    let one = charcoal::toxicity::onnx::OnnxToxicityScorer::load_with_sessions(&dir, 1)
+        .expect("single session loads");
+    let two = charcoal::toxicity::onnx::OnnxToxicityScorer::load_with_sessions(&dir, 2)
+        .expect("two sessions load");
+
+    let texts: Vec<String> = vec![
+        "what a lovely morning for a walk".into(),
+        "you are a worthless idiot and everyone knows it".into(),
+        "the meeting moved to thursday".into(),
+        "shut up nobody asked you".into(),
+    ];
+    let a = one.score_batch(&texts).await.unwrap();
+    // Call twice so both sessions in the pool are exercised.
+    let b1 = two.score_batch(&texts).await.unwrap();
+    let b2 = two.score_batch(&texts).await.unwrap();
+
+    for ((x, y), z) in a.iter().zip(&b1).zip(&b2) {
+        assert!(
+            (x.toxicity - y.toxicity).abs() < 1e-6,
+            "{} vs {}",
+            x.toxicity,
+            y.toxicity
+        );
+        assert!(
+            (x.toxicity - z.toxicity).abs() < 1e-6,
+            "{} vs {}",
+            x.toxicity,
+            z.toxicity
+        );
+    }
+}
