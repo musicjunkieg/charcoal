@@ -222,23 +222,37 @@ except Exception:
 # ── 3. Export chainlink issues ───────────────────────────────────────
 echo "📦 Pre-commit: exporting chainlink issues..."
 if (cd "$REPO_ROOT" && chainlink export --format json -o .chainlink/issues-export.json 2>/dev/null); then
-    # The export is a regenerated artifact, and .gitignore lists it. Staging it
-    # anyway kept it tracked, which made every branch integration conflict on
-    # churned JSON (#181). --no-index asks "do the ignore rules cover this?"
-    # rather than "is it tracked?", so the answer stays correct even if the file
-    # ever gets re-added to the index by accident.
+    # The export is a regenerated artifact and .gitignore lists it. It is
+    # deliberately NOT committed (ADR 0005): the authoritative issue records
+    # are .chainlink/issues.db, which step 5 below backs up to R2 on every
+    # commit. Committing the export made every branch integration conflict
+    # on churned JSON, and the record-level merge driver that used to paper
+    # over that was one more moving part downstream projects had to carry.
     #
-    # The export runs from $REPO_ROOT (kept from the template hardening on
-    # main): a relative .chainlink path otherwise resolves against the caller's
-    # cwd, which is how stray shadow .chainlink/ directories appear in
-    # subdirectories. No _would_clobber guard here, unlike the graph-data.json
-    # branch below — that guard protects a COMMITTED file from being overwritten
-    # by an empty export, and this file is deliberately not committed (#181).
-    if git check-ignore -q --no-index .chainlink/issues-export.json; then
+    # `git check-ignore --no-index` asks "do the ignore rules cover this?"
+    # rather than "is it tracked?", so the answer stays correct even if the
+    # file is re-added to the index by accident. No _would_clobber guard
+    # here, unlike the graph-data.json branch below — that guard protects a
+    # COMMITTED file from being overwritten by an empty export, and this
+    # file is not committed.
+    if (cd "$REPO_ROOT" && git check-ignore -q --no-index .chainlink/issues-export.json); then
+        # A project generated before ADR 0005 still has the export in its
+        # index; the ignore rule alone does not untrack it, so it would sit
+        # there with stale content forever. Say so once per commit rather
+        # than silently editing the index — the fix is a one-line command.
+        if (cd "$REPO_ROOT" && git ls-files --error-unmatch .chainlink/issues-export.json >/dev/null 2>&1); then
+            echo "⚠️  .chainlink/issues-export.json is gitignored but still tracked — untrack it once with:"
+            echo "      git rm --cached .chainlink/issues-export.json"
+        fi
         echo "✅ Chainlink issues exported (gitignored — not staged)"
     else
-        git add .chainlink/issues-export.json
-        echo "✅ Chainlink issues exported"
+        # The template-managed .gitignore always carries this rule, so
+        # reaching here means the project's ignore rules were edited or
+        # the file was renamed. Never stage regardless — staging is the
+        # behaviour ADR 0005 removed — and say why. Non-blocking, like
+        # every other step in this hook.
+        echo "⚠️  .chainlink/issues-export.json is NOT gitignored — not staging it (ADR 0005)."
+        echo "      Restore the '.chainlink/issues-export.json' line in .gitignore."
     fi
 else
     echo "⚠️  Chainlink export failed (non-blocking)"
