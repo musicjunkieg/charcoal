@@ -333,6 +333,44 @@ in the freshness read silently re-scores everything via
   `(user_did, threat_score)`, measured (runbook).
 - "Full fortnightly" is **not** in Phase 2 — it is #342's remaining scope.
 
+*Amended 2026-09-14 (plan rev 3, after Astra's second review V2-01–V2-07;
+deciduous 880):*
+
+- **The stored stamp is a composite revision**, not the bare generation:
+  `scoring_revision()` = `SCORING_GENERATION | ONNX model | embedding model |
+  NLI model`. Swapping any in-binary model expires every stored score by
+  itself; `SCORING_GENERATION` is bumped by hand for formula/format/policy
+  changes **and for CoPE-B/Zentropi classifier model or policy changes**
+  (the classifier's identity lives outside the binary). Caches keep their
+  own model-id keys and survive a revision change.
+- Staged verdict rows are reused only when **both** their classifier model
+  id and policy version match the running classifier.
+- The full scan's fingerprint rebuild decision checks the stored embedding
+  model id (same dimensions are not compatibility); a rebuild forced by an
+  incompatible model has **no fallback** — the scan aborts before scoring.
+- Scheduling writes the refresh queue row **conditionally** (`ON CONFLICT …
+  WHERE status IN ('done','failed')`) and advances a user only when that
+  write happened, so a full scan enqueued or admitted between the tick's
+  select and its write always wins. Two columns separate "this revision
+  still needs a first attempt" (`refresh_attempted_generation`, set by the
+  tick) from "this revision is proven" (`refreshed_generation`, set only by
+  complete work); a failed attempt waits for its hourly retry deadline
+  instead of being re-selected on the next tick.
+- **Completion is explicit.** `Ok` from the pipeline is classified into
+  complete / complete-with-skips / resumable; only complete work writes
+  the cooldown marker, schedules the nightly and proves the revision. Skips
+  and interruptions keep their successful writes, retry in an hour and read
+  as degraded. A full scan that only partially drains a refresh's leftovers
+  is resumable, not complete.
+- Migration carries SQLite's NULL/malformed expiries into Postgres as
+  `valid_until = scored_at` (expired when scored, never renewed, never
+  dropped); Postgres microseconds survive export/import, SQLite's whole-
+  second column form is a documented one-way truncation. Old-schema test
+  fixtures are built by running the migrations up to that version.
+- The refresh's context loads sit behind an injectable boundary so the
+  "missing context fails the run without writing" rule has a deterministic
+  test, not a runbook step.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust

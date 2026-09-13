@@ -1,12 +1,12 @@
-# #343 Phase 2 — Score Expiry and Nightly Refresh Implementation Plan (rev 2)
+# #343 Phase 2 — Score Expiry and Nightly Refresh Implementation Plan (rev 3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Revision 2 (2026-09-14)** resolves Astra's plan review (REQUEST CHANGES on `c91afb8`, findings R01–R13). The review-resolution table is at the end. Every task below is the revised contract; the first draft's snippets it contradicted are gone, not annotated.
+> **Revision 2 (2026-09-14)** resolved Astra's first plan review (REQUEST CHANGES on `c91afb8`, R01–R13). **Revision 3 (2026-09-14)** resolves the second review (REQUEST CHANGES on `30cd7f4`, V2-01–V2-07). Both resolution tables are at the end. Every task below is the current contract; superseded snippets are replaced, not annotated.
 
 **Goal:** Every stored score carries a generation stamp and an expiry; tier lists show only current, unexpired rows; and a nightly refresh job, driven from the existing admitter tick, re-scores the High/Elevated set before it expires — closing #344 and giving #342 the scheduler seam it needs — without losing scores in migration, without stranding its own interrupted work, and without stamping stale inputs as current.
 
-**Architecture:** Migration v18 adds `scoring_generation` + `valid_until` to `account_scores`, `kind` + `full_requested_at` to `scan_queue`, `next_refresh_at` + `refreshed_generation` to `users`, `embedding_model_id` to `topic_fingerprint`, and backfills the full-scan cooldown marker. The write path stamps scores from a build-time `SCORING_GENERATION` and `ScoringConfidence::staleness_days()`. One null-safe **fresh** predicate serves every tier read, count and pipeline gate; a separate **lossless** export/import serves `charcoal migrate`. The refresh is a second queue kind that reuses the admitter, lease/fencing and `run_phased_scan`; its candidates come from `account_scores`. Resumable staging records which run kind and generation owns it, so a refresh resumes its own work, a full scan drains a refresh's leftovers before gathering, and old-generation staging is discarded. Scheduling is one transaction per tick (claim + enqueue together, bounded), and a generation bump makes users due through a durable `refreshed_generation` column, not a one-off migration.
+**Architecture:** Migration v18 adds `scoring_generation` + `valid_until` to `account_scores`, `kind` + `full_requested_at` to `scan_queue`, `next_refresh_at` + `refreshed_generation` to `users`, `embedding_model_id` to `topic_fingerprint`, and backfills the full-scan cooldown marker. The write path stamps scores from a build-time `scoring_revision()` and `ScoringConfidence::staleness_days()`. One null-safe **fresh** predicate serves every tier read, count and pipeline gate; a separate **lossless** export/import serves `charcoal migrate`. The refresh is a second queue kind that reuses the admitter, lease/fencing and `run_phased_scan`; its candidates come from `account_scores`. Resumable staging records which run kind and generation owns it, so a refresh resumes its own work, a full scan drains a refresh's leftovers before gathering, and old-generation staging is discarded. Scheduling is one transaction per tick (claim + enqueue together, bounded), and a generation bump makes users due through a durable `refreshed_generation` column, not a one-off migration.
 
 **Tech Stack:** Rust 2021, tokio, async-trait, rusqlite 0.38 (SQLite) + sqlx-core/sqlx-postgres (Postgres), chrono, serde_json, tracing; SvelteKit 5 + vitest for the frontend change.
 
@@ -37,12 +37,14 @@
 - **Freshness reads are hard errors** (spec §4.4): the pipeline's `.unwrap_or_default()` calls become `?`.
 - **Nothing is deleted.** Expired and legacy rows stay; they are hidden and counted as `expired`. Re-entry is by re-engagement (full scan) or by the refresh job (High/Elevated only — decision 777).
 - **Staging ownership (R02/R03).** `scan_state` carries `scan_run_kind` (`full`|`refresh`) and `scan_run_generation` next to `scan_phase`. A resumable marker (`burst`/`finalize`) is resumed by its own kind, drained by a full scan before it gathers, and discarded (staging cleared) when its generation is not current.
-- **Input compatibility (R03).** A current-generation score may be published only from: a fingerprint whose `embedding_model_id` equals `EMBEDDING_MODEL_ID` (or a keyword-only fingerprint with no embedding), an `AccountInput` blob whose `scoring_generation` is current, and verdict rows whose `policy_version` equals the running classifier's. Full scans rebuild an incompatible fingerprint; refreshes request a full scan instead (they never rebuild).
-- **Generation bump procedure.** `SCORING_GENERATION` changes only for formula/weights, fingerprint format, or scoring-policy changes. Model changes are tracked by their own identities (`ONNX_MODEL_ID`, `EMBEDDING_MODEL_ID`, classifier `model_id`+`policy_version`) which key the caches and the compatibility checks above; a bump therefore does **not** invalidate the ONNX/classifier caches, and a model change does not require a bump to be safe. Rolling deploys: a generation bump is shipped as a single-replica deploy (Railway's default); during the seconds of overlap the old binary can still stamp its in-flight scan's rows with the old generation, which the new binary hides and the refresh re-scores — acceptable, documented in the runbook.
+- **The stored stamp is the scoring revision (R03, V2-01).** `scoring_revision()` = `SCORING_GENERATION | ONNX_MODEL_ID | EMBEDDING_MODEL_ID | NLI_MODEL_ID`, composed once at first use (`LazyLock`). It is what `account_scores.scoring_generation`, `AccountInput.scoring_generation`, `scan_state.scan_run_generation` and `users.refresh*_generation` hold, and what every freshness read compares against. Swapping any in-binary model therefore expires every stored score automatically; the human `SCORING_GENERATION` component is bumped for formula/format/policy changes **and for a classifier model or policy change** (the classifier lives outside the binary — CoPE-B/Zentropi — so its identity cannot be composed in; the runbook's bump procedure covers it). The ONNX/embedding/classifier caches are keyed by their own model identities and are **not** invalidated by a revision change — compatible inputs stay reusable.
+- **Input compatibility (R03, V2-01, V2-04).** A current-revision score may be published only from: a fingerprint whose `embedding_model_id` equals `EMBEDDING_MODEL_ID` (or a keyword-only fingerprint with no embedding), an `AccountInput` blob whose `scoring_generation` equals the current revision, and verdict rows whose `model_id` **and** `policy_version` equal the running classifier's. Full scans rebuild an incompatible fingerprint and **abort without scoring** if that rebuild fails (a stale-but-compatible fingerprint may still fall back, as today); refreshes request a full scan instead and never rebuild.
+- **Revision change procedure.** In-binary model swaps change the revision by themselves. `SCORING_GENERATION` is bumped by hand for formula/weights, fingerprint format, scoring policy, and classifier model/policy changes; the runbook (§7) makes the classifier case a deploy checklist item. Rolling deploys: a revision change ships as a single-replica deploy (Railway's default); during the seconds of overlap the old binary can still stamp its in-flight scan's rows with the old revision, which the new binary hides and the refresh re-scores — acceptable, documented in the runbook. Staged work from the old binary is discarded by the `scan_run_generation` check.
 - **Queue order stays FIFO across kinds** (#271). A full enqueue over a queued refresh upgrades the row **in place, keeping `enqueued_at`** (R09). A full request during a *running* refresh is recorded durably in `scan_queue.full_requested_at` and becomes a queued full row when the refresh finishes.
-- **Durable scheduling (R04).** Schedule advancement and queue-row creation happen in one transaction per backend, bounded to `REFRESH_BATCH_PER_TICK` users per tick. A failed transaction advances nothing and is retried on the next tick.
-- **Errors are not absence (R05).** Helpers that load context return `Result`; a refresh that cannot obtain required context fails the run (row `failed`, retry in `REFRESH_RETRY_HOURS`) and writes no score. The existing High/Elevated row keeps its own expiry — a failed refresh never extends validity.
-- **SQLite/Postgres divergence, deliberate:** Postgres `valid_until` is `NOT NULL` after backfill; SQLite stays nullable and NULL reads as expired.
+- **Durable scheduling (R04, V2-02, V2-03).** One transaction per tick, bounded to `REFRESH_BATCH_PER_TICK` users: select due users, then for each **conditionally** write the queue row (`INSERT … ON CONFLICT DO UPDATE … WHERE status IN ('done','failed')`) and advance `next_refresh_at` + set `refresh_attempted_generation` **only if that write affected a row**. The condition is evaluated at the write, so a full scan enqueued or admitted between the select and the write survives untouched (its user is simply not advanced and is reconsidered next tick). Lock order: the tick locks `users` rows then writes `scan_queue`; manual enqueue and finish lock only `scan_queue`; completion bookkeeping writes only `users` — no cycle. Due-ness separates *needs work* from *may attempt*: a user is due when `next_refresh_at <= now` **or** `refresh_attempted_generation ≠ current revision` (a genuinely new revision is attempted promptly, once); a retry after a failed/deferred/resumable attempt only becomes due by time. A failed transaction advances nothing and is retried next tick.
+- **Errors are not absence (R05).** Helpers that load context return `Result`; a refresh that cannot obtain required context fails the run (row `failed`, retry in `REFRESH_RETRY_HOURS`) and writes no score. The existing High/Elevated row keeps its own expiry — a failed refresh never extends validity. The failure path is a **mandatory deterministic test** through the `RefreshContextSource` boundary (Task 9), not a runbook step.
+- **Completion is explicit (V2-05).** `Ok(..)` from the pipeline is never "complete". Full scans classify into `ScanCompletion::{Complete, CompleteWithSkips{n}, Resumable}` and refreshes into `RefreshOutcome::{Completed, CompletedWithSkips{n}, NothingDue, Deferred(..), Resumable}`; only `Complete`/`Completed`/`NothingDue` earn success bookkeeping (cooldown marker for full scans, nightly schedule + `refreshed_generation` for both). `CompleteWithSkips`/`CompletedWithSkips` keep every successful write, show as degraded in the status, and schedule a retry; `Resumable` writes no cooldown marker (so the user can re-run at once to resume — the existing #208 contract) and schedules a retry. A full scan that only partially drains a refresh's leftovers is `Resumable`, not complete.
+- **SQLite/Postgres divergence, deliberate:** Postgres `valid_until` is `NOT NULL` after backfill; SQLite stays nullable and NULL/malformed read as expired. **Cross-backend expiry conversion (V2-06):** export carries `ExportedExpiry::{At(rfc3339), Missing, Invalid(raw)}`; importing `Missing`/`Invalid` into Postgres writes `valid_until = scored_at` (expired the instant it was scored — never renewed, never omitted; the raw text is logged, not stored). **Precision:** Postgres keeps microseconds through export/import; SQLite stores whole seconds (its `datetime()` column form), so a Postgres → SQLite import truncates to the second — documented and tested, not "byte-for-byte".
 - **Pass numbers (spec §6 Phase 2, as amended by Task 10):** after deploy every pre-existing row is hidden and `tier_counts.expired` = row count; the first tick enqueues a refresh for every user with scores (via `refreshed_generation`, not migration); the refresh re-scores exactly the High/Elevated set; no `legacy` row ≥ Elevated remains after one refresh per user; the feed-cache **functional** test passes (warm eligible candidate → hit, cold → miss, zero-candidate run → not applicable). The former ≥ 80 % hit-rate gate is withdrawn (R08, deciduous 878).
 - **Privacy:** never log tokens, DPoP proofs, request bodies, `CHARCOAL_TOKEN_KEY`, `SOOT_TOKEN`; never log post text; strip credentials from any `DATABASE_URL` printed.
 - **Clippy clean** on all three feature sets. Comments explain **why**; `?` for errors; `anyhow::Result` at application level.
@@ -66,7 +68,7 @@ Tasks 1–3 first, then 5 → 6, then 7 and 8 (independent), then 9, then 4 any 
 
 | Path | Responsibility |
 |---|---|
-| `src/scoring/generation.rs` (new) | Task 1: `SCORING_GENERATION`, `LEGACY_GENERATION`, bump rule. |
+| `src/scoring/generation.rs` (new) | Task 1: `scoring_revision()`, `LEGACY_GENERATION`, bump rule. |
 | `src/topics/embeddings.rs` | Task 1: `EMBEDDING_MODEL_ID`. |
 | `src/db/models.rs` | Task 1: `ScoringConfidence::from_label`/`staleness_days_for_label`; Task 7: `ThreatTier::ELEVATED_MIN`; Task 3: `StoredScore`. |
 | `src/db/schema.rs`, `migrations/postgres/0018_score_expiry.sql` (new), `src/db/postgres.rs` | Task 2: migration v18 + backfills; version-list assertions → 18. |
@@ -84,19 +86,19 @@ Tasks 1–3 first, then 5 → 6, then 7 and 8 (independent), then 9, then 4 any 
 
 ---
 
-### Task 1: Generation constant, model identities, and the confidence → staleness mapping
+### Task 1: Scoring revision, model identities, and the confidence → staleness mapping
 
-**Why:** Spec §4.4's build-time generation, plus the two identities R03 needs: an `EMBEDDING_MODEL_ID` so a stored fingerprint can say which model produced its vectors (384 dimensions is not an identity — a different model with the same width is incompatible), and a `scoring_generation` on the staged `AccountInput` so a resumed finalize cannot publish a current stamp from an old run's inputs.
+**Why:** Spec §4.4's build-time generation, made safe against forgotten bumps (V2-01): the stamp actually stored is `scoring_revision()`, the generation composed with every in-binary model identity, so a model swap expires stored scores by itself. Plus the identities R03 needs: `EMBEDDING_MODEL_ID` so a stored fingerprint can say which model produced its vectors (384 dimensions is not an identity), `NLI_MODEL_ID` for the same reason, and a `scoring_generation` (holding the revision) on the staged `AccountInput` so a resumed finalize cannot publish a current stamp from an old run's inputs.
 
 **Files:**
 - Create: `src/scoring/generation.rs`; Modify: `src/scoring/mod.rs`
-- Modify: `src/topics/embeddings.rs:24` (next to `EMBEDDING_DIM`)
+- Modify: `src/topics/embeddings.rs:24` (next to `EMBEDDING_DIM`); `src/scoring/nli.rs:71` (`NLI_MODEL_ID`)
 - Modify: `src/db/models.rs` (`impl ScoringConfidence`)
 - Modify: `src/pipeline/scan_phases/staging.rs:22` (`ACCOUNT_INPUT_SCHEMA_VERSION` → 3) and `:131-160` (`AccountInput.scoring_generation`); `src/pipeline/scan_phases/gather.rs:511-523` (stamp it); `src/pipeline/scan_phases/finalize.rs:98-108` (reject mismatch)
 - Test: `tests/unit_scoring.rs` (append); `tests/unit_scan_phases.rs` (append)
 
 **Interfaces:**
-- Produces: `charcoal::scoring::generation::{SCORING_GENERATION, LEGACY_GENERATION}`; `charcoal::topics::embeddings::EMBEDDING_MODEL_ID: &str = "all-MiniLM-L6-v2"`; `ScoringConfidence::from_label(&str) -> Option<Self>`; `ScoringConfidence::staleness_days_for_label(Option<&str>) -> i64`; `AccountInput.scoring_generation: String` (blob schema v3).
+- Produces: `charcoal::scoring::generation::{SCORING_GENERATION, LEGACY_GENERATION, compose_revision, scoring_revision}` — `scoring_revision() -> &'static str` is the stored stamp used by every task; `charcoal::topics::embeddings::EMBEDDING_MODEL_ID: &str = "all-MiniLM-L6-v2"`; `charcoal::scoring::nli::NLI_MODEL_ID: &str = "nli-deberta-v3-xsmall-fp32"`; `ScoringConfidence::from_label(&str) -> Option<Self>`; `ScoringConfidence::staleness_days_for_label(Option<&str>) -> i64`; `AccountInput.scoring_generation: String` (blob schema v3, holds the revision).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -112,6 +114,26 @@ fn scoring_generation_is_a_real_stamp_not_legacy() {
     assert_ne!(SCORING_GENERATION, LEGACY_GENERATION);
     assert_eq!(LEGACY_GENERATION, "legacy", "migration v18 backfills this literal");
     assert!(!SCORING_GENERATION.contains(char::is_whitespace));
+}
+
+/// V2-01: the STORED stamp is the composite revision — the human generation
+/// plus every in-binary model identity — so a model swap invalidates stored
+/// scores automatically, without anyone remembering to bump.
+#[test]
+fn scoring_revision_changes_when_any_component_changes() {
+    use charcoal::scoring::generation::{compose_revision, scoring_revision, SCORING_GENERATION};
+    use charcoal::scoring::nli::NLI_MODEL_ID;
+    use charcoal::topics::embeddings::EMBEDDING_MODEL_ID;
+    use charcoal::toxicity::onnx::ONNX_MODEL_ID;
+    let base = compose_revision(SCORING_GENERATION, ONNX_MODEL_ID, EMBEDDING_MODEL_ID, NLI_MODEL_ID);
+    assert_eq!(scoring_revision(), base);
+    assert_ne!(compose_revision("other-gen", ONNX_MODEL_ID, EMBEDDING_MODEL_ID, NLI_MODEL_ID), base);
+    assert_ne!(compose_revision(SCORING_GENERATION, "other-onnx", EMBEDDING_MODEL_ID, NLI_MODEL_ID), base);
+    assert_ne!(compose_revision(SCORING_GENERATION, ONNX_MODEL_ID, "other-emb", NLI_MODEL_ID), base);
+    assert_ne!(compose_revision(SCORING_GENERATION, ONNX_MODEL_ID, EMBEDDING_MODEL_ID, "other-nli"), base);
+    assert_ne!(scoring_revision(), "legacy");
+    assert!(!scoring_revision().contains(char::is_whitespace), "bound into SQL equality and shown in the UI");
+    assert_eq!(base.matches('|').count(), 3, "delimited so component sets cannot collide by concatenation");
 }
 
 #[test]
@@ -188,7 +210,7 @@ Append to `tests/unit_scan_phases.rs` (inside the module that already has `open_
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test --test unit_scoring generation` and `cargo test --test unit_scoring label` and `cargo test --features web --test unit_scan_phases another_generation`
+Run: `cargo test --test unit_scoring generation`, `cargo test --test unit_scoring revision`, `cargo test --test unit_scoring label`, and `cargo test --features web --test unit_scan_phases another_generation`
 Expected: compile errors (module, constant, field and method do not exist) — this step is expected to fail at compile time.
 
 - [ ] **Step 3: Implement**
@@ -196,51 +218,79 @@ Expected: compile errors (module, constant, field and method do not exist) — t
 Create `src/scoring/generation.rs`:
 
 ```rust
-//! The scoring generation stamp (#343 §4.4, #344).
+//! The scoring revision stamp (#343 §4.4, #344).
 //!
-//! Every `account_scores` row records the generation it was scored under. A
-//! row is *fresh* only if its generation equals [`SCORING_GENERATION`] **and**
-//! its `valid_until` is in the future; anything else is hidden from tier lists
-//! and re-scored by the refresh job (High/Elevated) or on the account's next
-//! re-engagement (everything else).
+//! Every `account_scores` row records the *revision* it was scored under:
+//! the human-bumped [`SCORING_GENERATION`] composed with every in-binary model
+//! identity. A row is *fresh* only if its stamp equals [`scoring_revision()`]
+//! **and** its `valid_until` is in the future; anything else is hidden from
+//! tier lists and re-scored by the refresh job (High/Elevated) or on the
+//! account's next re-engagement.
 //!
-//! # When to bump
+//! # Why a composite
 //!
-//! Change the value when a stored score is no longer comparable to a freshly
-//! computed one **for reasons the model identities do not already capture**:
+//! Model swaps change scores: a different toxicity, embedding or NLI model
+//! makes yesterday's numbers incomparable with today's even when the formula
+//! is untouched. Composing the identities in means a swap expires stored
+//! scores by itself — nobody has to remember (V2-01). The caches are NOT
+//! affected: `onnx_scores` and `classifier_verdicts` are keyed by their own
+//! model ids and stay reusable across a revision change.
+//!
+//! # When to bump [`SCORING_GENERATION`] by hand
+//!
 //! - the threat formula or its weights (`src/scoring/threat.rs`)
 //! - the topic-overlap math or the fingerprint JSON format (`src/topics/`)
 //! - a scoring-policy change (tier thresholds, abstention rules)
-//!
-//! Do **not** bump for a model swap. Models carry their own identities, which
-//! key the caches and the compatibility checks: `ONNX_MODEL_ID`
-//! (`toxicity/onnx.rs`), `EMBEDDING_MODEL_ID` (`topics/embeddings.rs`, stored
-//! on `topic_fingerprint.embedding_model_id`), and the classifier's
-//! `model_id` + `policy_version` (stored on every verdict row). A generation
-//! bump therefore never invalidates those caches, and a model change is safe
-//! without a bump: an incompatible fingerprint is rebuilt by the next full
-//! scan, and staged verdicts from another policy are re-classified.
+//! - a **classifier** model or policy change (CoPE-B / Zentropi): the
+//!   classifier lives outside this binary, so its identity is not composed
+//!   in; the runbook's deploy checklist covers it. Staged verdicts from the
+//!   old classifier are rejected at finalize regardless (model_id + policy).
 //!
 //! Bumping is a code change, not a config knob: two replicas disagreeing on
-//! the generation would hide each other's scores. The value is opaque; the
-//! date form is for humans reading `SELECT scoring_generation, COUNT(*) …`.
+//! the revision would hide each other's scores. The value is opaque; the
+//! date form of the generation is for humans reading
+//! `SELECT scoring_generation, COUNT(*) …`.
 //!
 //! # Rolling deploys
 //!
-//! A bump ships as a single-replica deploy. During the seconds both binaries
-//! run, the old one may still stamp its in-flight scan's rows with the old
-//! generation; the new binary hides those rows and the refresh job re-scores
-//! the High/Elevated ones. Staged work the old binary left behind carries the
-//! old generation in `scan_state.scan_run_generation` and is discarded on the
-//! next run (see `pipeline::scan_phases::RunIdentity`).
+//! A revision change ships as a single-replica deploy. During the seconds
+//! both binaries run, the old one may still stamp its in-flight scan's rows
+//! with the old revision; the new binary hides those rows and the refresh
+//! job re-scores the High/Elevated ones. Staged work the old binary left
+//! behind carries the old revision in `scan_state.scan_run_generation` and
+//! is discarded on the next run (`pipeline::scan_phases::RunIdentity`).
+use std::sync::LazyLock;
+
 pub const SCORING_GENERATION: &str = "2026-09-13";
 
-/// The stamp migration v18 writes onto rows scored before generations
-/// existed. Never equal to [`SCORING_GENERATION`].
+/// The stamp migration v18 writes onto rows scored before revisions
+/// existed. Never equal to [`scoring_revision()`].
 pub const LEGACY_GENERATION: &str = "legacy";
+
+/// Pure composition, so tests can build alternative revisions. `|` is the
+/// delimiter; no identity contains it (asserted by the unit test).
+pub fn compose_revision(generation: &str, onnx: &str, embedding: &str, nli: &str) -> String {
+    debug_assert!(![generation, onnx, embedding, nli].iter().any(|s| s.contains('|')));
+    format!("{generation}|onnx={onnx}|emb={embedding}|nli={nli}")
+}
+
+static SCORING_REVISION: LazyLock<String> = LazyLock::new(|| {
+    compose_revision(
+        SCORING_GENERATION,
+        crate::toxicity::onnx::ONNX_MODEL_ID,
+        crate::topics::embeddings::EMBEDDING_MODEL_ID,
+        crate::scoring::nli::NLI_MODEL_ID,
+    )
+});
+
+/// The revision this binary scores under. Bound into every freshness query
+/// and written onto every score row, staged blob and run marker.
+pub fn scoring_revision() -> &'static str {
+    SCORING_REVISION.as_str()
+}
 ```
 
-`src/scoring/mod.rs`: `pub mod generation;`. `src/topics/embeddings.rs`, after `EMBEDDING_DIM`:
+`src/scoring/mod.rs`: `pub mod generation;`. `src/scoring/nli.rs`, near the model doc at `:71`: `pub const NLI_MODEL_ID: &str = "nli-deberta-v3-xsmall-fp32";` (the fp32 export — see CLAUDE.md on #231). `src/topics/embeddings.rs`, after `EMBEDDING_DIM`:
 
 ```rust
 /// Identity of the embedding model behind every vector this module produces.
@@ -279,21 +329,21 @@ pub const EMBEDDING_MODEL_ID: &str = "all-MiniLM-L6-v2";
 `src/pipeline/scan_phases/staging.rs`: `pub const ACCOUNT_INPUT_SCHEMA_VERSION: u32 = 3;` and add to `AccountInput` after `schema_version`:
 
 ```rust
-    /// The `SCORING_GENERATION` this blob was gathered under (schema v3,
-    /// #344 R03). Phase C refuses to finalize a blob from another generation:
+    /// The `scoring_revision()` this blob was gathered under (schema v3,
+    /// #344 R03). Phase C refuses to finalize a blob from another revision:
     /// its target embedding, sample selection and fingerprint quality were
     /// computed against inputs the current formula may not accept.
     pub scoring_generation: String,
 ```
 
-`gather.rs:511`: `scoring_generation: crate::scoring::generation::SCORING_GENERATION.to_string(),` in the `AccountInput { … }` literal. `finalize.rs`, after the schema-version check (`:98-108`):
+`gather.rs:511`: `scoring_generation: crate::scoring::generation::scoring_revision().to_string(),` in the `AccountInput { … }` literal. `finalize.rs`, after the schema-version check (`:98-108`):
 
 ```rust
-    if blob.scoring_generation != crate::scoring::generation::SCORING_GENERATION {
+    if blob.scoring_generation != crate::scoring::generation::scoring_revision() {
         warn!(
             account_did,
             blob_generation = %blob.scoring_generation,
-            current = crate::scoring::generation::SCORING_GENERATION,
+            current = crate::scoring::generation::scoring_revision(),
             "AccountInput scoring_generation mismatch — clearing staging and re-gathering"
         );
         db.clear_account_staging(user_did, account_did).await?;
@@ -301,7 +351,7 @@ pub const EMBEDDING_MODEL_ID: &str = "all-MiniLM-L6-v2";
     }
 ```
 
-Every other `AccountInput { … }` literal in tests (`rg -n "AccountInput \{" src tests`) gains `scoring_generation: SCORING_GENERATION.to_string()`.
+Every other `AccountInput { … }` literal in tests (`rg -n "AccountInput \{" src tests`) gains `scoring_generation: scoring_revision().to_string()`.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -311,12 +361,13 @@ Expected: all pass, zero `SKIP:`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/scoring/generation.rs src/scoring/mod.rs src/topics/embeddings.rs src/db/models.rs src/pipeline/scan_phases/staging.rs src/pipeline/scan_phases/gather.rs src/pipeline/scan_phases/finalize.rs tests/unit_scoring.rs tests/unit_scan_phases.rs
-git commit -m 'feat(344): SCORING_GENERATION + EMBEDDING_MODEL_ID; staged blobs carry their generation
+git add src/scoring/generation.rs src/scoring/mod.rs src/scoring/nli.rs src/topics/embeddings.rs src/db/models.rs src/pipeline/scan_phases/staging.rs src/pipeline/scan_phases/gather.rs src/pipeline/scan_phases/finalize.rs tests/unit_scoring.rs tests/unit_scan_phases.rs
+git commit -m 'feat(344): scoring_revision() = generation + model ids; EMBEDDING/NLI model ids; staged blobs carry the revision
 
-The generation constant every score row will carry (#343 §4.4), the
-embedding model identity fingerprints will record, and blob schema v3 so
-Phase C refuses to finalize inputs gathered under another generation.
+The composite stamp every score row will carry (#343 §4.4, V2-01) so a
+model swap expires stored scores by itself, the embedding and NLI model
+identities, and blob schema v3 so Phase C refuses to finalize inputs
+gathered under another revision.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
@@ -337,7 +388,7 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 - `account_scores.scoring_generation TEXT NOT NULL` (`DEFAULT 'legacy'` SQLite; default dropped on Postgres after backfill); `account_scores.valid_until` (`TEXT` nullable SQLite / `TIMESTAMPTZ NOT NULL` Postgres), format follows `scored_at`.
 - Index `idx_account_scores_user_score (user_did, threat_score)` — serves `list_refresh_candidates` (`user_did = ? AND threat_score >= ?` then a small residual filter) and `get_ranked_threats` ordering. The first draft's `(user_did, threat_tier, valid_until)` is **not** created: the candidate query does not constrain `threat_tier`, and SQLite wraps `valid_until` in `datetime()`, so that index could serve neither filter (R12). Task 7 records `EXPLAIN` plans for both backends.
 - `scan_queue.kind TEXT NOT NULL DEFAULT 'full'` (Postgres `CHECK (kind IN ('full','refresh'))`); `scan_queue.full_requested_at` (`TEXT`/`TIMESTAMPTZ` nullable).
-- `users.next_refresh_at` (`TEXT` RFC3339 / `TIMESTAMPTZ`, nullable); `users.refreshed_generation TEXT` nullable — the generation under which this user's High/Elevated set was last refreshed or fully scanned. NULL after migration ⇒ due on the first tick.
+- `users.next_refresh_at` (`TEXT` RFC3339 / `TIMESTAMPTZ`, nullable); `users.refreshed_generation TEXT` nullable — the revision under which this user's High/Elevated set was last *proven* (a completed refresh or full scan); `users.refresh_attempted_generation TEXT` nullable — the revision for which the tick last *claimed* an attempt (V2-03). NULL after migration ⇒ due on the first tick; a failed attempt leaves `refreshed_generation` old but `refresh_attempted_generation` current, so the next attempt waits for `next_refresh_at`.
 - `topic_fingerprint.embedding_model_id TEXT` nullable; backfilled to `'all-MiniLM-L6-v2'` where `embedding_vector IS NOT NULL`.
 - `scan_state (user_did, 'last_full_scan_finished_at')` backfilled from `scan_queue` rows with `status = 'done'` (every pre-v18 row was a full scan).
 
@@ -370,6 +421,7 @@ In `src/db/schema.rs` tests, after `test_migration_v17_upgrades_a_v16_database`:
             ("scan_queue", "full_requested_at"),
             ("users", "next_refresh_at"),
             ("users", "refreshed_generation"),
+            ("users", "refresh_attempted_generation"),
             ("topic_fingerprint", "embedding_model_id"),
         ] {
             assert!(has_column(&conn, table, col), "{table}.{col}");
@@ -397,21 +449,15 @@ In `src/db/schema.rs` tests, after `test_migration_v17_upgrades_a_v16_database`:
     /// finished_at into scan_state.last_full_scan_finished_at (R13).
     #[test]
     fn test_migration_v18_upgrades_a_v17_database() {
+        // An AUTHENTIC v17 database: the migrations up to and including 17,
+        // nothing reconstructed by dropping columns (V2-07).
         let conn = Connection::open_in_memory().unwrap();
-        create_tables(&conn).unwrap();
-        conn.execute_batch(
-            "DROP INDEX idx_account_scores_user_score;
-             ALTER TABLE account_scores DROP COLUMN scoring_generation;
-             ALTER TABLE account_scores DROP COLUMN valid_until;
-             ALTER TABLE scan_queue DROP COLUMN kind;
-             ALTER TABLE scan_queue DROP COLUMN full_requested_at;
-             ALTER TABLE users DROP COLUMN next_refresh_at;
-             ALTER TABLE users DROP COLUMN refreshed_generation;
-             ALTER TABLE topic_fingerprint DROP COLUMN embedding_model_id;
-             DELETE FROM scan_state WHERE key = 'last_full_scan_finished_at';
-             DELETE FROM schema_version WHERE version = 18;",
-        )
-        .unwrap();
+        create_tables_through(&conn, 17).unwrap();
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(max, 17, "fixture is genuinely at v17 before the upgrade");
+        assert!(!has_column(&conn, "account_scores", "valid_until"));
         conn.execute_batch(
             "INSERT INTO users (did, handle) VALUES ('did:plc:scored', 'scored.test');
              INSERT INTO users (did, handle) VALUES ('did:plc:unscored', 'unscored.test');
@@ -450,14 +496,14 @@ In `src/db/schema.rs` tests, after `test_migration_v17_upgrades_a_v16_database`:
             .unwrap();
         assert_eq!(kind, "full");
 
-        let (next, refreshed): (Option<String>, Option<String>) = conn
+        let (next, refreshed, attempted): (Option<String>, Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT next_refresh_at, refreshed_generation FROM users WHERE did = 'did:plc:scored'",
+                "SELECT next_refresh_at, refreshed_generation, refresh_attempted_generation FROM users WHERE did = 'did:plc:scored'",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .unwrap();
-        assert!(next.is_none() && refreshed.is_none(), "due-ness comes from refreshed_generation IS NULL, not a stamped time");
+        assert!(next.is_none() && refreshed.is_none() && attempted.is_none(), "due-ness comes from the NULL attempted generation, not a stamped time");
 
         let with_vec: Option<String> = conn
             .query_row("SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = 'did:plc:scored'", [], |r| r.get(0))
@@ -484,12 +530,24 @@ In `src/db/schema.rs` tests, after `test_migration_v17_upgrades_a_v16_database`:
     }
 ```
 
-Change both `(1..=17)` assertions and their comments to 18.
+Change both `(1..=17)` assertions and their comments to 18. `create_tables_through` does not exist yet — add it in Step 3 (it is the test-support entry point every v17 fixture in this plan uses):
+
+```rust
+/// Apply migrations up to and including `max_version`. Test support for
+/// building an AUTHENTIC older-schema database (V2-07): a fixture made by
+/// dropping the newest columns from a current database is not the old
+/// schema (the other new columns are still there and the migration
+/// re-adding them fails on duplicates). Production always calls
+/// `create_tables`, which is `create_tables_through(conn, i64::MAX)`.
+pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()>
+```
+
+Implement it by threading `max_version` into `run_migration` (skip when `version > max_version`) and making `create_tables` delegate.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cargo test --lib db::schema::tests`
-Expected: the two v18 tests fail with "no such column" (runtime failure, not compile), and the two version-list tests fail on `17 != 18`.
+Expected: compile error on `create_tables_through` (expected at compile time). After adding the helper but before the migration: the two v18 tests fail with "no such column" at runtime, and the two version-list tests fail on `17 != 18`.
 
 - [ ] **Step 3: Write the SQLite migration**
 
@@ -504,10 +562,12 @@ In `src/db/schema.rs`, after the v17 block:
     // stays allowed here because SQLite cannot add NOT NULL post hoc, and the
     // fresh predicate reads NULL (and malformed text) as expired.
     //
-    // users.refreshed_generation is deliberately left NULL: the refresh tick
-    // treats "has scores AND refreshed_generation IS NOT the current one" as
-    // due, which is what makes both this deploy AND every later generation
-    // bump refresh users promptly, without a one-off time stamp (R07).
+    // users.refresh_attempted_generation / refreshed_generation are left
+    // NULL: the tick treats "has scores AND refresh_attempted_generation IS
+    // NOT the current revision" as due, which makes this deploy AND every
+    // later revision change refresh users promptly, once, without a one-off
+    // time stamp (R07, V2-03). refreshed_generation is the proof written
+    // only by a completed refresh or full scan.
     //
     // scan_state.last_full_scan_finished_at is backfilled from every done
     // queue row — all pre-v18 rows were full scans — so the cooldown keeps
@@ -534,6 +594,7 @@ In `src/db/schema.rs`, after the v17 block:
              ALTER TABLE scan_queue ADD COLUMN full_requested_at TEXT;
              ALTER TABLE users ADD COLUMN next_refresh_at TEXT;
              ALTER TABLE users ADD COLUMN refreshed_generation TEXT;
+             ALTER TABLE users ADD COLUMN refresh_attempted_generation TEXT;
              ALTER TABLE topic_fingerprint ADD COLUMN embedding_model_id TEXT;
              UPDATE topic_fingerprint
                  SET embedding_model_id = 'all-MiniLM-L6-v2'
@@ -562,15 +623,16 @@ Create `migrations/postgres/0018_score_expiry.sql`:
 -- Migration v18 (#343 §4.4, #344): score expiry + refresh bookkeeping.
 --
 -- account_scores.scoring_generation / valid_until: fresh = generation is the
--- binary's SCORING_GENERATION AND valid_until > NOW(). Pre-existing rows are
+-- binary's scoring_revision() AND valid_until > NOW(). Pre-existing rows are
 -- stamped 'legacy' (hidden at once) with valid_until = scored_at + 14 d so
 -- the column can be NOT NULL. The DEFAULT is dropped after the backfill on
 -- purpose: a writer that forgets the stamp must fail, not write 'legacy'.
 --
--- users.refreshed_generation stays NULL: the refresh tick treats a user
--- with scores whose refreshed_generation differs from the current one as
--- due, so this deploy AND every later generation bump refresh users
--- promptly (R07). No one-off next_refresh_at stamp.
+-- users.refresh_attempted_generation / refreshed_generation stay NULL: the
+-- tick treats a user with scores whose refresh_attempted_generation differs
+-- from the current revision as due, so this deploy AND every later revision
+-- change refresh users promptly, once (R07, V2-03). refreshed_generation is
+-- the proof a completed refresh/full scan writes. No one-off time stamp.
 --
 -- scan_queue.kind: 'full' | 'refresh'. scan_queue.full_requested_at: a
 -- full-scan request made while a refresh was running; the refresh's finish
@@ -603,6 +665,7 @@ ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS full_requested_at TIMESTAMPTZ;
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS next_refresh_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS refreshed_generation TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_attempted_generation TEXT;
 
 ALTER TABLE topic_fingerprint ADD COLUMN IF NOT EXISTS embedding_model_id TEXT;
 UPDATE topic_fingerprint
@@ -636,7 +699,7 @@ fn database_url() -> Option<String> {
 }
 ```
 
-(replace the existing `database_url` body; local runs without the variable still skip.) Then append the two v18 tests, mirroring the SQLite ones with the same fixture rows (`did:plc:v18scored` / `did:plc:v18unscored` / `did:plc:v18acct` / `did:plc:v18na`), asserting: `scoring_generation = 'legacy'`, `valid_until` = `scored_at + 14 d` (via `to_char(valid_until AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`), `is_nullable = 'NO'` for `valid_until`, `kind = 'full'`, `next_refresh_at IS NULL AND refreshed_generation IS NULL`, `embedding_model_id` set only where a vector exists, the `scan_state` marker equal to the done row's `finished_at` rendered RFC3339, `idx_account_scores_user_score` present, and version 18 recorded exactly once. Use the `cache_test_lock()` guard and drop the columns/index/version row before reconnecting, as `test_pg_migration_v17_upgrades_from_v16` does; delete the fixture rows at the end.
+(replace the existing `database_url` body; local runs without the variable still skip.) Add a Postgres twin of the fixture helper: `pub async fn migrate_postgres_through(url: &str, max_version: i64) -> Result<()>` in `src/db/postgres.rs` (runs the embedded migrations up to `max_version` against a database whose tables are dropped first — test support, documented as such). Then append the two v18 tests: the fresh-DB one as before; the upgrade one builds an **authentic v17** database with `migrate_postgres_through(&url, 17)` (asserting `MAX(version) = 17` and that `account_scores.valid_until` is absent in `information_schema.columns`), seeds the same fixture rows as the SQLite test (`did:plc:v18scored` / `did:plc:v18unscored` / `did:plc:v18acct` / `did:plc:v18na`, a done full queue row, two fingerprints), reconnects with `connect_postgres` (v18 applies), and asserts: `scoring_generation = 'legacy'`, `valid_until` = `scored_at + 14 d`, `is_nullable = 'NO'` for `valid_until`, `kind = 'full'`, `next_refresh_at`/`refreshed_generation`/`refresh_attempted_generation` all NULL, `embedding_model_id` set only where a vector exists, the `scan_state` marker equal to the done row's `finished_at` rendered RFC3339, `idx_account_scores_user_score` present, version 18 recorded exactly once. Use the `cache_test_lock()` guard (this test rebuilds the whole test database, so it must not overlap any other); it leaves the database at the current version.
 
 - [ ] **Step 6: Run**
 
@@ -651,8 +714,10 @@ git commit -m 'feat(344): migration v18 — expiry, queue kind + full_requested_
 
 account_scores.scoring_generation/valid_until (legacy backfill), the
 (user_did, threat_score) index, scan_queue.kind/full_requested_at,
-users.next_refresh_at/refreshed_generation (left NULL: due-ness is
-generation-driven), topic_fingerprint.embedding_model_id, and
+users.next_refresh_at/refreshed_generation/refresh_attempted_generation
+(left NULL: due-ness is revision-driven), topic_fingerprint.embedding_model_id,
+create_tables_through / migrate_postgres_through for authentic old-schema
+fixtures, and
 scan_state.last_full_scan_finished_at from done queue rows. Fresh +
 upgrade-from-v17 tests on both backends; Postgres suite fails in CI
 without DATABASE_URL.
@@ -665,7 +730,7 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 
 ### Task 3: Stamp on write, null-safe fresh reads, lossless export/import, discovery gates
 
-**Why:** The heart of #344, corrected for three review findings: the SQLite predicate must be boolean-explicit so malformed expiries count as expired everywhere (R11); `charcoal migrate` must copy every row verbatim rather than the fresh-only presentation set (R01); and topic-first discovery must use the fresh set like every other gate (R06).
+**Why:** The heart of #344, corrected for the review findings: the SQLite predicate must be boolean-explicit so malformed expiries count as expired everywhere (R11); `charcoal migrate` must copy every row rather than the fresh-only presentation set (R01), with a defined conversion for SQLite's NULL/malformed expiries into Postgres's NOT NULL column and a stated precision contract (V2-06), proven on the real SQLite → Postgres path from an authentic v17 fixture (V2-07); and topic-first discovery must use the fresh set like every other gate (R06).
 
 **Files:**
 - Modify: `src/db/traits.rs` (signatures + `StoredScore`, `export_scores`, `import_score`, `fingerprint_embedding_model`; `save_fingerprint_bundle` gains `embedding_model_id: Option<&str>`), `src/db/models.rs` (`StoredScore`), `src/db/queries.rs`, `src/db/sqlite.rs`, `src/db/postgres.rs`, `src/db/mod.rs`
@@ -689,7 +754,15 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
   async fn save_fingerprint_bundle(&self, user_did: &str, fingerprint_json: &str, post_count: u32,
       embedding: Option<&[f64]>, embedding_model_id: Option<&str>, clusters: &[ClusterCentroid]) -> Result<()>;
   ```
-- `StoredScore { score: AccountScore, scored_at: String /*RFC3339*/, scoring_generation: String, valid_until: Option<String> /*RFC3339; None only for a NULL SQLite row*/ }` in `models.rs`.
+- In `models.rs`:
+  ```rust
+  /// How a row's expiry left its backend (V2-06). Postgres rows are always `At`.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub enum ExportedExpiry { At(String) /* RFC3339 UTC, fractional seconds kept */, Missing, Invalid(String) /* the raw SQLite text */ }
+  #[derive(Debug, Clone, PartialEq)]
+  pub struct StoredScore { pub score: AccountScore, pub scored_at: String /* RFC3339 UTC */, pub scoring_generation: String, pub valid_until: ExportedExpiry }
+  ```
+  Import rule: `At(t)` → `t`; `Missing`/`Invalid(_)` → `valid_until = scored_at` on both backends (expired the instant it was scored; never renewed; the raw text is `warn!`-logged with the DID, not stored). Precision: `At` carries whatever the source had (`%f` milliseconds on SQLite, microseconds on Postgres); Postgres stores it in full; SQLite's `datetime()` column form truncates to whole seconds — a documented, tested conversion.
 - `get_ranked_threats` and `count_not_assessed` become fresh-only (signatures unchanged). `upsert_account_score` stamps both columns from the clock (the scoring path); `import_score` never does.
 
 - [ ] **Step 1: Rewrite `tests/unit_staleness.rs`**
@@ -697,7 +770,7 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 ```rust
 // Score freshness (#213 Task 5, redefined by #344 / #343 §4.4).
 //
-// FRESH = scoring_generation == SCORING_GENERATION AND valid_until is a
+// FRESH = scoring_generation == scoring_revision() AND valid_until is a
 // well-formed timestamp in the future. The predicate is boolean-explicit on
 // SQLite (COALESCE(..., 0)) so a NULL or malformed valid_until is expired —
 // hidden, stale, counted — rather than SQL-unknown (R11). These tests pin
@@ -710,7 +783,7 @@ use charcoal::db::queries::{
     upsert_account_score,
 };
 use charcoal::db::schema::create_tables;
-use charcoal::scoring::generation::{LEGACY_GENERATION, SCORING_GENERATION};
+use charcoal::scoring::generation::{scoring_revision, LEGACY_GENERATION};
 use rusqlite::{params, Connection};
 use std::collections::HashSet;
 
@@ -761,14 +834,14 @@ fn fresh_set(conn: &Connection) -> HashSet<String> {
 fn fresh_set_is_exactly_the_non_stale_dids_including_null_and_malformed_expiry() {
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
-    insert_score(&conn, "did:plc:current", 5, SCORING_GENERATION);
-    insert_score(&conn, "did:plc:expired", -1, SCORING_GENERATION);
+    insert_score(&conn, "did:plc:current", 5, scoring_revision());
+    insert_score(&conn, "did:plc:expired", -1, scoring_revision());
     insert_score(&conn, "did:plc:legacy", 5, LEGACY_GENERATION);
     insert_score(&conn, "did:plc:oldgen", 5, "1999-01-01");
-    insert_raw(&conn, "did:plc:nullvalid", "NULL", SCORING_GENERATION);
-    insert_raw(&conn, "did:plc:malformed", "'not a timestamp'", SCORING_GENERATION);
+    insert_raw(&conn, "did:plc:nullvalid", "NULL", scoring_revision());
+    insert_raw(&conn, "did:plc:malformed", "'not a timestamp'", scoring_revision());
     // Exact boundary: valid_until == now is NOT fresh (strict >).
-    insert_raw(&conn, "did:plc:boundary", "datetime('now')", SCORING_GENERATION);
+    insert_raw(&conn, "did:plc:boundary", "datetime('now')", scoring_revision());
 
     let fresh = fresh_set(&conn);
     assert_eq!(fresh, HashSet::from(["did:plc:current".to_string()]));
@@ -791,7 +864,7 @@ fn fresh_set_is_scoped_to_the_user() {
     conn.execute(
         "INSERT INTO account_scores (user_did, did, handle, scoring_generation, valid_until)
          VALUES ('did:plc:otheruser', 'did:plc:shared', 'shared.handle', ?1, datetime('now', '+5 days'))",
-        params![SCORING_GENERATION],
+        params![scoring_revision()],
     )
     .unwrap();
     assert!(!fresh_set(&conn).contains("did:plc:shared"));
@@ -819,7 +892,7 @@ fn upsert_stamps_generation_and_valid_until_from_confidence() {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(generation, SCORING_GENERATION, "{did}");
+        assert_eq!(generation, scoring_revision(), "{did}");
         assert!((days - expected_days).abs() < 0.01, "{did}: {days} days");
         assert!(!is_score_stale(&conn, USER, did).unwrap());
     }
@@ -840,14 +913,14 @@ fn upsert_restamps_an_existing_legacy_row() {
 fn ranked_threats_and_counts_hide_expired_rows() {
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
-    insert_score(&conn, "did:plc:current", 5, SCORING_GENERATION);
-    insert_score(&conn, "did:plc:expired", -1, SCORING_GENERATION);
+    insert_score(&conn, "did:plc:current", 5, scoring_revision());
+    insert_score(&conn, "did:plc:expired", -1, scoring_revision());
     insert_score(&conn, "did:plc:legacy", 5, LEGACY_GENERATION);
     for (did, days) in [("did:plc:na-expired", "-1"), ("did:plc:na-fresh", "+1")] {
         conn.execute(
             "INSERT INTO account_scores (user_did, did, handle, threat_tier, scoring_generation, valid_until)
              VALUES (?1, ?2, 'na.handle', 'NotAssessed', ?3, datetime('now', ?4 || ' days'))",
-            params![USER, did, SCORING_GENERATION, days],
+            params![USER, did, scoring_revision(), days],
         )
         .unwrap();
     }
@@ -867,51 +940,68 @@ fn staleness_days_are_three_seven_fourteen() {
 
 - [ ] **Step 2: Write the failing export/import tests**
 
-Create `tests/unit_score_export.rs`:
+Create `tests/unit_score_export.rs` (SQLite → SQLite; the SQLite → Postgres path is in Step 7):
 
 ```rust
-// #344 R01: `charcoal migrate` must be lossless. The presentation queries hide
-// expired/legacy rows; export/import carry every row with its original
-// scored_at, generation and expiry, and importing never renews anything.
+// #344 R01 / V2-06 / V2-07: `charcoal migrate` must be lossless. Presentation
+// queries hide expired/legacy rows; export/import carry every row with its
+// original scored_at, revision and expiry — including SQLite's NULL and
+// malformed expiries, which import as "expired when scored" — and importing
+// never renews anything. Fixtures are relative to now, never calendar dates.
 
-use charcoal::db::models::StoredScore;
-use charcoal::db::schema::create_tables;
+use charcoal::db::models::{ExportedExpiry, StoredScore};
+use charcoal::db::schema::{create_tables, create_tables_through};
 use charcoal::db::sqlite::SqliteDatabase;
 use charcoal::db::Database;
-use charcoal::scoring::generation::{LEGACY_GENERATION, SCORING_GENERATION};
+use charcoal::scoring::generation::{scoring_revision, LEGACY_GENERATION};
 use rusqlite::{params, Connection};
 use std::sync::Arc;
 
 const USER: &str = "did:plc:exportuser00000000000000";
 
+/// current (+14 d), expired (−6 d), legacy, NotAssessed (NULL score),
+/// NULL expiry, malformed expiry.
 fn seeded() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
-    // current, expired, legacy, and a NULL-score NotAssessed row.
-    conn.execute_batch(&format!(
-        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at, scoring_generation, valid_until) VALUES
-           ('{USER}', 'did:plc:cur', 'cur.h', 40.0, 'High', '2026-09-10 00:00:00', '{SCORING_GENERATION}', '2026-09-24 00:00:00'),
-           ('{USER}', 'did:plc:exp', 'exp.h', 20.0, 'Elevated', '2026-08-01 00:00:00', '{SCORING_GENERATION}', '2026-08-08 00:00:00'),
-           ('{USER}', 'did:plc:leg', 'leg.h', 50.0, 'High', '2026-04-30 00:00:00', '{LEGACY_GENERATION}', '2026-05-14 00:00:00');
-         INSERT INTO account_scores (user_did, did, handle, threat_tier, scored_at, scoring_generation, valid_until) VALUES
-           ('{USER}', 'did:plc:na', 'na.h', 'NotAssessed', '2026-09-01 00:00:00', '{SCORING_GENERATION}', '2026-09-08 00:00:00');"
-    ))
-    .unwrap();
+    let rev = scoring_revision();
+    let rows = [
+        ("did:plc:cur", "40.0", "'High'", "datetime('now', '-4 days')", "datetime('now', '+10 days')", rev),
+        ("did:plc:exp", "20.0", "'Elevated'", "datetime('now', '-13 days')", "datetime('now', '-6 days')", rev),
+        ("did:plc:leg", "50.0", "'High'", "datetime('now', '-140 days')", "datetime('now', '-126 days')", LEGACY_GENERATION),
+        ("did:plc:na", "NULL", "'NotAssessed'", "datetime('now', '-12 days')", "datetime('now', '-5 days')", rev),
+        ("did:plc:nul", "30.0", "'Elevated'", "datetime('now', '-2 days')", "NULL", rev),
+        ("did:plc:bad", "35.0", "'High'", "datetime('now', '-2 days')", "'not a timestamp'", rev),
+    ];
+    for (did, score, tier, scored_at, valid_until, generation) in rows {
+        conn.execute(
+            &format!(
+                "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at, scoring_generation, valid_until)
+                 VALUES (?1, ?2, ?3, {score}, {tier}, {scored_at}, ?4, {valid_until})"
+            ),
+            params![USER, did, format!("{did}.h"), generation],
+        )
+        .unwrap();
+    }
     conn
+}
+
+fn by_did<'a>(rows: &'a [StoredScore], did: &str) -> &'a StoredScore {
+    rows.iter().find(|r| r.score.did == did).expect(did)
 }
 
 #[tokio::test]
 async fn export_returns_every_row_with_its_provenance() {
     let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(seeded()));
     let rows = db.export_scores(USER).await.unwrap();
-    assert_eq!(rows.len(), 4, "expired, legacy and NULL-score rows are exported");
-    let leg = rows.iter().find(|r| r.score.did == "did:plc:leg").unwrap();
-    assert_eq!(leg.scoring_generation, LEGACY_GENERATION);
-    assert_eq!(leg.scored_at, "2026-04-30T00:00:00+00:00");
-    assert_eq!(leg.valid_until.as_deref(), Some("2026-05-14T00:00:00+00:00"));
-    let na = rows.iter().find(|r| r.score.did == "did:plc:na").unwrap();
-    assert!(na.score.threat_score.is_none());
-    assert_eq!(na.score.threat_tier.as_deref(), Some("NotAssessed"));
+    assert_eq!(rows.len(), 6, "expired, legacy, NULL-score, NULL-expiry and malformed rows are all exported");
+    assert_eq!(by_did(&rows, "did:plc:leg").scoring_generation, LEGACY_GENERATION);
+    assert!(by_did(&rows, "did:plc:na").score.threat_score.is_none());
+    assert_eq!(by_did(&rows, "did:plc:nul").valid_until, ExportedExpiry::Missing);
+    assert_eq!(by_did(&rows, "did:plc:bad").valid_until, ExportedExpiry::Invalid("not a timestamp".to_string()));
+    assert!(matches!(by_did(&rows, "did:plc:cur").valid_until, ExportedExpiry::At(_)));
+    // RFC3339 with the millisecond field SQLite can render.
+    assert!(by_did(&rows, "did:plc:cur").scored_at.ends_with("+00:00"));
 }
 
 #[tokio::test]
@@ -925,54 +1015,67 @@ async fn import_preserves_provenance_and_never_renews_expiry() {
     for r in &rows {
         dst.import_score(USER, r).await.unwrap();
     }
-    // Importing twice is a no-op, not a renewal.
     for r in &rows {
-        dst.import_score(USER, r).await.unwrap();
+        dst.import_score(USER, r).await.unwrap(); // idempotent, not a renewal
     }
-
     let back = dst.export_scores(USER).await.unwrap();
-    let mut a: Vec<StoredScore> = rows.clone();
-    let mut b = back;
-    a.sort_by(|x, y| x.score.did.cmp(&y.score.did));
-    b.sort_by(|x, y| x.score.did.cmp(&y.score.did));
-    assert_eq!(a, b, "round trip is byte-for-byte on scored_at, generation, valid_until and every score field");
 
-    // The presentation layer agrees: only the current row is visible, the
-    // other three are counted as expired — same as on the source.
+    // Well-formed rows round-trip exactly (SQLite → SQLite: whole seconds in,
+    // whole seconds out).
+    for did in ["did:plc:cur", "did:plc:exp", "did:plc:leg", "did:plc:na"] {
+        assert_eq!(by_did(&rows, did), by_did(&back, did), "{did}");
+    }
+    // NULL / malformed expiries import as "expired when scored": the
+    // destination holds a real timestamp equal to scored_at.
+    for did in ["did:plc:nul", "did:plc:bad"] {
+        let imported = by_did(&back, did);
+        assert_eq!(imported.valid_until, ExportedExpiry::At(imported.scored_at.clone()), "{did}");
+        assert_eq!(imported.scored_at, by_did(&rows, did).scored_at, "{did} scored_at untouched");
+    }
+    // Presentation agrees on both sides: one visible row, five expired.
     assert_eq!(dst.get_ranked_threats(USER, 0.0).await.unwrap().len(), 1);
-    assert_eq!(dst.count_expired(USER).await.unwrap(), 3);
+    assert_eq!(dst.count_expired(USER).await.unwrap(), 5);
+    assert_eq!(src.count_expired(USER).await.unwrap(), 5);
 }
 
-#[test]
-fn v17_fixture_rows_survive_open_export_import() {
-    // A database that stopped at v17 (no generation/expiry columns), opened
-    // by this binary: v18 stamps 'legacy' + scored_at + 14 d, and export sees
-    // exactly that — the migration must not lose or hide them from export.
+/// A genuinely v17 database (migrations through 17 only), opened by this
+/// binary: v18 stamps 'legacy' + scored_at + 14 d, and the export/import
+/// path carries exactly that into a fresh database.
+#[tokio::test]
+async fn v17_fixture_rows_survive_open_export_import() {
     let conn = Connection::open_in_memory().unwrap();
-    create_tables(&conn).unwrap();
-    conn.execute_batch(
-        "DROP INDEX idx_account_scores_user_score;
-         ALTER TABLE account_scores DROP COLUMN scoring_generation;
-         ALTER TABLE account_scores DROP COLUMN valid_until;
-         DELETE FROM schema_version WHERE version = 18;",
-    )
-    .unwrap();
+    create_tables_through(&conn, 17).unwrap();
+    let max: i64 = conn.query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(max, 17);
     conn.execute(
         "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at)
-         VALUES (?1, 'did:plc:v17', 'v17.h', 40.0, 'High', '2026-09-01 12:00:00')",
+         VALUES (?1, 'did:plc:v17', 'v17.h', 40.0, 'High', datetime('now', '-30 days'))",
         params![USER],
     )
     .unwrap();
-    create_tables(&conn).unwrap(); // v18 applies
-    let db = SqliteDatabase::new(conn);
-    let rows = tokio::runtime::Runtime::new().unwrap().block_on(db.export_scores(USER)).unwrap();
+    create_tables(&conn).unwrap(); // the binary opens it: v18 applies
+    let src: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+
+    let rows = src.export_scores(USER).await.unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].scoring_generation, LEGACY_GENERATION);
-    assert_eq!(rows[0].valid_until.as_deref(), Some("2026-09-15T12:00:00+00:00"));
+    let row = &rows[0];
+    assert_eq!(row.scoring_generation, LEGACY_GENERATION);
+    let ExportedExpiry::At(valid_until) = &row.valid_until else { panic!("backfilled expiry") };
+    let scored = chrono::DateTime::parse_from_rfc3339(&row.scored_at).unwrap();
+    let valid = chrono::DateTime::parse_from_rfc3339(valid_until).unwrap();
+    assert_eq!(valid - scored, chrono::Duration::days(14));
+
+    let dst_conn = Connection::open_in_memory().unwrap();
+    create_tables(&dst_conn).unwrap();
+    let dst: Arc<dyn Database> = Arc::new(SqliteDatabase::new(dst_conn));
+    dst.import_score(USER, row).await.unwrap();
+    assert_eq!(dst.export_scores(USER).await.unwrap(), rows);
+    assert!(dst.is_score_stale(USER, "did:plc:v17").await.unwrap(), "legacy stays hidden after import");
+    assert_eq!(dst.count_expired(USER).await.unwrap(), 1);
 }
 ```
 
-`StoredScore` needs `#[derive(Debug, Clone, PartialEq)]`; `AccountScore` already derives `PartialEq` (check; add if missing — `ToxicPost` too). Timestamps are exported as RFC3339 on both backends (SQLite converts `YYYY-MM-DD HH:MM:SS` with `strftime('%Y-%m-%dT%H:%M:%S+00:00', col)`; Postgres with `to_char(... AT TIME ZONE 'UTC', ...)`), and imported back to each backend's native form (`datetime(?)` / `$n::timestamptz`).
+`AccountScore` and `ToxicPost` need `PartialEq` (add if missing). Timestamps are exported as RFC3339 UTC on both backends: SQLite with `strftime('%Y-%m-%dT%H:%M:%f+00:00', col)` (milliseconds — the most SQLite can render; its stored form is whole seconds anyway), Postgres with `to_char(col AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')` (microseconds). Import writes each backend's native form: `datetime(?)` on SQLite (whole seconds — the truncation V2-06 asks to be explicit about) and `$n::timestamptz` on Postgres (full precision).
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -987,14 +1090,24 @@ Expected: compile errors (new methods/types missing) — expected at compile tim
 /// One `account_scores` row with its provenance, for lossless export/import
 /// (#344 R01). The presentation reads (`get_ranked_threats`, counts) hide
 /// expired rows; this does not, and `import_score` writes it back verbatim.
+/// How a row's expiry left its backend (V2-06). Postgres rows are always
+/// `At`; SQLite can hold NULL or text `datetime()` cannot parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportedExpiry {
+    /// RFC3339 UTC, fractional seconds as the source had them.
+    At(String),
+    Missing,
+    /// The raw SQLite text, for the log line the importer writes.
+    Invalid(String),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredScore {
     pub score: AccountScore,
     /// RFC3339 UTC.
     pub scored_at: String,
     pub scoring_generation: String,
-    /// RFC3339 UTC. `None` only for a SQLite row whose column is NULL.
-    pub valid_until: Option<String>,
+    pub valid_until: ExportedExpiry,
 }
 ```
 
@@ -1023,7 +1136,7 @@ then:
 pub fn is_score_stale(conn: &Connection, user_did: &str, did: &str) -> Result<bool> {
     let fresh_rows: i64 = conn.query_row(
         &format!("SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND did = ?2 AND {}", fresh_sql("?3")),
-        params![user_did, did, SCORING_GENERATION],
+        params![user_did, did, scoring_revision()],
         |row| row.get(0),
     )?;
     Ok(fresh_rows == 0)
@@ -1034,7 +1147,7 @@ pub fn get_fresh_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<St
         "SELECT did FROM account_scores WHERE user_did = ?1 AND {}", fresh_sql("?2")
     ))?;
     let dids = stmt
-        .query_map(params![user_did, SCORING_GENERATION], |row| row.get::<_, String>(0))?
+        .query_map(params![user_did, scoring_revision()], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     Ok(dids)
 }
@@ -1042,7 +1155,7 @@ pub fn get_fresh_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<St
 pub fn count_expired(conn: &Connection, user_did: &str) -> Result<i64> {
     let count: i64 = conn.query_row(
         &format!("SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND NOT ({})", fresh_sql("?2")),
-        params![user_did, SCORING_GENERATION],
+        params![user_did, scoring_revision()],
         |row| row.get(0),
     )?;
     Ok(count)
@@ -1054,16 +1167,16 @@ pub fn count_not_assessed(conn: &Connection, user_did: &str) -> Result<i64> {
             "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed' AND {}",
             fresh_sql("?2")
         ),
-        params![user_did, SCORING_GENERATION],
+        params![user_did, scoring_revision()],
         |row| row.get(0),
     )?;
     Ok(count)
 }
 ```
 
-`get_ranked_threats`: `WHERE user_did = ?1 AND threat_score >= ?2 AND {fresh_sql("?3")} ORDER BY threat_score DESC, did` with `params![user_did, min_score, SCORING_GENERATION]` (the `did` tie-breaker makes paging deterministic — #356 will rely on it).
+`get_ranked_threats`: `WHERE user_did = ?1 AND threat_score >= ?2 AND {fresh_sql("?3")} ORDER BY threat_score DESC, did` with `params![user_did, min_score, scoring_revision()]` (the `did` tie-breaker makes paging deterministic — #356 will rely on it).
 
-`upsert_account_score`: as in the first draft — add `scoring_generation` (`?16` = `SCORING_GENERATION`) and `valid_until = datetime('now', ?17)` (`?17` = `format!("+{} days", ScoringConfidence::staleness_days_for_label(score.scoring_confidence.as_deref()))`) to both the INSERT and the `DO UPDATE SET` lists.
+`upsert_account_score`: as in the first draft — add `scoring_generation` (`?16` = `scoring_revision()`) and `valid_until = datetime('now', ?17)` (`?17` = `format!("+{} days", ScoringConfidence::staleness_days_for_label(score.scoring_confidence.as_deref()))`) to both the INSERT and the `DO UPDATE SET` lists.
 
 Export/import (SQLite):
 
@@ -1074,9 +1187,10 @@ pub fn export_scores(conn: &Connection, user_did: &str) -> Result<Vec<StoredScor
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, behavioral_signals, graph_distance,
                 fingerprint_quality, scoring_confidence, context_score, overlap_legacy,
-                strftime('%Y-%m-%dT%H:%M:%S+00:00', scored_at),
+                strftime('%Y-%m-%dT%H:%M:%f+00:00', scored_at),
                 scoring_generation,
-                strftime('%Y-%m-%dT%H:%M:%S+00:00', valid_until)
+                strftime('%Y-%m-%dT%H:%M:%f+00:00', valid_until),
+                valid_until
          FROM account_scores WHERE user_did = ?1 ORDER BY did",
     )?;
     let rows = stmt
@@ -1105,19 +1219,35 @@ pub fn export_scores(conn: &Connection, user_did: &str) -> Result<Vec<StoredScor
                 },
                 scored_at: row.get(14)?,
                 scoring_generation: row.get(15)?,
-                valid_until: row.get(16)?,
+                // strftime() of NULL is NULL; of unparseable text is NULL too —
+                // the raw column (17) tells the two apart (V2-06).
+                valid_until: match (row.get::<_, Option<String>>(16)?, row.get::<_, Option<String>>(17)?) {
+                    (Some(t), _) => ExportedExpiry::At(t),
+                    (None, None) => ExportedExpiry::Missing,
+                    (None, Some(raw)) => ExportedExpiry::Invalid(raw),
+                },
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
-/// Write an exported row back exactly. `datetime(?)` normalises the RFC3339
-/// text to this backend's `YYYY-MM-DD HH:MM:SS` form. Idempotent: the
-/// conflict branch rewrites the same values.
+/// Write an exported row back. `datetime(?)` normalises the RFC3339 text to
+/// this backend's `YYYY-MM-DD HH:MM:SS` form (whole seconds — SQLite's
+/// column form; a Postgres source's microseconds are truncated here, and
+/// only here). A `Missing`/`Invalid` expiry becomes `scored_at`: expired the
+/// instant it was scored, never renewed, never dropped (V2-06). Idempotent.
 pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Result<()> {
     let s = &row.score;
     let top_posts_json = serde_json::to_string(&s.top_toxic_posts)?;
+    let valid_until = match &row.valid_until {
+        ExportedExpiry::At(t) => t.clone(),
+        ExportedExpiry::Missing => row.scored_at.clone(),
+        ExportedExpiry::Invalid(raw) => {
+            tracing::warn!(did = %s.did, raw, "invalid expiry on export — importing as expired-when-scored");
+            row.scored_at.clone()
+        }
+    };
     conn.execute(
         "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
              posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
@@ -1132,7 +1262,7 @@ pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Res
             user_did, s.did, s.handle, s.toxicity_score, s.topic_overlap, s.threat_score, s.threat_tier,
             s.posts_analyzed, top_posts_json, row.scored_at, s.behavioral_signals, s.context_score,
             s.graph_distance, s.fingerprint_quality, s.scoring_confidence, s.overlap_legacy,
-            row.scoring_generation, row.valid_until,
+            row.scoring_generation, valid_until,
         ],
     )?;
     Ok(())
@@ -1143,7 +1273,7 @@ pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Res
 
 - [ ] **Step 5: Postgres**
 
-Same predicate, natively boolean: `scoring_generation = $n AND valid_until > NOW()` in `is_score_stale`, `get_fresh_scored_dids`, `count_expired` (`NOT (...)` — `valid_until` is NOT NULL on Postgres so no COALESCE is needed; say so in a comment), `count_not_assessed`, `get_ranked_threats` (+ `, did` tie-breaker). `upsert_account_score`: `$16` generation, `NOW() + make_interval(days => $17)`. `export_scores`: `to_char(scored_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"+00:00"')` and the same for `valid_until` (non-null → `Some`). `import_score`: `$10::timestamptz` / `$18::timestamptz`. `fingerprint_embedding_model` and the bundle column.
+Same predicate, natively boolean: `scoring_generation = $n AND valid_until > NOW()` in `is_score_stale`, `get_fresh_scored_dids`, `count_expired` (`NOT (...)` — `valid_until` is NOT NULL on Postgres so no COALESCE is needed; say so in a comment), `count_not_assessed`, `get_ranked_threats` (+ `, did` tie-breaker). `upsert_account_score`: `$16` generation, `NOW() + make_interval(days => $17)`. `export_scores`: `to_char(scored_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')` and the same for `valid_until` (always `ExportedExpiry::At` — the column is NOT NULL). `import_score`: `$10::timestamptz` / `$18::timestamptz`, with the same `Missing`/`Invalid` → `scored_at` mapping and warn line as SQLite (a SQLite source can hand Postgres either). `fingerprint_embedding_model` and the bundle column.
 
 - [ ] **Step 6: Callers**
 
@@ -1176,15 +1306,25 @@ and after the fingerprint/scores/events/scan_state steps, initialise the destina
             if let Some(g) = sqlite_db.refreshed_generation(&did).await? {
                 pg_db.mark_refreshed_generation(&did, &g).await?;
             }
+            // mark_refreshed_generation sets attempted = refreshed; if the
+            // source had an attempt pending under a different revision, copy
+            // that too so the destination does not re-attempt at once.
+            if let Some(a) = sqlite_db.refresh_attempted_generation(&did).await? {
+                pg_db.mark_refresh_attempted_generation(&did, &a).await?;
+            }
 ```
 
-(`next_refresh_at`, `refreshed_generation`, `schedule_refresh`, `mark_refreshed_generation` are Task 6 trait methods; Task 6 lands before the migrate change is compiled — do this part of Task 3 as its final step after Task 6, or stub the four in Task 3 with the exact signatures Task 6 specifies.) The fingerprint step passes `Some(EMBEDDING_MODEL_ID)` when it migrates an embedding and copies `embedding_model_id` from the source via `fingerprint_embedding_model` if present.
+(`next_refresh_at`, `refreshed_generation`, `refresh_attempted_generation`, `schedule_refresh`, `mark_refreshed_generation`, `mark_refresh_attempted_generation` are Task 6 trait methods — the last is a plain `UPDATE users SET refresh_attempted_generation = ?2 WHERE did = ?1`, used only by migrate; Task 6 lands before the migrate change is compiled — do this part of Task 3 as its final step after Task 6, or stub the four in Task 3 with the exact signatures Task 6 specifies.) The fingerprint step passes `Some(EMBEDDING_MODEL_ID)` when it migrates an embedding and copies `embedding_model_id` from the source via `fingerprint_embedding_model` if present.
 
 Fix the existing tests to the new signatures (`rg -n "is_score_stale\(|get_fresh_scored_dids\(|save_fingerprint_bundle\(" src tests`).
 
 - [ ] **Step 7: Postgres tests**
 
-Append to `tests/db_postgres.rs`: the freshness twin (rows `pgfresh_current` +5 d / `pgfresh_expired` −1 d / `pgfresh_legacy` with `'legacy'`, plus the exact boundary `valid_until = NOW()` inserted in the same statement as the comparison is not testable deterministically — use `NOW() - INTERVAL '1 second'` and assert stale); `count_expired` = 3 of 4; the write-path stamp twin (`EXTRACT(EPOCH …)/86400.0)::float8`); and an export/import twin that seeds the four `unit_score_export` rows with explicit `scored_at`/`valid_until` timestamptz literals, exports, imports into the same database under a second user DID, exports that, and asserts equality after normalising the user; then repeats the import and asserts nothing changed.
+Append to `tests/db_postgres.rs`:
+- the freshness twin (rows `pgfresh_current` +5 d / `pgfresh_expired` −1 d / `pgfresh_legacy` with `'legacy'`; the exact boundary via `NOW() - INTERVAL '1 second'` → stale); `count_expired` = 3 of 4; the write-path stamp twin (`EXTRACT(EPOCH …)/86400.0)::float8`);
+- **`test_pg_migrate_from_sqlite_preserves_every_row` — the real path (V2-06, V2-07):** build the SQLite source exactly as `unit_score_export::seeded()` does but from a `create_tables_through(&conn, 17)` fixture for the legacy row and a v18 database for the others (so the source holds current, expired, legacy, NotAssessed, NULL-expiry and malformed-expiry rows), open it as `SqliteDatabase`, then run the same sequence `charcoal migrate` runs (`export_scores` on the source → `import_score` on `PgDatabase` for `did:plc:pgmig_user`). Assert with **direct SQL on Postgres**, not a re-export: 6 rows; `scoring_generation` per row; `threat_score IS NULL` for the NotAssessed row; `valid_until = scored_at` for the NULL and malformed rows; `valid_until - scored_at = INTERVAL '14 days'` for the legacy row; and `to_char(scored_at, …)` equal to the SQLite `strftime` of the same row (whole seconds — the source had no fraction). Then `count_expired` = 5 and `get_ranked_threats` = 1 on Postgres. Repeat the import loop; assert every `scored_at`/`valid_until` is unchanged;
+- **`test_pg_export_import_keeps_microseconds`:** insert a row with `scored_at = '2026-09-01 12:00:00.123456+00'` and `valid_until = scored_at + INTERVAL '14 days'`, export, import under a second DID, and assert with direct SQL that both columns match to the microsecond;
+- **`test_pg_import_into_sqlite_truncates_to_seconds`:** export that microsecond row from Postgres, import into an in-memory SQLite, and assert the stored value is `2026-09-01 12:00:00` — the documented one-way conversion.
 
 - [ ] **Step 8: Run everything**
 
@@ -1794,12 +1934,50 @@ Replace the cooldown block (`:63-95`) with: read the rows (warn + skip on error 
 
 and add to the 202 body `"queued": match outcome { EnqueueOutcome::QueuedAfterRefresh => "after_refresh", EnqueueOutcome::AlreadyRunning => "already_running", _ => "now" }` with a comment that `after_refresh` means "a background refresh is running; your scan starts when it finishes" (the dashboard copy for it is #365's — leave the frontend reading `position`/`eta` as today). Inline tests in `scan.rs` for `last_full_finished_at`: done-full row wins; done-refresh row → marker; queued/running/failed/missing → marker; no marker → `None`. `handlers/access.rs:245` and `admin.rs:301`: bind the new return type (`let _ = …?` is enough where the outcome is not surfaced). `admin.rs` `scan_row_json`: `"kind": row.kind.as_str(), "full_requested_at": row.full_requested_at`. `web/src/lib/types.ts` admin row: `kind: 'full' | 'refresh'; full_requested_at: string | null;`.
 
-`src/web/scan_job.rs` `run_scan`, right after `let result = crate::pipeline::amplification::run(...)`:
+`src/web/scan_job.rs` — completion is classified, never inferred from `Ok` (V2-05). Above `run_scan`:
 
 ```rust
-    // #344 R13: the queue row may later be reused by a refresh, so the
-    // cooldown's anchor lives here, not on the row.
-    if result.is_ok() {
+/// How a full scan ended, for bookkeeping. `amplification::run` returns
+/// `Ok((events, scored, degraded))` for cost-capped and partially skipped
+/// scans alike, so `Ok` alone says nothing about completion (V2-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanCompletion {
+    /// Every candidate scored; staging drained to `done`.
+    Complete,
+    /// Reached `done` but `n` accounts were skipped (recorded in `scan_skips`).
+    CompleteWithSkips { n: i64 },
+    /// Cost-capped or interrupted: staging left at burst/finalize, re-run to resume.
+    Resumable,
+}
+
+/// Pure classification from the pipeline result, the `scan_phase` marker
+/// after the run, and the skip count. `Err` is not a completion at all and
+/// is handled by the caller.
+pub fn classify_full_scan(degraded: bool, scan_phase: Option<&str>, skipped: i64) -> ScanCompletion {
+    match (degraded, scan_phase) {
+        (false, _) => ScanCompletion::Complete,
+        (true, Some("done")) => ScanCompletion::CompleteWithSkips { n: skipped.max(0) },
+        (true, _) => ScanCompletion::Resumable,
+    }
+}
+```
+
+and in `run_scan`, right after `let result = crate::pipeline::amplification::run(...)`:
+
+```rust
+    // #344 V2-05: only a scan that actually completed the user's request
+    // anchors the cooldown. A resumable (cost-capped / interrupted) scan
+    // writes NO marker, so the user can re-run immediately to resume — the
+    // existing #208 contract — instead of being told to wait 24 h.
+    let completion = match &result {
+        Ok((_, _, degraded)) => {
+            let phase = db.get_scan_state(user_did, "scan_phase").await.ok().flatten();
+            let skipped = db.count_scan_skips(user_did).await.unwrap_or(-1);
+            Some(classify_full_scan(*degraded, phase.as_deref(), skipped))
+        }
+        Err(_) => None,
+    };
+    if matches!(completion, Some(ScanCompletion::Complete | ScanCompletion::CompleteWithSkips { .. })) {
         if let Err(e) = db
             .set_scan_state(user_did, "last_full_scan_finished_at", &chrono::Utc::now().to_rfc3339())
             .await
@@ -1808,6 +1986,8 @@ and add to the 202 body `"queued": match outcome { EnqueueOutcome::QueuedAfterRe
         }
     }
 ```
+
+Inline tests in `scan_job.rs` for `classify_full_scan`: `(false, Some("done"), 0)` → `Complete`; `(true, Some("done"), 3)` → `CompleteWithSkips{3}`; `(true, Some("burst"), 0)` and `(true, None, 0)` → `Resumable`. Task 6 uses `completion` for scheduling and Task 9 reuses the same classification for the drain transition.
 
 - [ ] **Step 7: Postgres twins**
 
@@ -1822,7 +2002,7 @@ Expected: green. The admitter/slot-lifecycle inline tests still compile: they ca
 
 ```bash
 git add src/db/traits.rs src/db/mod.rs src/db/queries.rs src/db/sqlite.rs src/db/postgres.rs src/web/handlers/scan.rs src/web/handlers/admin.rs src/web/handlers/access.rs src/web/scan_job.rs web/src/lib/types.ts tests/unit_scan_kind.rs tests/db_postgres.rs
-git commit -m 'feat(344): scan_queue.kind — refresh rows share the queue; a user request is always honoured
+git commit -m 'feat(344): scan_queue.kind — refresh rows share the queue; a user request is always honoured; completion classified
 
 ScanKind on claims/rows; enqueue_scan returns EnqueueOutcome and upgrades
 a queued refresh IN PLACE (position kept) or records full_requested_at on
@@ -1839,9 +2019,9 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 
 ### Task 6: Durable, bounded, generation-aware refresh scheduling on the admitter tick
 
-**Why:** Spec §4.4: the refresh tick runs on the admitter's `TICK`, no second loop, no second lock. R04: selecting due users and creating their queue rows must be one transaction, bounded per tick, retried on failure. R07: a generation bump must make users due through durable state the scheduler reads every tick, not a one-off migration stamp.
+**Why:** Spec §4.4: the refresh tick runs on the admitter's `TICK`, no second loop, no second lock. R04: selecting due users and creating their queue rows must be one transaction, bounded per tick, retried on failure. R07: a revision change must make users due through durable state the scheduler reads every tick, not a one-off migration stamp. V2-02: the queue write must be conditional at the write itself, because manual enqueue and admission lock the queue row, not the user row, and can run between the tick's select and its write. V2-03: "this revision needs work" and "another attempt is allowed now" are different facts; a failed attempt must wait for its retry deadline.
 
-**Due rule:** a user is due when they have at least one score row, have **no queued or running `scan_queue` row of either kind**, and either `next_refresh_at <= now` or `refreshed_generation IS DISTINCT FROM <current>`. A user mid-scan is simply not selected: the completion path of whatever is running (`schedule_after_success` / `schedule_retry`) reschedules them, so the tick never has to reason about existing work. `refreshed_generation` is set to the current generation when a refresh completes (`Completed`/`NothingDue`, Task 9) or a full scan succeeds; `next_refresh_at` is set to `now + interval` on those same events and to `now + REFRESH_RETRY_HOURS` after `Deferred`/`Resumable`/failed outcomes. The tick advances `next_refresh_at` (to `now + interval`) **in the same transaction** that creates the queue row, so a crash cannot leave a rescheduled user with no job; it does **not** touch `refreshed_generation` (only a completed refresh proves the generation).
+**Due rule:** a user is due when they have at least one score row, have **no queued or running `scan_queue` row of either kind**, and either `next_refresh_at <= now` or `refresh_attempted_generation IS DISTINCT FROM <current revision>`. Two generation columns, two facts (V2-03): `refresh_attempted_generation` is set by the **tick** in the claiming transaction ("an attempt for this revision has been scheduled"), so a failed/deferred/resumable attempt does not make the user due again by revision — only its `next_refresh_at` retry deadline does; `refreshed_generation` is set by a **completed** refresh or full scan ("this revision is proven") and is observability, not a scheduling input. A new revision arriving during a backoff differs from `refresh_attempted_generation` and is attempted promptly. The tick advances `next_refresh_at` and sets `refresh_attempted_generation` **only for users whose queue write affected a row** (V2-02), in the same transaction; a user whose row turned out to be queued/running at write time is left entirely alone and reconsidered next tick.
 
 **Files:**
 - Create: `src/web/refresh.rs`; Modify: `src/web/mod.rs`
@@ -1854,14 +2034,21 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 // trait Database
 async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>>;
 async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>>;
+async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>>;
 async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()>;
+/// Proof: sets BOTH refreshed_generation and refresh_attempted_generation.
 async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()>;
-/// ONE transaction: select up to `limit` due users (see the due rule — users
-/// with queued/running work are not due), create/reset each one's refresh
-/// queue row and set next_refresh_at = `next`. Returns the DIDs claimed. A
-/// failure rolls back everything, so the next tick sees the same users due.
+/// ONE transaction: select up to `limit` due users (see the due rule), then
+/// for each CONDITIONALLY write the refresh queue row (ON CONFLICT … WHERE
+/// status IN ('done','failed')) and, only if that write affected a row, set
+/// next_refresh_at = `next` and refresh_attempted_generation = `current`.
+/// Returns the DIDs actually delivered. A failure rolls back everything.
 async fn claim_and_enqueue_due_refreshes(&self, now_rfc3339: &str, next_rfc3339: &str,
     current_generation: &str, limit: usize) -> Result<Vec<String>>;
+/// The two statements, public so the V2-02 interleaving test can run them
+/// on its own connections around a concurrent manual enqueue.
+pub const REFRESH_DUE_SQL: &str;      // the SELECT … (FOR UPDATE SKIP LOCKED on Postgres)
+pub const REFRESH_ENQUEUE_SQL: &str;  // the conditional INSERT … ON CONFLICT … WHERE
 
 // crate::web::refresh
 pub const REFRESH_INTERVAL_ENV: &str = "CHARCOAL_REFRESH_INTERVAL_HOURS";
@@ -1897,7 +2084,7 @@ mod tests {
     use crate::db::schema::create_tables;
     use crate::db::sqlite::SqliteDatabase;
     use crate::db::{Database, ScanKind};
-    use crate::scoring::generation::SCORING_GENERATION;
+    use crate::scoring::generation::scoring_revision;
     use chrono::{Duration as ChronoDuration, Utc};
     use rusqlite::Connection;
     use std::sync::Arc;
@@ -1908,9 +2095,9 @@ mod tests {
         Arc::new(SqliteDatabase::new(conn))
     }
 
-    /// A user with one score row (so they are eligible), scheduled `at`, last
-    /// refreshed under `generation`.
-    async fn user(db: &Arc<dyn Database>, did: &str, at: Option<&str>, generation: Option<&str>) {
+    /// A user with one score row (so they are eligible), scheduled `at`,
+    /// with `attempted` as the revision last attempted/proven (None = never).
+    async fn user(db: &Arc<dyn Database>, did: &str, at: Option<&str>, attempted: Option<&str>) {
         db.upsert_user(did, &format!("{did}.handle")).await.unwrap();
         let mut score = crate::db::models::AccountScore::default_for_test(did);
         score.threat_score = Some(40.0);
@@ -1919,7 +2106,9 @@ mod tests {
         if let Some(at) = at {
             db.schedule_refresh(did, at).await.unwrap();
         }
-        if let Some(g) = generation {
+        if let Some(g) = attempted {
+            // mark_refreshed_generation sets both columns — a proven revision
+            // is also an attempted one.
             db.mark_refreshed_generation(did, g).await.unwrap();
         }
     }
@@ -1946,10 +2135,10 @@ mod tests {
         let now = Utc::now();
         let past = (now - ChronoDuration::hours(1)).to_rfc3339();
         let future = (now + ChronoDuration::hours(1)).to_rfc3339();
-        user(&db, "did:plc:due-time", Some(&past), Some(SCORING_GENERATION)).await;
+        user(&db, "did:plc:due-time", Some(&past), Some(scoring_revision())).await;
         user(&db, "did:plc:due-gen", Some(&future), Some("1999-01-01")).await;
         user(&db, "did:plc:due-never-refreshed", None, None).await; // v18-migrated shape
-        user(&db, "did:plc:not-due", Some(&future), Some(SCORING_GENERATION)).await;
+        user(&db, "did:plc:not-due", Some(&future), Some(scoring_revision())).await;
         db.upsert_user("did:plc:no-scores", "none.handle").await.unwrap(); // no rows ⇒ never due
 
         let n = enqueue_due_refreshes(&db, now, Duration::from_secs(24 * 3600)).await;
@@ -1960,32 +2149,68 @@ mod tests {
         assert_eq!(queue_kind(&db, "did:plc:not-due").await, None);
         assert_eq!(queue_kind(&db, "did:plc:no-scores").await, None);
 
-        // A tick a minute later claims nobody: the time-due user was
-        // rescheduled, and the generation-due users are still generation-due
-        // (only a COMPLETED refresh proves the generation) but they now have
-        // a queued row, which excludes them from selection until it runs.
+        // A tick a minute later claims nobody: every claimed user was
+        // rescheduled AND stamped refresh_attempted_generation = current, so
+        // neither clause fires again until their deadline.
         let n = enqueue_due_refreshes(&db, now + ChronoDuration::minutes(1), Duration::from_secs(24 * 3600)).await;
         assert_eq!(n, 0);
+        for did in ["did:plc:due-time", "did:plc:due-gen", "did:plc:due-never-refreshed"] {
+            assert_eq!(db.refresh_attempted_generation(did).await.unwrap().as_deref(), Some(scoring_revision()), "{did}");
+            assert_ne!(db.refreshed_generation(did).await.unwrap().as_deref(), Some(scoring_revision()), "{did}: the tick never PROVES a revision");
+        }
     }
 
-    /// A user with queued or running work is not selected: their schedule is
-    /// left alone (the completion path reschedules them) and their row is not
-    /// touched — a queued full scan is never downgraded, a running scan never
-    /// interrupted.
+    /// V2-03: a failed attempt under a new revision waits for its retry
+    /// deadline; it is not re-claimed on the next tick just because the
+    /// revision is still unproven. A NEWER revision during the backoff is
+    /// attempted promptly.
+    #[tokio::test]
+    async fn a_failed_attempt_waits_for_its_retry_deadline() {
+        let db = db();
+        let now = Utc::now();
+        user(&db, "did:plc:retry", None, None).await; // v18-migrated shape: never attempted
+        assert_eq!(enqueue_due_refreshes(&db, now, Duration::from_secs(24 * 3600)).await, 1);
+        // The refresh runs and fails: the row finishes, the retry is scheduled.
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        db.finish_queued_scan("did:plc:retry", &claim.claim_id, Some("boom")).await.unwrap();
+        schedule_retry(db.as_ref(), "did:plc:retry", now).await;
+
+        assert_eq!(enqueue_due_refreshes(&db, now + ChronoDuration::seconds(30), Duration::from_secs(24 * 3600)).await, 0, "30 s later: no new job");
+        assert_eq!(enqueue_due_refreshes(&db, now + ChronoDuration::minutes(61), Duration::from_secs(24 * 3600)).await, 1, "after the deadline: exactly one");
+
+        // A newer revision arrives while a fresh backoff is pending.
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        db.finish_queued_scan("did:plc:retry", &claim.claim_id, Some("boom again")).await.unwrap();
+        let t = now + ChronoDuration::minutes(62);
+        schedule_retry(db.as_ref(), "did:plc:retry", t).await;
+        let promptly = db
+            .claim_and_enqueue_due_refreshes(&(t + ChronoDuration::seconds(30)).to_rfc3339(), &(t + ChronoDuration::hours(24)).to_rfc3339(), "rev-B", 25)
+            .await
+            .unwrap();
+        assert_eq!(promptly, vec!["did:plc:retry".to_string()], "a new revision is attempted at once, once");
+        assert_eq!(db.refresh_attempted_generation("did:plc:retry").await.unwrap().as_deref(), Some("rev-B"));
+    }
+
+    /// A user with queued or running work is not delivered: their schedule
+    /// and attempted revision are left alone (the completion path reschedules
+    /// them) and their row is not touched — a queued full scan is never
+    /// downgraded, a running scan never interrupted. On SQLite the immediate
+    /// transaction makes the select and the write atomic; the write is still
+    /// conditional so the two backends share one contract (V2-02).
     #[tokio::test]
     async fn a_user_with_queued_or_running_work_is_not_claimed() {
         let db = db();
         let now = Utc::now();
         let past = (now - ChronoDuration::hours(1)).to_rfc3339();
-        user(&db, "did:plc:busy", Some(&past), Some(SCORING_GENERATION)).await;
+        user(&db, "did:plc:busy", Some(&past), Some(scoring_revision())).await;
         db.enqueue_scan("did:plc:busy").await.unwrap();
-        user(&db, "did:plc:free", Some(&past), Some(SCORING_GENERATION)).await;
+        user(&db, "did:plc:free", Some(&past), Some(scoring_revision())).await;
 
         let claimed = db
             .claim_and_enqueue_due_refreshes(
                 &now.to_rfc3339(),
                 &(now + ChronoDuration::hours(24)).to_rfc3339(),
-                SCORING_GENERATION,
+                scoring_revision(),
                 25,
             )
             .await
@@ -1995,13 +2220,53 @@ mod tests {
         assert_eq!(db.next_refresh_at("did:plc:busy").await.unwrap().as_deref(), Some(past.as_str()), "schedule untouched");
     }
 
+    /// V2-02 at the SQL level: the conditional write refuses to clobber a
+    /// row that changed between the select and the write. Simulated on one
+    /// connection by running the select, then a manual full enqueue, then
+    /// the tick's write statement.
+    #[tokio::test]
+    async fn the_queue_write_is_conditional_on_the_row_state_at_write_time() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute("INSERT INTO users (did, handle) VALUES ('did:plc:race', 'race.h')", []).unwrap();
+        conn.execute(
+            "INSERT INTO account_scores (user_did, did, handle, threat_score, scoring_generation, valid_until)
+             VALUES ('did:plc:race', 'did:plc:x', 'x.h', 40.0, 'legacy', datetime('now', '-1 day'))",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, finished_at)
+             VALUES ('did:plc:race', 'done', 'full', '2026-09-10T00:00:00+00:00', '2026-09-10T01:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+        // 1. The tick selects: the user is due (never attempted) and has a done row.
+        let due: Vec<String> = conn
+            .prepare(crate::db::queries::REFRESH_DUE_SQL).unwrap()
+            .query_map(rusqlite::params![Utc::now().to_rfc3339(), scoring_revision(), 25i64], |r| r.get(0)).unwrap()
+            .map(Result::unwrap).collect();
+        assert_eq!(due, vec!["did:plc:race".to_string()]);
+        // 2. A manual full enqueue lands in between.
+        crate::db::queries::enqueue_scan(&conn, "did:plc:race").unwrap();
+        // 3. The tick's conditional write affects nothing; the full request survives.
+        let affected = conn
+            .execute(crate::db::queries::REFRESH_ENQUEUE_SQL, rusqlite::params!["did:plc:race", Utc::now().to_rfc3339()])
+            .unwrap();
+        assert_eq!(affected, 0);
+        let (status, kind): (String, String) = conn
+            .query_row("SELECT status, kind FROM scan_queue WHERE user_did = 'did:plc:race'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((status.as_str(), kind.as_str()), ("queued", "full"));
+    }
+
     #[tokio::test]
     async fn a_tick_is_bounded_and_the_rest_wait_for_the_next_one() {
         let db = db();
         let now = Utc::now();
         let past = (now - ChronoDuration::hours(1)).to_rfc3339();
         for i in 0..30 {
-            user(&db, &format!("did:plc:bulk{i:02}"), Some(&past), Some(SCORING_GENERATION)).await;
+            user(&db, &format!("did:plc:bulk{i:02}"), Some(&past), Some(scoring_revision())).await;
         }
         let first = enqueue_due_refreshes(&db, now, Duration::from_secs(3600)).await;
         let second = enqueue_due_refreshes(&db, now, Duration::from_secs(3600)).await;
@@ -2025,7 +2290,7 @@ mod tests {
         let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
         let now = Utc::now();
         let past = (now - ChronoDuration::hours(1)).to_rfc3339();
-        user(&db, "did:plc:unlucky", Some(&past), Some(SCORING_GENERATION)).await;
+        user(&db, "did:plc:unlucky", Some(&past), Some(scoring_revision())).await;
 
         let n = enqueue_due_refreshes(&db, now, Duration::from_secs(3600)).await;
         assert_eq!(n, 0, "nothing claimed when the transaction fails");
@@ -2042,12 +2307,12 @@ mod tests {
         schedule_after_success(db.as_ref(), "did:plc:u", now).await;
         let next = db.next_refresh_at("did:plc:u").await.unwrap().unwrap();
         assert_eq!(next, (now + ChronoDuration::hours(24)).to_rfc3339());
-        assert_eq!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(SCORING_GENERATION));
+        assert_eq!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(scoring_revision()));
 
         schedule_retry(db.as_ref(), "did:plc:u", now).await;
         let next = db.next_refresh_at("did:plc:u").await.unwrap().unwrap();
         assert_eq!(next, (now + ChronoDuration::hours(REFRESH_RETRY_HOURS as i64)).to_rfc3339());
-        assert_eq!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(SCORING_GENERATION), "retry does not unset the generation");
+        assert_eq!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(scoring_revision()), "retry does not unset the generation");
     }
 }
 ```
@@ -2088,6 +2353,30 @@ pub fn mark_refreshed_generation(conn: &Connection, user_did: &str, generation: 
     Ok(())
 }
 
+/// Params: ?1 now (RFC3339), ?2 current revision, ?3 limit.
+pub const REFRESH_DUE_SQL: &str =
+    "SELECT u.did FROM users u
+     WHERE EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
+       AND NOT EXISTS (SELECT 1 FROM scan_queue q
+                       WHERE q.user_did = u.did AND q.status IN ('queued', 'running'))
+       AND ((u.next_refresh_at IS NOT NULL AND u.next_refresh_at <= ?1)
+            OR u.refresh_attempted_generation IS NULL
+            OR u.refresh_attempted_generation != ?2)
+     ORDER BY u.next_refresh_at, u.did
+     LIMIT ?3";
+
+/// Params: ?1 user_did, ?2 now (RFC3339). CONDITIONAL: the WHERE is evaluated
+/// against the row as it is at write time, so a full row queued or admitted
+/// after the select is never clobbered (V2-02). Affects 0 rows in that case.
+pub const REFRESH_ENQUEUE_SQL: &str =
+    "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
+     VALUES (?1, 'queued', 'refresh', ?2)
+     ON CONFLICT(user_did) DO UPDATE SET
+         status = 'queued', kind = 'refresh', enqueued_at = ?2,
+         started_at = NULL, finished_at = NULL, lease_expires = NULL,
+         last_error = NULL, claim_id = NULL, full_requested_at = NULL
+     WHERE status IN ('done', 'failed')";
+
 /// See `Database::claim_and_enqueue_due_refreshes`. Immediate transaction:
 /// the write lock is taken before the select so two ticks in one process
 /// (or the CLI and the web) serialise here.
@@ -2100,40 +2389,30 @@ pub fn claim_and_enqueue_due_refreshes(
 ) -> Result<Vec<String>> {
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     let due: Vec<String> = {
-        let mut stmt = tx.prepare(
-            "SELECT u.did FROM users u
-             WHERE EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
-               AND NOT EXISTS (SELECT 1 FROM scan_queue q
-                               WHERE q.user_did = u.did AND q.status IN ('queued', 'running'))
-               AND ((u.next_refresh_at IS NOT NULL AND u.next_refresh_at <= ?1)
-                    OR u.refreshed_generation IS NULL
-                    OR u.refreshed_generation != ?2)
-             ORDER BY u.next_refresh_at, u.did
-             LIMIT ?3",
-        )?;
+        let mut stmt = tx.prepare(REFRESH_DUE_SQL)?;
         stmt.query_map(params![now_rfc3339, current_generation, limit as i64], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    for did in &due {
-        // The row is done/failed/absent by construction (see the NOT EXISTS
-        // above), so this always creates or resets it.
+    let mut delivered = Vec::with_capacity(due.len());
+    for did in due {
+        let affected = tx.execute(REFRESH_ENQUEUE_SQL, params![did, now_rfc3339])?;
+        if affected == 0 {
+            // The row changed under us (queued/running now). Leave the
+            // schedule alone: whatever is running reschedules on completion.
+            continue;
+        }
         tx.execute(
-            "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
-             VALUES (?1, 'queued', 'refresh', ?2)
-             ON CONFLICT(user_did) DO UPDATE SET
-                 status = 'queued', kind = 'refresh', enqueued_at = ?2,
-                 started_at = NULL, finished_at = NULL, lease_expires = NULL,
-                 last_error = NULL, claim_id = NULL, full_requested_at = NULL",
-            params![did, now_rfc3339],
+            "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+            params![did, next_rfc3339, current_generation],
         )?;
-        tx.execute("UPDATE users SET next_refresh_at = ?2 WHERE did = ?1", params![did, next_rfc3339])?;
+        delivered.push(did);
     }
     tx.commit()?;
-    Ok(due)
+    Ok(delivered)
 }
 ```
 
-Postgres: the same in one `BEGIN … COMMIT` over `self.pool.begin()`: `SELECT u.did FROM users u WHERE EXISTS (…scores…) AND NOT EXISTS (SELECT 1 FROM scan_queue q WHERE q.user_did = u.did AND q.status IN ('queued','running')) AND ((next_refresh_at IS NOT NULL AND next_refresh_at <= $1::timestamptz) OR refreshed_generation IS DISTINCT FROM $2) ORDER BY next_refresh_at NULLS FIRST, did LIMIT $3 FOR UPDATE OF u SKIP LOCKED` (two replicas ticking together partition the due set instead of colliding), then per user the `INSERT … ON CONFLICT (user_did) DO UPDATE SET …` (no `WHERE` — the row is finished or absent by construction) and `UPDATE users SET next_refresh_at = $2::timestamptz WHERE did = $1`; commit. `next_refresh_at`/`refreshed_generation` getters render `to_rfc3339()`.
+Postgres: the same two statements as `pub const`s in `postgres.rs` (`$1::timestamptz`, `refresh_attempted_generation IS DISTINCT FROM $2`, `ORDER BY next_refresh_at NULLS FIRST, did LIMIT $3 FOR UPDATE OF u SKIP LOCKED` — two replicas ticking together partition the due set), in one `BEGIN … COMMIT` over `self.pool.begin()`; per user the conditional `INSERT … ON CONFLICT (user_did) DO UPDATE SET … WHERE scan_queue.status IN ('done','failed')`, and the `users` update only when `rows_affected() == 1`. Lock order: `users` (FOR UPDATE) then `scan_queue`; `enqueue_scan`/`finish_queued_scan` lock only `scan_queue`; `schedule_*` only `users` — no cycle. The `NOT EXISTS` in the select is an optimisation; the conditional write is the guarantee. `next_refresh_at`/`refreshed_generation` getters render `to_rfc3339()`.
 
 - [ ] **Step 4: `src/web/refresh.rs` implementation (above the tests)**
 
@@ -2145,7 +2424,7 @@ use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
 
 use crate::db::Database;
-use crate::scoring::generation::SCORING_GENERATION;
+use crate::scoring::generation::scoring_revision;
 
 pub const REFRESH_INTERVAL_ENV: &str = "CHARCOAL_REFRESH_INTERVAL_HOURS";
 pub const DEFAULT_REFRESH_INTERVAL_HOURS: u64 = 24;
@@ -2192,7 +2471,7 @@ fn plus(now: DateTime<Utc>, d: Duration) -> String {
 /// Errors are logged, never propagated — this runs on the admitter loop.
 pub async fn enqueue_due_refreshes(db: &Arc<dyn Database>, now: DateTime<Utc>, interval: Duration) -> usize {
     match db
-        .claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &plus(now, interval), SCORING_GENERATION, REFRESH_BATCH_PER_TICK)
+        .claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &plus(now, interval), scoring_revision(), REFRESH_BATCH_PER_TICK)
         .await
     {
         Ok(claimed) => {
@@ -2221,13 +2500,17 @@ pub async fn schedule_after_success(db: &dyn Database, user_did: &str, now: Date
             warn!(error = %format!("{e:#}"), "could not schedule the next refresh");
         }
     }
-    if let Err(e) = db.mark_refreshed_generation(user_did, SCORING_GENERATION).await {
+    // Proof: sets refreshed_generation AND refresh_attempted_generation.
+    if let Err(e) = db.mark_refreshed_generation(user_did, scoring_revision()).await {
         warn!(error = %format!("{e:#}"), "could not record refreshed_generation");
     }
 }
 
-/// After a deferred, resumable or failed refresh: retry soon. Does not touch
-/// refreshed_generation — only a completed refresh proves the generation.
+/// After a deferred, resumable, partially completed or failed attempt: retry
+/// at the deadline. Touches only next_refresh_at — refresh_attempted_generation
+/// was set by the tick that claimed this attempt, so the revision clause
+/// stays quiet until the deadline (V2-03); refreshed_generation stays
+/// unproven so the runbook can see the user is behind.
 pub async fn schedule_retry(db: &dyn Database, user_did: &str, now: DateTime<Utc>) {
     if let Err(e) = db
         .schedule_refresh(user_did, &plus(now, Duration::from_secs(REFRESH_RETRY_HOURS * 3600)))
@@ -2253,11 +2536,14 @@ pub async fn schedule_retry(db: &dyn Database, user_did: &str, now: DateTime<Utc
         }
 ```
 
-`spawn_admitter` passes `crate::web::refresh::refresh_interval_from_env()`; the three test spawns pass `None`. Add the admitter test `the_tick_enqueues_and_admits_a_due_refresh` (user with one score row, `refreshed_generation` NULL, tick 20 ms, `RecordingLauncher::notifying`; assert the launched DID and, via a new `kinds()` accessor on `RecordingLauncher`, `ScanKind::Refresh`). `src/web/scan_job.rs` `run_scan`, in the `if result.is_ok()` block from Task 5: `crate::web::refresh::schedule_after_success(db.as_ref(), user_did, chrono::Utc::now()).await;`.
+`spawn_admitter` passes `crate::web::refresh::refresh_interval_from_env()`; the three test spawns pass `None`. Add the admitter test `the_tick_enqueues_and_admits_a_due_refresh` (user with one score row, `refreshed_generation` NULL, tick 20 ms, `RecordingLauncher::notifying`; assert the launched DID and, via a new `kinds()` accessor on `RecordingLauncher`, `ScanKind::Refresh`). `src/web/scan_job.rs` `run_scan`, using Task 5's `completion`: `Some(ScanCompletion::Complete)` → `schedule_after_success`; `Some(ScanCompletion::CompleteWithSkips { .. })` → `schedule_retry` (the run is not proof of the revision; the hourly retry covers what a refresh can, the user's next full run the rest); `Some(ScanCompletion::Resumable)` and `None` (`Err`) → `schedule_retry`. A full scan proves the revision only when it truly completed (V2-05).
 
 - [ ] **Step 6: Postgres twins**
 
-Append to `tests/db_postgres.rs`: `test_pg_claim_and_enqueue_is_one_transaction_and_bounded` (seed 3 due users + 1 not due + 1 without scores + 1 due-by-generation + 1 due-by-time with a queued full row; claim with limit 2 → 2 DIDs, rows queued refresh, `next_refresh_at` advanced for exactly those 2; claim again → the remaining 2 (never the busy one); claim again → 0) and `test_pg_two_schedulers_partition_the_due_set` (two connections, `BEGIN` both, run the claim in each with limit 25 over 10 due users concurrently via `tokio::join!` — assert the union is the 10 users and the intersection is empty; `SKIP LOCKED` is what makes this hold).
+Append to `tests/db_postgres.rs`:
+- `test_pg_claim_and_enqueue_is_one_transaction_and_bounded` (seed 3 due users + 1 not due + 1 without scores + 1 due-by-revision + 1 due-by-time with a queued full row; claim with limit 2 → 2 DIDs, rows queued refresh, `next_refresh_at` and `refresh_attempted_generation` set for exactly those 2; claim again → the remaining 2 (never the busy one); claim again → 0);
+- `test_pg_two_schedulers_partition_the_due_set` (two `PgDatabase`s over two pools, `tokio::join!` the claim with limit 25 over 10 due users — union is the 10, intersection empty; `SKIP LOCKED`);
+- **`test_pg_scheduler_write_does_not_clobber_a_concurrent_full_enqueue` (V2-02):** connection A: `BEGIN`, run `REFRESH_DUE_SQL` (locks the user row, returns `did:plc:pgrace`); connection B (a separate `PgDatabase`): `enqueue_scan("did:plc:pgrace")` — commits, the done row is now `queued full`; connection A: run `REFRESH_ENQUEUE_SQL` for the DID → `rows_affected() == 0`; skip the `users` update; `COMMIT`. Assert the row is still `queued full`, `next_refresh_at` and `refresh_attempted_generation` unchanged. Variant 2: after B's enqueue, B also `claim_next_scan(1, 60)` (the full scan is admitted, `running` with a claim id and lease) before A's write — assert kind/status/claim_id/lease_expires unchanged. Variant 3: no queue row exists at select time; B enqueues (inserts) between; A's INSERT conflicts, the WHERE sees `queued`, 0 rows. All three run the real statements because they are `pub const`.
 
 - [ ] **Step 7: Run**
 
@@ -2268,16 +2554,17 @@ Expected: green.
 
 ```bash
 git add src/web/refresh.rs src/web/mod.rs src/observability/refresh_metrics.rs src/observability/mod.rs src/db/traits.rs src/db/models.rs src/db/queries.rs src/db/sqlite.rs src/db/postgres.rs src/web/admitter.rs src/web/scan_job.rs tests/db_postgres.rs
-git commit -m 'feat(344): durable, bounded, generation-aware refresh scheduling on the admitter tick
+git commit -m 'feat(344): durable, bounded, revision-aware refresh scheduling with conditional queue writes
 
 claim_and_enqueue_due_refreshes: one transaction per tick (SKIP LOCKED
 on Postgres, immediate tx on SQLite) that selects up to 25 due users
-with no queued/running work, creates their refresh rows and advances
-next_refresh_at together — a failure advances nothing. Due = next_refresh_at passed OR
-refreshed_generation is not current, so a generation bump refreshes
-everyone without a migration stamp. Completed refreshes and successful
-full scans schedule the next nightly and prove the generation; deferred
-or failed ones retry in an hour.
+and writes each refresh row CONDITIONALLY (ON CONFLICT … WHERE done/failed),
+advancing next_refresh_at + refresh_attempted_generation only for rows it
+actually wrote — a concurrent manual enqueue or admission survives. Due =
+next_refresh_at passed OR refresh_attempted_generation is not the current
+revision, so a revision change is attempted promptly, once, and a failed
+attempt waits for its retry deadline. Completed refreshes and truly
+complete full scans prove the revision; everything else retries in an hour.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
@@ -2317,7 +2604,7 @@ Create `tests/unit_refresh_candidates.rs`:
 
 use charcoal::db::queries::list_refresh_candidates;
 use charcoal::db::schema::create_tables;
-use charcoal::scoring::generation::{LEGACY_GENERATION, SCORING_GENERATION};
+use charcoal::scoring::generation::{scoring_revision, LEGACY_GENERATION};
 use rusqlite::{params, Connection};
 
 const USER: &str = "did:plc:refreshuser0000000000000";
@@ -2343,16 +2630,16 @@ fn selects_high_and_elevated_rows_that_are_expiring_expired_malformed_or_old_gen
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
     // Included:
-    insert(&conn, USER, "did:plc:high-expiring", 60.0, &days(1), SCORING_GENERATION, Some("Stranger"));
-    insert(&conn, USER, "did:plc:high-expired", 40.0, &days(-3), SCORING_GENERATION, Some("Follows you"));
-    insert(&conn, USER, "did:plc:high-null", 45.0, "NULL", SCORING_GENERATION, None);
-    insert(&conn, USER, "did:plc:high-malformed", 42.0, "'yesterday-ish'", SCORING_GENERATION, None);
+    insert(&conn, USER, "did:plc:high-expiring", 60.0, &days(1), scoring_revision(), Some("Stranger"));
+    insert(&conn, USER, "did:plc:high-expired", 40.0, &days(-3), scoring_revision(), Some("Follows you"));
+    insert(&conn, USER, "did:plc:high-null", 45.0, "NULL", scoring_revision(), None);
+    insert(&conn, USER, "did:plc:high-malformed", 42.0, "'yesterday-ish'", scoring_revision(), None);
     insert(&conn, USER, "did:plc:elevated-legacy", 20.0, &days(10), LEGACY_GENERATION, None);
-    insert(&conn, USER, "did:plc:elevated-floor", 15.0, &days(1), SCORING_GENERATION, None);
+    insert(&conn, USER, "did:plc:elevated-floor", 15.0, &days(1), scoring_revision(), None);
     // Excluded:
-    insert(&conn, USER, "did:plc:high-fresh", 50.0, &days(10), SCORING_GENERATION, None);
+    insert(&conn, USER, "did:plc:high-fresh", 50.0, &days(10), scoring_revision(), None);
     insert(&conn, USER, "did:plc:watch-legacy", 14.99, &days(1), LEGACY_GENERATION, None);
-    insert(&conn, "did:plc:otheruser", "did:plc:high-other", 60.0, &days(1), SCORING_GENERATION, None);
+    insert(&conn, "did:plc:otheruser", "did:plc:high-other", 60.0, &days(1), scoring_revision(), None);
     conn.execute(
         "INSERT INTO account_scores (user_did, did, handle, threat_tier, scoring_generation, valid_until)
          VALUES (?1, 'did:plc:na', 'na.handle', 'NotAssessed', ?2, datetime('now', '-1 days'))",
@@ -2382,9 +2669,9 @@ fn selects_high_and_elevated_rows_that_are_expiring_expired_malformed_or_old_gen
 fn horizon_zero_means_only_already_expired_or_old_generation() {
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
-    insert(&conn, USER, "did:plc:soon", 60.0, &days(1), SCORING_GENERATION, None);
-    insert(&conn, USER, "did:plc:gone", 60.0, &days(-1), SCORING_GENERATION, None);
-    insert(&conn, USER, "did:plc:boundary", 60.0, "datetime('now')", SCORING_GENERATION, None);
+    insert(&conn, USER, "did:plc:soon", 60.0, &days(1), scoring_revision(), None);
+    insert(&conn, USER, "did:plc:gone", 60.0, &days(-1), scoring_revision(), None);
+    insert(&conn, USER, "did:plc:boundary", 60.0, "datetime('now')", scoring_revision(), None);
     let dids: Vec<String> = list_refresh_candidates(&conn, USER, 0).unwrap().into_iter().map(|r| r.did).collect();
     assert_eq!(dids, ["did:plc:gone", "did:plc:boundary"], "valid_until == now is expired (fresh is strict >)");
 }
@@ -2409,7 +2696,7 @@ fn candidate_query_uses_the_user_score_index() {
             charcoal::db::queries::REFRESH_CANDIDATES_SQL
         ))
         .unwrap()
-        .query_map(params![USER, 15.0, "+2 days", SCORING_GENERATION], |r| r.get::<_, String>(3))
+        .query_map(params![USER, 15.0, "+2 days", scoring_revision()], |r| r.get::<_, String>(3))
         .unwrap()
         .map(Result::unwrap)
         .collect();
@@ -2431,7 +2718,7 @@ Expected: compile error (expected at compile time — `list_refresh_candidates`,
 
 ```rust
 /// Public so the index test can EXPLAIN exactly this statement (R12).
-/// Params: ?1 user_did, ?2 ThreatTier::ELEVATED_MIN, ?3 "+N days", ?4 SCORING_GENERATION.
+/// Params: ?1 user_did, ?2 ThreatTier::ELEVATED_MIN, ?3 "+N days", ?4 scoring_revision().
 /// COALESCE(…, 1): a NULL or malformed valid_until is expired, hence eligible
 /// — the mirror of FRESH_SQL's COALESCE(…, 0) (R11).
 pub const REFRESH_CANDIDATES_SQL: &str =
@@ -2446,7 +2733,7 @@ pub fn list_refresh_candidates(conn: &Connection, user_did: &str, horizon_days: 
     let mut stmt = conn.prepare(REFRESH_CANDIDATES_SQL)?;
     let rows = stmt
         .query_map(
-            params![user_did, ThreatTier::ELEVATED_MIN, format!("+{horizon_days} days"), SCORING_GENERATION],
+            params![user_did, ThreatTier::ELEVATED_MIN, format!("+{horizon_days} days"), scoring_revision()],
             |r| Ok(RefreshCandidate { did: r.get(0)?, handle: r.get(1)?, graph_distance: r.get(2)? }),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2489,12 +2776,12 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 
 ### Task 8: Extract the shared scan setup — and make missing context an error, not an absence
 
-**Why:** `run_refresh` (Task 9) needs the scorer bundle, protected-post embeddings, pile-on set and direct-pair loading that `run_scan` and `amplification::run` build inline. R05: the extracted helpers must **return errors**. Today `direct_pairs_for`'s equivalent swallows a read failure into an empty list (which flips the account to the follower path) and the embedding step swallows into `None` (missing context). A full scan may still choose to degrade at its call site — that is today's behaviour and stays — but the helper itself must not decide that for the refresh.
+**Why:** `run_refresh` (Task 9) needs the scorer bundle, protected-post embeddings, pile-on set and direct-pair loading that `run_scan` and `amplification::run` build inline. R05: the extracted helpers must **return errors**. Today `direct_pairs_for`'s equivalent swallows a read failure into an empty list (which flips the account to the follower path) and the embedding step swallows into `None` (missing context). A full scan may still choose to degrade at its call site — that is today's behaviour and stays — but the helper itself must not decide that for the refresh. V2-04: this task also makes the full scan's fingerprint **rebuild decision** (`scan_job.rs:807-861`) check the embedding model identity, and forbids the existing fall-back-to-the-old-fingerprint path when the reason for rebuilding is model incompatibility.
 
 **Files:**
 - Modify: `src/pipeline/amplification.rs:340-366` → `pub async fn direct_pairs_for(...) -> Result<Vec<(String, String)>>`
-- Modify: `src/web/scan_job.rs:693-735` → `ScanScorers` + `build_scan_scorers`; `:1108-1128` → `record_scan_cache_stats`; `:875-900` → `embed_protected_posts(...) -> Result<Vec<(String, Vec<f64>)>>`; `:1045-1053` → `pile_on_dids`
-- Test: `tests/unit_direct_pairs.rs` (new); existing suites for "nothing changed"
+- Modify: `src/web/scan_job.rs:693-735` → `ScanScorers` + `build_scan_scorers`; `:1108-1128` → `record_scan_cache_stats`; `:875-900` → `embed_protected_posts(...) -> Result<Vec<(String, Vec<f64>)>>`; `:1045-1053` → `pile_on_dids`; `:807-861` → `RebuildReason` + `rebuild_decision` + no-fallback-on-incompatible (V2-04)
+- Test: `tests/unit_direct_pairs.rs` (new); `src/web/scan_job.rs` inline tests for `rebuild_decision`; existing suites for "nothing changed"
 
 **Interfaces:**
 ```rust
@@ -2512,7 +2799,64 @@ pub(crate) async fn record_scan_cache_stats(db: &dyn Database, user_did: &str, s
 /// Err on fetch or embedding failure; Ok(empty) when the user has no posts.
 pub(crate) async fn embed_protected_posts(client: &PublicAtpClient, embedder: &SentenceEmbedder, actor_handle: &str) -> anyhow::Result<Vec<(String, Vec<f64>)>>;
 pub(crate) async fn pile_on_dids(db: &dyn Database, user_did: &str) -> anyhow::Result<HashSet<String>>;
+
+/// Why the protected fingerprint must be rebuilt before this scan (V2-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildReason { Absent, Unreadable, Stale, Format, IncompatibleModel }
+impl RebuildReason {
+    /// Only age/format rebuilds may fall back to the stored fingerprint when
+    /// the rebuild fails; incompatible vectors must never be scored against.
+    pub fn fallback_allowed(&self) -> bool { matches!(self, RebuildReason::Stale | RebuildReason::Format) }
+}
+/// Pure decision: `None` = the stored fingerprint is usable as-is.
+pub fn rebuild_decision(stored: Option<&(String, String)> /* (json, updated_at) */, parsed_ok: bool,
+    has_embedding: bool, stored_model_id: Option<&str>, centroid_rows: usize, json_clusters: usize,
+    now: chrono::NaiveDateTime) -> Option<RebuildReason>;
 ```
+
+- [ ] **Step 0: Write the failing rebuild-decision tests (inline, `scan_job.rs`)**
+
+```rust
+    #[test]
+    fn rebuild_decision_orders_reasons_and_flags_model_incompatibility() {
+        let now = chrono::Utc::now().naive_utc();
+        let fresh = (now - chrono::Duration::days(1)).format("%Y-%m-%d %H:%M:%S").to_string();
+        let old = (now - chrono::Duration::days(20)).format("%Y-%m-%d %H:%M:%S").to_string();
+        let stored = |t: &str| Some(("{}".to_string(), t.to_string()));
+        assert_eq!(rebuild_decision(None, false, false, None, 0, 0, now), Some(RebuildReason::Absent));
+        assert_eq!(rebuild_decision(stored(&fresh).as_ref(), false, true, Some(EMBEDDING_MODEL_ID), 3, 3, now), Some(RebuildReason::Unreadable));
+        // Same dimensions, same cluster count, different model: incompatible.
+        assert_eq!(rebuild_decision(stored(&fresh).as_ref(), true, true, Some("other-model"), 3, 3, now), Some(RebuildReason::IncompatibleModel));
+        // A vector with NO recorded model is incompatible too — never assume.
+        assert_eq!(rebuild_decision(stored(&fresh).as_ref(), true, true, None, 3, 3, now), Some(RebuildReason::IncompatibleModel));
+        assert_eq!(rebuild_decision(stored(&old).as_ref(), true, true, Some(EMBEDDING_MODEL_ID), 3, 3, now), Some(RebuildReason::Stale));
+        assert_eq!(rebuild_decision(stored(&fresh).as_ref(), true, true, Some(EMBEDDING_MODEL_ID), 0, 3, now), Some(RebuildReason::Format));
+        assert_eq!(rebuild_decision(stored(&fresh).as_ref(), true, true, Some(EMBEDDING_MODEL_ID), 3, 3, now), None);
+        // Keyword-only fingerprints have no vectors to be incompatible.
+        assert_eq!(rebuild_decision(stored(&fresh).as_ref(), true, false, None, 0, 3, now), None);
+        assert!(RebuildReason::Stale.fallback_allowed());
+        assert!(!RebuildReason::IncompatibleModel.fallback_allowed());
+        assert!(!RebuildReason::Absent.fallback_allowed());
+    }
+```
+
+Then in `run_scan` (`:807-861`) replace the `needs_rebuild` boolean with `rebuild_decision(...)` (model id from `db.fingerprint_embedding_model(user_did)`), and the rebuild-failure arm becomes:
+
+```rust
+            Err(e) if reason.fallback_allowed() && stored_fingerprint.is_some() => {
+                warn!(error = %e, ?reason, "Fingerprint refresh failed; using the stored (compatible) fingerprint");
+                stored_fingerprint.expect("checked")
+            }
+            Err(e) => {
+                // Absent, unreadable, or built by another embedding model: there is
+                // nothing safe to fall back to. Abort before any account is scored
+                // (V2-04) — a score against incompatible vectors would be stamped
+                // current and hide the real state until it expired.
+                return Err(e).with_context(|| format!("fingerprint rebuild required ({reason:?}) and failed — scan aborted before scoring"));
+            }
+```
+
+`build_user_fingerprint` and every `save_fingerprint_bundle` caller pass `Some(EMBEDDING_MODEL_ID)` when an embedding is written; `migrate` copies the source's `fingerprint_embedding_model` verbatim (`None` stays `None` — the v18 backfill is the only place a missing id is ever filled, and only because one model has ever existed; an import never labels vectors). The refresh → full handover (Task 9, `request_full_after_refresh`) lands in exactly this path: the queued full scan runs `run_scan`, whose `rebuild_decision` returns `IncompatibleModel` and rebuilds or aborts.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2667,14 +3011,14 @@ pub(crate) async fn embed_protected_posts(
 
 - [ ] **Step 4: Run — this task's contract is "nothing changed" for full scans**
 
-Run: `cargo test --test unit_direct_pairs`, `VERIFY_WEB`, `VERIFY_CLIPPY`.
+Run: `cargo test --test unit_direct_pairs`, `cargo test --features web --lib web::scan_job rebuild_decision`, `VERIFY_WEB`, `VERIFY_CLIPPY`.
 Expected: green, zero `SKIP:`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/pipeline/amplification.rs src/web/scan_job.rs tests/unit_direct_pairs.rs
-git commit -m 'refactor(344): extract scan setup helpers; context loaders return errors, callers decide
+git commit -m 'refactor(344): extract scan setup helpers; context loaders return errors; rebuild decision checks the embedding model and never falls back to incompatible vectors
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
@@ -2684,7 +3028,7 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 
 ### Task 9: `run_refresh` — ownership, resume, compatibility, honest outcomes
 
-**Why:** The job itself, built on the contracts the review forced: staging carries its owner (R02), inputs must be compatible before a current stamp is published (R03), missing context fails the run instead of lowering a score (R05), the cache metric is per-run and only claims what it measured (R08), and every outcome drives the schedule (R02/R04).
+**Why:** The job itself, built on the contracts both reviews forced: staging carries its owner (R02), inputs must be compatible before a current stamp is published — fingerprint model, blob revision, and the classifier's **model and policy** (R03, V2-01), missing context fails the run instead of lowering a score and that failure path is a mandatory deterministic test through an injectable boundary (R05, V2), the cache metric is per-run and only claims what it measured (R08), and every outcome — including "completed but some accounts were skipped" — drives the schedule explicitly (R02/R04, V2-05).
 
 **Ownership markers.** `run_phased_scan` gains a `RunIdentity { kind: ScanKind, generation: &'static str }` parameter. At a fresh start it writes `scan_run_kind` and `scan_run_generation` to `scan_state` together with `scan_phase = gather`. On entry with a resumable marker it reads both and:
 - generation ≠ current → `clear_scan_staging`, clear the three markers, fresh start (old binary's leftovers; R03);
@@ -2696,23 +3040,26 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 - Full scan finds `OwnedByOtherKind(Refresh)` → **drain first**: call `run_phased_scan` with `RunIdentity::refresh()` and the refresh's re-derived candidates (`list_refresh_candidates`) until it returns `Done` (if it cost-caps again, the full scan reports itself degraded/resumable exactly as today and stops — the next full scan drains again), then clear markers and fresh-start its own gather. The refresh's `refreshed_generation` is **not** marked by this path (the refresh did not complete under its own claim); the full scan's own success marks it.
 - Refresh finds its own kind → resume with the current `list_refresh_candidates` as the candidate list (finalize does not need candidates; recovery for an account no longer in the list is a documented skip, as `recover_account` already handles "missing candidate").
 
-**Verdict compatibility (R03).** `finalize_account` receives `expected_policy_version: &str` through `PhasedScanDeps` (the running classifier's `policy_version()`); a `done` row whose `policy_version` differs is treated like an incomplete row → `NeedsRegather` (the decode-error sentinel's own `policy_version` is the classifier's, so #355's sentinel rows are unaffected here).
+**Verdict compatibility (R03, V2-01).** `finalize_account` receives `expected_classifier: ClassifierIdentity { model_id, policy_version }` through `PhasedScanDeps` (the running classifier's `model_id()` and `policy_version()` — add `fn model_id(&self) -> &str` to `ToxicityClassifier` if it only exposes `name()`; the value must be the same string the classifier writes into `VerdictRow.model_id`). A `done` row whose `model_id` **or** `policy_version` differs is treated like an incomplete row → `NeedsRegather`. The decode-error sentinel (`model_id = "decode-error"`, #355) therefore also fails this check and is re-classified on resume — intended: a sentinel is not evidence.
 
-**Outcomes.**
+**Outcomes (V2-05).**
 ```rust
 pub enum RefreshOutcome {
-    Completed { candidates: usize, scored: usize, degraded_accounts: usize },
+    Completed { candidates: usize, scored: usize },              // every candidate re-scored, staging drained
+    CompletedWithSkips { candidates: usize, scored: usize, skipped: usize }, // drained, but skipped accounts stay expired
     NothingDue,
     Deferred(DeferReason),   // FullScanResumable | NoFingerprint | IncompatibleFingerprint
     Resumable,               // cost cap / transient interruption: markers left, own kind
 }
+pub struct Bookkeeping { pub prove_revision: bool, pub retry: bool, pub request_full: bool, pub degraded: bool }
+impl RefreshOutcome { pub fn bookkeeping(&self) -> Bookkeeping; pub fn label(&self) -> String; }
 ```
-`Completed`/`NothingDue` → `schedule_after_success` (next nightly, generation proven). `Deferred`/`Resumable` → `schedule_retry` (1 h); `IncompatibleFingerprint` and `NoFingerprint` additionally call `request_full_after_refresh` (Task 5's `full_requested_at`, on its own row) so the user's next admitted run is a full scan that rebuilds; an `Err` from `run_refresh` → row `failed`, `schedule_retry`. The full-scan cooldown marker is never written by a refresh.
+`Completed`/`NothingDue` → `prove_revision` (`schedule_after_success`: nightly + `refreshed_generation`). `CompletedWithSkips` → `retry` (skipped High/Elevated rows are still expired candidates; the hourly retry picks them up; successful writes are kept), `degraded`. `Deferred(_)`/`Resumable` → `retry`, `degraded`; `NoFingerprint`/`IncompatibleFingerprint` additionally `request_full` (Task 5's `full_requested_at` on the refresh's own row, so the user's next admitted run is a full scan that rebuilds under Task 8's `rebuild_decision`). An `Err` from the run → row `failed`, `schedule_retry`. `degraded` is what `finish_scan` shows in the status, so completed-but-skipped work does not read as clean. The full-scan cooldown marker is never written by a refresh.
 
 **Files:**
 - Create: `src/web/refresh_scan.rs`; Modify: `src/web/mod.rs`
-- Modify: `src/pipeline/scan_phases/mod.rs:149-215` (`RunIdentity`, markers, `PhasedScanError`), `finalize.rs:252-268` (`verdict_for` policy check), `PhasedScanDeps` (`expected_policy_version`), `src/pipeline/amplification.rs:520-556` (pass identity + policy), `src/pipeline/sweep.rs` (same), `src/web/scan_job.rs` (`launch_scan(kind)`, drain transition, `set_progress`/`finish_scan` pub(crate), `record_scan_outcome` label), `src/web/admitter.rs:497-520`, `src/db/traits.rs` (+ `request_full_after_refresh(user_did)`)
-- Test: `src/web/refresh_scan.rs` inline; `tests/unit_scan_phases.rs` (append); `src/web/admitter.rs` (kinds)
+- Modify: `src/pipeline/scan_phases/mod.rs:149-215` (`RunIdentity`, markers, `PhasedScanError`), `finalize.rs:252-268` (`verdict_for` model + policy check), `PhasedScanDeps` (`expected_classifier`), `src/toxicity/classifier.rs` (`model_id()` if missing), `src/pipeline/amplification.rs:520-556` (pass identity + classifier identity), `src/pipeline/sweep.rs` (same), `src/web/scan_job.rs` (`launch_scan(kind)`, drain transition classified via `classify_full_scan`, `set_progress`/`finish_scan` pub(crate), `record_scan_outcome` label), `src/web/admitter.rs:497-520`, `src/db/traits.rs` (+ `request_full_after_refresh(user_did)`)
+- Test: `src/web/refresh_scan.rs` inline (pure functions **and** the mandatory missing-context failure test through `RefreshContextSource`); `tests/unit_scan_phases.rs` (append); `src/web/admitter.rs` (kinds)
 
 **Interfaces:**
 ```rust
@@ -2729,6 +3076,25 @@ pub const RUN_KIND_KEY: &str = "scan_run_kind"; pub const RUN_GENERATION_KEY: &s
 pub const REFRESH_HORIZON_DAYS: i64 = 2;
 pub enum RefreshOutcome { … } // above
 pub fn to_candidate(row: &RefreshCandidate, pairs: Vec<(String, String)>, pile_on: &HashSet<String>) -> CandidateInput;
+/// The fallible context loads, behind a trait so the failure path is testable
+/// without models (V2 mandatory test). Production impl wraps Task 8's helpers.
+#[async_trait]
+pub trait RefreshContextSource: Send + Sync {
+    async fn fingerprint(&self, user_did: &str) -> anyhow::Result<Option<(TopicFingerprint, Option<Vec<f64>>, Vec<Vec<f64>>, Option<String> /*embedding_model_id*/)>>;
+    async fn candidates(&self, user_did: &str) -> anyhow::Result<Vec<RefreshCandidate>>;
+    async fn protected_posts_embeddings(&self, actor_handle: &str) -> anyhow::Result<Vec<(String, Vec<f64>)>>;
+    async fn pile_on(&self, user_did: &str) -> anyhow::Result<HashSet<String>>;
+    async fn direct_pairs(&self, user_did: &str, amplifier_did: &str) -> anyhow::Result<Vec<(String, String)>>;
+    async fn median_engagement(&self, user_did: &str) -> anyhow::Result<f64>;
+}
+pub struct RefreshPlan { pub fingerprint: TopicFingerprint, pub protected_embedding: Option<Vec<f64>>, pub centroids: Vec<Vec<f64>>, pub protected_posts: Vec<(String, Vec<f64>)>, pub median_engagement: f64, pub candidates: Vec<CandidateInput> }
+/// Everything before the pipeline. Ok(Ok(plan)) | Ok(Err(defer reason)) | Err (missing context — nothing is written).
+pub async fn prepare_refresh(ctx: &dyn RefreshContextSource, user_did: &str, actor_handle: &str) -> anyhow::Result<Result<RefreshPlan, DeferReason>>;
+/// Generic over the pipeline so a test can pass one that must not be called.
+pub(crate) async fn run_refresh_with<F, Fut>(db: Arc<dyn Database>, scan_manager: Arc<RwLock<ScanManager>>, ctx: &dyn RefreshContextSource,
+    user_did: &str, actor_handle: &str, claim_id: &str, pipeline: F) -> anyhow::Result<()>
+    where F: FnOnce(RefreshPlan) -> Fut, Fut: Future<Output = anyhow::Result<ScanSummary>>;
+/// Production: real context source + the real run_phased_scan.
 pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, actor_handle, claim_id) -> anyhow::Result<()>;
 ```
 `scan_state` keys written by a refresh: `refresh_last_run_id` (= claim_id), `refresh_last_outcome` (`completed|nothing_due|deferred:<reason>|resumable|failed`), `refresh_last_run_at`, `refresh_candidates`, `refresh_scored`, `refresh_feed_cache_hits`, `refresh_feed_cache_misses`, `refresh_feed_cache_applicable` (`1` only when candidates > 0). All eight are (re)written at the **start** of every run (zeros / `running`) so a previous run's numbers can never be read as this run's (R08).
@@ -2765,7 +3131,100 @@ pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, acto
         assert_eq!(RefreshOutcome::NothingDue.label(), "nothing_due");
         assert_eq!(RefreshOutcome::Deferred(DeferReason::FullScanResumable).label(), "deferred:full_scan_resumable");
         assert_eq!(RefreshOutcome::Resumable.label(), "resumable");
-        assert_eq!(RefreshOutcome::Completed { candidates: 3, scored: 3, degraded_accounts: 0 }.label(), "completed");
+        assert_eq!(RefreshOutcome::Completed { candidates: 3, scored: 3 }.label(), "completed");
+        assert_eq!(RefreshOutcome::CompletedWithSkips { candidates: 3, scored: 2, skipped: 1 }.label(), "completed_with_skips");
+    }
+
+    /// V2-05: only complete work proves the revision; everything else
+    /// retries and shows as degraded; missing/incompatible fingerprints also
+    /// request a full scan.
+    #[test]
+    fn bookkeeping_follows_the_completion_contract() {
+        let b = |o: RefreshOutcome| o.bookkeeping();
+        let ok = b(RefreshOutcome::Completed { candidates: 1, scored: 1 });
+        assert!(ok.prove_revision && !ok.retry && !ok.request_full && !ok.degraded);
+        let none = b(RefreshOutcome::NothingDue);
+        assert!(none.prove_revision && !none.retry && !none.degraded);
+        let skips = b(RefreshOutcome::CompletedWithSkips { candidates: 3, scored: 2, skipped: 1 });
+        assert!(!skips.prove_revision && skips.retry && !skips.request_full && skips.degraded);
+        let res = b(RefreshOutcome::Resumable);
+        assert!(!res.prove_revision && res.retry && res.degraded);
+        let full = b(RefreshOutcome::Deferred(DeferReason::FullScanResumable));
+        assert!(!full.prove_revision && full.retry && !full.request_full);
+        for r in [DeferReason::NoFingerprint, DeferReason::IncompatibleFingerprint] {
+            let d = b(RefreshOutcome::Deferred(r));
+            assert!(d.retry && d.request_full && !d.prove_revision);
+        }
+    }
+
+    /// R05, mandatory (V2): a context load failure fails the run — no score
+    /// is written, the pipeline is never entered, the outcome is recorded as
+    /// failed, and the retry is scheduled. Runs without models: the context
+    /// source is a stub and the pipeline closure panics if called.
+    #[tokio::test]
+    async fn missing_context_fails_the_refresh_without_writing() {
+        struct Failing;
+        #[async_trait]
+        impl RefreshContextSource for Failing {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<(TopicFingerprint, Option<Vec<f64>>, Vec<Vec<f64>>, Option<String>)>> {
+                Ok(Some((TopicFingerprint { clusters: vec![], post_count: 0 }, None, vec![], None)))
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![RefreshCandidate { did: "did:plc:high".into(), handle: "high.h".into(), graph_distance: None }])
+            }
+            async fn protected_posts_embeddings(&self, _: &str) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                anyhow::bail!("getAuthorFeed: 502 from the AppView")
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> { Ok(HashSet::new()) }
+            async fn direct_pairs(&self, _: &str, _: &str) -> anyhow::Result<Vec<(String, String)>> { Ok(vec![]) }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> { Ok(0.0) }
+        }
+        let db = test_db(); // in-memory SQLite, as slot_lifecycle_tests builds it
+        db.upsert_user("did:plc:u", "u.h").await.unwrap();
+        // A previously High row that must survive untouched.
+        let mut high = crate::db::models::AccountScore::default_for_test("did:plc:high");
+        high.threat_score = Some(60.0);
+        high.threat_tier = Some("High".into());
+        high.scoring_confidence = Some("high".into());
+        db.upsert_account_score("did:plc:u", &high).await.unwrap();
+        let before = db.export_scores("did:plc:u").await.unwrap();
+        db.enqueue_refresh_scan("did:plc:u").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let mgr = manager_with_running_scan(&claim.claim_id);
+
+        let result = run_refresh_with(db.clone(), mgr, &Failing, "did:plc:u", "u.h", &claim.claim_id, |_plan| async {
+            panic!("the pipeline must not run when context is missing")
+        })
+        .await;
+
+        assert!(result.is_err(), "the run fails");
+        assert_eq!(db.export_scores("did:plc:u").await.unwrap(), before, "no score written or restamped");
+        assert_eq!(db.get_scan_state("did:plc:u", "refresh_last_outcome").await.unwrap().as_deref(), Some("failed"));
+        assert!(db.next_refresh_at("did:plc:u").await.unwrap().is_some(), "retry scheduled");
+        assert_ne!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(scoring_revision()), "not proven");
+    }
+
+    /// A successful lookup that legitimately finds no pairs is NOT a failure
+    /// (the other half of R05).
+    #[tokio::test]
+    async fn no_pairs_is_a_valid_plan() {
+        struct Empty;
+        #[async_trait]
+        impl RefreshContextSource for Empty {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<(TopicFingerprint, Option<Vec<f64>>, Vec<Vec<f64>>, Option<String>)>> {
+                Ok(Some((TopicFingerprint { clusters: vec![], post_count: 0 }, None, vec![], None)))
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![RefreshCandidate { did: "did:plc:a".into(), handle: "a.h".into(), graph_distance: None }])
+            }
+            async fn protected_posts_embeddings(&self, _: &str) -> anyhow::Result<Vec<(String, Vec<f64>)>> { Ok(vec![]) }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> { Ok(HashSet::new()) }
+            async fn direct_pairs(&self, _: &str, _: &str) -> anyhow::Result<Vec<(String, String)>> { Ok(vec![]) }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> { Ok(0.0) }
+        }
+        let plan = prepare_refresh(&Empty, "did:plc:u", "u.h").await.unwrap().expect("not deferred");
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].direct_pairs, None, "follower path, not an error");
     }
 ```
 
@@ -2783,7 +3242,7 @@ pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, acto
         assert!(summary.degraded, "cost-capped ⇒ resumable");
         assert_eq!(db.get_scan_state(TEST_USER, "scan_phase").await.unwrap().as_deref(), Some("burst"));
         assert_eq!(db.get_scan_state(TEST_USER, RUN_KIND_KEY).await.unwrap().as_deref(), Some("refresh"));
-        assert_eq!(db.get_scan_state(TEST_USER, RUN_GENERATION_KEY).await.unwrap().as_deref(), Some(SCORING_GENERATION));
+        assert_eq!(db.get_scan_state(TEST_USER, RUN_GENERATION_KEY).await.unwrap().as_deref(), Some(scoring_revision()));
 
         let err = run_phased_scan(&db, TEST_USER, &candidates, &deps, RunIdentity::full()).await.unwrap_err();
         assert!(matches!(err.downcast_ref::<PhasedScanError>(), Some(PhasedScanError::OwnedByOtherKind(ScanKind::Refresh))));
@@ -2831,7 +3290,7 @@ pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, acto
         };
         let blob = AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
-            scoring_generation: SCORING_GENERATION.to_string(),
+            scoring_generation: scoring_revision().to_string(),
             account_handle: "acct.handle".to_string(),
             sample,
             parent_texts: HashMap::new(),
@@ -2886,7 +3345,7 @@ pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, acto
     }
 ```
 
-Write the two `one_candidate_deps_*` helpers (a `PhasedScanDeps` over `CannedFetcher` + `FixedScorer(0.9)` + a `StubClassifier::with_script` that yields `CostCeilingExceeded` on its first call, resp. a benign verdict) and `finalize_account_with_policy` (a wrapper over `finalize_account` passing `expected_policy_version`) against the file's existing fixtures; the exact trait-method names for staging rows (`enqueue_classifications`, `record_classification_verdicts`) are in `src/db/traits.rs` — match their signatures if they differ from the sketch above.
+Write the two `one_candidate_deps_*` helpers (a `PhasedScanDeps` over `CannedFetcher` + `FixedScorer(0.9)` + a `StubClassifier::with_script` that yields `CostCeilingExceeded` on its first call, resp. a benign verdict) and `finalize_account_with_policy` (a wrapper over `finalize_account` passing an `expected_classifier` whose `model_id` is `"stub"` and whose `policy_version` is the argument) against the file's existing fixtures; the exact trait-method names for staging rows (`enqueue_classifications`, `record_classification_verdicts`) are in `src/db/traits.rs` — match their signatures if they differ from the sketch above.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -2918,7 +3377,7 @@ Expected: compile errors (expected at compile time).
 
 (a resumable marker with **no** owner recorded is pre-v18 staging from the same binary lineage — treat it as owned by `Full`, since only full scans existed). At the fresh-start branch, next to `scan_phase = gather`: `db.set_scan_state(user_did, RUN_KIND_KEY, identity.kind.as_str())` and `RUN_GENERATION_KEY = identity.generation`. At `Done`: delete both keys (`delete_scan_state` if the trait has it; otherwise set them to `""` and treat empty as absent in the reads above — check `rg -n "fn delete_scan_state" src/db/traits.rs`).
 
-`PhasedScanDeps` gains `pub expected_policy_version: &'a str`; `finalize.rs` `verdict_for` gains it and returns `None` when `row.policy_version.as_deref() != Some(expected)`. `amplification.rs` and `sweep.rs` pass `RunIdentity::full()` and `classifier.policy_version()`.
+`PhasedScanDeps` gains `pub expected_classifier: ClassifierIdentity<'a>` (`{ model_id: &'a str, policy_version: &'a str }`, defined in `staging.rs`); `finalize.rs` `verdict_for` gains it and returns `None` when `row.model_id.as_deref() != Some(expected.model_id) || row.policy_version.as_deref() != Some(expected.policy_version)`. `amplification.rs` and `sweep.rs` pass `RunIdentity::full()` and the classifier's identity. Test `finalize_rejects_verdicts_from_another_policy` gains a sibling `finalize_rejects_verdicts_from_another_classifier_model` (same policy, different `model_id` → `NeedsRegather`).
 
 - [ ] **Step 4: `run_refresh`**
 
@@ -2932,10 +3391,20 @@ pub enum DeferReason { FullScanResumable, NoFingerprint, IncompatibleFingerprint
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshOutcome {
-    Completed { candidates: usize, scored: usize, degraded_accounts: usize },
+    Completed { candidates: usize, scored: usize },
+    CompletedWithSkips { candidates: usize, scored: usize, skipped: usize },
     NothingDue,
     Deferred(DeferReason),
     Resumable,
+}
+
+/// What an outcome does to the schedule, the proof and the status (V2-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bookkeeping {
+    pub prove_revision: bool,
+    pub retry: bool,
+    pub request_full: bool,
+    pub degraded: bool,
 }
 
 impl RefreshOutcome {
@@ -2943,6 +3412,7 @@ impl RefreshOutcome {
     pub fn label(&self) -> String {
         match self {
             RefreshOutcome::Completed { .. } => "completed".to_string(),
+            RefreshOutcome::CompletedWithSkips { .. } => "completed_with_skips".to_string(),
             RefreshOutcome::NothingDue => "nothing_due".to_string(),
             RefreshOutcome::Deferred(DeferReason::FullScanResumable) => "deferred:full_scan_resumable".to_string(),
             RefreshOutcome::Deferred(DeferReason::NoFingerprint) => "deferred:no_fingerprint".to_string(),
@@ -2951,18 +3421,20 @@ impl RefreshOutcome {
         }
     }
 
-    /// Accounts re-scored by this run (0 unless Completed).
     pub fn scored(&self) -> usize {
         match self {
-            RefreshOutcome::Completed { scored, .. } => *scored,
+            RefreshOutcome::Completed { scored, .. } | RefreshOutcome::CompletedWithSkips { scored, .. } => *scored,
             _ => 0,
         }
     }
 
-    /// True when staging was left for a later run — reported to
-    /// `finish_scan` as the "degraded" flag so the status copy says so.
-    pub fn is_resumable(&self) -> bool {
-        matches!(self, RefreshOutcome::Resumable)
+    pub fn bookkeeping(&self) -> Bookkeeping {
+        match self {
+            RefreshOutcome::Completed { .. } | RefreshOutcome::NothingDue => Bookkeeping { prove_revision: true, retry: false, request_full: false, degraded: false },
+            RefreshOutcome::CompletedWithSkips { .. } | RefreshOutcome::Resumable => Bookkeeping { prove_revision: false, retry: true, request_full: false, degraded: true },
+            RefreshOutcome::Deferred(DeferReason::FullScanResumable) => Bookkeeping { prove_revision: false, retry: true, request_full: false, degraded: true },
+            RefreshOutcome::Deferred(DeferReason::NoFingerprint | DeferReason::IncompatibleFingerprint) => Bookkeeping { prove_revision: false, retry: true, request_full: true, degraded: true },
+        }
     }
 }
 
@@ -2976,132 +3448,204 @@ pub fn to_candidate(row: &RefreshCandidate, pairs: Vec<(String, String)>, pile_o
     }
 }
 
-pub(crate) async fn run_refresh(
-    config: Arc<Config>, db: Arc<dyn Database>, models: Arc<ScanModels>,
-    scan_manager: Arc<RwLock<ScanManager>>, user_did: &str, actor_handle: &str, claim_id: &str,
-) -> anyhow::Result<()> {
-    reset_run_markers(db.as_ref(), user_did, claim_id).await?; // the eight keys → running/0 (R08)
+/// Everything before the pipeline, through the injectable boundary.
+/// `Err` = required context could not be loaded (R05) — the caller fails
+/// the run and writes nothing. `Ok(Err(reason))` = defer.
+pub async fn prepare_refresh(
+    ctx: &dyn RefreshContextSource,
+    user_did: &str,
+    actor_handle: &str,
+) -> anyhow::Result<Result<RefreshPlan, DeferReason>> {
+    // 1. Fingerprint: read, never rebuilt. Missing or incompatible ⇒ defer and
+    //    ask for a full scan (R03, V2-04: the full scan's rebuild_decision
+    //    enforces compatibility; this is only the request).
+    let Some((fingerprint, protected_embedding, centroids, model_id)) = ctx.fingerprint(user_did).await? else {
+        return Ok(Err(DeferReason::NoFingerprint));
+    };
+    if protected_embedding.is_some() && model_id.as_deref() != Some(EMBEDDING_MODEL_ID) {
+        warn!(user_did, ?model_id, "fingerprint embeddings are from another model — deferring to a full scan");
+        return Ok(Err(DeferReason::IncompatibleFingerprint));
+    }
+    // 2. Candidates from the table.
+    let rows = ctx.candidates(user_did).await?;
+    // 3. Required context (R05): any failure here is an Err. Missing context
+    //    would systematically LOWER every High/Elevated score we are about to
+    //    overwrite.
+    let protected_posts = ctx.protected_posts_embeddings(actor_handle).await?;
+    let pile_on = ctx.pile_on(user_did).await?;
+    let median_engagement = ctx.median_engagement(user_did).await?;
+    let mut candidates = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let pairs = ctx.direct_pairs(user_did, &row.did).await?;
+        candidates.push(to_candidate(row, pairs, &pile_on));
+    }
+    Ok(Ok(RefreshPlan { fingerprint, protected_embedding, centroids, protected_posts, median_engagement, candidates }))
+}
+
+/// The run, generic over the pipeline so the failure path is testable with a
+/// pipeline that must not be called. Records the eight `refresh_*` keys
+/// (zeroed at start, R08), classifies the outcome, applies its bookkeeping,
+/// and ends the slot through `finish_scan`.
+pub(crate) async fn run_refresh_with<F, Fut>(
+    db: Arc<dyn Database>,
+    scan_manager: Arc<RwLock<ScanManager>>,
+    ctx: &dyn RefreshContextSource,
+    user_did: &str,
+    actor_handle: &str,
+    claim_id: &str,
+    pipeline: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(RefreshPlan) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<ScanSummary>>,
+{
+    reset_run_markers(db.as_ref(), user_did, claim_id).await?;
     let now = chrono::Utc::now();
-    let outcome = run_refresh_inner(&config, &db, &models, &scan_manager, user_did, actor_handle, claim_id).await;
-    let (result, label) = match &outcome {
-        Ok(o) => (Ok((0, o.scored(), o.is_resumable())), o.label()),
-        Err(e) => (Err(anyhow::anyhow!("{e:#}")), "failed".to_string()),
+    let outcome: anyhow::Result<RefreshOutcome> = async {
+        let plan = match prepare_refresh(ctx, user_did, actor_handle).await? {
+            Ok(plan) => plan,
+            Err(reason) => return Ok(RefreshOutcome::Deferred(reason)),
+        };
+        let candidates = plan.candidates.len();
+        db.set_scan_state(user_did, "refresh_candidates", &candidates.to_string()).await?;
+        db.set_scan_state(user_did, "refresh_feed_cache_applicable", if candidates == 0 { "0" } else { "1" }).await?;
+        // Ownership is enforced inside run_phased_scan (R02). NothingDue is
+        // decided AFTER it on purpose: a refresh with no candidates still
+        // resumes its own leftover staging.
+        let summary = match pipeline(plan).await {
+            Ok(s) => s,
+            Err(e) if matches!(e.downcast_ref::<PhasedScanError>(), Some(PhasedScanError::OwnedByOtherKind(ScanKind::Full))) => {
+                return Ok(RefreshOutcome::Deferred(DeferReason::FullScanResumable));
+            }
+            Err(e) => return Err(e),
+        };
+        db.set_scan_state(user_did, "refresh_scored", &summary.accounts_scored.to_string()).await?;
+        let phase = db.get_scan_state(user_did, "scan_phase").await?;
+        let skipped = db.count_scan_skips(user_did).await?.max(0) as usize;
+        Ok(match crate::web::scan_job::classify_full_scan(summary.degraded, phase.as_deref(), skipped as i64) {
+            crate::web::scan_job::ScanCompletion::Resumable => RefreshOutcome::Resumable,
+            crate::web::scan_job::ScanCompletion::CompleteWithSkips { .. } => RefreshOutcome::CompletedWithSkips { candidates, scored: summary.accounts_scored, skipped },
+            crate::web::scan_job::ScanCompletion::Complete if candidates == 0 => RefreshOutcome::NothingDue,
+            crate::web::scan_job::ScanCompletion::Complete => RefreshOutcome::Completed { candidates, scored: summary.accounts_scored },
+        })
+    }
+    .await;
+
+    let (result, label, books) = match &outcome {
+        Ok(o) => {
+            let b = o.bookkeeping();
+            (Ok((0, o.scored(), b.degraded)), o.label(), Some(b))
+        }
+        Err(e) => (Err(anyhow::anyhow!("{e:#}")), "failed".to_string(), None),
     };
     // Record before scheduling so an operator reading scan_state sees the
     // outcome that produced the schedule.
     let _ = db.set_scan_state(user_did, "refresh_last_outcome", &label).await;
     let _ = db.set_scan_state(user_did, "refresh_last_run_at", &now.to_rfc3339()).await;
-    match &outcome {
-        Ok(RefreshOutcome::Completed { .. }) | Ok(RefreshOutcome::NothingDue) => {
-            crate::web::refresh::schedule_after_success(db.as_ref(), user_did, now).await
-        }
-        Ok(RefreshOutcome::Deferred(reason)) => {
-            if matches!(reason, DeferReason::NoFingerprint | DeferReason::IncompatibleFingerprint) {
-                // The next admitted run for this user must be a full scan,
-                // which rebuilds. Recorded on our own row; finish hands over.
+    match books {
+        Some(b) if b.prove_revision => crate::web::refresh::schedule_after_success(db.as_ref(), user_did, now).await,
+        Some(b) => {
+            if b.request_full {
                 if let Err(e) = db.request_full_after_refresh(user_did).await {
                     warn!(error = %format!("{e:#}"), "could not request the follow-up full scan");
                 }
             }
-            crate::web::refresh::schedule_retry(db.as_ref(), user_did, now).await
+            crate::web::refresh::schedule_retry(db.as_ref(), user_did, now).await;
         }
-        Ok(RefreshOutcome::Resumable) | Err(_) => crate::web::refresh::schedule_retry(db.as_ref(), user_did, now).await,
+        None => crate::web::refresh::schedule_retry(db.as_ref(), user_did, now).await,
     }
     finish_scan(&scan_manager, user_did, claim_id, result, "Refresh").await
 }
 
-async fn run_refresh_inner(…) -> anyhow::Result<RefreshOutcome> {
-    // 1. Fingerprint: read, never rebuilt. Missing or incompatible ⇒ defer
-    //    and ask for a full scan (R03).
-    let Some((json, _, _)) = db.get_fingerprint(user_did).await? else {
-        return Ok(RefreshOutcome::Deferred(DeferReason::NoFingerprint));
-    };
-    let fingerprint: TopicFingerprint = serde_json::from_str(&json).context("stored fingerprint is unreadable")?;
-    let protected_embedding = db.get_embedding(user_did).await?;
-    let model_id = db.fingerprint_embedding_model(user_did).await?;
-    if protected_embedding.is_some() && model_id.as_deref() != Some(EMBEDDING_MODEL_ID) {
-        warn!(user_did, ?model_id, "fingerprint embeddings are from another model — deferring to a full scan");
-        return Ok(RefreshOutcome::Deferred(DeferReason::IncompatibleFingerprint));
-    }
-    let protected_topic_centroids: Vec<Vec<f64>> = db.get_topic_centroids(user_did).await?.iter().map(|c| c.centroid.clone()).collect();
-
-    // 2. Candidates from the table.
-    let rows = db.list_refresh_candidates(user_did, REFRESH_HORIZON_DAYS).await?;
-    db.set_scan_state(user_did, "refresh_candidates", &rows.len().to_string()).await?;
-    db.set_scan_state(user_did, "refresh_feed_cache_applicable", if rows.is_empty() { "0" } else { "1" }).await?;
-
-    // 3. Required context (R05): any failure here is an Err — no score is
-    //    written, the row fails, retry in an hour. Missing context would
-    //    systematically LOWER every High/Elevated score we are about to
-    //    overwrite.
-    let scorers = build_scan_scorers(models, db)?;
+/// Production entry: the real context source (Task 8's helpers behind
+/// `RefreshContextSource`) and the real pipeline.
+pub(crate) async fn run_refresh(
+    config: Arc<Config>,
+    db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
+    scan_manager: Arc<RwLock<ScanManager>>,
+    user_did: &str,
+    actor_handle: &str,
+    claim_id: &str,
+) -> anyhow::Result<()> {
+    let scorers = build_scan_scorers(&models, &db)?;
     let client = PublicAtpClient::new(&config.public_api_url)?;
-    let protected_posts_with_embeddings = embed_protected_posts(&client, &models.embedder, actor_handle).await?;
-    let pile_on = pile_on_dids(db.as_ref(), user_did).await?;
-    let median_engagement = db.get_median_engagement(user_did).await?;
-    let mut candidates = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let pairs = direct_pairs_for(db, user_did, &row.did).await?;
-        candidates.push(to_candidate(row, pairs, &pile_on));
-    }
-
-    // 4. Resume-or-start through the shared pipeline. Ownership is enforced
-    //    inside run_phased_scan (R02).
-    let source = AtpPostFetcher { client: &client };
-    let feed_stats = Arc::new(CacheStats::default());
-    let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
-    let scorer = &scorers.scorer;
-    let classifier = scorer.classifier();
-    let weights = ThreatWeights::default();
-    let deps = PhasedScanDeps {
-        fetcher: &fetcher,
-        scorer: scorer as &dyn ToxicityScorer,
-        clean_pass: scorer as &dyn CleanPassScorer,
-        classifier: &classifier,
-        protected_fingerprint: &fingerprint,
-        weights: &weights,
-        embedder: Some(&*models.embedder),
-        protected_embedding: protected_embedding.as_deref(),
-        protected_topic_centroids: Some(&protected_topic_centroids),
-        nli_scorer: Some(&*models.nli),
-        protected_posts_with_embeddings: Some(&protected_posts_with_embeddings),
-        data_dir: Some(config.data_dir()),
-        median_engagement,
-        gather_concurrency: 8, // same literal run_scan uses today; Phase 3 replaces both
-        burst_concurrency: burst::burst_concurrency(),
-        burst_batch: burst::burst_batch(),
-        expected_policy_version: classifier.policy_version(),
-    };
-    let summary = match run_phased_scan(db, user_did, &candidates, &deps, RunIdentity::refresh()).await {
-        Ok(s) => s,
-        Err(e) if matches!(e.downcast_ref::<PhasedScanError>(), Some(PhasedScanError::OwnedByOtherKind(ScanKind::Full))) => {
-            return Ok(RefreshOutcome::Deferred(DeferReason::FullScanResumable));
+    let ctx = LiveRefreshContext { db: Arc::clone(&db), client: &client, models: &models };
+    let run_db = Arc::clone(&db);
+    let run_models = Arc::clone(&models);
+    run_refresh_with(db, scan_manager, &ctx, user_did, actor_handle, claim_id, move |plan| async move {
+        // Same deps construction as amplification.rs:520-556.
+        let source = AtpPostFetcher { client: &client };
+        let feed_stats = Arc::new(CacheStats::default());
+        let fetcher = CachedPostFetcher::new(&source, Arc::clone(&run_db), Arc::clone(&feed_stats));
+        let scorer = &scorers.scorer;
+        let classifier = scorer.classifier();
+        let weights = ThreatWeights::default();
+        let deps = PhasedScanDeps {
+            fetcher: &fetcher,
+            scorer: scorer as &dyn ToxicityScorer,
+            clean_pass: scorer as &dyn CleanPassScorer,
+            classifier: &classifier,
+            protected_fingerprint: &plan.fingerprint,
+            weights: &weights,
+            embedder: Some(&*run_models.embedder),
+            protected_embedding: plan.protected_embedding.as_deref(),
+            protected_topic_centroids: Some(&plan.centroids),
+            nli_scorer: Some(&*run_models.nli),
+            protected_posts_with_embeddings: Some(&plan.protected_posts),
+            data_dir: Some(config.data_dir()),
+            median_engagement: plan.median_engagement,
+            gather_concurrency: 8, // same literal run_scan uses today; Phase 3 replaces both
+            burst_concurrency: burst::burst_concurrency(),
+            burst_batch: burst::burst_batch(),
+            expected_classifier: ClassifierIdentity { model_id: classifier.model_id(), policy_version: classifier.policy_version() },
+        };
+        let summary = run_phased_scan(&run_db, user_did, &plan.candidates, &deps, RunIdentity::refresh()).await?;
+        // The feed-cache functional number (R08): recorded per run, applicable
+        // only when there were candidates.
+        if let Err(e) = record_cache_stats(run_db.as_ref(), user_did, "refresh_feed", &feed_stats).await {
+            warn!(error = %e, "could not record refresh feed cache stats");
         }
-        Err(e) => return Err(e),
-    };
-    // NothingDue is decided AFTER the ownership check on purpose: a refresh
-    // with no candidates still resumes its own leftover staging.
-    if rows.is_empty() && !summary.degraded {
-        return Ok(RefreshOutcome::NothingDue);
-    }
+        record_scan_cache_stats(run_db.as_ref(), user_did, &scorers).await;
+        Ok(summary)
+    })
+    .await
+}
 
-    record_cache_stats(db.as_ref(), user_did, "refresh_feed", &feed_stats).await?;
-    record_scan_cache_stats(db.as_ref(), user_did, &scorers).await;
-    db.set_scan_state(user_did, "refresh_scored", &summary.accounts_scored.to_string()).await?;
-    if summary.degraded && db.get_scan_state(user_did, "scan_phase").await?.as_deref() != Some("done") {
-        return Ok(RefreshOutcome::Resumable);
+/// Task 8's helpers behind the boundary.
+struct LiveRefreshContext<'a> { db: Arc<dyn Database>, client: &'a PublicAtpClient, models: &'a ScanModels }
+
+#[async_trait]
+impl RefreshContextSource for LiveRefreshContext<'_> {
+    async fn fingerprint(&self, user_did: &str) -> anyhow::Result<Option<(TopicFingerprint, Option<Vec<f64>>, Vec<Vec<f64>>, Option<String>)>> {
+        let Some((json, _, _)) = self.db.get_fingerprint(user_did).await? else { return Ok(None) };
+        let fingerprint: TopicFingerprint = serde_json::from_str(&json).context("stored fingerprint is unreadable")?;
+        let embedding = self.db.get_embedding(user_did).await?;
+        let centroids = self.db.get_topic_centroids(user_did).await?.iter().map(|c| c.centroid.clone()).collect();
+        let model_id = self.db.fingerprint_embedding_model(user_did).await?;
+        Ok(Some((fingerprint, embedding, centroids, model_id)))
     }
-    Ok(RefreshOutcome::Completed { candidates: rows.len(), scored: summary.accounts_scored, degraded_accounts: db.count_scan_skips(user_did).await?.max(0) as usize })
+    async fn candidates(&self, user_did: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+        self.db.list_refresh_candidates(user_did, REFRESH_HORIZON_DAYS).await
+    }
+    async fn protected_posts_embeddings(&self, actor_handle: &str) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+        embed_protected_posts(self.client, &self.models.embedder, actor_handle).await
+    }
+    async fn pile_on(&self, user_did: &str) -> anyhow::Result<HashSet<String>> { pile_on_dids(self.db.as_ref(), user_did).await }
+    async fn direct_pairs(&self, user_did: &str, amplifier_did: &str) -> anyhow::Result<Vec<(String, String)>> {
+        crate::pipeline::amplification::direct_pairs_for(&self.db, user_did, amplifier_did).await
+    }
+    async fn median_engagement(&self, user_did: &str) -> anyhow::Result<f64> { self.db.get_median_engagement(user_did).await }
 }
 ```
 
-`request_full_after_refresh(user_did)`: `UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, now) WHERE user_did = ? AND status = 'running' AND kind = 'refresh'` on both backends (Task 5's finish hands over).
+`request_full_after_refresh(user_did)`: `UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, now) WHERE user_did = ? AND status = 'running' AND kind = 'refresh'` on both backends (Task 5's finish hands over). `reset_run_markers` writes the eight `refresh_*` keys to `running`/`0` and records `refresh_last_run_id = claim_id`. `RefreshPlan` and `RefreshContextSource` live in `refresh_scan.rs`; `ClassifierIdentity` in `staging.rs`.
 
-`launch_scan(state, user_did, actor_handle, kind, slot, live)`: `match kind { Full => run_scan(...), Refresh => run_refresh(...) }` inside the spawned future. `run_scan`'s pipeline call passes `RunIdentity::full()`; on `PhasedScanError::OwnedByOtherKind(Refresh)` it performs the **drain** (see Transitions) and then proceeds. `AppStateLauncher::launch` passes `claim.kind`; the admit log line gains `kind`. `record_scan_outcome`/`finish_scan` gain a `label: &str` ("Completed" / "Refresh complete") so a refresh's status message does not read "0 events".
+`launch_scan(state, user_did, actor_handle, kind, slot, live)`: `match kind { Full => run_scan(...), Refresh => run_refresh(...) }` inside the spawned future. `run_scan`'s pipeline call passes `RunIdentity::full()`; on `PhasedScanError::OwnedByOtherKind(Refresh)` it performs the **drain** (see Transitions): the drain's `ScanSummary` is classified with `classify_full_scan`; if it is `Resumable` (cost-capped/interrupted again), `run_scan` returns that as its own completion — no cooldown marker, `schedule_retry`, the user's row finishes `done` with the degraded message and their next click resumes the drain (V2-05: a partial drain never earns full-scan bookkeeping) — and only a `Complete`/`CompleteWithSkips` drain clears the markers and proceeds to the full gather. `AppStateLauncher::launch` passes `claim.kind`; the admit log line gains `kind`. `record_scan_outcome`/`finish_scan` gain a `label: &str` ("Completed" / "Refresh complete") so a refresh's status message does not read "0 events".
 
 - [ ] **Step 5: Run**
 
-Run: `cargo test --features web --lib web::refresh_scan`, `cargo test --features web --test unit_scan_phases`, `VERIFY_WEB`, `cargo build --features postgres`, `VERIFY_CLIPPY`.
+Run: `cargo test --features web --lib web::refresh_scan` (must include `missing_context_fails_the_refresh_without_writing` and `bookkeeping_follows_the_completion_contract` passing — not skipped), `cargo test --features web --test unit_scan_phases`, `VERIFY_WEB`, `cargo build --features postgres`, `VERIFY_CLIPPY`.
 Expected: green.
 
 - [ ] **Step 6: Commit**
@@ -3112,13 +3656,16 @@ git commit -m 'feat(344): run_refresh with staging ownership, resume, input comp
 
 run_phased_scan records scan_run_kind/scan_run_generation; a refresh
 resumes its own work, refuses a full scan'"'"'s (Deferred), a full scan
-drains a refresh'"'"'s leftovers before gathering, and other-generation
-staging is discarded. Verdicts from another classifier policy are
-incomplete. Missing context is an error (no score written). Outcomes
-drive the schedule: completed/nothing-due → nightly + generation proven;
-deferred/resumable/failed → retry in an hour; missing or incompatible
-fingerprint also requests a follow-up full scan. Per-run cache counters
-are reset at start and flagged not-applicable when nothing was due.
+drains a refresh'"'"'s leftovers before gathering (a partial drain is
+Resumable, not complete), and other-revision staging is discarded.
+Verdicts from another classifier model OR policy are incomplete. Context
+loads sit behind RefreshContextSource; a failure fails the run (no score
+written) and is covered by a deterministic test. Outcomes drive the
+schedule: completed/nothing-due → nightly + revision proven;
+completed-with-skips/deferred/resumable/failed → retry in an hour;
+missing or incompatible fingerprint also requests a follow-up full scan.
+Per-run cache counters are reset at start and flagged not-applicable
+when nothing was due.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
@@ -3177,9 +3724,10 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
   4. **The human still wins:** click Scan while a refresh is queued → row flips to `full`, `enqueued_at` unchanged; while running → 202 with `queued: "after_refresh"`, `full_requested_at` set, and after the refresh the row is `queued full`; cooldown still measured from `scan_state.last_full_scan_finished_at`.
   5. **Interruption:** with `CHARCOAL_RUNPOD_COST_CAP` (or the existing cost-cap knob — name it from `src/pipeline/scan_phases/burst.rs`) set low, force a refresh to cost-cap; verify `scan_state.scan_phase = burst`, `scan_run_kind = refresh`, `refresh_last_outcome = resumable`, `next_refresh_at` ≈ now + 1 h; raise the cap, force the tick (`UPDATE users SET next_refresh_at = NOW()`), verify the same claim resumes to `completed` with no re-gather (the `refresh_candidates` count is the staged set).
   6. **Feed cache — functional, not a rate (R08):** (a) warm: run a full scan, then within 24 h `UPDATE account_scores SET valid_until = NOW() WHERE user_did = … AND threat_score >= 15` and force the tick — expect `refresh_feed_cache_applicable = 1` and `hits ≥ misses` for those candidates; (b) cold: `DELETE FROM account_feed_snapshots` then the same — expect `hits = 0`; (c) no-op: force the tick with nothing due — expect `refresh_last_outcome = nothing_due`, `refresh_feed_cache_applicable = 0`, counters 0. Record the steady-state hit share over the first two weeks as a number in this file; there is **no** threshold. The arithmetic that withdrew the 80 % gate: High rows (14 d) enter the 2 d horizon ~12 d after scoring, snapshots live 24 h, so a steady-state refresh hits only for candidates active in the last day. Do not raise `SNAPSHOT_TTL` to move this number.
-  7. **Generation bump procedure:** change `SCORING_GENERATION`, deploy single-replica; steps 2–3 repeat automatically via `refreshed_generation`; with refreshes disabled (`0`) the lists stay hidden until users re-engage — state this in the deploy notes for that bump.
+  7. **Revision change procedure:** an in-binary model swap changes the revision by itself; bump `SCORING_GENERATION` by hand for formula/format/policy changes **and for any CoPE-B/Zentropi classifier model or policy change** (deploy checklist item — the classifier's identity is not composed into the revision). Deploy single-replica; steps 2–3 repeat automatically via `refresh_attempted_generation`; a failed first attempt retries hourly, not on every tick (`SELECT did, next_refresh_at, refresh_attempted_generation, refreshed_generation FROM users`); with refreshes disabled (`0`) the lists stay hidden until users re-engage — state this in the deploy notes for that change.
+  7b. **Completion bookkeeping check (V2-05):** cost-cap a full scan; `scan_state.last_full_scan_finished_at` must be unchanged and the user's next click must resume without a 429. Request a full scan during a refresh, cost-cap the drain; `full_requested_at` handover must still yield a queued full row and the cooldown must not treat the drain as a completed full scan. Skip one account (simulate a feed 4xx via the runbook's fixture account) in an otherwise completed refresh; `refresh_last_outcome = completed_with_skips`, `refreshed_generation` unchanged, `next_refresh_at` ≈ now + 1 h, the other accounts' new scores present.
   8. **Index plans:** paste Task 7's `EXPLAIN` output and timings for both backends.
-  9. **Migration rehearsal (R01):** on a copy of the prod SQLite (`backups/`), `charcoal migrate` into a scratch Postgres; compare `SELECT COUNT(*), COUNT(*) FILTER (WHERE threat_score IS NULL), MIN(scored_at), MAX(valid_until)` source vs destination; repeat the migrate; counts unchanged.
+  9. **Migration rehearsal (R01, V2-06):** on a copy of the prod SQLite (`backups/`), `charcoal migrate` into a scratch Postgres; compare `SELECT COUNT(*), COUNT(*) FILTER (WHERE threat_score IS NULL), MIN(scored_at), MAX(valid_until)` source vs destination; count the source's NULL/malformed `valid_until` rows (`SELECT COUNT(*) FROM account_scores WHERE datetime(valid_until) IS NULL`) and verify the destination has that many rows with `valid_until = scored_at`; repeat the migrate; nothing changes.
 
 - [ ] **Step 4: Spec** — §4.4 amendment (dated 2026-09-14): v18; `refreshed_generation` replaces the migration stamp; ownership markers and the transitions; the compatibility contract; `full_requested_at` and in-place upgrade; lossless migrate; the tick's single transaction and batch bound; SQLite nullable/malformed expiry semantics; retry cadence; "full fortnightly" remains #342. §6 Phase 2: replace the ≥ 80 % feed-hit pass with the functional test + recorded share (reference deciduous 878).
 
@@ -3187,27 +3735,47 @@ Claude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX'
 
 ---
 
-## Review-resolution table (Astra plan review of `c91afb8`)
+## Review-resolution table — first review (Astra, `c91afb8`, R01–R13)
 
 | ID | Disposition | Revised location | Acceptance test (planned, not yet executed) | Remaining limitation |
 |---|---|---|---|---|
-| R01 | addressed | Task 3 (`export_scores`/`import_score`, `migrate`), Global Constraints | `tests/unit_score_export.rs` (4-row round trip incl. NULL-score, repeat import, v17 fixture); Postgres twin; runbook §9 rehearsal on a prod copy | `top_toxic_posts` corruption still exports as empty (#364) |
-| R02 | addressed | Task 9 (`RunIdentity`, markers, `PhasedScanError`, outcomes, transitions), Task 6 (`schedule_retry`) | `staging_ownership_is_recorded_and_enforced`; runbook §5 cost-cap + resume | A refresh's resume uses the *current* candidate list; a staged account no longer eligible is finalized from staging but cannot be re-gathered (documented skip) |
-| R03 | addressed | Task 1 (`EMBEDDING_MODEL_ID`, blob generation, bump rule), Task 2 (`embedding_model_id` column), Task 9 (fingerprint check, verdict policy check, generation-mismatch discard) | `finalize_rejects_a_blob_from_another_generation`, `old_generation_staging_is_discarded_on_resume`, `finalize_rejects_verdicts_from_another_policy` | Two binaries with different generations overlapping for seconds on a rolling deploy can each stamp one scan; accepted and documented |
-| R04 | addressed | Task 6 (`claim_and_enqueue_due_refreshes`, batch bound, retry, metrics) | `a_failed_enqueue_rolls_back_the_schedule_advance` (trigger-induced failure), `a_tick_is_bounded…`, Postgres two-scheduler partition test | Delivery is at-least-once per tick, not exactly-once across process kills mid-transaction — the transaction rolls back, the next tick re-selects |
-| R05 | addressed | Task 8 (`Result` helpers), Task 9 (fail the run, `schedule_retry`, no write) | `a_read_failure_is_an_error_not_an_empty_list`; run_refresh returns `Err` on protected-feed/embedding failure (covered by the outcome→schedule path; add an injected-failure test with a failing fetcher in `unit_scan_phases` if the executor can construct `ScanModels` without models — otherwise runbook) | Per-account gather failures inside `run_phased_scan` are still skips (existing behaviour), not run failures |
-| R06 | addressed | Task 3 Step 6 (`run_topic_first`) | Extend `tests/unit_discovery.rs` (or the sweep test that covers `run_topic_first`) with an expired row that becomes eligible | none |
-| R07 | addressed | Task 2 (no time stamp; `refreshed_generation` NULL), Task 6 (due rule) | `due_by_time_or_by_generation_and_never_without_scores`; runbook §7 | Disabled refreshes ⇒ no prompt recovery after a bump (stated in runbook) |
-| R08 | addressed | Task 9 (per-run reset, `applicable` flag), Task 10 (runbook §6, spec §6), deciduous 878 | Runbook §6 (a)(b)(c) | Steady-state share is recorded, not gated |
-| R09 | addressed | Task 5 (`full_requested_at`, in-place upgrade, `EnqueueOutcome`, handover in `finish_queued_scan`) | `a_full_enqueue_upgrades_a_queued_refresh_in_place`, `a_full_request_during_a_running_refresh_is_recorded_and_runs_after_it`, `a_failed_refresh_still_hands_over…`, Postgres twins; runbook §4 | Dashboard copy for `queued: "after_refresh"` is #365's |
-| R10 | addressed | Global Constraints (`VERIFY_*`), every task's Run steps | Each command is a valid single-filter invocation; `VERIFY_WEB` fails on `SKIP:` via `pipefail` + negated grep | none |
-| R11 | addressed | Task 3 (`FRESH_SQL` COALESCE), Task 7 (candidate COALESCE) | `fresh_set_is_exactly…including_null_and_malformed_expiry` (count = 6), `selects_high_and_elevated…malformed…` | Postgres cannot hold a malformed value; only SQLite is exercised |
-| R12 | addressed | Task 2 (index changed to `(user_did, threat_score)`), Task 7 Step 4 | `candidate_query_uses_the_user_score_index` (SQLite plan assertion); runbook §8 plans + timings on 3 000-row users | Plans on a 3 000-row table may prefer a seq scan; the runbook says how to show index usability without adding a partial index prematurely |
-| R13 | addressed | Task 2 (backfill), Task 5 (`last_full_finished_at` anchor) | `test_migration_v18_upgrades_a_v17_database` (marker = done row's `finished_at`); `scan.rs` inline tests; runbook §4 | none |
+| R01 | addressed in design (rev 3: + V2-06, V2-07) | Task 3 (`export_scores`/`import_score`, `ExportedExpiry`, `migrate`), Global Constraints | `tests/unit_score_export.rs` (6-row round trip incl. NULL-score, NULL and malformed expiry, repeat import, authentic v17 fixture); `test_pg_migrate_from_sqlite_preserves_every_row` (real path, direct SQL); precision tests; runbook §9 | `top_toxic_posts` corruption still exports as empty (#364); Postgres → SQLite truncates to whole seconds (documented) |
+| R02 | addressed in design (rev 3: + V2-05) | Task 9 (`RunIdentity`, markers, `PhasedScanError`, `RefreshOutcome` incl. `CompletedWithSkips`, transitions), Task 5 (`ScanCompletion`), Task 6 (`schedule_retry`) | `staging_ownership_is_recorded_and_enforced`, `bookkeeping_follows_the_completion_contract`, `classify_full_scan` tests; runbook §5, §7b | A refresh's resume uses the *current* candidate list; a staged account no longer eligible is finalized from staging but cannot be re-gathered (documented skip) |
+| R03 | addressed in design (rev 3: + V2-01, V2-04) | Task 1 (`scoring_revision()` composite, `EMBEDDING_MODEL_ID`, `NLI_MODEL_ID`, blob revision), Task 2 (`embedding_model_id` column), Task 8 (`rebuild_decision`, no fallback on incompatible), Task 9 (verdict model + policy check, revision-mismatch discard) | `scoring_revision_changes_when_any_component_changes`, `rebuild_decision_orders_reasons…`, `finalize_rejects_a_blob_from_another_generation`, `old_generation_staging_is_discarded_on_resume`, `finalize_rejects_verdicts_from_another_policy` + `…_classifier_model` | Classifier model/policy changes still require a manual `SCORING_GENERATION` bump (identity lives outside the binary); rolling-deploy overlap of seconds accepted |
+| R04 | addressed in design (rev 3: + V2-02, V2-03) | Task 6 (conditional `REFRESH_ENQUEUE_SQL`, advance-only-on-write, `refresh_attempted_generation`, batch bound, metrics) | `a_failed_enqueue_rolls_back_the_schedule_advance`, `the_queue_write_is_conditional_on_the_row_state_at_write_time`, `a_failed_attempt_waits_for_its_retry_deadline`, `a_tick_is_bounded…`, Postgres partition + three interleaving variants | The Postgres interleaving test drives the two `pub const` statements directly rather than pausing the Rust function mid-transaction |
+| R05 | addressed in design (rev 3: mandatory test) | Task 8 (`Result` helpers), Task 9 (`RefreshContextSource`, `prepare_refresh`, `run_refresh_with`) | `a_read_failure_is_an_error_not_an_empty_list`, **`missing_context_fails_the_refresh_without_writing`** (deterministic, no models), `no_pairs_is_a_valid_plan` | Per-account gather failures inside `run_phased_scan` are skips → `CompletedWithSkips` (retry, degraded), not run failures |
+| R06 | addressed in design | Task 3 Step 6 (`run_topic_first`) | Extend `tests/unit_discovery.rs` (or the sweep test that covers `run_topic_first`) with an expired row that becomes eligible | none |
+| R07 | addressed in design (rev 3: + V2-03) | Task 2 (`refresh_attempted_generation` + `refreshed_generation`, both NULL), Task 6 (due rule) | `due_by_time_or_by_generation_and_never_without_scores`, `a_failed_attempt_waits_for_its_retry_deadline`; runbook §7 | Disabled refreshes ⇒ no prompt recovery after a revision change (stated in runbook) |
+| R08 | addressed in design | Task 9 (per-run reset, `applicable` flag), Task 10 (runbook §6, spec §6), deciduous 878 | Runbook §6 (a)(b)(c) | Steady-state share is recorded, not gated |
+| R09 | addressed in design (rev 3: + V2-02) | Task 5 (`full_requested_at`, in-place upgrade, `EnqueueOutcome`, handover in `finish_queued_scan`), Task 6 (conditional write never clobbers it) | `a_full_enqueue_upgrades_a_queued_refresh_in_place`, `a_full_request_during_a_running_refresh_is_recorded_and_runs_after_it`, `a_failed_refresh_still_hands_over…`, `test_pg_scheduler_write_does_not_clobber_a_concurrent_full_enqueue`; runbook §4 | Dashboard copy for `queued: "after_refresh"` is #365's |
+| R10 | addressed in design (rev 3: + V2-07) | Global Constraints (`VERIFY_*`), every task's Run steps; authentic fixtures via `create_tables_through` / `migrate_postgres_through` | Each command is a valid single-filter invocation; `VERIFY_WEB` fails on `SKIP:`; every "verify it fails" step names the failure kind; no calendar-dependent fixture remains | none |
+| R11 | addressed in design | Task 3 (`FRESH_SQL` COALESCE), Task 7 (candidate COALESCE) | `fresh_set_is_exactly…including_null_and_malformed_expiry` (count = 6), `selects_high_and_elevated…malformed…` | Postgres cannot hold a malformed value; only SQLite is exercised |
+| R12 | addressed in design | Task 2 (index changed to `(user_did, threat_score)`), Task 7 Step 4 | `candidate_query_uses_the_user_score_index` (SQLite plan assertion); runbook §8 plans + timings on 3 000-row users | Plans on a 3 000-row table may prefer a seq scan; the runbook says how to show index usability without adding a partial index prematurely |
+| R13 | addressed in design | Task 2 (backfill), Task 5 (`last_full_finished_at` anchor) | `test_migration_v18_upgrades_a_v17_database` (marker = done row's `finished_at`); `scan.rs` inline tests; runbook §4 | none |
 
-**Architectural changes relative to rev 1:** ownership markers on staging + a typed `PhasedScanError`; a compatibility contract (embedding model id on fingerprints, generation on blobs, policy on verdicts) instead of "bump the generation for everything"; scheduling as one bounded transaction with generation-driven due-ness; a durable full-scan request on the queue row; lossless export/import as a separate contract from presentation; error-returning context helpers.
+**Architectural changes relative to rev 1:** ownership markers on staging + a typed `PhasedScanError`; a compatibility contract (embedding model id on fingerprints, revision on blobs, classifier identity on verdicts); scheduling as one bounded transaction with revision-driven due-ness; a durable full-scan request on the queue row; lossless export/import as a separate contract from presentation; error-returning context helpers.
 
 **Unresolved product decisions (Bryan):** none new. Decision 777 (expire, refresh High/Elevated only) stands; the fortnightly full rescan stays in #342.
 
-**Validation performed for this revision:** none of the above tests has been executed — this is a plan. Verified in this session: Astra's three isolated SQLite reproductions were re-derived from the rev-1 text and the code paths it cited (`main.rs:1170-1176` migrate, `mod.rs:215-330` resume, `finalize.rs:77-110` blob check, `staging.rs:73-120` row provenance, `queries.rs:1466-1590` queue SQL, `sweep.rs:219-224` topic-first gate).
+## Review-resolution table — second review (Astra, `30cd7f4`, V2-01–V2-07)
+
+Dispositions: *addressed in design* = corrected contract + test specified; *partially addressed* = a stated path remains; *verified* = an executed test with environment and result; *disputed with evidence*. Nothing in this table is *verified*: this is a plan revision and no planned test has been run.
+
+| ID | Prior | Disposition | Revised location | Mandatory acceptance tests (planned) | Remaining limitation |
+|---|---|---|---|---|---|
+| V2-01 | R03 | addressed in design; **partially** for the out-of-binary classifier | Global Constraints ("stored stamp is the scoring revision"), Task 1 (`compose_revision`/`scoring_revision()`, `NLI_MODEL_ID`), Task 9 (`ClassifierIdentity` check), runbook §7 | (1) `scoring_revision_changes_when_any_component_changes` — a different ONNX/embedding/NLI id yields a different stamp, so rows stamped under model A fail the fresh predicate under model B with the policy unchanged (`fresh_set_is_exactly…` binds `scoring_revision()`); (2) `finalize_rejects_verdicts_from_another_classifier_model` (same policy, different model); (3) a generation-only bump changes the stamp while `onnx_scores`/`classifier_verdicts` cache keys (text hash + model id) are untouched — assert in `unit_cached_scoring` that a cached row is still hit after `SCORING_GENERATION` changes | A CoPE-B/Zentropi classifier model or policy change still needs a manual `SCORING_GENERATION` bump — its identity is outside the binary and cannot be composed in without threading a runtime value through every freshness read. Mitigations: verdict rows always carry model+policy and are rejected on resume; runbook §7 checklist |
+| V2-02 | R04, R09 | addressed in design | Task 6 (`REFRESH_DUE_SQL`, conditional `REFRESH_ENQUEUE_SQL`, advance-only-on-write, lock order) | `the_queue_write_is_conditional_on_the_row_state_at_write_time` (SQLite, real statements), `test_pg_scheduler_write_does_not_clobber_a_concurrent_full_enqueue` with three variants (enqueued between, admitted between, absent row), `test_pg_two_schedulers_partition_the_due_set` | The Postgres interleaving is driven at the statement level on two connections, not by pausing the Rust function — the statements are `pub const` precisely so the test exercises what production runs |
+| V2-03 | R04, R07 | addressed in design | Task 2 (`refresh_attempted_generation`), Task 6 (due rule; tick sets attempted; `schedule_retry` touches only time; `mark_refreshed_generation` sets both), Task 9 bookkeeping | `a_failed_attempt_waits_for_its_retry_deadline` (fail → finish → retry; +30 s no job; after deadline one job; newer revision during backoff attempted at once); the Postgres bounded-claim test asserts both columns | none identified |
+| V2-04 | R03 | addressed in design | Task 8 (`RebuildReason`, `rebuild_decision`, `fallback_allowed`, abort-before-scoring), Task 3 (`save_fingerprint_bundle` id; import copies verbatim, never labels) | `rebuild_decision_orders_reasons_and_flags_model_incompatibility` (same dims/cluster count, other model → rebuild; missing id with a vector → rebuild; failure with `IncompatibleModel` → no fallback); runbook §7 for the handover reaching this path | The abort-on-failed-rebuild arm runs inside `run_scan` (model-gated); the decision and the fallback rule are pure and unit-tested, the arm is exercised on staging |
+| V2-05 | R02, R04, R05, R13 | addressed in design | Task 5 (`ScanCompletion`, `classify_full_scan`, marker only on completion), Task 6 (success vs retry scheduling by completion), Task 9 (`CompletedWithSkips`, `Bookkeeping`, drain classified) | `classify_full_scan` cases; `bookkeeping_follows_the_completion_contract`; runbook §7b (cost-capped full scan → no marker, immediate re-run; drain cost-cap → pending full still honoured, no marker; one skipped account → `completed_with_skips`, retry, writes retained) | Retry of skipped accounts relies on the hourly refresh picking them up as still-expired candidates; a skipped Low/Watch account in a full scan has no refresh path (existing behaviour, #236/#355 territory) |
+| V2-06 | R01 | addressed in design | Global Constraints (conversion + precision), Task 3 (`ExportedExpiry`, `%f`/`.US` export, `scored_at` mapping, warn line) | `export_returns_every_row_with_its_provenance` (Missing/Invalid variants), `import_preserves_provenance_and_never_renews_expiry` (NULL/malformed → `scored_at`), `test_pg_migrate_from_sqlite_preserves_every_row` (direct SQL on Postgres incl. the two conversions), `test_pg_export_import_keeps_microseconds`, `test_pg_import_into_sqlite_truncates_to_seconds` | Postgres → SQLite truncates to whole seconds by SQLite's column form — deliberate, documented; the raw malformed text is logged, not preserved in the destination |
+| V2-07 | R01, R10 | addressed in design | Task 2 (`create_tables_through`, `migrate_postgres_through`), Task 3 tests (relative dates; real import; authentic v17) | `test_migration_v18_upgrades_a_v17_database` asserts `MAX(version) = 17` and the missing column before upgrading; `v17_fixture_rows_survive_open_export_import` imports into a second database and asserts; `test_pg_migrate_from_sqlite_preserves_every_row`; no fixture uses a calendar date | The Postgres authentic fixture rebuilds the whole test database and therefore serialises behind `cache_test_lock()` |
+
+**Invariants chosen (rev 3):**
+- *Compatibility:* a stored score is comparable to a fresh one iff its stamp equals `scoring_revision()` (generation ⊕ every in-binary model id); staged inputs carry the same stamp; verdict rows carry the classifier's model id and policy and are rejected on resume if either differs; fingerprints carry their embedding model id and are rebuilt (never fallen back to) when it differs. Caches keep their own identities.
+- *Concurrency:* the tick's write is conditional on the queue row's state at write time and advances a user's schedule only when it delivered; manual enqueue, admission and finish lock only the queue row; completion bookkeeping touches only `users`. No lock cycle; a race resolves to "the user's own work wins, the refresh is reconsidered next tick".
+- *Retry:* `refresh_attempted_generation` (set by the tick) decides whether a revision still needs a first attempt; `next_refresh_at` decides when the next attempt may happen; `refreshed_generation` (set only by complete work) is proof. A new revision is attempted promptly once; failures wait for their deadline.
+- *Completion:* `Ok` is classified, never trusted. Only `Complete`/`Completed`/`NothingDue` earn the cooldown marker, the nightly schedule and the revision proof; skips, resumable interruptions and deferrals keep their successful writes, retry in an hour, and read as degraded.
+
+**Validation performed for revisions 2 and 3:** none of the planned tests has been executed — this is a plan. Verified in-session for rev 2: the code paths the first review cited (`main.rs:1170-1176` migrate, `mod.rs:215-330` resume, `finalize.rs:77-110` blob check, `staging.rs:73-120` row provenance, `queries.rs:1466-1590` queue SQL, `sweep.rs:219-224` topic-first gate). Verified in-session for rev 3 (sqlite3 on the dev machine): `datetime('2026-01-01T00:00:00.123+00:00')` → `2026-01-01 00:00:00` (fractional seconds dropped), `datetime('garbage') IS NULL` → 1, `strftime('%f')` renders milliseconds; `amplification::run` returns `Ok((_, _, degraded))` for cost-capped scans (`src/pipeline/amplification.rs:92`); the rev-2 v17 fixture dropped two of nine v18 columns. No Rust or Postgres test was run.
 

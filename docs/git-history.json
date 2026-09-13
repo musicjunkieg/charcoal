@@ -1,5 +1,13 @@
 [
   {
+    "hash": "30cd7f4913a502b939687b3bfd0c00d77b6fe510",
+    "short_hash": "30cd7f4",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T13:45:57-07:00",
+    "message": "docs(343): Phase 2 plan rev 2 — resolve Astra plan review R01-R13; spec §4.4/§6 amended\n\nLossless export/import for charcoal migrate (R01); staging ownership\nmarkers, typed OwnedByOtherKind error, RefreshOutcome and full-drains-\nrefresh transition (R02); EMBEDDING_MODEL_ID on fingerprints, generation\non staged blobs, policy check on verdicts, narrowed bump rule (R03);\nclaim + enqueue in one bounded transaction, generation-driven due-ness\nvia users.refreshed_generation (R04, R07); context helpers return Result\nand a refresh fails rather than scoring without context (R05);\ntopic-first discovery uses the fresh set (R06); the 80% feed-hit gate\nwithdrawn for a functional test + recorded share (R08, deciduous 878);\nfull_requested_at + in-place upgrade so a user request always runs\n(R09); VERIFY_* commands with pipefail and single filters (R10);\nCOALESCE-boolean fresh predicate and malformed-eligible candidates\n(R11); (user_did, threat_score) index with plan evidence (R12);\ncooldown marker backfilled from done queue rows (R13).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "c91afb85a5bdab4b284c01b1256b485802504e85",
     "short_hash": "c91afb8",
     "author": "Bryan Guffey",

@@ -9558,6 +9558,28 @@
       "created_at": "2026-09-13T13:24:29.060270-07:00",
       "updated_at": "2026-09-13T13:24:29.060270-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"confidence\":85}"
+    },
+    {
+      "id": 879,
+      "change_id": "2afb364b-fc56-40e0-8dcc-3f51fdafdc01",
+      "node_type": "outcome",
+      "title": "Phase 2 plan rev 2 committed 30cd7f4 on docs/343-phase2-plan (PR #123): all 13 Astra findings addressed, none disputed — lossless export/import, staging ownership + RefreshOutcome + full-drains-refresh, embedding/blob/policy compatibility contract with narrowed bump rule, one bounded transaction per tick + refreshed_generation due-ness, Result context helpers, topic-first fresh gate, 80% hit gate withdrawn (878), full_requested_at + in-place upgrade, VERIFY_* commands, COALESCE predicate, (user_did,threat_score) index with plan evidence, cooldown backfill. Spec §4.4/§6 amended in the same commit. Awaiting CodeRabbit re-review + Bryan merge",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T13:46:14.633741-07:00",
+      "updated_at": "2026-09-13T13:46:14.633741-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"30cd7f4\",\"confidence\":88}"
+    },
+    {
+      "id": 880,
+      "change_id": "1416fa6f-f22a-4927-90ea-e1186b188e64",
+      "node_type": "action",
+      "title": "Revise Phase 2 plan to rev 3 per Astra second review V2-01..V2-07 (REQUEST CHANGES on 30cd7f4): composite SCORING_REVISION (generation + model ids) stored as the stamp, classifier model+policy verdict check, conditional queue write + refresh_attempted_generation for durable scheduling and retry backoff, full-scan rebuild predicate checks embedding model with no fallback on incompatible failure, explicit ScanCompletion/RefreshOutcome bookkeeping (Ok is not complete), cross-backend expiry conversion + precision contract, authentic v17 fixture via create_tables_through + real SQLite→Postgres migration test, mandatory missing-context failure test via RefreshContextSource",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T14:14:49.979112-07:00",
+      "updated_at": "2026-09-13T14:14:49.979112-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"30cd7f4\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19592,6 +19614,28 @@
       "weight": 1.0,
       "rationale": "Revision drops the gate",
       "created_at": "2026-09-13T13:25:23.257039-07:00"
+    },
+    {
+      "id": 923,
+      "from_node_id": 877,
+      "to_node_id": 879,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "2afb364b-fc56-40e0-8dcc-3f51fdafdc01",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Revision committed",
+      "created_at": "2026-09-13T13:46:14.640304-07:00"
+    },
+    {
+      "id": 924,
+      "from_node_id": 879,
+      "to_node_id": 880,
+      "from_change_id": "2afb364b-fc56-40e0-8dcc-3f51fdafdc01",
+      "to_change_id": "1416fa6f-f22a-4927-90ea-e1186b188e64",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second review on rev 2",
+      "created_at": "2026-09-13T14:14:49.986674-07:00"
     }
   ],
   "documents": [
