@@ -9646,6 +9646,28 @@
       "created_at": "2026-09-13T18:37:46.231492-07:00",
       "updated_at": "2026-09-13T18:37:46.231492-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"4b9459d\",\"confidence\":85}"
+    },
+    {
+      "id": 887,
+      "change_id": "4d2aa892-9da2-4ae1-8484-68316383e382",
+      "node_type": "outcome",
+      "title": "Phase 2 plan rev 6 committed 86c4756 on docs/343-phase2-plan (PR #123): all 3 fifth-review findings addressed in design, none disputed — completion from persisted skip state with CompleteUnverified, full-scan bookkeeping boundary run_scan_with/FullScanBookkeeping with one retry site, deterministic Postgres enqueue tests. Spec §4.4 rev-6 amendment. Docs-only ⇒ merge-ready",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T18:40:37.700876-07:00",
+      "updated_at": "2026-09-13T18:40:37.700876-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"86c4756\",\"confidence\":88}"
+    },
+    {
+      "id": 888,
+      "change_id": "95495f25-a28e-4459-b34b-2a00224f8b5d",
+      "node_type": "action",
+      "title": "Revise Phase 2 plan to rev 7 per Astra sixth review V6-01/V6-02 (changes requested on 86c4756): CompleteUnverified wired through the marker, obligation clearing, Postgres/SQLite finalization and the drain (drain outcome tainted into the run via ScanCompletion::worst); both wrappers take an injected clock and anchor the retry deadline on attempt END, not start",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T19:08:08.961661-07:00",
+      "updated_at": "2026-09-13T19:08:08.961661-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"86c4756\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19768,6 +19790,28 @@
       "weight": 1.0,
       "rationale": "Fifth review on rev 5",
       "created_at": "2026-09-13T18:37:46.242639-07:00"
+    },
+    {
+      "id": 931,
+      "from_node_id": 886,
+      "to_node_id": 887,
+      "from_change_id": "7361f837-33d3-4558-b207-d329bd53feb4",
+      "to_change_id": "4d2aa892-9da2-4ae1-8484-68316383e382",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Revision committed",
+      "created_at": "2026-09-13T18:40:37.707003-07:00"
+    },
+    {
+      "id": 932,
+      "from_node_id": 887,
+      "to_node_id": 888,
+      "from_change_id": "4d2aa892-9da2-4ae1-8484-68316383e382",
+      "to_change_id": "95495f25-a28e-4459-b34b-2a00224f8b5d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Sixth review on rev 6",
+      "created_at": "2026-09-13T19:08:08.968135-07:00"
     }
   ],
   "documents": [

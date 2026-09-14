@@ -1,5 +1,13 @@
 [
   {
+    "hash": "86c4756f4e96d32173983415c532a6e65f860f87",
+    "short_hash": "86c4756",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T18:40:21-07:00",
+    "message": "docs(343): Phase 2 plan rev 6 — resolve Astra fifth review V5-01..V5-03; spec §4.4 amended\n\nV5-01 classify_full_scan takes the PERSISTED skip count as Option<i64>:\ndone + skips > 0 is CompleteWithSkips even when the resuming invocation\nreports degraded=false; an unreadable count is CompleteUnverified\n(cooldown yes, proof never); RefreshOutcome::CompletedUnverified,\nFinishCompletion::CompleteUnverified, CHECK list; staged resume test.\nV5-02 run_scan becomes run_scan_with over FullScanBookkeeping — scorer\nsetup, fingerprint rebuild (abort arm), discovery and pipeline all inside\none captured outcome with a single scheduling site; injected-failure test\nproves the hourly retry replaces the tick-set nightly deadline and the\nobligation survives, without manual schedule_retry or models. V5-03 the\nPostgres enqueue tests are split: serialization observed via pg_locks\n(then AlreadyQueued), claim preservation with the running claim committed\nfirst (then AlreadyRunning). Fifth resolution table.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "4b9459db433010c39dc24ff49ec3fe89547eb203",
     "short_hash": "4b9459d",
     "author": "Bryan Guffey",

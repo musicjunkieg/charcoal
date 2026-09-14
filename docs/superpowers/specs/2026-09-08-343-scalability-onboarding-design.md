@@ -440,6 +440,22 @@ deciduous 886):*
   claim preservation establishes the committed running claim before the
   competing request reads state.
 
+*Amended 2026-09-14 (plan rev 7, after Astra's sixth review V6-01–V6-02;
+deciduous 888):*
+
+- "Complete, unverified" is **fulfilled**: it writes the cooldown marker and
+  clears the full-scan obligation exactly like complete-with-skips, while
+  still withholding revision proof and scheduling the hourly retry. When a
+  full scan drains refresh-owned staging, the drain's outcome is folded into
+  the run's own (the worse of the two wins), and a drain alone never counts
+  as completing the user's full scan — only the run's own gather reaching
+  `done` does.
+- Retry deadlines are anchored on the **end** of the attempt, not its
+  start: both wrappers take an injected clock, read it after the attempt
+  returns, and schedule from that instant, so a failed attempt that outlasts
+  the retry window still gets the full backoff. The start instant is
+  telemetry only.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust
