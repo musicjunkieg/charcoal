@@ -989,7 +989,6 @@ async fn run_scan(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_scan_inner(
     config: Arc<Config>,
     db: Arc<dyn Database>,
