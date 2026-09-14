@@ -4337,6 +4337,62 @@ async fn test_pg_migrate_from_sqlite_preserves_every_row() {
         5,
         "re-import must not change expiry counts"
     );
+
+    // --- The refresh schedule (#344): the three `users` columns migrate too,
+    // or the destination either refreshes a user it just refreshed or forgets
+    // one that is behind. The attempt is DELIBERATELY a different revision
+    // from the proof: `mark_refreshed_generation` sets both columns, so a
+    // migration that stopped there would silently overwrite a pending attempt
+    // and this assertion would catch it.
+    const DEADLINE: &str = "2026-10-01T12:00:00+00:00";
+    src.upsert_user(MIG_USER, "mig.h").await.unwrap();
+    src.schedule_refresh(MIG_USER, DEADLINE).await.unwrap();
+    src.mark_refreshed_generation(MIG_USER, "proven-revision")
+        .await
+        .unwrap();
+    src.mark_refresh_attempted_generation(MIG_USER, "attempted-revision")
+        .await
+        .unwrap();
+    pg_db.upsert_user(MIG_USER, "mig.h").await.unwrap();
+
+    // Exactly the sequence `charcoal migrate` runs.
+    if let Some(at) = src.next_refresh_at(MIG_USER).await.unwrap() {
+        pg_db.schedule_refresh(MIG_USER, &at).await.unwrap();
+    }
+    if let Some(g) = src.refreshed_generation(MIG_USER).await.unwrap() {
+        pg_db.mark_refreshed_generation(MIG_USER, &g).await.unwrap();
+    }
+    if let Some(a) = src.refresh_attempted_generation(MIG_USER).await.unwrap() {
+        pg_db
+            .mark_refresh_attempted_generation(MIG_USER, &a)
+            .await
+            .unwrap();
+    }
+
+    let (next_at, proven, attempted): (
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx_core::query::query(
+        "SELECT next_refresh_at, refreshed_generation, refresh_attempted_generation
+           FROM users WHERE did = $1",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .map(|r| (r.get(0), r.get(1), r.get(2)))
+    .unwrap();
+    assert_eq!(
+        next_at.map(|t| t.to_rfc3339()).as_deref(),
+        Some(DEADLINE),
+        "the deadline survives migration"
+    );
+    assert_eq!(proven.as_deref(), Some("proven-revision"));
+    assert_eq!(
+        attempted.as_deref(),
+        Some("attempted-revision"),
+        "a pending attempt is copied verbatim, not overwritten by the proof"
+    );
 }
 
 /// #344 V2-06: Postgres keeps microseconds through export/import — the

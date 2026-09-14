@@ -1214,6 +1214,24 @@ async fn main() -> Result<()> {
                 );
             }
 
+            // 5. Refresh schedule (#344): copy what the source knew, so a
+            // migrated user is neither refreshed twice nor forgotten. A NULL
+            // refreshed_generation on the destination makes the next tick
+            // refresh them — the right default for a freshly migrated user.
+            if let Some(at) = sqlite_db.next_refresh_at(&did).await? {
+                pg_db.schedule_refresh(&did, &at).await?;
+            }
+            if let Some(g) = sqlite_db.refreshed_generation(&did).await? {
+                pg_db.mark_refreshed_generation(&did, &g).await?;
+            }
+            // mark_refreshed_generation sets attempted = refreshed; if the
+            // source had an attempt pending under a different revision, copy
+            // that too so the destination does not re-attempt at once.
+            if let Some(a) = sqlite_db.refresh_attempted_generation(&did).await? {
+                pg_db.mark_refresh_attempted_generation(&did, &a).await?;
+            }
+            println!("  {} Refresh schedule migrated", "✓".green());
+
             println!("\n{}", "Migration complete!".green().bold());
             println!(
                 "Set {} in your .env to switch to PostgreSQL.",
