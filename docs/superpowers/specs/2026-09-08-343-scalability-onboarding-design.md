@@ -371,6 +371,36 @@ deciduous 880):*
   "missing context fails the run without writing" rule has a deterministic
   test, not a runbook step.
 
+*Amended 2026-09-14 (plan rev 4, after Astra's third review V3-01–V3-06;
+deciduous 882):*
+
+- **Evidence provenance.** Every done verdict row names its producer. The
+  Stage-1 clean pass is a producer (`ONNX_MODEL_ID` + `onnx-clean-pass`);
+  the Stage-2 classifier is a producer (its model id + policy version, one
+  string on every path — advertised, written on a miss, matched on a hit;
+  Zentropi's advertised policy becomes the configured labeler version).
+  Finalize accepts a row only from a producer this binary runs; missing,
+  foreign and decode-error-sentinel provenance are distinct and all rejected
+  (bounded re-gather, never a skip).
+- **Cooldown reads only the completion marker.** `scan_state.
+  last_full_scan_finished_at` is written for `Complete` and
+  `CompleteWithSkips` (the request was fulfilled), never for a resumable
+  attempt; the queue row's `done` status is never consulted, and the row
+  records the outcome (`scan_queue.completion`). Only `Complete` proves the
+  revision.
+- **A full-scan request is a durable obligation.** `scan_queue.
+  full_requested_at` is set by every user enqueue, kept through a refresh
+  handover and through resumable/failed attempts, and cleared only when a
+  full scan completes. The retry tick re-queues owed work as `kind = 'full'`,
+  never as a refresh, so an interrupted drain continues automatically.
+- `mark_refreshed_generation` sets both revision columns; all refresh setup
+  (marker reset, scorers, client, context) runs inside one captured outcome
+  with a single scheduling site, so a setup failure still gets the hourly
+  retry.
+- Destructive Postgres migration fixtures run only against a dedicated
+  `*_migrations` database (`DATABASE_URL_MIGRATIONS`); the suite's isolation
+  is proven by a ten-run loop, not by a process-local lock.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust

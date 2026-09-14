@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c40be7f4d1e2910b15cb684b344b41e45d3299ae",
+    "short_hash": "c40be7f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T14:36:18-07:00",
+    "message": "docs(343): Phase 2 plan rev 3 — resolve Astra second review V2-01..V2-07; spec §4.4 amended\n\nV2-01 the stored stamp is scoring_revision() = generation | ONNX | embedding\n| NLI model ids (a model swap expires scores by itself; classifier\nmodel/policy changes still need a manual bump, documented); verdicts are\nreused only on matching classifier model AND policy. V2-02 the tick writes\nthe refresh row conditionally (ON CONFLICT … WHERE done/failed) and\nadvances a user only when the write happened; the two statements are pub\nconsts so the interleaving is tested on real SQL. V2-03\nrefresh_attempted_generation (set by the tick) is separated from\nrefreshed_generation (proof); failed attempts wait for their retry\ndeadline, a new revision is attempted promptly once. V2-04 the full\nscan rebuild decision checks the embedding model id and never falls back\nto incompatible vectors. V2-05 ScanCompletion / RefreshOutcome\n(CompletedWithSkips) — Ok is classified, only complete work earns the\ncooldown marker, the nightly schedule and the revision proof. V2-06\nExportedExpiry {At, Missing, Invalid}; NULL/malformed import as\nscored_at; microseconds kept on Postgres, whole-second truncation into\nSQLite documented and tested; real SQLite→Postgres migration test.\nV2-07 authentic v17 fixtures via create_tables_through /\nmigrate_postgres_through; relative dates; the export test imports.\nMandatory missing-context test via RefreshContextSource. Resolution\ntables for R01–R13 (cross-referenced) and V2-01–V2-07.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "30cd7f4913a502b939687b3bfd0c00d77b6fe510",
     "short_hash": "30cd7f4",
     "author": "Bryan Guffey",
