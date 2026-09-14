@@ -10,6 +10,7 @@
 
 use anyhow::Result;
 use charcoal::db::models::AccountScore;
+use charcoal::db::{EnqueueOutcome, FinishCompletion, ScanKind};
 use charcoal::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 const TEST_USER: &str = "did:plc:pgtest_user000000000000";
@@ -1299,7 +1300,9 @@ async fn test_pg_stale_claim_cannot_finish_or_heartbeat() {
         "a stale claim must not extend the new owner's lease"
     );
     assert!(
-        !db.finish_queued_scan(U, &a.claim_id, None).await.unwrap(),
+        !db.finish_queued_scan(U, &a.claim_id, FinishCompletion::Complete, None)
+            .await
+            .unwrap(),
         "a stale claim must not finish the new owner's scan"
     );
     assert_eq!(
@@ -1310,7 +1313,10 @@ async fn test_pg_stale_claim_cannot_finish_or_heartbeat() {
 
     // B, holding the live token, succeeds.
     assert!(db.heartbeat_scan(U, &b.claim_id, 120).await.unwrap());
-    assert!(db.finish_queued_scan(U, &b.claim_id, None).await.unwrap());
+    assert!(db
+        .finish_queued_scan(U, &b.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap());
     assert_eq!(
         db.scan_queue_entry(U, 1).await.unwrap().unwrap().status,
         "done"
@@ -1342,7 +1348,7 @@ async fn test_pg_finish_records_failure() {
 
     let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
     assert!(db
-        .finish_queued_scan(U, &claim.claim_id, Some("boom"))
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Failed, Some("boom"))
         .await
         .unwrap());
 
@@ -1355,7 +1361,7 @@ async fn test_pg_finish_records_failure() {
 
     // Finishing twice must be a no-op, not a second state change.
     assert!(
-        !db.finish_queued_scan(U, &claim.claim_id, None)
+        !db.finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
             .await
             .unwrap(),
         "the row is no longer running, so finish must not fire again"
@@ -1424,8 +1430,10 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
     charcoal::db::schema::create_tables(&conn).expect("schema");
     conn.execute(
-        "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-         VALUES (?1, 'done', ?2, ?2, ?3)",
+        // kind/completion explicit: since #344 the median counts CLEAN FULL
+        // rows only, so a fixture that omits them is invisible to it.
+        "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
+         VALUES (?1, 'done', 'full', 'complete', ?2, ?2, ?3)",
         rusqlite::params![DONE, STARTED, FINISHED],
     )
     .expect("seed the completed scan");
@@ -1445,8 +1453,8 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
 
         let pool = Pool::<Postgres>::connect(&url).await.unwrap();
         sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', $2, $2, $3)",
+            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', 'full', 'complete', $2, $2, $3)",
         )
         .bind(DONE)
         .bind(chrono::DateTime::parse_from_rfc3339(STARTED).unwrap())
@@ -1553,9 +1561,14 @@ async fn test_pg_scan_queue_depth_counts_queued_and_running() {
     );
 
     // Finished rows are neither waiting nor holding a slot.
-    db.finish_queued_scan(&claim.user_did, &claim.claim_id, None)
-        .await
-        .unwrap();
+    db.finish_queued_scan(
+        &claim.user_did,
+        &claim.claim_id,
+        FinishCompletion::Complete,
+        None,
+    )
+    .await
+    .unwrap();
     let finished = db.scan_queue_depth().await.unwrap();
     assert_eq!(
         (finished.queued, finished.running),
@@ -1776,8 +1789,8 @@ async fn test_pg_eta_accounts_for_the_concurrency_cap() {
         db.upsert_user(DONE, "q.bsky.social").await.unwrap();
         // A 'done' row lasting exactly 600s.
         sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', NOW(), NOW() - INTERVAL '600 seconds', NOW())",
+            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', 'full', 'complete', NOW(), NOW() - INTERVAL '600 seconds', NOW())",
         )
         .bind(DONE)
         .execute(&pool)
@@ -1926,9 +1939,14 @@ async fn test_pg_list_scan_queue_orders_and_numbers_rows() {
 
     // A failed scan must be distinguishable from one that never ran, which is
     // the whole reason #288 exists.
-    db.finish_queued_scan(CHARLIE, &claim.claim_id, Some("gather exploded"))
-        .await
-        .unwrap();
+    db.finish_queued_scan(
+        CHARLIE,
+        &claim.claim_id,
+        FinishCompletion::Failed,
+        Some("gather exploded"),
+    )
+    .await
+    .unwrap();
     let failed = db
         .list_scan_queue()
         .await
@@ -2025,12 +2043,270 @@ async fn test_pg_scan_queue_breaks_enqueued_at_ties_by_user_did() {
         "the total order is (enqueued_at, user_did), so ALPHA goes first"
     );
 
-    db.finish_queued_scan(ALPHA, &claim.claim_id, None)
+    db.finish_queued_scan(ALPHA, &claim.claim_id, FinishCompletion::Complete, None)
         .await
         .unwrap();
     for d in [ALPHA, BRAVO, CHARLIE] {
         db.delete_user_data(d).await.unwrap();
     }
+}
+
+// ── #344: scan_queue.kind, the full-request obligation, the handover ────────
+//
+// Postgres twins of `tests/unit_scan_kind.rs`. They share the scan_queue
+// fixture prefix, lock and wholesale reset used by the #257 tests above rather
+// than a prefix of their own: cap, position and median are whole-table
+// figures, so one row left behind by a panicking test breaks every later one.
+
+/// The refresh → owed-full handover, end to end (R09/V3-03).
+#[tokio::test]
+async fn test_pg_enqueue_outcomes_and_handover() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kind_handover";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "kind.bsky.social").await.unwrap();
+
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
+    assert_eq!(claim.kind, ScanKind::Refresh);
+
+    assert_eq!(
+        db.enqueue_scan(U).await.unwrap(),
+        EnqueueOutcome::QueuedAfterRefresh
+    );
+    let requested = pg_row(&db, U)
+        .await
+        .full_requested_at
+        .expect("request recorded");
+    assert_eq!(
+        db.enqueue_scan(U).await.unwrap(),
+        EnqueueOutcome::QueuedAfterRefresh,
+        "a second click coalesces"
+    );
+    assert_eq!(
+        pg_row(&db, U).await.full_requested_at.as_deref(),
+        Some(requested.as_str()),
+        "and does not move the request time"
+    );
+
+    // The refresh finishes: the row becomes the user's queued FULL scan,
+    // dated from the request, with the obligation still recorded.
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap());
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("queued", ScanKind::Full));
+    assert_eq!(row.enqueued_at, requested);
+    assert_eq!(row.full_requested_at.as_deref(), Some(requested.as_str()));
+    assert_eq!(
+        row.completion, None,
+        "the handover clears the refresh's own"
+    );
+
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("admitted");
+    assert_eq!(claim.kind, ScanKind::Full);
+
+    // A resumable full attempt keeps the obligation; an unverified one
+    // fulfils it (V6-01).
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap());
+    let row = pg_row(&db, U).await;
+    assert_eq!(row.completion, Some(FinishCompletion::Resumable));
+    assert_eq!(row.full_requested_at.as_deref(), Some(requested.as_str()));
+
+    db.enqueue_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(1, 120).await.unwrap().unwrap();
+    assert!(db
+        .finish_queued_scan(
+            U,
+            &claim.claim_id,
+            FinishCompletion::CompleteUnverified,
+            None
+        )
+        .await
+        .unwrap());
+    let row = pg_row(&db, U).await;
+    assert_eq!(row.completion, Some(FinishCompletion::CompleteUnverified));
+    assert!(row.full_requested_at.is_none(), "fulfilled");
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A user's click over a queued refresh keeps the place the refresh held.
+#[tokio::test]
+async fn test_pg_full_enqueue_upgrades_queued_refresh_keeping_position() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kind_upgrade";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "up.bsky.social").await.unwrap();
+
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let before = pg_row(&db, U).await.enqueued_at;
+    assert_eq!(db.enqueue_scan(U).await.unwrap(), EnqueueOutcome::Queued);
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("queued", ScanKind::Full));
+    assert_eq!(
+        row.enqueued_at, before,
+        "the user keeps the place the refresh held (R09)"
+    );
+    assert!(row.full_requested_at.is_some());
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A refresh enqueue never downgrades a queued full row, never touches a
+/// running one, and re-queues OWED full work as full (V3-03).
+#[tokio::test]
+async fn test_pg_refresh_never_downgrades() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kind_nodown";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "nd.bsky.social").await.unwrap();
+
+    // Queued full: untouched.
+    db.enqueue_scan(U).await.unwrap();
+    db.enqueue_refresh_scan(U).await.unwrap();
+    assert_eq!(pg_row(&db, U).await.kind, ScanKind::Full);
+
+    // Running full: untouched, and the claim still owns the row.
+    let claim = db.claim_next_scan(1, 120).await.unwrap().unwrap();
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("running", ScanKind::Full));
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap());
+
+    // Finished but still owed: re-queued as FULL, never as a refresh.
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("queued", ScanKind::Full));
+    assert_eq!(
+        row.completion, None,
+        "a re-queue clears the stale completion"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// The ETA median is over CLEAN FULL scans only — a one-minute refresh and a
+/// cost-capped attempt must not set the expectation for a two-hour scan.
+#[tokio::test]
+async fn test_pg_eta_median_ignores_refresh_and_unclean_rows() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const WAITER: &str = "did:plc:pgtest_q_kind_waiter";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    // Written directly: `enqueue_scan`/`finish_queued_scan` stamp NOW(), and
+    // these rows need chosen durations.
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    for (did, kind, completion, mins) in [
+        ("did:plc:pgtest_q_kind_full", "full", "complete", 60),
+        ("did:plc:pgtest_q_kind_refr", "refresh", "complete", 1),
+        ("did:plc:pgtest_q_kind_capd", "full", "resumable", 1),
+    ] {
+        sqlx_core::query::query(
+            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', $2, $3, NOW(), NOW(), NOW() + make_interval(mins => $4))",
+        )
+        .bind(did)
+        .bind(kind)
+        .bind(completion)
+        .bind(mins)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    db.enqueue_scan(WAITER).await.unwrap();
+    let entry = db.scan_queue_entry(WAITER, 1).await.unwrap().unwrap();
+    assert_eq!(
+        entry.eta_seconds,
+        Some(3600),
+        "median over clean full scans only"
+    );
+
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// V7-02: the cooldown marker and the carried drain outcome are written and
+/// retired together, and the delete touches exactly one key.
+#[tokio::test]
+async fn test_pg_finish_full_scan_state_is_one_transaction() {
+    const U: &str = "did:plc:pgtest_fullstate00000";
+    const CARRIED: &str = "full_carried_completion";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "fs.bsky.social").await.unwrap();
+    db.set_scan_state(U, CARRIED, "whatever").await.unwrap();
+    db.set_scan_state(U, "scan_phase", "done").await.unwrap();
+
+    db.finish_full_scan_state(U, "2026-09-14T00:00:00+00:00", CARRIED)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.get_scan_state(U, "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("2026-09-14T00:00:00+00:00")
+    );
+    assert_eq!(db.get_scan_state(U, CARRIED).await.unwrap(), None);
+    assert_eq!(
+        db.get_scan_state(U, "scan_phase").await.unwrap().as_deref(),
+        Some("done"),
+        "the delete is scoped to one key"
+    );
+
+    // Deleting an absent key is not an error — absence is the wanted state.
+    db.delete_scan_state(U, CARRIED).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// The `ScanQueueRow` view of the new columns, on the Postgres mapper.
+async fn pg_row(
+    db: &std::sync::Arc<dyn charcoal::db::Database>,
+    did: &str,
+) -> charcoal::db::traits::ScanQueueRow {
+    db.list_scan_queue()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.user_did == did)
+        .expect("row exists")
 }
 
 // --- Access requests (#309) ---

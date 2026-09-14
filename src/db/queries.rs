@@ -19,8 +19,8 @@ use super::models::{
     UserRow,
 };
 use super::traits::{
-    ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow, ScanClaim, ScanQueueDepth, ScanQueueEntry,
-    ScanQueueRow, ScanSkip,
+    ClassifierVerdictRow, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow, ScanClaim,
+    ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
 };
 use crate::scoring::generation::scoring_revision;
 
@@ -78,6 +78,44 @@ pub fn set_scan_state(conn: &Connection, user_did: &str, key: &str, value: &str)
          ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
         params![user_did, key, value],
     )?;
+    Ok(())
+}
+
+/// Remove one scan state key. Absent is not an error — the callers use a
+/// key's presence as the signal, so "already gone" is the state they wanted.
+pub fn delete_scan_state(conn: &Connection, user_did: &str, key: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+        params![user_did, key],
+    )?;
+    Ok(())
+}
+
+/// The cooldown anchor and the carried drain outcome, together (#344 V7-02).
+///
+/// One transaction, because the pair is a single fact: "this full scan was
+/// carried out, and whatever drain it performed along the way is accounted
+/// for". Written separately, a crash between them either starts a cooldown
+/// for a run still owed, or leaves a drain outcome behind to taint an
+/// unrelated later scan.
+pub fn finish_full_scan_state(
+    conn: &Connection,
+    user_did: &str,
+    finished_at_rfc3339: &str,
+    carried_key: &str,
+) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES (?1, 'last_full_scan_finished_at', ?2, datetime('now'))
+         ON CONFLICT(user_did, key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
+        params![user_did, finished_at_rfc3339],
+    )?;
+    tx.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+        params![user_did, carried_key],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -1611,22 +1649,108 @@ pub fn clear_scan_skips(conn: &Connection, user_did: &str) -> Result<()> {
 // over-admit, so the transaction below is BEGIN IMMEDIATE: the second admitter
 // gets SQLITE_BUSY — a loud error — instead of quietly admitting past the cap.
 
-/// Add a user to the scan queue. Idempotent — a second call while queued or
-/// running is a no-op; a finished ('done'/'failed') row is reset so the user
-/// can scan again. Mirrors PgDatabase::enqueue_scan.
-pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<()> {
+/// Re-queue a finished row for the refresh job and for the scheduling tick
+/// (#344 R04/V3-03).
+///
+/// Owed full work is re-queued as **full**, not as a refresh: a user whose
+/// full scan was interrupted is still owed that full scan, and a nightly tick
+/// must not quietly downgrade it to a partial re-score. Queued and running
+/// rows are excluded at the write itself, so a manual enqueue or an admission
+/// landing between a caller's read and this statement survives untouched
+/// (V2-02).
+///
+/// `?1` = user_did, `?2` = now (RFC3339). Task 6's tick binds the same two.
+pub const REFRESH_ENQUEUE_SQL: &str = "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
+     VALUES (?1, 'queued', 'refresh', ?2)
+     ON CONFLICT(user_did) DO UPDATE SET
+         status = 'queued',
+         kind = CASE WHEN scan_queue.full_requested_at IS NOT NULL THEN 'full' ELSE 'refresh' END,
+         enqueued_at = ?2,
+         started_at = NULL, finished_at = NULL,
+         lease_expires = NULL, last_error = NULL,
+         claim_id = NULL, completion = NULL
+     WHERE scan_queue.status IN ('done', 'failed')";
+
+/// Add a user to the scan queue as a FULL scan. Idempotent — a second call
+/// while queued or running changes no position; a finished ('done'/'failed')
+/// row is reset so the user can scan again. Mirrors PgDatabase::enqueue_scan.
+pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<EnqueueOutcome> {
+    // Immediate, so the state read and the write it decides cannot straddle
+    // another writer: the outcome this returns is what the handler tells the
+    // user, and a stale read would name the wrong one.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO scan_queue (user_did, status, enqueued_at)
-         VALUES (?1, 'queued', ?2)
-         ON CONFLICT(user_did) DO UPDATE SET
-             status = 'queued', enqueued_at = ?2,
-             started_at = NULL, finished_at = NULL,
-             lease_expires = NULL, last_error = NULL,
-             claim_id = NULL
-         WHERE status IN ('done', 'failed')",
-        params![user_did, now],
-    )?;
+    let current: Option<(String, String)> = tx
+        .query_row(
+            "SELECT status, kind FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    // Every branch records the obligation (V3-03): the user asked for a full
+    // scan, and only a full scan that COMPLETES may clear this.
+    let outcome = match current.as_ref().map(|(s, k)| (s.as_str(), k.as_str())) {
+        None | Some(("done", _)) | Some(("failed", _)) => {
+            tx.execute(
+                "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+                 VALUES (?1, 'queued', 'full', ?2, ?2)
+                 ON CONFLICT(user_did) DO UPDATE SET
+                     status = 'queued', kind = 'full', enqueued_at = ?2,
+                     started_at = NULL, finished_at = NULL, lease_expires = NULL,
+                     last_error = NULL, claim_id = NULL, completion = NULL,
+                     full_requested_at = COALESCE(scan_queue.full_requested_at, ?2)",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::Queued
+        }
+        Some(("queued", "refresh")) => {
+            // In place: the user keeps the position the refresh already held.
+            tx.execute(
+                "UPDATE scan_queue
+                 SET kind = 'full', full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::Queued
+        }
+        Some(("queued", _)) => {
+            tx.execute(
+                "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::AlreadyQueued
+        }
+        Some(("running", "refresh")) => {
+            // Honoured when the refresh finishes (finish_queued_scan). The
+            // first request's time wins so repeated clicks do not move it.
+            tx.execute(
+                "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::QueuedAfterRefresh
+        }
+        Some(("running", _)) => {
+            tx.execute(
+                "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::AlreadyRunning
+        }
+        Some((other, _)) => anyhow::bail!("scan_queue.status holds an unknown value {other:?}"),
+    };
+    tx.commit()?;
+    Ok(outcome)
+}
+
+/// Same statement the tick uses (`REFRESH_ENQUEUE_SQL`, Task 6): owed full
+/// work is re-queued as full, otherwise a refresh; queued/running rows are
+/// never touched.
+pub fn enqueue_refresh_scan(conn: &Connection, user_did: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(REFRESH_ENQUEUE_SQL, params![user_did, now])?;
     Ok(())
 }
 
@@ -1657,21 +1781,26 @@ pub fn claim_next_scan(
     // a bare `ORDER BY enqueued_at` falls back to rowid — so the row admitted
     // here would not be the row `list_scan_queue` displays as next. One total
     // order for display, position, and admission (#271).
-    let did: Option<String> = tx
+    // No `kind` in the ORDER BY: the queue is FIFO ACROSS kinds (#271), so an
+    // older refresh is admitted before a newer full scan. A user who wants to
+    // jump that queue upgrades their own row, which keeps its place.
+    let next: Option<(String, String)> = tx
         .query_row(
-            "SELECT user_did FROM scan_queue
+            "SELECT user_did, kind FROM scan_queue
              WHERE status = 'queued'
              ORDER BY enqueued_at, user_did
              LIMIT 1",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
-    let Some(did) = did else {
+    let Some((did, kind)) = next else {
         tx.commit()?;
         return Ok(None);
     };
+    let kind = ScanKind::from_str(&kind)
+        .with_context(|| format!("scan_queue.kind holds an unknown value {kind:?}"))?;
 
     let started_at = chrono::Utc::now();
     let lease_expires = started_at + chrono::Duration::seconds(lease_secs);
@@ -1691,6 +1820,7 @@ pub fn claim_next_scan(
     Ok(Some(ScanClaim {
         user_did: did,
         claim_id,
+        kind,
     }))
 }
 
@@ -1719,15 +1849,41 @@ pub fn finish_queued_scan(
     conn: &Connection,
     user_did: &str,
     claim_id: &str,
+    completion: FinishCompletion,
     error: Option<&str>,
 ) -> Result<bool> {
     let now = chrono::Utc::now().to_rfc3339();
     let status = if error.is_none() { "done" } else { "failed" };
+    // Fulfilled = the user's request was carried out, verified or not (V6-01).
+    let fulfilled = completion.fulfils_full_request();
+    // One statement, one WHERE (status='running' AND claim_id) — the fencing
+    // rule is unchanged. Three shapes, all decided from the row's PRE-update
+    // values (SQLite evaluates every CASE against them):
+    //   refresh + owed full  → hand over: queued full, obligation kept (R09)
+    //   full + fulfilled     → done, obligation cleared (V3-03)
+    //   anything else        → done/failed, obligation kept
     let changed = conn.execute(
         "UPDATE scan_queue
-         SET status = ?3, finished_at = ?4, lease_expires = NULL, last_error = ?5
+         SET status = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN 'queued' ELSE ?3 END,
+             kind = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN 'full' ELSE kind END,
+             enqueued_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN full_requested_at ELSE enqueued_at END,
+             started_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE started_at END,
+             finished_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE ?4 END,
+             claim_id = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE claim_id END,
+             completion = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE ?6 END,
+             full_requested_at = CASE WHEN kind = 'full' AND ?7 THEN NULL ELSE full_requested_at END,
+             lease_expires = NULL,
+             last_error = ?5
          WHERE user_did = ?1 AND status = 'running' AND claim_id = ?2",
-        params![user_did, claim_id, status, now, error],
+        params![
+            user_did,
+            claim_id,
+            status,
+            now,
+            error,
+            completion.as_str(),
+            fulfilled
+        ],
     )?;
     Ok(changed > 0)
 }
@@ -1787,29 +1943,52 @@ pub fn list_scan_queue(conn: &Connection) -> Result<Vec<ScanQueueRow>> {
         "SELECT user_did, status, enqueued_at, started_at, finished_at, last_error,
                 (SELECT COUNT(*) FROM scan_queue q2
                   WHERE q2.status = 'queued'
-                    AND (q2.enqueued_at, q2.user_did) <= (q.enqueued_at, q.user_did))
+                    AND (q2.enqueued_at, q2.user_did) <= (q.enqueued_at, q.user_did)),
+                kind, full_requested_at, completion
          FROM scan_queue q
          ORDER BY q.enqueued_at ASC, q.user_did ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         let status: String = row.get(1)?;
         let raw_position: i64 = row.get(6)?;
-        Ok(ScanQueueRow {
-            user_did: row.get(0)?,
-            position: if status == "queued" { raw_position } else { 0 },
-            status,
-            enqueued_at: row.get(2)?,
-            started_at: row.get(3)?,
-            finished_at: row.get(4)?,
-            last_error: row.get(5)?,
-        })
+        Ok((
+            ScanQueueRow {
+                user_did: row.get(0)?,
+                position: if status == "queued" { raw_position } else { 0 },
+                status,
+                enqueued_at: row.get(2)?,
+                started_at: row.get(3)?,
+                finished_at: row.get(4)?,
+                last_error: row.get(5)?,
+                // Placeholders: `kind` and `completion` are validated outside
+                // the rusqlite closure, whose error type cannot carry an
+                // anyhow context string.
+                kind: ScanKind::Full,
+                full_requested_at: row.get(8)?,
+                completion: None,
+            },
+            row.get::<_, String>(7)?,
+            row.get::<_, Option<String>>(9)?,
+        ))
     })?;
     // Collected with `?` rather than `filter_map(ok)`: a row that fails to map
     // would otherwise vanish from an operator's view of the queue, which is
-    // the exact blindness #288 is removing.
+    // the exact blindness #288 is removing. An unrecognised `kind` or
+    // `completion` is an error for the same reason — rendering it as an
+    // ordinary full scan would hide the row this binary cannot interpret.
     let mut out = Vec::new();
     for row in rows {
-        out.push(row?);
+        let (mut row, kind, completion) = row?;
+        row.kind = ScanKind::from_str(&kind)
+            .with_context(|| format!("scan_queue.kind holds an unknown value {kind:?}"))?;
+        row.completion =
+            match completion {
+                None => None,
+                Some(c) => Some(FinishCompletion::from_str(&c).with_context(|| {
+                    format!("scan_queue.completion holds an unknown value {c:?}")
+                })?),
+            };
+        out.push(row);
     }
     Ok(out)
 }
@@ -1855,10 +2034,16 @@ pub fn scan_queue_entry(
     // Errors propagate with `?` rather than being dropped by `filter_map(ok)`:
     // a corrupt row or an unparseable timestamp would otherwise silently shrink
     // the sample and skew the median instead of surfacing.
+    //
+    // FULL rows that completed CLEANLY only (#344): a refresh re-scores a
+    // handful of accounts in about a minute, and an interrupted full scan's
+    // duration is the time until it gave up. Folding either into the median
+    // would quote a queued user an ETA for work nobody is about to do.
     let mut durations: Vec<f64> = Vec::new();
     let mut stmt = conn.prepare(
         "SELECT started_at, finished_at FROM scan_queue
          WHERE status = 'done' AND started_at IS NOT NULL
+           AND kind = 'full' AND completion = 'complete'
          ORDER BY finished_at DESC LIMIT 20",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -3033,7 +3218,14 @@ mod tests {
             "a stale claim must not extend the new owner's lease"
         );
         assert!(
-            !finish_queued_scan(&conn, QUEUE_USER_A, &a.claim_id, None).unwrap(),
+            !finish_queued_scan(
+                &conn,
+                QUEUE_USER_A,
+                &a.claim_id,
+                FinishCompletion::Complete,
+                None
+            )
+            .unwrap(),
             "a stale claim must not finish the new owner's scan"
         );
         assert_eq!(
@@ -3047,7 +3239,14 @@ mod tests {
 
         // B, holding the live token, succeeds on both surfaces.
         assert!(heartbeat_scan(&conn, QUEUE_USER_A, &b.claim_id, 120).unwrap());
-        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &b.claim_id, None).unwrap());
+        assert!(finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &b.claim_id,
+            FinishCompletion::Complete,
+            None
+        )
+        .unwrap());
     }
 
     /// The admitter's only way to tell an idle queue from a wedged one —
@@ -3086,7 +3285,14 @@ mod tests {
         );
 
         // Finished rows are neither waiting nor holding a slot.
-        finish_queued_scan(&conn, &claim.user_did, &claim.claim_id, None).unwrap();
+        finish_queued_scan(
+            &conn,
+            &claim.user_did,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
         assert_eq!(
             scan_queue_depth(&conn).unwrap(),
             ScanQueueDepth {
@@ -3102,9 +3308,23 @@ mod tests {
         let conn = test_db();
         enqueue_scan(&conn, QUEUE_USER_A).unwrap();
         let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap());
+        assert!(finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None
+        )
+        .unwrap());
         assert!(
-            !finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap(),
+            !finish_queued_scan(
+                &conn,
+                QUEUE_USER_A,
+                &claim.claim_id,
+                FinishCompletion::Complete,
+                None
+            )
+            .unwrap(),
             "the row is no longer running, so a second finish must be a no-op"
         );
     }
@@ -3114,7 +3334,14 @@ mod tests {
         let conn = test_db();
         enqueue_scan(&conn, QUEUE_USER_A).unwrap();
         let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+        finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
         let done_at = scan_queue_entry(&conn, QUEUE_USER_A, 1)
             .unwrap()
             .unwrap()
@@ -3260,7 +3487,14 @@ mod tests {
         // Seed a finished scan so a median exists.
         enqueue_scan(&conn, QUEUE_USER_A).unwrap();
         let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+        finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
 
         // A running row, with the median now available, must still report
         // no ETA — a running scan's remaining time is unknown.
@@ -3326,9 +3560,11 @@ mod tests {
         let started = chrono::DateTime::parse_from_rfc3339("2026-08-06T00:00:00+00:00").unwrap();
         let finished =
             started + chrono::TimeDelta::nanoseconds((duration_secs * 1e9).round() as i64);
+        // kind/completion explicit: since #344 the median counts CLEAN FULL
+        // rows only, so a fixture that omits them is invisible to it.
         conn.execute(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-             VALUES (?1, 'done', ?2, ?2, ?3)",
+            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
+             VALUES (?1, 'done', 'full', 'complete', ?2, ?2, ?3)",
             params![user_did, started.to_rfc3339(), finished.to_rfc3339()],
         )
         .unwrap();
@@ -3541,6 +3777,7 @@ mod tests {
             &conn,
             QUEUE_USER_A,
             &claim.claim_id,
+            FinishCompletion::Failed,
             Some("gather exploded"),
         )
         .unwrap();

@@ -7,11 +7,21 @@
 //! observe the bug it claims to cover.
 #![cfg(feature = "web")]
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use charcoal::db::{Database, FinishCompletion, ScanKind};
+use charcoal::web::admitter::{LiveScans, LEASE_SECS};
 use charcoal::web::auth::{create_token, COOKIE_NAME};
+use charcoal::web::scan_job::{
+    record_full_scan_completion, run_under_slot, QueueSlot, ScanCompletion, ScanManager,
+    ScanReport, SlotExit,
+};
 use charcoal::web::test_helpers::{build_open_test_app_with_db, TEST_SECRET};
 use serde_json::Value;
+use tokio::sync::RwLock;
 use tower::ServiceExt;
 
 const USER_A: &str = "did:plc:queuetestaaaaaaaaaaaaaaaa";
@@ -178,24 +188,68 @@ async fn status_reports_the_queue_position_only_while_queued() {
     assert_eq!(running["scan_running"], true);
 }
 
+/// Drive `run_under_slot` with a scan future that reports `completion` (and
+/// writes the marker exactly as `run_scan` would), then POST /api/scan.
+///
+/// Composed rather than helper-level on purpose (V3-02): the defect this
+/// guards against — a cooldown anchored on the queue row's `done` status
+/// rather than on the completion marker — lives in the seam between the slot
+/// lifecycle and the handler. A test that pokes `finish_queued_scan` and then
+/// reads the row cannot see it.
+async fn finish_then_post(
+    app: &axum::Router,
+    db: &Arc<dyn Database>,
+    did: &str,
+    completion: ScanCompletion,
+) -> StatusCode {
+    db.enqueue_scan(did).await.expect("enqueue");
+    let claim = db
+        .claim_next_scan(1, LEASE_SECS)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    let mgr = Arc::new(RwLock::new({
+        let mut m = ScanManager::new();
+        m.begin_admitted_scan(did, &claim.claim_id);
+        m
+    }));
+    let slot = QueueSlot {
+        claim_id: claim.claim_id.clone(),
+        wake: tokio::sync::mpsc::channel(1).0,
+    };
+    let live = LiveScans::new().try_register(did).expect("fresh registry");
+    let scan_db = db.clone();
+    let scan_did = did.to_string();
+    let exit = run_under_slot(
+        async move {
+            record_full_scan_completion(scan_db.as_ref(), &scan_did, completion).await;
+            Ok(ScanReport {
+                completion: completion.into(),
+            })
+        },
+        db.clone(),
+        mgr,
+        did.to_string(),
+        slot,
+        live,
+        Duration::from_millis(10),
+    )
+    .await;
+    assert_eq!(exit, SlotExit::Completed);
+    post_scan(app, did).await.0
+}
+
 /// #258/#309: a successful scan starts a per-user cooldown window. The 429
 /// carries a `retry_at` so the client can tell the caller when to come back.
 #[tokio::test]
 async fn a_completed_scan_starts_the_cooldown() {
     let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
     db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
-    db.enqueue_scan(USER_A).await.expect("enqueue");
-    let claim = db
-        .claim_next_scan(1, 600)
-        .await
-        .expect("claim")
-        .expect("claimed");
-    db.finish_queued_scan(USER_A, &claim.claim_id, None)
-        .await
-        .expect("finish");
-
-    let (status, body) = post_scan(&app, USER_A).await;
-    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(
+        finish_then_post(&app, &db, USER_A, ScanCompletion::Complete).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let (_, body) = post_scan(&app, USER_A).await;
     assert!(body["retry_at"].is_string(), "retry_at present: {body}");
 }
 
@@ -211,9 +265,14 @@ async fn a_failed_scan_does_not_start_the_cooldown() {
         .await
         .expect("claim")
         .expect("claimed");
-    db.finish_queued_scan(USER_A, &claim.claim_id, Some("boom"))
-        .await
-        .expect("finish");
+    db.finish_queued_scan(
+        USER_A,
+        &claim.claim_id,
+        FinishCompletion::Failed,
+        Some("boom"),
+    )
+    .await
+    .expect("finish");
 
     let (status, _) = post_scan(&app, USER_A).await;
     assert_eq!(
@@ -221,6 +280,149 @@ async fn a_failed_scan_does_not_start_the_cooldown() {
         StatusCode::ACCEPTED,
         "failed scans may retry immediately"
     );
+}
+
+/// V3-02: an interrupted full scan finishes `done` like any other, so a
+/// cooldown keyed on the row's status would lock the user out of the retry
+/// that resumes their own staging. The marker is the only anchor.
+#[tokio::test]
+async fn an_interrupted_full_scan_does_not_start_a_cooldown() {
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
+    assert_eq!(
+        finish_then_post(&app, &db, USER_A, ScanCompletion::Resumable).await,
+        StatusCode::ACCEPTED,
+        "resume immediately"
+    );
+    let row = db
+        .list_scan_queue()
+        .await
+        .expect("queue")
+        .into_iter()
+        .find(|r| r.user_did == USER_A)
+        .expect("row");
+    assert_eq!(row.status, "queued", "the retry click was accepted");
+    assert!(db
+        .get_scan_state(USER_A, "last_full_scan_finished_at")
+        .await
+        .expect("marker read")
+        .is_none());
+}
+
+/// V6-01: a scan that finished with skipped accounts still CARRIED OUT the
+/// user's request — the gaps are per-account, and the cooldown applies.
+#[tokio::test]
+async fn a_scan_completed_with_skips_starts_the_cooldown() {
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
+    assert_eq!(
+        finish_then_post(
+            &app,
+            &db,
+            USER_A,
+            ScanCompletion::CompleteWithSkips { n: 2 }
+        )
+        .await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+/// R13: a nightly refresh reuses the user's one queue row. It must neither
+/// start a cooldown nor move the one a full scan started.
+#[tokio::test]
+async fn a_completed_full_scan_enforces_cooldown_and_a_refresh_does_not_reset_it() {
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
+    assert_eq!(
+        finish_then_post(&app, &db, USER_A, ScanCompletion::Complete).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let marker = db
+        .get_scan_state(USER_A, "last_full_scan_finished_at")
+        .await
+        .expect("marker read")
+        .expect("marker written");
+
+    // The 429'd click enqueued nothing, so the helper's row is already `done`
+    // and the obligation it carried was cleared by the fulfilled completion —
+    // which is why the refresh enqueue below stays a refresh rather than being
+    // re-queued as owed full work.
+    let row = db
+        .list_scan_queue()
+        .await
+        .expect("queue")
+        .into_iter()
+        .find(|r| r.user_did == USER_A)
+        .expect("row");
+    assert_eq!(
+        (row.status.as_str(), row.full_requested_at.as_deref()),
+        ("done", None)
+    );
+
+    // A refresh runs and finishes; the marker and the 429 are unchanged.
+    db.enqueue_refresh_scan(USER_A).await.expect("refresh");
+    let claim = db
+        .claim_next_scan(1, LEASE_SECS)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    assert_eq!(claim.kind, ScanKind::Refresh);
+    db.finish_queued_scan(USER_A, &claim.claim_id, FinishCompletion::Complete, None)
+        .await
+        .expect("finish");
+    assert_eq!(
+        db.get_scan_state(USER_A, "last_full_scan_finished_at")
+            .await
+            .expect("marker read")
+            .expect("still there"),
+        marker,
+        "a refresh never touches the full-scan cooldown anchor"
+    );
+    assert_eq!(
+        post_scan(&app, USER_A).await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+/// R09: the 202 body says which of the three things actually happened, so the
+/// dashboard can tell "your scan starts when the refresh finishes" from
+/// "you're in line".
+#[tokio::test]
+async fn the_202_body_names_what_happened_to_the_request() {
+    let (app, db) = build_open_test_app_with_db().expect(MODELS_REQUIRED);
+    db.upsert_user(USER_A, "a.bsky.social").await.expect("user");
+
+    let (status, body) = post_scan(&app, USER_A).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["queued"], "now", "{body}");
+
+    // A full scan of their own is running: still queued, already running.
+    let claim = db
+        .claim_next_scan(1, LEASE_SECS)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    let (_, body) = post_scan(&app, USER_A).await;
+    assert_eq!(body["queued"], "already_running", "{body}");
+    db.finish_queued_scan(USER_A, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .expect("finish");
+
+    // A REFRESH is running: the request is recorded and honoured afterwards.
+    db.enqueue_refresh_scan(USER_B).await.expect("refresh");
+    db.upsert_user(USER_B, "b.bsky.social").await.expect("user");
+    let claim = db
+        .claim_next_scan(2, LEASE_SECS)
+        .await
+        .expect("claim")
+        .expect("claimed");
+    assert_eq!(
+        (claim.user_did.as_str(), claim.kind),
+        (USER_B, ScanKind::Refresh)
+    );
+    let (status, body) = post_scan(&app, USER_B).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["queued"], "after_refresh", "{body}");
 }
 
 /// The queue row is the authority on whether a scan is live (#257/#274). A
@@ -248,7 +450,7 @@ async fn status_reports_a_running_row_even_with_no_in_memory_scan() {
     // And once the row reaches a terminal state, the scan is over — even though
     // nothing in this process ever wrote a status entry.
     assert!(db
-        .finish_queued_scan(USER_A, &claim.claim_id, None)
+        .finish_queued_scan(USER_A, &claim.claim_id, FinishCompletion::Complete, None)
         .await
         .expect("finish"));
     let json = get_status(&app, USER_A).await;

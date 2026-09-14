@@ -107,6 +107,108 @@ mod eta_tests {
     }
 }
 
+/// What a `scan_queue` row asks the admitter to run (#343 §4.4).
+///
+/// `Full` is the scan the user triggers. `Refresh` re-scores only this
+/// user's High/Elevated rows that are about to expire or predate the current
+/// scoring generation — candidates come from `account_scores`, never from
+/// the network. Both run under the same claim/lease/fencing machinery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanKind {
+    Full,
+    Refresh,
+}
+
+impl ScanKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScanKind::Full => "full",
+            ScanKind::Refresh => "refresh",
+        }
+    }
+
+    /// Not `std::str::FromStr`: the callers want `Option` so they can attach
+    /// the offending value with `.with_context(...)`, and `FromStr::Err` would
+    /// force an error type that carries nothing useful here. Paired with
+    /// [`ScanKind::as_str`] as a round-trip, which is the only contract the
+    /// database columns need.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "full" => Some(ScanKind::Full),
+            "refresh" => Some(ScanKind::Refresh),
+            _ => None,
+        }
+    }
+}
+
+/// What `enqueue_scan` did, so the handler can tell the user the truth
+/// (#344 R09): a request made while a refresh is running is not dropped —
+/// it is recorded on the row and runs when the refresh finishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnqueueOutcome {
+    /// A new queued full row, or a queued refresh upgraded in place.
+    Queued,
+    /// A full row was already queued; nothing changed.
+    AlreadyQueued,
+    /// A full scan is running; nothing changed.
+    AlreadyRunning,
+    /// A refresh is running; `full_requested_at` recorded (or already was).
+    QueuedAfterRefresh,
+}
+
+/// How a scan ended, recorded durably on the queue row (#344 V2-05).
+///
+/// `status` alone cannot carry this: an interrupted full scan and a clean one
+/// both finish `done`, and the cooldown, the ETA median and the full-scan
+/// obligation each need to tell them apart. The first three variants are
+/// *fulfilment* — the user's request was carried out, verified or not — and
+/// only [`FinishCompletion::Complete`] is clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinishCompletion {
+    Complete,
+    CompleteWithSkips,
+    CompleteUnverified,
+    Resumable,
+    Failed,
+}
+
+impl FinishCompletion {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FinishCompletion::Complete => "complete",
+            FinishCompletion::CompleteWithSkips => "complete_with_skips",
+            FinishCompletion::CompleteUnverified => "complete_unverified",
+            FinishCompletion::Resumable => "resumable",
+            FinishCompletion::Failed => "failed",
+        }
+    }
+
+    /// `Option` rather than `std::str::FromStr` — see [`ScanKind::from_str`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "complete" => Some(FinishCompletion::Complete),
+            "complete_with_skips" => Some(FinishCompletion::CompleteWithSkips),
+            "complete_unverified" => Some(FinishCompletion::CompleteUnverified),
+            "resumable" => Some(FinishCompletion::Resumable),
+            "failed" => Some(FinishCompletion::Failed),
+            _ => None,
+        }
+    }
+
+    /// The user's full-scan request was carried out (V6-01). Clears
+    /// `full_requested_at`; the other two leave the work owed.
+    pub fn fulfils_full_request(&self) -> bool {
+        matches!(
+            self,
+            FinishCompletion::Complete
+                | FinishCompletion::CompleteWithSkips
+                | FinishCompletion::CompleteUnverified
+        )
+    }
+}
+
 /// A successful claim on a queued scan (#257).
 ///
 /// `claim_id` is a fencing token minted by the claim. `heartbeat_scan` and
@@ -117,6 +219,11 @@ mod eta_tests {
 pub struct ScanClaim {
     pub user_did: String,
     pub claim_id: String,
+    /// Which pipeline the claimant must run (#344). Carried on the claim
+    /// rather than re-read afterwards: between the claim and a second read
+    /// the row can be upgraded, and the worker must run the kind it was
+    /// admitted as.
+    pub kind: ScanKind,
 }
 
 /// One `scan_queue` row, as the admin dashboard needs to display it (#288).
@@ -137,6 +244,16 @@ pub struct ScanQueueRow {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub last_error: Option<String>,
+    /// Which pipeline this row runs (#344). Legacy rows read `Full`, which is
+    /// what the v18 column default backfilled them to.
+    pub kind: ScanKind,
+    /// RFC3339 instant a full scan was first asked for and not yet delivered,
+    /// or None when nothing is owed (#344 R09). Survives a refresh handover,
+    /// a resumable attempt and a process restart.
+    pub full_requested_at: Option<String>,
+    /// How the last attempt ended. None on a row that has never finished, and
+    /// on rows written before v18.
+    pub completion: Option<FinishCompletion>,
 }
 
 /// How many rows are waiting versus occupying a slot (#257).
@@ -293,6 +410,25 @@ pub trait Database: Send + Sync {
 
     /// Set a scan state value (upsert) for a specific user.
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
+
+    /// Remove a single scan state key. Absent keys are not an error — the
+    /// callers use this to retract a marker whose presence is the signal, and
+    /// "already gone" is the state they wanted.
+    async fn delete_scan_state(&self, user_did: &str, key: &str) -> Result<()>;
+
+    /// Record that a full scan was carried out, in ONE transaction (#344
+    /// V7-02): write `last_full_scan_finished_at` (the cooldown anchor) and
+    /// delete `carried_key` (the drain outcome this run has now consumed).
+    ///
+    /// Two calls would leave a window where the cooldown has started but the
+    /// carried outcome is still there to taint an unrelated later scan — or,
+    /// the other way round, the evidence is gone while the run is still owed.
+    async fn finish_full_scan_state(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+    ) -> Result<()>;
 
     /// Get all scan state key-value pairs for a specific user. Used by the
     /// migration command to transfer all keys without a hardcoded list.
@@ -651,9 +787,15 @@ pub trait Database: Send + Sync {
 
     // --- Scan admission queue (#257) ---
 
-    /// Add a user to the scan queue. Idempotent — a second call while queued or
-    /// running is a no-op, so a double-click cannot double-book.
-    async fn enqueue_scan(&self, user_did: &str) -> Result<()>;
+    /// Queue a full scan. Re-queues `done`/`failed` rows; upgrades a queued
+    /// `refresh` in place (keeps `enqueued_at`); records `full_requested_at`
+    /// on a running `refresh` so it runs afterwards; no-op on queued/running
+    /// `full`. Idempotent. See `EnqueueOutcome`.
+    async fn enqueue_scan(&self, user_did: &str) -> Result<EnqueueOutcome>;
+
+    /// Queue a refresh (#343 §4.4). Re-queues `done`/`failed` rows as
+    /// `refresh`; never touches a queued or running row of either kind.
+    async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()>;
 
     /// Claim the oldest queued scan if fewer than `limit` are running.
     /// Returns the claim (user_did plus fencing token), or None when at
@@ -670,10 +812,17 @@ pub trait Database: Send + Sync {
     /// Mark a scan done (error None) or failed (error Some), releasing its slot.
     /// Returns false when the row is not running under `claim_id`, in which
     /// case nothing was changed.
+    ///
+    /// Writes `completion`. A `refresh` row with `full_requested_at` set
+    /// becomes a queued `full` row dated from the request, obligation kept. A
+    /// `full` row finishing `Complete`/`CompleteWithSkips`/`CompleteUnverified`
+    /// clears `full_requested_at`; `Resumable`/`Failed` keep it (V3-03). The
+    /// refresh's own outcome is recorded in `scan_state` by `run_refresh`.
     async fn finish_queued_scan(
         &self,
         user_did: &str,
         claim_id: &str,
+        completion: FinishCompletion,
         error: Option<&str>,
     ) -> Result<bool>;
 

@@ -3,6 +3,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use charcoal::db::FinishCompletion;
 use charcoal::web::auth::{create_token, COOKIE_NAME};
 use charcoal::web::test_helpers::{build_admin_test_app_with_db, TEST_DID, TEST_SECRET};
 use serde_json::Value;
@@ -212,9 +213,14 @@ async fn admin_trigger_bypasses_the_cooldown() {
         .await
         .expect("claim")
         .expect("claimed");
-    db.finish_queued_scan(COOLDOWN_USER, &claim.claim_id, None)
-        .await
-        .expect("finish");
+    db.finish_queued_scan(
+        COOLDOWN_USER,
+        &claim.claim_id,
+        FinishCompletion::Complete,
+        None,
+    )
+    .await
+    .expect("finish");
 
     let uri = format!("/api/admin/users/{COOLDOWN_USER}/scan");
     let (status, body) = call(&app, "POST", &uri, TEST_DID).await;

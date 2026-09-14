@@ -263,6 +263,138 @@ async fn set_progress(
         });
 }
 
+/// How a full scan ended, for bookkeeping. `amplification::run` returns
+/// `Ok((events, scored, degraded))` for cost-capped and partially skipped
+/// scans alike, so `Ok` alone says nothing about completion (V2-05).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanCompletion {
+    /// Every candidate scored; staging drained to `done`; zero persisted skips.
+    Complete,
+    /// Reached `done` but `n` accounts were skipped at some point in this
+    /// staged run (persisted in `scan_skips`, which survives a resume).
+    CompleteWithSkips { n: i64 },
+    /// Reached `done` but the skip count could not be read: fulfilled for the
+    /// cooldown, never clean, never proof (V5-01).
+    CompleteUnverified,
+    /// Cost-capped or interrupted: staging left at burst/finalize, re-run to resume.
+    Resumable,
+}
+
+impl ScanCompletion {
+    /// The user's request was carried out — verified or not. Drives the
+    /// cooldown marker and clears the full obligation (V6-01). Only
+    /// `Complete` additionally proves the revision.
+    pub fn fulfilled(&self) -> bool {
+        !matches!(self, ScanCompletion::Resumable)
+    }
+
+    /// Severity for folding a drain's outcome into the run's own (V6-01):
+    /// Resumable > CompleteUnverified > CompleteWithSkips > Complete. Skip
+    /// counts add.
+    pub fn worst(self, other: ScanCompletion) -> ScanCompletion {
+        use ScanCompletion::*;
+        match (self, other) {
+            (Resumable, _) | (_, Resumable) => Resumable,
+            (CompleteUnverified, _) | (_, CompleteUnverified) => CompleteUnverified,
+            (CompleteWithSkips { n: a }, CompleteWithSkips { n: b }) => {
+                CompleteWithSkips { n: a + b }
+            }
+            (CompleteWithSkips { n }, Complete) | (Complete, CompleteWithSkips { n }) => {
+                CompleteWithSkips { n }
+            }
+            (Complete, Complete) => Complete,
+        }
+    }
+}
+
+impl From<ScanCompletion> for crate::db::FinishCompletion {
+    fn from(c: ScanCompletion) -> crate::db::FinishCompletion {
+        use crate::db::FinishCompletion as F;
+        match c {
+            ScanCompletion::Complete => F::Complete,
+            ScanCompletion::CompleteWithSkips { .. } => F::CompleteWithSkips,
+            ScanCompletion::CompleteUnverified => F::CompleteUnverified,
+            ScanCompletion::Resumable => F::Resumable,
+        }
+    }
+}
+
+/// `scan_state` key holding what a full scan remembers about a refresh drain
+/// it performed earlier in the same owed run (V7-02).
+///
+/// The value is written and interpreted by `drain_then_run` (Task 9), which
+/// owns the drain. It is named here because [`record_full_scan_completion`] is
+/// what RETIRES it: a fulfilled run has consumed whatever drain it carried, so
+/// the key is deleted in the same transaction as the cooldown marker. A failed
+/// or resumable attempt leaves it in place — the obligation it belongs to is
+/// still owed.
+///
+/// The key exists at all because the evidence it summarises (`scan_skips`, the
+/// refresh's staging) is wiped by the full scan's own fresh start
+/// (`scan_phases/mod.rs:195`), and the run may be resumed by another process.
+pub const CARRIED_KEY: &str = "full_carried_completion";
+
+/// Pure classification from the pipeline result, the `scan_phase` marker
+/// after the run, and the skip count. `Err` is not a completion at all and
+/// is handled by the caller.
+pub fn classify_full_scan(
+    degraded: bool,
+    scan_phase: Option<&str>,
+    skipped: Option<i64>,
+) -> ScanCompletion {
+    // The marker is authoritative (V4-02): staging left at burst/finalize is
+    // unfinished work whatever the summary's flag says, and an unreadable
+    // marker is not proof of completion either. The skip count is PERSISTED
+    // state (V5-01): `scan_skips` is cleared only at a fresh start, so a
+    // resumed invocation that saw no new error still carries the earlier
+    // skips — the flag alone would erase them.
+    match (scan_phase, skipped, degraded) {
+        (Some("burst") | Some("finalize") | None, _, _) => ScanCompletion::Resumable,
+        (Some("done"), Some(n), _) if n > 0 => ScanCompletion::CompleteWithSkips { n },
+        (Some("done"), Some(_), false) => ScanCompletion::Complete,
+        // Degraded with no recorded skip: something else went wrong (decode
+        // sentinels, #355). Fulfilled, not clean.
+        (Some("done"), Some(_), true) => ScanCompletion::CompleteWithSkips { n: 0 },
+        (Some("done"), None, _) => ScanCompletion::CompleteUnverified,
+        (Some(_), _, _) => ScanCompletion::Resumable, // gather or unknown: not finished
+    }
+}
+
+/// What a scan future hands back to `run_under_slot`, so the durable queue
+/// outcome (`scan_queue.completion`) keeps the distinction between a
+/// fulfilled request and an interrupted attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScanReport {
+    pub completion: crate::db::FinishCompletion,
+}
+
+/// The cooldown anchor. Written for Complete AND CompleteWithSkips (the
+/// user's request was fulfilled; skipped accounts are per-account gaps the
+/// retry covers), never for Resumable. Best-effort: a scan that completed
+/// must not be reported failed because a marker write failed.
+///
+/// `pub`, like `run_under_slot`, for the same reason: the V3-02 property —
+/// the cooldown reads THIS marker and never the queue row's `done` status —
+/// is only observable by composing this with the real slot lifecycle and the
+/// real handler, which lives in `tests/web_scan_queue.rs`.
+pub async fn record_full_scan_completion(
+    db: &dyn Database,
+    user_did: &str,
+    completion: ScanCompletion,
+) {
+    if completion.fulfilled() {
+        // Marker and carried-outcome delete together: a fulfilled run has
+        // consumed whatever drain it carried (V7-02). `finish_full_scan_state`
+        // is one `with_conn` transaction on SQLite / one transaction on Postgres.
+        if let Err(e) = db
+            .finish_full_scan_state(user_did, &chrono::Utc::now().to_rfc3339(), CARRIED_KEY)
+            .await
+        {
+            warn!(error = %format!("{e:#}"), "could not record last_full_scan_finished_at");
+        }
+    }
+}
+
 /// The `scan_queue` slot a scan is running under (#257).
 ///
 /// Not optional: every scan runs under a slot now, which is what makes
@@ -304,16 +436,29 @@ pub enum SlotExit {
 /// dropping it left a panicked scan with no recorded cause in either place.
 /// `panic_message` is the pipeline's existing extractor, reused for exactly
 /// the reason it was written.
-fn classify(finished: std::thread::Result<anyhow::Result<()>>) -> (SlotExit, Option<String>) {
+///
+/// The `FinishCompletion` is what the durable `scan_queue.completion` records
+/// (#344): a scan that reported itself only `Resumable` finishes `done` like
+/// any other, and the row is the only place that difference survives a
+/// restart. An `Err` or a panic is `Failed` — no completion was reported at
+/// all, and the full-scan obligation must stay owed.
+fn classify(
+    finished: std::thread::Result<anyhow::Result<ScanReport>>,
+) -> (SlotExit, Option<String>, crate::db::FinishCompletion) {
     match finished {
-        Ok(Ok(())) => (SlotExit::Completed, None),
-        Ok(Err(e)) => (SlotExit::Failed, Some(format!("{e:#}"))),
+        Ok(Ok(report)) => (SlotExit::Completed, None, report.completion),
+        Ok(Err(e)) => (
+            SlotExit::Failed,
+            Some(format!("{e:#}")),
+            crate::db::FinishCompletion::Failed,
+        ),
         Err(payload) => (
             SlotExit::Panicked,
             Some(format!(
                 "Background scan panicked: {}",
                 crate::pipeline::scan_phases::panic_message(&payload)
             )),
+            crate::db::FinishCompletion::Failed,
         ),
     }
 }
@@ -340,7 +485,7 @@ pub async fn run_under_slot<F>(
     heartbeat_interval: std::time::Duration,
 ) -> SlotExit
 where
-    F: std::future::Future<Output = anyhow::Result<()>>,
+    F: std::future::Future<Output = anyhow::Result<ScanReport>>,
 {
     let scan = AssertUnwindSafe(scan).catch_unwind();
     tokio::pin!(scan);
@@ -356,7 +501,7 @@ where
         heartbeat_interval,
     ));
 
-    let (exit, error_text) = loop {
+    let (exit, error_text, completion) = loop {
         tokio::select! {
             finished = &mut scan => {
                 heartbeat.abort();
@@ -373,6 +518,9 @@ where
                 Ok(_lost) => break (
                     SlotExit::Abandoned,
                     Some("scan lease lapsed — the queue slot was reassigned".to_string()),
+                    // Never written: the release below finds no matching row,
+                    // by construction (the fencing token is dead).
+                    crate::db::FinishCompletion::Failed,
                 ),
                 Err(e) => {
                     error!(
@@ -462,8 +610,14 @@ where
     // admitted scan cannot observe this user mid-transition. On abandonment the
     // release is a no-op by construction: the fencing token no longer matches,
     // so `release_and_log` reports Lost and changes nothing.
-    crate::web::admitter::release_and_log(&db, &user_did, &slot.claim_id, error_text.as_deref())
-        .await;
+    crate::web::admitter::release_and_log(
+        &db,
+        &user_did,
+        &slot.claim_id,
+        completion,
+        error_text.as_deref(),
+    )
+    .await;
 
     // try_send, not send: a full channel already has a wake pending, so
     // dropping this one loses nothing, and a closed channel only means the
@@ -639,11 +793,13 @@ async fn finish_scan(
     user_did: &str,
     claim_id: &str,
     result: anyhow::Result<(usize, usize, bool)>,
-) -> anyhow::Result<()> {
+    completion: crate::db::FinishCompletion,
+) -> anyhow::Result<ScanReport> {
     record_scan_outcome(scan_manager, user_did, claim_id, &result).await;
     // Discard only the success tuple — `record_scan_outcome` has already
-    // rendered it into the user-visible message. The `Err` must survive.
-    result.map(|_| ())
+    // rendered it into the user-visible message. The `Err` must survive, and
+    // the classified completion rides out to the durable queue row (#344).
+    result.map(|_| ScanReport { completion })
 }
 
 /// Phase 0 (#343): one number per scan, read from scan_state, not logs.
@@ -677,7 +833,7 @@ async fn run_scan(
     user_did: &str,
     actor_handle: &str,
     claim_id: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ScanReport> {
     // Phase 1: toxicity scorer — loaded once at boot (#257), shared via Arc::clone.
     set_progress(
         &scan_manager,
@@ -1128,7 +1284,39 @@ async fn run_scan(
         tracing::warn!(error = %e, "could not record classifier cache stats");
     }
 
-    finish_scan(&scan_manager, user_did, claim_id, result).await
+    // Completion is CLASSIFIED, never inferred from `Ok` (V2-05): the pipeline
+    // returns `Ok` for a cost-capped run too. The `scan_phase` marker says
+    // whether the staging actually drained, and `scan_skips` — which survives
+    // a burst/finalize resume — says whether this scan's coverage has holes
+    // even when the resuming invocation itself reported none (V5-01).
+    //
+    // A failed count read is `None`, not 0: unverifiable is a distinct answer
+    // from clean, and `classify_full_scan` keeps it that way.
+    let completion = match &result {
+        Ok((_, _, degraded)) => {
+            let phase = db.get_scan_state(user_did, "scan_phase").await?;
+            let skipped = db.count_scan_skips(user_did).await.ok();
+            Some(classify_full_scan(*degraded, phase.as_deref(), skipped))
+        }
+        Err(_) => None,
+    };
+    if let Some(c) = completion {
+        // The cooldown anchor, and only for a fulfilled run. Best-effort — a
+        // scan that completed must not be reported failed because a marker
+        // write failed.
+        record_full_scan_completion(db.as_ref(), user_did, c).await;
+    }
+
+    finish_scan(
+        &scan_manager,
+        user_did,
+        claim_id,
+        result,
+        completion
+            .map(Into::into)
+            .unwrap_or(crate::db::FinishCompletion::Failed),
+    )
+    .await
 }
 
 /// The slot lifecycle: every exit from `run_under_slot` must free the row it
@@ -1211,7 +1399,11 @@ mod slot_lifecycle_tests {
         let mgr = manager_with_running_scan(&claim_id);
 
         let exit = run_under_slot(
-            async { Ok(()) },
+            async {
+                Ok(ScanReport {
+                    completion: crate::db::FinishCompletion::Complete,
+                })
+            },
             db.clone(),
             mgr.clone(),
             DID.to_string(),
@@ -1311,8 +1503,10 @@ mod slot_lifecycle_tests {
     #[test]
     fn a_panic_payload_becomes_the_recorded_error() {
         // `panic!("literal")` — a &'static str payload.
-        let literal = std::panic::catch_unwind(|| -> anyhow::Result<()> { panic!("static cause") });
-        let (exit, text) = classify(literal);
+        let literal =
+            std::panic::catch_unwind(|| -> anyhow::Result<ScanReport> { panic!("static cause") });
+        let (exit, text, completion) = classify(literal);
+        assert_eq!(completion, crate::db::FinishCompletion::Failed);
         assert_eq!(exit, SlotExit::Panicked);
         assert!(
             text.as_deref().is_some_and(|t| t.contains("static cause")),
@@ -1320,9 +1514,10 @@ mod slot_lifecycle_tests {
         );
 
         // `panic!("{}", …)` and `unwrap()` on an Err — a String payload.
-        let formatted =
-            std::panic::catch_unwind(|| -> anyhow::Result<()> { panic!("formatted {}", "cause") });
-        let (exit, text) = classify(formatted);
+        let formatted = std::panic::catch_unwind(|| -> anyhow::Result<ScanReport> {
+            panic!("formatted {}", "cause")
+        });
+        let (exit, text, _) = classify(formatted);
         assert_eq!(exit, SlotExit::Panicked);
         assert!(
             text.as_deref()
@@ -1366,7 +1561,7 @@ mod slot_lifecycle_tests {
         let exit = tokio::time::timeout(
             Duration::from_secs(5),
             run_under_slot(
-                std::future::pending::<anyhow::Result<()>>(),
+                std::future::pending::<anyhow::Result<ScanReport>>(),
                 db.clone(),
                 mgr.clone(),
                 DID.to_string(),
@@ -1524,6 +1719,7 @@ mod slot_lifecycle_tests {
                 DID,
                 &claim_id,
                 Err(anyhow::anyhow!("constellation unreachable mid-burst")),
+                crate::db::FinishCompletion::Failed,
             ),
             db.clone(),
             mgr.clone(),
@@ -1597,7 +1793,13 @@ mod slot_lifecycle_tests {
         let mgr = manager_with_running_scan(&claim_id);
 
         let exit = run_under_slot(
-            finish_scan(&mgr, DID, &claim_id, Ok((7, 42, false))),
+            finish_scan(
+                &mgr,
+                DID,
+                &claim_id,
+                Ok((7, 42, false)),
+                crate::db::FinishCompletion::Complete,
+            ),
             db.clone(),
             mgr.clone(),
             DID.to_string(),
@@ -1614,6 +1816,216 @@ mod slot_lifecycle_tests {
         assert_eq!(status.phase, WebScanPhase::Done);
         assert!(status.last_error.is_none());
         assert!(status.progress_message.contains("42 accounts scored"));
+    }
+}
+
+/// #344 V2-05/V5-01/V6-01: how a full scan's ending is classified, and what
+/// a classification is allowed to claim. These are pure — no models, no
+/// network — because the whole point is that `Ok(..)` from the pipeline is
+/// not evidence of completion.
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+
+    use crate::db::schema::create_tables;
+    use crate::db::sqlite::SqliteDatabase;
+    use crate::scoring::generation::scoring_revision;
+
+    fn test_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+        create_tables(&conn).expect("schema");
+        Arc::new(SqliteDatabase::new(conn))
+    }
+
+    #[test]
+    fn fulfilled_covers_every_completion_but_resumable() {
+        assert!(ScanCompletion::Complete.fulfilled());
+        assert!(ScanCompletion::CompleteWithSkips { n: 3 }.fulfilled());
+        assert!(ScanCompletion::CompleteUnverified.fulfilled());
+        assert!(!ScanCompletion::Resumable.fulfilled());
+    }
+
+    #[test]
+    fn worst_is_commutative_and_ordered_by_severity() {
+        use ScanCompletion::*;
+        let all = [
+            Complete,
+            CompleteWithSkips { n: 2 },
+            CompleteUnverified,
+            Resumable,
+        ];
+        for a in all {
+            for b in all {
+                assert_eq!(a.worst(b), b.worst(a), "worst({a:?}, {b:?}) is symmetric");
+            }
+            assert_eq!(a.worst(Resumable), Resumable, "Resumable absorbs {a:?}");
+        }
+        assert_eq!(
+            CompleteUnverified.worst(CompleteWithSkips { n: 9 }),
+            CompleteUnverified,
+            "an unverifiable count beats a known one"
+        );
+        assert_eq!(
+            CompleteWithSkips { n: 2 }.worst(CompleteWithSkips { n: 3 }),
+            CompleteWithSkips { n: 5 },
+            "skip counts add"
+        );
+        assert_eq!(
+            CompleteWithSkips { n: 4 }.worst(Complete),
+            CompleteWithSkips { n: 4 }
+        );
+        assert_eq!(Complete.worst(Complete), Complete);
+    }
+
+    /// Args are `(degraded, scan_phase, skipped)`.
+    #[test]
+    fn classification_reads_the_marker_and_the_persisted_skip_count() {
+        use ScanCompletion::*;
+        let cases: &[(bool, Option<&str>, Option<i64>, ScanCompletion)] = &[
+            (false, Some("done"), Some(0), Complete),
+            (true, Some("done"), Some(3), CompleteWithSkips { n: 3 }),
+            // V5-01: a clean RESUME over skips an earlier invocation persisted.
+            // The flag describes this attempt; `scan_skips` describes the scan.
+            (false, Some("done"), Some(2), CompleteWithSkips { n: 2 }),
+            // Degraded with no recorded skip: something else went wrong
+            // (decode sentinels, #355). Fulfilled, not clean.
+            (true, Some("done"), Some(0), CompleteWithSkips { n: 0 }),
+            // V5-01: the count could not be read — fulfilled, never proof.
+            (false, Some("done"), None, CompleteUnverified),
+            (true, Some("done"), None, CompleteUnverified),
+            // V4-02: unfinished staging is resumable whatever the flag says.
+            (true, Some("burst"), Some(0), Resumable),
+            (true, None, Some(0), Resumable),
+            (false, Some("burst"), Some(0), Resumable),
+            (false, Some("finalize"), Some(0), Resumable),
+            (false, None, Some(0), Resumable),
+            (false, Some("burst"), None, Resumable),
+            (false, Some("gather"), Some(0), Resumable),
+        ];
+        for (degraded, phase, skipped, expected) in cases {
+            assert_eq!(
+                classify_full_scan(*degraded, *phase, *skipped),
+                *expected,
+                "classify_full_scan({degraded}, {phase:?}, {skipped:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn the_durable_completion_mirrors_the_classification() {
+        use crate::db::FinishCompletion as F;
+        assert_eq!(F::from(ScanCompletion::Complete), F::Complete);
+        assert_eq!(
+            F::from(ScanCompletion::CompleteWithSkips { n: 1 }),
+            F::CompleteWithSkips,
+            "the durable row records THAT there were skips, not how many"
+        );
+        assert_eq!(
+            F::from(ScanCompletion::CompleteUnverified),
+            F::CompleteUnverified
+        );
+        assert_eq!(F::from(ScanCompletion::Resumable), F::Resumable);
+    }
+
+    /// V6-01: the cooldown anchor is written for every fulfilled completion —
+    /// including one that could not verify itself — and never for a resumable
+    /// attempt, which the user must be able to retry at once.
+    #[tokio::test]
+    async fn the_marker_is_written_for_fulfilment_only() {
+        for (completion, expected) in [
+            (ScanCompletion::Complete, true),
+            (ScanCompletion::CompleteWithSkips { n: 2 }, true),
+            (ScanCompletion::CompleteUnverified, true),
+            (ScanCompletion::Resumable, false),
+        ] {
+            let db = test_db();
+            record_full_scan_completion(db.as_ref(), "did:plc:m", completion).await;
+            assert_eq!(
+                db.get_scan_state("did:plc:m", "last_full_scan_finished_at")
+                    .await
+                    .unwrap()
+                    .is_some(),
+                expected,
+                "{completion:?}"
+            );
+        }
+    }
+
+    /// V7-02: the carried drain outcome is retired by the SAME call that
+    /// anchors the cooldown, and kept by an attempt that is still owed.
+    /// (`drain_then_run`, which writes the value, is Task 9's; the key's
+    /// retirement is this task's.)
+    #[tokio::test]
+    async fn a_fulfilled_run_consumes_the_carried_outcome_and_a_resumable_one_keeps_it() {
+        let db = test_db();
+        let carried = format!("{}|skips|1", scoring_revision());
+        db.set_scan_state("did:plc:g", CARRIED_KEY, &carried)
+            .await
+            .unwrap();
+        record_full_scan_completion(db.as_ref(), "did:plc:g", ScanCompletion::Resumable).await;
+        assert_eq!(
+            db.get_scan_state("did:plc:g", CARRIED_KEY).await.unwrap(),
+            Some(carried),
+            "a resumable attempt keeps it — the run is still owed"
+        );
+        record_full_scan_completion(
+            db.as_ref(),
+            "did:plc:g",
+            ScanCompletion::CompleteWithSkips { n: 1 },
+        )
+        .await;
+        assert_eq!(
+            db.get_scan_state("did:plc:g", CARRIED_KEY).await.unwrap(),
+            None
+        );
+        assert!(db
+            .get_scan_state("did:plc:g", "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    /// The marker write and the carried-key delete are ONE transaction, and
+    /// the delete is scoped to that key alone.
+    #[tokio::test]
+    async fn finishing_full_scan_state_leaves_every_other_key_alone() {
+        let db = test_db();
+        db.set_scan_state("did:plc:k", CARRIED_KEY, "whatever")
+            .await
+            .unwrap();
+        db.set_scan_state("did:plc:k", "scan_phase", "done")
+            .await
+            .unwrap();
+        db.finish_full_scan_state("did:plc:k", "2026-09-14T00:00:00+00:00", CARRIED_KEY)
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_scan_state("did:plc:k", "last_full_scan_finished_at")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("2026-09-14T00:00:00+00:00")
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:k", CARRIED_KEY).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:k", "scan_phase")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("done"),
+            "the delete is scoped to one key"
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_an_absent_scan_state_key_is_not_an_error() {
+        let db = test_db();
+        db.delete_scan_state("did:plc:absent", CARRIED_KEY)
+            .await
+            .expect("absent is the state the caller wanted");
     }
 }
 

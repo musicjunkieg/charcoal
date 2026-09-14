@@ -209,9 +209,12 @@ async fn release_slot(
     db: &Arc<dyn Database>,
     user_did: &str,
     claim_id: &str,
+    completion: crate::db::FinishCompletion,
     error: Option<&str>,
 ) -> anyhow::Result<ClaimStatus> {
-    let still_owned = db.finish_queued_scan(user_did, claim_id, error).await?;
+    let still_owned = db
+        .finish_queued_scan(user_did, claim_id, completion, error)
+        .await?;
     Ok(ClaimStatus::from_db(still_owned))
 }
 
@@ -225,9 +228,10 @@ pub async fn release_and_log(
     db: &Arc<dyn Database>,
     user_did: &str,
     claim_id: &str,
+    completion: crate::db::FinishCompletion,
     error: Option<&str>,
 ) {
-    match release_slot(db, user_did, claim_id, error).await {
+    match release_slot(db, user_did, claim_id, completion, error).await {
         Ok(ClaimStatus::Held) => {
             info!(user_did, failed = error.is_some(), "released scan slot");
         }
@@ -401,7 +405,14 @@ async fn admit_ready(
                     // failed (rather than re-queuing) is what stops this pass
                     // from claiming the very same row again on the next
                     // iteration.
-                    release_and_log(db, &claim.user_did, &claim.claim_id, Some(&detail)).await;
+                    release_and_log(
+                        db,
+                        &claim.user_did,
+                        &claim.claim_id,
+                        crate::db::FinishCompletion::Failed,
+                        Some(&detail),
+                    )
+                    .await;
                     continue;
                 };
 
@@ -418,7 +429,14 @@ async fn admit_ready(
                         // Release the slot rather than holding it until the
                         // lease lapses — otherwise one bad row throttles the
                         // whole server for two minutes.
-                        release_and_log(db, &claim.user_did, &claim.claim_id, Some(&detail)).await;
+                        release_and_log(
+                            db,
+                            &claim.user_did,
+                            &claim.claim_id,
+                            crate::db::FinishCompletion::Failed,
+                            Some(&detail),
+                        )
+                        .await;
                     }
                 }
             }
@@ -822,9 +840,15 @@ mod admitter_tests {
         let db = test_db();
         let (zombie, successor) = superseded_claim(&db).await;
 
-        let status = release_slot(&db, &zombie.user_did, &zombie.claim_id, None)
-            .await
-            .expect("the release query itself must succeed");
+        let status = release_slot(
+            &db,
+            &zombie.user_did,
+            &zombie.claim_id,
+            crate::db::FinishCompletion::Complete,
+            None,
+        )
+        .await
+        .expect("the release query itself must succeed");
 
         assert_eq!(
             status,
@@ -838,9 +862,15 @@ mod admitter_tests {
         );
         // And the successor can still release its own slot.
         assert_eq!(
-            release_slot(&db, &successor.user_did, &successor.claim_id, None)
-                .await
-                .expect("release query"),
+            release_slot(
+                &db,
+                &successor.user_did,
+                &successor.claim_id,
+                crate::db::FinishCompletion::Complete,
+                None,
+            )
+            .await
+            .expect("release query"),
             ClaimStatus::Held
         );
     }

@@ -36,6 +36,36 @@ pub struct AccountScore {
     pub scoring_confidence: Option<String>,
 }
 
+impl AccountScore {
+    /// Construct a minimal valid `AccountScore` for unit tests, mirroring
+    /// `AccountInput::new_for_test`.
+    ///
+    /// Everything optional is `None`, collections are empty, and `scored_at`
+    /// is now — the shape a test needs when it only cares about one or two
+    /// fields (a tier, a score) and must not hand-write the other thirteen.
+    /// Deliberately not `#[cfg(test)]`: integration tests in `tests/` compile
+    /// against the library, where a `cfg(test)` item does not exist.
+    pub fn default_for_test(did: &str) -> Self {
+        AccountScore {
+            did: did.to_string(),
+            handle: format!("{}.test", did.trim_start_matches("did:plc:")),
+            toxicity_score: None,
+            topic_overlap: None,
+            overlap_legacy: None,
+            threat_score: None,
+            threat_tier: None,
+            posts_analyzed: 0,
+            top_toxic_posts: vec![],
+            scored_at: chrono::Utc::now().to_rfc3339(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        }
+    }
+}
+
 /// One stored topic centroid. Label/keywords/weight live in the fingerprint
 /// JSON (clusters[i] ↔ cluster_index i); this is only what scoring needs.
 #[derive(Debug, Clone, PartialEq)]

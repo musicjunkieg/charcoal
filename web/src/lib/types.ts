@@ -174,6 +174,21 @@ export interface AdminScanRow {
 	started_at: string | null;
 	finished_at: string | null;
 	last_error: string | null;
+	/** Which pipeline the row runs (#344). A nightly `refresh` re-scores only
+	 *  this user's High/Elevated rows; `full` is the scan a user triggers. */
+	kind: 'full' | 'refresh';
+	/** RFC3339 instant a full scan was first asked for and not yet delivered,
+	 *  or null when nothing is owed. Set while a refresh runs over a user's
+	 *  request, and cleared only by a full scan that was carried out. */
+	full_requested_at: string | null;
+	/** How the last attempt ended. null on a row that has never finished. */
+	completion:
+		| 'complete'
+		| 'complete_with_skips'
+		| 'complete_unverified'
+		| 'resumable'
+		| 'failed'
+		| null;
 }
 
 export interface AdminQueue {

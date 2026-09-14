@@ -242,8 +242,10 @@ pub async fn approve_access_and_scan(
         }
     }
 
+    // The outcome is not surfaced here: this path answers "access granted,
+    // and a scan is on the queue", which is true for every successful branch.
     let scan = match state.db.enqueue_scan(&did).await {
-        Ok(()) => {
+        Ok(_) => {
             if let Some(wake) = &state.scan_wake {
                 let _ = wake.try_send(());
             }

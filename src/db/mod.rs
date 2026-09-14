@@ -19,7 +19,10 @@ pub mod sqlite;
 pub mod traits;
 
 pub use cache_retention::CacheEviction;
-pub use traits::{ClassifierVerdictRow, Database, FeedSnapshot, OnnxScoreRow};
+pub use traits::{
+    ClassifierVerdictRow, Database, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow,
+    ScanKind,
+};
 
 use anyhow::Result;
 use std::sync::Arc;

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0f100211703dc33b2e5f50181ac831034ea23410",
+    "short_hash": "0f10021",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T06:29:32-07:00",
+    "message": "test(344): assert migrated generations from Postgres, not the source export\n\nThe generation_of closure in test_pg_migrate_from_sqlite_preserves_every_row\nclosed over the SQLite-side export and asserted against it, making the\nper-row generation check a tautology about the source instead of a check on\nwhat import_score actually wrote into Postgres. Replace it with direct SQL\nagainst the Postgres pool for all five non-legacy rows, matching the style\nalready used by the other direct-SQL assertions in the same test.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
     "hash": "dd12ec2a7660e70991bf7c683536004ad9d54890",
     "short_hash": "dd12ec2",
     "author": "Bryan Guffey",

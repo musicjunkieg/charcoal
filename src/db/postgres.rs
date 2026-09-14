@@ -23,8 +23,8 @@ use super::models::{
 };
 use super::traits::{
     eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
-    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
-    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
+    ScanClaim, ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::db::models::ScoringConfidence;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
@@ -367,6 +367,44 @@ impl Database for PgDatabase {
         .bind(value)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn delete_scan_state(&self, user_did: &str, key: &str) -> Result<()> {
+        sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1 AND key = $2")
+            .bind(user_did)
+            .bind(key)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn finish_full_scan_state(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+    ) -> Result<()> {
+        // One transaction: the cooldown anchor and the retirement of the
+        // carried drain outcome are a single fact (#344 V7-02). Split, a crash
+        // between them either starts a cooldown for a run still owed or leaves
+        // a drain outcome behind to taint an unrelated later scan.
+        let mut tx = self.pool.begin().await?;
+        sqlx_core::query::query(
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES ($1, 'last_full_scan_finished_at', $2, NOW())
+             ON CONFLICT(user_did, key) DO UPDATE SET value = $2, updated_at = NOW()",
+        )
+        .bind(user_did)
+        .bind(finished_at_rfc3339)
+        .execute(&mut *tx)
+        .await?;
+        sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1 AND key = $2")
+            .bind(user_did)
+            .bind(carried_key)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1862,21 +1900,144 @@ impl Database for PgDatabase {
 
     // --- Scan admission queue (#257) ---
 
-    async fn enqueue_scan(&self, user_did: &str) -> Result<()> {
-        // The ON CONFLICT DO UPDATE ... WHERE only fires for a finished row, so
-        // a re-enqueue after 'done'/'failed' resets the row and starts a fresh
-        // wait. While 'queued' or 'running' the WHERE excludes the row and the
-        // update is skipped entirely, leaving enqueued_at untouched — that is
-        // what stops a double-click from sending the user to the back of the
-        // queue.
+    async fn enqueue_scan(&self, user_did: &str) -> Result<EnqueueOutcome> {
+        let mut tx = self.pool.begin().await?;
+
+        // Per-user advisory lock BEFORE the state read (V4-03). `SELECT … FOR
+        // UPDATE` on an ABSENT row locks nothing, so without this two
+        // first-time enqueues can both read "no row" and the loser's
+        // `ON CONFLICT DO UPDATE` would reset a job the winner's worker has
+        // already claimed. SQLite's BEGIN IMMEDIATE hides this; Postgres does
+        // not. Transaction-scoped, so it releases on commit/rollback.
+        //
+        // Lock order is acyclic: advisory(user) → queue row here; the
+        // scheduling tick takes `users` rows then queue rows and never this
+        // advisory lock; `finish_queued_scan` takes only the queue row.
+        sqlx_core::query::query("SELECT pg_advisory_xact_lock(hashtext('scan_queue:' || $1))")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+
+        let current = sqlx_core::query::query(
+            "SELECT status, kind FROM scan_queue WHERE user_did = $1 FOR UPDATE",
+        )
+        .bind(user_did)
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)));
+
+        // Every branch records the obligation (V3-03): the user asked for a
+        // full scan, and only a full scan that COMPLETES may clear it.
+        const RECORD_OBLIGATION: &str =
+            "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, NOW())
+             WHERE user_did = $1";
+
+        let outcome = match current.as_ref().map(|(s, k)| (s.as_str(), k.as_str())) {
+            None | Some(("done", _)) | Some(("failed", _)) => {
+                // Conditional as defense in depth even under the advisory
+                // lock: if it somehow affects no row, the state is re-read and
+                // the truthful outcome returned rather than a fabricated one.
+                let affected = sqlx_core::query::query(
+                    "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+                     VALUES ($1, 'queued', 'full', NOW(), NOW())
+                     ON CONFLICT (user_did) DO UPDATE
+                       SET status = 'queued', kind = 'full', enqueued_at = NOW(),
+                           started_at = NULL, finished_at = NULL,
+                           lease_expires = NULL, last_error = NULL,
+                           claim_id = NULL, completion = NULL,
+                           full_requested_at = COALESCE(scan_queue.full_requested_at, NOW())
+                     WHERE scan_queue.status IN ('done', 'failed')",
+                )
+                .bind(user_did)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+
+                if affected > 0 {
+                    EnqueueOutcome::Queued
+                } else {
+                    let row = sqlx_core::query::query(
+                        "SELECT status, kind FROM scan_queue WHERE user_did = $1",
+                    )
+                    .bind(user_did)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    sqlx_core::query::query(RECORD_OBLIGATION)
+                        .bind(user_did)
+                        .execute(&mut *tx)
+                        .await?;
+                    match row
+                        .as_ref()
+                        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)))
+                        .as_ref()
+                        .map(|(s, k)| (s.as_str(), k.as_str()))
+                    {
+                        Some(("running", "refresh")) => EnqueueOutcome::QueuedAfterRefresh,
+                        Some(("running", _)) => EnqueueOutcome::AlreadyRunning,
+                        _ => EnqueueOutcome::AlreadyQueued,
+                    }
+                }
+            }
+            Some(("queued", "refresh")) => {
+                // In place: the user keeps the position the refresh held.
+                sqlx_core::query::query(
+                    "UPDATE scan_queue
+                     SET kind = 'full', full_requested_at = COALESCE(full_requested_at, NOW())
+                     WHERE user_did = $1",
+                )
+                .bind(user_did)
+                .execute(&mut *tx)
+                .await?;
+                EnqueueOutcome::Queued
+            }
+            Some(("queued", _)) => {
+                sqlx_core::query::query(RECORD_OBLIGATION)
+                    .bind(user_did)
+                    .execute(&mut *tx)
+                    .await?;
+                EnqueueOutcome::AlreadyQueued
+            }
+            Some(("running", "refresh")) => {
+                // Honoured when the refresh finishes (finish_queued_scan). The
+                // first request's time wins so repeated clicks do not move it.
+                sqlx_core::query::query(RECORD_OBLIGATION)
+                    .bind(user_did)
+                    .execute(&mut *tx)
+                    .await?;
+                EnqueueOutcome::QueuedAfterRefresh
+            }
+            Some(("running", _)) => {
+                sqlx_core::query::query(RECORD_OBLIGATION)
+                    .bind(user_did)
+                    .execute(&mut *tx)
+                    .await?;
+                EnqueueOutcome::AlreadyRunning
+            }
+            Some((other, _)) => {
+                anyhow::bail!("scan_queue.status holds an unknown value {other:?}")
+            }
+        };
+
+        tx.commit().await?;
+        Ok(outcome)
+    }
+
+    async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()> {
+        // The same conditional statement the scheduling tick uses (Task 6):
+        // owed full work is re-queued as FULL, never downgraded to a refresh
+        // (V3-03), and queued/running rows are excluded at the write itself so
+        // a manual enqueue landing in between survives untouched (V2-02).
         sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at)
-             VALUES ($1, 'queued', NOW())
+            "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
+             VALUES ($1, 'queued', 'refresh', NOW())
              ON CONFLICT (user_did) DO UPDATE
-               SET status = 'queued', enqueued_at = NOW(),
+               SET status = 'queued',
+                   kind = CASE WHEN scan_queue.full_requested_at IS NOT NULL
+                               THEN 'full' ELSE 'refresh' END,
+                   enqueued_at = NOW(),
                    started_at = NULL, finished_at = NULL,
                    lease_expires = NULL, last_error = NULL,
-                   claim_id = NULL
+                   claim_id = NULL, completion = NULL
              WHERE scan_queue.status IN ('done', 'failed')",
         )
         .bind(user_did)
@@ -1915,8 +2076,11 @@ impl Database for PgDatabase {
         // among tied rows a bare ORDER BY admits whichever row the plan
         // reaches first — not the one `list_scan_queue` displays as next. One
         // total order for display, position, and admission (#271).
+        //
+        // No `kind` in the ORDER BY: the queue is FIFO ACROSS kinds (#271), so
+        // an older refresh is admitted before a newer full scan.
         let row = sqlx_core::query::query(
-            "SELECT user_did FROM scan_queue
+            "SELECT user_did, kind FROM scan_queue
              WHERE status = 'queued'
              ORDER BY enqueued_at, user_did
              LIMIT 1
@@ -1930,6 +2094,9 @@ impl Database for PgDatabase {
             return Ok(None);
         };
         let did: String = row.get(0);
+        let raw_kind: String = row.get(1);
+        let kind = ScanKind::from_str(&raw_kind)
+            .with_context(|| format!("scan_queue.kind holds an unknown value {raw_kind:?}"))?;
 
         // gen_random_uuid() is core Postgres from 13 on, so the fencing token
         // costs no extension and no round-trip.
@@ -1951,6 +2118,7 @@ impl Database for PgDatabase {
         Ok(Some(ScanClaim {
             user_did: did,
             claim_id,
+            kind,
         }))
     }
 
@@ -1977,6 +2145,7 @@ impl Database for PgDatabase {
         &self,
         user_did: &str,
         claim_id: &str,
+        completion: FinishCompletion,
         error: Option<&str>,
     ) -> Result<bool> {
         // status = 'running' AND claim_id together are what make this safe: a
@@ -1984,15 +2153,32 @@ impl Database for PgDatabase {
         // under a new claim_id, so its late finish matches nothing instead of
         // stomping the new owner's running row to 'done' and freeing a slot
         // that is still occupied.
+        //
+        // Three shapes, all decided from the row's PRE-update values (an
+        // UPDATE's expressions see the old row):
+        //   refresh + owed full  → hand over: queued full, obligation kept (R09)
+        //   full + fulfilled     → done, obligation cleared (V3-03)
+        //   anything else        → done/failed, obligation kept
         let result = sqlx_core::query::query(
             "UPDATE scan_queue
-             SET status = CASE WHEN $3::TEXT IS NULL THEN 'done' ELSE 'failed' END,
-                 finished_at = NOW(), lease_expires = NULL, last_error = $3
+             SET status = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN 'queued'
+                               WHEN $3::TEXT IS NULL THEN 'done' ELSE 'failed' END,
+                 kind = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN 'full' ELSE kind END,
+                 enqueued_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN full_requested_at ELSE enqueued_at END,
+                 started_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE started_at END,
+                 finished_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE NOW() END,
+                 claim_id = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE claim_id END,
+                 completion = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE $4 END,
+                 full_requested_at = CASE WHEN kind = 'full' AND $5::boolean THEN NULL ELSE full_requested_at END,
+                 lease_expires = NULL,
+                 last_error = $3
              WHERE user_did = $1 AND status = 'running' AND claim_id = $2",
         )
         .bind(user_did)
         .bind(claim_id)
         .bind(error)
+        .bind(completion.as_str())
+        .bind(completion.fulfils_full_request())
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
@@ -2062,12 +2248,18 @@ impl Database for PgDatabase {
 
         // Rolling median over the last 20 completed scans. NULL until any
         // finish, so ETA is absent rather than fabricated on a fresh install.
+        //
+        // FULL rows that completed CLEANLY only (#344): a refresh re-scores a
+        // handful of accounts in about a minute, and an interrupted full
+        // scan's duration is the time until it gave up. Folding either in
+        // would quote a queued user an ETA for work nobody is about to do.
         let median: Option<f64> = sqlx_core::query::query(
             "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (
                  ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))
              )
              FROM (SELECT started_at, finished_at FROM scan_queue
                    WHERE status = 'done' AND started_at IS NOT NULL
+                     AND kind = 'full' AND completion = 'complete'
                    ORDER BY finished_at DESC LIMIT 20) recent",
         )
         .fetch_one(&self.pool)
@@ -2095,16 +2287,30 @@ impl Database for PgDatabase {
                     (SELECT COUNT(*) FROM scan_queue q2
                       WHERE q2.status = 'queued'
                         AND (q2.enqueued_at, q2.user_did)
-                            <= (q.enqueued_at, q.user_did)) AS position
+                            <= (q.enqueued_at, q.user_did)) AS position,
+                    kind, full_requested_at, completion
              FROM scan_queue q
              ORDER BY q.enqueued_at ASC, q.user_did ASC",
         )
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| {
+        // `?` on every row rather than a lossy default: an unrecognised
+        // `kind`/`completion` is a row this binary cannot interpret, and
+        // rendering it as an ordinary full scan hides it from the operator —
+        // the exact blindness #288 removed.
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let raw_kind: String = row.get(7);
+            let kind = ScanKind::from_str(&raw_kind)
+                .with_context(|| format!("scan_queue.kind holds an unknown value {raw_kind:?}"))?;
+            let completion = match row.get::<Option<String>, _>(9) {
+                None => None,
+                Some(c) => Some(FinishCompletion::from_str(&c).with_context(|| {
+                    format!("scan_queue.completion holds an unknown value {c:?}")
+                })?),
+            };
+            out.push({
                 let status: String = row.get(1);
                 let raw_position: i64 = row.get(6);
                 ScanQueueRow {
@@ -2127,9 +2333,15 @@ impl Database for PgDatabase {
                         .get::<Option<chrono::DateTime<chrono::Utc>>, _>(4)
                         .map(|t| t.to_rfc3339()),
                     last_error: row.get::<Option<String>, _>(5),
+                    kind,
+                    full_requested_at: row
+                        .get::<Option<chrono::DateTime<chrono::Utc>>, _>(8)
+                        .map(|t| t.to_rfc3339()),
+                    completion,
                 }
-            })
-            .collect())
+            });
+        }
+        Ok(out)
     }
 
     // --- Access requests (#309) ---

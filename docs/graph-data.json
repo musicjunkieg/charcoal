@@ -9789,6 +9789,72 @@
       "created_at": "2026-09-14T06:22:55.297517-07:00",
       "updated_at": "2026-09-14T06:22:55.297517-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
+    },
+    {
+      "id": 900,
+      "change_id": "6eed9a0c-1c5e-433b-b25f-983649a7b0b9",
+      "node_type": "outcome",
+      "title": "Task 3 review fix committed 0f10021: test_pg_migrate_from_sqlite_preserves_every_row now asserts every row's scoring_generation via direct SQL on Postgres (sabotage-fail proven, then green); clippy postgres + fmt clean. Re-review requested from the Task 3 reviewer.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:30:10.319829-07:00",
+      "updated_at": "2026-09-14T06:30:10.319829-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"0f10021\",\"confidence\":85}"
+    },
+    {
+      "id": 901,
+      "change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 5: scan_queue.kind (full|refresh) in the same FIFO queue — ScanKind, enqueue_refresh_scan, full enqueue upgrades a queued refresh in place keeping enqueued_at, full_requested_at obligation (set on every user enqueue via COALESCE, kept by refresh handover/resumable/failed, cleared only by a fulfilled full scan), request_full_after_refresh, finish flips, ScanCompletion classification from persisted state, cooldown anchor last_full_scan_finished_at, 202 body says what was queued, admin kind/full_requested_at",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:30:45.786824-07:00",
+      "updated_at": "2026-09-14T06:30:45.786824-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"0f10021\",\"confidence\":85}"
+    },
+    {
+      "id": 902,
+      "change_id": "184911ba-ed8e-497c-915e-69a00bb70b48",
+      "node_type": "option",
+      "title": "Task 5 sequencing: A — land the unblocked half of Task 5 now (ScanKind, enqueue upgrade-in-place, full_requested_at, finish flips, ScanCompletion + classification, cooldown marker, handlers/admin/types.ts); defer FullScanBookkeeping/DbFullScanBookkeeping/run_scan_with+assert_send to Task 6 (needs its scheduling trait methods) and drain_then_run/OwnRun/CarriedCompletion to Task 9 (needs RunIdentity/RUN_KIND_KEY/test_support). Interface names unchanged; only landing order moves",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:35:40.667605-07:00",
+      "updated_at": "2026-09-14T06:35:40.667605-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
+    },
+    {
+      "id": 903,
+      "change_id": "5eafb153-239f-48e6-9f67-ef860474b611",
+      "node_type": "option",
+      "title": "Task 5 sequencing: B — pull Task 6's six scheduling trait methods and Task 9's RunIdentity/RUN_KIND_KEY/test_support forward into Task 5 so the brief lands whole",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:35:40.678044-07:00",
+      "updated_at": "2026-09-14T06:35:40.678044-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":40}"
+    },
+    {
+      "id": 904,
+      "change_id": "80df5a3c-2f56-405d-8437-811c3c172e2b",
+      "node_type": "option",
+      "title": "Task 5 sequencing: C — stop and ask Bryan before deviating from the rev-8 landing order",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:35:40.687927-07:00",
+      "updated_at": "2026-09-14T06:35:40.687927-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":30}"
+    },
+    {
+      "id": 905,
+      "change_id": "bdda9fea-71ef-4672-a6a1-76ee6fceaee4",
+      "node_type": "decision",
+      "title": "Task 5 sequencing: choose A (split by dependency owner). The rev-8 brief for Task 5 references Task 6 scheduling trait methods, Task 9 RunIdentity/RUN_KIND_KEY/test_support and Task 7 list_refresh_candidates that do not exist yet; pulling them forward (B) would blur task boundaries and reviews, and blocking on Bryan (C) contradicts the 'make the call and document it' rule for landing-order questions. A keeps every interface name verbatim, keeps dependency order 5→6→9, and the deferred pieces are folded into the Task 6 and Task 9 dispatches as mandatory items with their tests.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:35:46.307797-07:00",
+      "updated_at": "2026-09-14T06:35:46.307797-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -20054,6 +20120,105 @@
       "weight": 1.0,
       "rationale": "Observed during Task 3 review",
       "created_at": "2026-09-14T06:22:57.971208-07:00"
+    },
+    {
+      "id": 944,
+      "from_node_id": 898,
+      "to_node_id": 900,
+      "from_change_id": "b51c5c6e-e270-4447-87f4-4b1ae57238fc",
+      "to_change_id": "6eed9a0c-1c5e-433b-b25f-983649a7b0b9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fix applied to Task 3",
+      "created_at": "2026-09-14T06:30:12.884884-07:00"
+    },
+    {
+      "id": 945,
+      "from_node_id": 877,
+      "to_node_id": 901,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 5 queue kind",
+      "created_at": "2026-09-14T06:30:51.610024-07:00"
+    },
+    {
+      "id": 946,
+      "from_node_id": 901,
+      "to_node_id": 902,
+      "from_change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "to_change_id": "184911ba-ed8e-497c-915e-69a00bb70b48",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Sequencing options for Task 5",
+      "created_at": "2026-09-14T06:35:46.314824-07:00"
+    },
+    {
+      "id": 947,
+      "from_node_id": 901,
+      "to_node_id": 903,
+      "from_change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "to_change_id": "5eafb153-239f-48e6-9f67-ef860474b611",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Sequencing options for Task 5",
+      "created_at": "2026-09-14T06:35:46.321659-07:00"
+    },
+    {
+      "id": 948,
+      "from_node_id": 901,
+      "to_node_id": 904,
+      "from_change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "to_change_id": "80df5a3c-2f56-405d-8437-811c3c172e2b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Sequencing options for Task 5",
+      "created_at": "2026-09-14T06:35:46.327992-07:00"
+    },
+    {
+      "id": 949,
+      "from_node_id": 902,
+      "to_node_id": 905,
+      "from_change_id": "184911ba-ed8e-497c-915e-69a00bb70b48",
+      "to_change_id": "bdda9fea-71ef-4672-a6a1-76ee6fceaee4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option considered for the sequencing decision",
+      "created_at": "2026-09-14T06:35:53.419882-07:00"
+    },
+    {
+      "id": 950,
+      "from_node_id": 903,
+      "to_node_id": 905,
+      "from_change_id": "5eafb153-239f-48e6-9f67-ef860474b611",
+      "to_change_id": "bdda9fea-71ef-4672-a6a1-76ee6fceaee4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option considered for the sequencing decision",
+      "created_at": "2026-09-14T06:35:53.427373-07:00"
+    },
+    {
+      "id": 951,
+      "from_node_id": 904,
+      "to_node_id": 905,
+      "from_change_id": "80df5a3c-2f56-405d-8437-811c3c172e2b",
+      "to_change_id": "bdda9fea-71ef-4672-a6a1-76ee6fceaee4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option considered for the sequencing decision",
+      "created_at": "2026-09-14T06:35:53.434293-07:00"
+    },
+    {
+      "id": 952,
+      "from_node_id": 905,
+      "to_node_id": 901,
+      "from_change_id": "bdda9fea-71ef-4672-a6a1-76ee6fceaee4",
+      "to_change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision A governs how Task 5 is executed",
+      "created_at": "2026-09-14T06:35:53.440516-07:00"
     }
   ],
   "documents": [

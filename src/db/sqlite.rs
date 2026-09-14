@@ -19,8 +19,8 @@ use super::models::{
 };
 use super::traits::{
     validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
-    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
-    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
+    ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -62,6 +62,21 @@ impl Database for SqliteDatabase {
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().await;
         super::queries::set_scan_state(&conn, user_did, key, value)
+    }
+
+    async fn delete_scan_state(&self, user_did: &str, key: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_scan_state(&conn, user_did, key)
+    }
+
+    async fn finish_full_scan_state(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::finish_full_scan_state(&conn, user_did, finished_at_rfc3339, carried_key)
     }
 
     async fn get_all_scan_state(&self, user_did: &str) -> Result<Vec<(String, String)>> {
@@ -462,9 +477,14 @@ impl Database for SqliteDatabase {
 
     // --- Scan admission queue (#257) ---
 
-    async fn enqueue_scan(&self, user_did: &str) -> Result<()> {
+    async fn enqueue_scan(&self, user_did: &str) -> Result<EnqueueOutcome> {
         let conn = self.conn.lock().await;
         super::queries::enqueue_scan(&conn, user_did)
+    }
+
+    async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::enqueue_refresh_scan(&conn, user_did)
     }
 
     async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
@@ -489,10 +509,11 @@ impl Database for SqliteDatabase {
         &self,
         user_did: &str,
         claim_id: &str,
+        completion: FinishCompletion,
         error: Option<&str>,
     ) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::finish_queued_scan(&conn, user_did, claim_id, error)
+        super::queries::finish_queued_scan(&conn, user_did, claim_id, completion, error)
     }
 
     async fn reclaim_expired_scans(&self) -> Result<usize> {
