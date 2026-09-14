@@ -422,6 +422,24 @@ deciduous 884):*
 - Destructive migration tests are serialized among themselves by a process
   mutex plus a Postgres session advisory lock on the migrations database.
 
+*Amended 2026-09-14 (plan rev 6, after Astra's fifth review V5-01–V5-03;
+deciduous 886):*
+
+- Completion is classified from **persisted** skip state, not only the
+  resuming invocation's flag: a `done` marker with a positive skip count is
+  complete-with-skips even when the resume itself saw no new error; an
+  unreadable skip count is "complete, unverified" — fulfilled for the
+  cooldown, never clean, never proof of the revision.
+- The full scan has one bookkeeping boundary like the refresh: scorer
+  construction, fingerprint rebuild (including its abort), discovery and
+  the pipeline all run inside one captured outcome, and every error reaches
+  the single retry site — a scheduler-created owed full scan whose setup
+  fails gets the hourly retry, not the nightly deadline the tick set.
+- The Postgres enqueue concurrency tests are deterministic: serialization
+  is proven by observing the competitor's ungranted advisory lock, and
+  claim preservation establishes the committed running claim before the
+  competing request reads state.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust

@@ -9624,6 +9624,28 @@
       "created_at": "2026-09-13T17:53:42.625013-07:00",
       "updated_at": "2026-09-13T17:53:42.625013-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"fb713a3\",\"confidence\":85}"
+    },
+    {
+      "id": 885,
+      "change_id": "ecb0f8fc-7d1f-4d78-8a10-98d018b9a3f7",
+      "node_type": "outcome",
+      "title": "Phase 2 plan rev 5 committed 4b9459d on docs/343-phase2-plan (PR #123): all 5 fourth-review findings addressed in design, none disputed — owed-full eligibility without scores + retry stamps the attempt, empty discovery always enters the pipeline + marker-authoritative completion, per-user advisory lock on Postgres enqueue, one ScanReport contract for both kinds, migrations DB serialized by process mutex + session advisory lock. Spec §4.4 rev-5 amendment. Docs-only ⇒ merge-ready",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T17:57:06.350527-07:00",
+      "updated_at": "2026-09-13T17:57:06.350527-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"4b9459d\",\"confidence\":88}"
+    },
+    {
+      "id": 886,
+      "change_id": "7361f837-33d3-4558-b207-d329bd53feb4",
+      "node_type": "action",
+      "title": "Revise Phase 2 plan to rev 6 per Astra fifth review V5-01..V5-03 (changes requested on 4b9459d): completion classified from persisted skip state (Option<i64>; done+skips>0 = CompleteWithSkips even when degraded=false; unknown count = CompleteUnverified, never proof), full-scan bookkeeping boundary run_scan_with + FullScanBookkeeping so fingerprint/scorer setup failures reach the single retry site, Postgres enqueue tests split into deterministic serialization (pg_locks wait) and claim-preservation (claim committed first) tests",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T18:37:46.231492-07:00",
+      "updated_at": "2026-09-13T18:37:46.231492-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"4b9459d\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19724,6 +19746,28 @@
       "weight": 1.0,
       "rationale": "Fourth review on rev 4",
       "created_at": "2026-09-13T17:53:42.632896-07:00"
+    },
+    {
+      "id": 929,
+      "from_node_id": 884,
+      "to_node_id": 885,
+      "from_change_id": "2a46864a-7712-4bea-b88d-87073f1103b6",
+      "to_change_id": "ecb0f8fc-7d1f-4d78-8a10-98d018b9a3f7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Revision committed",
+      "created_at": "2026-09-13T17:57:06.356644-07:00"
+    },
+    {
+      "id": 930,
+      "from_node_id": 885,
+      "to_node_id": 886,
+      "from_change_id": "ecb0f8fc-7d1f-4d78-8a10-98d018b9a3f7",
+      "to_change_id": "7361f837-33d3-4558-b207-d329bd53feb4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fifth review on rev 5",
+      "created_at": "2026-09-13T18:37:46.242639-07:00"
     }
   ],
   "documents": [

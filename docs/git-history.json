@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4b9459db433010c39dc24ff49ec3fe89547eb203",
+    "short_hash": "4b9459d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T17:56:49-07:00",
+    "message": "docs(343): Phase 2 plan rev 5 — resolve Astra fourth review V4-01..V4-05; spec §4.4 amended\n\nV4-01 an owed full scan is retry-eligible with zero score rows\n(REFRESH_DUE_SQL eligibility = scores OR owed full); schedule_retry_at\nstamps refresh_attempted_generation so retries of either kind wait for\ntheir deadline; restart test with a never-scored first scan. V4-02 the\nempty-candidate shortcut in amplification::run is removed — a full scan\nalways enters run_phased_scan so staged work resumes or drains, and\nclassify_full_scan treats a burst/finalize/missing marker as Resumable\nregardless of degraded. V4-03 Postgres enqueue_scan takes a per-user\npg_advisory_xact_lock before reading state, with a conditional\nabsent-row insert + re-read; two-connection barrier test. V4-04\nrun_refresh_with/run_refresh return Result<ScanReport> through one\nfinish_scan, so both launch_scan arms share a type. V4-05 destructive\nmigration tests serialized by migrations_fixture(): process mutex +\nPostgres session advisory lock; ordering test. Fourth resolution table.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "fb713a3ffc761bf63286c1260f1169867255b495",
     "short_hash": "fb713a3",
     "author": "Bryan Guffey",
