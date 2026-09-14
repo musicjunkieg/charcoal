@@ -17,7 +17,7 @@
 // `run_topic_first`) are preserved exactly, so the produced `AccountScore`s
 // are identical to the pre-rewire behaviour.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::StreamExt;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -128,14 +128,14 @@ pub async fn run(
     );
 
     // Step 3: Filter to accounts with stale or missing scores (candidate set).
-    // Same staleness gate as before, but one bulk query instead of an
-    // is_score_stale round-trip per candidate (#213). On error, fall back to an
-    // empty fresh set so everything is treated stale — byte-identical to the old
-    // per-call `.unwrap_or(true)`.
+    // One bulk query instead of an is_score_stale round-trip per candidate
+    // (#213). This is now a hard error (#344 spec §4.4): a DB blip must not
+    // silently widen the re-score set to "everything" (old `.unwrap_or(true)`
+    // behavior) or, worse, silently narrow it to "nothing".
     let fresh: HashSet<String> = db
-        .get_fresh_scored_dids(user_did, 7)
+        .get_fresh_scored_dids(user_did)
         .await
-        .unwrap_or_default()
+        .context("reading fresh-score set for second-degree candidate filtering")?
         .into_iter()
         .collect();
     let mut stale = Vec::new();
@@ -216,15 +216,20 @@ pub async fn run_topic_first(
     keywords_per_cycle: usize,
     results_per_keyword: usize,
 ) -> Result<(usize, usize, bool)> {
-    // Step 1: Get already-scored DIDs for deduplication (candidate filter).
+    // Step 1: Get FRESH-scored DIDs for deduplication (candidate filter,
+    // #344 R06). A legacy or expired row must not suppress re-discovery — a
+    // stale score is exactly the case discovery should be finding again, not
+    // treating as "already handled". Hard error: a DB blip must not silently
+    // widen or narrow the discovery set.
     let scored_dids: HashSet<String> = db
-        .get_all_scored_dids(user_did)
-        .await?
+        .get_fresh_scored_dids(user_did)
+        .await
+        .context("reading fresh-score set for topic-first discovery dedup")?
         .into_iter()
         .collect();
 
     crate::progress!(
-        "  {} accounts already scored, searching for new discoveries...",
+        "  {} accounts have fresh scores, searching for new discoveries…",
         scored_dids.len()
     );
 

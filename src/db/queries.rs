@@ -14,13 +14,15 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::cache_retention::CacheEviction;
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    ThreatTier, ToxicPost, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ExportedExpiry, InferredPair,
+    NewAmplificationEvent, ScoringConfidence, StoredScore, ThreatTier, ToxicPost, UserLabel,
+    UserRow,
 };
 use super::traits::{
     ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow, ScanClaim, ScanQueueDepth, ScanQueueEntry,
     ScanQueueRow, ScanSkip,
 };
+use crate::scoring::generation::scoring_revision;
 
 // --- Users ---
 
@@ -158,18 +160,20 @@ pub fn save_fingerprint_bundle(
     fingerprint_json: &str,
     post_count: u32,
     embedding: Option<&str>, // pre-serialized JSON array, like save_embedding
+    embedding_model_id: Option<&str>,
     clusters: &[crate::db::models::ClusterCentroid],
 ) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, updated_at)
-         VALUES (?1, ?2, ?3, ?4, datetime('now'))
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, embedding_model_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
          ON CONFLICT(user_did) DO UPDATE SET
             fingerprint_json = ?2,
             post_count = ?3,
             embedding_vector = ?4,
+            embedding_model_id = ?5,
             updated_at = datetime('now')",
-        params![user_did, fingerprint_json, post_count, embedding],
+        params![user_did, fingerprint_json, post_count, embedding, embedding_model_id],
     )?;
     tx.execute(
         "DELETE FROM topic_clusters WHERE user_did = ?1",
@@ -210,14 +214,33 @@ pub fn get_topic_centroids(
     Ok(out)
 }
 
+/// The stored embedding model id for a user's fingerprint (#344). `None` for
+/// a keyword-only fingerprint or a pre-v18 row that predates the column.
+pub fn fingerprint_embedding_model(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    let model_id: Option<Option<String>> = conn
+        .query_row(
+            "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = ?1",
+            params![user_did],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(model_id.flatten())
+}
+
 // --- Account scores ---
 
-/// Save or update an account's scores for a specific user.
+/// Save or update an account's scores for a specific user. Stamps both
+/// `scoring_generation` (the current `scoring_revision()`) and `valid_until`
+/// (now + 3/7/14 d by confidence tier, #344) — this IS the scoring write
+/// path, so it always stamps from the clock. `import_score` is the only
+/// other writer of these columns, and it never does.
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
+    let staleness_days =
+        ScoringConfidence::staleness_days_for_label(score.scoring_confidence.as_deref());
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence, overlap_legacy)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14, ?15)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence, overlap_legacy, scoring_generation, valid_until)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14, ?15, ?16, datetime('now', ?17))
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -232,7 +255,9 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             graph_distance = ?12,
             fingerprint_quality = ?13,
             scoring_confidence = ?14,
-            overlap_legacy = ?15",
+            overlap_legacy = ?15,
+            scoring_generation = ?16,
+            valid_until = datetime('now', ?17)",
         params![
             user_did,
             score.did,
@@ -249,31 +274,54 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             score.fingerprint_quality,
             score.scoring_confidence,
             score.overlap_legacy,
+            scoring_revision(),
+            format!("+{staleness_days} days"),
         ],
     )?;
     Ok(())
 }
 
-/// Get all scored accounts for a specific user, ranked by threat score descending.
+/// The fresh predicate, SQLite spelling (#344 R11). Boolean-explicit:
+/// `datetime(NULL)` and `datetime('garbage')` are both NULL, so without
+/// COALESCE the comparison is SQL-unknown and `NOT (...)` stays unknown —
+/// a hidden row that is never counted. COALESCE(…, 0) makes NULL and
+/// malformed values read as "not fresh" in every consumer. Interpolated by
+/// `format!` as a constant, never with user input; values still bind.
+const FRESH_SQL: &str =
+    "scoring_generation = {gen} AND COALESCE(datetime(valid_until) > datetime('now'), 0)";
+
+fn fresh_sql(gen_param: &str) -> String {
+    FRESH_SQL.replace("{gen}", gen_param)
+}
+
+/// Get all scored accounts for a specific user, ranked by threat score
+/// descending, fresh-only (#344 R06/R11) — `did` tie-breaks so paging is
+/// deterministic (#356).
 pub fn get_ranked_threats(
     conn: &Connection,
     user_did: &str,
     min_score: f64,
 ) -> Result<Vec<AccountScore>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
                 graph_distance, fingerprint_quality, scoring_confidence, context_score,
                 overlap_legacy
          FROM account_scores
-         WHERE user_did = ?1 AND threat_score >= ?2
-         ORDER BY threat_score DESC",
-    )?;
+         WHERE user_did = ?1 AND threat_score >= ?2 AND {}
+         ORDER BY threat_score DESC, did",
+        fresh_sql("?3")
+    ))?;
 
-    let rows = stmt.query_map(params![user_did, min_score], |row| {
-        let top_posts_json: String = row.get(7)?;
-        let top_toxic_posts: Vec<ToxicPost> =
-            serde_json::from_str(&top_posts_json).unwrap_or_default();
+    let rows = stmt.query_map(params![user_did, min_score, scoring_revision()], |row| {
+        // NULL (never written by the app's own upsert, but reachable from a
+        // raw INSERT — test fixtures, a hand-patched row) and corrupted JSON
+        // both present as empty (#364) rather than erroring the whole read.
+        let top_posts_json: Option<String> = row.get(7)?;
+        let top_toxic_posts: Vec<ToxicPost> = top_posts_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
         // Recalculate tier from stored score so threshold changes
         // take effect without rescanning.
         let threat_score: Option<f64> = row.get(4)?;
@@ -311,56 +359,154 @@ pub fn get_ranked_threats(
     Ok(accounts)
 }
 
-/// Check if an account's score is stale (older than the given number of days) for a specific user.
-pub fn is_score_stale(
-    conn: &Connection,
-    user_did: &str,
-    did: &str,
-    max_age_days: i64,
-) -> Result<bool> {
-    let mut stmt =
-        conn.prepare("SELECT scored_at FROM account_scores WHERE user_did = ?1 AND did = ?2")?;
-    let result: Option<String> = stmt
-        .query_row(params![user_did, did], |row| row.get(0))
-        .optional()?;
-
-    match result {
-        None => Ok(true), // No score exists — treat as stale
-        Some(scored_at) => {
-            // Compare against current time minus max_age_days
-            let stale: bool = conn.query_row(
-                "SELECT datetime(?1) < datetime('now', ?2)",
-                params![scored_at, format!("-{max_age_days} days")],
-                |row| row.get(0),
-            )?;
-            Ok(stale)
-        }
-    }
+/// Check if an account's score is stale for a specific user (#344): NOT
+/// (`scoring_generation` current AND `valid_until` in the future). A missing
+/// row is stale.
+pub fn is_score_stale(conn: &Connection, user_did: &str, did: &str) -> Result<bool> {
+    let fresh_rows: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND did = ?2 AND {}",
+            fresh_sql("?3")
+        ),
+        params![user_did, did, scoring_revision()],
+        |row| row.get(0),
+    )?;
+    Ok(fresh_rows == 0)
 }
 
-/// Return the DIDs the user has scored within the last `max_age_days` — i.e.
-/// the accounts a per-candidate `is_score_stale` check would call *fresh*
-/// (row exists AND `scored_at >= now - max_age_days`).
+/// Return the DIDs the user has a FRESH score for (#344) — the complement of
+/// `is_score_stale` over a whole user's scores, in one query.
 ///
 /// Discovery loops fetch this set once and test membership in memory instead
-/// of issuing one `is_score_stale` round-trip per candidate (#213). The cutoff
-/// MUST match `is_score_stale` exactly, or candidates get silently re-scored or
-/// skipped; `fresh_set_is_exactly_the_non_stale_dids` guards that.
-pub fn get_fresh_scored_dids(
-    conn: &Connection,
-    user_did: &str,
-    max_age_days: i64,
-) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT did FROM account_scores
-         WHERE user_did = ?1 AND datetime(scored_at) >= datetime('now', ?2)",
-    )?;
+/// of issuing one `is_score_stale` round-trip per candidate (#213). The
+/// predicate MUST match `is_score_stale` exactly, or candidates get silently
+/// re-scored or skipped; `fresh_set_is_exactly_the_non_stale_dids_including_null_and_malformed_expiry`
+/// guards that.
+pub fn get_fresh_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT did FROM account_scores WHERE user_did = ?1 AND {}",
+        fresh_sql("?2")
+    ))?;
     let dids = stmt
-        .query_map(params![user_did, format!("-{max_age_days} days")], |row| {
+        .query_map(params![user_did, scoring_revision()], |row| {
             row.get::<_, String>(0)
         })?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     Ok(dids)
+}
+
+/// Count rows that are NOT fresh for a user (#344) — hidden from
+/// `get_ranked_threats` but never deleted. `NOT (...)` around the
+/// boolean-explicit predicate correctly counts NULL and malformed
+/// `valid_until` as expired (R11): without the inner COALESCE, `NOT
+/// (unknown)` would still be unknown and the row would vanish from both the
+/// fresh AND the expired count.
+pub fn count_expired(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND NOT ({})",
+            fresh_sql("?2")
+        ),
+        params![user_did, scoring_revision()],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Every `account_scores` row for the user, verbatim, RFC3339 timestamps
+/// (#344 R01). See `Database::export_scores`.
+pub fn export_scores(conn: &Connection, user_did: &str) -> Result<Vec<StoredScore>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                posts_analyzed, top_toxic_posts, behavioral_signals, graph_distance,
+                fingerprint_quality, scoring_confidence, context_score, overlap_legacy,
+                strftime('%Y-%m-%dT%H:%M:%f+00:00', scored_at),
+                scoring_generation,
+                strftime('%Y-%m-%dT%H:%M:%f+00:00', valid_until),
+                valid_until
+         FROM account_scores WHERE user_did = ?1 ORDER BY did",
+    )?;
+    let rows = stmt
+        .query_map(params![user_did], |row| {
+            // NULL/corrupted top_toxic_posts presents as empty (#364) — same
+            // contract as get_ranked_threats, not a reason to fail the export.
+            let top_posts_json: Option<String> = row.get(7)?;
+            let stored_tier: Option<String> = row.get(5)?;
+            Ok(StoredScore {
+                score: AccountScore {
+                    did: row.get(0)?,
+                    handle: row.get(1)?,
+                    toxicity_score: row.get(2)?,
+                    topic_overlap: row.get(3)?,
+                    threat_score: row.get(4)?,
+                    // Stored tier verbatim — export does not recompute (that is
+                    // the presentation layer's job).
+                    threat_tier: stored_tier,
+                    posts_analyzed: row.get(6)?,
+                    top_toxic_posts: top_posts_json
+                        .as_deref()
+                        .and_then(|j| serde_json::from_str(j).ok())
+                        .unwrap_or_default(),
+                    scored_at: String::new(),
+                    behavioral_signals: row.get(8)?,
+                    graph_distance: row.get(9)?,
+                    fingerprint_quality: row.get(10)?,
+                    scoring_confidence: row.get(11)?,
+                    context_score: row.get(12)?,
+                    overlap_legacy: row.get(13)?,
+                },
+                scored_at: row.get(14)?,
+                scoring_generation: row.get(15)?,
+                // strftime() of NULL is NULL; of unparseable text is NULL too —
+                // the raw column (17) tells the two apart (V2-06).
+                valid_until: match (
+                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, Option<String>>(17)?,
+                ) {
+                    (Some(t), _) => ExportedExpiry::At(t),
+                    (None, None) => ExportedExpiry::Missing,
+                    (None, Some(raw)) => ExportedExpiry::Invalid(raw),
+                },
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Write an exported row back. `datetime(?)` normalises the RFC3339 text to
+/// this backend's `YYYY-MM-DD HH:MM:SS` form (whole seconds — SQLite's
+/// column form; a Postgres source's microseconds are truncated here, and
+/// only here). A `Missing`/`Invalid` expiry becomes `scored_at`: expired the
+/// instant it was scored, never renewed, never dropped (V2-06). Idempotent.
+pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Result<()> {
+    let s = &row.score;
+    let top_posts_json = serde_json::to_string(&s.top_toxic_posts)?;
+    let valid_until = match &row.valid_until {
+        ExportedExpiry::At(t) => t.clone(),
+        ExportedExpiry::Missing => row.scored_at.clone(),
+        ExportedExpiry::Invalid(raw) => {
+            tracing::warn!(did = %s.did, raw, "invalid expiry on export — importing as expired-when-scored");
+            row.scored_at.clone()
+        }
+    };
+    conn.execute(
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+             posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
+             fingerprint_quality, scoring_confidence, overlap_legacy, scoring_generation, valid_until)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime(?10), ?11, ?12, ?13, ?14, ?15, ?16, ?17, datetime(?18))
+         ON CONFLICT(user_did, did) DO UPDATE SET
+             handle = ?3, toxicity_score = ?4, topic_overlap = ?5, threat_score = ?6, threat_tier = ?7,
+             posts_analyzed = ?8, top_toxic_posts = ?9, scored_at = datetime(?10), behavioral_signals = ?11,
+             context_score = ?12, graph_distance = ?13, fingerprint_quality = ?14, scoring_confidence = ?15,
+             overlap_legacy = ?16, scoring_generation = ?17, valid_until = datetime(?18)",
+        params![
+            user_did, s.did, s.handle, s.toxicity_score, s.topic_overlap, s.threat_score, s.threat_tier,
+            s.posts_analyzed, top_posts_json, row.scored_at, s.behavioral_signals, s.context_score,
+            s.graph_distance, s.fingerprint_quality, s.scoring_confidence, s.overlap_legacy,
+            row.scoring_generation, valid_until,
+        ],
+    )?;
+    Ok(())
 }
 
 // --- Amplification events ---
@@ -1402,15 +1548,20 @@ pub fn count_scan_skips(conn: &Connection, user_did: &str) -> Result<i64> {
     Ok(count)
 }
 
-/// Count accounts whose `threat_tier` is `'NotAssessed'` for a user (#222).
+/// Count accounts whose `threat_tier` is `'NotAssessed'` for a user (#222),
+/// fresh-only (#344 R06) — matches `get_ranked_threats`'s freshness gate so
+/// the two counts stay consistent for the same set of visible rows.
 ///
 /// `get_ranked_threats` filters on `threat_score >= ?`, which always excludes
 /// NULL-score NotAssessed rows, so this can't be derived from that result
 /// set — it needs its own query.
 pub fn count_not_assessed(conn: &Connection, user_did: &str) -> Result<i64> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed'",
-        params![user_did],
+        &format!(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed' AND {}",
+            fresh_sql("?2")
+        ),
+        params![user_did, scoring_revision()],
         |row| row.get(0),
     )?;
     Ok(count)
@@ -2705,7 +2856,7 @@ mod tests {
         let conn = test_db();
 
         // No score — should be stale
-        assert!(is_score_stale(&conn, TEST_USER, "did:plc:abc", 7).unwrap());
+        assert!(is_score_stale(&conn, TEST_USER, "did:plc:abc").unwrap());
 
         let score = AccountScore {
             did: "did:plc:abc".to_string(),
@@ -2727,7 +2878,7 @@ mod tests {
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
         // Just scored — should not be stale
-        assert!(!is_score_stale(&conn, TEST_USER, "did:plc:abc", 7).unwrap());
+        assert!(!is_score_stale(&conn, TEST_USER, "did:plc:abc").unwrap());
     }
 
     #[test]

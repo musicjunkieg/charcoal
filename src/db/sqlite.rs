@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
-    NewAmplificationEvent, UserLabel, UserRow,
+    NewAmplificationEvent, StoredScore, UserLabel, UserRow,
 };
 use super::traits::{
     validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
@@ -101,6 +101,7 @@ impl Database for SqliteDatabase {
         fingerprint_json: &str,
         post_count: u32,
         embedding: Option<&[f64]>,
+        embedding_model_id: Option<&str>,
         clusters: &[ClusterCentroid],
     ) -> Result<()> {
         validate_bundle(embedding, clusters)?;
@@ -112,6 +113,7 @@ impl Database for SqliteDatabase {
             fingerprint_json,
             post_count,
             embedding_json.as_deref(),
+            embedding_model_id,
             clusters,
         )
     }
@@ -119,6 +121,11 @@ impl Database for SqliteDatabase {
     async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>> {
         let conn = self.conn.lock().await;
         super::queries::get_topic_centroids(&conn, user_did)
+    }
+
+    async fn fingerprint_embedding_model(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::fingerprint_embedding_model(&conn, user_did)
     }
 
     async fn upsert_account_score(&self, user_did: &str, score: &AccountScore) -> Result<()> {
@@ -135,18 +142,29 @@ impl Database for SqliteDatabase {
         super::queries::get_ranked_threats(&conn, user_did, min_score)
     }
 
-    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool> {
+    async fn is_score_stale(&self, user_did: &str, did: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::is_score_stale(&conn, user_did, did, max_age_days)
+        super::queries::is_score_stale(&conn, user_did, did)
     }
 
-    async fn get_fresh_scored_dids(
-        &self,
-        user_did: &str,
-        max_age_days: i64,
-    ) -> Result<Vec<String>> {
+    async fn get_fresh_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
         let conn = self.conn.lock().await;
-        super::queries::get_fresh_scored_dids(&conn, user_did, max_age_days)
+        super::queries::get_fresh_scored_dids(&conn, user_did)
+    }
+
+    async fn count_expired(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_expired(&conn, user_did)
+    }
+
+    async fn export_scores(&self, user_did: &str) -> Result<Vec<StoredScore>> {
+        let conn = self.conn.lock().await;
+        super::queries::export_scores(&conn, user_did)
+    }
+
+    async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::import_score(&conn, user_did, row)
     }
 
     async fn insert_amplification_event(
@@ -764,6 +782,7 @@ mod tests {
             "{\"clusters\":[],\"post_count\":42}",
             42,
             Some(&emb),
+            Some(crate::topics::embeddings::EMBEDDING_MODEL_ID),
             &clusters,
         )
         .await
@@ -798,7 +817,7 @@ mod tests {
                 post_count: 7,
             },
         ];
-        db.save_fingerprint_bundle(TEST_USER, "{}", 18, None, &three)
+        db.save_fingerprint_bundle(TEST_USER, "{}", 18, None, None, &three)
             .await
             .unwrap();
         let two = vec![
@@ -811,7 +830,7 @@ mod tests {
                 post_count: 8,
             },
         ];
-        db.save_fingerprint_bundle(TEST_USER, "{}", 17, None, &two)
+        db.save_fingerprint_bundle(TEST_USER, "{}", 17, None, None, &two)
             .await
             .unwrap();
         let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
@@ -826,7 +845,7 @@ mod tests {
     #[tokio::test]
     async fn test_bundle_keyword_only_is_legal() {
         let db = test_db().await;
-        db.save_fingerprint_bundle(TEST_USER, "{}", 10, None, &[])
+        db.save_fingerprint_bundle(TEST_USER, "{}", 10, None, None, &[])
             .await
             .unwrap();
         assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
@@ -840,7 +859,7 @@ mod tests {
             centroid: vec![0.5; 384],
             post_count: 3,
         }];
-        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, None, &good)
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, None, None, &good)
             .await
             .unwrap();
 
@@ -849,7 +868,7 @@ mod tests {
             post_count: 4,
         }];
         assert!(db
-            .save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &bad)
+            .save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, None, &bad)
             .await
             .is_err());
 
@@ -868,14 +887,21 @@ mod tests {
             post_count: 3,
         }];
         let emb = vec![0.25; 384];
-        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, Some(&emb), &clusters)
-            .await
-            .unwrap();
+        db.save_fingerprint_bundle(
+            TEST_USER,
+            "{\"gen\":1}",
+            3,
+            Some(&emb),
+            Some(crate::topics::embeddings::EMBEDDING_MODEL_ID),
+            &clusters,
+        )
+        .await
+        .unwrap();
         assert!(db.get_embedding(TEST_USER).await.unwrap().is_some());
 
         // Downgrade to keyword-only: the new generation replaces EVERYTHING —
         // a stale embedding surviving here would mix generations (#302).
-        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &[])
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, None, &[])
             .await
             .unwrap();
         assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
@@ -889,7 +915,7 @@ mod tests {
             centroid: vec![0.5; 384],
             post_count: 3,
         }];
-        db.save_fingerprint_bundle(TEST_USER, "{}", 3, None, &clusters)
+        db.save_fingerprint_bundle(TEST_USER, "{}", 3, None, None, &clusters)
             .await
             .unwrap();
         db.delete_user_data(TEST_USER).await.unwrap();
@@ -1055,7 +1081,7 @@ mod tests {
     async fn test_trait_is_score_stale_missing() {
         let db = test_db().await;
         assert!(db
-            .is_score_stale(TEST_USER, "did:plc:missing", 7)
+            .is_score_stale(TEST_USER, "did:plc:missing")
             .await
             .unwrap());
     }

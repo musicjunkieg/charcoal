@@ -8,7 +8,7 @@
 // 4. Scores each follower for toxicity and topic overlap
 // 5. Stores the results for the threat report
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::StreamExt;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -308,12 +308,13 @@ pub async fn run(
     // Fetch the fresh-scored DID set ONCE for both the amplifier and follower
     // staleness gates below, instead of an is_score_stale round-trip per
     // candidate (#213). Scores aren't written until Phase C, so the set is
-    // stable across both loops. Empty-on-error → everything treated stale,
-    // matching the old per-call `.unwrap_or(true)`.
+    // stable across both loops. Hard error (#344 spec §4.4): a DB blip must
+    // not silently widen the re-score set to "everything" (old
+    // `.unwrap_or(true)` behavior) or, worse, silently narrow it to "nothing".
     let fresh_scored: HashSet<String> = db
-        .get_fresh_scored_dids(user_did, 7)
+        .get_fresh_scored_dids(user_did)
         .await
-        .unwrap_or_default()
+        .context("reading fresh-score set for amplifier/follower candidate filtering")?
         .into_iter()
         .collect();
 

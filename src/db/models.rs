@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A scored account in the threat list.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccountScore {
     pub did: String,
     pub handle: String,
@@ -99,11 +99,34 @@ impl ScoringConfidence {
 }
 
 /// A single post with its toxicity score, kept as evidence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToxicPost {
     pub text: String,
     pub toxicity: f64,
     pub uri: String,
+}
+
+/// One `account_scores` row with its provenance, for lossless export/import
+/// (#344 R01). The presentation reads (`get_ranked_threats`, counts) hide
+/// expired rows; this does not, and `import_score` writes it back verbatim.
+/// How a row's expiry left its backend (V2-06). Postgres rows are always
+/// `At`; SQLite can hold NULL or text `datetime()` cannot parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportedExpiry {
+    /// RFC3339 UTC, fractional seconds as the source had them.
+    At(String),
+    Missing,
+    /// The raw SQLite text, for the log line the importer writes.
+    Invalid(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredScore {
+    pub score: AccountScore,
+    /// RFC3339 UTC.
+    pub scored_at: String,
+    pub scoring_generation: String,
+    pub valid_until: ExportedExpiry,
 }
 
 /// An amplification event — someone quoted or reposted the protected user.

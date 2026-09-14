@@ -18,15 +18,17 @@ use sqlx_core::row::Row;
 use sqlx_postgres::Postgres;
 
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
-    NewAmplificationEvent, ThreatTier, ToxicPost, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, ExportedExpiry,
+    InferredPair, NewAmplificationEvent, StoredScore, ThreatTier, ToxicPost, UserLabel, UserRow,
 };
 use super::traits::{
     eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
     FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
     ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
 };
+use crate::db::models::ScoringConfidence;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
+use crate::scoring::generation::scoring_revision;
 
 /// Type alias for the PostgreSQL connection pool.
 pub type PgPool = Pool<Postgres>;
@@ -416,6 +418,7 @@ impl Database for PgDatabase {
         fingerprint_json: &str,
         post_count: u32,
         embedding: Option<&[f64]>,
+        embedding_model_id: Option<&str>,
         clusters: &[ClusterCentroid],
     ) -> Result<()> {
         crate::db::traits::validate_bundle(embedding, clusters)?;
@@ -427,18 +430,20 @@ impl Database for PgDatabase {
             pgvector::Vector::from(floats)
         });
         sqlx_core::query::query(
-            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, updated_at)
-             VALUES ($1, $2, $3, $4, NOW())
+            "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, embedding_model_id, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW())
              ON CONFLICT(user_did) DO UPDATE SET
                 fingerprint_json = $2,
                 post_count = $3,
                 embedding_vector = $4,
+                embedding_model_id = $5,
                 updated_at = NOW()",
         )
         .bind(user_did)
         .bind(fingerprint_json)
         .bind(i32::try_from(post_count).context("post_count exceeds i32 range")?)
         .bind(vector)
+        .bind(embedding_model_id)
         .execute(&mut *tx)
         .await?;
         sqlx_core::query::query("DELETE FROM topic_clusters WHERE user_did = $1")
@@ -484,6 +489,16 @@ impl Database for PgDatabase {
             .collect()
     }
 
+    async fn fingerprint_embedding_model(&self, user_did: &str) -> Result<Option<String>> {
+        let row = sqlx_core::query::query(
+            "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = $1",
+        )
+        .bind(user_did)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|r| r.get::<Option<String>, _>(0)))
+    }
+
     async fn get_fingerprint(&self, user_did: &str) -> Result<Option<(String, u32, String)>> {
         let row = sqlx_core::query::query(
             "SELECT fingerprint_json, post_count,
@@ -526,13 +541,20 @@ impl Database for PgDatabase {
             .behavioral_signals
             .as_ref()
             .and_then(|s| serde_json::from_str(s).ok());
+        // Stamp both freshness columns from the clock (#344) — this IS the
+        // scoring write path. `import_score` is the only other writer and
+        // never stamps from now; it carries a source's own values verbatim.
+        let staleness_days = i32::try_from(ScoringConfidence::staleness_days_for_label(
+            score.scoring_confidence.as_deref(),
+        ))
+        .context("staleness_days exceeds i32 range")?;
 
         sqlx_core::query::query(
             "INSERT INTO account_scores
                 (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                  posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
-                 fingerprint_quality, scoring_confidence, overlap_legacy)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15)
+                 fingerprint_quality, scoring_confidence, overlap_legacy, scoring_generation, valid_until)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11, $12, $13, $14, $15, $16, NOW() + make_interval(days => $17))
              ON CONFLICT(user_did, did) DO UPDATE SET
                 handle = $3,
                 toxicity_score = $4,
@@ -547,7 +569,9 @@ impl Database for PgDatabase {
                 graph_distance = $12,
                 fingerprint_quality = $13,
                 scoring_confidence = $14,
-                overlap_legacy = $15",
+                overlap_legacy = $15,
+                scoring_generation = $16,
+                valid_until = NOW() + make_interval(days => $17)",
         )
         .bind(user_did)
         .bind(&score.did)
@@ -564,6 +588,8 @@ impl Database for PgDatabase {
         .bind(&score.fingerprint_quality)
         .bind(&score.scoring_confidence)
         .bind(score.overlap_legacy)
+        .bind(scoring_revision())
+        .bind(staleness_days)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -582,11 +608,12 @@ impl Database for PgDatabase {
                     fingerprint_quality, scoring_confidence, graph_distance,
                     overlap_legacy
              FROM account_scores
-             WHERE user_did = $1 AND threat_score >= $2
-             ORDER BY threat_score DESC",
+             WHERE user_did = $1 AND threat_score >= $2 AND scoring_generation = $3 AND valid_until > NOW()
+             ORDER BY threat_score DESC, did",
         )
         .bind(user_did)
         .bind(min_score)
+        .bind(scoring_revision())
         .fetch_all(&self.pool)
         .await?;
 
@@ -630,41 +657,154 @@ impl Database for PgDatabase {
         Ok(accounts)
     }
 
-    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool> {
-        // Use make_interval(days => $3) with a bound i32 instead of string
-        // concatenation — avoids SQL injection risk and type ambiguity.
+    async fn is_score_stale(&self, user_did: &str, did: &str) -> Result<bool> {
+        // Same predicate as SQLite (#344 R11), natively boolean here: no
+        // COALESCE needed because valid_until is NOT NULL on Postgres.
         let row = sqlx_core::query::query(
-            "SELECT scored_at < NOW() - make_interval(days => $3)
+            "SELECT scoring_generation = $3 AND valid_until > NOW()
              FROM account_scores WHERE user_did = $1 AND did = $2",
         )
         .bind(user_did)
         .bind(did)
-        .bind(i32::try_from(max_age_days).context("max_age_days exceeds i32 range")?)
+        .bind(scoring_revision())
         .fetch_optional(&self.pool)
         .await?;
 
         match row {
             None => Ok(true), // No score exists — treat as stale
-            Some(r) => Ok(r.get::<bool, _>(0)),
+            Some(r) => Ok(!r.get::<bool, _>(0)),
         }
     }
 
-    async fn get_fresh_scored_dids(
-        &self,
-        user_did: &str,
-        max_age_days: i64,
-    ) -> Result<Vec<String>> {
-        // Same cutoff as is_score_stale (make_interval + bound i32), inverted:
-        // fresh = scored_at >= NOW() - interval.
+    async fn get_fresh_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
         let rows = sqlx_core::query::query(
             "SELECT did FROM account_scores
-             WHERE user_did = $1 AND scored_at >= NOW() - make_interval(days => $2)",
+             WHERE user_did = $1 AND scoring_generation = $2 AND valid_until > NOW()",
         )
         .bind(user_did)
-        .bind(i32::try_from(max_age_days).context("max_age_days exceeds i32 range")?)
+        .bind(scoring_revision())
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(|r| r.get::<String, _>(0)).collect())
+    }
+
+    async fn count_expired(&self, user_did: &str) -> Result<i64> {
+        // valid_until is NOT NULL on Postgres so, unlike SQLite, no COALESCE
+        // is needed — the comparison is never SQL-unknown here.
+        let row = sqlx_core::query::query(
+            "SELECT COUNT(*) FROM account_scores
+             WHERE user_did = $1 AND NOT (scoring_generation = $2 AND valid_until > NOW())",
+        )
+        .bind(user_did)
+        .bind(scoring_revision())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>(0))
+    }
+
+    async fn export_scores(&self, user_did: &str) -> Result<Vec<StoredScore>> {
+        let rows = sqlx_core::query::query(
+            "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                    posts_analyzed, top_toxic_posts, behavioral_signals, graph_distance,
+                    fingerprint_quality, scoring_confidence, context_score, overlap_legacy,
+                    to_char(scored_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"+00:00\"'),
+                    scoring_generation,
+                    to_char(valid_until AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"+00:00\"')
+             FROM account_scores WHERE user_did = $1 ORDER BY did",
+        )
+        .bind(user_did)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            // NULL (never written by the app's own upsert, but reachable
+            // from a raw INSERT — test fixtures, a hand-patched row) and
+            // corrupted JSON both present as empty (#364), matching the
+            // SQLite side of this same function.
+            let top_posts_json: Option<serde_json::Value> = row.get(7);
+            let top_toxic_posts: Vec<ToxicPost> = top_posts_json
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
+            let behavioral_signals: Option<serde_json::Value> = row.get(8);
+            // valid_until is NOT NULL on Postgres — every row is `At` (V2-06).
+            let valid_until: String = row.get(16);
+            out.push(StoredScore {
+                score: AccountScore {
+                    did: row.get(0),
+                    handle: row.get(1),
+                    toxicity_score: row.get(2),
+                    topic_overlap: row.get(3),
+                    threat_score: row.get(4),
+                    threat_tier: row.get(5),
+                    posts_analyzed: row.get::<i32, _>(6) as u32,
+                    top_toxic_posts,
+                    scored_at: String::new(),
+                    behavioral_signals: behavioral_signals.map(|v| v.to_string()),
+                    graph_distance: row.get(9),
+                    fingerprint_quality: row.get(10),
+                    scoring_confidence: row.get(11),
+                    context_score: row.get(12),
+                    overlap_legacy: row.get(13),
+                },
+                scored_at: row.get(14),
+                scoring_generation: row.get(15),
+                valid_until: ExportedExpiry::At(valid_until),
+            });
+        }
+        Ok(out)
+    }
+
+    async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()> {
+        let s = &row.score;
+        let top_posts_json = serde_json::to_value(&s.top_toxic_posts)?;
+        let behavioral_json: Option<serde_json::Value> = s
+            .behavioral_signals
+            .as_ref()
+            .and_then(|v| serde_json::from_str(v).ok());
+        // Same Missing/Invalid -> scored_at mapping as SQLite (V2-06): a
+        // SQLite source can hand this backend either, since export_scores on
+        // SQLite is not itself NOT-NULL-constrained.
+        let valid_until = match &row.valid_until {
+            ExportedExpiry::At(t) => t.clone(),
+            ExportedExpiry::Missing => row.scored_at.clone(),
+            ExportedExpiry::Invalid(raw) => {
+                tracing::warn!(did = %s.did, raw, "invalid expiry on export — importing as expired-when-scored");
+                row.scored_at.clone()
+            }
+        };
+        sqlx_core::query::query(
+            "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
+                 fingerprint_quality, scoring_confidence, overlap_legacy, scoring_generation, valid_until)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz, $11, $12, $13, $14, $15, $16, $17, $18::timestamptz)
+             ON CONFLICT(user_did, did) DO UPDATE SET
+                 handle = $3, toxicity_score = $4, topic_overlap = $5, threat_score = $6, threat_tier = $7,
+                 posts_analyzed = $8, top_toxic_posts = $9, scored_at = $10::timestamptz, behavioral_signals = $11,
+                 context_score = $12, graph_distance = $13, fingerprint_quality = $14, scoring_confidence = $15,
+                 overlap_legacy = $16, scoring_generation = $17, valid_until = $18::timestamptz",
+        )
+        .bind(user_did)
+        .bind(&s.did)
+        .bind(&s.handle)
+        .bind(s.toxicity_score)
+        .bind(s.topic_overlap)
+        .bind(s.threat_score)
+        .bind(&s.threat_tier)
+        .bind(s.posts_analyzed as i32)
+        .bind(&top_posts_json)
+        .bind(&row.scored_at)
+        .bind(&behavioral_json)
+        .bind(s.context_score)
+        .bind(&s.graph_distance)
+        .bind(&s.fingerprint_quality)
+        .bind(&s.scoring_confidence)
+        .bind(s.overlap_legacy)
+        .bind(&row.scoring_generation)
+        .bind(&valid_until)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn insert_amplification_event(
@@ -1709,9 +1849,12 @@ impl Database for PgDatabase {
 
     async fn count_not_assessed(&self, user_did: &str) -> Result<i64> {
         let row = sqlx_core::query::query(
-            "SELECT COUNT(*) FROM account_scores WHERE user_did = $1 AND threat_tier = 'NotAssessed'",
+            "SELECT COUNT(*) FROM account_scores
+             WHERE user_did = $1 AND threat_tier = 'NotAssessed'
+               AND scoring_generation = $2 AND valid_until > NOW()",
         )
         .bind(user_did)
+        .bind(scoring_revision())
         .fetch_one(&self.pool)
         .await?;
         Ok(row.get::<i64, _>(0))

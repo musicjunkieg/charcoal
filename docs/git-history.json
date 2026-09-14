@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bb47ba6f475573438c14b067009959de47bfbaaf",
+    "short_hash": "bb47ba6",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T02:00:52-07:00",
+    "message": "feat(344): migration v18 — expiry, queue kind + full_requested_at, refresh schedule, embedding model id, cooldown backfill\n\naccount_scores.scoring_generation/valid_until (legacy backfill), the\n(user_did, threat_score) index, scan_queue.kind/full_requested_at,\nusers.next_refresh_at/refreshed_generation/refresh_attempted_generation\n(left NULL: due-ness is revision-driven), topic_fingerprint.embedding_model_id,\ncreate_tables_through / migrate_postgres_through for authentic old-schema\nfixtures, and\nscan_state.last_full_scan_finished_at from done queue rows. Fresh +\nupgrade-from-v17 tests on both backends; Postgres suite fails in CI\nwithout DATABASE_URL.\n\nPostgres drops the DEFAULT on scoring_generation after backfill (a\nforgetful writer must fail, not silently write \"legacy\") — this leaves\nthree pre-existing Postgres integration tests failing\n(test_pg_account_score_upsert_and_rank, test_pg_action_score_snapshots_and_cascade,\ntest_pg_get_fresh_scored_dids_matches_is_score_stale) until Task 3 stamps\nscoring_generation on every write, per task-3-brief.md. Expected and\nout of scope here.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 6
+  },
+  {
     "hash": "91eadcf822f14dbabde38000ad6761b550285318",
     "short_hash": "91eadcf",
     "author": "Bryan Guffey",

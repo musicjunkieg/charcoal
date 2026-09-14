@@ -13,7 +13,7 @@ use async_trait::async_trait;
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
-    NewAmplificationEvent, UserLabel, UserRow,
+    NewAmplificationEvent, StoredScore, UserLabel, UserRow,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -321,18 +321,29 @@ pub trait Database: Send + Sync {
     /// embedding, and per-topic centroid rows in ONE transaction, bumping
     /// updated_at exactly once. `embedding: None` with empty `clusters` is the
     /// legal keyword-only bundle (embedder unavailable). (#302)
+    ///
+    /// `embedding_model_id` (#344) records which model produced `embedding` —
+    /// callers pass `Some(EMBEDDING_MODEL_ID)` when `embedding.is_some()`,
+    /// else `None` (keyword-only fingerprint). Read back by
+    /// `fingerprint_embedding_model` to gate input compatibility (R03).
     async fn save_fingerprint_bundle(
         &self,
         user_did: &str,
         fingerprint_json: &str,
         post_count: u32,
         embedding: Option<&[f64]>,
+        embedding_model_id: Option<&str>,
         clusters: &[ClusterCentroid],
     ) -> Result<()>;
 
     /// Load stored topic centroids ordered by cluster_index. Empty = legacy
     /// (pre-#297) or keyword-only fingerprint.
     async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>>;
+
+    /// The stored embedding model id for a user's fingerprint (#344). `None`
+    /// means a keyword-only fingerprint, or a pre-v18 row that predates the
+    /// column — either way, no vector to compare against `EMBEDDING_MODEL_ID`.
+    async fn fingerprint_embedding_model(&self, user_did: &str) -> Result<Option<String>>;
 
     // --- Account scores ---
 
@@ -343,15 +354,35 @@ pub trait Database: Send + Sync {
     async fn get_ranked_threats(&self, user_did: &str, min_score: f64)
         -> Result<Vec<AccountScore>>;
 
-    /// Check if an account's score is stale for a user (older than the given number of days).
-    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool>;
+    /// Check if an account's score is fresh for a user (#344). Freshness is
+    /// `scoring_generation == scoring_revision() AND valid_until > now` — NOT
+    /// a simple age check any more. A missing row is stale. This read is a
+    /// hard error for callers (spec §4.4): a DB blip must not silently widen
+    /// the re-score set or, worse, silently narrow it.
+    async fn is_score_stale(&self, user_did: &str, did: &str) -> Result<bool>;
 
-    /// Return the DIDs scored within the last `max_age_days` — the complement
-    /// of `is_score_stale` over a whole user's scores, in one query. Discovery
-    /// loops fetch this once and test membership in memory instead of one
-    /// `is_score_stale` round-trip per candidate (#213).
-    async fn get_fresh_scored_dids(&self, user_did: &str, max_age_days: i64)
-        -> Result<Vec<String>>;
+    /// Return the DIDs whose score is fresh (see `is_score_stale`) — the
+    /// complement of `is_score_stale` over a whole user's scores, in one
+    /// query. Discovery loops fetch this once and test membership in memory
+    /// instead of one `is_score_stale` round-trip per candidate (#213).
+    async fn get_fresh_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
+
+    /// Count rows that are NOT fresh for a user (#344) — hidden from
+    /// `get_ranked_threats` but never deleted. Includes legacy, expired,
+    /// NULL and malformed `valid_until` rows.
+    async fn count_expired(&self, user_did: &str) -> Result<i64>;
+
+    /// Every `account_scores` row for the user, verbatim — never filtered by
+    /// freshness (#344 R01). For `charcoal migrate` and any future export
+    /// path; the presentation queries (`get_ranked_threats`, counts) are the
+    /// wrong tool for this because they hide expired/legacy rows.
+    async fn export_scores(&self, user_did: &str) -> Result<Vec<StoredScore>>;
+
+    /// Write a row exactly as `export_scores` produced it: `scored_at`,
+    /// `scoring_generation` and `valid_until` are taken from `row`, never
+    /// from the clock — unlike `upsert_account_score`, which is the live
+    /// scoring path and always stamps from now. Idempotent.
+    async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()>;
 
     // --- Amplification events ---
 
@@ -500,7 +531,13 @@ pub trait Database: Send + Sync {
     /// Update last_login_at timestamp for a user.
     async fn update_last_login(&self, did: &str) -> Result<()>;
 
-    /// Get all DIDs that have been scored for a user (for deduplication during discovery).
+    /// Get all DIDs that have ever been scored for a user, fresh or not.
+    ///
+    /// Not a scoring-eligibility gate (#344 R06) — `run_topic_first`'s
+    /// discovery dedup uses `get_fresh_scored_dids` instead, so a legacy or
+    /// expired row no longer suppresses re-discovery of an account. This
+    /// method has no remaining production caller; kept for history/export
+    /// uses where "was this DID ever scored" is the actual question.
     async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
 
     // --- Classification staging (#208) ---

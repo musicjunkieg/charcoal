@@ -166,41 +166,58 @@ async fn test_pg_scan_state_roundtrip() {
 
 #[tokio::test]
 async fn test_pg_fingerprint_roundtrip() {
+    // A dedicated user_did, NOT the shared TEST_USER: topic_fingerprint's
+    // primary key is user_did ALONE (one row per user, unlike account_scores'
+    // (user_did, did) composite), so every test that writes a fingerprint
+    // under TEST_USER races the same singleton row against every other such
+    // test running concurrently in this file (#344 fixup — observed as a
+    // real, reproducible failure, not a hypothetical).
+    const OWNER: &str = "did:plc:pgtest_fp_roundtrip_own";
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 
-    db.save_fingerprint(TEST_USER, r#"{"topics": ["test"]}"#, 42)
+    db.save_fingerprint(OWNER, r#"{"topics": ["test"]}"#, 42)
         .await
         .unwrap();
-    let (json, count, _) = db.get_fingerprint(TEST_USER).await.unwrap().unwrap();
+    let (json, count, _) = db.get_fingerprint(OWNER).await.unwrap().unwrap();
     assert_eq!(json, r#"{"topics": ["test"]}"#);
     assert_eq!(count, 42);
+
+    db.delete_user_data(OWNER).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_pg_embedding_roundtrip() {
+    // Dedicated user_did — see test_pg_fingerprint_roundtrip: TEST_USER's
+    // topic_fingerprint row is a singleton other concurrent tests also
+    // write, so sharing it here is a real race (observed: this test's own
+    // "ensure fingerprint row exists" step can be clobbered by another
+    // test's concurrent delete-then-rewrite before save_embedding runs).
+    const OWNER: &str = "did:plc:pgtest_emb_roundtrip_own";
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 
     // Ensure fingerprint row exists
-    db.save_fingerprint(TEST_USER, r#"{"clusters":[]}"#, 10)
+    db.save_fingerprint(OWNER, r#"{"clusters":[]}"#, 10)
         .await
         .unwrap();
 
     let embedding: Vec<f64> = (0..384).map(|i| i as f64 / 384.0).collect();
-    db.save_embedding(TEST_USER, &embedding).await.unwrap();
+    db.save_embedding(OWNER, &embedding).await.unwrap();
 
-    let loaded = db.get_embedding(TEST_USER).await.unwrap().unwrap();
+    let loaded = db.get_embedding(OWNER).await.unwrap().unwrap();
     assert_eq!(loaded.len(), 384);
     // f64→f32→f64 round-trip loses some precision
     assert!((loaded[0] - 0.0).abs() < 0.001);
     assert!((loaded[383] - 383.0 / 384.0).abs() < 0.001);
+
+    db.delete_user_data(OWNER).await.unwrap();
 }
 
 /// #302: `save_fingerprint_bundle` writes the fingerprint row, the mean
@@ -210,11 +227,15 @@ async fn test_pg_embedding_roundtrip() {
 /// bundle IS the generation, not an incremental patch.
 #[tokio::test]
 async fn test_pg_bundle_roundtrip_and_replacement() {
+    // Dedicated user_did — see test_pg_fingerprint_roundtrip: topic_fingerprint
+    // is a per-user singleton, so sharing TEST_USER here races every other
+    // concurrently-running test that also writes a fingerprint for it.
+    const OWNER: &str = "did:plc:pgtest_bundle_roundtrip";
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 
     let clusters = vec![
         charcoal::db::models::ClusterCentroid {
@@ -227,11 +248,18 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         },
     ];
     let emb = vec![0.125; 384];
-    db.save_fingerprint_bundle(TEST_USER, "{}", 42, Some(&emb), &clusters)
-        .await
-        .unwrap();
+    db.save_fingerprint_bundle(
+        OWNER,
+        "{}",
+        42,
+        Some(&emb),
+        Some(charcoal::topics::embeddings::EMBEDDING_MODEL_ID),
+        &clusters,
+    )
+    .await
+    .unwrap();
 
-    let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+    let stored = db.get_topic_centroids(OWNER).await.unwrap();
     assert_eq!(stored.len(), 2);
     // pgvector stores f32 — compare with tolerance, same as the
     // mean-embedding tests.
@@ -247,10 +275,10 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         centroid: vec![0.9; 384],
         post_count: 9,
     }];
-    db.save_fingerprint_bundle(TEST_USER, "{}", 9, None, &one)
+    db.save_fingerprint_bundle(OWNER, "{}", 9, None, None, &one)
         .await
         .unwrap();
-    let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+    let stored = db.get_topic_centroids(OWNER).await.unwrap();
     assert_eq!(stored.len(), 1);
     // Count alone would also pass if the delete ran but the insert did not —
     // assert the survivor is the NEW generation's row, not an old one.
@@ -260,9 +288,9 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         "the surviving row must be the new generation's centroid"
     );
     // None embedding leaves the column NULL for this generation.
-    assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
+    assert!(db.get_embedding(OWNER).await.unwrap().is_none());
 
-    cleanup_test_data(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 }
 
 /// Deleting a user must cascade to `topic_clusters` (FK ON DELETE CASCADE,
@@ -285,7 +313,7 @@ async fn test_pg_delete_user_cascades_topic_clusters() {
         centroid: vec![0.5; 384],
         post_count: 3,
     }];
-    db.save_fingerprint_bundle(DEL_USER, "{}", 3, None, &clusters)
+    db.save_fingerprint_bundle(DEL_USER, "{}", 3, None, None, &clusters)
         .await
         .unwrap();
     assert_eq!(
@@ -675,7 +703,7 @@ async fn test_pg_is_score_stale_missing() {
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     assert!(db
-        .is_score_stale(TEST_USER, "did:plc:nonexistent_pg", 7)
+        .is_score_stale(TEST_USER, "did:plc:nonexistent_pg")
         .await
         .unwrap());
 }
@@ -902,6 +930,12 @@ async fn test_pg_staging_round_trip() {
     );
 }
 
+/// #344 R11: the fresh predicate on Postgres — `scoring_generation = $n AND
+/// valid_until > NOW()`, natively boolean (no COALESCE needed; valid_until is
+/// NOT NULL here) — matches the SQLite semantics pinned in
+/// `unit_staleness::fresh_set_is_exactly_the_non_stale_dids_including_null_and_malformed_expiry`.
+/// Four rows: one fresh, three not (wrong revision, past expiry, and the
+/// exact boundary one second before NOW — strict `>`, not `>=`).
 #[tokio::test]
 async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
     use sqlx_core::pool::Pool;
@@ -912,12 +946,110 @@ async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
         return;
     };
 
-    // Marker DIDs unique to this test; clean them up first so a prior run's rows
-    // can't leak in.
-    let fresh_did = "did:plc:pgfresh_stale_test_ok";
-    let stale_did = "did:plc:pgfresh_stale_test_old";
+    // A dedicated user_did, NOT the shared TEST_USER: get_fresh_scored_dids
+    // and count_expired aggregate over every row for the user_did, and many
+    // other tests in this file concurrently write fresh rows under
+    // TEST_USER — an aggregate assertion scoped to TEST_USER would be
+    // flaky under real parallel execution. Scoping to a DID nothing else
+    // touches makes the aggregate exact and safe.
+    const OWNER: &str = "did:plc:pgfresh_owner_user";
+    let current_did = "did:plc:pgfresh_current";
+    let expired_did = "did:plc:pgfresh_expired";
+    let legacy_did = "did:plc:pgfresh_legacy";
+    let boundary_did = "did:plc:pgfresh_boundary";
     let pool = Pool::<Postgres>::connect(&url).await.unwrap();
-    for did in [fresh_did, stale_did] {
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let rev = charcoal::scoring::generation::scoring_revision();
+    // (did, generation, valid_until_offset_sql)
+    let rows: [(&str, &str, &str); 4] = [
+        (current_did, rev, "NOW() + make_interval(days => 5)"),
+        (expired_did, rev, "NOW() - make_interval(days => 1)"),
+        (legacy_did, "legacy", "NOW() + make_interval(days => 5)"),
+        (boundary_did, rev, "NOW() - INTERVAL '1 second'"),
+    ];
+    for (did, generation, valid_until_sql) in rows {
+        sqlx_core::query::query(&format!(
+            "INSERT INTO account_scores (user_did, did, handle, scoring_generation, valid_until)
+             VALUES ($1, $2, $3, $4, {valid_until_sql})"
+        ))
+        .bind(OWNER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(generation)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let fresh: HashSet<String> = db
+        .get_fresh_scored_dids(OWNER)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+
+    assert_eq!(
+        fresh,
+        HashSet::from([current_did.to_string()]),
+        "only the current-revision, not-yet-expired row is fresh"
+    );
+
+    // Equivalence with the per-DID path, including a never-scored DID which
+    // must be stale/absent.
+    for did in [
+        current_did,
+        expired_did,
+        legacy_did,
+        boundary_did,
+        "did:plc:pgfresh_never_scored",
+    ] {
+        let stale = db.is_score_stale(OWNER, did).await.unwrap();
+        assert_eq!(
+            fresh.contains(did),
+            !stale,
+            "fresh-set membership must equal !is_score_stale for {did}"
+        );
+    }
+
+    // Every stored non-fresh row is counted — 3 of 4 (R11).
+    assert_eq!(db.count_expired(OWNER).await.unwrap(), 3);
+
+    // Cleanup.
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// #344: `upsert_account_score` stamps `scoring_generation` and `valid_until`
+/// from the confidence tier (3/7/14 d) — the write-path twin of
+/// `unit_staleness::upsert_stamps_generation_and_valid_until_from_confidence`,
+/// on the backend that actually runs in production.
+#[tokio::test]
+async fn test_pg_upsert_stamps_generation_and_valid_until_from_confidence() {
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    let dids = [
+        "did:plc:pgstamp_low",
+        "did:plc:pgstamp_standard",
+        "did:plc:pgstamp_high",
+        "did:plc:pgstamp_none",
+        "did:plc:pgstamp_bogus",
+    ];
+    for did in dids {
         sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
             .bind(TEST_USER)
             .bind(did)
@@ -926,52 +1058,52 @@ async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
             .unwrap();
     }
 
-    // Insert both fresh, then age one to 8 days (stale). Raw INSERT so we can
-    // control scored_at directly (the trait upsert always stamps NOW()).
-    for (did, age_days) in [(fresh_did, 0i32), (stale_did, 8i32)] {
-        sqlx_core::query::query(
-            "INSERT INTO account_scores (user_did, did, handle, scored_at)
-             VALUES ($1, $2, $3, NOW() - make_interval(days => $4))",
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let rev = charcoal::scoring::generation::scoring_revision();
+    for (did, confidence, expected_days) in [
+        (dids[0], Some("low"), 3.0_f64),
+        (dids[1], Some("standard"), 7.0),
+        (dids[2], Some("high"), 14.0),
+        (dids[3], None, 7.0),
+        (dids[4], Some("bogus"), 7.0),
+    ] {
+        let score = AccountScore {
+            did: did.to_string(),
+            handle: format!("{did}.handle"),
+            toxicity_score: Some(0.5),
+            topic_overlap: Some(0.5),
+            overlap_legacy: None,
+            threat_score: Some(20.0),
+            threat_tier: Some("Elevated".to_string()),
+            posts_analyzed: 50,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: confidence.map(str::to_string),
+        };
+        db.upsert_account_score(TEST_USER, &score).await.unwrap();
+
+        let row = sqlx_core::query::query(
+            "SELECT scoring_generation,
+                    (EXTRACT(EPOCH FROM (valid_until - scored_at)) / 86400.0)::float8
+             FROM account_scores WHERE user_did = $1 AND did = $2",
         )
         .bind(TEST_USER)
         .bind(did)
-        .bind(format!("{did}.handle"))
-        .bind(age_days)
-        .execute(&pool)
+        .fetch_one(&pool)
         .await
         .unwrap();
+        let generation: String = row.get(0);
+        let days: f64 = row.get(1);
+        assert_eq!(generation, rev, "{did}");
+        assert!((days - expected_days).abs() < 0.01, "{did}: {days} days");
+        assert!(!db.is_score_stale(TEST_USER, did).await.unwrap(), "{did}");
     }
 
-    let db = charcoal::db::connect_postgres(&url).await.unwrap();
-    let fresh: HashSet<String> = db
-        .get_fresh_scored_dids(TEST_USER, 7)
-        .await
-        .unwrap()
-        .into_iter()
-        .collect();
-
-    assert!(
-        fresh.contains(fresh_did),
-        "recently-scored DID must be fresh"
-    );
-    assert!(
-        !fresh.contains(stale_did),
-        "8-day-old DID must not be fresh"
-    );
-
-    // Equivalence with the per-DID path (same make_interval cutoff), including
-    // a never-scored DID which must be stale/absent.
-    for did in [fresh_did, stale_did, "did:plc:pgfresh_never_scored"] {
-        let stale = db.is_score_stale(TEST_USER, did, 7).await.unwrap();
-        assert_eq!(
-            fresh.contains(did),
-            !stale,
-            "fresh-set membership must equal !is_score_stale for {did}"
-        );
-    }
-
-    // Cleanup.
-    for did in [fresh_did, stale_did] {
+    for did in dids {
         sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
             .bind(TEST_USER)
             .bind(did)
@@ -3383,4 +3515,399 @@ async fn test_migrations_fixture_serializes_concurrent_calls() {
         count_b, 1,
         "the second call's drop-all wiped the first's sentinel before inserting its own"
     );
+}
+
+/// #344 R01/V2-06/V2-07: `charcoal migrate`'s real path — export_scores on an
+/// authentic SQLite source (one row backfilled from a genuine v17 fixture,
+/// the rest inserted directly at v18, matching `unit_score_export::seeded()`)
+/// piped through import_score into Postgres. Destructive on the Postgres
+/// side (drop-all via `migrate_postgres_through`), so this runs on the
+/// dedicated `_migrations` database under the double lock (V3-06/V4-05),
+/// not `charcoal_test`.
+#[tokio::test]
+async fn test_pg_migrate_from_sqlite_preserves_every_row() {
+    use charcoal::db::schema::{create_tables, create_tables_through};
+    use charcoal::db::sqlite::SqliteDatabase;
+    use charcoal::scoring::generation::{scoring_revision, LEGACY_GENERATION};
+    use rusqlite::{params, Connection};
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+    const MIG_USER: &str = "did:plc:pgmig_user";
+
+    // --- Build the SQLite source: v17 fixture for the legacy row, v18 for
+    // the rest, exactly as unit_score_export::seeded() does. ---
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables_through(&conn, 17).unwrap();
+    conn.execute(
+        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at)
+         VALUES (?1, 'did:plc:pgmig_leg', 'leg.h', 50.0, 'High', datetime('now', '-140 days'))",
+        params![MIG_USER],
+    )
+    .unwrap();
+    create_tables(&conn).unwrap(); // v18 boot: backfills the legacy row
+
+    let rev = scoring_revision();
+    let rows = [
+        (
+            "did:plc:pgmig_cur",
+            "40.0",
+            "'High'",
+            "datetime('now', '-4 days')",
+            "datetime('now', '+10 days')",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_exp",
+            "20.0",
+            "'Elevated'",
+            "datetime('now', '-13 days')",
+            "datetime('now', '-6 days')",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_na",
+            "NULL",
+            "'NotAssessed'",
+            "datetime('now', '-12 days')",
+            "datetime('now', '-5 days')",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_nul",
+            "30.0",
+            "'Elevated'",
+            "datetime('now', '-2 days')",
+            "NULL",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_bad",
+            "35.0",
+            "'High'",
+            "datetime('now', '-2 days')",
+            "'not a timestamp'",
+            rev,
+        ),
+    ];
+    for (did, score, tier, scored_at, valid_until, generation) in rows {
+        conn.execute(
+            &format!(
+                "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at, scoring_generation, valid_until)
+                 VALUES (?1, ?2, ?3, {score}, {tier}, {scored_at}, ?4, {valid_until})"
+            ),
+            params![MIG_USER, did, format!("{did}.h"), generation],
+        )
+        .unwrap();
+    }
+    let src: std::sync::Arc<dyn charcoal::db::Database> =
+        std::sync::Arc::new(SqliteDatabase::new(conn));
+
+    // --- Destination: a clean v18 Postgres, via the destructive fixture. ---
+    let _fixture = migrations_fixture(&murl, 18).await;
+    let pg_db = charcoal::db::connect_postgres(&murl).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&murl).await.unwrap();
+
+    // The sequence `charcoal migrate` runs: export every row, import every row.
+    let exported = src.export_scores(MIG_USER).await.unwrap();
+    assert_eq!(exported.len(), 6);
+    for row in &exported {
+        pg_db.import_score(MIG_USER, row).await.unwrap();
+    }
+
+    let count: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM account_scores WHERE user_did = $1")
+            .bind(MIG_USER)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(count, 6);
+
+    let generation_of = |did: &str| -> String {
+        exported
+            .iter()
+            .find(|r| r.score.did == did)
+            .map(|r| r.scoring_generation.clone())
+            .unwrap_or_default()
+    };
+    for did in [
+        "did:plc:pgmig_cur",
+        "did:plc:pgmig_exp",
+        "did:plc:pgmig_na",
+        "did:plc:pgmig_nul",
+        "did:plc:pgmig_bad",
+    ] {
+        assert_eq!(generation_of(did), rev, "{did}");
+    }
+    let leg_row = sqlx_core::query::query(
+        "SELECT scoring_generation FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_leg'",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let leg_generation: String = leg_row.get(0);
+    assert_eq!(leg_generation, LEGACY_GENERATION);
+
+    let na_threat_score_is_null: bool = sqlx_core::query::query(
+        "SELECT threat_score IS NULL FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_na'",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        na_threat_score_is_null,
+        "NotAssessed row carries its NULL score verbatim"
+    );
+
+    for did in ["did:plc:pgmig_nul", "did:plc:pgmig_bad"] {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT valid_until = scored_at FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(did)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{did}: NULL/malformed expiry imports as expired-when-scored"
+        );
+    }
+
+    let leg_valid_matches_14d: bool = sqlx_core::query::query(
+        "SELECT valid_until - scored_at = INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_leg'",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        leg_valid_matches_14d,
+        "legacy row's v18 backfill (scored_at + 14 d) survives migration"
+    );
+
+    // Every scored_at carried through unchanged: compare against the exact
+    // instant the SQLite source exported (parsed from its own RFC3339 text),
+    // not a re-formatted string — SQLite and Postgres render fractional
+    // seconds differently (milliseconds vs microseconds) even for the same
+    // instant.
+    for row in &exported {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT scored_at = $3::timestamptz FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(&row.score.did)
+        .bind(&row.scored_at)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{}: scored_at must survive migration exactly",
+            row.score.did
+        );
+    }
+
+    assert_eq!(pg_db.count_expired(MIG_USER).await.unwrap(), 5);
+    assert_eq!(
+        pg_db.get_ranked_threats(MIG_USER, 0.0).await.unwrap().len(),
+        1
+    );
+
+    // Re-import (as a second `charcoal migrate` run would): idempotent, no
+    // row is renewed or changed.
+    for row in &exported {
+        pg_db.import_score(MIG_USER, row).await.unwrap();
+    }
+    for row in &exported {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT scored_at = $3::timestamptz FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(&row.score.did)
+        .bind(&row.scored_at)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{}: re-import must not change scored_at",
+            row.score.did
+        );
+    }
+    assert_eq!(
+        pg_db.count_expired(MIG_USER).await.unwrap(),
+        5,
+        "re-import must not change expiry counts"
+    );
+}
+
+/// #344 V2-06: Postgres keeps microseconds through export/import — the
+/// precision contract, positive direction.
+#[tokio::test]
+async fn test_pg_export_import_keeps_microseconds() {
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let src_did = "did:plc:pgmicro_src";
+    let dst_did = "did:plc:pgmicro_dst";
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    for did in [src_did, dst_did] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+            .bind(TEST_USER)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, scoring_generation, scored_at, valid_until)
+         VALUES ($1, $2, $3, 'legacy', '2026-09-01 12:00:00.123456+00'::timestamptz,
+                 '2026-09-01 12:00:00.123456+00'::timestamptz + INTERVAL '14 days')",
+    )
+    .bind(TEST_USER)
+    .bind(src_did)
+    .bind(format!("{src_did}.handle"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let exported = db.export_scores(TEST_USER).await.unwrap();
+    let src_row = exported
+        .iter()
+        .find(|r| r.score.did == src_did)
+        .expect("source row exported");
+    let mut dst_row = src_row.clone();
+    dst_row.score.did = dst_did.to_string();
+    dst_row.score.handle = format!("{dst_did}.handle");
+    db.import_score(TEST_USER, &dst_row).await.unwrap();
+
+    let row = sqlx_core::query::query(
+        "SELECT scored_at = '2026-09-01 12:00:00.123456+00'::timestamptz,
+                valid_until = '2026-09-01 12:00:00.123456+00'::timestamptz + INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = $2",
+    )
+    .bind(TEST_USER)
+    .bind(dst_did)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let scored_matches: bool = row.get(0);
+    let valid_matches: bool = row.get(1);
+    assert!(
+        scored_matches,
+        "scored_at keeps microseconds through export/import"
+    );
+    assert!(
+        valid_matches,
+        "valid_until keeps microseconds through export/import"
+    );
+
+    for did in [src_did, dst_did] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+            .bind(TEST_USER)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
+/// #344 V2-06: the documented one-way truncation — a Postgres source's
+/// microseconds are truncated to whole seconds when imported into SQLite
+/// (SQLite's `datetime()` column form), and only there.
+#[tokio::test]
+async fn test_pg_import_into_sqlite_truncates_to_seconds() {
+    use charcoal::db::sqlite::SqliteDatabase;
+    use rusqlite::Connection;
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let src_did = "did:plc:pgtrunc_src";
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+        .bind(TEST_USER)
+        .bind(src_did)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, scoring_generation, scored_at, valid_until)
+         VALUES ($1, $2, $3, 'legacy', '2026-09-01 12:00:00.123456+00'::timestamptz,
+                 '2026-09-01 12:00:00.123456+00'::timestamptz + INTERVAL '14 days')",
+    )
+    .bind(TEST_USER)
+    .bind(src_did)
+    .bind(format!("{src_did}.handle"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pg_db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let exported = pg_db.export_scores(TEST_USER).await.unwrap();
+    let row = exported
+        .iter()
+        .find(|r| r.score.did == src_did)
+        .expect("source row exported")
+        .clone();
+
+    let sqlite_conn = Connection::open_in_memory().unwrap();
+    charcoal::db::schema::create_tables(&sqlite_conn).unwrap();
+    let sqlite_db: std::sync::Arc<dyn charcoal::db::Database> =
+        std::sync::Arc::new(SqliteDatabase::new(sqlite_conn));
+    sqlite_db.import_score(TEST_USER, &row).await.unwrap();
+
+    let (stored_scored_at, stored_valid_until): (String, String) = {
+        // Reach into the SqliteDatabase's connection isn't exposed, so
+        // re-export and check the truncated value the same way the rest of
+        // this suite verifies SQLite state — through the trait.
+        let back = sqlite_db.export_scores(TEST_USER).await.unwrap();
+        let r = back.iter().find(|r| r.score.did == src_did).unwrap();
+        let charcoal::db::models::ExportedExpiry::At(valid_until) = &r.valid_until else {
+            panic!("imported row must have a well-formed expiry");
+        };
+        (r.scored_at.clone(), valid_until.clone())
+    };
+    // SQLite's datetime() column form is whole seconds — the microsecond
+    // fraction from the Postgres source is truncated on import, and
+    // re-exporting renders that truncated value back out with a
+    // millisecond field of all zeros.
+    assert!(
+        stored_scored_at.starts_with("2026-09-01T12:00:00.000"),
+        "scored_at truncated to whole seconds: {stored_scored_at}"
+    );
+    assert!(
+        stored_valid_until.starts_with("2026-09-15T12:00:00.000"),
+        "valid_until truncated to whole seconds: {stored_valid_until}"
+    );
+
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+        .bind(TEST_USER)
+        .bind(src_did)
+        .execute(&pool)
+        .await
+        .unwrap();
 }

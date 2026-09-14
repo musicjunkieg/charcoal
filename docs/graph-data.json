@@ -9745,6 +9745,28 @@
       "created_at": "2026-09-13T22:27:12.776548-07:00",
       "updated_at": "2026-09-13T22:27:12.776548-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"91eadcf\",\"confidence\":85}"
+    },
+    {
+      "id": 896,
+      "change_id": "79aaa558-d2f9-44d5-ab3d-2ab659e1b89b",
+      "node_type": "outcome",
+      "title": "Task 2 committed bb47ba6: migration v18 on both backends (0018_score_expiry.sql self-records; SQLite v18 block), fresh-DB + upgrade-from-v17 tests both backends, migrations fixture guard (_migrations name) + mutex + advisory lock, version assertions 18. VERIFY_WEB green 0 SKIP incl doctests; clippy x3 clean; VERIFY_PG 45/48 db_postgres — the 3 failures are the plan-sequenced write-path gap (Postgres DROP DEFAULT lands in Task 2, stamp-on-write is Task 3). Controller re-ran the 8 migration tests post-commit: 8/8. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T02:03:47.078465-07:00",
+      "updated_at": "2026-09-14T02:03:47.078465-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"bb47ba6\",\"confidence\":80}"
+    },
+    {
+      "id": 897,
+      "change_id": "ae9db254-f8a7-4419-b76a-1340761c53e0",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 3: stamp scoring_generation + valid_until on every score write (both backends, INSERT and DO UPDATE), single null-safe fresh predicate for count_expired/get_ranked_threats/count_not_assessed/is_score_stale/get_fresh_scored_dids/topic-first discovery, lossless export_scores/import_score with ExportedExpiry for charcoal migrate, fingerprint embedding_model_id stamping, pipeline freshness reads become hard errors",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T02:08:39.782198-07:00",
+      "updated_at": "2026-09-14T02:08:39.782198-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"bb47ba6\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19966,6 +19988,28 @@
       "weight": 1.0,
       "rationale": "Plan execution: Task 2 migration v18",
       "created_at": "2026-09-13T22:27:15.681028-07:00"
+    },
+    {
+      "id": 940,
+      "from_node_id": 895,
+      "to_node_id": 896,
+      "from_change_id": "bda4ffe3-38e2-474d-ada2-bbb878d551b1",
+      "to_change_id": "79aaa558-d2f9-44d5-ab3d-2ab659e1b89b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 implementation outcome",
+      "created_at": "2026-09-14T02:03:49.260480-07:00"
+    },
+    {
+      "id": 941,
+      "from_node_id": 877,
+      "to_node_id": 897,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "ae9db254-f8a7-4419-b76a-1340761c53e0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 3 fresh predicate + export/import",
+      "created_at": "2026-09-14T02:08:46.101850-07:00"
     }
   ],
   "documents": [
