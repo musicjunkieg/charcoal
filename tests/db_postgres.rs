@@ -3628,13 +3628,9 @@ async fn test_pg_migrate_from_sqlite_preserves_every_row() {
             .get(0);
     assert_eq!(count, 6);
 
-    let generation_of = |did: &str| -> String {
-        exported
-            .iter()
-            .find(|r| r.score.did == did)
-            .map(|r| r.scoring_generation.clone())
-            .unwrap_or_default()
-    };
+    // Direct SQL against Postgres — not a re-export of the SQLite source —
+    // so this actually checks what `import_score` wrote, not a tautology
+    // about `exported`.
     for did in [
         "did:plc:pgmig_cur",
         "did:plc:pgmig_exp",
@@ -3642,7 +3638,20 @@ async fn test_pg_migrate_from_sqlite_preserves_every_row() {
         "did:plc:pgmig_nul",
         "did:plc:pgmig_bad",
     ] {
-        assert_eq!(generation_of(did), rev, "{did}");
+        let matches: bool = sqlx_core::query::query(
+            "SELECT scoring_generation = $3 FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(did)
+        .bind(rev)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{did}: migrated scoring_generation must equal the current revision, as read back from Postgres"
+        );
     }
     let leg_row = sqlx_core::query::query(
         "SELECT scoring_generation FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_leg'",

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "dd12ec2a7660e70991bf7c683536004ad9d54890",
+    "short_hash": "dd12ec2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T06:14:24-07:00",
+    "message": "feat(344): stamp scores; null-safe fresh-only reads; lossless export/import for migrate\n\nupsert stamps scoring_generation + valid_until (3/7/14 d by confidence).\nOne boolean-explicit fresh predicate (COALESCE on SQLite so NULL and\nmalformed expiries are hidden AND counted) behind is_score_stale,\nget_fresh_scored_dids, count_expired, count_not_assessed,\nget_ranked_threats; topic-first discovery uses the fresh set too. The\npipeline propagates freshness-read errors. charcoal migrate now copies\nevery row verbatim through export_scores/import_score and never renews\nexpiry. Fingerprints record their embedding model id.\n\nFixes two pre-existing Postgres test races surfaced while adding this\nsuite: three tests sharing topic_fingerprint (a per-user singleton row)\nunder the same TEST_USER constant raced each others cleanup/write cycles;\ngave each its own dedicated user_did, matching the isolation pattern\nalready used elsewhere in the file.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 14
+  },
+  {
     "hash": "bb47ba6f475573438c14b067009959de47bfbaaf",
     "short_hash": "bb47ba6",
     "author": "Bryan Guffey",

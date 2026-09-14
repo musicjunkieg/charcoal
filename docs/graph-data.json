@@ -9767,6 +9767,28 @@
       "created_at": "2026-09-14T02:08:39.782198-07:00",
       "updated_at": "2026-09-14T02:08:39.782198-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"bb47ba6\",\"confidence\":85}"
+    },
+    {
+      "id": 898,
+      "change_id": "b51c5c6e-e270-4447-87f4-4b1ae57238fc",
+      "node_type": "outcome",
+      "title": "Task 3 committed dd12ec2: scoring_generation + valid_until stamped on write (both backends, INSERT + DO UPDATE); single null-safe fresh predicate behind count_expired/get_ranked_threats/count_not_assessed/is_score_stale/get_fresh_scored_dids/topic-first discovery; ExportedExpiry + export_scores/import_score lossless path for charcoal migrate; fingerprint embedding_model_id stamping; pipeline freshness reads are hard errors. VERIFY_WEB green 0 SKIP; VERIFY_PG fully green 781 tests (the 3 Task-2 write-path failures closed); clippy x3 clean. Deferred per brief: migrate's refresh-schedule copy waits for Task 6 trait methods. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:17:14.488594-07:00",
+      "updated_at": "2026-09-14T06:17:14.488594-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"dd12ec2\",\"confidence\":85}"
+    },
+    {
+      "id": 899,
+      "change_id": "4e4b7a47-fffd-4c5a-ac0b-2dea7ed07051",
+      "node_type": "observation",
+      "title": "Task 3 reviewer: after the fresh predicate lands, reads outside the plan's six-consumer list stay freshness-blind — account by DID/handle, pile-on join, COUNT(threat_score IS NOT NULL), typeahead in src/db/queries.rs. The tier list hides an expired row while account detail and typeahead still present it as current. Not in Phase 2 scope; needs a scoping call (Bryan) — likely a follow-up issue after #344.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T06:22:55.297517-07:00",
+      "updated_at": "2026-09-14T06:22:55.297517-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -20010,6 +20032,28 @@
       "weight": 1.0,
       "rationale": "Plan execution: Task 3 fresh predicate + export/import",
       "created_at": "2026-09-14T02:08:46.101850-07:00"
+    },
+    {
+      "id": 942,
+      "from_node_id": 897,
+      "to_node_id": 898,
+      "from_change_id": "ae9db254-f8a7-4419-b76a-1340761c53e0",
+      "to_change_id": "b51c5c6e-e270-4447-87f4-4b1ae57238fc",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 implementation outcome",
+      "created_at": "2026-09-14T06:17:17.165549-07:00"
+    },
+    {
+      "id": 943,
+      "from_node_id": 898,
+      "to_node_id": 899,
+      "from_change_id": "b51c5c6e-e270-4447-87f4-4b1ae57238fc",
+      "to_change_id": "4e4b7a47-fffd-4c5a-ac0b-2dea7ed07051",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Observed during Task 3 review",
+      "created_at": "2026-09-14T06:22:57.971208-07:00"
     }
   ],
   "documents": [
