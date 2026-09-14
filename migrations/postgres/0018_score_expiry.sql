@@ -46,8 +46,14 @@ ALTER TABLE scan_queue
     ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'full'
     CHECK (kind IN ('full', 'refresh'));
 ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS full_requested_at TIMESTAMPTZ;
+-- kind = 'full' is belt and braces: the ADD COLUMN above defaults every
+-- existing row to 'full', so on a first run this changes nothing. It matters
+-- when the column already exists (IF NOT EXISTS, a re-run) and refresh rows
+-- are present, where an unqualified backfill would invent a full-scan
+-- obligation for a nightly refresh nobody asked for.
 UPDATE scan_queue SET full_requested_at = enqueued_at
-    WHERE status IN ('queued', 'running') AND full_requested_at IS NULL;
+    WHERE status IN ('queued', 'running') AND kind = 'full'
+      AND full_requested_at IS NULL;
 ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS completion TEXT
     CHECK (completion IN ('complete', 'complete_with_skips', 'complete_unverified', 'resumable', 'failed'));
 

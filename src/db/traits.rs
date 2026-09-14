@@ -493,11 +493,20 @@ pub trait Database: Send + Sync {
     /// Two calls would leave a window where the cooldown has started but the
     /// carried outcome is still there to taint an unrelated later scan — or,
     /// the other way round, the evidence is gone while the run is still owed.
+    ///
+    /// Fenced by `claim_id` (#344 N2): all three writes describe the attempt
+    /// that holds the row, so a worker whose lease lapsed writes **nothing** —
+    /// it must not sample a successor's `started_at`, start a cooldown the
+    /// successor has not earned, or retire a drain outcome the successor still
+    /// owes. A row that is absent, unclaimed, or claimed by someone else is
+    /// logged and skipped; it is not an error, because the scan itself really
+    /// did finish.
     async fn finish_full_scan_state(
         &self,
         user_did: &str,
         finished_at_rfc3339: &str,
         carried_key: &str,
+        claim_id: &str,
     ) -> Result<()>;
 
     /// Get all scan state key-value pairs for a specific user. Used by the
@@ -929,6 +938,82 @@ pub trait Database: Send + Sync {
     /// A second, narrower method would be a second snapshot of a table that
     /// changes under it.
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>;
+
+    // --- Refresh schedule (#343 §4.4, #344) ---
+    //
+    // Three columns on `users`, two different facts (V2-03):
+    //
+    // * `next_refresh_at` — when this user may be attempted again.
+    // * `refresh_attempted_generation` — the revision an attempt has already
+    //   been *scheduled* for. Written by the tick (in its claiming
+    //   transaction) and by `schedule_retry_at`, so a failed, deferred or
+    //   resumable attempt does not become due again by revision; only its
+    //   deadline brings it back.
+    // * `refreshed_generation` — the revision a *completed* run has proven.
+    //   Observability, never a scheduling input.
+
+    /// When the refresh tick may next consider this user. `None` for a user
+    /// who has never been scheduled (the v18-migrated shape) — which makes
+    /// them due, because the revision clause fires instead.
+    async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>>;
+
+    /// The scoring revision a completed refresh or full scan has proven for
+    /// this user. Read by the runbook, never by the scheduler.
+    async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>>;
+
+    /// The scoring revision an attempt has already been scheduled for.
+    async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>>;
+
+    /// Set `next_refresh_at` alone. Used after a success and by `migrate`.
+    async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()>;
+
+    /// Retry: sets `next_refresh_at` AND `refresh_attempted_generation` in one
+    /// statement (V4-01). Two statements would leave a window in which the
+    /// deadline is set but the revision clause still fires, and the tick would
+    /// claim the user it just backed off.
+    async fn schedule_retry_at(
+        &self,
+        user_did: &str,
+        at_rfc3339: &str,
+        attempted_generation: &str,
+    ) -> Result<()>;
+
+    /// Proof: sets BOTH `refreshed_generation` and
+    /// `refresh_attempted_generation` (V3-04) — a proven revision is also an
+    /// attempted one, so the tick stays quiet after a manual full scan.
+    async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()>;
+
+    /// Attempt only. Used solely by `charcoal migrate`, to copy a pending
+    /// attempt from the source database verbatim; production code reaches
+    /// this column through `schedule_retry_at` or the tick.
+    async fn mark_refresh_attempted_generation(
+        &self,
+        user_did: &str,
+        generation: &str,
+    ) -> Result<()>;
+
+    /// ONE transaction: select up to `limit` due users, then for each
+    /// CONDITIONALLY write the refresh queue row (`ON CONFLICT … WHERE
+    /// status IN ('done','failed')`) and, only if that write affected a row,
+    /// set `next_refresh_at = next_rfc3339` and
+    /// `refresh_attempted_generation = current_generation`.
+    ///
+    /// A user is due when they have at least one score row **or** a finished
+    /// queue row that still owes a full scan (V4-01), have no queued or
+    /// running row of either kind, and either their deadline has passed or
+    /// `refresh_attempted_generation` is not `current_generation`.
+    ///
+    /// Returns the DIDs actually delivered — a user whose row turned out to be
+    /// queued or running at write time is left entirely alone (schedule
+    /// included) and reconsidered next tick (V2-02). A failure rolls back
+    /// everything, so nothing is half-scheduled (R04).
+    async fn claim_and_enqueue_due_refreshes(
+        &self,
+        now_rfc3339: &str,
+        next_rfc3339: &str,
+        current_generation: &str,
+        limit: usize,
+    ) -> Result<Vec<String>>;
 
     // --- Access requests (#309) ---
 

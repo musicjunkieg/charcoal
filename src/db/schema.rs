@@ -640,8 +640,14 @@ pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> 
              ALTER TABLE scan_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'full';
              ALTER TABLE scan_queue ADD COLUMN full_requested_at TEXT;
              ALTER TABLE scan_queue ADD COLUMN completion TEXT;
+             -- kind = 'full' is belt and braces: the ALTER above defaults
+             -- every existing row to 'full', so on a first run this changes
+             -- nothing. It matters on a re-run against a database that already
+             -- has refresh rows, where an unqualified backfill would invent a
+             -- full-scan obligation for a nightly refresh nobody asked for.
              UPDATE scan_queue SET full_requested_at = enqueued_at
-                 WHERE status IN ('queued', 'running') AND full_requested_at IS NULL;
+                 WHERE status IN ('queued', 'running') AND kind = 'full'
+                   AND full_requested_at IS NULL;
              ALTER TABLE users ADD COLUMN next_refresh_at TEXT;
              ALTER TABLE users ADD COLUMN refreshed_generation TEXT;
              ALTER TABLE users ADD COLUMN refresh_attempted_generation TEXT;

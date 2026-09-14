@@ -463,8 +463,16 @@ async fn run_admitter(
     mut wake_rx: mpsc::Receiver<()>,
     tick: Duration,
     cap: fn() -> usize,
+    refresh: Option<Duration>,
 ) {
     loop {
+        // #343 §4.4: the refresh schedule rides this tick — one bounded
+        // transaction, before admit so a user claimed now starts now when a
+        // slot is free. None = CHARCOAL_REFRESH_INTERVAL_HOURS disabled.
+        if let Some(interval) = refresh {
+            crate::web::refresh::enqueue_due_refreshes(&db, chrono::Utc::now(), interval).await;
+        }
+
         // Reclaim on EVERY pass, not just at boot.
         //
         // A boot-only reclaim leaks a slot per redeploy. Railway starts the new
@@ -560,7 +568,15 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
     // bigger question (a panicking loop that respawns can hot-loop) and is left
     // for the supervision work; being loud is the part that matters now.
     tokio::spawn(async move {
-        let admitter = tokio::spawn(run_admitter(db, launcher, live, rx, TICK, scan_concurrency));
+        let admitter = tokio::spawn(run_admitter(
+            db,
+            launcher,
+            live,
+            rx,
+            TICK,
+            scan_concurrency,
+            crate::web::refresh::refresh_interval_from_env(),
+        ));
         match admitter.await {
             Ok(()) => error!(
                 "the scan admitter loop returned, which it never should — NO queued \
@@ -605,6 +621,9 @@ mod admitter_tests {
         /// Fencing tokens handed out, so a test can age a lease the same way
         /// the real heartbeat would.
         claim_ids: Mutex<Vec<String>>,
+        /// What kind of scan each claim was (#344): "the tick admitted
+        /// something" is not the property — "the tick admitted a REFRESH" is.
+        kinds: Mutex<Vec<crate::db::ScanKind>>,
     }
 
     impl RecordingLauncher {
@@ -615,6 +634,7 @@ mod admitter_tests {
                 notify: None,
                 held: Mutex::new(Vec::new()),
                 claim_ids: Mutex::new(Vec::new()),
+                kinds: Mutex::new(Vec::new()),
             }
         }
 
@@ -639,6 +659,10 @@ mod admitter_tests {
         fn claim_ids(&self) -> Vec<String> {
             self.claim_ids.lock().expect("claim_ids lock").clone()
         }
+
+        fn kinds(&self) -> Vec<crate::db::ScanKind> {
+            self.kinds.lock().expect("kinds lock").clone()
+        }
     }
 
     #[async_trait::async_trait]
@@ -652,6 +676,7 @@ mod admitter_tests {
                 .lock()
                 .expect("claim_ids lock")
                 .push(claim.claim_id.clone());
+            self.kinds.lock().expect("kinds lock").push(claim.kind);
             self.launched
                 .lock()
                 .expect("launched lock")
@@ -923,6 +948,7 @@ mod admitter_tests {
             wake_rx,
             Duration::from_secs(600),
             || 1,
+            None,
         ));
 
         let launched = tokio::time::timeout(Duration::from_secs(2), notify_rx.recv())
@@ -1003,6 +1029,7 @@ mod admitter_tests {
             wake_rx,
             Duration::from_millis(50),
             || 1,
+            None,
         ));
 
         // The boot pass has to find this row legitimately held and leave it
@@ -1043,6 +1070,7 @@ mod admitter_tests {
             wake_rx,
             Duration::from_secs(600),
             || 1,
+            None,
         ));
 
         // Let the boot pass find an empty queue first, so the admission below
@@ -1056,6 +1084,94 @@ mod admitter_tests {
             .expect("a wake must admit without waiting for the 600s tick")
             .expect("launcher notified");
         assert_eq!(launched, "did:plc:late");
+        handle.abort();
+    }
+
+    /// #343 §4.4: the refresh schedule rides the admitter tick. A user with
+    /// scores and no proven revision is due, so one pass must enqueue their
+    /// refresh AND admit it — nothing else enqueues it, and nobody clicked.
+    ///
+    /// The kind is the assertion that matters: admitting *something* would
+    /// also pass if the tick had queued a full scan, which is exactly the
+    /// downgrade/upgrade confusion V3-03 is about.
+    #[tokio::test]
+    async fn the_tick_enqueues_and_admits_a_due_refresh() {
+        let db = test_db();
+        db.upsert_user("did:plc:duetick", "duetick.h")
+            .await
+            .expect("upsert");
+        let mut score = crate::db::models::AccountScore::default_for_test("did:plc:scored");
+        score.threat_score = Some(40.0);
+        score.threat_tier = Some("High".into());
+        db.upsert_account_score("did:plc:duetick", &score)
+            .await
+            .expect("score");
+
+        let (notify_tx, mut notify_rx) = mpsc::channel(4);
+        let launcher = Arc::new(RecordingLauncher::notifying(notify_tx));
+        let (_wake_tx, wake_rx) = mpsc::channel(4);
+
+        let handle = tokio::spawn(run_admitter(
+            db.clone(),
+            launcher.clone(),
+            LiveScans::new(),
+            wake_rx,
+            Duration::from_millis(20),
+            || 1,
+            Some(Duration::from_secs(24 * 3600)),
+        ));
+
+        let launched = tokio::time::timeout(Duration::from_secs(5), notify_rx.recv())
+            .await
+            .expect("the refresh tick must enqueue the due user and admit them")
+            .expect("launcher notified");
+        assert_eq!(launched, "did:plc:duetick");
+        assert_eq!(
+            launcher.kinds().first().copied(),
+            Some(crate::db::ScanKind::Refresh),
+            "the tick queues a REFRESH, never a full scan"
+        );
+        handle.abort();
+    }
+
+    /// The knob is off by default in tests and in any deployment that sets
+    /// `CHARCOAL_REFRESH_INTERVAL_HOURS=0`: a `None` interval means the tick
+    /// never runs, so a due user stays untouched.
+    #[tokio::test]
+    async fn a_disabled_refresh_interval_never_ticks() {
+        let db = test_db();
+        db.upsert_user("did:plc:offtick", "offtick.h")
+            .await
+            .expect("upsert");
+        let mut score = crate::db::models::AccountScore::default_for_test("did:plc:scored");
+        score.threat_score = Some(40.0);
+        score.threat_tier = Some("High".into());
+        db.upsert_account_score("did:plc:offtick", &score)
+            .await
+            .expect("score");
+
+        let (notify_tx, mut notify_rx) = mpsc::channel(4);
+        let launcher = Arc::new(RecordingLauncher::notifying(notify_tx));
+        let (_wake_tx, wake_rx) = mpsc::channel(4);
+
+        let handle = tokio::spawn(run_admitter(
+            db.clone(),
+            launcher.clone(),
+            LiveScans::new(),
+            wake_rx,
+            Duration::from_millis(20),
+            || 1,
+            None,
+        ));
+
+        // Long enough for many ticks to have run had the schedule been on.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), notify_rx.recv())
+                .await
+                .is_err(),
+            "a disabled interval must never enqueue a refresh"
+        );
+        assert!(db.list_scan_queue().await.expect("queue").is_empty());
         handle.abort();
     }
 }

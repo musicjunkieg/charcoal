@@ -385,14 +385,21 @@ pub struct ScanReport {
 pub async fn record_full_scan_completion(
     db: &dyn Database,
     user_did: &str,
+    claim_id: &str,
     completion: ScanCompletion,
 ) {
     if completion.fulfilled() {
         // Marker and carried-outcome delete together: a fulfilled run has
         // consumed whatever drain it carried (V7-02). `finish_full_scan_state`
-        // is one `with_conn` transaction on SQLite / one transaction on Postgres.
+        // is one `with_conn` transaction on SQLite / one transaction on Postgres,
+        // fenced by `claim_id` so a superseded worker writes nothing (N2).
         if let Err(e) = db
-            .finish_full_scan_state(user_did, &chrono::Utc::now().to_rfc3339(), CARRIED_KEY)
+            .finish_full_scan_state(
+                user_did,
+                &chrono::Utc::now().to_rfc3339(),
+                CARRIED_KEY,
+                claim_id,
+            )
             .await
         {
             warn!(error = %format!("{e:#}"), "could not record last_full_scan_finished_at");
@@ -1309,7 +1316,7 @@ async fn run_scan(
         // The cooldown anchor, and only for a fulfilled run. Best-effort — a
         // scan that completed must not be reported failed because a marker
         // write failed.
-        record_full_scan_completion(db.as_ref(), user_did, c).await;
+        record_full_scan_completion(db.as_ref(), user_did, claim_id, c).await;
     }
 
     finish_scan(
@@ -1834,12 +1841,25 @@ mod completion_tests {
 
     use crate::db::schema::create_tables;
     use crate::db::sqlite::SqliteDatabase;
+    use crate::db::traits::LAST_FULL_SCAN_DURATION_KEY;
     use crate::scoring::generation::scoring_revision;
 
     fn test_db() -> Arc<dyn Database> {
         let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
         create_tables(&conn).expect("schema");
         Arc::new(SqliteDatabase::new(conn))
+    }
+
+    /// Put `did` in the state `record_full_scan_completion` is called from:
+    /// a running full-scan row this worker holds the claim on. Required since
+    /// the bookkeeping is fenced by that claim (N2).
+    async fn claimed(db: &Arc<dyn Database>, did: &str) -> String {
+        db.enqueue_scan(did).await.expect("enqueue");
+        db.claim_next_scan(8, 60)
+            .await
+            .expect("claim")
+            .expect("a queued row exists")
+            .claim_id
     }
 
     #[test]
@@ -1944,7 +1964,8 @@ mod completion_tests {
             (ScanCompletion::Resumable, false),
         ] {
             let db = test_db();
-            record_full_scan_completion(db.as_ref(), "did:plc:m", completion).await;
+            let claim = claimed(&db, "did:plc:m").await;
+            record_full_scan_completion(db.as_ref(), "did:plc:m", &claim, completion).await;
             assert_eq!(
                 db.get_scan_state("did:plc:m", "last_full_scan_finished_at")
                     .await
@@ -1963,11 +1984,13 @@ mod completion_tests {
     #[tokio::test]
     async fn a_fulfilled_run_consumes_the_carried_outcome_and_a_resumable_one_keeps_it() {
         let db = test_db();
+        let claim = claimed(&db, "did:plc:g").await;
         let carried = format!("{}|skips|1", scoring_revision());
         db.set_scan_state("did:plc:g", CARRIED_KEY, &carried)
             .await
             .unwrap();
-        record_full_scan_completion(db.as_ref(), "did:plc:g", ScanCompletion::Resumable).await;
+        record_full_scan_completion(db.as_ref(), "did:plc:g", &claim, ScanCompletion::Resumable)
+            .await;
         assert_eq!(
             db.get_scan_state("did:plc:g", CARRIED_KEY).await.unwrap(),
             Some(carried),
@@ -1976,6 +1999,7 @@ mod completion_tests {
         record_full_scan_completion(
             db.as_ref(),
             "did:plc:g",
+            &claim,
             ScanCompletion::CompleteWithSkips { n: 1 },
         )
         .await;
@@ -1995,15 +2019,21 @@ mod completion_tests {
     #[tokio::test]
     async fn finishing_full_scan_state_leaves_every_other_key_alone() {
         let db = test_db();
+        let claim = claimed(&db, "did:plc:k").await;
         db.set_scan_state("did:plc:k", CARRIED_KEY, "whatever")
             .await
             .unwrap();
         db.set_scan_state("did:plc:k", "scan_phase", "done")
             .await
             .unwrap();
-        db.finish_full_scan_state("did:plc:k", "2026-09-14T00:00:00+00:00", CARRIED_KEY)
-            .await
-            .unwrap();
+        db.finish_full_scan_state(
+            "did:plc:k",
+            "2026-09-14T00:00:00+00:00",
+            CARRIED_KEY,
+            &claim,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             db.get_scan_state("did:plc:k", "last_full_scan_finished_at")
                 .await
@@ -2022,6 +2052,121 @@ mod completion_tests {
                 .as_deref(),
             Some("done"),
             "the delete is scoped to one key"
+        );
+    }
+
+    /// N2: the bookkeeping is fenced by the claim. A worker whose lease
+    /// lapsed — its row reclaimed and handed to a successor — writes NOTHING:
+    /// no cooldown anchor for a request it no longer owns, no ETA sample from
+    /// the successor's clock, and no retirement of a drain outcome the
+    /// successor still owes.
+    #[tokio::test]
+    async fn a_superseded_worker_records_no_completion() {
+        let db = test_db();
+        db.enqueue_scan("did:plc:zombie").await.unwrap();
+        // A lease that is already expired, so the reclaim below is the real
+        // per-pass reclaim rather than a hand-edited row.
+        let stale = db
+            .claim_next_scan(8, -1)
+            .await
+            .unwrap()
+            .expect("a queued row exists")
+            .claim_id;
+        db.set_scan_state("did:plc:zombie", CARRIED_KEY, "carried")
+            .await
+            .unwrap();
+        assert_eq!(db.reclaim_expired_scans().await.unwrap(), 1);
+        let successor = db
+            .claim_next_scan(8, 60)
+            .await
+            .unwrap()
+            .expect("the successor claims the re-queued row")
+            .claim_id;
+        assert_ne!(successor, stale);
+
+        record_full_scan_completion(
+            db.as_ref(),
+            "did:plc:zombie",
+            &stale,
+            ScanCompletion::Complete,
+        )
+        .await;
+        assert_eq!(
+            db.get_scan_state("did:plc:zombie", "last_full_scan_finished_at")
+                .await
+                .unwrap(),
+            None,
+            "no cooldown anchor from a worker that lost its claim"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:zombie", LAST_FULL_SCAN_DURATION_KEY)
+                .await
+                .unwrap(),
+            None,
+            "no ETA sample from the successor's started_at"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:zombie", CARRIED_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("carried"),
+            "the successor's obligation is not retired by its predecessor"
+        );
+
+        // The successor, holding the real claim, writes all three.
+        record_full_scan_completion(
+            db.as_ref(),
+            "did:plc:zombie",
+            &successor,
+            ScanCompletion::Complete,
+        )
+        .await;
+        assert!(db
+            .get_scan_state("did:plc:zombie", "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            db.get_scan_state("did:plc:zombie", CARRIED_KEY)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    /// N4: the ETA median describes FULL scans. A refresh finishing cleanly
+    /// runs the whole queue lifecycle but never calls the full-scan
+    /// bookkeeping, so it records no duration sample — a refresh is a
+    /// fraction of a full scan's work, and one folded into the median would
+    /// quote every queued user an ETA they cannot get.
+    #[tokio::test]
+    async fn a_refresh_completion_records_no_duration_sample() {
+        let db = test_db();
+        db.enqueue_refresh_scan("did:plc:r").await.unwrap();
+        let claim = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+        assert_eq!(claim.kind, crate::db::ScanKind::Refresh);
+        db.finish_queued_scan(
+            "did:plc:r",
+            &claim.claim_id,
+            crate::db::FinishCompletion::Complete,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.get_scan_state("did:plc:r", LAST_FULL_SCAN_DURATION_KEY)
+                .await
+                .unwrap(),
+            None,
+            "a refresh duration must never reach the full-scan ETA median"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:r", "last_full_scan_finished_at")
+                .await
+                .unwrap(),
+            None,
+            "and it anchors no cooldown either"
         );
     }
 

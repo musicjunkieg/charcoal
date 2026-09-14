@@ -74,9 +74,16 @@ impl Database for SqliteDatabase {
         user_did: &str,
         finished_at_rfc3339: &str,
         carried_key: &str,
+        claim_id: &str,
     ) -> Result<()> {
         let conn = self.conn.lock().await;
-        super::queries::finish_full_scan_state(&conn, user_did, finished_at_rfc3339, carried_key)
+        super::queries::finish_full_scan_state(
+            &conn,
+            user_did,
+            finished_at_rfc3339,
+            carried_key,
+            claim_id,
+        )
     }
 
     async fn get_all_scan_state(&self, user_did: &str) -> Result<Vec<(String, String)>> {
@@ -538,6 +545,69 @@ impl Database for SqliteDatabase {
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>> {
         let conn = self.conn.lock().await;
         super::queries::list_scan_queue(&conn)
+    }
+
+    // --- Refresh schedule (#343 §4.4, #344) ---
+
+    async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::next_refresh_at(&conn, user_did)
+    }
+
+    async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::refreshed_generation(&conn, user_did)
+    }
+
+    async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::refresh_attempted_generation(&conn, user_did)
+    }
+
+    async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::schedule_refresh(&conn, user_did, at_rfc3339)
+    }
+
+    async fn schedule_retry_at(
+        &self,
+        user_did: &str,
+        at_rfc3339: &str,
+        attempted_generation: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::schedule_retry_at(&conn, user_did, at_rfc3339, attempted_generation)
+    }
+
+    async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::mark_refreshed_generation(&conn, user_did, generation)
+    }
+
+    async fn mark_refresh_attempted_generation(
+        &self,
+        user_did: &str,
+        generation: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::mark_refresh_attempted_generation(&conn, user_did, generation)
+    }
+
+    async fn claim_and_enqueue_due_refreshes(
+        &self,
+        now_rfc3339: &str,
+        next_rfc3339: &str,
+        current_generation: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::claim_and_enqueue_due_refreshes(
+            &conn,
+            now_rfc3339,
+            next_rfc3339,
+            current_generation,
+            limit,
+        )
     }
 
     // --- Access requests (#309) ---

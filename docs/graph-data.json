@@ -9910,6 +9910,28 @@
       "created_at": "2026-09-14T09:31:00.084056-07:00",
       "updated_at": "2026-09-14T09:31:00.084056-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
+    },
+    {
+      "id": 911,
+      "change_id": "f162556d-5ab5-4eea-89ba-247e38aa34e5",
+      "node_type": "outcome",
+      "title": "Task 5 fix wave committed 65f81b9 (F1-F6): ETA median now sampled from per-user scan_state last_full_scan_duration_secs written with the cooldown marker (decision 910 A); forced-failure half of the finish_full_scan_state one-transaction test on both backends (sabotage RED then GREEN); v18 amended in place to backfill full_requested_at for queued/running rows + upgrade-test assertions; COALESCE arms tested; pg fallback None → bail; doc comment names CompleteUnverified. lib 314 / unit_scan_kind 19 / web_scan_queue 10 / unit_staleness 6 / db_postgres 60 green; clippy x3 + fmt clean. Concerns: median population = fulfilled full attempts (not only clean); window ordered by updated_at (second resolution on SQLite); two doc-hidden pub test seams. Re-review requested.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T10:28:10.401500-07:00",
+      "updated_at": "2026-09-14T10:28:10.401500-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"65f81b9\",\"confidence\":85}"
+    },
+    {
+      "id": 912,
+      "change_id": "b60ba82e-006a-4727-9a8c-61b29f4defad",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 6: durable bounded generation-aware refresh scheduling on the admitter tick — CHARCOAL_REFRESH_INTERVAL_HOURS knob (default 24, 0/off disables, clamp 1..=168), src/web/refresh.rs (enqueue_due_refreshes, schedule_retry, REFRESH_RETRY_HOURS=1, REFRESH_BATCH_PER_TICK=25), claim_and_enqueue_due_refreshes one transaction per tick with conditional queue write and owed-full retry as kind=full, schedule_refresh/mark_refreshed_generation/refresh_attempted_generation trait methods, plus deferred Task 5 manifest rows 1-4 (FullScanBookkeeping, DbFullScanBookkeeping, run_scan_with + assert_send + injected clock, V3-03 lifecycle test) and the Task 3 migrate schedule-copy step",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T10:31:46.205783-07:00",
+      "updated_at": "2026-09-14T10:31:46.205783-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"65f81b9\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -20351,6 +20373,39 @@
       "weight": 1.0,
       "rationale": "Option weighed",
       "created_at": "2026-09-14T09:31:03.201033-07:00"
+    },
+    {
+      "id": 960,
+      "from_node_id": 910,
+      "to_node_id": 911,
+      "from_change_id": "4f267bee-3a1a-4b92-a36e-18581ff434c9",
+      "to_change_id": "f162556d-5ab5-4eea-89ba-247e38aa34e5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision A implemented in the Task 5 fix wave",
+      "created_at": "2026-09-14T10:28:13.186190-07:00"
+    },
+    {
+      "id": 961,
+      "from_node_id": 906,
+      "to_node_id": 911,
+      "from_change_id": "25e26fe9-2d29-4578-b2ba-c22f18b0b8e2",
+      "to_change_id": "f162556d-5ab5-4eea-89ba-247e38aa34e5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fixes applied to Task 5",
+      "created_at": "2026-09-14T10:28:13.192762-07:00"
+    },
+    {
+      "id": 962,
+      "from_node_id": 877,
+      "to_node_id": 912,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "b60ba82e-006a-4727-9a8c-61b29f4defad",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 6 scheduling tick (+ Task 5 deferred rows 1-4, Task 3 migrate obligation)",
+      "created_at": "2026-09-14T10:31:49.841301-07:00"
     }
   ],
   "documents": [

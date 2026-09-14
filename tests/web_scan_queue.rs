@@ -220,9 +220,10 @@ async fn finish_then_post(
     let live = LiveScans::new().try_register(did).expect("fresh registry");
     let scan_db = db.clone();
     let scan_did = did.to_string();
+    let scan_claim = claim.claim_id.clone();
     let exit = run_under_slot(
         async move {
-            record_full_scan_completion(scan_db.as_ref(), &scan_did, completion).await;
+            record_full_scan_completion(scan_db.as_ref(), &scan_did, &scan_claim, completion).await;
             Ok(ScanReport {
                 completion: completion.into(),
             })

@@ -49,6 +49,51 @@ pub type PgPool = Pool<Postgres>;
 /// mnemonic for "charcoal #257 scan queue".
 const SCAN_ADMISSION_ADVISORY_LOCK_KEY: i64 = 0x0000_0257_5CA4_0001;
 
+/// The refresh tick's SELECT (#343 §4.4, #344). Params: `$1` now (RFC3339
+/// text, cast), `$2` current scoring revision, `$3` limit.
+///
+/// `pub` so the V2-02 interleaving tests can run the real statement on their
+/// own connections around a concurrent manual enqueue — a test against a
+/// paraphrase of it would prove nothing about production.
+///
+/// Differences from the SQLite twin, all deliberate: `IS DISTINCT FROM`
+/// instead of `IS NULL OR != `; `NULLS FIRST` because Postgres sorts NULLs
+/// last by default and SQLite sorts them first; and `FOR UPDATE OF u SKIP
+/// LOCKED`, which is what lets two replicas tick at the same time and
+/// partition the due set rather than block on each other.
+pub const REFRESH_DUE_SQL: &str = "SELECT u.did FROM users u
+     WHERE (EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
+            OR EXISTS (SELECT 1 FROM scan_queue o
+                       WHERE o.user_did = u.did AND o.full_requested_at IS NOT NULL))
+       AND NOT EXISTS (SELECT 1 FROM scan_queue q
+                       WHERE q.user_did = u.did AND q.status IN ('queued', 'running'))
+       AND (u.next_refresh_at <= $1::timestamptz
+            OR u.refresh_attempted_generation IS DISTINCT FROM $2)
+     ORDER BY u.next_refresh_at NULLS FIRST, u.did
+     LIMIT $3
+     FOR UPDATE OF u SKIP LOCKED";
+
+/// The conditional queue write shared by `enqueue_refresh_scan` and the tick.
+/// Params: `$1` user_did, `$2` now (RFC3339 text, cast).
+///
+/// The `WHERE` is evaluated against the row as it is AT THE WRITE, so a full
+/// row queued or admitted after the tick's select is never clobbered (V2-02);
+/// it affects 0 rows in that case. A finished row that still owes a full scan
+/// is re-queued as FULL (V3-03) — `full_requested_at` is deliberately absent
+/// from the SET list, because owed work stays owed until a full scan
+/// completes.
+pub const REFRESH_ENQUEUE_SQL: &str = "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
+     VALUES ($1, 'queued', 'refresh', $2::timestamptz)
+     ON CONFLICT (user_did) DO UPDATE
+       SET status = 'queued',
+           kind = CASE WHEN scan_queue.full_requested_at IS NOT NULL
+                       THEN 'full' ELSE 'refresh' END,
+           enqueued_at = $2::timestamptz,
+           started_at = NULL, finished_at = NULL,
+           lease_expires = NULL, last_error = NULL,
+           claim_id = NULL, completion = NULL
+     WHERE scan_queue.status IN ('done', 'failed')";
+
 pub struct PgDatabase {
     pool: PgPool,
 }
@@ -69,9 +114,16 @@ impl PgDatabase {
         user_did: &str,
         finished_at_rfc3339: &str,
         carried_key: &str,
+        claim_id: &str,
     ) -> Result<()> {
-        self.finish_full_scan_state_inner(user_did, finished_at_rfc3339, carried_key, true)
-            .await
+        self.finish_full_scan_state_inner(
+            user_did,
+            finished_at_rfc3339,
+            carried_key,
+            claim_id,
+            true,
+        )
+        .await
     }
 
     /// One transaction: the cooldown anchor, the ETA duration sample and the
@@ -84,9 +136,35 @@ impl PgDatabase {
         user_did: &str,
         finished_at_rfc3339: &str,
         carried_key: &str,
+        claim_id: &str,
         fail_before_commit: bool,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        // Fenced by the claim (#344 N2) — see the SQLite twin for why all
+        // three writes belong to the worker that still owns the row.
+        let owner = sqlx_core::query::query(
+            "SELECT started_at, claim_id FROM scan_queue WHERE user_did = $1 FOR UPDATE",
+        )
+        .bind(user_did)
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(|r| {
+            (
+                r.get::<Option<chrono::DateTime<chrono::Utc>>, _>(0),
+                r.get::<Option<String>, _>(1),
+            )
+        });
+        let started_at = match owner {
+            Some((started_at, Some(owner_claim))) if owner_claim == claim_id => started_at,
+            _ => {
+                tracing::warn!(
+                    user_did,
+                    "full scan finished but its claim no longer owns the queue row — no \
+                     cooldown anchor, no ETA sample, no carried-outcome retirement"
+                );
+                return Ok(());
+            }
+        };
         sqlx_core::query::query(
             "INSERT INTO scan_state (user_did, key, value, updated_at)
              VALUES ($1, 'last_full_scan_finished_at', $2, NOW())
@@ -101,12 +179,6 @@ impl PgDatabase {
         // attempt being fulfilled, and by the time a refresh reuses the row it
         // will not. Parsed through the shared helper rather than computed in
         // SQL so both backends agree on what a duration is.
-        let started_at: Option<chrono::DateTime<chrono::Utc>> =
-            sqlx_core::query::query("SELECT started_at FROM scan_queue WHERE user_did = $1")
-                .bind(user_did)
-                .fetch_optional(&mut *tx)
-                .await?
-                .and_then(|r| r.get::<Option<chrono::DateTime<chrono::Utc>>, _>(0));
         let started_at = started_at.map(|s| s.to_rfc3339());
         if let Some(secs) =
             super::traits::full_scan_duration_secs(started_at.as_deref(), finished_at_rfc3339)
@@ -473,9 +545,16 @@ impl Database for PgDatabase {
         user_did: &str,
         finished_at_rfc3339: &str,
         carried_key: &str,
+        claim_id: &str,
     ) -> Result<()> {
-        self.finish_full_scan_state_inner(user_did, finished_at_rfc3339, carried_key, false)
-            .await
+        self.finish_full_scan_state_inner(
+            user_did,
+            finished_at_rfc3339,
+            carried_key,
+            claim_id,
+            false,
+        )
+        .await
     }
 
     async fn save_fingerprint(
@@ -2120,26 +2199,16 @@ impl Database for PgDatabase {
     }
 
     async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()> {
-        // The same conditional statement the scheduling tick uses (Task 6):
-        // owed full work is re-queued as FULL, never downgraded to a refresh
-        // (V3-03), and queued/running rows are excluded at the write itself so
-        // a manual enqueue landing in between survives untouched (V2-02).
-        sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
-             VALUES ($1, 'queued', 'refresh', NOW())
-             ON CONFLICT (user_did) DO UPDATE
-               SET status = 'queued',
-                   kind = CASE WHEN scan_queue.full_requested_at IS NOT NULL
-                               THEN 'full' ELSE 'refresh' END,
-                   enqueued_at = NOW(),
-                   started_at = NULL, finished_at = NULL,
-                   lease_expires = NULL, last_error = NULL,
-                   claim_id = NULL, completion = NULL
-             WHERE scan_queue.status IN ('done', 'failed')",
-        )
-        .bind(user_did)
-        .execute(&self.pool)
-        .await?;
+        // Literally the statement the scheduling tick binds
+        // ([`REFRESH_ENQUEUE_SQL`]): owed full work is re-queued as FULL,
+        // never downgraded to a refresh (V3-03), and queued/running rows are
+        // excluded at the write itself so a manual enqueue landing in between
+        // survives untouched (V2-02).
+        sqlx_core::query::query(REFRESH_ENQUEUE_SQL)
+            .bind(user_did)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -2441,6 +2510,160 @@ impl Database for PgDatabase {
             });
         }
         Ok(out)
+    }
+
+    // --- Refresh schedule (#343 §4.4, #344) ---
+
+    async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>> {
+        Ok(
+            sqlx_core::query::query("SELECT next_refresh_at FROM users WHERE did = $1")
+                .bind(user_did)
+                .fetch_optional(&self.pool)
+                .await?
+                .and_then(|r| r.get::<Option<chrono::DateTime<chrono::Utc>>, _>(0))
+                .map(|t| t.to_rfc3339()),
+        )
+    }
+
+    async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>> {
+        Ok(
+            sqlx_core::query::query("SELECT refreshed_generation FROM users WHERE did = $1")
+                .bind(user_did)
+                .fetch_optional(&self.pool)
+                .await?
+                .and_then(|r| r.get::<Option<String>, _>(0)),
+        )
+    }
+
+    async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>> {
+        Ok(
+            sqlx_core::query::query(
+                "SELECT refresh_attempted_generation FROM users WHERE did = $1",
+            )
+            .bind(user_did)
+            .fetch_optional(&self.pool)
+            .await?
+            .and_then(|r| r.get::<Option<String>, _>(0)),
+        )
+    }
+
+    async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()> {
+        sqlx_core::query::query(
+            "UPDATE users SET next_refresh_at = $2::timestamptz WHERE did = $1",
+        )
+        .bind(user_did)
+        .bind(at_rfc3339)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn schedule_retry_at(
+        &self,
+        user_did: &str,
+        at_rfc3339: &str,
+        attempted_generation: &str,
+    ) -> Result<()> {
+        // One statement for both facts (V4-01) — see the SQLite twin.
+        sqlx_core::query::query(
+            "UPDATE users
+                SET next_refresh_at = $2::timestamptz, refresh_attempted_generation = $3
+              WHERE did = $1",
+        )
+        .bind(user_did)
+        .bind(at_rfc3339)
+        .bind(attempted_generation)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()> {
+        // Proof sets BOTH columns (V3-04): a proven revision is an attempted
+        // one, so the tick's revision clause stays quiet after a full scan.
+        sqlx_core::query::query(
+            "UPDATE users
+                SET refreshed_generation = $2, refresh_attempted_generation = $2
+              WHERE did = $1",
+        )
+        .bind(user_did)
+        .bind(generation)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn mark_refresh_attempted_generation(
+        &self,
+        user_did: &str,
+        generation: &str,
+    ) -> Result<()> {
+        sqlx_core::query::query(
+            "UPDATE users SET refresh_attempted_generation = $2 WHERE did = $1",
+        )
+        .bind(user_did)
+        .bind(generation)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn claim_and_enqueue_due_refreshes(
+        &self,
+        now_rfc3339: &str,
+        next_rfc3339: &str,
+        current_generation: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        // ONE transaction (R04). `FOR UPDATE OF u … SKIP LOCKED` means two
+        // replicas ticking together partition the due set instead of fighting
+        // over it: whatever the other one has already selected is skipped
+        // rather than waited on.
+        //
+        // Lock order is `users` (FOR UPDATE) then `scan_queue`. `enqueue_scan`
+        // and `finish_queued_scan` lock only `scan_queue`, and the schedulers
+        // lock only `users` — no cycle.
+        let mut tx = self.pool.begin().await?;
+        let due: Vec<String> = sqlx_core::query::query(REFRESH_DUE_SQL)
+            .bind(now_rfc3339)
+            .bind(current_generation)
+            .bind(limit as i64)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .map(|r| r.get::<String, _>(0))
+            .collect();
+
+        let mut delivered = Vec::with_capacity(due.len());
+        for did in due {
+            let affected = sqlx_core::query::query(REFRESH_ENQUEUE_SQL)
+                .bind(&did)
+                .bind(now_rfc3339)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+            if affected == 0 {
+                // The row changed between the select and this write (a manual
+                // enqueue or an admission committed in between). Leave the
+                // schedule alone: whatever is running reschedules on
+                // completion, and this user is reconsidered next tick (V2-02).
+                continue;
+            }
+            sqlx_core::query::query(
+                "UPDATE users
+                    SET next_refresh_at = $2::timestamptz,
+                        refresh_attempted_generation = $3
+                  WHERE did = $1",
+            )
+            .bind(&did)
+            .bind(next_rfc3339)
+            .bind(current_generation)
+            .execute(&mut *tx)
+            .await?;
+            delivered.push(did);
+        }
+        tx.commit().await?;
+        Ok(delivered)
     }
 
     // --- Access requests (#309) ---

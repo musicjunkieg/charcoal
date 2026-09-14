@@ -378,6 +378,7 @@ async fn the_eta_median_survives_the_refresh_that_rewrites_the_queue_row() {
         SCANNER,
         "2026-09-10T01:00:00+00:00",
         "full_carried_completion",
+        "claim-1",
     )
     .await
     .unwrap();

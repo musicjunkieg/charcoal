@@ -104,8 +104,16 @@ pub fn finish_full_scan_state(
     user_did: &str,
     finished_at_rfc3339: &str,
     carried_key: &str,
+    claim_id: &str,
 ) -> Result<()> {
-    finish_full_scan_state_inner(conn, user_did, finished_at_rfc3339, carried_key, false)
+    finish_full_scan_state_inner(
+        conn,
+        user_did,
+        finished_at_rfc3339,
+        carried_key,
+        claim_id,
+        false,
+    )
 }
 
 /// Test seam for the atomicity of [`finish_full_scan_state`] (#344 F2).
@@ -121,8 +129,16 @@ pub fn finish_full_scan_state_failing_for_test(
     user_did: &str,
     finished_at_rfc3339: &str,
     carried_key: &str,
+    claim_id: &str,
 ) -> Result<()> {
-    finish_full_scan_state_inner(conn, user_did, finished_at_rfc3339, carried_key, true)
+    finish_full_scan_state_inner(
+        conn,
+        user_did,
+        finished_at_rfc3339,
+        carried_key,
+        claim_id,
+        true,
+    )
 }
 
 fn finish_full_scan_state_inner(
@@ -130,9 +146,37 @@ fn finish_full_scan_state_inner(
     user_did: &str,
     finished_at_rfc3339: &str,
     carried_key: &str,
+    claim_id: &str,
     fail_before_commit: bool,
 ) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
+    // Fenced by the claim (#344 N2). Everything below is derived from — or
+    // describes — the attempt that holds this row: the ETA sample comes from
+    // the row's own `started_at`, and the cooldown anchor says "this worker
+    // carried the request out". A worker whose lease lapsed no longer owns
+    // either fact, and writing them would sample a successor's clock and
+    // start a cooldown the successor has not earned.
+    let owner: Option<(Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT started_at, claim_id FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let started_at = match owner {
+        Some((started_at, Some(owner_claim))) if owner_claim == claim_id => started_at,
+        _ => {
+            // Not an error: the scan really did finish, it simply no longer
+            // owns the row. Loud, because a cooldown that never anchors would
+            // otherwise be invisible.
+            tracing::warn!(
+                user_did,
+                "full scan finished but its claim no longer owns the queue row — no \
+                 cooldown anchor, no ETA sample, no carried-outcome retirement"
+            );
+            return Ok(());
+        }
+    };
     tx.execute(
         "INSERT INTO scan_state (user_did, key, value, updated_at)
          VALUES (?1, 'last_full_scan_finished_at', ?2, datetime('now'))
@@ -142,14 +186,6 @@ fn finish_full_scan_state_inner(
     // The ETA sample (F1). Read from the row's own `started_at` inside this
     // transaction: at this moment the queue row still describes the attempt
     // being fulfilled, and by the time a refresh reuses the row it will not.
-    let started_at: Option<String> = tx
-        .query_row(
-            "SELECT started_at FROM scan_queue WHERE user_did = ?1",
-            params![user_did],
-            |r| r.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten();
     if let Some(secs) =
         super::traits::full_scan_duration_secs(started_at.as_deref(), finished_at_rfc3339)
     {
@@ -1815,6 +1851,161 @@ pub fn enqueue_refresh_scan(conn: &Connection, user_did: &str) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(REFRESH_ENQUEUE_SQL, params![user_did, now])?;
     Ok(())
+}
+
+// --- Refresh schedule (#343 §4.4, #344) ---
+
+/// When the refresh tick may next consider this user.
+pub fn next_refresh_at(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT next_refresh_at FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// The revision a completed run has proven for this user.
+pub fn refreshed_generation(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT refreshed_generation FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// The revision an attempt has already been scheduled for.
+pub fn refresh_attempted_generation(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT refresh_attempted_generation FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+pub fn schedule_refresh(conn: &Connection, user_did: &str, at_rfc3339: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET next_refresh_at = ?2 WHERE did = ?1",
+        params![user_did, at_rfc3339],
+    )?;
+    Ok(())
+}
+
+/// One statement for both facts (V4-01): the deadline and "an attempt for
+/// this revision has happened". Split, the tick could claim the user between
+/// the two writes and undo the backoff it was told to respect.
+pub fn schedule_retry_at(
+    conn: &Connection,
+    user_did: &str,
+    at_rfc3339: &str,
+    attempted_generation: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+        params![user_did, at_rfc3339, attempted_generation],
+    )?;
+    Ok(())
+}
+
+/// Proof. Sets BOTH columns (V3-04): a proven revision is also an attempted
+/// one, so the tick's revision clause stays quiet after a manual full scan.
+pub fn mark_refreshed_generation(
+    conn: &Connection,
+    user_did: &str,
+    generation: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET refreshed_generation = ?2, refresh_attempted_generation = ?2 WHERE did = ?1",
+        params![user_did, generation],
+    )?;
+    Ok(())
+}
+
+/// Attempt only (used by `migrate` to copy a pending attempt verbatim).
+pub fn mark_refresh_attempted_generation(
+    conn: &Connection,
+    user_did: &str,
+    generation: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET refresh_attempted_generation = ?2 WHERE did = ?1",
+        params![user_did, generation],
+    )?;
+    Ok(())
+}
+
+/// The tick's SELECT. Params: `?1` now (RFC3339), `?2` current revision,
+/// `?3` limit.
+///
+/// Eligibility (V4-01): score rows OR an owed full scan. A first scan that
+/// failed before its first write has no scores but does have
+/// `full_requested_at` on its finished row — it must be retried. Users with
+/// neither are never selected. Timing is unchanged: `schedule_retry` stamps
+/// `refresh_attempted_generation`, so the revision clause is quiet until the
+/// deadline for retries of either kind.
+///
+/// The `NOT EXISTS` is an optimisation — it keeps the batch from being spent
+/// on users who are already working. The guarantee is
+/// [`REFRESH_ENQUEUE_SQL`]'s `WHERE`, evaluated at the write.
+pub const REFRESH_DUE_SQL: &str = "SELECT u.did FROM users u
+     WHERE (EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
+            OR EXISTS (SELECT 1 FROM scan_queue o
+                       WHERE o.user_did = u.did AND o.full_requested_at IS NOT NULL))
+       AND NOT EXISTS (SELECT 1 FROM scan_queue q
+                       WHERE q.user_did = u.did AND q.status IN ('queued', 'running'))
+       AND ((u.next_refresh_at IS NOT NULL AND u.next_refresh_at <= ?1)
+            OR u.refresh_attempted_generation IS NULL
+            OR u.refresh_attempted_generation != ?2)
+     ORDER BY u.next_refresh_at, u.did
+     LIMIT ?3";
+
+/// See [`crate::db::Database::claim_and_enqueue_due_refreshes`].
+///
+/// Immediate transaction: the write lock is taken before the select, so two
+/// ticks in one process (or the CLI and the web) serialise here rather than
+/// both deciding from the same snapshot.
+pub fn claim_and_enqueue_due_refreshes(
+    conn: &Connection,
+    now_rfc3339: &str,
+    next_rfc3339: &str,
+    current_generation: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let due: Vec<String> = {
+        let mut stmt = tx.prepare(REFRESH_DUE_SQL)?;
+        let dids = stmt
+            .query_map(
+                params![now_rfc3339, current_generation, limit as i64],
+                |r| r.get::<_, String>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        dids
+    };
+    let mut delivered = Vec::with_capacity(due.len());
+    for did in due {
+        let affected = tx.execute(REFRESH_ENQUEUE_SQL, params![did, now_rfc3339])?;
+        if affected == 0 {
+            // The row changed under us (queued/running now). Leave the
+            // schedule alone: whatever is running reschedules on completion.
+            continue;
+        }
+        tx.execute(
+            "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+            params![did, next_rfc3339, current_generation],
+        )?;
+        delivered.push(did);
+    }
+    tx.commit()?;
+    Ok(delivered)
 }
 
 /// Claim the oldest queued scan if fewer than `limit` are running.
@@ -3624,6 +3815,7 @@ mod tests {
             QUEUE_USER_A,
             "2026-09-10T01:00:00+00:00",
             "full_carried_completion",
+            "claim-1",
         )
         .unwrap();
         assert_eq!(
@@ -3660,9 +3852,11 @@ mod tests {
     #[test]
     fn a_full_scan_with_no_start_time_records_no_duration() {
         let conn = test_db();
+        // Running under this worker's claim — the fence below requires
+        // ownership — but with no `started_at` to measure.
         conn.execute(
-            "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
-             VALUES (?1, 'queued', 'full', ?2)",
+            "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at)
+             VALUES (?1, 'running', 'full', 'claim-1', ?2)",
             params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
         )
         .unwrap();
@@ -3672,6 +3866,7 @@ mod tests {
             QUEUE_USER_A,
             "2026-09-10T01:00:00+00:00",
             "full_carried_completion",
+            "claim-1",
         )
         .unwrap();
 
@@ -3716,6 +3911,7 @@ mod tests {
             QUEUE_USER_A,
             "2026-09-10T01:00:00+00:00",
             "full_carried_completion",
+            "claim-1",
         )
         .expect_err("the injected statement must fail");
         assert!(
