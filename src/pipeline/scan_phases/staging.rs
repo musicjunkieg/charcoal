@@ -19,7 +19,7 @@ use crate::bluesky::posts::PostSample;
 /// Bumped whenever the shape of `AccountInput` changes in a breaking way.
 /// Stored alongside every serialised blob so Phase C can reject stale rows
 /// rather than silently misinterpret them.
-pub const ACCOUNT_INPUT_SCHEMA_VERSION: u32 = 2;
+pub const ACCOUNT_INPUT_SCHEMA_VERSION: u32 = 3;
 
 // ── ScanPhase ─────────────────────────────────────────────────────────────────
 
@@ -133,6 +133,12 @@ pub struct AccountInput {
     /// to process this blob.
     pub schema_version: u32,
 
+    /// The `scoring_revision()` this blob was gathered under (schema v3,
+    /// #344 R03). Phase C refuses to finalize a blob from another revision:
+    /// its target embedding, sample selection and fingerprint quality were
+    /// computed against inputs the current formula may not accept.
+    pub scoring_generation: String,
+
     /// Handle of the account being scored. Phase C needs this for the
     /// `AccountScore.handle` field — the orchestrator only has the DID
     /// (`list_scan_accounts` is DID-only), so the handle is stashed here.
@@ -192,6 +198,7 @@ impl AccountInput {
         use crate::bluesky::posts::PostSample;
         AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: crate::scoring::generation::scoring_revision().to_string(),
             account_handle: "test.handle".to_string(),
             sample: PostSample {
                 originals: vec![],

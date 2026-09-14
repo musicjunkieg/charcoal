@@ -9686,10 +9686,43 @@
       "node_type": "action",
       "title": "Revise Phase 2 plan to rev 8 per Astra seventh review V7-01/V7-02/V7-03 (changes requested on 96ffdfe): clock bound + Sync with compile-time Send check; durable carried drain outcome (scan_state full_carried_completion with Draining sentinel, drain_then_run seam, delete_scan_state + finish_full_scan_state on both backends); FailOnce SkipCounter seam for the unverified-drain test; note to the reviewer separating design findings from implementation-gate findings",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-13T19:44:58.468419-07:00",
-      "updated_at": "2026-09-13T19:44:58.468419-07:00",
+      "updated_at": "2026-09-13T19:45:59.806211-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"96ffdfe\",\"confidence\":88,\"files\":[\"docs/superpowers/plans/2026-09-13-343-phase2-expiry-refresh.md\",\"docs/superpowers/specs/2026-09-08-343-scalability-onboarding-design.md\"]}"
+    },
+    {
+      "id": 891,
+      "change_id": "85f9b44b-a636-4cce-b1b3-6a5fcb7f900f",
+      "node_type": "outcome",
+      "title": "Phase 2 plan rev 8 committed b777c25 and pushed to PR #123: V7-01 (+ Sync clock, assert_send), V7-02 (durable carried drain outcome via full_carried_completion sentinel/outcome, drain_then_run, finish_full_scan_state + delete_scan_state on both backends), V7-03 (FailOnce SkipCounter seam) addressed in design; reviewer note on design vs implementation-gate findings; seventh resolution table; spec §4.4 rev-8 amendment; no tests executed",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-13T19:45:59.787273-07:00",
+      "updated_at": "2026-09-13T19:45:59.813104-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"b777c25\",\"confidence\":90}"
+    },
+    {
+      "id": 892,
+      "change_id": "adb088e8-3656-4d57-a5c1-1115f504d63b",
+      "node_type": "outcome",
+      "title": "PR #123 merged into staging as 96f2ebf (merge commit; docs/343-phase2-plan deleted locally and remotely) after Astra approved rev 8; local staging synced. Phase 2 plan + spec §4.4 amendments are now on staging; next is executing the ten plan tasks on feat/343-phase2-expiry-refresh under #344",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-13T21:13:21.796946-07:00",
+      "updated_at": "2026-09-13T21:13:21.809018-07:00",
+      "metadata_json": "{\"branch\":\"staging\",\"commit\":\"96f2ebf\",\"confidence\":95}"
+    },
+    {
+      "id": 893,
+      "change_id": "a5556bc8-f49c-4d55-8e35-cfaff97e57b1",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 1: scoring_revision() + LEGACY_GENERATION, EMBEDDING_MODEL_ID/NLI_MODEL_ID, ScoringConfidence::from_label/staleness_days_for_label, AccountInput.scoring_generation (blob schema v3) stamped in gather and rejected on mismatch in finalize",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T21:15:31.853768-07:00",
+      "updated_at": "2026-09-13T21:15:31.853768-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"96f2ebf\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19856,6 +19889,39 @@
       "weight": 1.0,
       "rationale": "seventh review round follows rev 7",
       "created_at": "2026-09-13T19:44:58.474963-07:00"
+    },
+    {
+      "id": 935,
+      "from_node_id": 890,
+      "to_node_id": 891,
+      "from_change_id": "392dd4c5-fca6-4658-87d7-f9da884c2aae",
+      "to_change_id": "85f9b44b-a636-4cce-b1b3-6a5fcb7f900f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rev 8 landed",
+      "created_at": "2026-09-13T19:45:59.798227-07:00"
+    },
+    {
+      "id": 936,
+      "from_node_id": 891,
+      "to_node_id": 892,
+      "from_change_id": "85f9b44b-a636-4cce-b1b3-6a5fcb7f900f",
+      "to_change_id": "adb088e8-3656-4d57-a5c1-1115f504d63b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "approval and merge close the plan-review loop",
+      "created_at": "2026-09-13T21:13:21.803185-07:00"
+    },
+    {
+      "id": 937,
+      "from_node_id": 877,
+      "to_node_id": 893,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "a5556bc8-f49c-4d55-8e35-cfaff97e57b1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan rev 8 execution begins: Task 1",
+      "created_at": "2026-09-13T21:15:35.086221-07:00"
     }
   ],
   "documents": [

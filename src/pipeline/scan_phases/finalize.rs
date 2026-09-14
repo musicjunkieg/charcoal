@@ -105,6 +105,17 @@ pub async fn finalize_account(
         return Ok(FinalizeOutcome::NeedsRegather);
     }
 
+    if blob.scoring_generation != crate::scoring::generation::scoring_revision() {
+        warn!(
+            account_did,
+            blob_generation = %blob.scoring_generation,
+            current = crate::scoring::generation::scoring_revision(),
+            "AccountInput scoring_generation mismatch — clearing staging and re-gathering"
+        );
+        db.clear_account_staging(user_did, account_did).await?;
+        return Ok(FinalizeOutcome::NeedsRegather);
+    }
+
     // ── Step 2: fetch verdict rows (arbitrary order) ──
     let rows = db.fetch_account_verdicts(user_did, account_did).await?;
 

@@ -1,5 +1,21 @@
 [
   {
+    "hash": "96f2ebfb2d5d8a67dcc32ae45e521eff6569bab5",
+    "short_hash": "96f2ebf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T21:12:52-07:00",
+    "message": "Merge pull request #123 from musicjunkieg/docs/343-phase2-plan\n\ndocs(343): Phase 2 implementation plan — score expiry + nightly refresh (#344)",
+    "files_changed": 0
+  },
+  {
+    "hash": "b777c25691a0a2191644b147504ad1b1c5e83422",
+    "short_hash": "b777c25",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T19:45:09-07:00",
+    "message": "docs(343): Phase 2 plan rev 8 — resolve Astra seventh review V7-01/V7-02/V7-03; reviewer note; spec §4.4 amended\n\nV7-01: the injected clock is &(dyn Fn() -> DateTime<Utc> + Sync) so the\nspawned scan futures stay Send; a compile-time assert_send test guards it.\nV7-02: a drained refresh outcome is persisted in scan_state under\nfull_carried_completion — a Draining sentinel before the drain, the\nclassified outcome after, folded back by drain_then_run at the end of\nwhichever attempt finishes the own run, consumed by the fulfilled\ncompletion in one transaction with the cooldown marker, dropped on a\nrevision mismatch. delete_scan_state and finish_full_scan_state join the\ntrait on both backends. V7-03: the unverified-drain test injects a\nfail-once fault into exactly the drain skip-count read through a\nPhasedScanDeps.skip_counter seam instead of dropping the table. Adds a\nnote to the reviewer separating design findings from implementation-gate\nfindings the plan cannot settle. Seventh resolution table; plan revision\nonly, no tests executed.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "96ffdfe4aff5908d22022cc694ffab08d0be03ae",
     "short_hash": "96ffdfe",
     "author": "Bryan Guffey",

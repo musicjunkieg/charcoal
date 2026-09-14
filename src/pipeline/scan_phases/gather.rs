@@ -516,6 +516,7 @@ pub async fn gather_account(
     // leave orphaned pending rows on a stash failure.)
     let blob = AccountInput {
         schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+        scoring_generation: crate::scoring::generation::scoring_revision().to_string(),
         account_handle: inputs.account_handle.to_string(),
         sample,
         parent_texts,

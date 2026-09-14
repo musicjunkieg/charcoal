@@ -544,8 +544,15 @@ fn account_input_deserializes_legacy_blob_without_target_embedding() {
     // A blob serialized before #213 (no `target_embedding` key) must still
     // deserialize — `#[serde(default)]` fills it with None. The schema_version
     // gate at finalize handles rejecting/regathering; serde must not hard-fail.
+    //
+    // `scoring_generation` (schema v3, #344) has no `#[serde(default)]` — a
+    // blob missing IT is a genuinely different failure mode (a pre-v3 blob,
+    // rejected as unreadable rather than as a generation mismatch), so this
+    // fixture carries a (deliberately stale) value to keep testing only what
+    // it was written to test: `target_embedding` leniency.
     let legacy = r#"{
         "schema_version": 1,
+        "scoring_generation": "pre-v3",
         "account_handle": "legacy.bsky.social",
         "sample": {"originals": [], "replies": [], "quotes": [],
                    "reply_ratio": 0.0, "quote_ratio": 0.0, "total_posts": 0},
@@ -1359,6 +1366,86 @@ mod gather_tests {
             timing.clean_pass_ms
         );
     }
+
+    // Thin wrapper around `finalize_account` for tests that only care about
+    // the outcome, not the scoring inputs — the fingerprint and weights are
+    // fixed to `astrophysics_fingerprint()` / `ThreatWeights::default()`, and
+    // every optional context source (embedder, embedding, centroids, NLI,
+    // pre-embedded posts, data_dir) is `None`.
+    async fn finalize_account_for_test(
+        db: &Arc<dyn Database>,
+        user_did: &str,
+        account_did: &str,
+    ) -> charcoal::pipeline::scan_phases::finalize::FinalizeOutcome {
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        charcoal::pipeline::scan_phases::finalize::finalize_account(
+            db,
+            user_did,
+            account_did,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap()
+    }
+
+    /// R03: a staged blob from another scoring generation must not be
+    /// finalized under the current stamp — Phase C rejects it and asks for a
+    /// re-gather, exactly as it does for a schema-version mismatch.
+    #[tokio::test]
+    async fn finalize_rejects_a_blob_from_another_generation() {
+        use charcoal::pipeline::scan_phases::staging::{
+            AccountInput, ACCOUNT_INPUT_SCHEMA_VERSION,
+        };
+        let db = open_db().await;
+        let blob = AccountInput {
+            schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: "1999-01-01".to_string(),
+            account_handle: "old.handle".to_string(),
+            sample: PostSample {
+                originals: vec![],
+                replies: vec![],
+                quotes: vec![],
+                reply_ratio: 0.0,
+                quote_ratio: 0.0,
+                total_posts: 0,
+            },
+            parent_texts: HashMap::new(),
+            median_engagement: 0.0,
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+            fingerprint_quality: "normal".to_string(),
+            target_embedding: None,
+        };
+        db.stash_account_input(
+            TEST_USER,
+            "did:plc:oldgen",
+            &serde_json::to_string(&blob).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let outcome = finalize_account_for_test(&db, TEST_USER, "did:plc:oldgen").await;
+        assert_eq!(
+            outcome,
+            charcoal::pipeline::scan_phases::finalize::FinalizeOutcome::NeedsRegather
+        );
+        assert!(
+            db.fetch_account_input(TEST_USER, "did:plc:oldgen")
+                .await
+                .unwrap()
+                .is_none(),
+            "staging for the old-generation blob is cleared so re-gather starts clean"
+        );
+    }
 }
 
 // ── Phase C: finalize_account tests ─────────────────────────────────────────
@@ -1492,6 +1579,7 @@ mod finalize_tests {
     ) {
         let blob = AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: charcoal::scoring::generation::scoring_revision().to_string(),
             account_handle: "finacct.bsky.social".to_string(),
             sample: sample.clone(),
             parent_texts: HashMap::new(),
@@ -1604,7 +1692,7 @@ mod finalize_tests {
         let weights = ThreatWeights::default();
 
         // Stash a blob with a bogus schema_version, plus a queue row.
-        let bad_payload = r#"{"schema_version":999,"account_handle":"x","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
+        let bad_payload = r#"{"schema_version":999,"scoring_generation":"whatever","account_handle":"x","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
         db.stash_account_input(FIN_USER, ACCT, bad_payload)
             .await
             .unwrap();
@@ -1709,6 +1797,7 @@ mod finalize_tests {
         sample2.total_posts += 1;
         let blob = AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: charcoal::scoring::generation::scoring_revision().to_string(),
             account_handle: "finacct.bsky.social".to_string(),
             sample: sample2,
             parent_texts: HashMap::new(),
@@ -1759,6 +1848,7 @@ mod finalize_tests {
         sample.total_posts = 1;
         let blob = AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: charcoal::scoring::generation::scoring_revision().to_string(),
             account_handle: "finacct.bsky.social".to_string(),
             sample: sample.clone(),
             parent_texts: HashMap::new(),
@@ -3156,6 +3246,7 @@ mod orchestration_tests {
         let sample = survivor_sample("res");
         let blob = AccountInput {
             schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: charcoal::scoring::generation::scoring_revision().to_string(),
             account_handle: "res.bsky.social".to_string(),
             sample: sample.clone(),
             parent_texts: HashMap::new(),
@@ -3297,7 +3388,7 @@ mod orchestration_tests {
         // Pre-seed a STALE blob (wrong schema_version) so the first finalize
         // returns NeedsRegather + clears the account's staging. Also enqueue a
         // row so list_scan_accounts surfaces the account.
-        let bad_payload = r#"{"schema_version":999,"account_handle":"rg.bsky.social","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
+        let bad_payload = r#"{"schema_version":999,"scoring_generation":"whatever","account_handle":"rg.bsky.social","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
         db.stash_account_input(ORCH_USER, acct, bad_payload)
             .await
             .unwrap();

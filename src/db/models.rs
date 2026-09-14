@@ -75,6 +75,27 @@ impl ScoringConfidence {
             ScoringConfidence::High => "high",
         }
     }
+
+    /// Inverse of [`as_str`](Self::as_str). `None` for anything the enum
+    /// never produced.
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "low" => Some(ScoringConfidence::Low),
+            "standard" => Some(ScoringConfidence::Standard),
+            "high" => Some(ScoringConfidence::High),
+            _ => None,
+        }
+    }
+
+    /// Staleness window for a stored `scoring_confidence` label (#344).
+    /// `None` (NotAssessed / insufficient-data rows) and unknown labels fall
+    /// back to Standard (7 days) — never 0, never forever.
+    pub fn staleness_days_for_label(label: Option<&str>) -> i64 {
+        label
+            .and_then(Self::from_label)
+            .unwrap_or(ScoringConfidence::Standard)
+            .staleness_days()
+    }
 }
 
 /// A single post with its toxicity score, kept as evidence.
