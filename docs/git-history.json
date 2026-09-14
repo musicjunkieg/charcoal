@@ -1,5 +1,13 @@
 [
   {
+    "hash": "96ffdfe4aff5908d22022cc694ffab08d0be03ae",
+    "short_hash": "96ffdfe",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T19:12:14-07:00",
+    "message": "docs(343): Phase 2 plan rev 7 — resolve Astra sixth review V6-01/V6-02; spec §4.4 amended\n\nV6-01: CompleteUnverified is fulfilled everywhere the contract says so —\nScanCompletion::fulfilled() drives the cooldown marker, finish_queued_scan\nclears full_requested_at for it on both backends, and a full scan folds a\nrefresh-owned drain into its own completion with ScanCompletion::worst so\na drain can neither launder an unverified outcome nor complete the request\non its own. V6-02: run_scan_with and run_refresh_with take an injected\nclock, read it after the attempt returns, and anchor the retry deadline on\nthat end instant; the start instant is telemetry only. Sixth resolution\ntable added; plan revision only, no tests executed.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "86c4756f4e96d32173983415c532a6e65f860f87",
     "short_hash": "86c4756",
     "author": "Bryan Guffey",

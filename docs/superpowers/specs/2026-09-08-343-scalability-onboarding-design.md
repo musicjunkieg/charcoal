@@ -456,6 +456,28 @@ deciduous 888):*
   the retry window still gets the full backoff. The start instant is
   telemetry only.
 
+*Amended 2026-09-14 (plan rev 8, after Astra's seventh review V7-01–V7-03;
+deciduous 890):*
+
+- A drained refresh's outcome is **persisted**, not just remembered: the
+  full scan writes a "draining" sentinel to `scan_state` before the drain,
+  replaces it with the drain's outcome (skips or unverified; nothing for a
+  clean drain) after, and folds it back in at the end of whichever attempt
+  finishes its own run — even after an interruption and a process restart,
+  and even though the fresh start wipes the drain's skip records. The key is
+  consumed by the fulfilled completion and dropped on a scoring-revision
+  change; a lost sentinel reads as unverified. Skip counts are set, never
+  added twice.
+- The injected clock is thread-safe (`Sync`) so the spawned scan futures
+  stay `Send`; a compile-time check guards it.
+- The unverified-drain test injects its failure into exactly the drain's
+  skip-count read (a fail-once counter seam) instead of dropping the table,
+  so the following cleanup and fresh gather really run.
+- Plan revisions settle design; compile-level and fixture-level facts are
+  settled by the toolchain at implementation. The plan carries a note asking
+  the reviewer to file those as implementation-gate notes, not
+  change-requested findings.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust

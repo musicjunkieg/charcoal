@@ -9664,10 +9664,32 @@
       "node_type": "action",
       "title": "Revise Phase 2 plan to rev 7 per Astra sixth review V6-01/V6-02 (changes requested on 86c4756): CompleteUnverified wired through the marker, obligation clearing, Postgres/SQLite finalization and the drain (drain outcome tainted into the run via ScanCompletion::worst); both wrappers take an injected clock and anchor the retry deadline on attempt END, not start",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-09-13T19:08:08.961661-07:00",
-      "updated_at": "2026-09-13T19:08:08.961661-07:00",
+      "updated_at": "2026-09-13T19:12:51.696908-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"86c4756\",\"confidence\":85}"
+    },
+    {
+      "id": 889,
+      "change_id": "40e9a894-2bfc-4a6b-96a5-9b840954299d",
+      "node_type": "outcome",
+      "title": "Phase 2 plan rev 7 committed 96ffdfe and pushed to PR #123: V6-01 (CompleteUnverified fulfilled via ScanCompletion::fulfilled()/finish predicate on both backends; drain folded with ScanCompletion::worst; drain alone never completes) and V6-02 (injected clock, deadline anchored on attempt end) both addressed in design; sixth resolution table; spec §4.4 rev-7 amendment; no tests executed",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-09-13T19:12:47.880618-07:00",
+      "updated_at": "2026-09-13T19:12:51.702474-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"96ffdfe\",\"confidence\":90}"
+    },
+    {
+      "id": 890,
+      "change_id": "392dd4c5-fca6-4658-87d7-f9da884c2aae",
+      "node_type": "action",
+      "title": "Revise Phase 2 plan to rev 8 per Astra seventh review V7-01/V7-02/V7-03 (changes requested on 96ffdfe): clock bound + Sync with compile-time Send check; durable carried drain outcome (scan_state full_carried_completion with Draining sentinel, drain_then_run seam, delete_scan_state + finish_full_scan_state on both backends); FailOnce SkipCounter seam for the unverified-drain test; note to the reviewer separating design findings from implementation-gate findings",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T19:44:58.468419-07:00",
+      "updated_at": "2026-09-13T19:44:58.468419-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"96ffdfe\",\"confidence\":88,\"files\":[\"docs/superpowers/plans/2026-09-13-343-phase2-expiry-refresh.md\",\"docs/superpowers/specs/2026-09-08-343-scalability-onboarding-design.md\"]}"
     }
   ],
   "edges": [
@@ -19812,6 +19834,28 @@
       "weight": 1.0,
       "rationale": "Sixth review on rev 6",
       "created_at": "2026-09-13T19:08:08.968135-07:00"
+    },
+    {
+      "id": 933,
+      "from_node_id": 888,
+      "to_node_id": 889,
+      "from_change_id": "95495f25-a28e-4459-b34b-2a00224f8b5d",
+      "to_change_id": "40e9a894-2bfc-4a6b-96a5-9b840954299d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rev 7 landed",
+      "created_at": "2026-09-13T19:12:51.691052-07:00"
+    },
+    {
+      "id": 934,
+      "from_node_id": 889,
+      "to_node_id": 890,
+      "from_change_id": "40e9a894-2bfc-4a6b-96a5-9b840954299d",
+      "to_change_id": "392dd4c5-fca6-4658-87d7-f9da884c2aae",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "seventh review round follows rev 7",
+      "created_at": "2026-09-13T19:44:58.474963-07:00"
     }
   ],
   "documents": [
