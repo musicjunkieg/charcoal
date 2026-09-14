@@ -513,3 +513,110 @@ async fn an_unknown_kind_is_an_error_not_a_default() {
         "the offending value must be in the message: {err:#}"
     );
 }
+
+/// One High row so a user is refresh-eligible where a test needs the tick.
+#[cfg(feature = "web")]
+async fn seed_one_score(db: &SqliteDatabase, user: &str) {
+    let mut s = charcoal::db::models::AccountScore::default_for_test("did:plc:seed");
+    s.threat_score = Some(60.0);
+    s.threat_tier = Some("High".into());
+    db.upsert_account_score(user, &s).await.unwrap();
+}
+
+/// V3-03: the requested full scan survives an interrupted drain and runs
+/// again automatically — no second click — and duplicate clicks in between
+/// coalesce. A "restart" is a fresh SqliteDatabase over the same file.
+///
+/// `cfg(feature = "web")`: the scheduling tick lives in `charcoal::web`, which
+/// is only compiled under that feature. It runs under `VERIFY_WEB`; the
+/// Postgres twin of the same property is `test_pg_owed_full_work_is_retried_as_a_full_scan`.
+#[cfg(feature = "web")]
+#[tokio::test]
+async fn a_requested_full_scan_survives_an_interrupted_drain_and_runs_without_another_click() {
+    use charcoal::web::refresh::REFRESH_RETRY_HOURS;
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let open = || {
+        let conn = Connection::open(file.path()).unwrap();
+        create_tables(&conn).unwrap();
+        Arc::new(SqliteDatabase::new(conn))
+    };
+    let db = open();
+    db.upsert_user(USER, "u.h").await.unwrap();
+    seed_one_score(&db, USER).await; // a High row so the user is refresh-eligible
+                                     // 1. A refresh is running; the user asks for a full scan.
+    db.enqueue_refresh_scan(USER).await.unwrap();
+    let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+    assert_eq!(
+        db.enqueue_scan(USER).await.unwrap(),
+        EnqueueOutcome::QueuedAfterRefresh
+    );
+    assert_eq!(
+        db.enqueue_scan(USER).await.unwrap(),
+        EnqueueOutcome::QueuedAfterRefresh,
+        "second click coalesces"
+    );
+    let requested = row(&db, USER).await.full_requested_at.unwrap();
+    // 2. Handover; the full scan is admitted and cost-caps while draining.
+    db.finish_queued_scan(USER, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap();
+    let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+    assert_eq!(claim.kind, ScanKind::Full);
+    db.finish_queued_scan(USER, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap();
+    let r = row(&db, USER).await;
+    assert_eq!(
+        (r.status.as_str(), r.completion),
+        ("done", Some(FinishCompletion::Resumable))
+    );
+    assert_eq!(
+        r.full_requested_at.as_deref(),
+        Some(requested.as_str()),
+        "still owed"
+    );
+    let now = chrono::Utc::now();
+    charcoal::web::refresh::schedule_retry(db.as_ref(), USER, now).await;
+    // 3. Restart. The tick, after the deadline, re-queues OWED work as full.
+    drop(db);
+    let db = open();
+    let tick_db: Arc<dyn Database> = db.clone();
+    assert_eq!(
+        charcoal::web::refresh::enqueue_due_refreshes(
+            &tick_db,
+            now + chrono::Duration::seconds(30),
+            std::time::Duration::from_secs(24 * 3600)
+        )
+        .await,
+        0
+    );
+    assert_eq!(
+        charcoal::web::refresh::enqueue_due_refreshes(
+            &tick_db,
+            now + chrono::Duration::hours(REFRESH_RETRY_HOURS as i64 + 1),
+            std::time::Duration::from_secs(24 * 3600)
+        )
+        .await,
+        1
+    );
+    let r = row(&db, USER).await;
+    assert_eq!(
+        (r.status.as_str(), r.kind),
+        ("queued", ScanKind::Full),
+        "owed work is retried as a FULL scan, never a refresh"
+    );
+    assert_eq!(r.full_requested_at.as_deref(), Some(requested.as_str()));
+    // 4. This time it completes: the obligation is fulfilled.
+    let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+    db.finish_queued_scan(
+        USER,
+        &claim.claim_id,
+        FinishCompletion::CompleteWithSkips,
+        None,
+    )
+    .await
+    .unwrap();
+    let r = row(&db, USER).await;
+    assert!(r.full_requested_at.is_none());
+    assert_eq!(r.completion, Some(FinishCompletion::CompleteWithSkips));
+}

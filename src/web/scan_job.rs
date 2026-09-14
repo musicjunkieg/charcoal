@@ -17,8 +17,9 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use futures::{FutureExt, StreamExt};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::bluesky::client::PublicAtpClient;
 use crate::config::Config;
@@ -837,6 +838,126 @@ async fn record_observed_rate_limit(db: &dyn Database, user_did: &str, observed:
     }
 }
 
+/// What the full scan's inner run produces once it has gone as far as it can.
+///
+/// `completion` is CLASSIFIED (V2-05) — the pipeline returns `Ok` for a
+/// cost-capped run too — so this is the only thing the bookkeeping boundary
+/// needs to decide what the attempt earned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FullScanRun {
+    pub events: usize,
+    pub scored: usize,
+    pub completion: ScanCompletion,
+}
+
+/// Everything a full scan writes about ITSELF, as opposed to about its
+/// results: the cooldown marker and the refresh schedule.
+///
+/// A trait rather than three direct calls so the wrapper's single scheduling
+/// site can be driven — and counted — without a database's worth of fixture,
+/// which is what makes "exactly one retry per failed attempt, and no other
+/// scheduling call" an assertable property.
+#[async_trait::async_trait]
+pub trait FullScanBookkeeping: Send + Sync {
+    /// Best-effort: the marker (+ ETA sample + carried-key delete), written
+    /// only for fulfilled completions and only under this claim.
+    async fn record_completion(&self, user_did: &str, claim_id: &str, completion: ScanCompletion);
+    async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>);
+    async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>);
+}
+
+/// The production bookkeeping: Task 5's marker plus the refresh schedulers.
+pub struct DbFullScanBookkeeping(pub Arc<dyn Database>);
+
+#[async_trait::async_trait]
+impl FullScanBookkeeping for DbFullScanBookkeeping {
+    async fn record_completion(&self, user_did: &str, claim_id: &str, completion: ScanCompletion) {
+        record_full_scan_completion(self.0.as_ref(), user_did, claim_id, completion).await;
+    }
+
+    async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>) {
+        crate::web::refresh::schedule_after_success(self.0.as_ref(), user_did, now).await;
+    }
+
+    async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>) {
+        crate::web::refresh::schedule_retry(self.0.as_ref(), user_did, now).await;
+    }
+}
+
+/// ONE scheduling site for the full scan (V5-02).
+///
+/// `run` is the entire inner scan, so an early `?` anywhere in it arrives
+/// here as `Err` and still gets its retry — which is the defect this shape
+/// exists to remove: a scan that failed while building its scorer used to
+/// return before any scheduling code ran, and the user's owed full scan was
+/// never retried.
+///
+/// * complete → marker + nightly + proof
+/// * complete-with-skips / unverified → marker + hourly retry (the request
+///   was fulfilled, but it is not proof of the revision)
+/// * resumable, or ANY error → hourly retry, obligation kept, no marker, no
+///   proof
+///
+/// The deadline is anchored on the attempt's END (V6-02): `clock` is read
+/// once *after* `run` returns, so a ninety-minute failed attempt still gets a
+/// full hour of backoff. The start instant is telemetry only.
+///
+/// `clock: &(dyn Fn() -> DateTime<Utc> + Sync)` and not a bare `&dyn Fn`:
+/// the future holds this borrow across `.await` and `launch_scan` hands it to
+/// `tokio::spawn`, which needs `Send` (V7-01).
+pub(crate) async fn run_scan_with<R, Fut>(
+    scan_manager: Arc<RwLock<ScanManager>>,
+    books: &dyn FullScanBookkeeping,
+    clock: &(dyn Fn() -> DateTime<Utc> + Sync),
+    user_did: &str,
+    claim_id: &str,
+    run: R,
+) -> anyhow::Result<ScanReport>
+where
+    R: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<FullScanRun>>,
+{
+    let started = clock(); // telemetry only — never a scheduling anchor (V6-02)
+    let outcome = run().await;
+    // Read the clock AFTER the attempt: a retry is "an hour after this attempt
+    // ended", not "an hour after it began" (V6-02).
+    let now = clock();
+    debug!(
+        user_did,
+        attempt_secs = (now - started).num_seconds(),
+        "full scan attempt finished"
+    );
+    let completion = match &outcome {
+        Ok(r) => Some(r.completion),
+        Err(_) => None,
+    };
+    if let Some(c) = completion {
+        books.record_completion(user_did, claim_id, c).await; // no-op for Resumable
+    }
+    match completion {
+        Some(ScanCompletion::Complete) => books.schedule_success(user_did, now).await,
+        // CompleteWithSkips / CompleteUnverified: fulfilled (marker written,
+        // obligation cleared by finish), not clean — retry, no proof.
+        // Resumable and Err: obligation kept, retry.
+        _ => books.schedule_retry(user_did, now).await,
+    }
+    let (result, finish) = match outcome {
+        Ok(r) => (
+            Ok((r.events, r.scored, r.completion != ScanCompletion::Complete)),
+            r.completion.into(),
+        ),
+        Err(e) => (Err(e), crate::db::FinishCompletion::Failed),
+    };
+    finish_scan(&scan_manager, user_did, claim_id, result, finish).await
+}
+
+/// The full scan, wrapped so every exit reaches ONE scheduling site (V5-02).
+///
+/// Everything that can fail — scorer construction, the fingerprint rebuild
+/// and its abort arm, discovery, the pipeline, classification — happens
+/// inside `run_scan_inner`, so an early `?` anywhere in it lands in
+/// [`run_scan_with`] as `Err` and still gets its retry. The slot lifecycle
+/// only finishes the row; it never schedules.
 async fn run_scan(
     config: Arc<Config>,
     db: Arc<dyn Database>,
@@ -846,6 +967,38 @@ async fn run_scan(
     actor_handle: &str,
     claim_id: &str,
 ) -> anyhow::Result<ScanReport> {
+    let books = DbFullScanBookkeeping(Arc::clone(&db));
+    run_scan_with(
+        Arc::clone(&scan_manager),
+        &books,
+        &chrono::Utc::now,
+        user_did,
+        claim_id,
+        || {
+            run_scan_inner(
+                config,
+                db,
+                models,
+                scan_manager,
+                user_did,
+                actor_handle,
+                claim_id,
+            )
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_scan_inner(
+    config: Arc<Config>,
+    db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
+    scan_manager: Arc<RwLock<ScanManager>>,
+    user_did: &str,
+    actor_handle: &str,
+    claim_id: &str,
+) -> anyhow::Result<FullScanRun> {
     // Phase 1: toxicity scorer — loaded once at boot (#257), shared via Arc::clone.
     set_progress(
         &scan_manager,
@@ -1304,31 +1457,14 @@ async fn run_scan(
     //
     // A failed count read is `None`, not 0: unverifiable is a distinct answer
     // from clean, and `classify_full_scan` keeps it that way.
-    let completion = match &result {
-        Ok((_, _, degraded)) => {
-            let phase = db.get_scan_state(user_did, "scan_phase").await?;
-            let skipped = db.count_scan_skips(user_did).await.ok();
-            Some(classify_full_scan(*degraded, phase.as_deref(), skipped))
-        }
-        Err(_) => None,
-    };
-    if let Some(c) = completion {
-        // The cooldown anchor, and only for a fulfilled run. Best-effort — a
-        // scan that completed must not be reported failed because a marker
-        // write failed.
-        record_full_scan_completion(db.as_ref(), user_did, claim_id, c).await;
-    }
-
-    finish_scan(
-        &scan_manager,
-        user_did,
-        claim_id,
-        result,
-        completion
-            .map(Into::into)
-            .unwrap_or(crate::db::FinishCompletion::Failed),
-    )
-    .await
+    let (events, scored, degraded) = result?;
+    let phase = db.get_scan_state(user_did, "scan_phase").await?;
+    let skipped = db.count_scan_skips(user_did).await.ok();
+    Ok(FullScanRun {
+        events,
+        scored,
+        completion: classify_full_scan(degraded, phase.as_deref(), skipped),
+    })
 }
 
 /// The slot lifecycle: every exit from `run_under_slot` must free the row it
@@ -2370,5 +2506,432 @@ mod rate_limit_persistence_tests {
             None,
             "the None branch must not write a scan_state row"
         );
+    }
+}
+
+/// The full scan's bookkeeping boundary (#344 V5-02, V6-01, V6-02, V7-01).
+///
+/// Driven with a closure in place of the pipeline, so none of it is
+/// model-gated: the property under test is "every exit reaches exactly one
+/// scheduling site, and the deadline it sets is anchored on the attempt's
+/// end", which has nothing to do with ONNX.
+#[cfg(test)]
+mod bookkeeping_tests {
+    use super::*;
+
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+
+    use crate::db::schema::create_tables;
+    use crate::db::sqlite::SqliteDatabase;
+    use crate::db::FinishCompletion;
+    use crate::scoring::generation::scoring_revision;
+    use crate::web::refresh::REFRESH_RETRY_HOURS;
+
+    fn test_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+        create_tables(&conn).expect("schema");
+        Arc::new(SqliteDatabase::new(conn))
+    }
+
+    fn manager_with_running_scan(did: &str, claim_id: &str) -> Arc<RwLock<ScanManager>> {
+        let mut mgr = ScanManager::new();
+        mgr.begin_admitted_scan(did, claim_id);
+        Arc::new(RwLock::new(mgr))
+    }
+
+    /// The real bookkeeping with a tally on top. Counting the calls is what
+    /// makes "exactly one retry per failed attempt, and no other scheduling
+    /// call" assertable — asserting only on the database cannot tell one
+    /// write from three identical ones.
+    struct CountingFullBooks {
+        inner: DbFullScanBookkeeping,
+        retries: AtomicUsize,
+        successes: AtomicUsize,
+        markers: AtomicUsize,
+    }
+
+    impl CountingFullBooks {
+        fn new(db: Arc<dyn Database>) -> Self {
+            Self {
+                inner: DbFullScanBookkeeping(db),
+                retries: 0.into(),
+                successes: 0.into(),
+                markers: 0.into(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FullScanBookkeeping for CountingFullBooks {
+        async fn record_completion(
+            &self,
+            user_did: &str,
+            claim_id: &str,
+            completion: ScanCompletion,
+        ) {
+            // Only fulfilled completions write anything, so only those count
+            // as markers.
+            if completion.fulfilled() {
+                self.markers.fetch_add(1, SeqCst);
+            }
+            self.inner
+                .record_completion(user_did, claim_id, completion)
+                .await;
+        }
+
+        async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>) {
+            self.successes.fetch_add(1, SeqCst);
+            self.inner.schedule_success(user_did, now).await;
+        }
+
+        async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>) {
+            self.retries.fetch_add(1, SeqCst);
+            self.inner.schedule_retry(user_did, now).await;
+        }
+    }
+
+    async fn queue_row(db: &Arc<dyn Database>, did: &str) -> crate::db::traits::ScanQueueRow {
+        db.list_scan_queue()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.user_did == did)
+            .expect("row exists")
+    }
+
+    /// V5-02: a scheduler-created owed full scan whose setup fails before any
+    /// score write still gets exactly one hourly retry, keeps its obligation,
+    /// writes no marker and proves nothing — and the tick honours THAT
+    /// deadline, not the nightly one it set when it queued the job.
+    #[tokio::test]
+    async fn a_full_scan_setup_failure_schedules_the_hourly_retry_and_keeps_the_obligation() {
+        let db = test_db();
+        db.upsert_user("did:plc:owed", "owed.h").await.unwrap();
+        let now = chrono::Utc::now();
+        // The user asked for a full scan earlier; the tick queued the retry
+        // and set the NIGHTLY deadline (as claim_and_enqueue_due_refreshes does).
+        db.enqueue_scan("did:plc:owed").await.unwrap();
+        db.schedule_refresh(
+            "did:plc:owed",
+            &(now + chrono::Duration::hours(24)).to_rfc3339(),
+        )
+        .await
+        .unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let obligation = queue_row(&db, "did:plc:owed")
+            .await
+            .full_requested_at
+            .expect("the obligation is recorded at enqueue");
+        let mgr = manager_with_running_scan("did:plc:owed", &claim.claim_id);
+        let books = CountingFullBooks::new(db.clone());
+
+        for failure in [
+            "fingerprint rebuild required (IncompatibleModel) and failed — scan aborted before scoring",
+            "CHARCOAL_CLASSIFIER is unset — build_from_env failed",
+        ] {
+            let result = run_scan_with(
+                mgr.clone(),
+                &books,
+                &chrono::Utc::now,
+                "did:plc:owed",
+                &claim.claim_id,
+                move || async move { anyhow::bail!("{failure}") },
+            )
+            .await;
+            assert!(result.is_err());
+        }
+        assert_eq!(
+            books.retries.load(SeqCst),
+            2,
+            "one retry per failed attempt — no other scheduling call"
+        );
+        assert_eq!(books.successes.load(SeqCst), 0);
+        assert_eq!(books.markers.load(SeqCst), 0, "no completion marker");
+        assert!(db
+            .get_scan_state("did:plc:owed", "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .is_none());
+        assert_ne!(
+            db.refreshed_generation("did:plc:owed")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(scoring_revision()),
+            "no proof"
+        );
+        let row = queue_row(&db, "did:plc:owed").await;
+        assert_eq!(
+            row.full_requested_at.as_deref(),
+            Some(obligation.as_str()),
+            "obligation kept"
+        );
+        // The retry deadline REPLACED the nightly one.
+        let next = chrono::DateTime::parse_from_rfc3339(
+            &db.next_refresh_at("did:plc:owed").await.unwrap().unwrap(),
+        )
+        .unwrap();
+        let delta = next.signed_duration_since(chrono::Utc::now());
+        assert!(
+            delta > chrono::Duration::minutes(55) && delta <= chrono::Duration::hours(1),
+            "hourly, not nightly: {delta}"
+        );
+        // Finish the row as the slot would after the second failure, then tick.
+        db.finish_queued_scan(
+            "did:plc:owed",
+            &claim.claim_id,
+            FinishCompletion::Failed,
+            Some("setup failed"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            crate::web::refresh::enqueue_due_refreshes(
+                &db,
+                now + chrono::Duration::seconds(30),
+                std::time::Duration::from_secs(24 * 3600)
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            crate::web::refresh::enqueue_due_refreshes(
+                &db,
+                now + chrono::Duration::hours(2),
+                std::time::Duration::from_secs(24 * 3600)
+            )
+            .await,
+            1
+        );
+        let row = queue_row(&db, "did:plc:owed").await;
+        assert_eq!(
+            (row.status.as_str(), row.kind),
+            ("queued", crate::db::ScanKind::Full)
+        );
+    }
+
+    /// A settable clock for the wrapper: the `run` closure advances it, so a
+    /// ninety-minute attempt takes no wall time (V6-02).
+    struct FakeClock(std::sync::Arc<std::sync::Mutex<DateTime<Utc>>>);
+
+    impl FakeClock {
+        fn now(&self) -> DateTime<Utc> {
+            *self.0.lock().unwrap()
+        }
+    }
+
+    /// V6-02: the retry deadline is attempt END + REFRESH_RETRY_HOURS, even
+    /// when the attempt itself outlasts the retry window. Anchored on the
+    /// start, a two-hour failure would be "due" the moment it gave up and the
+    /// next tick would re-run it immediately, forever.
+    #[tokio::test]
+    async fn a_failed_full_scan_is_retried_an_hour_after_it_ended_not_began() {
+        let db = test_db();
+        db.upsert_user("did:plc:slow", "slow.h").await.unwrap();
+        db.enqueue_scan("did:plc:slow").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let mgr = manager_with_running_scan("did:plc:slow", &claim.claim_id);
+        let books = CountingFullBooks::new(db.clone());
+        let t0 = chrono::Utc::now();
+        let clock = FakeClock(std::sync::Arc::new(std::sync::Mutex::new(t0)));
+        let advance = clock.0.clone();
+        let result = run_scan_with(
+            mgr,
+            &books,
+            &|| clock.now(),
+            "did:plc:slow",
+            &claim.claim_id,
+            move || async move {
+                // the attempt takes 90 min
+                *advance.lock().unwrap() += chrono::Duration::minutes(90);
+                anyhow::bail!("classifier down for the whole attempt")
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        let end = t0 + chrono::Duration::minutes(90);
+        let deadline = chrono::DateTime::parse_from_rfc3339(
+            &db.next_refresh_at("did:plc:slow").await.unwrap().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            deadline,
+            end + chrono::Duration::hours(REFRESH_RETRY_HOURS as i64),
+            "anchored on the END of the attempt"
+        );
+        assert_eq!(books.retries.load(SeqCst), 1);
+        db.finish_queued_scan(
+            "did:plc:slow",
+            &claim.claim_id,
+            FinishCompletion::Failed,
+            Some("down"),
+        )
+        .await
+        .unwrap();
+        // The tick honours that deadline.
+        assert_eq!(
+            crate::web::refresh::enqueue_due_refreshes(
+                &db,
+                end + chrono::Duration::minutes(30),
+                std::time::Duration::from_secs(24 * 3600)
+            )
+            .await,
+            0,
+            "still inside the backoff"
+        );
+        assert_eq!(
+            crate::web::refresh::enqueue_due_refreshes(
+                &db,
+                end + chrono::Duration::minutes(61),
+                std::time::Duration::from_secs(24 * 3600)
+            )
+            .await,
+            1
+        );
+        let row = queue_row(&db, "did:plc:slow").await;
+        assert_eq!(
+            (row.status.as_str(), row.kind),
+            ("queued", crate::db::ScanKind::Full),
+            "owed work retried as full"
+        );
+    }
+
+    /// V6-01: an unverified completion is FULFILLED — marker written,
+    /// obligation cleared, durable completion `complete_unverified` — but it
+    /// is not proof: the retry is scheduled, the revision is not marked.
+    #[tokio::test]
+    async fn an_unverified_completion_is_fulfilled_but_not_proof() {
+        let db = test_db();
+        db.upsert_user("did:plc:unv", "unv.h").await.unwrap();
+        db.enqueue_scan("did:plc:unv").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let mgr = manager_with_running_scan("did:plc:unv", &claim.claim_id);
+        let books = CountingFullBooks::new(db.clone());
+        let report = run_scan_with(
+            mgr,
+            &books,
+            &chrono::Utc::now,
+            "did:plc:unv",
+            &claim.claim_id,
+            || async {
+                Ok(FullScanRun {
+                    events: 3,
+                    scored: 3,
+                    completion: ScanCompletion::CompleteUnverified,
+                })
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.completion, FinishCompletion::CompleteUnverified);
+        assert_eq!(
+            (
+                books.markers.load(SeqCst),
+                books.retries.load(SeqCst),
+                books.successes.load(SeqCst)
+            ),
+            (1, 1, 0)
+        );
+        assert!(
+            db.get_scan_state("did:plc:unv", "last_full_scan_finished_at")
+                .await
+                .unwrap()
+                .is_some(),
+            "cooldown anchored: the request was carried out"
+        );
+        assert_ne!(
+            db.refreshed_generation("did:plc:unv")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(scoring_revision()),
+            "no proof"
+        );
+        // The slot finishes the row from the report:
+        db.finish_queued_scan("did:plc:unv", &claim.claim_id, report.completion, None)
+            .await
+            .unwrap();
+        let row = queue_row(&db, "did:plc:unv").await;
+        assert_eq!(row.completion, Some(FinishCompletion::CompleteUnverified));
+        assert!(
+            row.full_requested_at.is_none(),
+            "obligation cleared — fulfilled"
+        );
+    }
+
+    /// A clean completion is the only thing that proves the revision and
+    /// earns the nightly cadence — the other half of the `Complete` arm.
+    #[tokio::test]
+    async fn a_clean_completion_proves_the_revision_and_schedules_the_nightly() {
+        let db = test_db();
+        db.upsert_user("did:plc:clean", "clean.h").await.unwrap();
+        db.enqueue_scan("did:plc:clean").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let mgr = manager_with_running_scan("did:plc:clean", &claim.claim_id);
+        let books = CountingFullBooks::new(db.clone());
+        std::env::remove_var(crate::web::refresh::REFRESH_INTERVAL_ENV);
+        let report = run_scan_with(
+            mgr,
+            &books,
+            &chrono::Utc::now,
+            "did:plc:clean",
+            &claim.claim_id,
+            || async {
+                Ok(FullScanRun {
+                    events: 1,
+                    scored: 1,
+                    completion: ScanCompletion::Complete,
+                })
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.completion, FinishCompletion::Complete);
+        assert_eq!(
+            (
+                books.markers.load(SeqCst),
+                books.retries.load(SeqCst),
+                books.successes.load(SeqCst)
+            ),
+            (1, 0, 1),
+            "one marker, one success, and NO retry"
+        );
+        assert_eq!(
+            db.refreshed_generation("did:plc:clean")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(scoring_revision()),
+            "proven"
+        );
+        let next = chrono::DateTime::parse_from_rfc3339(
+            &db.next_refresh_at("did:plc:clean").await.unwrap().unwrap(),
+        )
+        .unwrap();
+        let delta = next.signed_duration_since(chrono::Utc::now());
+        assert!(
+            delta > chrono::Duration::hours(23),
+            "the nightly cadence, not the hourly retry: {delta}"
+        );
+    }
+
+    /// V7-01: the wrapper futures must be `Send` — `launch_scan` puts them
+    /// inside `tokio::spawn`. A directly awaited test proves nothing about
+    /// that; this compile-time check does, for the production clock type.
+    #[test]
+    fn wrapper_futures_are_send() {
+        fn assert_send<F: Send>(_: &F) {}
+        let db = test_db();
+        let books = DbFullScanBookkeeping(db.clone());
+        let mgr = manager_with_running_scan("did:plc:u", "c");
+        let fut = run_scan_with(mgr, &books, &chrono::Utc::now, "did:plc:u", "c", || async {
+            Ok(FullScanRun {
+                events: 0,
+                scored: 0,
+                completion: ScanCompletion::Complete,
+            })
+        });
+        assert_send(&fut);
+        drop(fut);
     }
 }
