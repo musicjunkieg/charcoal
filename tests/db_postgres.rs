@@ -4563,6 +4563,17 @@ async fn test_pg_import_into_sqlite_truncates_to_seconds() {
 /// of `reset_scan_queue_fixtures`: without it a tick with a limit of 2 could
 /// spend its whole batch on somebody else's fixture, and would enqueue scans
 /// for users no test is watching.
+///
+/// **Invariant (#344 F8): this writes `users` rows that belong to OTHER tests**
+/// — every DID outside `keep_prefix`, in the shared `charcoal_test` database —
+/// and the only thing keeping that safe is the process-local
+/// `scan_queue_test_lock`. So: any Postgres test that asserts on
+/// `next_refresh_at`, `refresh_attempted_generation` or `refreshed_generation`
+/// MUST hold `scan_queue_test_lock` for the whole of its assertions, whether
+/// or not it calls this helper. A test that reads those columns without the
+/// lock can have them rewritten underneath it by a tick test running in
+/// parallel, and will fail for reasons that have nothing to do with the code
+/// under test.
 async fn quiesce_users_outside(url: &str, keep_prefix: &str) {
     use sqlx_core::pool::Pool;
     use sqlx_postgres::Postgres;
@@ -5315,6 +5326,52 @@ async fn test_pg_a_superseded_worker_records_no_completion() {
         .unwrap()
         .is_some());
     assert_eq!(db.get_scan_state(U, CARRIED).await.unwrap(), None);
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// F2, Postgres twin: the ownership probe `run_scan_with` fences all three of
+/// its completion writes on. The refresh schedule lives on `users`, so it
+/// cannot be fenced by a `WHERE claim_id = $n` on `scan_queue` — this read is
+/// what stands in for that. The mismatch is produced the way production
+/// produces it: a real claim, a real reclaim, a real successor.
+#[tokio::test]
+async fn test_pg_scan_claim_is_current_only_for_the_holder() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_owner";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "owner.h").await.unwrap();
+
+    assert!(
+        !db.scan_claim_is_current(U, "claim-1").await.unwrap(),
+        "no row at all"
+    );
+    db.enqueue_scan(U).await.unwrap();
+    assert!(
+        !db.scan_claim_is_current(U, "claim-1").await.unwrap(),
+        "queued, so claim_id is still NULL"
+    );
+    // An already-expired lease, so the reclaim below is the real one.
+    let stale = db.claim_next_scan(8, -1).await.unwrap().unwrap();
+    assert!(db.scan_claim_is_current(U, &stale.claim_id).await.unwrap());
+    assert!(db.reclaim_expired_scans().await.unwrap() >= 1);
+    let successor = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    assert_ne!(successor.claim_id, stale.claim_id);
+    assert!(
+        !db.scan_claim_is_current(U, &stale.claim_id).await.unwrap(),
+        "the superseded worker no longer owns the row"
+    );
+    assert!(db
+        .scan_claim_is_current(U, &successor.claim_id)
+        .await
+        .unwrap());
 
     db.delete_user_data(U).await.unwrap();
     reset_scan_queue_fixtures(&url).await;

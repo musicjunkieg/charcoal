@@ -540,6 +540,7 @@ impl ScanLauncher for AppStateLauncher {
             &self.state,
             claim.user_did.clone(),
             handle,
+            claim.kind,
             crate::web::scan_job::QueueSlot {
                 claim_id: claim.claim_id.clone(),
                 wake: self.wake.clone(),

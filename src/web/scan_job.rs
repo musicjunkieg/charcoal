@@ -646,10 +646,14 @@ where
 /// `pub(crate)` and slot-mandatory on purpose (#257): the admitter is the only
 /// caller, because a second admission path is a second way past the concurrency
 /// cap. There is no `None` to pass any more.
+///
+/// `kind` comes off the claim, and [`run_claim`] decides from it which pipeline
+/// actually runs — a `refresh` row must never execute the full scan.
 pub(crate) fn launch_scan(
     state: &crate::web::AppState,
     user_did: String,
     actor_handle: String,
+    kind: crate::db::ScanKind,
     slot: QueueSlot,
     live: crate::web::admitter::LiveScanGuard,
 ) {
@@ -664,27 +668,98 @@ pub(crate) fn launch_scan(
         let did = user_did.clone();
         let handle = actor_handle;
         let claim_id = slot.claim_id.clone();
-        let scan = run_scan(
-            config,
-            db.clone(),
-            models,
-            scan_manager.clone(),
-            &did,
-            &handle,
-            &claim_id,
-        );
 
-        run_under_slot(
-            scan,
-            db,
-            scan_manager,
+        run_claim(
+            kind,
+            db.clone(),
+            scan_manager.clone(),
             user_did,
             slot,
             live,
             crate::web::admitter::HEARTBEAT_INTERVAL,
+            || run_scan(config, db, models, scan_manager, &did, &handle, &claim_id),
         )
         .await;
     });
+}
+
+/// The error a `refresh` claim finishes with until Task 9 lands the runner.
+///
+/// Named so the guard below and its test say the same thing, and so the
+/// message an operator sees in `scan_queue.last_error` names the missing piece
+/// rather than describing a scan failure that never happened.
+fn refresh_runner_missing(user_did: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "no refresh runner is built into this binary yet (#344 Task 9) — the queued refresh \
+         for {user_did} was not executed; it will be retried, and a full scan is unaffected"
+    )
+}
+
+/// Run one admitted claim as the kind it was admitted as (#344 F1).
+///
+/// The guard is here rather than at the admitter because this is the last
+/// point a claim can still be diverted: however a `refresh` row got into the
+/// queue — the tick, a manual enqueue, a migration — it must not execute
+/// `run_scan`. A full scan under a refresh claim would write the full-scan
+/// cooldown marker and an ETA duration sample against a refresh row, which is
+/// exactly what N4 forbids, and would clear a full-scan obligation the refresh
+/// never fulfilled.
+///
+/// The refusal is loud and terminal rather than silent or looping: dropping the
+/// row would leave the user's schedule advanced with nothing to show for it,
+/// and re-queueing it would spin. Finishing the claim `failed` releases the
+/// slot, records the reason durably, and lets the hourly retry pick the user up
+/// once a runner exists.
+///
+/// `full` is a closure so the full pipeline is never even constructed for a
+/// refresh claim — which is the property the test asserts.
+#[allow(clippy::too_many_arguments)] // the slot lifecycle's own arguments, one call site
+pub(crate) async fn run_claim<R, Fut>(
+    kind: crate::db::ScanKind,
+    db: Arc<dyn Database>,
+    scan_manager: Arc<RwLock<ScanManager>>,
+    user_did: String,
+    slot: QueueSlot,
+    live: crate::web::admitter::LiveScanGuard,
+    heartbeat_interval: std::time::Duration,
+    full: R,
+) -> SlotExit
+where
+    R: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<ScanReport>>,
+{
+    match kind {
+        crate::db::ScanKind::Full => {
+            run_under_slot(
+                full(),
+                db,
+                scan_manager,
+                user_did,
+                slot,
+                live,
+                heartbeat_interval,
+            )
+            .await
+        }
+        crate::db::ScanKind::Refresh => {
+            error!(
+                user_did,
+                "a refresh claim was admitted but this binary has no refresh runner — \
+                 finishing it as failed rather than running a full scan under it"
+            );
+            let refusal = refresh_runner_missing(&user_did);
+            run_under_slot(
+                async move { Err(refusal) },
+                db,
+                scan_manager,
+                user_did,
+                slot,
+                live,
+                heartbeat_interval,
+            )
+            .await
+        }
+    }
 }
 
 /// Rebuild the protected user's fingerprint when it's older than this.
@@ -843,8 +918,11 @@ async fn record_observed_rate_limit(db: &dyn Database, user_did: &str, observed:
 /// `completion` is CLASSIFIED (V2-05) — the pipeline returns `Ok` for a
 /// cost-capped run too — so this is the only thing the bookkeeping boundary
 /// needs to decide what the attempt earned.
+///
+/// `pub(crate)` like [`run_scan_with`], the only thing that consumes it —
+/// nothing outside the crate constructs or reads one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FullScanRun {
+pub(crate) struct FullScanRun {
     pub events: usize,
     pub scored: usize,
     pub completion: ScanCompletion,
@@ -859,6 +937,13 @@ pub struct FullScanRun {
 /// scheduling call" an assertable property.
 #[async_trait::async_trait]
 pub trait FullScanBookkeeping: Send + Sync {
+    /// Does this attempt still own the user's queue row? (#344 F2)
+    ///
+    /// The marker is fenced inside its own transaction, but the refresh
+    /// schedule lives on `users` and cannot be fenced by a `WHERE` clause on
+    /// `scan_queue`, so the wrapper asks once and skips ALL of its writes when
+    /// the answer is no.
+    async fn owns_claim(&self, user_did: &str, claim_id: &str) -> bool;
     /// Best-effort: the marker (+ ETA sample + carried-key delete), written
     /// only for fulfilled completions and only under this claim.
     async fn record_completion(&self, user_did: &str, claim_id: &str, completion: ScanCompletion);
@@ -867,20 +952,61 @@ pub trait FullScanBookkeeping: Send + Sync {
 }
 
 /// The production bookkeeping: Task 5's marker plus the refresh schedulers.
-pub struct DbFullScanBookkeeping(pub Arc<dyn Database>);
+pub struct DbFullScanBookkeeping {
+    db: Arc<dyn Database>,
+    /// The cadence a success writes. Injected at construction so
+    /// `schedule_after_success` never reads a process-global variable from
+    /// inside the code under test (#344 F3).
+    refresh_interval: std::time::Duration,
+}
+
+impl DbFullScanBookkeeping {
+    pub fn new(db: Arc<dyn Database>, refresh_interval: std::time::Duration) -> Self {
+        Self {
+            db,
+            refresh_interval,
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl FullScanBookkeeping for DbFullScanBookkeeping {
+    async fn owns_claim(&self, user_did: &str, claim_id: &str) -> bool {
+        match self.db.scan_claim_is_current(user_did, claim_id).await {
+            Ok(current) => current,
+            Err(e) => {
+                // Fail closed. An unreadable queue row is not evidence of
+                // ownership, and the cost of guessing wrong is clobbering a
+                // successor's schedule with this attempt's. Skipping costs the
+                // user a deadline they get back on the next tick — they are
+                // still due by the revision clause, or by their owed full work.
+                warn!(
+                    user_did,
+                    error = %format!("{e:#}"),
+                    "could not confirm the scan claim still owns this row — skipping the \
+                     completion bookkeeping"
+                );
+                false
+            }
+        }
+    }
+
     async fn record_completion(&self, user_did: &str, claim_id: &str, completion: ScanCompletion) {
-        record_full_scan_completion(self.0.as_ref(), user_did, claim_id, completion).await;
+        record_full_scan_completion(self.db.as_ref(), user_did, claim_id, completion).await;
     }
 
     async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>) {
-        crate::web::refresh::schedule_after_success(self.0.as_ref(), user_did, now).await;
+        crate::web::refresh::schedule_after_success(
+            self.db.as_ref(),
+            user_did,
+            now,
+            self.refresh_interval,
+        )
+        .await;
     }
 
     async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>) {
-        crate::web::refresh::schedule_retry(self.0.as_ref(), user_did, now).await;
+        crate::web::refresh::schedule_retry(self.db.as_ref(), user_did, now).await;
     }
 }
 
@@ -931,15 +1057,31 @@ where
         Ok(r) => Some(r.completion),
         Err(_) => None,
     };
-    if let Some(c) = completion {
-        books.record_completion(user_did, claim_id, c).await; // no-op for Resumable
-    }
-    match completion {
-        Some(ScanCompletion::Complete) => books.schedule_success(user_did, now).await,
-        // CompleteWithSkips / CompleteUnverified: fulfilled (marker written,
-        // obligation cleared by finish), not clean — retry, no proof.
-        // Resumable and Err: obligation kept, retry.
-        _ => books.schedule_retry(user_did, now).await,
+    // One ownership check for all three writes (#344 F2). `record_completion`
+    // fences itself, but `schedule_success`/`schedule_retry` write `users`,
+    // which no fence on `scan_queue` can cover: a zombie whose lease lapsed
+    // would otherwise move `next_refresh_at` and `refreshed_generation` for a
+    // user its successor now owns — and being the slow one, its write lands
+    // last. `finish_scan` below is still called: its writes are fenced on the
+    // claim of their own accord, and the caller must learn the outcome either
+    // way.
+    if books.owns_claim(user_did, claim_id).await {
+        if let Some(c) = completion {
+            books.record_completion(user_did, claim_id, c).await; // no-op for Resumable
+        }
+        match completion {
+            Some(ScanCompletion::Complete) => books.schedule_success(user_did, now).await,
+            // CompleteWithSkips / CompleteUnverified: fulfilled (marker written,
+            // obligation cleared by finish), not clean — retry, no proof.
+            // Resumable and Err: obligation kept, retry.
+            _ => books.schedule_retry(user_did, now).await,
+        }
+    } else {
+        warn!(
+            user_did,
+            "the scan's claim no longer owns the queue row — no marker, no ETA sample and \
+             no refresh schedule written; the successor owns this user's bookkeeping"
+        );
     }
     let (result, finish) = match outcome {
         Ok(r) => (
@@ -967,7 +1109,10 @@ async fn run_scan(
     actor_handle: &str,
     claim_id: &str,
 ) -> anyhow::Result<ScanReport> {
-    let books = DbFullScanBookkeeping(Arc::clone(&db));
+    let books = DbFullScanBookkeeping::new(
+        Arc::clone(&db),
+        crate::web::refresh::refresh_deadline_interval(),
+    );
     run_scan_with(
         Arc::clone(&scan_manager),
         &books,
@@ -1964,6 +2109,94 @@ mod slot_lifecycle_tests {
         assert!(status.last_error.is_none());
         assert!(status.progress_message.contains("42 accounts scored"));
     }
+
+    /// F1: a `refresh` claim must never execute the full scan, however its row
+    /// got into the queue. Until Task 9 lands the runner it finishes `failed`
+    /// with a message naming the missing piece — and, critically, the full
+    /// pipeline is never even constructed, so none of the full scan's
+    /// bookkeeping (the cooldown marker, the ETA duration sample) can be
+    /// written against a refresh row (N4).
+    #[tokio::test]
+    async fn a_refresh_claim_never_runs_the_full_scan() {
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        let db = test_db();
+        db.upsert_user(DID, "slot.h").await.expect("user");
+        db.enqueue_refresh_scan(DID).await.expect("enqueue refresh");
+        let claim = db
+            .claim_next_scan(1, LEASE_SECS)
+            .await
+            .expect("claim")
+            .expect("a queued row exists");
+        assert_eq!(claim.kind, crate::db::ScanKind::Refresh);
+        let (tx, mut wake_rx) = tokio::sync::mpsc::channel(4);
+        let mgr = manager_with_running_scan(&claim.claim_id);
+
+        let constructed = Arc::new(AtomicBool::new(false));
+        let flag = constructed.clone();
+        let exit = run_claim(
+            claim.kind,
+            db.clone(),
+            mgr,
+            DID.to_string(),
+            QueueSlot {
+                claim_id: claim.claim_id.clone(),
+                wake: tx,
+            },
+            live_guard(),
+            Duration::from_millis(10),
+            || {
+                flag.store(true, SeqCst);
+                async {
+                    Ok(ScanReport {
+                        completion: crate::db::FinishCompletion::Complete,
+                    })
+                }
+            },
+        )
+        .await;
+
+        assert!(
+            !constructed.load(SeqCst),
+            "the full pipeline must not even be built for a refresh claim"
+        );
+        assert_eq!(exit, SlotExit::Failed);
+        let row = db
+            .list_scan_queue()
+            .await
+            .expect("queue")
+            .into_iter()
+            .find(|r| r.user_did == DID)
+            .expect("row exists");
+        assert_eq!(row.status, "failed");
+        assert!(
+            row.last_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no refresh runner"),
+            "the recorded reason must name the missing runner: {:?}",
+            row.last_error
+        );
+        // N4: nothing about the FULL scan was recorded against this row.
+        assert_eq!(
+            db.get_scan_state(DID, "last_full_scan_finished_at")
+                .await
+                .expect("scan_state read"),
+            None,
+            "no cooldown marker"
+        );
+        assert_eq!(
+            db.get_scan_state(DID, crate::db::traits::LAST_FULL_SCAN_DURATION_KEY)
+                .await
+                .expect("scan_state read"),
+            None,
+            "no ETA duration sample"
+        );
+        assert!(
+            wake_rx.try_recv().is_ok(),
+            "the slot was released and the admitter woken"
+        );
+    }
 }
 
 /// #344 V2-05/V5-01/V6-01: how a full scan's ending is classified, and what
@@ -1995,6 +2228,40 @@ mod completion_tests {
             .expect("claim")
             .expect("a queued row exists")
             .claim_id
+    }
+
+    /// F2: the ownership probe the wrapper's fence reads. False for a row that
+    /// does not exist, a row nobody holds, and a row someone else holds —
+    /// the same three cases `finish_full_scan_state` refuses to write under.
+    #[tokio::test]
+    async fn claim_ownership_is_false_unless_this_claim_holds_the_row() {
+        let db = test_db();
+        db.upsert_user("did:plc:own", "own.h").await.unwrap();
+        assert!(
+            !db.scan_claim_is_current("did:plc:own", "claim-1")
+                .await
+                .unwrap(),
+            "no row at all"
+        );
+        // Queued, so claim_id is still NULL.
+        db.enqueue_scan("did:plc:own").await.unwrap();
+        assert!(
+            !db.scan_claim_is_current("did:plc:own", "claim-1")
+                .await
+                .unwrap(),
+            "unclaimed"
+        );
+        let claim = claimed(&db, "did:plc:own").await;
+        assert!(db
+            .scan_claim_is_current("did:plc:own", &claim)
+            .await
+            .unwrap());
+        assert!(
+            !db.scan_claim_is_current("did:plc:own", "someone-else")
+                .await
+                .unwrap(),
+            "a foreign claim"
+        );
     }
 
     #[test]
@@ -2549,10 +2816,14 @@ mod bookkeeping_tests {
         markers: AtomicUsize,
     }
 
+    /// The nightly cadence, passed explicitly so no test reads — or writes —
+    /// `CHARCOAL_REFRESH_INTERVAL_HOURS` (#344 F3).
+    const TEST_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
     impl CountingFullBooks {
         fn new(db: Arc<dyn Database>) -> Self {
             Self {
-                inner: DbFullScanBookkeeping(db),
+                inner: DbFullScanBookkeeping::new(db, TEST_REFRESH_INTERVAL),
                 retries: 0.into(),
                 successes: 0.into(),
                 markers: 0.into(),
@@ -2562,6 +2833,12 @@ mod bookkeeping_tests {
 
     #[async_trait::async_trait]
     impl FullScanBookkeeping for CountingFullBooks {
+        // Delegated, not stubbed: the fence under test is the real database
+        // one, driven by a real reclaim.
+        async fn owns_claim(&self, user_did: &str, claim_id: &str) -> bool {
+            self.inner.owns_claim(user_did, claim_id).await
+        }
+
         async fn record_completion(
             &self,
             user_did: &str,
@@ -2867,8 +3144,8 @@ mod bookkeeping_tests {
         db.enqueue_scan("did:plc:clean").await.unwrap();
         let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
         let mgr = manager_with_running_scan("did:plc:clean", &claim.claim_id);
+        // No env mutation: the cadence comes from TEST_REFRESH_INTERVAL.
         let books = CountingFullBooks::new(db.clone());
-        std::env::remove_var(crate::web::refresh::REFRESH_INTERVAL_ENV);
         let report = run_scan_with(
             mgr,
             &books,
@@ -2914,6 +3191,117 @@ mod bookkeeping_tests {
         );
     }
 
+    /// F2: a worker whose lease lapsed writes NONE of the three — no marker,
+    /// no ETA duration sample, no refresh schedule — and the successor's own
+    /// writes survive it.
+    ///
+    /// The zombie is the slow one by definition, so its write lands last: an
+    /// unfenced `schedule_success` would overwrite the successor's deadline
+    /// and proof for a user it no longer owns. The mismatch is produced the
+    /// way production produces it (claim → reclaim → successor claim), never
+    /// by editing `claim_id` by hand.
+    #[tokio::test]
+    async fn a_superseded_worker_writes_no_marker_sample_or_schedule() {
+        let db = test_db();
+        db.upsert_user("did:plc:zombie", "zombie.h").await.unwrap();
+        db.enqueue_scan("did:plc:zombie").await.unwrap();
+        // An already-expired lease, so the reclaim below has something to take.
+        let zombie = db.claim_next_scan(1, -1).await.unwrap().unwrap();
+        assert_eq!(db.reclaim_expired_scans().await.unwrap(), 1);
+        let successor = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        assert_ne!(zombie.claim_id, successor.claim_id);
+
+        // The successor finishes first and writes all three.
+        let mgr = manager_with_running_scan("did:plc:zombie", &successor.claim_id);
+        let books = CountingFullBooks::new(db.clone());
+        let t0 = chrono::Utc::now();
+        run_scan_with(
+            mgr.clone(),
+            &books,
+            &move || t0,
+            "did:plc:zombie",
+            &successor.claim_id,
+            || async {
+                Ok(FullScanRun {
+                    events: 1,
+                    scored: 1,
+                    completion: ScanCompletion::Complete,
+                })
+            },
+        )
+        .await
+        .unwrap();
+        let marker = db
+            .get_scan_state("did:plc:zombie", "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .expect("the successor anchored the cooldown");
+        let sample = db
+            .get_scan_state(
+                "did:plc:zombie",
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY,
+            )
+            .await
+            .unwrap();
+        let deadline = db.next_refresh_at("did:plc:zombie").await.unwrap();
+        assert_eq!(
+            deadline.as_deref(),
+            Some((t0 + chrono::Duration::hours(24)).to_rfc3339()).as_deref(),
+            "the successor scheduled the nightly"
+        );
+
+        // Now the zombie's attempt lands, an hour later.
+        let late = t0 + chrono::Duration::hours(1);
+        run_scan_with(
+            mgr,
+            &books,
+            &move || late,
+            "did:plc:zombie",
+            &zombie.claim_id,
+            || async {
+                Ok(FullScanRun {
+                    events: 9,
+                    scored: 9,
+                    completion: ScanCompletion::Complete,
+                })
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            (
+                books.markers.load(SeqCst),
+                books.successes.load(SeqCst),
+                books.retries.load(SeqCst)
+            ),
+            (1, 1, 0),
+            "the zombie reached NO scheduling call — the successor's one of each is all there is"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:zombie", "last_full_scan_finished_at")
+                .await
+                .unwrap(),
+            Some(marker),
+            "cooldown anchor untouched"
+        );
+        assert_eq!(
+            db.get_scan_state(
+                "did:plc:zombie",
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .await
+            .unwrap(),
+            sample,
+            "ETA sample untouched"
+        );
+        assert_eq!(
+            db.next_refresh_at("did:plc:zombie").await.unwrap(),
+            deadline,
+            "the successor's deadline survived the zombie's later write"
+        );
+    }
+
     /// V7-01: the wrapper futures must be `Send` — `launch_scan` puts them
     /// inside `tokio::spawn`. A directly awaited test proves nothing about
     /// that; this compile-time check does, for the production clock type.
@@ -2921,7 +3309,7 @@ mod bookkeeping_tests {
     fn wrapper_futures_are_send() {
         fn assert_send<F: Send>(_: &F) {}
         let db = test_db();
-        let books = DbFullScanBookkeeping(db.clone());
+        let books = DbFullScanBookkeeping::new(db.clone(), TEST_REFRESH_INTERVAL);
         let mgr = manager_with_running_scan("did:plc:u", "c");
         let fut = run_scan_with(mgr, &books, &chrono::Utc::now, "did:plc:u", "c", || async {
             Ok(FullScanRun {

@@ -9932,6 +9932,61 @@
       "created_at": "2026-09-14T10:31:46.205783-07:00",
       "updated_at": "2026-09-14T10:31:46.205783-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"65f81b9\",\"confidence\":85}"
+    },
+    {
+      "id": 913,
+      "change_id": "3989b51d-56b3-458d-af1c-12d4391a9c98",
+      "node_type": "outcome",
+      "title": "Task 6 committed 555fb91 + 54ad52e + abc583c + 4bbb400: CHARCOAL_REFRESH_INTERVAL_HOURS knob, src/web/refresh.rs + admitter wiring + refresh_metrics, 8 scheduling trait methods on both backends with claim_and_enqueue_due_refreshes (one bounded transaction per tick, conditional queue write, owed-full retried as kind=full), obligation A (FullScanBookkeeping/DbFullScanBookkeeping/FullScanRun/run_scan_with + run_scan_inner, 4 mandated tests incl. assert_send and the V3-03 lifecycle test), obligation B (charcoal migrate copies the three refresh columns, asserted on Postgres), obligation C (N1 fixture scope, N2 claim fence through finish_full_scan_state, N3 backfill kind guard, N4 refresh writes no duration sample). VERIFY_WEB lib 334 / 56 binaries / 0 SKIP; VERIFY_PG 820 passed 0 failed (db_postgres 69); clippy x3 + fmt clean; 7 mutations applied, 6 RED on the paired test and 1 caught by three others. Concerns: status API says 'scan running' during a refresh (#365 follow-up); one brief test replaced because its fixture contradicted its assertion; FullScanRun landed early by signature necessity; refresh.rs web-gating splits two tests; new quiesce_users_outside pg helper; tick also runs on wake-driven passes. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T14:22:15.706251-07:00",
+      "updated_at": "2026-09-14T14:22:15.706251-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"4bbb400\",\"confidence\":85}"
+    },
+    {
+      "id": 914,
+      "change_id": "b23f4168-ba96-4293-b5ba-70192d9d75d6",
+      "node_type": "option",
+      "title": "Task 6 review I1 (tick default-on but launch_scan has no refresh dispatch until Task 9): A — default CHARCOAL_REFRESH_INTERVAL_HOURS to OFF on this branch until Task 9 lands run_refresh, AND add a kind guard in launch_scan so a refresh claim can never execute as a full scan; Task 9 restores the spec default of 24 and replaces the guard with the real dispatch",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T14:28:50.480873-07:00",
+      "updated_at": "2026-09-14T14:28:50.480873-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
+    },
+    {
+      "id": 915,
+      "change_id": "15b076a2-021c-47af-8776-218da3833b77",
+      "node_type": "option",
+      "title": "Task 6 review I1: B — keep the spec default of 24 and make launch_scan park/refuse refresh claims; the tick then queues rows nightly that nothing can run until Task 9",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T14:28:50.491102-07:00",
+      "updated_at": "2026-09-14T14:28:50.491102-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":35}"
+    },
+    {
+      "id": 916,
+      "change_id": "b3ebf2cc-074f-429e-91bd-347731ccae64",
+      "node_type": "option",
+      "title": "Task 6 review I1: C — pull Task 9's run_refresh dispatch forward into the Task 6 fix wave",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T14:28:50.500822-07:00",
+      "updated_at": "2026-09-14T14:28:50.500822-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":25}"
+    },
+    {
+      "id": 917,
+      "change_id": "202a4ee7-059e-481f-9831-76c62ec13271",
+      "node_type": "decision",
+      "title": "Task 6 review I1: choose A. The knob's spec default (24) is correct for the SHIPPED branch but wrong at this commit, where no dispatch exists; B leaves a default-on schedule queueing unrunnable rows every night; C repeats the boundary-blurring that decision 905 rejected. A is two small reversible edits, keeps the branch safe at every intermediate commit, and makes restoring the default an explicit, tested Task 9 acceptance item. Both halves are mandatory in the Task 9 dispatch: restore default 24, replace the guard with real dispatch, and add an N4 assertion THROUGH launch_scan.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T14:28:50.510515-07:00",
+      "updated_at": "2026-09-14T14:28:50.510515-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -20406,6 +20461,83 @@
       "weight": 1.0,
       "rationale": "Plan execution: Task 6 scheduling tick (+ Task 5 deferred rows 1-4, Task 3 migrate obligation)",
       "created_at": "2026-09-14T10:31:49.841301-07:00"
+    },
+    {
+      "id": 963,
+      "from_node_id": 912,
+      "to_node_id": 913,
+      "from_change_id": "b60ba82e-006a-4727-9a8c-61b29f4defad",
+      "to_change_id": "3989b51d-56b3-458d-af1c-12d4391a9c98",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 implementation outcome (incl. deferred Task 5 rows 1-4, Task 3 migrate step, 4 hardening minors)",
+      "created_at": "2026-09-14T14:22:21.446524-07:00"
+    },
+    {
+      "id": 964,
+      "from_node_id": 913,
+      "to_node_id": 914,
+      "from_change_id": "3989b51d-56b3-458d-af1c-12d4391a9c98",
+      "to_change_id": "b23f4168-ba96-4293-b5ba-70192d9d75d6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Options for Task 6 review finding I1",
+      "created_at": "2026-09-14T14:28:53.320283-07:00"
+    },
+    {
+      "id": 965,
+      "from_node_id": 914,
+      "to_node_id": 917,
+      "from_change_id": "b23f4168-ba96-4293-b5ba-70192d9d75d6",
+      "to_change_id": "202a4ee7-059e-481f-9831-76c62ec13271",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-14T14:28:53.332601-07:00"
+    },
+    {
+      "id": 966,
+      "from_node_id": 913,
+      "to_node_id": 915,
+      "from_change_id": "3989b51d-56b3-458d-af1c-12d4391a9c98",
+      "to_change_id": "15b076a2-021c-47af-8776-218da3833b77",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Options for Task 6 review finding I1",
+      "created_at": "2026-09-14T14:28:53.339591-07:00"
+    },
+    {
+      "id": 967,
+      "from_node_id": 915,
+      "to_node_id": 917,
+      "from_change_id": "15b076a2-021c-47af-8776-218da3833b77",
+      "to_change_id": "202a4ee7-059e-481f-9831-76c62ec13271",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-14T14:28:53.345441-07:00"
+    },
+    {
+      "id": 968,
+      "from_node_id": 913,
+      "to_node_id": 916,
+      "from_change_id": "3989b51d-56b3-458d-af1c-12d4391a9c98",
+      "to_change_id": "b3ebf2cc-074f-429e-91bd-347731ccae64",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Options for Task 6 review finding I1",
+      "created_at": "2026-09-14T14:28:53.351251-07:00"
+    },
+    {
+      "id": 969,
+      "from_node_id": 916,
+      "to_node_id": 917,
+      "from_change_id": "b3ebf2cc-074f-429e-91bd-347731ccae64",
+      "to_change_id": "202a4ee7-059e-481f-9831-76c62ec13271",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-14T14:28:53.357029-07:00"
     }
   ],
   "documents": [

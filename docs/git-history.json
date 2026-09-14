@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4bbb400cf6c2af558bbde79f5d96a9dee397841f",
+    "short_hash": "4bbb400",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T13:26:49-07:00",
+    "message": "style(344): drop an unnecessary clippy allow on run_scan_inner\n\nrun_scan_inner carries the same seven arguments run_scan always had, which\nis at clippy's threshold, not over it — the allow was defensive and says\nnothing true.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 1
+  },
+  {
     "hash": "65f81b9451a35fa6fb2aefef064865a0e66fce69",
     "short_hash": "65f81b9",
     "author": "Bryan Guffey",

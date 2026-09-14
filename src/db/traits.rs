@@ -888,6 +888,17 @@ pub trait Database: Send + Sync {
     async fn heartbeat_scan(&self, user_did: &str, claim_id: &str, lease_secs: i64)
         -> Result<bool>;
 
+    /// Does `claim_id` still own this user's queue row? (#344 F2)
+    ///
+    /// A read-only ownership probe for bookkeeping that writes OUTSIDE
+    /// `scan_queue` — the refresh schedule lives on `users`, so it cannot be
+    /// fenced by a `WHERE claim_id = ?` the way `finish_queued_scan` is. False
+    /// for an absent row, an unclaimed row and a row claimed by someone else,
+    /// matching the fence inside `finish_full_scan_state`. Unlike
+    /// `heartbeat_scan` it writes nothing and does not care about `status`:
+    /// the caller is finishing, not running.
+    async fn scan_claim_is_current(&self, user_did: &str, claim_id: &str) -> Result<bool>;
+
     /// Mark a scan done (error None) or failed (error Some), releasing its slot.
     /// Returns false when the row is not running under `claim_id`, in which
     /// case nothing was changed.

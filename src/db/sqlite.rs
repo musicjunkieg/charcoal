@@ -512,6 +512,11 @@ impl Database for SqliteDatabase {
         super::queries::heartbeat_scan(&conn, user_did, claim_id, lease_secs)
     }
 
+    async fn scan_claim_is_current(&self, user_did: &str, claim_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::scan_claim_is_current(&conn, user_did, claim_id)
+    }
+
     async fn finish_queued_scan(
         &self,
         user_did: &str,

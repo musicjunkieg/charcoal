@@ -149,7 +149,13 @@ fn finish_full_scan_state_inner(
     claim_id: &str,
     fail_before_commit: bool,
 ) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
+    // Immediate rather than the default Deferred (#344 F5): this is a
+    // read-then-write — the fence below decides from `claim_id` and the ETA
+    // sample from `started_at` — and a Deferred transaction takes no write
+    // lock until its first INSERT, so another writer can land between the read
+    // and the writes it authorises. `claim_next_scan` takes Immediate for the
+    // same reason; the Postgres twin gets the same guarantee from `FOR UPDATE`.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     // Fenced by the claim (#344 N2). Everything below is derived from — or
     // describes — the attempt that holds this row: the ETA sample comes from
     // the row's own `started_at`, and the cooldown anchor says "this worker
@@ -2080,6 +2086,19 @@ pub fn claim_next_scan(
 
 /// Extend a running scan's lease, only if `claim_id` still owns the row.
 /// Returns false when it does not. Mirrors PgDatabase::heartbeat_scan.
+/// See [`crate::db::Database::scan_claim_is_current`]. Read-only, so no
+/// transaction: a single statement is already atomic on SQLite.
+pub fn scan_claim_is_current(conn: &Connection, user_did: &str, claim_id: &str) -> Result<bool> {
+    let owner: Option<Option<String>> = conn
+        .query_row(
+            "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(matches!(owner, Some(Some(owner)) if owner == claim_id))
+}
+
 pub fn heartbeat_scan(
     conn: &Connection,
     user_did: &str,

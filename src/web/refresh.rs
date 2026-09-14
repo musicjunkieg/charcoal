@@ -17,6 +17,8 @@ use crate::db::Database;
 use crate::scoring::generation::scoring_revision;
 
 pub const REFRESH_INTERVAL_ENV: &str = "CHARCOAL_REFRESH_INTERVAL_HOURS";
+/// The cadence spec §4.4 specifies, and the deadline a completed scan writes
+/// even while the tick is switched off (see [`refresh_deadline_interval`]).
 pub const DEFAULT_REFRESH_INTERVAL_HOURS: u64 = 24;
 pub const MAX_REFRESH_INTERVAL_HOURS: u64 = 168;
 /// After a deferred, resumable or failed refresh: try again soon, not at the
@@ -29,12 +31,38 @@ pub const REFRESH_RETRY_HOURS: u64 = 1;
 /// transaction; the rest are claimed on following ticks, 30 s apart.
 pub const REFRESH_BATCH_PER_TICK: usize = 25;
 
-/// `None` disables the tick (`0`/`off`); unparseable → default so a typo in
-/// Railway does not silently switch refreshes off.
+/// What an unset — or unparseable — knob means on this branch: **disabled**.
+///
+/// Spec §4.4's default is 24 h, and Task 9 restores it here. It cannot be the
+/// default yet: nothing dispatches a `kind = 'refresh'` claim until Task 9
+/// lands the refresh runner, so a tick that is on by default would queue
+/// refresh rows that no worker can execute. The knob is otherwise unchanged —
+/// an explicit `6` still means six hours — so staging can switch the tick on
+/// deliberately while the runner is being built.
+fn default_refresh_interval() -> Option<Duration> {
+    None
+}
+
+/// `None` disables the tick (`0`/`off`, or an unset/unparseable value — see
+/// [`default_refresh_interval`] for why "unset" means off on this branch).
 pub fn parse_refresh_interval(raw: Option<&str>) -> Option<Duration> {
+    parse_refresh_interval_with(raw, default_refresh_interval())
+}
+
+/// The parse with its fallback injected.
+///
+/// Not folded into the caller because the fallback is itself `None` on this
+/// branch, which would make "`OFF` disables" and "an unparseable value falls
+/// back" indistinguishable — a test of the first would pass against a
+/// case-SENSITIVE match. With the fallback passed in, the two are separable
+/// today and stay separable when Task 9 restores the 24 h default.
+fn parse_refresh_interval_with(raw: Option<&str>, default: Option<Duration>) -> Option<Duration> {
     let hours = match raw.map(str::trim) {
-        None | Some("") => DEFAULT_REFRESH_INTERVAL_HOURS,
-        Some("off") => return None,
+        None | Some("") => return default,
+        // Case-insensitive: `OFF` and `Off` are spellings an operator will
+        // reach for, and falling through to warn-and-default would read them
+        // as "leave the tick alone" — the opposite of what was typed.
+        Some(s) if s.eq_ignore_ascii_case("off") => return None,
         Some(s) => match s.parse::<u64>() {
             Ok(0) => return None,
             Ok(n) => n.min(MAX_REFRESH_INTERVAL_HOURS),
@@ -43,7 +71,7 @@ pub fn parse_refresh_interval(raw: Option<&str>) -> Option<Duration> {
                     value = s,
                     "{REFRESH_INTERVAL_ENV} is not a number; using the default"
                 );
-                DEFAULT_REFRESH_INTERVAL_HOURS
+                return default;
             }
         },
     };
@@ -52,6 +80,23 @@ pub fn parse_refresh_interval(raw: Option<&str>) -> Option<Duration> {
 
 pub fn refresh_interval_from_env() -> Option<Duration> {
     parse_refresh_interval(std::env::var(REFRESH_INTERVAL_ENV).ok().as_deref())
+}
+
+/// The deadline a *completed* scan writes, whatever the tick knob says.
+///
+/// Deliberately not `Option`: a user stamped "attempted at the current
+/// revision" with `next_refresh_at IS NULL` matches neither due clause, so
+/// switching the tick back on would never pick them up again. Writing the
+/// cadence unconditionally keeps re-enabling a one-variable change — while the
+/// tick is off the deadline is simply never read.
+pub fn refresh_deadline_interval() -> Duration {
+    deadline_interval(refresh_interval_from_env())
+}
+
+/// The env-free half of [`refresh_deadline_interval`], so the fallback can be
+/// asserted without touching a process-global variable.
+fn deadline_interval(tick: Option<Duration>) -> Duration {
+    tick.unwrap_or_else(|| Duration::from_secs(DEFAULT_REFRESH_INTERVAL_HOURS * 3600))
 }
 
 fn plus(now: DateTime<Utc>, d: Duration) -> String {
@@ -99,11 +144,20 @@ pub async fn enqueue_due_refreshes(
 /// succeeded; a scheduling failure is logged and the user is caught by the
 /// generation rule (`refresh_attempted_generation` still differs) on a later
 /// tick.
-pub async fn schedule_after_success(db: &dyn Database, user_did: &str, now: DateTime<Utc>) {
-    if let Some(interval) = refresh_interval_from_env() {
-        if let Err(e) = db.schedule_refresh(user_did, &plus(now, interval)).await {
-            warn!(error = %format!("{e:#}"), "could not schedule the next refresh");
-        }
+///
+/// `interval` is injected rather than read from the environment here: the
+/// proof below stamps `refresh_attempted_generation`, so skipping the deadline
+/// would strand the user (see [`refresh_deadline_interval`]), and a function
+/// that reads a process-global variable cannot be tested in parallel with
+/// anything that writes one.
+pub async fn schedule_after_success(
+    db: &dyn Database,
+    user_did: &str,
+    now: DateTime<Utc>,
+    interval: Duration,
+) {
+    if let Err(e) = db.schedule_refresh(user_did, &plus(now, interval)).await {
+        warn!(error = %format!("{e:#}"), "could not schedule the next refresh");
     }
     // Proof: sets refreshed_generation AND refresh_attempted_generation.
     if let Err(e) = db
@@ -180,13 +234,66 @@ mod tests {
     #[test]
     fn interval_knob_defaults_disables_and_clamps() {
         let h = |n: u64| Duration::from_secs(n * 3600);
-        assert_eq!(parse_refresh_interval(None), Some(h(24)));
+        // Unset and unparseable both mean DISABLED on this branch — the
+        // refresh runner lands in Task 9, which restores the spec's 24 h
+        // default here. Everything else is unchanged.
+        assert_eq!(parse_refresh_interval(None), None);
+        assert_eq!(parse_refresh_interval(Some("")), None);
+        assert_eq!(parse_refresh_interval(Some("abc")), None);
         assert_eq!(parse_refresh_interval(Some("6")), Some(h(6)));
         assert_eq!(parse_refresh_interval(Some("0")), None);
         assert_eq!(parse_refresh_interval(Some("off")), None);
+        // A plausible operator spelling must not read as "leave it on". Run
+        // against an ENABLED fallback, because with the branch default
+        // disabled "off" and "unparseable" both yield None and a
+        // case-sensitive match would pass this by accident.
+        for spelling in ["off", "OFF", "Off", " oFf "] {
+            assert_eq!(
+                parse_refresh_interval_with(Some(spelling), Some(h(24))),
+                None,
+                "{spelling}"
+            );
+        }
+        assert_eq!(
+            parse_refresh_interval_with(Some("offf"), Some(h(24))),
+            Some(h(24)),
+            "only 'off' disables — anything else is an unparseable value"
+        );
+        assert_eq!(parse_refresh_interval(Some("1")), Some(h(1)));
         assert_eq!(parse_refresh_interval(Some("500")), Some(h(168)));
-        assert_eq!(parse_refresh_interval(Some("abc")), Some(h(24)));
         assert_eq!(parse_refresh_interval(Some(" 12 ")), Some(h(12)));
+    }
+
+    /// F4: a success writes its deadline even while the tick is off, so
+    /// switching the knob back on picks the user up again. Without it they
+    /// carry `next_refresh_at IS NULL` AND the current attempted revision,
+    /// which matches neither due clause — permanently invisible.
+    #[tokio::test]
+    async fn a_success_while_the_tick_is_off_still_leaves_the_user_reachable() {
+        let db = db();
+        let now = Utc::now();
+        user(&db, "did:plc:parked", None, None).await;
+        // What run_scan does when the knob is off: the fallback cadence.
+        assert_eq!(
+            deadline_interval(None),
+            Duration::from_secs(DEFAULT_REFRESH_INTERVAL_HOURS * 3600)
+        );
+        schedule_after_success(db.as_ref(), "did:plc:parked", now, deadline_interval(None)).await;
+        assert_eq!(
+            db.next_refresh_at("did:plc:parked").await.unwrap(),
+            Some((now + ChronoDuration::hours(DEFAULT_REFRESH_INTERVAL_HOURS as i64)).to_rfc3339()),
+            "a deadline exists even with the tick disabled"
+        );
+        // Re-enabled a day later, the tick finds them.
+        assert_eq!(
+            enqueue_due_refreshes(
+                &db,
+                now + ChronoDuration::hours(DEFAULT_REFRESH_INTERVAL_HOURS as i64 + 1),
+                Duration::from_secs(24 * 3600)
+            )
+            .await,
+            1
+        );
     }
 
     #[tokio::test]
@@ -481,8 +588,13 @@ mod tests {
             crate::web::scan_job::ScanCompletion::Complete,
         )
         .await;
-        std::env::remove_var(REFRESH_INTERVAL_ENV);
-        schedule_after_success(db.as_ref(), "did:plc:manual", now).await;
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:manual",
+            now,
+            Duration::from_secs(24 * 3600),
+        )
+        .await;
         db.finish_queued_scan(
             "did:plc:manual",
             &claim.claim_id,
@@ -625,8 +737,13 @@ mod tests {
         let db = db();
         let now = Utc::now();
         user(&db, "did:plc:u", None, None).await;
-        std::env::remove_var(REFRESH_INTERVAL_ENV);
-        schedule_after_success(db.as_ref(), "did:plc:u", now).await;
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:u",
+            now,
+            Duration::from_secs(24 * 3600),
+        )
+        .await;
         let next = db.next_refresh_at("did:plc:u").await.unwrap().unwrap();
         assert_eq!(next, (now + ChronoDuration::hours(24)).to_rfc3339());
         assert_eq!(

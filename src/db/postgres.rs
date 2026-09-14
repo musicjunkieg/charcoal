@@ -2307,6 +2307,22 @@ impl Database for PgDatabase {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn scan_claim_is_current(&self, user_did: &str, claim_id: &str) -> Result<bool> {
+        // Read-only and single-statement, so no transaction and no `FOR
+        // UPDATE`: the caller is about to skip its writes on a false, and a
+        // row that changes owner a microsecond later would have raced this
+        // worker anyway. Mirrors queries::scan_claim_is_current.
+        let row = sqlx_core::query::query("SELECT claim_id FROM scan_queue WHERE user_did = $1")
+            .bind(user_did)
+            .fetch_optional(&self.pool)
+            .await?;
+        let owner: Option<String> = match row {
+            Some(row) => row.try_get("claim_id")?,
+            None => return Ok(false),
+        };
+        Ok(owner.is_some_and(|owner| owner == claim_id))
+    }
+
     async fn finish_queued_scan(
         &self,
         user_did: &str,
