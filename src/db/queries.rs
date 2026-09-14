@@ -91,18 +91,46 @@ pub fn delete_scan_state(conn: &Connection, user_did: &str, key: &str) -> Result
     Ok(())
 }
 
-/// The cooldown anchor and the carried drain outcome, together (#344 V7-02).
+/// The cooldown anchor, the ETA sample and the carried drain outcome,
+/// together (#344 V7-02, F1).
 ///
-/// One transaction, because the pair is a single fact: "this full scan was
-/// carried out, and whatever drain it performed along the way is accounted
-/// for". Written separately, a crash between them either starts a cooldown
-/// for a run still owed, or leaves a drain outcome behind to taint an
-/// unrelated later scan.
+/// One transaction, because the three are a single fact: "this full scan was
+/// carried out, it took this long, and whatever drain it performed along the
+/// way is accounted for". Written separately, a crash between them either
+/// starts a cooldown for a run still owed, or leaves a drain outcome behind to
+/// taint an unrelated later scan.
 pub fn finish_full_scan_state(
     conn: &Connection,
     user_did: &str,
     finished_at_rfc3339: &str,
     carried_key: &str,
+) -> Result<()> {
+    finish_full_scan_state_inner(conn, user_did, finished_at_rfc3339, carried_key, false)
+}
+
+/// Test seam for the atomicity of [`finish_full_scan_state`] (#344 F2).
+///
+/// Runs the identical statements inside the identical transaction and then
+/// fails, so a test can assert that NOTHING the transaction wrote survives.
+/// `#[doc(hidden)]`, never called in production: the real function has no
+/// statement a caller can make fail from outside, and "the source says BEGIN"
+/// is not evidence that the rollback works.
+#[doc(hidden)]
+pub fn finish_full_scan_state_failing_for_test(
+    conn: &Connection,
+    user_did: &str,
+    finished_at_rfc3339: &str,
+    carried_key: &str,
+) -> Result<()> {
+    finish_full_scan_state_inner(conn, user_did, finished_at_rfc3339, carried_key, true)
+}
+
+fn finish_full_scan_state_inner(
+    conn: &Connection,
+    user_did: &str,
+    finished_at_rfc3339: &str,
+    carried_key: &str,
+    fail_before_commit: bool,
 ) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
@@ -111,10 +139,45 @@ pub fn finish_full_scan_state(
          ON CONFLICT(user_did, key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
         params![user_did, finished_at_rfc3339],
     )?;
+    // The ETA sample (F1). Read from the row's own `started_at` inside this
+    // transaction: at this moment the queue row still describes the attempt
+    // being fulfilled, and by the time a refresh reuses the row it will not.
+    let started_at: Option<String> = tx
+        .query_row(
+            "SELECT started_at FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    if let Some(secs) =
+        super::traits::full_scan_duration_secs(started_at.as_deref(), finished_at_rfc3339)
+    {
+        tx.execute(
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
+            params![
+                user_did,
+                super::traits::LAST_FULL_SCAN_DURATION_KEY,
+                secs.to_string()
+            ],
+        )?;
+    }
     tx.execute(
         "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
         params![user_did, carried_key],
     )?;
+    if fail_before_commit {
+        // Valid SQL that cannot succeed — `scan_state.value` is NOT NULL — so
+        // the failure happens INSIDE the transaction exactly as a real error
+        // would, and `?` returns without ever reaching the commit.
+        tx.execute(
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES (?1, 'injected_failure_for_test', NULL, datetime('now'))",
+            params![user_did],
+        )?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -2019,62 +2082,34 @@ pub fn scan_queue_entry(
     };
     let position = if status == "queued" { raw_position } else { 0 };
 
-    // Rolling median over the last 20 completed scans. None until any finish,
-    // so ETA is absent rather than fabricated on a fresh install.
+    // Rolling median over the 20 most recently recorded full-scan durations.
+    // None until any full scan is fulfilled, so ETA is absent rather than
+    // fabricated on a fresh install.
     //
-    // Seconds are kept FRACTIONAL, matching the Postgres backend's
-    // `EXTRACT(EPOCH FROM (finished_at - started_at))`. This used to be
-    // `num_seconds()`, which truncates, so the same scan history quoted a
-    // different ETA either side of a backend switch. Truncating is not a
-    // harmless rounding difference once `eta_seconds` multiplies the median by
-    // the batch count: a 90.6s median eight batches out is 724s here and 720s
-    // there. Rounding both would have to throw away precision Postgres already
-    // has, so the SQLite side gains it instead.
+    // The sample comes from `scan_state`, NOT from `scan_queue` (#344 F1).
+    // There is one queue row per user and a refresh enqueue resets its
+    // `started_at`/`finished_at` and sets `kind = 'refresh'`, so a median read
+    // from the queue would go permanently empty the first night the refresh
+    // job runs. `finish_full_scan_state` writes one durable sample per user
+    // instead, for every full scan the user's request was fulfilled by —
+    // never for a refresh and never for a resumable attempt, whose duration is
+    // only the time until it gave up.
     //
-    // Errors propagate with `?` rather than being dropped by `filter_map(ok)`:
-    // a corrupt row or an unparseable timestamp would otherwise silently shrink
-    // the sample and skew the median instead of surfacing.
-    //
-    // FULL rows that completed CLEANLY only (#344): a refresh re-scores a
-    // handful of accounts in about a minute, and an interrupted full scan's
-    // duration is the time until it gave up. Folding either into the median
-    // would quote a queued user an ETA for work nobody is about to do.
-    let mut durations: Vec<f64> = Vec::new();
+    // `updated_at DESC` is the "most recent 20" the queue's `finished_at DESC`
+    // used to express; `user_did` breaks the tie so the window is stable
+    // within SQLite's one-second `datetime('now')` resolution.
+    let mut values: Vec<String> = Vec::new();
     let mut stmt = conn.prepare(
-        "SELECT started_at, finished_at FROM scan_queue
-         WHERE status = 'done' AND started_at IS NOT NULL
-           AND kind = 'full' AND completion = 'complete'
-         ORDER BY finished_at DESC LIMIT 20",
+        "SELECT value FROM scan_state WHERE key = ?1
+         ORDER BY updated_at DESC, user_did DESC LIMIT 20",
     )?;
-    let rows = stmt.query_map([], |row| {
-        let started_at: String = row.get(0)?;
-        let finished_at: String = row.get(1)?;
-        Ok((started_at, finished_at))
+    let rows = stmt.query_map(params![super::traits::LAST_FULL_SCAN_DURATION_KEY], |row| {
+        row.get::<_, String>(0)
     })?;
     for row in rows {
-        let (s, f) = row?;
-        let s = chrono::DateTime::parse_from_rfc3339(&s)
-            .with_context(|| format!("scan_queue.started_at is not RFC3339: {s}"))?;
-        let f = chrono::DateTime::parse_from_rfc3339(&f)
-            .with_context(|| format!("scan_queue.finished_at is not RFC3339: {f}"))?;
-        durations.push((f - s).as_seconds_f64());
+        values.push(row?);
     }
-
-    let median = if durations.is_empty() {
-        None
-    } else {
-        // `total_cmp`, not `partial_cmp().unwrap()`: durations are finite by
-        // construction, but a total order needs no unwrap to say so.
-        durations.sort_by(f64::total_cmp);
-        let mid = durations.len() / 2;
-        // Averaging the two middle values on an even sample is what
-        // PERCENTILE_CONT(0.5) does, so the backends agree here too.
-        Some(if durations.len().is_multiple_of(2) {
-            (durations[mid - 1] + durations[mid]) / 2.0
-        } else {
-            durations[mid]
-        })
-    };
+    let median = super::traits::median_scan_duration_secs(values);
 
     let eta_seconds = super::traits::eta_seconds(&status, position, concurrency_limit, median);
 
@@ -3484,17 +3519,8 @@ mod tests {
     fn eta_is_none_for_non_queued_status_even_with_a_median_available() {
         let conn = test_db();
 
-        // Seed a finished scan so a median exists.
-        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
-        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        finish_queued_scan(
-            &conn,
-            QUEUE_USER_A,
-            &claim.claim_id,
-            FinishCompletion::Complete,
-            None,
-        )
-        .unwrap();
+        // Seed a full-scan duration sample so a median exists.
+        seed_completed_scan(&conn, "did:plc:done000000000000000", 600.0);
 
         // A running row, with the median now available, must still report
         // no ETA — a running scan's remaining time is unknown.
@@ -3520,10 +3546,11 @@ mod tests {
         );
     }
 
-    /// Fractional seconds in the completed-scan history must survive into the
-    /// median, because the Postgres backend's `EXTRACT(EPOCH FROM ...)` keeps
-    /// them. `num_seconds()` truncated, so the same history quoted a different
-    /// ETA either side of a backend switch.
+    /// Fractional seconds in the recorded duration history must survive into
+    /// the median. Both backends parse the stored `scan_state` value as `f64`
+    /// and average the two middle values on an even sample, so truncating
+    /// anywhere — as the old SQLite `num_seconds()` did — makes the same
+    /// history quote a different ETA either side of a backend switch.
     ///
     /// The position is deliberately 2, not 1: at one batch the multiplication
     /// hides the difference (90.5 and 90.0 both truncate to 90). At two
@@ -3552,22 +3579,172 @@ mod tests {
         );
     }
 
-    /// Insert a finished `scan_queue` row whose duration is exactly
-    /// `duration_secs`. Written directly rather than via
-    /// `claim_next_scan`/`finish_queued_scan` because those stamp wall-clock
-    /// times, and this needs a sub-second duration it can name.
+    /// Record a full-scan duration sample of exactly `duration_secs`, the way
+    /// `finish_full_scan_state` does.
+    ///
+    /// Written straight into `scan_state` rather than by running a scan,
+    /// because a real one stamps wall-clock times and these tests need a
+    /// duration they can name — including a sub-second one, which the writer
+    /// itself rounds to whole seconds but the reader parses as `f64`.
+    ///
+    /// Since #344 F1 this is the ONLY population the ETA median is drawn from:
+    /// seeding a `done` `scan_queue` row is invisible to it.
     fn seed_completed_scan(conn: &Connection, user_did: &str, duration_secs: f64) {
-        let started = chrono::DateTime::parse_from_rfc3339("2026-08-06T00:00:00+00:00").unwrap();
-        let finished =
-            started + chrono::TimeDelta::nanoseconds((duration_secs * 1e9).round() as i64);
-        // kind/completion explicit: since #344 the median counts CLEAN FULL
-        // rows only, so a fixture that omits them is invisible to it.
         conn.execute(
-            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
-             VALUES (?1, 'done', 'full', 'complete', ?2, ?2, ?3)",
-            params![user_did, started.to_rfc3339(), finished.to_rfc3339()],
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))",
+            params![
+                user_did,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY,
+                duration_secs.to_string()
+            ],
         )
         .unwrap();
+    }
+
+    /// #344 F1: a fulfilled full scan records its own duration, derived inside
+    /// the marker transaction from the queue row's `started_at` — the last
+    /// moment that value still describes this attempt.
+    #[test]
+    fn a_fulfilled_full_scan_records_its_duration_for_the_eta_median() {
+        let conn = test_db();
+        // A running row with a chosen start, so the derived duration is a
+        // number this test can name rather than a wall-clock near-zero.
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+             VALUES (?1, 'running', 'full', 'claim-1', ?2, ?2)",
+            params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
+        )
+        .unwrap();
+
+        // Production order: the marker is written while the row is still
+        // running, then the row is finished.
+        finish_full_scan_state(
+            &conn,
+            QUEUE_USER_A,
+            "2026-09-10T01:00:00+00:00",
+            "full_carried_completion",
+        )
+        .unwrap();
+        assert_eq!(
+            get_scan_state(
+                &conn,
+                QUEUE_USER_A,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .unwrap()
+            .as_deref(),
+            Some("3600"),
+            "one hour of full scan, in whole seconds"
+        );
+        finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            "claim-1",
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
+
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        let entry = scan_queue_entry(&conn, QUEUE_USER_B, 1).unwrap().unwrap();
+        assert_eq!(
+            entry.eta_seconds,
+            Some(3600),
+            "the median is the recorded sample"
+        );
+    }
+
+    /// #344 F1: with no `started_at` there is nothing to measure, and a made-up
+    /// sample would skew every queued user's ETA. The marker is still written.
+    #[test]
+    fn a_full_scan_with_no_start_time_records_no_duration() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
+             VALUES (?1, 'queued', 'full', ?2)",
+            params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
+        )
+        .unwrap();
+
+        finish_full_scan_state(
+            &conn,
+            QUEUE_USER_A,
+            "2026-09-10T01:00:00+00:00",
+            "full_carried_completion",
+        )
+        .unwrap();
+
+        assert_eq!(
+            get_scan_state(
+                &conn,
+                QUEUE_USER_A,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .unwrap(),
+            None
+        );
+        assert!(
+            get_scan_state(&conn, QUEUE_USER_A, "last_full_scan_finished_at")
+                .unwrap()
+                .is_some(),
+            "the cooldown anchor does not depend on the sample"
+        );
+    }
+
+    /// #344 F2: `finish_full_scan_state` is ONE transaction. With a failure
+    /// injected before the commit, neither the cooldown anchor nor the
+    /// duration sample may survive, and the carried key must still be there.
+    ///
+    /// Without the transaction (or with a commit between the statements) the
+    /// marker is already on disk when the failure lands, and this goes red —
+    /// which is the whole point: the happy-path test cannot tell a
+    /// transaction from three independent writes.
+    #[test]
+    fn a_failure_inside_finish_full_scan_state_rolls_back_every_write() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+             VALUES (?1, 'running', 'full', 'claim-1', ?2, ?2)",
+            params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
+        )
+        .unwrap();
+        set_scan_state(&conn, QUEUE_USER_A, "full_carried_completion", "whatever").unwrap();
+
+        let err = finish_full_scan_state_failing_for_test(
+            &conn,
+            QUEUE_USER_A,
+            "2026-09-10T01:00:00+00:00",
+            "full_carried_completion",
+        )
+        .expect_err("the injected statement must fail");
+        assert!(
+            format!("{err:#}").contains("NOT NULL"),
+            "the failure must be the injected one, not something else: {err:#}"
+        );
+
+        assert_eq!(
+            get_scan_state(&conn, QUEUE_USER_A, "last_full_scan_finished_at").unwrap(),
+            None,
+            "the cooldown anchor must not survive a failed transaction"
+        );
+        assert_eq!(
+            get_scan_state(
+                &conn,
+                QUEUE_USER_A,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .unwrap(),
+            None,
+            "nor may the ETA sample"
+        );
+        assert_eq!(
+            get_scan_state(&conn, QUEUE_USER_A, "full_carried_completion")
+                .unwrap()
+                .as_deref(),
+            Some("whatever"),
+            "and the carried drain outcome is still owed"
+        );
     }
 
     #[test]

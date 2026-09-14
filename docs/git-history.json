@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7b3cff7e25f20171d2cd662a4c2b5171cfbe66cb",
+    "short_hash": "7b3cff7",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T09:14:49-07:00",
+    "message": "fix(344): Postgres enqueue_scan upgrades a refresh found on the fallback re-read\n\nSELECT ... FOR UPDATE locks nothing on an ABSENT row, and the scheduling\ntick writes scan_queue without taking the per-user advisory lock, so a\nrefresh created between the state read and the conditional INSERT lands\nin the affected-0 fallback. It now applies the same in-place upgrade the\nmain arm would and reports Queued, instead of recording only the\nobligation and reporting AlreadyQueued.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 1
+  },
+  {
     "hash": "0f100211703dc33b2e5f50181ac831034ea23410",
     "short_hash": "0f10021",
     "author": "Bryan Guffey",

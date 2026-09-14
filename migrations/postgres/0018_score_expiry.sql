@@ -14,7 +14,13 @@
 --
 -- scan_queue.kind: 'full' | 'refresh'. scan_queue.full_requested_at: a
 -- full-scan request made while a refresh was running; the refresh's finish
--- turns the row into a queued full row dated by this column (R09).
+-- turns the row into a queued full row dated by this column (R09). It is
+-- backfilled for rows still in flight at deploy time: every pre-v18 queued or
+-- running row IS a user's outstanding full-scan request, and enqueued_at is
+-- when they made it. Without the backfill an attempt interrupted across the
+-- deploy carries no obligation, so the tick never retries it as full work
+-- (V3-03) and the user has to click again. Finished rows stay NULL — nothing
+-- is owed on them.
 --
 -- scan_state.last_full_scan_finished_at is backfilled from every done queue
 -- row (all pre-v18 rows are full scans) so the cooldown keeps its anchor
@@ -40,6 +46,8 @@ ALTER TABLE scan_queue
     ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'full'
     CHECK (kind IN ('full', 'refresh'));
 ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS full_requested_at TIMESTAMPTZ;
+UPDATE scan_queue SET full_requested_at = enqueued_at
+    WHERE status IN ('queued', 'running') AND full_requested_at IS NULL;
 ALTER TABLE scan_queue ADD COLUMN IF NOT EXISTS completion TEXT
     CHECK (completion IN ('complete', 'complete_with_skips', 'complete_unverified', 'resumable', 'failed'));
 

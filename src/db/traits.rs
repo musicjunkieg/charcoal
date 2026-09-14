@@ -41,8 +41,75 @@ pub struct ScanQueueEntry {
     /// by up to the cap factor. None while the status is anything but
     /// "queued" (a running scan's remaining time is unknown, not zero) and
     /// None until enough scans have finished to have a median.
+    ///
+    /// The median is sampled from the per-user `scan_state` key
+    /// [`LAST_FULL_SCAN_DURATION_KEY`], written by `finish_full_scan_state`
+    /// when a full scan is fulfilled — **not** from `scan_queue`. There is one
+    /// queue row per user and a refresh enqueue rewrites its `kind`,
+    /// `started_at` and `finished_at`, so a median read from the queue would
+    /// lose every user's full-scan sample the first night the refresh job runs
+    /// and stay empty forever after (#344 F1). `scan_state` rows are only ever
+    /// added to, so the sample survives the refresh.
     pub eta_seconds: Option<i64>,
     pub enqueued_at: String,
+}
+
+/// Per-user `scan_state` key holding the whole-second duration of that user's
+/// most recent fulfilled full scan. The population the ETA median is drawn
+/// from; see [`ScanQueueEntry::eta_seconds`].
+pub const LAST_FULL_SCAN_DURATION_KEY: &str = "last_full_scan_duration_secs";
+
+/// Whole seconds between a claimed full scan's `started_at` and the instant it
+/// fulfilled, or `None` when there is no trustworthy sample to record.
+///
+/// `None` for an absent `started_at` (nothing to measure from), for timestamps
+/// that do not parse, and for a negative span (clock skew across a restart).
+/// A fabricated sample would skew the ETA every queued user is quoted, whereas
+/// no sample merely means this attempt taught the median nothing.
+///
+/// Shared by both backends so they cannot disagree about what a duration is.
+pub(crate) fn full_scan_duration_secs(started_at: Option<&str>, finished_at: &str) -> Option<i64> {
+    let started = chrono::DateTime::parse_from_rfc3339(started_at?).ok()?;
+    let finished = chrono::DateTime::parse_from_rfc3339(finished_at).ok()?;
+    let secs = (finished - started).num_seconds();
+    (secs >= 0).then_some(secs)
+}
+
+/// Median of the raw `scan_state` duration values both backends hand in.
+///
+/// Lives here, like [`eta_seconds`], so the two cannot drift: averaging the
+/// two middle values on an even sample is what Postgres's
+/// `PERCENTILE_CONT(0.5)` did while the median was computed in SQL, and what
+/// the SQLite side has always done in Rust.
+///
+/// An unparseable value is warned about and skipped rather than failing the
+/// read: an ETA is an estimate shown next to a queue position, and one corrupt
+/// row must not take the page down. `None` on an empty sample, so a fresh
+/// install reports no ETA instead of fabricating one.
+pub(crate) fn median_scan_duration_secs<I: IntoIterator<Item = String>>(values: I) -> Option<f64> {
+    let mut durations: Vec<f64> = Vec::new();
+    for raw in values {
+        match raw.parse::<f64>() {
+            Ok(v) if v.is_finite() => durations.push(v),
+            _ => tracing::warn!(
+                value = %raw,
+                key = LAST_FULL_SCAN_DURATION_KEY,
+                "scan_state holds an unparseable full-scan duration — ignoring it"
+            ),
+        }
+    }
+    if durations.is_empty() {
+        return None;
+    }
+    // `total_cmp`, not `partial_cmp().unwrap()`: the values are finite by the
+    // filter above, and a total order needs no unwrap to say so.
+    durations.sort_by(f64::total_cmp);
+    let mid = durations.len() / 2;
+    Some(if durations.len().is_multiple_of(2) {
+        (durations[mid - 1] + durations[mid]) / 2.0
+    } else {
+        durations[mid]
+    })
 }
 
 /// Shared ETA formula for `ScanQueueEntry::eta_seconds` (#257).
@@ -417,8 +484,11 @@ pub trait Database: Send + Sync {
     async fn delete_scan_state(&self, user_did: &str, key: &str) -> Result<()>;
 
     /// Record that a full scan was carried out, in ONE transaction (#344
-    /// V7-02): write `last_full_scan_finished_at` (the cooldown anchor) and
-    /// delete `carried_key` (the drain outcome this run has now consumed).
+    /// V7-02): write `last_full_scan_finished_at` (the cooldown anchor), write
+    /// [`LAST_FULL_SCAN_DURATION_KEY`] (the ETA sample, derived in the same
+    /// transaction from the queue row's own `started_at` — omitted when there
+    /// is none), and delete `carried_key` (the drain outcome this run has now
+    /// consumed).
     ///
     /// Two calls would leave a window where the cooldown has started but the
     /// carried outcome is still there to taint an unrelated later scan — or,

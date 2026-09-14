@@ -54,6 +54,95 @@ pub struct PgDatabase {
 }
 
 impl PgDatabase {
+    /// Test seam for the atomicity of `finish_full_scan_state` (#344 F2).
+    ///
+    /// Runs the identical statements inside the identical transaction and then
+    /// fails, so a test can assert that NOTHING the transaction wrote
+    /// survives. `#[doc(hidden)]`, never called in production: the real method
+    /// has no statement a caller can make fail from outside, and "the source
+    /// says BEGIN" is not evidence that the rollback works. `pub` rather than
+    /// `#[cfg(test)]` because the Postgres tests live in an integration test
+    /// binary, which compiles against the library.
+    #[doc(hidden)]
+    pub async fn finish_full_scan_state_failing_for_test(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+    ) -> Result<()> {
+        self.finish_full_scan_state_inner(user_did, finished_at_rfc3339, carried_key, true)
+            .await
+    }
+
+    /// One transaction: the cooldown anchor, the ETA duration sample and the
+    /// retirement of the carried drain outcome are a single fact (#344 V7-02,
+    /// F1). Split, a crash between them either starts a cooldown for a run
+    /// still owed or leaves a drain outcome behind to taint an unrelated later
+    /// scan.
+    async fn finish_full_scan_state_inner(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+        fail_before_commit: bool,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx_core::query::query(
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES ($1, 'last_full_scan_finished_at', $2, NOW())
+             ON CONFLICT(user_did, key) DO UPDATE SET value = $2, updated_at = NOW()",
+        )
+        .bind(user_did)
+        .bind(finished_at_rfc3339)
+        .execute(&mut *tx)
+        .await?;
+        // The ETA sample (F1). Read from the row's own `started_at` inside
+        // this transaction: right now the queue row still describes the
+        // attempt being fulfilled, and by the time a refresh reuses the row it
+        // will not. Parsed through the shared helper rather than computed in
+        // SQL so both backends agree on what a duration is.
+        let started_at: Option<chrono::DateTime<chrono::Utc>> =
+            sqlx_core::query::query("SELECT started_at FROM scan_queue WHERE user_did = $1")
+                .bind(user_did)
+                .fetch_optional(&mut *tx)
+                .await?
+                .and_then(|r| r.get::<Option<chrono::DateTime<chrono::Utc>>, _>(0));
+        let started_at = started_at.map(|s| s.to_rfc3339());
+        if let Some(secs) =
+            super::traits::full_scan_duration_secs(started_at.as_deref(), finished_at_rfc3339)
+        {
+            sqlx_core::query::query(
+                "INSERT INTO scan_state (user_did, key, value, updated_at)
+                 VALUES ($1, $2, $3, NOW())
+                 ON CONFLICT(user_did, key) DO UPDATE SET value = $3, updated_at = NOW()",
+            )
+            .bind(user_did)
+            .bind(super::traits::LAST_FULL_SCAN_DURATION_KEY)
+            .bind(secs.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1 AND key = $2")
+            .bind(user_did)
+            .bind(carried_key)
+            .execute(&mut *tx)
+            .await?;
+        if fail_before_commit {
+            // Valid SQL that cannot succeed — `scan_state.value` is NOT NULL —
+            // so the failure happens INSIDE the transaction exactly as a real
+            // error would, and `?` returns without ever reaching the commit.
+            sqlx_core::query::query(
+                "INSERT INTO scan_state (user_did, key, value, updated_at)
+                 VALUES ($1, 'injected_failure_for_test', NULL, NOW())",
+            )
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Connect to PostgreSQL and run migrations.
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = PgPool::connect(database_url)
@@ -385,27 +474,8 @@ impl Database for PgDatabase {
         finished_at_rfc3339: &str,
         carried_key: &str,
     ) -> Result<()> {
-        // One transaction: the cooldown anchor and the retirement of the
-        // carried drain outcome are a single fact (#344 V7-02). Split, a crash
-        // between them either starts a cooldown for a run still owed or leaves
-        // a drain outcome behind to taint an unrelated later scan.
-        let mut tx = self.pool.begin().await?;
-        sqlx_core::query::query(
-            "INSERT INTO scan_state (user_did, key, value, updated_at)
-             VALUES ($1, 'last_full_scan_finished_at', $2, NOW())
-             ON CONFLICT(user_did, key) DO UPDATE SET value = $2, updated_at = NOW()",
-        )
-        .bind(user_did)
-        .bind(finished_at_rfc3339)
-        .execute(&mut *tx)
-        .await?;
-        sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1 AND key = $2")
-            .bind(user_did)
-            .bind(carried_key)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-        Ok(())
+        self.finish_full_scan_state_inner(user_did, finished_at_rfc3339, carried_key, false)
+            .await
     }
 
     async fn save_fingerprint(
@@ -1990,7 +2060,18 @@ impl Database for PgDatabase {
                         Some(("queued", "refresh")) => EnqueueOutcome::Queued,
                         Some(("running", "refresh")) => EnqueueOutcome::QueuedAfterRefresh,
                         Some(("running", _)) => EnqueueOutcome::AlreadyRunning,
-                        _ => EnqueueOutcome::AlreadyQueued,
+                        Some(_) => EnqueueOutcome::AlreadyQueued,
+                        // A 0-row `INSERT … ON CONFLICT` means a conflicting
+                        // row exists, so finding none here is an invariant
+                        // violation, not a state to report. Folding it into
+                        // `AlreadyQueued` would tell the user their scan is
+                        // waiting in a queue it is not in — a plausible lie is
+                        // worse than an error the handler can surface (#344
+                        // F5).
+                        None => anyhow::bail!(
+                            "enqueue_scan: the conditional insert for {user_did} affected no row, \
+                             yet no scan_queue row exists to explain it"
+                        ),
                     }
                 }
             }
@@ -2262,25 +2343,27 @@ impl Database for PgDatabase {
         let enqueued_at: String = row.get::<chrono::DateTime<chrono::Utc>, _>(1).to_rfc3339();
         let position: i64 = if status == "queued" { row.get(2) } else { 0 };
 
-        // Rolling median over the last 20 completed scans. NULL until any
-        // finish, so ETA is absent rather than fabricated on a fresh install.
+        // Rolling median over the 20 most recently recorded full-scan
+        // durations. None until any full scan is fulfilled, so ETA is absent
+        // rather than fabricated on a fresh install.
         //
-        // FULL rows that completed CLEANLY only (#344): a refresh re-scores a
-        // handful of accounts in about a minute, and an interrupted full
-        // scan's duration is the time until it gave up. Folding either in
-        // would quote a queued user an ETA for work nobody is about to do.
-        let median: Option<f64> = sqlx_core::query::query(
-            "SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (
-                 ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))
-             )
-             FROM (SELECT started_at, finished_at FROM scan_queue
-                   WHERE status = 'done' AND started_at IS NOT NULL
-                     AND kind = 'full' AND completion = 'complete'
-                   ORDER BY finished_at DESC LIMIT 20) recent",
+        // The sample comes from `scan_state`, NOT from `scan_queue` (#344 F1).
+        // There is one queue row per user and a refresh enqueue resets its
+        // `started_at`/`finished_at` and sets `kind = 'refresh'`, so a median
+        // read from the queue would go permanently empty the first night the
+        // refresh job runs. `finish_full_scan_state` writes one durable sample
+        // per user instead. The median itself is computed in Rust, shared with
+        // the SQLite backend, so the two cannot drift.
+        let rows = sqlx_core::query::query(
+            "SELECT value FROM scan_state WHERE key = $1
+             ORDER BY updated_at DESC, user_did DESC LIMIT 20",
         )
-        .fetch_one(&self.pool)
-        .await?
-        .get(0);
+        .bind(super::traits::LAST_FULL_SCAN_DURATION_KEY)
+        .fetch_all(&self.pool)
+        .await?;
+        let median = super::traits::median_scan_duration_secs(
+            rows.into_iter().map(|r| r.get::<String, _>(0)),
+        );
 
         let eta_seconds = eta_seconds(&status, position, concurrency_limit, median);
 

@@ -608,6 +608,14 @@ pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> 
     // time stamp (R07, V2-03). refreshed_generation is the proof written
     // only by a completed refresh or full scan.
     //
+    // scan_queue.full_requested_at is backfilled for rows that are still in
+    // flight at deploy time. Every pre-v18 queued or running row IS a user's
+    // outstanding full-scan request, and `enqueued_at` is when they made it.
+    // Without this, an attempt interrupted across the deploy carries no
+    // obligation, so the tick never retries it as full work (R09/V3-03) and
+    // the user has to click again — the one case the whole rule exists to
+    // prevent. Finished rows are left NULL: nothing is owed on them.
+    //
     // scan_state.last_full_scan_finished_at is backfilled from every done
     // queue row — all pre-v18 rows were full scans — so the cooldown keeps
     // its anchor once a refresh reuses the row (R13).
@@ -632,6 +640,8 @@ pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> 
              ALTER TABLE scan_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'full';
              ALTER TABLE scan_queue ADD COLUMN full_requested_at TEXT;
              ALTER TABLE scan_queue ADD COLUMN completion TEXT;
+             UPDATE scan_queue SET full_requested_at = enqueued_at
+                 WHERE status IN ('queued', 'running') AND full_requested_at IS NULL;
              ALTER TABLE users ADD COLUMN next_refresh_at TEXT;
              ALTER TABLE users ADD COLUMN refreshed_generation TEXT;
              ALTER TABLE users ADD COLUMN refresh_attempted_generation TEXT;
@@ -1263,6 +1273,8 @@ mod tests {
              INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
                  VALUES ('did:plc:scored', 'done', '2026-09-01T11:00:00+00:00',
                          '2026-09-01T11:00:00+00:00', '2026-09-01T12:00:00+00:00');
+             INSERT INTO scan_queue (user_did, status, enqueued_at)
+                 VALUES ('did:plc:waiting', 'queued', '2026-09-01T13:00:00+00:00');
              INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
                  VALUES ('did:plc:scored', '{\"clusters\":[],\"post_count\":0}', 0, '[0.1,0.2]');
              INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
@@ -1293,14 +1305,34 @@ mod tests {
             "NULL-score rows are backfilled too"
         );
 
-        let kind: String = conn
+        let (kind, done_requested): (String, Option<String>) = conn
             .query_row(
-                "SELECT kind FROM scan_queue WHERE user_did = 'did:plc:scored'",
+                "SELECT kind, full_requested_at FROM scan_queue WHERE user_did = 'did:plc:scored'",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
         assert_eq!(kind, "full");
+        assert_eq!(
+            done_requested, None,
+            "a finished row owes nothing, so it keeps a NULL obligation"
+        );
+
+        // A row still in flight at deploy time IS an outstanding request, and
+        // enqueued_at is when the user made it. Left NULL, the tick would
+        // never retry an attempt interrupted across the deploy as full work.
+        let (status, waiting_requested): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, full_requested_at FROM scan_queue WHERE user_did = 'did:plc:waiting'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "queued");
+        assert_eq!(
+            waiting_requested.as_deref(),
+            Some("2026-09-01T13:00:00+00:00")
+        );
 
         let (next, refreshed, attempted): (Option<String>, Option<String>, Option<String>) = conn
             .query_row(

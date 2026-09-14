@@ -10,6 +10,7 @@
 
 use anyhow::Result;
 use charcoal::db::models::AccountScore;
+use charcoal::db::traits::LAST_FULL_SCAN_DURATION_KEY;
 use charcoal::db::{EnqueueOutcome, FinishCompletion, ScanKind};
 use charcoal::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -1208,6 +1209,37 @@ async fn reset_scan_queue_fixtures(url: &str) {
         .execute(&pool)
         .await
         .unwrap();
+    // Since #344 F1 the ETA median is drawn from `scan_state`, so a duration
+    // sample left behind by a panicking test skews every later ETA assertion
+    // in this group exactly the way a stray queue row used to.
+    sqlx_core::query::query("DELETE FROM scan_state WHERE key = $1 AND user_did LIKE $2")
+        .bind(LAST_FULL_SCAN_DURATION_KEY)
+        .bind(SCAN_QUEUE_DID_PREFIX)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// Record a full-scan duration sample of exactly `duration_secs` for
+/// `user_did`, the way `finish_full_scan_state` does — the only population the
+/// ETA median is drawn from since #344 F1. Written directly because a real
+/// scan stamps wall-clock times and these tests need durations they can name.
+async fn seed_full_scan_duration(url: &str, user_did: &str, duration_secs: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (user_did, key) DO UPDATE SET value = $3, updated_at = NOW()",
+    )
+    .bind(user_did)
+    .bind(LAST_FULL_SCAN_DURATION_KEY)
+    .bind(duration_secs)
+    .execute(&pool)
+    .await
+    .unwrap();
 }
 
 /// Admission must never exceed the cap, and claims must come back in FIFO
@@ -1399,18 +1431,19 @@ async fn test_pg_running_scan_has_no_eta() {
     db.delete_user_data(U).await.unwrap();
 }
 
-/// The two backends must quote the SAME `eta_seconds` for the same scan
-/// history. They compute the median duration by different routes — Postgres
-/// via `EXTRACT(EPOCH FROM (finished_at - started_at))`, SQLite in Rust — and
-/// the SQLite side used `num_seconds()`, which truncates, while `EXTRACT`
-/// keeps fractional seconds. A user whose deployment moved from SQLite to
-/// Postgres therefore saw the estimate change with no change in history.
+/// The two backends must quote the SAME `eta_seconds` for the same duration
+/// history. Both read the raw `scan_state` sample and hand it to the shared
+/// median helper, so the only way they can disagree is if one of them starts
+/// truncating — which is exactly what the SQLite side used to do with
+/// `num_seconds()` while Postgres's `EXTRACT` kept the fraction, changing a
+/// user's estimate when their deployment moved backends with no change in
+/// history.
 ///
-/// Both sides are seeded with the SAME hand-written timestamps rather than
-/// real scans, because a wall-clock duration differs between the two runs and
-/// could not be compared for equality at all. The duration carries a half
-/// second and the queued user sits two batches out, so truncation is visible:
-/// 181s correct, 180s truncated.
+/// Both sides are seeded with the SAME hand-written duration rather than real
+/// scans, because a wall-clock duration differs between the two runs and could
+/// not be compared for equality at all. It carries a half second and the
+/// queued user sits two batches out, so truncation is visible: 181s correct,
+/// 180s truncated.
 #[tokio::test]
 async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     let _guard = scan_queue_test_lock().lock().await;
@@ -1419,8 +1452,7 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     const A: &str = "did:plc:pgtest_q_ooooooooooooo";
     const B: &str = "did:plc:pgtest_q_ppppppppppppp";
     // A 90.5-second scan: the half second is the whole point.
-    const STARTED: &str = "2026-08-06T00:00:00+00:00";
-    const FINISHED: &str = "2026-08-06T00:01:30.5+00:00";
+    const DURATION: &str = "90.5";
 
     let Some(url) = database_url() else {
         return;
@@ -1430,13 +1462,13 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
     charcoal::db::schema::create_tables(&conn).expect("schema");
     conn.execute(
-        // kind/completion explicit: since #344 the median counts CLEAN FULL
-        // rows only, so a fixture that omits them is invisible to it.
-        "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
-         VALUES (?1, 'done', 'full', 'complete', ?2, ?2, ?3)",
-        rusqlite::params![DONE, STARTED, FINISHED],
+        // Since #344 F1 the median is drawn from `scan_state`; a `done`
+        // `scan_queue` row is invisible to it on both backends.
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES (?1, ?2, ?3, datetime('now'))",
+        rusqlite::params![DONE, LAST_FULL_SCAN_DURATION_KEY, DURATION],
     )
-    .expect("seed the completed scan");
+    .expect("seed the duration sample");
     charcoal::db::queries::enqueue_scan(&conn, A).expect("enqueue A");
     std::thread::sleep(std::time::Duration::from_millis(10));
     charcoal::db::queries::enqueue_scan(&conn, B).expect("enqueue B");
@@ -1447,22 +1479,7 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     // --- Postgres side -----------------------------------------------------
     reset_scan_queue_fixtures(&url).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
-    {
-        use sqlx_core::pool::Pool;
-        use sqlx_postgres::Postgres;
-
-        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
-        sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', 'full', 'complete', $2, $2, $3)",
-        )
-        .bind(DONE)
-        .bind(chrono::DateTime::parse_from_rfc3339(STARTED).unwrap())
-        .bind(chrono::DateTime::parse_from_rfc3339(FINISHED).unwrap())
-        .execute(&pool)
-        .await
-        .expect("seed the completed scan");
-    }
+    seed_full_scan_duration(&url, DONE, DURATION).await;
     db.upsert_user(A, "q.bsky.social").await.unwrap();
     db.upsert_user(B, "q.bsky.social").await.unwrap();
     db.enqueue_scan(A).await.unwrap();
@@ -1758,7 +1775,7 @@ async fn test_pg_null_lease_is_reclaimed() {
 async fn test_pg_eta_accounts_for_the_concurrency_cap() {
     let _guard = scan_queue_test_lock().lock().await;
 
-    // One finished scan of a known duration gives a deterministic median.
+    // One recorded duration sample gives a deterministic median.
     // Unique to this test — see the note in test_pg_null_lease_is_reclaimed.
     const DONE: &str = "did:plc:pgtest_q_uuuuuuuuuuuuu";
     // Four queued rows so the last one sits at position 4.
@@ -1775,28 +1792,16 @@ async fn test_pg_eta_accounts_for_the_concurrency_cap() {
     reset_scan_queue_fixtures(&url).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    // The median is a whole-table figure, so this test needs the table to hold
-    // exactly one finished row — its own. `reset_scan_queue_fixtures` above
-    // cleared the group's rows; anything else in scan_queue at this point
-    // belongs to production data in a shared database, which this test cannot
-    // and should not assume away, so it asserts nothing about other users.
-    {
-        use sqlx_core::pool::Pool;
-        use sqlx_postgres::Postgres;
-        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
-
-        db.delete_user_data(DONE).await.unwrap();
-        db.upsert_user(DONE, "q.bsky.social").await.unwrap();
-        // A 'done' row lasting exactly 600s.
-        sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', 'full', 'complete', NOW(), NOW() - INTERVAL '600 seconds', NOW())",
-        )
-        .bind(DONE)
-        .execute(&pool)
-        .await
-        .unwrap();
-    }
+    // The median is a whole-table figure, so this test needs the duration
+    // samples to be exactly one — its own. `reset_scan_queue_fixtures` above
+    // cleared the group's queue rows AND its duration keys; anything else in
+    // `scan_state` at this point belongs to production data in a shared
+    // database, which this test cannot and should not assume away, so it
+    // asserts nothing about other users.
+    db.delete_user_data(DONE).await.unwrap();
+    db.upsert_user(DONE, "q.bsky.social").await.unwrap();
+    // A full scan that lasted exactly 600s.
+    seed_full_scan_duration(&url, DONE, "600").await;
 
     for d in QUEUED {
         db.delete_user_data(d).await.unwrap();
@@ -2211,37 +2216,193 @@ async fn test_pg_refresh_never_downgrades() {
     db.delete_user_data(U).await.unwrap();
 }
 
-/// The ETA median is over CLEAN FULL scans only — a one-minute refresh and a
-/// cost-capped attempt must not set the expectation for a two-hour scan.
+/// Postgres twin of
+/// `unit_scan_kind::a_full_enqueue_records_the_obligation_on_a_*_full_row_that_lacks_one`
+/// (#344 Minor 3): the `COALESCE` on the already-queued and already-running
+/// arms records the obligation for a user whose own full scan is already in
+/// flight. A row written by a pre-v18 binary carries `full_requested_at IS
+/// NULL`, and the enqueue has to repair it — otherwise an interrupted attempt
+/// on that row is never retried, because nothing says a full scan is owed.
 #[tokio::test]
-async fn test_pg_eta_median_ignores_refresh_and_unclean_rows() {
+async fn test_pg_enqueue_records_the_obligation_on_in_flight_full_rows() {
     let _guard = scan_queue_test_lock().lock().await;
 
-    const WAITER: &str = "did:plc:pgtest_q_kind_waiter";
+    const QUEUED: &str = "did:plc:pgtest_q_oblig_queued";
+    const RUNNING: &str = "did:plc:pgtest_q_oblig_running";
     let Some(url) = database_url() else {
         return;
     };
     reset_scan_queue_fixtures(&url).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    // Written directly: `enqueue_scan`/`finish_queued_scan` stamp NOW(), and
-    // these rows need chosen durations.
     let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
         .await
         .unwrap();
-    for (did, kind, completion, mins) in [
-        ("did:plc:pgtest_q_kind_full", "full", "complete", 60),
-        ("did:plc:pgtest_q_kind_refr", "refresh", "complete", 1),
-        ("did:plc:pgtest_q_kind_capd", "full", "resumable", 1),
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+         VALUES ($1, 'queued', 'full', $2, NULL)",
+    )
+    .bind(QUEUED)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at, full_requested_at)
+         VALUES ($1, 'running', 'full', 'claim-1', $2, $2, NULL)",
+    )
+    .bind(RUNNING)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        db.enqueue_scan(QUEUED).await.unwrap(),
+        EnqueueOutcome::AlreadyQueued
+    );
+    let r = pg_row(&db, QUEUED).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+    assert!(
+        r.full_requested_at.is_some(),
+        "the obligation is recorded even though nothing else changed"
+    );
+    assert_eq!(
+        r.enqueued_at, "2026-09-10T00:00:00+00:00",
+        "and the user keeps the place they already held"
+    );
+
+    assert_eq!(
+        db.enqueue_scan(RUNNING).await.unwrap(),
+        EnqueueOutcome::AlreadyRunning
+    );
+    let r = pg_row(&db, RUNNING).await;
+    assert_eq!((r.status.as_str(), r.kind), ("running", ScanKind::Full));
+    assert!(
+        r.full_requested_at.is_some(),
+        "the obligation is recorded; the running scan is left alone"
+    );
+    assert_eq!(r.started_at.as_deref(), Some("2026-09-10T00:00:00+00:00"));
+
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// Postgres twin of
+/// `unit_scan_kind::the_eta_median_survives_the_refresh_that_rewrites_the_queue_row`
+/// (#344 F1): a fulfilled full scan records its duration in `scan_state`, and
+/// the nightly refresh that reuses the very same queue row cannot erase it.
+///
+/// Sourced from the queue row, the second half of this went to `None` and
+/// every queued user's ETA disappeared for good the first night the tick ran.
+#[tokio::test]
+async fn test_pg_eta_median_survives_the_refresh_that_rewrites_the_queue_row() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const WAITER: &str = "did:plc:pgtest_q_kind_waiter";
+    const SCANNER: &str = "did:plc:pgtest_q_kind_scanner";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.upsert_user(SCANNER, "q.bsky.social").await.unwrap();
+
+    // A running full scan whose start is an hour before it fulfils, written
+    // directly so the derived duration is a number this test can name.
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+         VALUES ($1, 'running', 'full', 'claim-1', $2, $2)",
+    )
+    .bind(SCANNER)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Production order: the marker while the row is still running, then the
+    // row is finished.
+    db.finish_full_scan_state(
+        SCANNER,
+        "2026-09-10T01:00:00+00:00",
+        "full_carried_completion",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        db.get_scan_state(SCANNER, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("3600"),
+        "one hour of full scan, in whole seconds"
+    );
+    assert!(db
+        .finish_queued_scan(SCANNER, "claim-1", FinishCompletion::Complete, None)
+        .await
+        .unwrap());
+
+    db.enqueue_scan(WAITER).await.unwrap();
+    assert_eq!(
+        db.scan_queue_entry(WAITER, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .eta_seconds,
+        Some(3600),
+        "the median is the recorded sample"
+    );
+
+    // The nightly refresh now takes over that user's one queue row.
+    db.enqueue_refresh_scan(SCANNER).await.unwrap();
+    let r = pg_row(&db, SCANNER).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Refresh));
+    assert_eq!(
+        r.started_at, None,
+        "the refresh really did wipe the timing the old median read"
+    );
+    assert_eq!(
+        db.scan_queue_entry(WAITER, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .eta_seconds,
+        Some(3600),
+        "the sample lives in scan_state, so the refresh cannot take it away"
+    );
+
+    db.delete_user_data(SCANNER).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// The negative control for the move (#344 F1) on Postgres: the queue row is
+/// not a median source any more. Clean, done, `kind = 'full'` rows with real
+/// durations and no `scan_state` sample must quote no ETA.
+#[tokio::test]
+async fn test_pg_eta_median_is_not_read_from_the_queue_row() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const WAITER: &str = "did:plc:pgtest_q_kind_waiter2";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    for did in [
+        "did:plc:pgtest_q_kind_clean1",
+        "did:plc:pgtest_q_kind_clean2",
     ] {
         sqlx_core::query::query(
             "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', $2, $3, NOW(), NOW(), NOW() + make_interval(mins => $4))",
+             VALUES ($1, 'done', 'full', 'complete', NOW(), NOW() - INTERVAL '3600 seconds', NOW())",
         )
         .bind(did)
-        .bind(kind)
-        .bind(completion)
-        .bind(mins)
         .execute(&pool)
         .await
         .unwrap();
@@ -2250,9 +2411,8 @@ async fn test_pg_eta_median_ignores_refresh_and_unclean_rows() {
     db.enqueue_scan(WAITER).await.unwrap();
     let entry = db.scan_queue_entry(WAITER, 1).await.unwrap().unwrap();
     assert_eq!(
-        entry.eta_seconds,
-        Some(3600),
-        "median over clean full scans only"
+        entry.eta_seconds, None,
+        "no recorded duration sample means no ETA, however many done rows there are"
     );
 
     reset_scan_queue_fixtures(&url).await;
@@ -2290,9 +2450,88 @@ async fn test_pg_finish_full_scan_state_is_one_transaction() {
         Some("done"),
         "the delete is scoped to one key"
     );
+    assert_eq!(
+        db.get_scan_state(U, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap(),
+        None,
+        "no queue row, so no started_at, so no ETA sample to invent (#344 F1)"
+    );
 
     // Deleting an absent key is not an error — absence is the wanted state.
     db.delete_scan_state(U, CARRIED).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// #344 F2, the failure half of the one-transaction property on Postgres:
+/// with a failure injected before the commit, neither the cooldown anchor nor
+/// the duration sample may survive, and the carried key must still be there.
+///
+/// Without the transaction (or with a commit between the statements) the
+/// marker is already durable when the failure lands and this goes red — which
+/// is the point: the happy-path test above cannot tell a transaction from
+/// three independent writes.
+#[tokio::test]
+async fn test_pg_a_failure_inside_finish_full_scan_state_rolls_back_every_write() {
+    const U: &str = "did:plc:pgtest_fullstate_rb00";
+    const CARRIED: &str = "full_carried_completion";
+    let Some(url) = database_url() else {
+        return;
+    };
+    // The concrete type, not `connect_postgres`'s `Arc<dyn Database>`: the
+    // failure seam is an inherent method, not part of the trait.
+    use charcoal::db::Database as _;
+    let db = charcoal::db::postgres::PgDatabase::connect(&url)
+        .await
+        .unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "fs.bsky.social").await.unwrap();
+    db.set_scan_state(U, CARRIED, "whatever").await.unwrap();
+
+    // A running row, so the duration sample would be written too if the
+    // transaction committed — both writes have to disappear.
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+         VALUES ($1, 'running', 'full', 'claim-1', $2, $2)",
+    )
+    .bind(U)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let err = db
+        .finish_full_scan_state_failing_for_test(U, "2026-09-10T01:00:00+00:00", CARRIED)
+        .await
+        .expect_err("the injected statement must fail");
+    assert!(
+        format!("{err:#}").contains("null value in column"),
+        "the failure must be the injected NOT NULL violation: {err:#}"
+    );
+
+    assert_eq!(
+        db.get_scan_state(U, "last_full_scan_finished_at")
+            .await
+            .unwrap(),
+        None,
+        "the cooldown anchor must not survive a failed transaction"
+    );
+    assert_eq!(
+        db.get_scan_state(U, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap(),
+        None,
+        "nor may the ETA sample"
+    );
+    assert_eq!(
+        db.get_scan_state(U, CARRIED).await.unwrap().as_deref(),
+        Some("whatever"),
+        "and the carried drain outcome is still owed"
+    );
+
     db.delete_user_data(U).await.unwrap();
 }
 
@@ -3529,6 +3768,7 @@ async fn test_pg_migration_v18_upgrades_from_v17() {
 
     const V18_SCORED: &str = "did:plc:v18scored";
     const V18_UNSCORED: &str = "did:plc:v18unscored";
+    const V18_WAITING: &str = "did:plc:v18waiting";
     const V18_ACCT: &str = "did:plc:v18acct";
     const V18_NA: &str = "did:plc:v18na";
     // pgvector's `vector(384)` column enforces the dimension on insert, so a
@@ -3567,6 +3807,14 @@ async fn test_pg_migration_v18_upgrades_from_v17() {
                  '2026-09-01T11:00:00+00:00'::timestamptz, '2026-09-01T12:00:00+00:00'::timestamptz)",
     )
     .bind(V18_SCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at)
+         VALUES ($1, 'queued', '2026-09-01T13:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_WAITING)
     .execute(&pool)
     .await
     .unwrap();
@@ -3630,16 +3878,41 @@ async fn test_pg_migration_v18_upgrades_from_v17() {
         "Postgres valid_until is NOT NULL after backfill"
     );
 
-    let queue_row =
-        sqlx_core::query::query("SELECT kind, completion FROM scan_queue WHERE user_did = $1")
-            .bind(V18_SCORED)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let queue_row = sqlx_core::query::query(
+        "SELECT kind, completion, full_requested_at FROM scan_queue WHERE user_did = $1",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let kind: String = queue_row.get(0);
     let completion: Option<String> = queue_row.get(1);
+    let done_requested: Option<chrono::DateTime<chrono::Utc>> = queue_row.get(2);
     assert_eq!(kind, "full");
     assert!(completion.is_none());
+    assert!(
+        done_requested.is_none(),
+        "a finished row owes nothing, so it keeps a NULL obligation"
+    );
+
+    // A row still in flight at deploy time IS an outstanding request, and
+    // enqueued_at is when the user made it. Left NULL, the tick would never
+    // retry an attempt interrupted across the deploy as full work.
+    let waiting = sqlx_core::query::query(
+        "SELECT status, full_requested_at = enqueued_at FROM scan_queue WHERE user_did = $1",
+    )
+    .bind(V18_WAITING)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let waiting_status: String = waiting.get(0);
+    let waiting_backfilled: Option<bool> = waiting.get(1);
+    assert_eq!(waiting_status, "queued");
+    assert_eq!(
+        waiting_backfilled,
+        Some(true),
+        "an in-flight row's obligation is backfilled from enqueued_at"
+    );
 
     let user_row = sqlx_core::query::query(
         "SELECT next_refresh_at IS NULL, refreshed_generation IS NULL, refresh_attempted_generation IS NULL

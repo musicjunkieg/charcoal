@@ -368,10 +368,15 @@ pub struct ScanReport {
     pub completion: crate::db::FinishCompletion,
 }
 
-/// The cooldown anchor. Written for Complete AND CompleteWithSkips (the
-/// user's request was fulfilled; skipped accounts are per-account gaps the
-/// retry covers), never for Resumable. Best-effort: a scan that completed
-/// must not be reported failed because a marker write failed.
+/// The cooldown anchor. Written for Complete, CompleteWithSkips AND
+/// CompleteUnverified — every completion [`ScanCompletion::fulfilled`] admits
+/// (V6-01): the user's request was carried out, and skipped or unverifiable
+/// accounts are per-account gaps the retry covers. Never for Resumable.
+/// Best-effort: a scan that completed must not be reported failed because a
+/// marker write failed.
+///
+/// The same call records the run's duration as the ETA median's sample
+/// (#344 F1) — see [`Database::finish_full_scan_state`].
 ///
 /// `pub`, like `run_under_slot`, for the same reason: the V3-02 property —
 /// the cooldown reads THIS marker and never the queue row's `done` status —

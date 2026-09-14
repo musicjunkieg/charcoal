@@ -2,12 +2,13 @@
 // scan_queue. The rules under test keep a nightly refresh from ever costing a
 // human their scan: an upgrade keeps their place, a request during a running
 // refresh is honoured when it finishes, a refresh never downgrades, and the
-// ETA median ignores refresh durations.
+// ETA median is sampled somewhere a refresh cannot erase it.
 
 use std::sync::Arc;
 
 use charcoal::db::schema::create_tables;
 use charcoal::db::sqlite::SqliteDatabase;
+use charcoal::db::traits::LAST_FULL_SCAN_DURATION_KEY;
 use charcoal::db::{Database, EnqueueOutcome, FinishCompletion, ScanKind};
 use rusqlite::{params, Connection};
 
@@ -287,48 +288,166 @@ async fn admission_is_fifo_across_kinds() {
     );
 }
 
-/// The ETA quoted to a queued user is a median of FULL scan durations.
+/// #344 Minor 3: the `COALESCE` on the already-queued and already-running
+/// arms is what records the obligation for a user whose own full scan is
+/// already in flight. A row written by a pre-v18 binary carries
+/// `full_requested_at IS NULL`, and the enqueue has to repair it — otherwise
+/// an interrupted attempt on that row is never retried, because nothing says
+/// a full scan is owed.
 #[tokio::test]
-async fn eta_median_ignores_refresh_rows() {
+async fn a_full_enqueue_records_the_obligation_on_a_queued_full_row_that_lacks_one() {
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
     conn.execute(
-        "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
-         VALUES ('did:plc:full', 'done', 'full', 'complete',
-                 '2026-09-10T00:00:00+00:00', '2026-09-10T00:00:00+00:00', '2026-09-10T01:00:00+00:00'),
-                ('did:plc:refresh', 'done', 'refresh', 'complete',
-                 '2026-09-11T00:00:00+00:00', '2026-09-11T00:00:00+00:00', '2026-09-11T00:01:00+00:00')",
-        [],
+        "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+         VALUES (?1, 'queued', 'full', ?2, NULL)",
+        params![USER, "2026-09-10T00:00:00+00:00"],
     )
     .unwrap();
     let db = SqliteDatabase::new(conn);
-    db.enqueue_scan(USER).await.unwrap();
-    let entry = db.scan_queue_entry(USER, 1).await.unwrap().unwrap();
-    assert_eq!(entry.eta_seconds, Some(3600), "median over full scans only");
+
+    assert_eq!(
+        db.enqueue_scan(USER).await.unwrap(),
+        EnqueueOutcome::AlreadyQueued
+    );
+    let r = row(&db, USER).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+    assert!(
+        r.full_requested_at.is_some(),
+        "the obligation is recorded even though nothing else changed"
+    );
+    assert_eq!(
+        r.enqueued_at, "2026-09-10T00:00:00+00:00",
+        "and the user keeps the place they already held"
+    );
 }
 
-/// Only a *clean* full scan feeds the median: a resumable attempt's duration
-/// is the time until it gave up, which says nothing about how long a scan
-/// takes.
+/// The running twin of the test above (#344 Minor 3).
 #[tokio::test]
-async fn eta_median_ignores_unclean_completions() {
+async fn a_full_enqueue_records_the_obligation_on_a_running_full_row_that_lacks_one() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    conn.execute(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at, full_requested_at)
+         VALUES (?1, 'running', 'full', 'claim-1', ?2, ?2, NULL)",
+        params![USER, "2026-09-10T00:00:00+00:00"],
+    )
+    .unwrap();
+    let db = SqliteDatabase::new(conn);
+
+    assert_eq!(
+        db.enqueue_scan(USER).await.unwrap(),
+        EnqueueOutcome::AlreadyRunning
+    );
+    let r = row(&db, USER).await;
+    assert_eq!((r.status.as_str(), r.kind), ("running", ScanKind::Full));
+    assert!(
+        r.full_requested_at.is_some(),
+        "the obligation is recorded; the running scan is left alone"
+    );
+    assert_eq!(r.started_at.as_deref(), Some("2026-09-10T00:00:00+00:00"));
+}
+
+/// #344 F1, the whole point of moving the sample out of `scan_queue`: a
+/// fulfilled full scan records its duration in `scan_state`, and the nightly
+/// refresh that reuses the very same queue row — resetting `started_at` and
+/// `finished_at`, flipping `kind` to `refresh` — cannot erase it.
+///
+/// Sourced from the queue row, this test's second half went to `None` and
+/// every queued user's ETA disappeared for good the first night Task 6's tick
+/// ran.
+#[tokio::test]
+async fn the_eta_median_survives_the_refresh_that_rewrites_the_queue_row() {
+    const SCANNER: &str = "did:plc:kindtest_scanner0000000";
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    // A running full scan started an hour before it fulfils, so the derived
+    // duration is a number this test can name.
+    conn.execute(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+         VALUES (?1, 'running', 'full', 'claim-1', ?2, ?2)",
+        params![SCANNER, "2026-09-10T00:00:00+00:00"],
+    )
+    .unwrap();
+    let db = SqliteDatabase::new(conn);
+
+    // Production order: the marker while the row is still running, then the
+    // row is finished. The carried key is just an argument here; its own
+    // contract is covered in `scan_job.rs`.
+    db.finish_full_scan_state(
+        SCANNER,
+        "2026-09-10T01:00:00+00:00",
+        "full_carried_completion",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        db.get_scan_state(SCANNER, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("3600"),
+        "one hour of full scan, in whole seconds"
+    );
+    assert!(db
+        .finish_queued_scan(SCANNER, "claim-1", FinishCompletion::Complete, None)
+        .await
+        .unwrap());
+
+    db.enqueue_scan(USER).await.unwrap();
+    assert_eq!(
+        db.scan_queue_entry(USER, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .eta_seconds,
+        Some(3600),
+        "the median is the recorded sample"
+    );
+
+    // The nightly refresh now takes over that user's one queue row.
+    db.enqueue_refresh_scan(SCANNER).await.unwrap();
+    let r = row(&db, SCANNER).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Refresh));
+    assert_eq!(
+        r.started_at, None,
+        "the refresh really did wipe the timing the old median read"
+    );
+    assert_eq!(
+        db.scan_queue_entry(USER, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .eta_seconds,
+        Some(3600),
+        "the sample lives in scan_state, so the refresh cannot take it away"
+    );
+}
+
+/// The negative control for the move (#344 F1): the queue row is not a median
+/// source at all any more. Clean, done, `kind = 'full'` rows with real
+/// durations and no `scan_state` sample must quote no ETA — if they do, the
+/// old query is still in there somewhere.
+#[tokio::test]
+async fn the_eta_median_is_not_read_from_the_queue_row() {
     let conn = Connection::open_in_memory().unwrap();
     create_tables(&conn).unwrap();
     conn.execute(
         "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
          VALUES ('did:plc:clean', 'done', 'full', 'complete',
                  '2026-09-10T00:00:00+00:00', '2026-09-10T00:00:00+00:00', '2026-09-10T01:00:00+00:00'),
-                ('did:plc:capped', 'done', 'full', 'resumable',
-                 '2026-09-11T00:00:00+00:00', '2026-09-11T00:00:00+00:00', '2026-09-11T00:01:00+00:00'),
-                ('did:plc:legacy', 'done', 'full', NULL,
-                 '2026-09-12T00:00:00+00:00', '2026-09-12T00:00:00+00:00', '2026-09-12T00:02:00+00:00')",
+                ('did:plc:clean2', 'done', 'full', 'complete',
+                 '2026-09-11T00:00:00+00:00', '2026-09-11T00:00:00+00:00', '2026-09-11T02:00:00+00:00')",
         [],
     )
     .unwrap();
     let db = SqliteDatabase::new(conn);
     db.enqueue_scan(USER).await.unwrap();
     let entry = db.scan_queue_entry(USER, 1).await.unwrap().unwrap();
-    assert_eq!(entry.eta_seconds, Some(3600));
+    assert_eq!(
+        entry.eta_seconds, None,
+        "no recorded duration sample means no ETA, however many done rows there are"
+    );
 }
 
 #[test]

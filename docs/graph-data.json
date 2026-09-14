@@ -9855,6 +9855,61 @@
       "created_at": "2026-09-14T06:35:46.307797-07:00",
       "updated_at": "2026-09-14T06:35:46.307797-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
+    },
+    {
+      "id": 906,
+      "change_id": "25e26fe9-2d29-4578-b2ba-c22f18b0b8e2",
+      "node_type": "outcome",
+      "title": "Task 5 committed f01bc21 + 7b3cff7 under decision 905 (split by dependency owner): ScanKind/EnqueueOutcome/FinishCompletion, enqueue upgrades a queued refresh in place keeping enqueued_at, full_requested_at obligation via COALESCE, finish flips write scan_queue.completion, ScanCompletion + classify from persisted scan_skips, cooldown marker last_full_scan_finished_at, 202 body + admin kind/full_requested_at, tests/unit_scan_kind.rs (17) + 5 Postgres twins; also landed CARRIED_KEY, finish_full_scan_state, delete_scan_state, AccountScore::default_for_test as drop-in seams. Deferred manifest (7 rows) in task-5-report.md: FullScanBookkeeping/DbFullScanBookkeeping/run_scan_with+assert_send + V3-03 lifecycle test → Task 6; CarriedCompletion+helpers/OwnRun/drain_then_run + 7 tests → Task 9. VERIFY_WEB 0 SKIP, VERIFY_PG 803 green, clippy x3 clean, VERIFY_FE test+build pass (check has 5 pre-existing errors on HEAD). Concern: legacy done rows no longer feed the ETA median (runbook). Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T09:23:51.805526-07:00",
+      "updated_at": "2026-09-14T09:23:51.805526-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"7b3cff7\",\"confidence\":85}"
+    },
+    {
+      "id": 907,
+      "change_id": "5e99fe74-6b40-434e-890b-b56ef9698a44",
+      "node_type": "option",
+      "title": "ETA median source (Task 5 review I1): A — write a per-user last_full_scan_duration_secs key into scan_state in the same transaction as the cooldown marker (finish_full_scan_state) and compute the queue ETA median over those keys; the shared scan_queue row can then be overwritten by the nightly refresh without erasing full-scan samples. No migration (scan_state is key/value)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T09:31:00.054186-07:00",
+      "updated_at": "2026-09-14T09:31:00.054186-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
+    },
+    {
+      "id": 908,
+      "change_id": "f9ccb40f-7a36-49ad-8ed1-d029301b332c",
+      "node_type": "option",
+      "title": "ETA median source: B — keep the brief's rule (median over scan_queue rows with kind='full' AND completion='complete') and document in the runbook that eta_seconds is null once the refresh tick runs, since scan_queue is one row per user and REFRESH_ENQUEUE_SQL resets started_at/finished_at",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T09:31:00.064356-07:00",
+      "updated_at": "2026-09-14T09:31:00.064356-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":35}"
+    },
+    {
+      "id": 909,
+      "change_id": "579abb83-3848-4b67-8497-929e49097d7b",
+      "node_type": "option",
+      "title": "ETA median source: C — add a scan_durations history table (migration v19) and median over it",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T09:31:00.074428-07:00",
+      "updated_at": "2026-09-14T09:31:00.074428-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":40}"
+    },
+    {
+      "id": 910,
+      "change_id": "4f267bee-3a1a-4b92-a36e-18581ff434c9",
+      "node_type": "decision",
+      "title": "ETA median source: choose A. B ships a permanent user-facing regression the plan did not choose deliberately (its median rule predates the shared-row consequence, surfaced only at Task 5 review); C is the same idea as A with a migration the key/value table makes unnecessary. A is reversible, keeps #257's ETA promise, and stays inside files Task 5 already owns. Bryan can overrule at PR time.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T09:31:00.084056-07:00",
+      "updated_at": "2026-09-14T09:31:00.084056-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -20219,6 +20274,83 @@
       "weight": 1.0,
       "rationale": "Decision A governs how Task 5 is executed",
       "created_at": "2026-09-14T06:35:53.440516-07:00"
+    },
+    {
+      "id": 953,
+      "from_node_id": 901,
+      "to_node_id": 906,
+      "from_change_id": "d0c6ea1a-f7fb-4784-902c-1a8f78300799",
+      "to_change_id": "25e26fe9-2d29-4578-b2ba-c22f18b0b8e2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 implementation outcome (under decision 905)",
+      "created_at": "2026-09-14T09:23:54.394810-07:00"
+    },
+    {
+      "id": 954,
+      "from_node_id": 906,
+      "to_node_id": 907,
+      "from_change_id": "25e26fe9-2d29-4578-b2ba-c22f18b0b8e2",
+      "to_change_id": "5e99fe74-6b40-434e-890b-b56ef9698a44",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "ETA median options raised by Task 5 review",
+      "created_at": "2026-09-14T09:31:03.169018-07:00"
+    },
+    {
+      "id": 955,
+      "from_node_id": 907,
+      "to_node_id": 910,
+      "from_change_id": "5e99fe74-6b40-434e-890b-b56ef9698a44",
+      "to_change_id": "4f267bee-3a1a-4b92-a36e-18581ff434c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-14T09:31:03.175969-07:00"
+    },
+    {
+      "id": 956,
+      "from_node_id": 906,
+      "to_node_id": 908,
+      "from_change_id": "25e26fe9-2d29-4578-b2ba-c22f18b0b8e2",
+      "to_change_id": "f9ccb40f-7a36-49ad-8ed1-d029301b332c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "ETA median options raised by Task 5 review",
+      "created_at": "2026-09-14T09:31:03.183218-07:00"
+    },
+    {
+      "id": 957,
+      "from_node_id": 908,
+      "to_node_id": 910,
+      "from_change_id": "f9ccb40f-7a36-49ad-8ed1-d029301b332c",
+      "to_change_id": "4f267bee-3a1a-4b92-a36e-18581ff434c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-14T09:31:03.189362-07:00"
+    },
+    {
+      "id": 958,
+      "from_node_id": 906,
+      "to_node_id": 909,
+      "from_change_id": "25e26fe9-2d29-4578-b2ba-c22f18b0b8e2",
+      "to_change_id": "579abb83-3848-4b67-8497-929e49097d7b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "ETA median options raised by Task 5 review",
+      "created_at": "2026-09-14T09:31:03.195228-07:00"
+    },
+    {
+      "id": 959,
+      "from_node_id": 909,
+      "to_node_id": 910,
+      "from_change_id": "579abb83-3848-4b67-8497-929e49097d7b",
+      "to_change_id": "4f267bee-3a1a-4b92-a36e-18581ff434c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-14T09:31:03.201033-07:00"
     }
   ],
   "documents": [
