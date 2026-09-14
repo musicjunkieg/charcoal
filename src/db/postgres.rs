@@ -104,117 +104,10 @@ impl PgDatabase {
 
         // Run all migrations using the shared pool. The advisory lock is held
         // on lock_conn independently, so pool connections can be used freely.
-        let migration_result: Result<()> = async {
-            // Ensure schema_version table exists (idempotent DDL, no transaction needed)
-            sqlx_core::query::query(
-                "CREATE TABLE IF NOT EXISTS schema_version (
-                    version INTEGER PRIMARY KEY,
-                    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )",
-            )
-            .execute(&self.pool)
-            .await?;
-
-            let migrations = [
-                (
-                    1,
-                    include_str!("../../migrations/postgres/0001_initial.sql"),
-                ),
-                (
-                    2,
-                    include_str!("../../migrations/postgres/0002_pgvector.sql"),
-                ),
-                (
-                    3,
-                    include_str!("../../migrations/postgres/0003_behavioral_signals.sql"),
-                ),
-                (
-                    4,
-                    include_str!("../../migrations/postgres/0004_multiuser.sql"),
-                ),
-                (
-                    5,
-                    include_str!("../../migrations/postgres/0005_contextual_scoring.sql"),
-                ),
-                (
-                    6,
-                    include_str!("../../migrations/postgres/0006_graph_distance.sql"),
-                ),
-                (
-                    7,
-                    include_str!("../../migrations/postgres/0007_last_login_at.sql"),
-                ),
-                (
-                    8,
-                    include_str!("../../migrations/postgres/0008_fingerprint_scoring.sql"),
-                ),
-                (
-                    9,
-                    include_str!("../../migrations/postgres/0009_classification_staging.sql"),
-                ),
-                (
-                    10,
-                    include_str!("../../migrations/postgres/0010_scan_skips.sql"),
-                ),
-                (
-                    11,
-                    include_str!("../../migrations/postgres/0011_scan_queue.sql"),
-                ),
-                (
-                    12,
-                    include_str!("../../migrations/postgres/0012_scan_queue_claim_id.sql"),
-                ),
-                (
-                    13,
-                    include_str!("../../migrations/postgres/0013_topic_clusters.sql"),
-                ),
-                (
-                    14,
-                    include_str!("../../migrations/postgres/0014_access_requests.sql"),
-                ),
-                (
-                    15,
-                    include_str!("../../migrations/postgres/0015_actions.sql"),
-                ),
-                (
-                    16,
-                    include_str!("../../migrations/postgres/0016_shared_cache.sql"),
-                ),
-                (
-                    17,
-                    include_str!("../../migrations/postgres/0017_cache_indexes.sql"),
-                ),
-            ];
-
-            for (version, sql) in migrations {
-                let applied: bool = sqlx_core::query::query(
-                    "SELECT COUNT(*) > 0 FROM schema_version WHERE version = $1",
-                )
-                .bind(version)
-                .fetch_one(&self.pool)
-                .await
-                .map(|row| row.get::<bool, _>(0))
-                .unwrap_or(false);
-
-                if !applied {
-                    if version == 1 {
-                        // Migration 1 contains CREATE EXTENSION which cannot run inside a
-                        // transaction. All statements use IF NOT EXISTS so they are safe
-                        // to retry if the process is interrupted partway through.
-                        sqlx_core::raw_sql::raw_sql(sql).execute(&self.pool).await?;
-                    } else {
-                        // Migrations 2+ are wrapped in a transaction so the schema change
-                        // and schema_version insert are committed or rolled back together.
-                        let mut tx = self.pool.begin().await?;
-                        sqlx_core::raw_sql::raw_sql(sql).execute(&mut *tx).await?;
-                        tx.commit().await?;
-                    }
-                }
-            }
-
-            Ok(())
-        }
-        .await;
+        // `apply_migrations_up_to` is shared with `migrate_postgres_through`
+        // (test support), so the boot path and test fixtures replay exactly
+        // the same migration sequence.
+        let migration_result: Result<()> = apply_migrations_up_to(&self.pool, i64::MAX).await;
 
         // Release the advisory lock on the same connection that acquired it.
         // This always runs even if migrations failed — we surface the migration
@@ -231,6 +124,191 @@ impl PgDatabase {
 
         Ok(())
     }
+}
+
+/// The full, ordered list of Postgres migrations. Shared between the
+/// boot-time `run_migrations` (always plays through the latest version) and
+/// `migrate_postgres_through` (test support for an authentic older-schema
+/// fixture — V2-07) so the two paths can never drift apart.
+fn all_migrations() -> [(i64, &'static str); 18] {
+    [
+        (
+            1,
+            include_str!("../../migrations/postgres/0001_initial.sql"),
+        ),
+        (
+            2,
+            include_str!("../../migrations/postgres/0002_pgvector.sql"),
+        ),
+        (
+            3,
+            include_str!("../../migrations/postgres/0003_behavioral_signals.sql"),
+        ),
+        (
+            4,
+            include_str!("../../migrations/postgres/0004_multiuser.sql"),
+        ),
+        (
+            5,
+            include_str!("../../migrations/postgres/0005_contextual_scoring.sql"),
+        ),
+        (
+            6,
+            include_str!("../../migrations/postgres/0006_graph_distance.sql"),
+        ),
+        (
+            7,
+            include_str!("../../migrations/postgres/0007_last_login_at.sql"),
+        ),
+        (
+            8,
+            include_str!("../../migrations/postgres/0008_fingerprint_scoring.sql"),
+        ),
+        (
+            9,
+            include_str!("../../migrations/postgres/0009_classification_staging.sql"),
+        ),
+        (
+            10,
+            include_str!("../../migrations/postgres/0010_scan_skips.sql"),
+        ),
+        (
+            11,
+            include_str!("../../migrations/postgres/0011_scan_queue.sql"),
+        ),
+        (
+            12,
+            include_str!("../../migrations/postgres/0012_scan_queue_claim_id.sql"),
+        ),
+        (
+            13,
+            include_str!("../../migrations/postgres/0013_topic_clusters.sql"),
+        ),
+        (
+            14,
+            include_str!("../../migrations/postgres/0014_access_requests.sql"),
+        ),
+        (
+            15,
+            include_str!("../../migrations/postgres/0015_actions.sql"),
+        ),
+        (
+            16,
+            include_str!("../../migrations/postgres/0016_shared_cache.sql"),
+        ),
+        (
+            17,
+            include_str!("../../migrations/postgres/0017_cache_indexes.sql"),
+        ),
+        (
+            18,
+            include_str!("../../migrations/postgres/0018_score_expiry.sql"),
+        ),
+    ]
+}
+
+/// Apply every migration up to and including `max_version` against `pool`.
+/// Migration 1 contains `CREATE EXTENSION`, which cannot run inside a
+/// transaction, so it runs bare (its DDL is all `IF NOT EXISTS`, safe to
+/// retry); migrations 2+ run inside a transaction so the schema change and
+/// the `schema_version` insert commit or roll back together — though every
+/// migration from v4 onward self-records its own version row, per the
+/// project rule that the runner does not do it for them.
+async fn apply_migrations_up_to(pool: &PgPool, max_version: i64) -> Result<()> {
+    // Ensure schema_version table exists (idempotent DDL, no transaction needed)
+    sqlx_core::query::query(
+        "CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    for (version, sql) in all_migrations() {
+        if version > max_version {
+            continue;
+        }
+
+        let applied: bool =
+            sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = $1")
+                .bind(version)
+                .fetch_one(pool)
+                .await
+                .map(|row| row.get::<bool, _>(0))
+                .unwrap_or(false);
+
+        if !applied {
+            if version == 1 {
+                // Migration 1 contains CREATE EXTENSION which cannot run inside a
+                // transaction. All statements use IF NOT EXISTS so they are safe
+                // to retry if the process is interrupted partway through.
+                sqlx_core::raw_sql::raw_sql(sql).execute(pool).await?;
+            } else {
+                // Migrations 2+ are wrapped in a transaction so the schema change
+                // and schema_version insert are committed or rolled back together.
+                let mut tx = pool.begin().await?;
+                sqlx_core::raw_sql::raw_sql(sql).execute(&mut *tx).await?;
+                tx.commit().await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Test support (V2-07): reset a dedicated Postgres database and replay
+/// migrations up to `max_version`, producing an AUTHENTIC older-schema
+/// fixture rather than one built by dropping columns off a current database
+/// — that leaves every OTHER new column in place, so the migration that
+/// re-adds the dropped ones fails on duplicates instead of exercising the
+/// real upgrade path.
+///
+/// Refuses (`bail!`) to run against anything but a database whose name ends
+/// in `_migrations` (V3-06): this drops every table it finds, and the
+/// ordinary test suite's fixtures live in a database this must never touch.
+pub async fn migrate_postgres_through(url: &str, max_version: i64) -> Result<()> {
+    let db_name = url
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("");
+    if !db_name.ends_with("_migrations") {
+        anyhow::bail!(
+            "migrate_postgres_through refuses to run against database {db_name:?} — \
+             it drops every table in the database, and only a database whose \
+             name ends in `_migrations` may be reset this way"
+        );
+    }
+
+    let pool = PgPool::connect(url)
+        .await
+        .context("Failed to connect to the Postgres migrations database")?;
+
+    // Drop every table in the public schema so the migration replay starts
+    // from a truly blank database, not whatever a previous test left behind.
+    let tables: Vec<String> =
+        sqlx_core::query::query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+            .fetch_all(&pool)
+            .await?
+            .into_iter()
+            .map(|row| row.get::<String, _>(0))
+            .collect();
+
+    if !tables.is_empty() {
+        let quoted = tables
+            .iter()
+            .map(|t| format!("\"{t}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        sqlx_core::raw_sql::raw_sql(&format!("DROP TABLE IF EXISTS {quoted} CASCADE;"))
+            .execute(&pool)
+            .await?;
+    }
+
+    apply_migrations_up_to(&pool, max_version).await
 }
 
 #[async_trait]

@@ -14,11 +14,81 @@ use charcoal::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 const TEST_USER: &str = "did:plc:pgtest_user000000000000";
 
-/// Skip the test if DATABASE_URL is not set or doesn't point to Postgres.
+/// In CI the Postgres service is mandatory; a missing DATABASE_URL must fail
+/// the job, not turn every test in this file into a silent early return.
 fn database_url() -> Option<String> {
-    std::env::var("DATABASE_URL")
+    let url = std::env::var("DATABASE_URL")
         .ok()
-        .filter(|u| u.starts_with("postgres://") || u.starts_with("postgresql://"))
+        .filter(|u| u.starts_with("postgres://"));
+    if url.is_none() && std::env::var("CI").is_ok() {
+        panic!("DATABASE_URL is required in CI for tests/db_postgres.rs");
+    }
+    url
+}
+
+/// The dedicated database destructive migration fixtures are allowed to reset
+/// (V3-06) — everything else in this file uses `database_url()`'s ordinary
+/// `charcoal_test` database and must never see a table dropped out from under
+/// it. Same CI contract as `database_url()`.
+fn migrations_database_url() -> Option<String> {
+    let url = std::env::var("DATABASE_URL_MIGRATIONS")
+        .ok()
+        .filter(|u| u.starts_with("postgres://"));
+    if url.is_none() && std::env::var("CI").is_ok() {
+        panic!("DATABASE_URL_MIGRATIONS is required in CI for tests/db_postgres.rs");
+    }
+    url
+}
+
+/// Process-local half of the double serialization for tests that reset the
+/// `_migrations` database (V4-05). The Postgres session advisory lock taken
+/// in `migrations_fixture` covers separate processes or overlapping CI
+/// invocations; this mutex covers tests within this one binary, matching the
+/// `scan_queue_test_lock` / `cache_test_lock` pattern above.
+fn migrations_db_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Guard for a test against the dedicated `_migrations` database, built to an
+/// AUTHENTIC older-schema state (V2-07) by `migrate_postgres_through`. Holds
+/// the process-local mutex AND a dedicated (non-pooled) Postgres connection
+/// carrying a session advisory lock
+/// (`pg_advisory_lock(hashtext('charcoal_migrations_fixture'))`) for its
+/// whole lifetime — released together when the guard drops at the end of the
+/// test, so a second test binary or an overlapping CI invocation blocks
+/// rather than interleaves (V4-05). The drop-all inside
+/// `migrate_postgres_through` happens at construction time, under both
+/// locks, so a failed test leaves nothing for the next one to trip over.
+struct MigrationsFixture {
+    _mutex_guard: tokio::sync::MutexGuard<'static, ()>,
+    _lock_conn: sqlx_postgres::PgConnection,
+}
+
+async fn migrations_fixture(url: &str, max_version: i64) -> MigrationsFixture {
+    use sqlx_core::connection::Connection;
+
+    let mutex_guard = migrations_db_lock().lock().await;
+
+    // A dedicated (non-pooled) connection: the session advisory lock it takes
+    // is released when THIS connection's session ends, which happens exactly
+    // when it drops at the end of the test — no pool reuse to worry about.
+    let mut lock_conn = sqlx_postgres::PgConnection::connect(url)
+        .await
+        .expect("connect dedicated advisory-lock connection to the migrations database");
+    sqlx_core::query::query("SELECT pg_advisory_lock(hashtext('charcoal_migrations_fixture'))")
+        .execute(&mut lock_conn)
+        .await
+        .expect("acquire charcoal_migrations_fixture advisory lock");
+
+    charcoal::db::postgres::migrate_postgres_through(url, max_version)
+        .await
+        .expect("reset migrations database to the requested version");
+
+    MigrationsFixture {
+        _mutex_guard: mutex_guard,
+        _lock_conn: lock_conn,
+    }
 }
 
 /// Delete rows written by this test file so tests are idempotent across runs.
@@ -2952,4 +3022,365 @@ async fn test_pg_cache_batch_upserts_round_trip_and_update() {
         .unwrap();
     assert!(!got["batch1"].toxic_token);
     assert_eq!(got["batch1"].confidence, 0.2);
+}
+
+/// v18 (#344): fresh connect adds expiry/generation, queue kind, refresh
+/// schedule and embedding-model-id columns, the (user_did, threat_score)
+/// index, and records 18. Runs against the ordinary `charcoal_test` database
+/// — non-destructive, so no fixture lock is needed.
+#[tokio::test]
+async fn test_pg_migration_v18_creates_expiry_and_refresh_columns() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    for (table, col) in [
+        ("account_scores", "scoring_generation"),
+        ("account_scores", "valid_until"),
+        ("scan_queue", "kind"),
+        ("scan_queue", "full_requested_at"),
+        ("scan_queue", "completion"),
+        ("users", "next_refresh_at"),
+        ("users", "refreshed_generation"),
+        ("users", "refresh_attempted_generation"),
+        ("topic_fingerprint", "embedding_model_id"),
+    ] {
+        let exists: bool = sqlx_core::query::query(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+        )
+        .bind(table)
+        .bind(col)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(exists, "{table}.{col}");
+    }
+
+    let has_index: bool = sqlx_core::query::query(
+        "SELECT COUNT(*) > 0 FROM pg_indexes
+         WHERE schemaname = 'public' AND indexname = 'idx_account_scores_user_score'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(has_index);
+
+    let recorded: bool =
+        sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = 18")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(recorded, "0018 must self-record its version");
+}
+
+/// v18 upgrade, on the dedicated `_migrations` database (V3-06): an
+/// AUTHENTIC v17 fixture (via `migrate_postgres_through`, not columns
+/// reconstructed by dropping them off a current database — V2-07) with live
+/// data, upgraded by a normal `connect_postgres` boot. Mirrors
+/// `test_migration_v18_upgrades_a_v17_database` in `src/db/schema.rs`.
+#[tokio::test]
+async fn test_pg_migration_v18_upgrades_from_v17() {
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _fixture = migrations_fixture(&murl, 17).await;
+    let pool = Pool::<Postgres>::connect(&murl).await.unwrap();
+
+    // Precondition: genuinely at v17, valid_until does not exist yet.
+    // MAX(int4) stays int4 in Postgres (unlike COUNT(*), which is always
+    // bigint) — cast explicitly so sqlx's i64 decode doesn't reject it.
+    let max: i64 = sqlx_core::query::query("SELECT MAX(version)::bigint FROM schema_version")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(max, 17, "fixture is genuinely at v17 before the upgrade");
+    let has_valid_until: bool = sqlx_core::query::query(
+        "SELECT COUNT(*) > 0 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'account_scores' AND column_name = 'valid_until'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(!has_valid_until);
+
+    const V18_SCORED: &str = "did:plc:v18scored";
+    const V18_UNSCORED: &str = "did:plc:v18unscored";
+    const V18_ACCT: &str = "did:plc:v18acct";
+    const V18_NA: &str = "did:plc:v18na";
+    // pgvector's `vector(384)` column enforces the dimension on insert, so a
+    // short literal like SQLite's `[0.1,0.2]` fixture would fail here.
+    let vector_384 = format!("[{}]", vec!["0.1"; 384].join(","));
+
+    sqlx_core::query::query(
+        "INSERT INTO users (did, handle) VALUES ($1, 'scored.test'), ($2, 'unscored.test')",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_UNSCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at)
+         VALUES ($1, $2, 'acct.test', 40.0, 'High', '2026-09-01T12:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_ACCT)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_tier, scored_at)
+         VALUES ($1, $2, 'na.test', 'NotAssessed', '2026-09-02T12:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_NA)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+         VALUES ($1, 'done', '2026-09-01T11:00:00+00:00'::timestamptz,
+                 '2026-09-01T11:00:00+00:00'::timestamptz, '2026-09-01T12:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_SCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+         VALUES ($1, '{\"clusters\":[],\"post_count\":0}', 0, $2::vector)",
+    )
+    .bind(V18_SCORED)
+    .bind(&vector_384)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+         VALUES ($1, '{\"clusters\":[],\"post_count\":0}', 0, NULL)",
+    )
+    .bind(V18_UNSCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The upgrade itself — an ordinary boot against the migrations database.
+    let _db = charcoal::db::connect_postgres(&murl).await.unwrap();
+
+    let row = sqlx_core::query::query(
+        "SELECT scoring_generation, valid_until = scored_at + INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = $2",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_ACCT)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let generation: String = row.get(0);
+    let valid_matches_14d: bool = row.get(1);
+    assert_eq!(generation, "legacy");
+    assert!(valid_matches_14d, "scored_at + 14 days");
+
+    let na_valid_matches_14d: bool = sqlx_core::query::query(
+        "SELECT valid_until = scored_at + INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = $2",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_NA)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(na_valid_matches_14d, "NULL-score rows are backfilled too");
+
+    let is_nullable: String = sqlx_core::query::query(
+        "SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'account_scores' AND column_name = 'valid_until'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(
+        is_nullable, "NO",
+        "Postgres valid_until is NOT NULL after backfill"
+    );
+
+    let queue_row =
+        sqlx_core::query::query("SELECT kind, completion FROM scan_queue WHERE user_did = $1")
+            .bind(V18_SCORED)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let kind: String = queue_row.get(0);
+    let completion: Option<String> = queue_row.get(1);
+    assert_eq!(kind, "full");
+    assert!(completion.is_none());
+
+    let user_row = sqlx_core::query::query(
+        "SELECT next_refresh_at IS NULL, refreshed_generation IS NULL, refresh_attempted_generation IS NULL
+         FROM users WHERE did = $1",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let next_is_null: bool = user_row.get(0);
+    let refreshed_is_null: bool = user_row.get(1);
+    let attempted_is_null: bool = user_row.get(2);
+    assert!(
+        next_is_null && refreshed_is_null && attempted_is_null,
+        "due-ness comes from the NULL attempted generation, not a stamped time"
+    );
+
+    let with_vec: Option<String> = sqlx_core::query::query(
+        "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = $1",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(with_vec.as_deref(), Some("all-MiniLM-L6-v2"));
+    let without_vec: Option<String> = sqlx_core::query::query(
+        "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = $1",
+    )
+    .bind(V18_UNSCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        without_vec.is_none(),
+        "keyword-only fingerprints have no embedding model"
+    );
+
+    let marker: String = sqlx_core::query::query(
+        "SELECT value FROM scan_state WHERE user_did = $1 AND key = 'last_full_scan_finished_at'",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(
+        marker, "2026-09-01T12:00:00+00:00",
+        "cooldown anchor backfilled from the done row"
+    );
+
+    let has_index: bool = sqlx_core::query::query(
+        "SELECT COUNT(*) > 0 FROM pg_indexes
+         WHERE schemaname = 'public' AND indexname = 'idx_account_scores_user_score'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(has_index);
+
+    let version_count: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 18")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(version_count, 1);
+}
+
+/// V3-06: the destructive reset must refuse anything but the dedicated
+/// `_migrations` database. No fixture/lock needed — the `bail!` happens
+/// before any connection is opened.
+#[tokio::test]
+async fn test_migrate_postgres_through_refuses_a_non_migrations_database() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    let result = charcoal::db::postgres::migrate_postgres_through(&url, 17).await;
+    assert!(
+        result.is_err(),
+        "must refuse to reset a database whose name does not end in _migrations"
+    );
+}
+
+/// V4-05: two `migrations_fixture` calls in one process never run
+/// concurrently. Proven two ways: an active-guard counter never exceeds 1,
+/// and each call's own sentinel row is the ONLY row present at its own
+/// check-point — proof the other call's drop-all (whichever ran first)
+/// completed, and the other call's own insert (if it ran second) had not
+/// started yet, at the moment this call looked.
+#[tokio::test]
+async fn test_migrations_fixture_serializes_concurrent_calls() {
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+
+    static ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static MAX_ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    async fn hold_fixture(url: &str, marker: &str) -> i64 {
+        use sqlx_core::pool::Pool;
+        use sqlx_core::row::Row;
+        use sqlx_postgres::Postgres;
+
+        let _guard = migrations_fixture(url, 17).await;
+        let now = ACTIVE.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        MAX_ACTIVE.fetch_max(now, std::sync::atomic::Ordering::SeqCst);
+
+        let pool = Pool::<Postgres>::connect(url).await.unwrap();
+        sqlx_core::query::query("INSERT INTO users (did, handle) VALUES ($1, 'concurrent.test')")
+            .bind(marker)
+            .execute(&pool)
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let count: i64 = sqlx_core::query::query(
+            "SELECT COUNT(*) FROM users WHERE did LIKE 'did:plc:v18concurrent_%'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+
+        ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        count
+    }
+
+    // `tokio::join!` rather than `tokio::spawn`: both futures run on this
+    // task, interleaved at await points, which is enough to prove
+    // serialization without fighting sqlx-core's `Executor` HRTB across a
+    // spawned (`Send + 'static`) boundary.
+    let (count_a, count_b) = tokio::join!(
+        hold_fixture(&murl, "did:plc:v18concurrent_a"),
+        hold_fixture(&murl, "did:plc:v18concurrent_b")
+    );
+
+    assert_eq!(
+        MAX_ACTIVE.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "migrations_fixture must serialize — two guards were live at once"
+    );
+    assert_eq!(
+        count_a, 1,
+        "whichever call ran first sees only its own sentinel"
+    );
+    assert_eq!(
+        count_b, 1,
+        "the second call's drop-all wiped the first's sentinel before inserting its own"
+    );
 }

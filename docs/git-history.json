@@ -1,5 +1,13 @@
 [
   {
+    "hash": "91eadcf822f14dbabde38000ad6761b550285318",
+    "short_hash": "91eadcf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T22:22:14-07:00",
+    "message": "feat(344): scoring_revision() = generation + model ids; EMBEDDING/NLI model ids; staged blobs carry the revision\n\nThe composite stamp every score row will carry (#343 §4.4, V2-01) so a\nmodel swap expires stored scores by itself, the embedding and NLI model\nidentities, and blob schema v3 so Phase C refuses to finalize inputs\ngathered under another revision.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 12
+  },
+  {
     "hash": "96f2ebfb2d5d8a67dcc32ae45e521eff6569bab5",
     "short_hash": "96f2ebf",
     "author": "Bryan Guffey",

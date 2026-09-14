@@ -9723,6 +9723,28 @@
       "created_at": "2026-09-13T21:15:31.853768-07:00",
       "updated_at": "2026-09-13T21:15:31.853768-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"96f2ebf\",\"confidence\":85}"
+    },
+    {
+      "id": 894,
+      "change_id": "cee47fdb-1aa6-460a-9a11-996fa60df895",
+      "node_type": "outcome",
+      "title": "Task 1 committed 91eadcf: scoring_revision() (LazyLock, 4 components pipe-delimited), LEGACY_GENERATION='legacy', EMBEDDING_MODEL_ID/NLI_MODEL_ID, ScoringConfidence::from_label + staleness_days_for_label, AccountInput schema v3 with scoring_generation stamped in gather and rejected in finalize. VERIFY_WEB 0 failed/0 SKIP, VERIFY_CLIPPY clean x3. Implementer first stalled by backgrounding cargo test; resumed with foreground-only instruction. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T22:24:07.673200-07:00",
+      "updated_at": "2026-09-13T22:24:07.673200-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"91eadcf\",\"confidence\":85}"
+    },
+    {
+      "id": 895,
+      "change_id": "bda4ffe3-38e2-474d-ada2-bbb878d551b1",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 2: migration v18 on both backends — account_scores.scoring_generation + valid_until (backfill legacy/expired), scan_queue.kind + full_requested_at, users.next_refresh_at + refreshed_generation, topic_fingerprint.embedding_model_id, last_full_scan_finished_at cooldown backfill; fresh-DB and upgrade-from-v17 tests; Postgres migrations fixture guards (_migrations DB name, mutex + advisory lock)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T22:27:12.776548-07:00",
+      "updated_at": "2026-09-13T22:27:12.776548-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"91eadcf\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19922,6 +19944,28 @@
       "weight": 1.0,
       "rationale": "Plan rev 8 execution begins: Task 1",
       "created_at": "2026-09-13T21:15:35.086221-07:00"
+    },
+    {
+      "id": 938,
+      "from_node_id": 893,
+      "to_node_id": 894,
+      "from_change_id": "a5556bc8-f49c-4d55-8e35-cfaff97e57b1",
+      "to_change_id": "cee47fdb-1aa6-460a-9a11-996fa60df895",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 1 implementation outcome",
+      "created_at": "2026-09-13T22:24:09.999861-07:00"
+    },
+    {
+      "id": 939,
+      "from_node_id": 877,
+      "to_node_id": 895,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "bda4ffe3-38e2-474d-ada2-bbb878d551b1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 2 migration v18",
+      "created_at": "2026-09-13T22:27:15.681028-07:00"
     }
   ],
   "documents": [
