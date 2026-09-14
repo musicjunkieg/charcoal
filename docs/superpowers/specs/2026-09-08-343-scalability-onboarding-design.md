@@ -286,6 +286,198 @@ in the freshness read silently re-scores everything via
   `scoring_generation = 'legacy'`. Legacy rows expire naturally and are
   refreshed by the job; nothing is deleted.
 
+*Amended 2026-09-14 (Phase 2 plan rev 2, after Astra's plan review; deciduous
+877/878):*
+
+- The migration is **v18** (v17 shipped with Phase 1's cache indexes).
+- **Due-ness is generation-driven, not stamped.** `users.refreshed_generation`
+  records the generation under which a user's High/Elevated set was last
+  refreshed or fully scanned; a user with scores is due when
+  `next_refresh_at` has passed **or** `refreshed_generation` is not the
+  current generation. Migration v18 leaves it NULL, so the first tick after
+  the deploy — and after every later bump — refreshes everyone. There is no
+  one-off `next_refresh_at = NOW()` backfill.
+- **Scheduling is one bounded transaction per tick** (25 users): select due
+  users with no queued/running work, create their refresh rows, advance
+  `next_refresh_at` — together. A failure advances nothing.
+- **Staging carries its owner.** `scan_state.scan_run_kind` and
+  `scan_run_generation` are written at every fresh start. A refresh resumes
+  its own interrupted work; it defers (retry in 1 h) when the staging belongs
+  to a full scan; a full scan drains a refresh's leftovers before gathering;
+  staging from another generation is discarded.
+- **Compatibility contract.** A current-generation score is published only
+  from a fingerprint whose `embedding_model_id` matches the binary's
+  `EMBEDDING_MODEL_ID` (or a keyword-only fingerprint), an `AccountInput`
+  blob stamped with the current generation, and verdict rows whose
+  `policy_version` matches the running classifier. `SCORING_GENERATION` is
+  bumped only for formula/format/policy changes — model changes are carried
+  by their own identities and never require a bump or invalidate the caches.
+  A refresh never rebuilds a fingerprint; a missing or incompatible one makes
+  the refresh defer and request a full scan.
+- **The user's request always wins.** A full enqueue over a queued refresh
+  upgrades it in place (queue position kept); a full request during a running
+  refresh is recorded in `scan_queue.full_requested_at` and becomes the
+  user's queued full scan when the refresh finishes. Queue order stays FIFO
+  across kinds (#271). The 24 h cooldown anchors on
+  `scan_state.last_full_scan_finished_at`, backfilled by v18 from done rows.
+- **`charcoal migrate` is lossless:** `export_scores`/`import_score` copy every
+  row (expired, legacy, NotAssessed) with its original `scored_at`,
+  generation and expiry; importing never renews expiry.
+- **Missing context is an error, not an absence:** a refresh that cannot load
+  stored events, protected posts or embeddings fails and retries; it never
+  overwrites a High/Elevated row with a score computed without them.
+- SQLite `valid_until` stays nullable; NULL and malformed values read as
+  expired everywhere (COALESCE), and malformed rows are refresh-eligible.
+- Refresh candidates are selected by score (`threat_score ≥
+  ThreatTier::ELEVATED_MIN`), not the stored tier string. Index:
+  `(user_did, threat_score)`, measured (runbook).
+- "Full fortnightly" is **not** in Phase 2 — it is #342's remaining scope.
+
+*Amended 2026-09-14 (plan rev 3, after Astra's second review V2-01–V2-07;
+deciduous 880):*
+
+- **The stored stamp is a composite revision**, not the bare generation:
+  `scoring_revision()` = `SCORING_GENERATION | ONNX model | embedding model |
+  NLI model`. Swapping any in-binary model expires every stored score by
+  itself; `SCORING_GENERATION` is bumped by hand for formula/format/policy
+  changes **and for CoPE-B/Zentropi classifier model or policy changes**
+  (the classifier's identity lives outside the binary). Caches keep their
+  own model-id keys and survive a revision change.
+- Staged verdict rows are reused only when **both** their classifier model
+  id and policy version match the running classifier.
+- The full scan's fingerprint rebuild decision checks the stored embedding
+  model id (same dimensions are not compatibility); a rebuild forced by an
+  incompatible model has **no fallback** — the scan aborts before scoring.
+- Scheduling writes the refresh queue row **conditionally** (`ON CONFLICT …
+  WHERE status IN ('done','failed')`) and advances a user only when that
+  write happened, so a full scan enqueued or admitted between the tick's
+  select and its write always wins. Two columns separate "this revision
+  still needs a first attempt" (`refresh_attempted_generation`, set by the
+  tick) from "this revision is proven" (`refreshed_generation`, set only by
+  complete work); a failed attempt waits for its hourly retry deadline
+  instead of being re-selected on the next tick.
+- **Completion is explicit.** `Ok` from the pipeline is classified into
+  complete / complete-with-skips / resumable; only complete work writes
+  the cooldown marker, schedules the nightly and proves the revision. Skips
+  and interruptions keep their successful writes, retry in an hour and read
+  as degraded. A full scan that only partially drains a refresh's leftovers
+  is resumable, not complete.
+- Migration carries SQLite's NULL/malformed expiries into Postgres as
+  `valid_until = scored_at` (expired when scored, never renewed, never
+  dropped); Postgres microseconds survive export/import, SQLite's whole-
+  second column form is a documented one-way truncation. Old-schema test
+  fixtures are built by running the migrations up to that version.
+- The refresh's context loads sit behind an injectable boundary so the
+  "missing context fails the run without writing" rule has a deterministic
+  test, not a runbook step.
+
+*Amended 2026-09-14 (plan rev 4, after Astra's third review V3-01–V3-06;
+deciduous 882):*
+
+- **Evidence provenance.** Every done verdict row names its producer. The
+  Stage-1 clean pass is a producer (`ONNX_MODEL_ID` + `onnx-clean-pass`);
+  the Stage-2 classifier is a producer (its model id + policy version, one
+  string on every path — advertised, written on a miss, matched on a hit;
+  Zentropi's advertised policy becomes the configured labeler version).
+  Finalize accepts a row only from a producer this binary runs; missing,
+  foreign and decode-error-sentinel provenance are distinct and all rejected
+  (bounded re-gather, never a skip).
+- **Cooldown reads only the completion marker.** `scan_state.
+  last_full_scan_finished_at` is written for `Complete` and
+  `CompleteWithSkips` (the request was fulfilled), never for a resumable
+  attempt; the queue row's `done` status is never consulted, and the row
+  records the outcome (`scan_queue.completion`). Only `Complete` proves the
+  revision.
+- **A full-scan request is a durable obligation.** `scan_queue.
+  full_requested_at` is set by every user enqueue, kept through a refresh
+  handover and through resumable/failed attempts, and cleared only when a
+  full scan completes. The retry tick re-queues owed work as `kind = 'full'`,
+  never as a refresh, so an interrupted drain continues automatically.
+- `mark_refreshed_generation` sets both revision columns; all refresh setup
+  (marker reset, scorers, client, context) runs inside one captured outcome
+  with a single scheduling site, so a setup failure still gets the hourly
+  retry.
+- Destructive Postgres migration fixtures run only against a dedicated
+  `*_migrations` database (`DATABASE_URL_MIGRATIONS`); the suite's isolation
+  is proven by a ten-run loop, not by a process-local lock.
+
+*Amended 2026-09-14 (plan rev 5, after Astra's fourth review V4-01–V4-05;
+deciduous 884):*
+
+- An owed full scan is eligible for the retry tick **without any score
+  row** — a first scan that failed before its first write is retried, as a
+  full scan, after its deadline; users with neither scores nor an
+  obligation are never selected. `schedule_retry` stamps the attempted
+  revision, so retries of either kind respect the deadline.
+- A full scan always enters the phased pipeline, even with no fresh
+  candidates: staged work is resumed or drained first, and a `burst` /
+  `finalize` marker after the run is resumable regardless of the summary's
+  flag. Empty discovery over no staging still completes legitimately.
+- Postgres `enqueue_scan` takes a per-user transaction advisory lock before
+  reading queue state (an absent row cannot be row-locked), with a
+  conditional absent-row insert and re-read as defense in depth; a running
+  claim and lease survive a concurrent first enqueue.
+- Both scan kinds return one `ScanReport` through one `finish_scan`, so the
+  queue row's completion is recorded the same way for full and refresh.
+- Destructive migration tests are serialized among themselves by a process
+  mutex plus a Postgres session advisory lock on the migrations database.
+
+*Amended 2026-09-14 (plan rev 6, after Astra's fifth review V5-01–V5-03;
+deciduous 886):*
+
+- Completion is classified from **persisted** skip state, not only the
+  resuming invocation's flag: a `done` marker with a positive skip count is
+  complete-with-skips even when the resume itself saw no new error; an
+  unreadable skip count is "complete, unverified" — fulfilled for the
+  cooldown, never clean, never proof of the revision.
+- The full scan has one bookkeeping boundary like the refresh: scorer
+  construction, fingerprint rebuild (including its abort), discovery and
+  the pipeline all run inside one captured outcome, and every error reaches
+  the single retry site — a scheduler-created owed full scan whose setup
+  fails gets the hourly retry, not the nightly deadline the tick set.
+- The Postgres enqueue concurrency tests are deterministic: serialization
+  is proven by observing the competitor's ungranted advisory lock, and
+  claim preservation establishes the committed running claim before the
+  competing request reads state.
+
+*Amended 2026-09-14 (plan rev 7, after Astra's sixth review V6-01–V6-02;
+deciduous 888):*
+
+- "Complete, unverified" is **fulfilled**: it writes the cooldown marker and
+  clears the full-scan obligation exactly like complete-with-skips, while
+  still withholding revision proof and scheduling the hourly retry. When a
+  full scan drains refresh-owned staging, the drain's outcome is folded into
+  the run's own (the worse of the two wins), and a drain alone never counts
+  as completing the user's full scan — only the run's own gather reaching
+  `done` does.
+- Retry deadlines are anchored on the **end** of the attempt, not its
+  start: both wrappers take an injected clock, read it after the attempt
+  returns, and schedule from that instant, so a failed attempt that outlasts
+  the retry window still gets the full backoff. The start instant is
+  telemetry only.
+
+*Amended 2026-09-14 (plan rev 8, after Astra's seventh review V7-01–V7-03;
+deciduous 890):*
+
+- A drained refresh's outcome is **persisted**, not just remembered: the
+  full scan writes a "draining" sentinel to `scan_state` before the drain,
+  replaces it with the drain's outcome (skips or unverified; nothing for a
+  clean drain) after, and folds it back in at the end of whichever attempt
+  finishes its own run — even after an interruption and a process restart,
+  and even though the fresh start wipes the drain's skip records. The key is
+  consumed by the fulfilled completion and dropped on a scoring-revision
+  change; a lost sentinel reads as unverified. Skip counts are set, never
+  added twice.
+- The injected clock is thread-safe (`Sync`) so the spawned scan futures
+  stay `Send`; a compile-time check guards it.
+- The unverified-drain test injects its failure into exactly the drain's
+  skip-count read (a fail-once counter seam) instead of dropping the table,
+  so the following cleanup and fresh gather really run.
+- Plan revisions settle design; compile-level and fixture-level facts are
+  settled by the toolchain at implementation. The plan carries a note asking
+  the reviewer to file those as implementation-gate notes, not
+  change-requested findings.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust
@@ -394,15 +586,24 @@ overlap < 15 % → Phase 3 sizes for zero sharing and Phase 4 moves up;
 a clear high mode ≥ 40 % → use its size as the Phase 3 wave assumption.
 
 **Phase 2 — Expiry + refresh (4.4)**
-*Pass:* bump the generation on staging → every row expired and hidden; the
-nightly refresh re-scores exactly the high/elevated set; no `legacy` row in
-any tier list after one nightly.
-*Added 2026-09-13:* the refresh job is the cache consumer that always runs
-inside the 24 h `SNAPSHOT_TTL`. Record its `feed_cache_hits/misses` per
-run; *pass:* feed hit rate ≥ 80 % on the refresh set (misses are only
-accounts whose snapshot aged out or was evicted). Below 50 % means the TTL
-or the refresh cadence is misaligned, and that — not user-to-user sharing —
-is where to tune first.
+*Pass:* deploy → every pre-existing row hidden and `tier_counts.expired`
+equals the row count; the first ticks enqueue a refresh for every user with
+scores (via `refreshed_generation`); each refresh re-scores exactly that
+user's High/Elevated set; no `legacy` row at or above Elevated remains after
+one refresh per user; an interrupted refresh resumes itself on its retry;
+a user's full-scan request during a refresh runs afterwards; `charcoal
+migrate` rehearsal on a prod copy preserves row counts and provenance.
+Plan: `docs/superpowers/plans/2026-09-13-343-phase2-expiry-refresh.md`.
+*Withdrawn 2026-09-14 (deciduous 878):* the ≥ 80 % refresh feed-hit target
+added on 2026-09-13. The arithmetic does not support it: High rows (14 d)
+enter the 2 d refresh horizon ~12 d after scoring while feed snapshots live
+24 h, so a steady-state refresh misses the cache for every candidate that
+was not active in the last day — by design, not by defect. The refresh job
+is therefore **not** the cache's main beneficiary. Phase 2 keeps a
+*functional* cache test (warm eligible candidate → hit; cold → miss;
+nothing due → not applicable, counters zeroed per run) and records the
+steady-state hit share as a number with no threshold. `SNAPSHOT_TTL` is not
+raised to move that number.
 
 **Phase 3 — Rate limiting + worker role (4.2, 4.3)**
 *Pass — the #343 acceptance test:* ten gated staging accounts whose

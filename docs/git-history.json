@@ -1,5 +1,77 @@
 [
   {
+    "hash": "96ffdfe4aff5908d22022cc694ffab08d0be03ae",
+    "short_hash": "96ffdfe",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T19:12:14-07:00",
+    "message": "docs(343): Phase 2 plan rev 7 — resolve Astra sixth review V6-01/V6-02; spec §4.4 amended\n\nV6-01: CompleteUnverified is fulfilled everywhere the contract says so —\nScanCompletion::fulfilled() drives the cooldown marker, finish_queued_scan\nclears full_requested_at for it on both backends, and a full scan folds a\nrefresh-owned drain into its own completion with ScanCompletion::worst so\na drain can neither launder an unverified outcome nor complete the request\non its own. V6-02: run_scan_with and run_refresh_with take an injected\nclock, read it after the attempt returns, and anchor the retry deadline on\nthat end instant; the start instant is telemetry only. Sixth resolution\ntable added; plan revision only, no tests executed.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "86c4756f4e96d32173983415c532a6e65f860f87",
+    "short_hash": "86c4756",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T18:40:21-07:00",
+    "message": "docs(343): Phase 2 plan rev 6 — resolve Astra fifth review V5-01..V5-03; spec §4.4 amended\n\nV5-01 classify_full_scan takes the PERSISTED skip count as Option<i64>:\ndone + skips > 0 is CompleteWithSkips even when the resuming invocation\nreports degraded=false; an unreadable count is CompleteUnverified\n(cooldown yes, proof never); RefreshOutcome::CompletedUnverified,\nFinishCompletion::CompleteUnverified, CHECK list; staged resume test.\nV5-02 run_scan becomes run_scan_with over FullScanBookkeeping — scorer\nsetup, fingerprint rebuild (abort arm), discovery and pipeline all inside\none captured outcome with a single scheduling site; injected-failure test\nproves the hourly retry replaces the tick-set nightly deadline and the\nobligation survives, without manual schedule_retry or models. V5-03 the\nPostgres enqueue tests are split: serialization observed via pg_locks\n(then AlreadyQueued), claim preservation with the running claim committed\nfirst (then AlreadyRunning). Fifth resolution table.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "4b9459db433010c39dc24ff49ec3fe89547eb203",
+    "short_hash": "4b9459d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T17:56:49-07:00",
+    "message": "docs(343): Phase 2 plan rev 5 — resolve Astra fourth review V4-01..V4-05; spec §4.4 amended\n\nV4-01 an owed full scan is retry-eligible with zero score rows\n(REFRESH_DUE_SQL eligibility = scores OR owed full); schedule_retry_at\nstamps refresh_attempted_generation so retries of either kind wait for\ntheir deadline; restart test with a never-scored first scan. V4-02 the\nempty-candidate shortcut in amplification::run is removed — a full scan\nalways enters run_phased_scan so staged work resumes or drains, and\nclassify_full_scan treats a burst/finalize/missing marker as Resumable\nregardless of degraded. V4-03 Postgres enqueue_scan takes a per-user\npg_advisory_xact_lock before reading state, with a conditional\nabsent-row insert + re-read; two-connection barrier test. V4-04\nrun_refresh_with/run_refresh return Result<ScanReport> through one\nfinish_scan, so both launch_scan arms share a type. V4-05 destructive\nmigration tests serialized by migrations_fixture(): process mutex +\nPostgres session advisory lock; ordering test. Fourth resolution table.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "fb713a3ffc761bf63286c1260f1169867255b495",
+    "short_hash": "fb713a3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T17:34:01-07:00",
+    "message": "docs(343): Phase 2 plan rev 4 — resolve Astra third review V3-01..V3-06; spec §4.4 amended\n\nV3-01 per-producer evidence provenance: mark_clean stamps ONNX_MODEL_ID +\nCLEAN_PASS_POLICY, EvidenceContract/Provenance distinguish clean-pass,\nclassifier, missing, foreign and decode-error rows; Zentropi advertises\nthe configured labeler version and writes the same string. V3-02 the\ncooldown reads only scan_state.last_full_scan_finished_at (written for\nComplete and CompleteWithSkips, never Resumable); scan_queue.completion\nkeeps the durable distinction; composed web tests through run_under_slot\nand POST /api/scan. V3-03 full_requested_at is a durable obligation set by\nevery user enqueue and cleared only by a completed full scan; the tick\nretries owed work as kind=full; lifecycle test across a restart. V3-04\nmark_refreshed_generation sets both columns; real-path test. V3-05\nRefreshBookkeeping boundary — marker reset, scorers, client and context\nall inside one captured outcome with a single scheduling site; setup and\nmarker-failure tests without models. V3-06 destructive fixtures on a\ndedicated *_migrations database with a suffix guard; ten-run isolation\nloop. Third resolution table + provenance and lifecycle contracts.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "c40be7f4d1e2910b15cb684b344b41e45d3299ae",
+    "short_hash": "c40be7f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T14:36:18-07:00",
+    "message": "docs(343): Phase 2 plan rev 3 — resolve Astra second review V2-01..V2-07; spec §4.4 amended\n\nV2-01 the stored stamp is scoring_revision() = generation | ONNX | embedding\n| NLI model ids (a model swap expires scores by itself; classifier\nmodel/policy changes still need a manual bump, documented); verdicts are\nreused only on matching classifier model AND policy. V2-02 the tick writes\nthe refresh row conditionally (ON CONFLICT … WHERE done/failed) and\nadvances a user only when the write happened; the two statements are pub\nconsts so the interleaving is tested on real SQL. V2-03\nrefresh_attempted_generation (set by the tick) is separated from\nrefreshed_generation (proof); failed attempts wait for their retry\ndeadline, a new revision is attempted promptly once. V2-04 the full\nscan rebuild decision checks the embedding model id and never falls back\nto incompatible vectors. V2-05 ScanCompletion / RefreshOutcome\n(CompletedWithSkips) — Ok is classified, only complete work earns the\ncooldown marker, the nightly schedule and the revision proof. V2-06\nExportedExpiry {At, Missing, Invalid}; NULL/malformed import as\nscored_at; microseconds kept on Postgres, whole-second truncation into\nSQLite documented and tested; real SQLite→Postgres migration test.\nV2-07 authentic v17 fixtures via create_tables_through /\nmigrate_postgres_through; relative dates; the export test imports.\nMandatory missing-context test via RefreshContextSource. Resolution\ntables for R01–R13 (cross-referenced) and V2-01–V2-07.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "30cd7f4913a502b939687b3bfd0c00d77b6fe510",
+    "short_hash": "30cd7f4",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T13:45:57-07:00",
+    "message": "docs(343): Phase 2 plan rev 2 — resolve Astra plan review R01-R13; spec §4.4/§6 amended\n\nLossless export/import for charcoal migrate (R01); staging ownership\nmarkers, typed OwnedByOtherKind error, RefreshOutcome and full-drains-\nrefresh transition (R02); EMBEDDING_MODEL_ID on fingerprints, generation\non staged blobs, policy check on verdicts, narrowed bump rule (R03);\nclaim + enqueue in one bounded transaction, generation-driven due-ness\nvia users.refreshed_generation (R04, R07); context helpers return Result\nand a refresh fails rather than scoring without context (R05);\ntopic-first discovery uses the fresh set (R06); the 80% feed-hit gate\nwithdrawn for a functional test + recorded share (R08, deciduous 878);\nfull_requested_at + in-place upgrade so a user request always runs\n(R09); VERIFY_* commands with pipefail and single filters (R10);\nCOALESCE-boolean fresh predicate and malformed-eligible candidates\n(R11); (user_did, threat_score) index with plan evidence (R12);\ncooldown marker backfilled from done queue rows (R13).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "c91afb85a5bdab4b284c01b1256b485802504e85",
+    "short_hash": "c91afb8",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T03:55:08-07:00",
+    "message": "docs(343): Phase 2 implementation plan — score expiry + nightly refresh (#344)\n\nTen TDD tasks: SCORING_GENERATION + confidence label parsing; migration v18\n(scoring_generation, valid_until, scan_queue.kind, users.next_refresh_at,\nlegacy backfill) on both backends; fresh-only reads with hard-error\nfreshness in the pipeline; tier_counts.expired in the UI; refresh queue\nkind with upgrade/no-downgrade rules, full-only ETA median and a cooldown\nanchor; the refresh schedule on the admitter tick (one UPDATE … RETURNING,\nCHARCOAL_REFRESH_INTERVAL_HOURS); list_refresh_candidates from the table;\nshared-setup extraction; run_refresh through the unchanged run_phased_scan;\ndocs, runbook and spec §4.4 amendment (v18 not v17, FIFO across kinds,\nfortnightly full stays with #342).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
+    "hash": "b24765e9f312cd814ab51764d9b25eb226f3e708",
+    "short_hash": "b24765e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T03:24:51-07:00",
+    "message": "Merge pull request #122 from musicjunkieg/docs/343-overlap-probe",
+    "files_changed": 0
+  },
+  {
+    "hash": "bd4812d2f012f2d87e27ab9faa3d4b866ad953cd",
+    "short_hash": "bd4812d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T00:37:15-07:00",
+    "message": "docs(343): drop the last single-pair threshold wording; state total_ms units (CodeRabbit)\n\nCHANGELOG: record 6.6% as one onboarding observation under the\nten-onboarding rule; total_ms is summed per-account milliseconds\n(829992 ms ~= 830 worker-seconds), not wall. Phase 1 runbook: the\nheader, the pass block and the result verdict now read as the mechanism\ncheck (hit rate ~= measured overlap) with no per-pair pass/re-cost.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "45b637e659d7858bbae209a8e0ad229f345a804d",
     "short_hash": "45b637e",
     "author": "Bryan Guffey",
