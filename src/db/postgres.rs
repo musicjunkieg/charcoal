@@ -1956,22 +1956,38 @@ impl Database for PgDatabase {
                 if affected > 0 {
                     EnqueueOutcome::Queued
                 } else {
+                    // The row was absent (or finished) at the read but is
+                    // queued/running now. `SELECT … FOR UPDATE` locks nothing
+                    // on an ABSENT row, and the scheduling tick writes queue
+                    // rows without taking this advisory lock — so a refresh
+                    // the tick created in between lands here. Re-read and
+                    // answer for the state actually found, applying the same
+                    // in-place upgrade the main arm would.
                     let row = sqlx_core::query::query(
-                        "SELECT status, kind FROM scan_queue WHERE user_did = $1",
+                        "SELECT status, kind FROM scan_queue WHERE user_did = $1 FOR UPDATE",
                     )
                     .bind(user_did)
                     .fetch_optional(&mut *tx)
                     .await?;
-                    sqlx_core::query::query(RECORD_OBLIGATION)
-                        .bind(user_did)
-                        .execute(&mut *tx)
-                        .await?;
-                    match row
+                    let found = row
                         .as_ref()
-                        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)))
-                        .as_ref()
-                        .map(|(s, k)| (s.as_str(), k.as_str()))
-                    {
+                        .map(|r| (r.get::<String, _>(0), r.get::<String, _>(1)));
+                    let upgrade = matches!(
+                        found.as_ref().map(|(s, k)| (s.as_str(), k.as_str())),
+                        Some(("queued", "refresh"))
+                    );
+                    sqlx_core::query::query(if upgrade {
+                        "UPDATE scan_queue
+                         SET kind = 'full', full_requested_at = COALESCE(full_requested_at, NOW())
+                         WHERE user_did = $1"
+                    } else {
+                        RECORD_OBLIGATION
+                    })
+                    .bind(user_did)
+                    .execute(&mut *tx)
+                    .await?;
+                    match found.as_ref().map(|(s, k)| (s.as_str(), k.as_str())) {
+                        Some(("queued", "refresh")) => EnqueueOutcome::Queued,
                         Some(("running", "refresh")) => EnqueueOutcome::QueuedAfterRefresh,
                         Some(("running", _)) => EnqueueOutcome::AlreadyRunning,
                         _ => EnqueueOutcome::AlreadyQueued,
