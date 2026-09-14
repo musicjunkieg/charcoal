@@ -1,8 +1,8 @@
-# #343 Phase 2 — Score Expiry and Nightly Refresh Implementation Plan (rev 4)
+# #343 Phase 2 — Score Expiry and Nightly Refresh Implementation Plan (rev 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Revision 2 (2026-09-14)** resolved Astra's first plan review (REQUEST CHANGES on `c91afb8`, R01–R13). **Revision 3 (2026-09-14)** resolved the second review (REQUEST CHANGES on `30cd7f4`, V2-01–V2-07). **Revision 4 (2026-09-14)** resolves the third (REQUEST CHANGES on `c40be7f`, V3-01–V3-06). All three resolution tables are at the end. Every task below is the current contract; superseded snippets are replaced, not annotated.
+> **Revision 2 (2026-09-14)** resolved Astra's first plan review (REQUEST CHANGES on `c91afb8`, R01–R13). **Revision 3 (2026-09-14)** resolved the second review (REQUEST CHANGES on `30cd7f4`, V2-01–V2-07). **Revision 4 (2026-09-14)** resolved the third (REQUEST CHANGES on `c40be7f`, V3-01–V3-06). **Revision 5 (2026-09-14)** resolves the fourth (changes requested on `fb713a3`, V4-01–V4-05). All four resolution tables are at the end. Every task below is the current contract; superseded snippets are replaced, not annotated.
 
 **Goal:** Every stored score carries a generation stamp and an expiry; tier lists show only current, unexpired rows; and a nightly refresh job, driven from the existing admitter tick, re-scores the High/Elevated set before it expires — closing #344 and giving #342 the scheduler seam it needs — without losing scores in migration, without stranding its own interrupted work, and without stamping stale inputs as current.
 
@@ -26,7 +26,7 @@
     ! grep -qE '^\s*SKIP:' target/test-web.log
     ```
     Both lines must succeed; `pipefail` keeps cargo's exit status, the negated grep fails the step on a `SKIP:` sentinel. Run it as three separate shell lines, never through a `| grep` alone.
-  - `VERIFY_PG` — `DATABASE_URL=postgres://$USER@localhost/charcoal_test DATABASE_URL_MIGRATIONS=postgres://$USER@localhost/charcoal_test_migrations cargo test --all-targets --features postgres` (`createdb charcoal_test; createdb charcoal_test_migrations` once). The **migrations** database is the only one destructive fixtures ever touch (V3-06): `migrate_postgres_through` refuses any URL whose database name does not end in `_migrations`. Postgres tests must **fail**, not return, when either variable is unset in CI (Task 2 adds the guards). Task 10 runs the whole parallel suite ten times in a loop as the isolation evidence.
+  - `VERIFY_PG` — `DATABASE_URL=postgres://$USER@localhost/charcoal_test DATABASE_URL_MIGRATIONS=postgres://$USER@localhost/charcoal_test_migrations cargo test --all-targets --features postgres` (`createdb charcoal_test; createdb charcoal_test_migrations` once). The **migrations** database is the only one destructive fixtures ever touch (V3-06): `migrate_postgres_through` refuses any URL whose database name does not end in `_migrations`. Every test that opens the migrations database is serialized twice over (V4-05): a process-local `migrations_db_lock()` mutex for tests in one binary, and a Postgres session advisory lock (`pg_advisory_lock(hashtext('charcoal_migrations_fixture'))`, held on a dedicated connection for the test's duration) for separate processes or overlapping CI invocations; each such test drops-all under both locks at its start. Postgres tests must **fail**, not return, when either variable is unset in CI (Task 2 adds the guards). Task 10 runs the whole parallel suite ten times in a loop as the isolation evidence.
   - `VERIFY_CLIPPY` — `cargo clippy --features web --all-targets && cargo clippy --features postgres --all-targets && cargo clippy --all-targets`.
   - `VERIFY_FE` — `npm --prefix web run test && npm --prefix web run check && npm --prefix web run build`.
   - A single cargo test filter is one positional argument: `cargo test --test unit_staleness fresh_set` (substring). To run several unrelated tests, run several commands. "Run to verify it fails" steps must state the **expected failure kind** — a compile error in a test-first step is acceptable only where the step says so; a wrong assertion failure is never mistaken for a compile failure.
@@ -41,10 +41,10 @@
 - **Input compatibility (R03, V2-01, V2-04, V3-01).** A current-revision score may be published only from: a fingerprint whose `embedding_model_id` equals `EMBEDDING_MODEL_ID` (or a keyword-only fingerprint with no embedding), an `AccountInput` blob whose `scoring_generation` equals the current revision, and done verdict rows whose recorded **producer** is one this binary runs — either the Stage-1 clean pass (`model_id = ONNX_MODEL_ID`, `policy_version = CLEAN_PASS_POLICY`) or the Stage-2 classifier (its `model_id` **and** `policy_version`, one string on every path: advertised, written on a miss, matched on a hit). Missing, foreign and decode-error-sentinel provenance are distinct and all rejected (→ bounded re-gather, never a skip). Full scans rebuild an incompatible fingerprint and **abort without scoring** if that rebuild fails (a stale-but-compatible fingerprint may still fall back, as today); refreshes request a full scan instead and never rebuild.
 - **Revision change procedure.** In-binary model swaps change the revision by themselves. `SCORING_GENERATION` is bumped by hand for formula/weights, fingerprint format, scoring policy, and classifier model/policy changes; the runbook (§7) makes the classifier case a deploy checklist item. Rolling deploys: a revision change ships as a single-replica deploy (Railway's default); during the seconds of overlap the old binary can still stamp its in-flight scan's rows with the old revision, which the new binary hides and the refresh re-scores — acceptable, documented in the runbook. Staged work from the old binary is discarded by the `scan_run_generation` check.
 - **Queue order stays FIFO across kinds** (#271). A full enqueue over a queued refresh upgrades the row **in place, keeping `enqueued_at`** (R09). A full request during a *running* refresh is recorded durably in `scan_queue.full_requested_at` and becomes a queued full row when the refresh finishes.
-- **Durable scheduling (R04, V2-02, V2-03).** One transaction per tick, bounded to `REFRESH_BATCH_PER_TICK` users: select due users, then for each **conditionally** write the queue row (`INSERT … ON CONFLICT DO UPDATE … WHERE status IN ('done','failed')`) and advance `next_refresh_at` + set `refresh_attempted_generation` **only if that write affected a row**. The condition is evaluated at the write, so a full scan enqueued or admitted between the select and the write survives untouched (its user is simply not advanced and is reconsidered next tick). Lock order: the tick locks `users` rows then writes `scan_queue`; manual enqueue and finish lock only `scan_queue`; completion bookkeeping writes only `users` — no cycle. Due-ness separates *needs work* from *may attempt*: a user is due when `next_refresh_at <= now` **or** `refresh_attempted_generation ≠ current revision` (a genuinely new revision is attempted promptly, once); a retry after a failed/deferred/resumable attempt only becomes due by time. A failed transaction advances nothing and is retried next tick. **Owed full work is retried as full work (V3-03):** when a due user's finished row carries `full_requested_at`, the tick's conditional write re-queues it as `kind = 'full'`, never as a refresh.
+- **Durable scheduling (R04, V2-02, V2-03).** One transaction per tick, bounded to `REFRESH_BATCH_PER_TICK` users: select due users, then for each **conditionally** write the queue row (`INSERT … ON CONFLICT DO UPDATE … WHERE status IN ('done','failed')`) and advance `next_refresh_at` + set `refresh_attempted_generation` **only if that write affected a row**. The condition is evaluated at the write, so a full scan enqueued or admitted between the select and the write survives untouched (its user is simply not advanced and is reconsidered next tick). Lock order: the tick locks `users` rows then writes `scan_queue`; manual enqueue and finish lock only `scan_queue`; completion bookkeeping writes only `users` — no cycle. Due-ness separates *needs work* from *may attempt*: a user is eligible when they have score rows **or** their finished queue row owes a full scan (V4-01), and due when `next_refresh_at <= now` **or** `refresh_attempted_generation ≠ current revision` (a genuinely new revision is attempted promptly, once). Both `schedule_retry` and the tick stamp `refresh_attempted_generation`, so a retry after a failed/deferred/resumable attempt — from either scan kind — only becomes due by time. Users with neither scores nor an obligation are never selected. A failed transaction advances nothing and is retried next tick. **Owed full work is retried as full work (V3-03):** when a due user's finished row carries `full_requested_at`, the tick's conditional write re-queues it as `kind = 'full'`, never as a refresh.
 - **Errors are not absence (R05).** Helpers that load context return `Result`; a refresh that cannot obtain required context fails the run (row `failed`, retry in `REFRESH_RETRY_HOURS`) and writes no score. The existing High/Elevated row keeps its own expiry — a failed refresh never extends validity. The failure path is a **mandatory deterministic test** through the `RefreshContextSource` boundary (Task 9), not a runbook step.
 - **Completion is explicit (V2-05, V3-02).** `Ok(..)` from the pipeline is never "complete". Full scans classify into `ScanCompletion::{Complete, CompleteWithSkips{n}, Resumable}` and refreshes into `RefreshOutcome::{Completed, CompletedWithSkips{n}, NothingDue, Deferred(..), Resumable}`. Two different privileges: **revision proof + nightly schedule** go only to `Complete`/`Completed`/`NothingDue`; the **cooldown anchor** (`scan_state.last_full_scan_finished_at`) is written for `Complete` **and** `CompleteWithSkips` — the user's request was fulfilled, skipped accounts are per-account gaps the retry covers. `Resumable` writes no marker and keeps the full obligation (V3-03). The queue row records the outcome durably (`scan_queue.completion`), and the cooldown reads **only** the marker — never a row's `done` status — so an interrupted attempt can be re-run at once. `CompleteWithSkips`/`CompletedWithSkips` show as degraded and schedule a retry.
-- **Full-request lifecycle (R09, V2-05, V3-03).** `scan_queue.full_requested_at` means "a full scan is owed since T". Every user enqueue sets it (`COALESCE`, so clicks coalesce); a refresh handover keeps it; a resumable or failed full attempt keeps it; **only a full scan finishing `Complete`/`CompleteWithSkips` clears it**. The tick retries owed work as `kind = 'full'`. All of this is in `scan_queue`/`scan_state`, so a worker restart changes nothing.
+- **Full-request lifecycle (R09, V2-05, V3-03).** `scan_queue.full_requested_at` means "a full scan is owed since T". Every user enqueue sets it (`COALESCE`, so clicks coalesce); a refresh handover keeps it; a resumable or failed full attempt keeps it; **only a full scan finishing `Complete`/`CompleteWithSkips` clears it**. The tick retries owed work as `kind = 'full'`, and an owed full scan is **eligible for that retry with zero score rows** (V4-01) — a first scan that failed before its first write is not stranded. All of this is in `scan_queue`/`scan_state`, so a worker restart changes nothing. A full scan **always enters `run_phased_scan`**, even with no fresh candidates (V4-02), so staged work is resumed or drained before anything can be called complete; a `burst`/`finalize` marker after the run is `Resumable` regardless of the `degraded` flag.
 - **SQLite/Postgres divergence, deliberate:** Postgres `valid_until` is `NOT NULL` after backfill; SQLite stays nullable and NULL/malformed read as expired. **Cross-backend expiry conversion (V2-06):** export carries `ExportedExpiry::{At(rfc3339), Missing, Invalid(raw)}`; importing `Missing`/`Invalid` into Postgres writes `valid_until = scored_at` (expired the instant it was scored — never renewed, never omitted; the raw text is logged, not stored). **Precision:** Postgres keeps microseconds through export/import; SQLite stores whole seconds (its `datetime()` column form), so a Postgres → SQLite import truncates to the second — documented and tested, not "byte-for-byte".
 - **Pass numbers (spec §6 Phase 2, as amended by Task 10):** after deploy every pre-existing row is hidden and `tier_counts.expired` = row count; the first tick enqueues a refresh for every user with scores (via `refreshed_generation`, not migration); the refresh re-scores exactly the High/Elevated set; no `legacy` row ≥ Elevated remains after one refresh per user; the feed-cache **functional** test passes (warm eligible candidate → hit, cold → miss, zero-candidate run → not applicable). The former ≥ 80 % hit-rate gate is withdrawn (R08, deciduous 878).
 - **Privacy:** never log tokens, DPoP proofs, request bodies, `CHARCOAL_TOKEN_KEY`, `SOOT_TOKEN`; never log post text; strip credentials from any `DATABASE_URL` printed.
@@ -704,7 +704,7 @@ fn database_url() -> Option<String> {
 }
 ```
 
-(replace the existing `database_url` body; local runs without the variable still skip.) Destructive fixtures get their **own database** (V3-06): add `migrations_database_url()` next to it, reading `DATABASE_URL_MIGRATIONS` with the same CI panic, and `pub async fn migrate_postgres_through(url: &str, max_version: i64) -> Result<()>` in `src/db/postgres.rs` that (1) refuses — `bail!` — unless the URL's database name ends in `_migrations`, (2) drops every table in that database, (3) runs the embedded migrations up to `max_version`. Test support, documented as such. No lock is claimed to protect it: the ordinary suite never opens that database, so nothing can observe its resets; the drop-all happens at test **start**, so a failed test leaves nothing for the next to trip over. Then append the two v18 tests: the fresh-DB one as before against `DATABASE_URL`; the upgrade one against `DATABASE_URL_MIGRATIONS`: `migrate_postgres_through(&murl, 17)` (assert `MAX(version) = 17` and that `account_scores.valid_until` is absent in `information_schema.columns`), seed the same fixture rows as the SQLite test (`did:plc:v18scored` / `did:plc:v18unscored` / `did:plc:v18acct` / `did:plc:v18na`, a done full queue row, two fingerprints), `connect_postgres(&murl)` (v18 applies), and assert: `scoring_generation = 'legacy'`, `valid_until` = `scored_at + 14 d`, `is_nullable = 'NO'` for `valid_until`, `kind = 'full'`, `completion IS NULL`, `next_refresh_at`/`refreshed_generation`/`refresh_attempted_generation` all NULL, `embedding_model_id` set only where a vector exists, the `scan_state` marker equal to the done row's `finished_at` rendered RFC3339, `idx_account_scores_user_score` present, version 18 recorded exactly once. Add `migrate_postgres_through_refuses_a_non_migrations_database` asserting the `bail!` on `DATABASE_URL`.
+(replace the existing `database_url` body; local runs without the variable still skip.) Destructive fixtures get their **own database** (V3-06): add `migrations_database_url()` next to it, reading `DATABASE_URL_MIGRATIONS` with the same CI panic, and `pub async fn migrate_postgres_through(url: &str, max_version: i64) -> Result<()>` in `src/db/postgres.rs` that (1) refuses — `bail!` — unless the URL's database name ends in `_migrations`, (2) drops every table in that database, (3) runs the embedded migrations up to `max_version`. Test support, documented as such. The ordinary suite never opens that database, so it cannot observe the resets; the destructive tests **among themselves** are serialized (V4-05) by `migrations_fixture()` in `tests/db_postgres.rs`: it takes a process-local `migrations_db_lock()` (a `tokio::sync::Mutex<()>` in a `OnceLock`, like the existing locks), opens a dedicated connection and runs `SELECT pg_advisory_lock(hashtext('charcoal_migrations_fixture'))` on it (released when the connection drops at the end of the test — a session lock, so a second test binary or an overlapping CI invocation blocks rather than interleaves), then calls `migrate_postgres_through`. The drop-all happens at test **start** under both locks, so a failed test leaves nothing for the next to trip over. Both destructive tests (`test_pg_migration_v18_upgrades_from_v17`, `test_pg_migrate_from_sqlite_preserves_every_row`) go through `migrations_fixture()`; a third test asserts that two concurrent `migrations_fixture()` calls in one process run strictly one after the other (the second observes the first's tables gone and its own fixture in place). Then append the two v18 tests: the fresh-DB one as before against `DATABASE_URL`; the upgrade one against `DATABASE_URL_MIGRATIONS`: `migrate_postgres_through(&murl, 17)` (assert `MAX(version) = 17` and that `account_scores.valid_until` is absent in `information_schema.columns`), seed the same fixture rows as the SQLite test (`did:plc:v18scored` / `did:plc:v18unscored` / `did:plc:v18acct` / `did:plc:v18na`, a done full queue row, two fingerprints), `connect_postgres(&murl)` (v18 applies), and assert: `scoring_generation = 'legacy'`, `valid_until` = `scored_at + 14 d`, `is_nullable = 'NO'` for `valid_until`, `kind = 'full'`, `completion IS NULL`, `next_refresh_at`/`refreshed_generation`/`refresh_attempted_generation` all NULL, `embedding_model_id` set only where a vector exists, the `scan_state` marker equal to the done row's `finished_at` rendered RFC3339, `idx_account_scores_user_score` present, version 18 recorded exactly once. Add `migrate_postgres_through_refuses_a_non_migrations_database` asserting the `bail!` on `DATABASE_URL`.
 
 - [ ] **Step 6: Run**
 
@@ -1989,7 +1989,7 @@ pub fn finish_queued_scan(
 
 - [ ] **Step 5: Postgres**
 
-Same semantics. `enqueue_scan`: `BEGIN; SELECT status, kind FROM scan_queue WHERE user_did = $1 FOR UPDATE;` then the matching statement per state; `COMMIT`. `enqueue_refresh_scan`: the INSERT … ON CONFLICT … WHERE `scan_queue.status IN ('done','failed')` with `kind = 'refresh'`. `finish_queued_scan`: the same `CASE` form with `$3::TEXT IS NULL` for the status, `NOW()` for `finished_at`, `$6` completion and `$7::boolean` fulfilled. `claim_next_scan`: `SELECT user_did, kind … FOR UPDATE SKIP LOCKED`. `list_scan_queue`: `kind`, `full_requested_at` (`to_rfc3339()` on the `Option<DateTime<Utc>>`). Median: `AND kind = 'full'`.
+Same semantics, with one difference the SQLite immediate transaction hides (V4-03): `SELECT … FOR UPDATE` on an **absent** row locks nothing, so two first-time enqueues can race and the loser's `ON CONFLICT DO UPDATE` would reset a job the winner's worker has already claimed. Postgres `enqueue_scan` therefore starts with a per-user transaction advisory lock — `SELECT pg_advisory_xact_lock(hashtext('scan_queue:' || $1))` — before the state read (the same mechanism `claim_next_scan` already uses for admission), and its absent-row `INSERT … ON CONFLICT (user_did) DO UPDATE SET … WHERE scan_queue.status IN ('done','failed')` is conditional as defense in depth: if it affects 0 rows the function re-reads the row and returns the outcome for the state it actually found (`AlreadyQueued`/`AlreadyRunning`/`QueuedAfterRefresh`, with the obligation still recorded via the `COALESCE` update). Lock order is unchanged (advisory(user) → queue row; the tick takes users rows then queue rows and never the enqueue advisory lock; `finish_queued_scan` takes only the queue row) — no cycle. `enqueue_refresh_scan`: the INSERT … ON CONFLICT … WHERE `scan_queue.status IN ('done','failed')` with `kind = 'refresh'`. `finish_queued_scan`: the same `CASE` form with `$3::TEXT IS NULL` for the status, `NOW()` for `finished_at`, `$6` completion and `$7::boolean` fulfilled. `claim_next_scan`: `SELECT user_did, kind … FOR UPDATE SKIP LOCKED`. `list_scan_queue`: `kind`, `full_requested_at` (`to_rfc3339()` on the `Option<DateTime<Utc>>`). Median: `AND kind = 'full'`.
 
 - [ ] **Step 6: Handlers and the marker**
 
@@ -2118,13 +2118,19 @@ pub enum ScanCompletion {
 /// after the run, and the skip count. `Err` is not a completion at all and
 /// is handled by the caller.
 pub fn classify_full_scan(degraded: bool, scan_phase: Option<&str>, skipped: i64) -> ScanCompletion {
-    match (degraded, scan_phase) {
-        (false, _) => ScanCompletion::Complete,
-        (true, Some("done")) => ScanCompletion::CompleteWithSkips { n: skipped.max(0) },
-        (true, _) => ScanCompletion::Resumable,
+    // The marker is authoritative (V4-02): staging left at burst/finalize is
+    // unfinished work whatever the summary's flag says, and an unreadable
+    // marker is not proof of completion either.
+    match (scan_phase, degraded) {
+        (Some("burst") | Some("finalize") | None, _) => ScanCompletion::Resumable,
+        (Some("done"), false) => ScanCompletion::Complete,
+        (Some("done"), true) => ScanCompletion::CompleteWithSkips { n: skipped.max(0) },
+        (Some(_), _) => ScanCompletion::Resumable, // gather or unknown: not finished
     }
 }
 ```
+
+Inline tests in `scan_job.rs` for `classify_full_scan`: `(false, Some("done"), 0)` → `Complete`; `(true, Some("done"), 3)` → `CompleteWithSkips{3}`; `(true, Some("burst"), 0)`, `(true, None, 0)`, **`(false, Some("burst"), 0)`, `(false, Some("finalize"), 0)`, `(false, None, 0)`** → `Resumable` (V4-02: a clean-looking summary over unfinished staging is not complete).
 
 plus the marker writer and the report type the slot lifecycle needs (V3-02):
 
@@ -2218,6 +2224,8 @@ async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>>;
 async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>>;
 async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>>;
 async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()>;
+/// Retry: sets next_refresh_at AND refresh_attempted_generation in one statement (V4-01).
+async fn schedule_retry_at(&self, user_did: &str, at_rfc3339: &str, attempted_generation: &str) -> Result<()>;
 /// Proof: sets BOTH refreshed_generation and refresh_attempted_generation.
 async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()>;
 /// ONE transaction: select up to `limit` due users (see the due rule), then
@@ -2530,7 +2538,46 @@ mod tests {
         schedule_retry(db.as_ref(), "did:plc:u", now).await;
         let next = db.next_refresh_at("did:plc:u").await.unwrap().unwrap();
         assert_eq!(next, (now + ChronoDuration::hours(REFRESH_RETRY_HOURS as i64)).to_rfc3339());
-        assert_eq!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(scoring_revision()), "retry does not unset the generation");
+        assert_eq!(db.refreshed_generation("did:plc:u").await.unwrap().as_deref(), Some(scoring_revision()), "retry does not unset the proof");
+        assert_eq!(db.refresh_attempted_generation("did:plc:u").await.unwrap().as_deref(), Some(scoring_revision()), "retry stamps the attempt (V4-01)");
+    }
+
+    /// V4-01: a first full scan that failed before writing a single score is
+    /// still retried — as a full scan, after its deadline, once — across a
+    /// simulated restart. A user with neither scores nor an obligation is
+    /// never selected.
+    #[tokio::test]
+    async fn an_owed_first_scan_with_no_scores_is_retried_after_its_deadline() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let open = || -> Arc<dyn Database> {
+            let conn = Connection::open(file.path()).unwrap();
+            create_tables(&conn).unwrap();
+            Arc::new(SqliteDatabase::new(conn))
+        };
+        let db = open();
+        db.upsert_user("did:plc:first", "first.h").await.unwrap();
+        db.upsert_user("did:plc:nobody", "nobody.h").await.unwrap(); // no scores, no request: never due
+        let now = Utc::now();
+        // 1–2. Their first full scan is claimed and fails before any write.
+        db.enqueue_scan("did:plc:first").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        db.finish_queued_scan("did:plc:first", &claim.claim_id, crate::db::FinishCompletion::Failed, Some("fingerprint build failed")).await.unwrap();
+        schedule_retry(db.as_ref(), "did:plc:first", now).await;
+        let owed = db.list_scan_queue().await.unwrap().into_iter().find(|r| r.user_did == "did:plc:first").unwrap();
+        let requested = owed.full_requested_at.clone().expect("obligation retained on failure");
+        assert_eq!(db.export_scores("did:plc:first").await.unwrap().len(), 0, "zero scores — the case V4-01 is about");
+        // 3. Restart.
+        drop(db);
+        let db = open();
+        // 4. Before the deadline: nothing.
+        assert_eq!(enqueue_due_refreshes(&db, now + ChronoDuration::seconds(30), Duration::from_secs(24 * 3600)).await, 0);
+        // 5. After it: exactly one FULL job, same obligation timestamp.
+        assert_eq!(enqueue_due_refreshes(&db, now + ChronoDuration::hours(REFRESH_RETRY_HOURS as i64 + 1), Duration::from_secs(24 * 3600)).await, 1);
+        let r = db.list_scan_queue().await.unwrap().into_iter().find(|r| r.user_did == "did:plc:first").unwrap();
+        assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+        assert_eq!(r.full_requested_at.as_deref(), Some(requested.as_str()));
+        // 6. The user with nothing owed and nothing scored was not selected.
+        assert!(db.list_scan_queue().await.unwrap().iter().all(|r| r.user_did != "did:plc:nobody"));
     }
 }
 ```
@@ -2566,6 +2613,14 @@ pub fn schedule_refresh(conn: &Connection, user_did: &str, at_rfc3339: &str) -> 
     Ok(())
 }
 
+pub fn schedule_retry_at(conn: &Connection, user_did: &str, at_rfc3339: &str, attempted_generation: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+        params![user_did, at_rfc3339, attempted_generation],
+    )?;
+    Ok(())
+}
+
 /// Proof. Sets BOTH columns (V3-04): a proven revision is also an attempted
 /// one, so the tick's revision clause stays quiet after a manual full scan.
 pub fn mark_refreshed_generation(conn: &Connection, user_did: &str, generation: &str) -> Result<()> {
@@ -2585,7 +2640,9 @@ pub fn mark_refresh_attempted_generation(conn: &Connection, user_did: &str, gene
 /// Params: ?1 now (RFC3339), ?2 current revision, ?3 limit.
 pub const REFRESH_DUE_SQL: &str =
     "SELECT u.did FROM users u
-     WHERE EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
+     WHERE (EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
+            OR EXISTS (SELECT 1 FROM scan_queue o
+                       WHERE o.user_did = u.did AND o.full_requested_at IS NOT NULL))
        AND NOT EXISTS (SELECT 1 FROM scan_queue q
                        WHERE q.user_did = u.did AND q.status IN ('queued', 'running'))
        AND ((u.next_refresh_at IS NOT NULL AND u.next_refresh_at <= ?1)
@@ -2593,6 +2650,12 @@ pub const REFRESH_DUE_SQL: &str =
             OR u.refresh_attempted_generation != ?2)
      ORDER BY u.next_refresh_at, u.did
      LIMIT ?3";
+     // Eligibility (V4-01): score rows OR an owed full scan. A first scan that
+     // failed before its first write has no scores but does have
+     // full_requested_at on its finished row — it must be retried. Users with
+     // neither are never selected. Timing is unchanged: schedule_retry stamps
+     // refresh_attempted_generation, so the revision clause is quiet until
+     // the deadline for retries of either kind.
 
 /// Params: ?1 user_did, ?2 now (RFC3339). CONDITIONAL: the WHERE is evaluated
 /// against the row as it is at write time, so a full row queued or admitted
@@ -2647,7 +2710,7 @@ pub fn claim_and_enqueue_due_refreshes(
 }
 ```
 
-Postgres: the same two statements as `pub const`s in `postgres.rs` (`$1::timestamptz`, `refresh_attempted_generation IS DISTINCT FROM $2`, the owed-full `CASE`, `mark_refreshed_generation` setting both columns, `ORDER BY next_refresh_at NULLS FIRST, did LIMIT $3 FOR UPDATE OF u SKIP LOCKED` — two replicas ticking together partition the due set), in one `BEGIN … COMMIT` over `self.pool.begin()`; per user the conditional `INSERT … ON CONFLICT (user_did) DO UPDATE SET … WHERE scan_queue.status IN ('done','failed')`, and the `users` update only when `rows_affected() == 1`. Lock order: `users` (FOR UPDATE) then `scan_queue`; `enqueue_scan`/`finish_queued_scan` lock only `scan_queue`; `schedule_*` only `users` — no cycle. The `NOT EXISTS` in the select is an optimisation; the conditional write is the guarantee. `next_refresh_at`/`refreshed_generation` getters render `to_rfc3339()`.
+Postgres: the same two statements as `pub const`s in `postgres.rs` (`$1::timestamptz`, the owed-full `OR EXISTS` eligibility, `refresh_attempted_generation IS DISTINCT FROM $2`, the owed-full `CASE`, `mark_refreshed_generation` setting both columns, `schedule_retry_at` setting both `next_refresh_at` and `refresh_attempted_generation`, `ORDER BY next_refresh_at NULLS FIRST, did LIMIT $3 FOR UPDATE OF u SKIP LOCKED` — two replicas ticking together partition the due set), in one `BEGIN … COMMIT` over `self.pool.begin()`; per user the conditional `INSERT … ON CONFLICT (user_did) DO UPDATE SET … WHERE scan_queue.status IN ('done','failed')`, and the `users` update only when `rows_affected() == 1`. Lock order: `users` (FOR UPDATE) then `scan_queue`; `enqueue_scan`/`finish_queued_scan` lock only `scan_queue`; `schedule_*` only `users` — no cycle. The `NOT EXISTS` in the select is an optimisation; the conditional write is the guarantee. `next_refresh_at`/`refreshed_generation` getters render `to_rfc3339()`.
 
 - [ ] **Step 4: `src/web/refresh.rs` implementation (above the tests)**
 
@@ -2742,13 +2805,14 @@ pub async fn schedule_after_success(db: &dyn Database, user_did: &str, now: Date
 }
 
 /// After a deferred, resumable, partially completed or failed attempt: retry
-/// at the deadline. Touches only next_refresh_at — refresh_attempted_generation
-/// was set by the tick that claimed this attempt, so the revision clause
-/// stays quiet until the deadline (V2-03); refreshed_generation stays
-/// unproven so the runbook can see the user is behind.
+/// at the deadline. Sets next_refresh_at AND stamps refresh_attempted_generation
+/// (V2-03, V4-01): an attempt happened — whether the tick claimed it or the
+/// user clicked — so the revision clause stays quiet until the deadline.
+/// refreshed_generation stays unproven so the runbook can see the user is
+/// behind. One statement on both backends.
 pub async fn schedule_retry(db: &dyn Database, user_did: &str, now: DateTime<Utc>) {
     if let Err(e) = db
-        .schedule_refresh(user_did, &plus(now, Duration::from_secs(REFRESH_RETRY_HOURS * 3600)))
+        .schedule_retry_at(user_did, &plus(now, Duration::from_secs(REFRESH_RETRY_HOURS * 3600)), scoring_revision())
         .await
     {
         warn!(error = %format!("{e:#}"), "could not schedule the refresh retry");
@@ -2779,6 +2843,7 @@ Append to `tests/db_postgres.rs`:
 - `test_pg_claim_and_enqueue_is_one_transaction_and_bounded` (seed 3 due users + 1 not due + 1 without scores + 1 due-by-revision + 1 due-by-time with a queued full row; claim with limit 2 → 2 DIDs, rows queued refresh, `next_refresh_at` and `refresh_attempted_generation` set for exactly those 2; claim again → the remaining 2 (never the busy one); claim again → 0);
 - `test_pg_two_schedulers_partition_the_due_set` (two `PgDatabase`s over two pools, `tokio::join!` the claim with limit 25 over 10 due users — union is the 10, intersection empty; `SKIP LOCKED`);
 - Postgres twins of `a_completed_manual_full_scan_proves_both_columns_and_the_tick_stays_quiet` (V3-04) and `owed_full_work_is_retried_as_a_full_scan` (V3-03), through the same functions;
+- **`test_pg_concurrent_first_enqueues_cannot_reset_a_running_claim` (V4-03):** two `PgDatabase`s over two pools for a user with no queue row. Connection A: `BEGIN; SELECT pg_advisory_xact_lock(hashtext('scan_queue:' || $1))` (A now holds the enqueue lock). Task B: `enqueue_scan(did)` — must block (assert it has not returned after 200 ms). A: `INSERT` the full row and `COMMIT`; A's pool: `claim_next_scan(1, 60)` (the job is running with a claim id and lease). B unblocks: assert it returned `AlreadyRunning`, the row is still `running` with A's `claim_id`, `lease_expires` unchanged, exactly one `full_requested_at`. Repeat the click on B twice more → `AlreadyRunning`, obligation unchanged. Variant: run the raw absent-row `INSERT … ON CONFLICT … WHERE` from the plan against a running row directly → `rows_affected() == 0`, state preserved (the defense-in-depth clause);
 - **`test_pg_scheduler_write_does_not_clobber_a_concurrent_full_enqueue` (V2-02):** connection A: `BEGIN`, run `REFRESH_DUE_SQL` (locks the user row, returns `did:plc:pgrace`); connection B (a separate `PgDatabase`): `enqueue_scan("did:plc:pgrace")` — commits, the done row is now `queued full`; connection A: run `REFRESH_ENQUEUE_SQL` for the DID → `rows_affected() == 0`; skip the `users` update; `COMMIT`. Assert the row is still `queued full`, `next_refresh_at` and `refresh_attempted_generation` unchanged. Variant 2: after B's enqueue, B also `claim_next_scan(1, 60)` (the full scan is admitted, `running` with a claim id and lease) before A's write — assert kind/status/claim_id/lease_expires unchanged. Variant 3: no queue row exists at select time; B enqueues (inserts) between; A's INSERT conflicts, the WHERE sees `queued`, 0 rows. All three run the real statements because they are `pub const`.
 
 - [ ] **Step 7: Run**
@@ -3472,11 +3537,11 @@ pub async fn prepare_refresh(ctx: &dyn RefreshContextSource, user_did: &str, act
 #[async_trait] pub trait RefreshBookkeeping: Send + Sync { /* reset_markers, record_outcome, request_full, schedule_success, schedule_retry — see below */ }
 pub struct DbBookkeeping(pub Arc<dyn Database>);
 pub(crate) async fn run_refresh_with<S, F, Fut>(scan_manager: Arc<RwLock<ScanManager>>, books: &dyn RefreshBookkeeping,
-    user_did: &str, actor_handle: &str, claim_id: &str, setup: S) -> anyhow::Result<()>
+    user_did: &str, actor_handle: &str, claim_id: &str, setup: S) -> anyhow::Result<ScanReport>  // same report type as run_scan (V4-04)
     where S: FnOnce() -> anyhow::Result<(Box<dyn RefreshContextSource>, F)>, F: FnOnce(RefreshPlan) -> Fut, Fut: Future<Output = anyhow::Result<ScanSummary>>;
 pub fn classify_refresh(candidates: usize, summary: &ScanSummary) -> RefreshOutcome;
 /// Production: real context source + the real run_phased_scan, both built inside `setup`.
-pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, actor_handle, claim_id) -> anyhow::Result<()>;
+pub(crate) async fn run_refresh(config, db, models, scan_manager, user_did, actor_handle, claim_id) -> anyhow::Result<ScanReport>;
 ```
 `scan_state` keys written by a refresh: `refresh_last_run_id` (= claim_id), `refresh_last_outcome` (`completed|nothing_due|deferred:<reason>|resumable|failed`), `refresh_last_run_at`, `refresh_candidates`, `refresh_scored`, `refresh_feed_cache_hits`, `refresh_feed_cache_misses`, `refresh_feed_cache_applicable` (`1` only when candidates > 0). All eight are (re)written at the **start** of every run (zeros / `running`) so a previous run's numbers can never be read as this run's (R08).
 
@@ -3822,7 +3887,7 @@ Expected: compile errors (expected at compile time).
 
 (a resumable marker with **no** owner recorded is pre-v18 staging from the same binary lineage — treat it as owned by `Full`, since only full scans existed). At the fresh-start branch, next to `scan_phase = gather`: `db.set_scan_state(user_did, RUN_KIND_KEY, identity.kind.as_str())` and `RUN_GENERATION_KEY = identity.generation`. At `Done`: delete both keys (`delete_scan_state` if the trait has it; otherwise set them to `""` and treat empty as absent in the reads above — check `rg -n "fn delete_scan_state" src/db/traits.rs`).
 
-`PhasedScanDeps` gains `pub evidence: EvidenceContract<'a>` (see "Evidence provenance" above); `finalize.rs` `verdict_for` takes it and returns `None` unless `evidence.accepts(row.model_id.as_deref(), row.policy_version.as_deref())`. `amplification.rs` and `sweep.rs` pass `RunIdentity::full()` and an `EvidenceContract` built from `ONNX_MODEL_ID` and the classifier's identity. `ScanSummary` gains `final_phase: Option<String>` (the `scan_phase` marker at return) and `skipped: i64` (`count_scan_skips` at return), filled by `run_phased_scan`, so completion can be classified from the summary alone. The rev-3 tests `finalize_rejects_verdicts_from_another_policy` / `…_classifier_model` are subsumed by `finalize_rejects_evidence_from_another_producer_revision`.
+`PhasedScanDeps` gains `pub evidence: EvidenceContract<'a>` (see "Evidence provenance" above); `finalize.rs` `verdict_for` takes it and returns `None` unless `evidence.accepts(row.model_id.as_deref(), row.policy_version.as_deref())`. `amplification.rs` and `sweep.rs` pass `RunIdentity::full()` and an `EvidenceContract` built from `ONNX_MODEL_ID` and the classifier's identity. **`amplification::run` always enters `run_phased_scan` when a scorer is present (V4-02):** the `Some(_) if candidates.is_empty() => (0, false)` arm at `amplification.rs:516` is removed — with an empty candidate list a fresh start is a no-op gather → empty burst → empty finalize → `Done` (cheap), and a resumable marker is resumed (own kind) or surfaces `OwnedByOtherKind` (refresh-owned, so `run_scan` drains) exactly as with candidates. The `None` (no scorer, CLI `--analyze` off) arm stays. Test in `tests/unit_scan_phases.rs`: `empty_discovery_resumes_full_owned_staging` (seed a full-owned `burst` marker with one pending row via the canned classifier; call `run_phased_scan(db, user, &[], deps, RunIdentity::full())`; assert the row is finalized and the marker reaches `done`), `empty_discovery_surfaces_refresh_owned_staging` (refresh-owned marker → `Err(OwnedByOtherKind(Refresh))`, marker untouched), `empty_discovery_with_no_staging_completes` (no marker → `Done`, `ScanSummary { degraded: false, final_phase: Some("done"), .. }` → `classify_full_scan` = `Complete`). And `run_scan` records the completion from `classify_full_scan` on the summary's `final_phase`, so a drain or resume that is still interrupted after an empty discovery is `Resumable`: no marker, no proof, retry, obligation kept. `ScanSummary` gains `final_phase: Option<String>` (the `scan_phase` marker at return) and `skipped: i64` (`count_scan_skips` at return), filled by `run_phased_scan`, so completion can be classified from the summary alone. The rev-3 tests `finalize_rejects_verdicts_from_another_policy` / `…_classifier_model` are subsumed by `finalize_rejects_evidence_from_another_producer_revision`.
 
 - [ ] **Step 4: `run_refresh`**
 
@@ -3987,7 +4052,7 @@ pub(crate) async fn run_refresh_with<S, F, Fut>(
     actor_handle: &str,
     claim_id: &str,
     setup: S,
-) -> anyhow::Result<()>
+) -> anyhow::Result<ScanReport>
 where
     S: FnOnce() -> anyhow::Result<(Box<dyn RefreshContextSource>, F)>,
     F: FnOnce(RefreshPlan) -> Fut,
@@ -4063,7 +4128,9 @@ pub fn classify_refresh(candidates: usize, summary: &ScanSummary) -> RefreshOutc
     }
 }
 
-/// Production entry: everything fallible is inside `setup`.
+/// Production entry: everything fallible is inside `setup`. Returns the same
+/// `ScanReport` as `run_scan` so `launch_scan`'s two arms have one type and
+/// `run_under_slot` finishes the queue row with the refresh's completion (V4-04).
 pub(crate) async fn run_refresh(
     config: Arc<Config>,
     db: Arc<dyn Database>,
@@ -4072,7 +4139,7 @@ pub(crate) async fn run_refresh(
     user_did: &str,
     actor_handle: &str,
     claim_id: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ScanReport> {
     let books = DbBookkeeping(Arc::clone(&db));
     let setup_db = Arc::clone(&db);
     let setup = move || -> anyhow::Result<(Box<dyn RefreshContextSource>, _)> {
@@ -4161,7 +4228,7 @@ impl RefreshContextSource for LiveRefreshContext {
 }
 ```
 
-`request_full_after_refresh(user_did)`: `UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, now) WHERE user_did = ? AND status = 'running' AND kind = 'refresh'` on both backends (Task 5's finish hands over). `DbBookkeeping::reset_markers` writes the eight `refresh_*` keys. `RefreshPlan`, `RefreshContextSource`, `RefreshBookkeeping`, `DbBookkeeping` live in `refresh_scan.rs`; `ClassifierIdentity`, `EvidenceContract`, `CLEAN_PASS_POLICY` in `staging.rs`. `finish_scan` gains `completion: FinishCompletion` (passed through to `run_under_slot`'s `ScanReport`) next to the `label`; `RefreshOutcome::finish_completion()` maps Completed → Complete, CompletedWithSkips → CompleteWithSkips, NothingDue → Complete, Deferred/Resumable → Resumable.
+`request_full_after_refresh(user_did)`: `UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, now) WHERE user_did = ? AND status = 'running' AND kind = 'refresh'` on both backends (Task 5's finish hands over). `DbBookkeeping::reset_markers` writes the eight `refresh_*` keys. `RefreshPlan`, `RefreshContextSource`, `RefreshBookkeeping`, `DbBookkeeping` live in `refresh_scan.rs`; `ClassifierIdentity`, `EvidenceContract`, `CLEAN_PASS_POLICY` in `staging.rs`. `finish_scan(mgr, user, claim, result: anyhow::Result<(usize, usize, bool)>, completion: FinishCompletion, label: &str) -> anyhow::Result<ScanReport>` records the outcome in the status entry and returns `Ok(ScanReport { completion })` for an `Ok` result, `Err` otherwise — the single tail call for **both** `run_scan` and `run_refresh_with` (V4-04), so `launch_scan`'s `match kind { … }` has one future type `anyhow::Result<ScanReport>` and `run_under_slot` finishes the row with the reported completion for either kind. `RefreshOutcome::finish_completion()` maps Completed → Complete, CompletedWithSkips → CompleteWithSkips, NothingDue → Complete, Deferred/Resumable → Resumable; an `Err` from `run_refresh_with` reaches `run_under_slot` as `SlotExit::Failed` → `FinishCompletion::Failed`. The slot-lifecycle tests (`scan_job.rs::slot_lifecycle_tests`) drive `run_under_slot` with futures of exactly this type for both kinds: a refresh future returning `Ok(ScanReport { completion: Resumable })` must leave the row `done` with `completion = resumable`, one returning `Err` → `failed`.
 
 `launch_scan(state, user_did, actor_handle, kind, slot, live)`: `match kind { Full => run_scan(...), Refresh => run_refresh(...) }` inside the spawned future. `run_scan`'s pipeline call passes `RunIdentity::full()`; on `PhasedScanError::OwnedByOtherKind(Refresh)` it performs the **drain** (see Transitions): the drain's `ScanSummary` is classified with `classify_full_scan`; if it is `Resumable` (cost-capped/interrupted again), `run_scan` returns that as its own completion — no cooldown marker, `schedule_retry`, the row finishes `done` with `completion = resumable` and **`full_requested_at` kept**, so the retry tick re-queues the user's owed **full** scan automatically and the next attempt resumes the drain before its own gather (V3-02, V3-03: a partial drain earns no full-scan bookkeeping and loses no obligation) — and only a `Complete`/`CompleteWithSkips` drain clears the markers and proceeds to the full gather. `AppStateLauncher::launch` passes `claim.kind`; the admit log line gains `kind`. `record_scan_outcome`/`finish_scan` gain a `label: &str` ("Completed" / "Refresh complete") so a refresh's status message does not read "0 events".
 
@@ -4174,7 +4241,7 @@ Expected: green.
 
 ```bash
 git add src/web/refresh_scan.rs src/web/mod.rs src/web/scan_job.rs src/web/admitter.rs src/pipeline/scan_phases/mod.rs src/pipeline/scan_phases/staging.rs src/pipeline/scan_phases/gather.rs src/pipeline/scan_phases/finalize.rs src/pipeline/amplification.rs src/pipeline/sweep.rs src/toxicity/zentropi.rs src/db/traits.rs src/db/queries.rs src/db/sqlite.rs src/db/postgres.rs tests/unit_scan_phases.rs tests/unit_classifier.rs
-git commit -m 'feat(344): run_refresh with staging ownership, resume, input compatibility and honest outcomes
+git commit -m 'feat(344): run_refresh with staging ownership, resume, input compatibility and honest outcomes; one ScanReport contract for both scan kinds
 
 run_phased_scan records scan_run_kind/scan_run_generation; a refresh
 resumes its own work, refuses a full scan'"'"'s (Deferred), a full scan
@@ -4311,11 +4378,23 @@ Dispositions as for the second table. Nothing here is *verified*: this is a plan
 | V3-03 | R02, R09, V2-05 | addressed in design | Task 5 (`full_requested_at` = "a full scan is owed since T": set by every user request, kept through handover and resumable finishes, cleared only when a full scan completes), Task 6 (`REFRESH_ENQUEUE_SQL` retries owed work as `kind = 'full'`), Task 9 (drain interruption is `Resumable`, obligation retained) | `tests/unit_scan_kind.rs::a_requested_full_scan_survives_an_interrupted_drain_and_runs_without_another_click` (request during refresh → handover → full claimed → finish `Resumable` → owed → `schedule_retry` → tick after deadline creates `kind = 'full'` → finish `Complete` clears `full_requested_at`); duplicate clicks in between leave one row and one `full_requested_at`; the same across a simulated restart (new `SqliteDatabase` over the same file); Postgres twin | The owed retry waits `REFRESH_RETRY_HOURS` unless the user clicks (which re-queues at once) — automatic, but not instant |
 | V3-04 | R07, V2-03 | addressed in design | Task 6 (`mark_refreshed_generation` SQL sets both columns on both backends; `mark_refresh_attempted_generation` sets one) | `a_completed_manual_full_scan_proves_both_columns_and_the_tick_stays_quiet` (user with NULL attempted → enqueue → claim → `record_full_scan_completion(Complete)` → `schedule_after_success` → both columns = current, `next_refresh_at` ≈ +24 h → tick 30 s later creates no job); Postgres twin through the same functions | none identified |
 | V3-05 | R04, R05, V2-03 | addressed in design | Task 9 (`RefreshBookkeeping` boundary; `setup` builds context + pipeline inside the captured outcome; `reset_markers` inside; one scheduling site; bookkeeping-write failure logged + counted, never reported as scheduled) | `setup_failure_records_failed_and_schedules_the_retry` (setup returns `Err`; stub bookkeeping counts exactly one `schedule_retry`, zero `schedule_success`), `marker_reset_failure_records_failed_and_schedules_the_retry` (stub `reset_markers` errs, others delegate), `missing_context_fails_the_refresh_without_writing` retained; all three run without models | If the database is unreachable for the bookkeeping write itself, the retry cannot be scheduled either; the failure is logged at error level and counted (`refresh_metrics::record_bookkeeping_failure`), and the user is next selected by time |
-| V3-06 | R10, V2-07 | addressed in design | Task 2 (`migrate_postgres_through` runs only against `DATABASE_URL_MIGRATIONS`, whose database name must end in `_migrations`; drop-all at test *start*; `cache_test_lock` no longer claimed as isolation), Global Constraints (`VERIFY_PG` sets both URLs; CI creates both databases) | `test_pg_migration_v18_upgrades_from_v17` and `test_pg_migrate_from_sqlite_preserves_every_row` run against the migrations database; a guard test asserts `migrate_postgres_through` refuses a URL without the `_migrations` suffix; the runbook's parallel-suite loop (`for i in $(seq 10); do VERIFY_PG; done`) is part of Task 10's evidence | none identified |
+| V3-06 | R10, V2-07 | addressed in design (rev 5: + V4-05) | Task 2 (`migrate_postgres_through` runs only against `DATABASE_URL_MIGRATIONS`, `_migrations` suffix guard; `migrations_fixture()` serializes destructive tests with a process mutex **and** a Postgres session advisory lock; drop-all at test *start* under both), Global Constraints (`VERIFY_PG`) | the two destructive tests go through `migrations_fixture()`; the suffix guard test; a two-concurrent-fixtures test proves strict ordering; the runbook's ten-run loop | none identified |
 
 **Evidence-provenance contract (rev 4):** every done queue row names its producer; the Stage-1 clean pass is a producer (ONNX model + `CLEAN_PASS_POLICY`), the Stage-2 classifier is a producer (its `model_id` + `policy_version`, one string on every path — advertised, written, cached). Finalize accepts a row only from a producer this binary runs; missing, foreign and sentinel provenance are distinct and all rejected. Re-gather recreates evidence with provenance, so a rejected row is a bounded retry, never a skip.
 
 **Full-request lifecycle contract (rev 4):** a user's request is a durable obligation, `scan_queue.full_requested_at`, set by every user enqueue and cleared only when a full scan **completes** (`Complete`/`CompleteWithSkips`). Attempts are queue rows and claims; interruptions finish the row with `completion = resumable` and keep the obligation; the retry tick queues owed work as `kind = 'full'`, never as a refresh; a refresh handover turns the row into the owed full row; repeated clicks coalesce; a worker restart changes nothing because every part of the state is in `scan_queue` and `scan_state`. Cooldown anchors only on the completion marker, so an interrupted attempt never starts one.
 
-**Validation performed for revisions 2–4:** none of the planned tests has been executed — this is a plan. Verified in-session for rev 2: the code paths the first review cited. Verified in-session for rev 3 (sqlite3): `datetime()` drops fractional seconds, malformed text yields NULL, `%f` renders milliseconds; `amplification::run` returns `Ok` for cost-capped scans; the rev-2 v17 fixture dropped two of nine v18 columns. Verified in-session for rev 4 by code inspection: `gather.rs:570-576` `mark_clean` writes `model_id = None, policy_version = None`; `zentropi.rs:378-386` writes the configured `labeler_version_id` into verdicts while `policy_version()` (`:402-408`) returns the static `"zentropi-labeler"`; `cached_classifier.rs:68-73` keys hits on `inner.policy_version()`; `tests/db_postgres.rs:972,982` define two separate locks. No Rust or Postgres test was run.
+## Review-resolution table — fourth review (Astra, `fb713a3`, V4-01–V4-05)
+
+Dispositions as before. Nothing here is *verified*: plan revision only.
+
+| ID | Prior | Disposition | Revised location | Mandatory acceptance tests (planned) | Remaining limitation |
+|---|---|---|---|---|---|
+| V4-01 | R04, V2-03, V3-03 | addressed in design | Task 6 (`REFRESH_DUE_SQL` eligibility = scores **or** owed full; `schedule_retry_at` stamps `refresh_attempted_generation`; Postgres twin), Global Constraints | `an_owed_first_scan_with_no_scores_is_retried_after_its_deadline` (zero scores → claim → fail before write → retry scheduled → restart → +30 s nothing → after deadline exactly one **full** job with the original obligation timestamp; a user with neither scores nor request never selected); `success_and_retry_scheduling` asserts the attempt stamp; Postgres twin | none identified |
+| V4-02 | R02, V2-05, V3-02, V3-03 | addressed in design | Task 9 (`amplification::run` removes the empty-candidate shortcut — always `run_phased_scan` with a scorer), Task 5 (`classify_full_scan`: `burst`/`finalize`/missing marker ⇒ `Resumable` regardless of `degraded`) | `empty_discovery_resumes_full_owned_staging`, `empty_discovery_surfaces_refresh_owned_staging` (→ `run_scan` drains), `empty_discovery_with_no_staging_completes`, the extended `classify_full_scan` cases | A CLI scan without `--analyze` (no scorer) still skips the pipeline, as today — it never scores and never owns staging |
+| V4-03 | R09, V2-02, V3-03 | addressed in design | Task 5 (Postgres `enqueue_scan`: `pg_advisory_xact_lock(hashtext('scan_queue:' \|\| $1))` before the state read; conditional absent-row insert with re-read as defense in depth; lock order stated) | `test_pg_concurrent_first_enqueues_cannot_reset_a_running_claim` (two pools; A holds the lock, B's enqueue blocks; A inserts, commits, claims; B returns `AlreadyRunning`; claim id, lease, status intact; one obligation; repeated clicks coalesce) + the raw-statement variant | SQLite needs no change: its immediate transaction already serializes the absent-row case |
+| V4-04 | R02, V3-02, V3-05 | addressed in design | Task 9 (`run_refresh_with` / `run_refresh` return `anyhow::Result<ScanReport>`; `finish_scan` returns `Result<ScanReport>` and is the single tail for both kinds), Task 5 (`launch_scan` arms share one future type) | `cargo build --features web,postgres` with both dispatch arms; slot-lifecycle tests driving `run_under_slot` with refresh-shaped `ScanReport` futures (`Resumable` → `completion = resumable`, `Err` → `failed`); the V3-05 tests assert `completion = failed` on the row | none identified |
+| V4-05 | R10, V2-07, V3-06 | addressed in design | Task 2 (`migrations_fixture()`: process mutex + Postgres session advisory lock; drop-all under both; both destructive tests use it; concurrent-fixtures ordering test), Global Constraints (`VERIFY_PG` wording) | the ordering test; both destructive tests under the suite's normal parallelism, ten-run loop (runbook §8b) | A single process mutex would not cover two overlapping CI invocations — that is what the Postgres session advisory lock is for |
+
+**Validation performed for revisions 2–5:** none of the planned tests has been executed — this is a plan. Verified in-session for rev 2: the code paths the first review cited. Verified in-session for rev 3 (sqlite3): `datetime()` drops fractional seconds, malformed text yields NULL, `%f` renders milliseconds; `amplification::run` returns `Ok` for cost-capped scans; the rev-2 v17 fixture dropped two of nine v18 columns. Verified in-session for rev 4 by code inspection: `gather.rs:570-576` `mark_clean` writes no provenance; `zentropi.rs:378-386` vs `:402-408` write and advertise different policy strings; `cached_classifier.rs:68-73` keys on the advertised one; `tests/db_postgres.rs:972,982` are two separate locks. Verified in-session for rev 5: `amplification.rs:516` (`Some(_) if candidates.is_empty() => (0, false)`) bypasses `run_phased_scan`; the rev-4 `REFRESH_DUE_SQL` required an `account_scores` row; the rev-4 Postgres `enqueue_scan` began with `SELECT … FOR UPDATE` on a possibly absent row; rev 4 declared `run_refresh` as `Result<()>` while `run_scan` returned `Result<ScanReport>`; rev 4 assigned both destructive tests to one database with no lock. No Rust or Postgres test was run.
 

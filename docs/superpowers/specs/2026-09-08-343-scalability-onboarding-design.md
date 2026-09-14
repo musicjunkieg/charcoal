@@ -401,6 +401,27 @@ deciduous 882):*
   `*_migrations` database (`DATABASE_URL_MIGRATIONS`); the suite's isolation
   is proven by a ten-run loop, not by a process-local lock.
 
+*Amended 2026-09-14 (plan rev 5, after Astra's fourth review V4-01–V4-05;
+deciduous 884):*
+
+- An owed full scan is eligible for the retry tick **without any score
+  row** — a first scan that failed before its first write is retried, as a
+  full scan, after its deadline; users with neither scores nor an
+  obligation are never selected. `schedule_retry` stamps the attempted
+  revision, so retries of either kind respect the deadline.
+- A full scan always enters the phased pipeline, even with no fresh
+  candidates: staged work is resumed or drained first, and a `burst` /
+  `finalize` marker after the run is resumable regardless of the summary's
+  flag. Empty discovery over no staging still completes legitimately.
+- Postgres `enqueue_scan` takes a per-user transaction advisory lock before
+  reading queue state (an absent row cannot be row-locked), with a
+  conditional absent-row insert and re-read as defense in depth; a running
+  claim and lease survive a concurrent first enqueue.
+- Both scan kinds return one `ScanReport` through one `finish_scan`, so the
+  queue row's completion is recorded the same way for full and refresh.
+- Destructive migration tests are serialized among themselves by a process
+  mutex plus a Postgres session advisory lock on the migrations database.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust

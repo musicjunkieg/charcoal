@@ -1,5 +1,13 @@
 [
   {
+    "hash": "fb713a3ffc761bf63286c1260f1169867255b495",
+    "short_hash": "fb713a3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T17:34:01-07:00",
+    "message": "docs(343): Phase 2 plan rev 4 — resolve Astra third review V3-01..V3-06; spec §4.4 amended\n\nV3-01 per-producer evidence provenance: mark_clean stamps ONNX_MODEL_ID +\nCLEAN_PASS_POLICY, EvidenceContract/Provenance distinguish clean-pass,\nclassifier, missing, foreign and decode-error rows; Zentropi advertises\nthe configured labeler version and writes the same string. V3-02 the\ncooldown reads only scan_state.last_full_scan_finished_at (written for\nComplete and CompleteWithSkips, never Resumable); scan_queue.completion\nkeeps the durable distinction; composed web tests through run_under_slot\nand POST /api/scan. V3-03 full_requested_at is a durable obligation set by\nevery user enqueue and cleared only by a completed full scan; the tick\nretries owed work as kind=full; lifecycle test across a restart. V3-04\nmark_refreshed_generation sets both columns; real-path test. V3-05\nRefreshBookkeeping boundary — marker reset, scorers, client and context\nall inside one captured outcome with a single scheduling site; setup and\nmarker-failure tests without models. V3-06 destructive fixtures on a\ndedicated *_migrations database with a suffix guard; ten-run isolation\nloop. Third resolution table + provenance and lifecycle contracts.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "c40be7f4d1e2910b15cb684b344b41e45d3299ae",
     "short_hash": "c40be7f",
     "author": "Bryan Guffey",

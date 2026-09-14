@@ -9602,6 +9602,28 @@
       "created_at": "2026-09-13T17:21:54.383792-07:00",
       "updated_at": "2026-09-13T17:21:54.383792-07:00",
       "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"c40be7f\",\"confidence\":85}"
+    },
+    {
+      "id": 883,
+      "change_id": "df37d25e-8a5a-4166-bdc5-1a670a7e5a15",
+      "node_type": "outcome",
+      "title": "Phase 2 plan rev 4 committed fb713a3 on docs/343-phase2-plan (PR #123): all 6 third-review findings addressed in design, none disputed. Evidence-provenance contract (clean pass is a producer; Zentropi identity unified), cooldown from the completion marker only + scan_queue.completion, durable full obligation retried as kind=full, both revision columns on success, RefreshBookkeeping boundary with a single scheduling site, dedicated _migrations database. Spec §4.4 rev-4 amendment in the same commit. Docs-only ⇒ merge-ready",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T17:34:17.601757-07:00",
+      "updated_at": "2026-09-13T17:34:17.601757-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"fb713a3\",\"confidence\":88}"
+    },
+    {
+      "id": 884,
+      "change_id": "2a46864a-7712-4bea-b88d-87073f1103b6",
+      "node_type": "action",
+      "title": "Revise Phase 2 plan to rev 5 per Astra fourth review V4-01..V4-05 (REQUEST CHANGES on fb713a3): owed full work eligible for retry without a score row (due rule = (has scores OR owed full) AND …; schedule_retry stamps the attempted revision), the empty-candidate shortcut always enters run_phased_scan so staged work resumes/drains and classify_full_scan treats a burst/finalize phase as Resumable regardless of degraded, Postgres enqueue takes a per-user advisory xact lock + conditional absent-row insert with re-read, run_refresh returns Result<ScanReport> through finish_scan, migrations database serialized by process mutex + Postgres advisory lock",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-13T17:53:42.625013-07:00",
+      "updated_at": "2026-09-13T17:53:42.625013-07:00",
+      "metadata_json": "{\"branch\":\"docs/343-phase2-plan\",\"commit\":\"fb713a3\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -19680,6 +19702,28 @@
       "weight": 1.0,
       "rationale": "Third review on rev 3",
       "created_at": "2026-09-13T17:21:54.392634-07:00"
+    },
+    {
+      "id": 927,
+      "from_node_id": 882,
+      "to_node_id": 883,
+      "from_change_id": "8f0bd06b-0410-4db9-bcd5-56cc8489e6d6",
+      "to_change_id": "df37d25e-8a5a-4166-bdc5-1a670a7e5a15",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Revision committed",
+      "created_at": "2026-09-13T17:34:17.612122-07:00"
+    },
+    {
+      "id": 928,
+      "from_node_id": 883,
+      "to_node_id": 884,
+      "from_change_id": "df37d25e-8a5a-4166-bdc5-1a670a7e5a15",
+      "to_change_id": "2a46864a-7712-4bea-b88d-87073f1103b6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fourth review on rev 4",
+      "created_at": "2026-09-13T17:53:42.632896-07:00"
     }
   ],
   "documents": [
