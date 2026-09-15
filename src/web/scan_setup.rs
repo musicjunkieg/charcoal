@@ -224,6 +224,19 @@ pub(crate) fn build_scan_scorers(
     })
 }
 
+/// Confirm the out-of-binary Stage-2 classifier is serving the identity this
+/// deployment declared, BEFORE the scan gathers anything (#344 F5).
+///
+/// Separate from `build_scan_scorers` because it is the only part of setup
+/// that does I/O, and both scan kinds have to await it at their own first
+/// async point. A hard error on purpose: a mismatched policy means every
+/// verdict this scan produces is foreign evidence, so the accounts are
+/// re-gathered and then skipped — hours of work for nothing. Refusing the
+/// start costs one round trip and names the variable to fix.
+pub(crate) async fn probe_classifier_identity(scorers: &ScanScorers) -> anyhow::Result<()> {
+    scorers.scorer.classifier().probe_identity().await
+}
+
 /// Persist both cache counters. Best-effort by construction: telemetry must
 /// never fail a run that has already done its work.
 pub(crate) async fn record_scan_cache_stats(db: &dyn Database, user_did: &str, s: &ScanScorers) {

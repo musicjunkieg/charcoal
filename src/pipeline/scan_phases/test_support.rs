@@ -70,16 +70,6 @@ impl SkipCounter for FailOnce {
     }
 }
 
-/// A [`SkipCounter`] that reports a fixed number without touching a database.
-pub struct FixedSkipCount(pub i64);
-
-#[async_trait]
-impl SkipCounter for FixedSkipCount {
-    async fn count(&self, _user_did: &str) -> Result<i64> {
-        Ok(self.0)
-    }
-}
-
 /// A fetcher that panics if it is ever asked for anything.
 struct NeverFetcher;
 

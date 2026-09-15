@@ -606,9 +606,11 @@ pub async fn run_candidates(
     median_engagement: f64,
     concurrency: usize,
     identity: RunIdentity,
-    // `scan_state` prefix for the feed-cache counters: `feed` for a full
-    // scan, `refresh_feed` for the nightly refresh, so the refresh's per-run
-    // hit rate is readable on its own (R08).
+    // `scan_state` prefix for the feed-cache counters, one per RUN and not per
+    // identity: `feed` for a full scan, `refresh_feed` for the nightly refresh
+    // (so its per-run hit rate is readable on its own — R08), and `drain_feed`
+    // for a full scan draining a dead refresh's staging, which borrows the
+    // refresh IDENTITY but is a different run (#344 F7).
     cache_prefix: &str,
 ) -> Result<ScanSummary> {
     let source = AtpPostFetcher { client };

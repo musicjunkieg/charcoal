@@ -46,7 +46,7 @@ use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind};
 use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity, ScanSummary};
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
-use crate::web::scan_job::{finish_scan, ScanManager, ScanReport};
+use crate::web::scan_job::{finish_scan, set_progress, ScanManager, ScanReport, WebScanPhase};
 use crate::web::scan_setup::{
     build_scan_scorers, embed_protected_posts, pile_on_dids, record_scan_cache_stats, ScanModels,
 };
@@ -157,15 +157,6 @@ impl RefreshOutcome {
             RefreshOutcome::Completed { scored, .. }
             | RefreshOutcome::CompletedWithSkips { scored, .. }
             | RefreshOutcome::CompletedUnverified { scored, .. } => *scored,
-            _ => 0,
-        }
-    }
-
-    pub fn candidates(&self) -> usize {
-        match self {
-            RefreshOutcome::Completed { candidates, .. }
-            | RefreshOutcome::CompletedWithSkips { candidates, .. }
-            | RefreshOutcome::CompletedUnverified { candidates, .. } => *candidates,
             _ => 0,
         }
     }
@@ -713,6 +704,25 @@ pub(crate) async fn run_refresh(
         crate::web::refresh::refresh_deadline_interval(),
     );
     let uid = user_did.to_string();
+
+    // #344 F3: the admitter creates the status entry and nothing writes to it
+    // until `finish_scan`, so without these two calls a user watching the
+    // dashboard through an hour-long nightly refresh sees "Starting…" the whole
+    // time — indistinguishable from a stuck scan. Reported here rather than
+    // inside `run_refresh_with` because the progress vocabulary is the
+    // production runner's, not the seam's: the tests drive that seam with
+    // fake pipelines that have no phases to report.
+    set_progress(
+        &scan_manager,
+        user_did,
+        claim_id,
+        WebScanPhase::Fingerprint,
+        "Loading topic fingerprint for the nightly refresh…",
+    )
+    .await;
+
+    let progress_manager = Arc::clone(&scan_manager);
+    let progress_claim = claim_id.to_string();
     let setup = move || -> anyhow::Result<(Box<dyn RefreshContextSource>, _)> {
         let scorers = build_scan_scorers(&models, &db)?;
         let client = Arc::new(PublicAtpClient::new(&config.public_api_url)?);
@@ -722,8 +732,20 @@ pub(crate) async fn run_refresh(
             models: Arc::clone(&models),
         });
         let pipeline = move |plan: RefreshPlan| async move {
+            // #344 F5: the first async point a refresh has. A mismatched
+            // Stage-2 policy fails the run (retry in an hour, no score
+            // written) instead of re-gathering every due account and then
+            // skipping it.
+            crate::web::scan_setup::probe_classifier_identity(&scorers).await?;
             let candidates = plan.candidates.len();
             db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
+                .await?;
+            // Minor 5: `candidates_total` is the denominator GET /api/status
+            // renders. `amplification::run` writes it for a full scan and
+            // `run_candidates` does not, so without this the dashboard showed
+            // the PREVIOUS full scan's denominator against this refresh's
+            // progress — two runs' numbers in one fraction.
+            db.set_scan_state(&uid, "candidates_total", &candidates.to_string())
                 .await?;
             // The feed cache measured nothing when nothing was due, and a
             // "0 % hit rate" from an empty run is worse than no number (R08).
@@ -733,6 +755,17 @@ pub(crate) async fn run_refresh(
                 if candidates == 0 { "0" } else { "1" },
             )
             .await?;
+            // From here the pipeline reports through the `scan_phase` marker
+            // and the classification counts, exactly as the full scan does —
+            // GET /api/status refines this message from them.
+            set_progress(
+                &progress_manager,
+                &uid,
+                &progress_claim,
+                WebScanPhase::Scoring,
+                &format!("Re-scoring {candidates} accounts whose scores are expiring…"),
+            )
+            .await;
             let weights = crate::scoring::threat::ThreatWeights::default();
             let summary = crate::pipeline::amplification::run_candidates(
                 &client,

@@ -216,7 +216,10 @@ use tokio::sync::RwLock;
 /// entry — a superseded worker keeps producing progress until its heartbeat
 /// notices, and every one of those writes would otherwise land in the
 /// successor's entry (#274).
-async fn set_progress(
+/// `pub(crate)` because the nightly refresh reports through the same entry
+/// (#344 F3): the admitter creates the status row, and without this the
+/// dashboard would sit on "Starting…" for the whole of an hour-long refresh.
+pub(crate) async fn set_progress(
     scan_manager: &Arc<RwLock<ScanManager>>,
     user_did: &str,
     claim_id: &str,
@@ -377,13 +380,31 @@ impl CarriedCompletion {
         }
     }
 
-    /// `None` when the value belongs to another scoring revision, or has no
-    /// revision at all — the caller deletes it. An UNPARSEABLE payload of the
-    /// current revision reads as `Draining`, the conservative answer: something
-    /// was carried and we cannot say it was clean.
+    /// `None` only for a value that belongs to another scoring revision (or is
+    /// empty) — the caller deletes it. Everything else of the current revision,
+    /// including an unparseable payload and a value truncated past its
+    /// separator, reads as `Draining`: something was carried and we cannot say
+    /// it was clean.
     pub fn parse(value: &str) -> Option<CarriedCompletion> {
         let current = crate::scoring::generation::scoring_revision();
-        let (tag, rest) = value.split_once('|')?;
+        let Some((tag, rest)) = value.split_once('|') else {
+            // No separator at all: every encoding this writes contains one, so
+            // the value was truncated in storage. The revision it belonged to
+            // is unrecoverable, but "a sentinel existed" is not — and a lost
+            // sentinel reads as unverified, never as absence. Returning `None`
+            // here would delete it and let the run be reported `Complete`.
+            //
+            // A genuinely empty value is different: `set_scan_state` never
+            // writes one for this key, so it carries no claim to preserve.
+            if value.trim().is_empty() {
+                return None;
+            }
+            warn!(
+                value,
+                "carried completion has no revision separator — treating the drain as unverified"
+            );
+            return Some(CarriedCompletion::Draining);
+        };
         let carried = match tag {
             "draining" if rest == current => CarriedCompletion::Draining,
             "unverified" if rest == current => CarriedCompletion::Unverified,
@@ -1357,6 +1378,11 @@ async fn run_scan_inner(
 
     let scorers = build_scan_scorers(&models, &db)?;
 
+    // #344 F5: refuse the scan now if the Stage-2 endpoint is not serving the
+    // policy this deployment declared. Discovering it in `map_verdicts`
+    // instead costs a full gather and then skips every account.
+    crate::web::scan_setup::probe_classifier_identity(&scorers).await?;
+
     // Phase 2: embedding model — loaded once at boot, shared via Arc::clone.
     //
     // Kept `Option`-shaped downstream (always `Some` now that boot fail-fast
@@ -1819,7 +1845,15 @@ async fn run_scan_inner(
                 median_engagement,
                 8,
                 crate::pipeline::scan_phases::RunIdentity::refresh(),
-                "refresh_feed",
+                // `drain_feed`, NOT `refresh_feed` (#344 F7): the drain runs
+                // under the refresh's IDENTITY but it is not the refresh's run.
+                // Writing `refresh_feed_cache_hits`/`_misses` here would leave
+                // those two keys describing this drain while
+                // `refresh_last_run_id`, `refresh_candidates`, `refresh_scored`
+                // and `refresh_last_outcome` still describe the dead refresh —
+                // five keys that are only meaningful read together, mixing two
+                // runs. Its own prefix keeps each set internally consistent.
+                "drain_feed",
             )
             .await
         },
@@ -4145,10 +4179,33 @@ mod carried_completion_tests {
             CarriedCompletion::parse(&format!("skips|nan|{}", scoring_revision())),
             Some(CarriedCompletion::Draining)
         );
-        // Another revision, and a value with no separator at all, are absent.
+        // Another revision is absent — that value belongs to a run this binary
+        // cannot speak for.
         assert_eq!(CarriedCompletion::parse("unverified|1999-01-01"), None);
         assert_eq!(CarriedCompletion::parse("skips|2|1999-01-01"), None);
-        assert_eq!(CarriedCompletion::parse("nonsense"), None);
+        // A value truncated past its separator is NOT absence (#344 F8): the
+        // revision is unrecoverable but the claim that a drain happened is not,
+        // and a lost sentinel reads as unverified. Reading it as `None` would
+        // delete it and let the run be reported `Complete`.
+        assert_eq!(
+            CarriedCompletion::parse("nonsense"),
+            Some(CarriedCompletion::Draining)
+        );
+        assert_eq!(
+            CarriedCompletion::parse("draining"),
+            Some(CarriedCompletion::Draining),
+            "a sentinel truncated at the separator still taints the run"
+        );
+        assert_eq!(
+            ScanCompletion::from(
+                CarriedCompletion::parse("draining").expect("truncated sentinel is not absence")
+            ),
+            ScanCompletion::CompleteUnverified,
+            "and it folds to unverified, never to Complete"
+        );
+        // An empty value carries no claim: nothing ever writes one for this key.
+        assert_eq!(CarriedCompletion::parse(""), None);
+        assert_eq!(CarriedCompletion::parse("   "), None);
         // The real revision contains '|' — the regression this encoding exists
         // for. A revision-first encoding would make every value unparseable.
         assert!(
