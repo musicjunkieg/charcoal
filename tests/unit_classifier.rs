@@ -177,6 +177,104 @@ mod runpod {
     }
 }
 
+mod zentropi_policy_identity {
+    use std::sync::Arc;
+
+    use charcoal::db::sqlite::SqliteDatabase;
+    use charcoal::db::Database;
+    use charcoal::observability::cache_stats::CacheStats;
+    use charcoal::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
+    use charcoal::toxicity::cached_classifier::CachedClassifier;
+    use charcoal::toxicity::classifier::{ItemOutcome, ToxicityClassifier};
+    use charcoal::toxicity::onnx::ONNX_MODEL_ID;
+    use charcoal::toxicity::zentropi::ZentropiClient;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// #344 V3-01: a configured labeler version is the classifier's policy
+    /// identity on EVERY path — advertised, written on a cache miss, and
+    /// matched on a cache hit. Before this, `classify` wrote the configured
+    /// version while `policy_version()` returned a static banner, so finalize
+    /// — which validates a row against the advertised value — would have
+    /// rejected the classifier's own verdicts as foreign evidence.
+    #[tokio::test]
+    async fn zentropi_advertised_policy_matches_written_policy_on_miss_and_hit() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/label"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "label": "0",
+                "confidence": 0.9,
+                "compute_time": 0.1
+            })))
+            .expect(1) // the hit must not reach the backend
+            .mount(&server)
+            .await;
+
+        let inner = ZentropiClient::with_api_url(
+            "k".into(),
+            "labeler-id".into(),
+            Some("labeler-v42".into()),
+            format!("{}/v1/label", server.uri()),
+        )
+        .unwrap();
+        assert_eq!(inner.policy_version(), "labeler-v42");
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        charcoal::db::schema::create_tables(&conn).unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        let stats = Arc::new(CacheStats::default());
+        let cached = CachedClassifier::new(Arc::new(inner), db.clone(), stats.clone());
+
+        let miss = cached.classify_batch(&["hello".to_string()]).await.unwrap();
+        let hit = cached.classify_batch(&["hello".to_string()]).await.unwrap();
+        for outcome in [&miss[0], &hit[0]] {
+            let ItemOutcome::Verdict(v) = outcome else {
+                panic!("expected a verdict")
+            };
+            assert_eq!(v.policy_version, "labeler-v42");
+            assert_eq!(v.model_id, cached.model_id());
+        }
+        assert_eq!((stats.hits(), stats.misses()), (1, 1));
+
+        // …and finalize accepts a row written from either path.
+        let evidence = EvidenceContract {
+            onnx_model_id: ONNX_MODEL_ID,
+            classifier: ClassifierIdentity {
+                model_id: cached.model_id(),
+                policy_version: cached.policy_version(),
+            },
+        };
+        assert!(evidence.accepts(Some(cached.model_id()), Some("labeler-v42")));
+    }
+
+    /// With no labeler version configured the advertised banner is still what
+    /// gets written — the same one-identity property, unconfigured.
+    #[tokio::test]
+    async fn an_unconfigured_zentropi_writes_the_policy_it_advertises() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/label"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "label": "1",
+                "confidence": 0.95,
+                "compute_time": 0.1
+            })))
+            .mount(&server)
+            .await;
+        let client = ZentropiClient::with_api_url(
+            "k".into(),
+            "labeler-id".into(),
+            None,
+            format!("{}/v1/label", server.uri()),
+        )
+        .unwrap();
+        let advertised = client.policy_version();
+        let verdict = client.classify("hello").await.unwrap();
+        assert_eq!(verdict.policy_version, advertised);
+    }
+}
+
 mod zentropi_trait {
     use charcoal::toxicity::classifier::ToxicityClassifier;
     use charcoal::toxicity::zentropi::{ZentropiClient, ZENTROPI_THRESHOLD};

@@ -31,31 +31,27 @@ pub const REFRESH_RETRY_HOURS: u64 = 1;
 /// transaction; the rest are claimed on following ticks, 30 s apart.
 pub const REFRESH_BATCH_PER_TICK: usize = 25;
 
-/// What an unset — or unparseable — knob means on this branch: **disabled**.
+/// What an unset — or unparseable — knob means: the spec's nightly cadence.
 ///
-/// Spec §4.4's default is 24 h, and Task 9 restores it here. It cannot be the
-/// default yet: nothing dispatches a `kind = 'refresh'` claim until Task 9
-/// lands the refresh runner, so a tick that is on by default would queue
-/// refresh rows that no worker can execute. The knob is otherwise unchanged —
-/// an explicit `6` still means six hours — so staging can switch the tick on
-/// deliberately while the runner is being built.
+/// The tick was deliberately disabled on this branch while no worker could
+/// execute a `kind = 'refresh'` claim (deciduous 917). Task 9 landed the
+/// runner, so the spec §4.4 default is restored: an unset knob means nightly,
+/// and switching the job off is an explicit `0`/`off`.
 fn default_refresh_interval() -> Option<Duration> {
-    None
+    Some(Duration::from_secs(DEFAULT_REFRESH_INTERVAL_HOURS * 3600))
 }
 
-/// `None` disables the tick (`0`/`off`, or an unset/unparseable value — see
-/// [`default_refresh_interval`] for why "unset" means off on this branch).
+/// `None` disables the tick — and only `0`/`off` produce it. An unset or
+/// unparseable value falls back to [`default_refresh_interval`].
 pub fn parse_refresh_interval(raw: Option<&str>) -> Option<Duration> {
     parse_refresh_interval_with(raw, default_refresh_interval())
 }
 
 /// The parse with its fallback injected.
 ///
-/// Not folded into the caller because the fallback is itself `None` on this
-/// branch, which would make "`OFF` disables" and "an unparseable value falls
-/// back" indistinguishable — a test of the first would pass against a
-/// case-SENSITIVE match. With the fallback passed in, the two are separable
-/// today and stay separable when Task 9 restores the 24 h default.
+/// Kept separate from the caller so "`OFF` disables" and "an unparseable value
+/// falls back" stay independently assertable against a fallback the test
+/// chooses, rather than against whatever the process default happens to be.
 fn parse_refresh_interval_with(raw: Option<&str>, default: Option<Duration>) -> Option<Duration> {
     let hours = match raw.map(str::trim) {
         None | Some("") => return default,
@@ -67,9 +63,13 @@ fn parse_refresh_interval_with(raw: Option<&str>, default: Option<Duration>) -> 
             Ok(0) => return None,
             Ok(n) => n.min(MAX_REFRESH_INTERVAL_HOURS),
             Err(_) => {
+                // Says what actually happens now that the default is the
+                // nightly cadence again: a typo does NOT switch the job off.
                 warn!(
                     value = s,
-                    "{REFRESH_INTERVAL_ENV} is not a number; using the default"
+                    default_hours = DEFAULT_REFRESH_INTERVAL_HOURS,
+                    "{REFRESH_INTERVAL_ENV} is not a number; falling back to the nightly \
+                     default — use 0 or 'off' to disable the refresh job"
                 );
                 return default;
             }
@@ -234,19 +234,18 @@ mod tests {
     #[test]
     fn interval_knob_defaults_disables_and_clamps() {
         let h = |n: u64| Duration::from_secs(n * 3600);
-        // Unset and unparseable both mean DISABLED on this branch — the
-        // refresh runner lands in Task 9, which restores the spec's 24 h
-        // default here. Everything else is unchanged.
-        assert_eq!(parse_refresh_interval(None), None);
-        assert_eq!(parse_refresh_interval(Some("")), None);
-        assert_eq!(parse_refresh_interval(Some("abc")), None);
+        // Unset, blank and unparseable all mean the spec's nightly cadence
+        // (#344 Task 9 restored it); only an explicit 0/off disables the job.
+        assert_eq!(parse_refresh_interval(None), Some(h(24)));
+        assert_eq!(parse_refresh_interval(Some("")), Some(h(24)));
+        assert_eq!(parse_refresh_interval(Some("abc")), Some(h(24)));
         assert_eq!(parse_refresh_interval(Some("6")), Some(h(6)));
         assert_eq!(parse_refresh_interval(Some("0")), None);
         assert_eq!(parse_refresh_interval(Some("off")), None);
         // A plausible operator spelling must not read as "leave it on". Run
-        // against an ENABLED fallback, because with the branch default
-        // disabled "off" and "unparseable" both yield None and a
-        // case-sensitive match would pass this by accident.
+        // against an explicitly ENABLED fallback so the assertion still
+        // separates "off disabled it" from "the fallback happened to be None"
+        // if the default ever changes again.
         for spelling in ["off", "OFF", "Off", " oFf "] {
             assert_eq!(
                 parse_refresh_interval_with(Some(spelling), Some(h(24))),

@@ -416,7 +416,10 @@ async fn admit_ready(
                     continue;
                 };
 
-                info!(user_did = %claim.user_did, cap, "admitting queued scan");
+                // The kind is on the line because a refresh and a full scan
+                // now share this queue and behave very differently downstream;
+                // "a scan was admitted" alone no longer identifies what ran.
+                info!(user_did = %claim.user_did, kind = claim.kind.as_str(), cap, "admitting queued scan");
                 match launcher.launch(&claim, guard).await {
                     Ok(()) => admitted += 1,
                     Err(e) => {

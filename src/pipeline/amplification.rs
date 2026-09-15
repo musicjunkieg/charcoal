@@ -568,6 +568,7 @@ pub async fn run(
                 median_engagement,
                 concurrency,
                 RunIdentity::full(),
+                "feed",
             )
             .await?;
             (summary.accounts_scored, summary.degraded)
@@ -605,6 +606,10 @@ pub async fn run_candidates(
     median_engagement: f64,
     concurrency: usize,
     identity: RunIdentity,
+    // `scan_state` prefix for the feed-cache counters: `feed` for a full
+    // scan, `refresh_feed` for the nightly refresh, so the refresh's per-run
+    // hit rate is readable on its own (R08).
+    cache_prefix: &str,
 ) -> Result<ScanSummary> {
     let source = AtpPostFetcher { client };
     let feed_stats = Arc::new(CacheStats::default());
@@ -644,7 +649,7 @@ pub async fn run_candidates(
     };
 
     let summary = run_phased_scan(db, user_did, candidates, &deps, identity).await?;
-    if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
+    if let Err(e) = record_cache_stats(db.as_ref(), user_did, cache_prefix, &feed_stats).await {
         warn!(error = %e, "could not record feed cache stats");
     }
     Ok(summary)

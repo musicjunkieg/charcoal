@@ -694,7 +694,6 @@ mod tests {
         );
     }
 
-    #[test]
     /// #344 V3-01: the declared policy identity. Unset/blank keeps the
     /// pre-#344 value, so an unconfigured deployment is unchanged; anything
     /// else is taken verbatim (it is an opaque server-side identifier, so

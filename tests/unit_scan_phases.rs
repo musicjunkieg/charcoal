@@ -2988,8 +2988,8 @@ mod orchestration_tests {
     use charcoal::pipeline::scan_phases::gather::{CleanPassScorer, PostFetcher};
     use charcoal::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
     use charcoal::pipeline::scan_phases::{
-        run_phased_scan, CandidateInput, PhasedScanDeps, PhasedScanError, RunIdentity,
-        RUN_GENERATION_KEY, RUN_KIND_KEY,
+        run_phased_scan, CandidateInput, PhasedScanDeps, RunIdentity, RUN_GENERATION_KEY,
+        RUN_KIND_KEY,
     };
     use charcoal::scoring::threat::ThreatWeights;
     use charcoal::topics::fingerprint::{TopicCluster, TopicFingerprint};
@@ -3954,5 +3954,611 @@ fn provenance_distinguishes_missing_foreign_and_sentinel() {
         (Some("cls"), Some("q")),
     ] {
         assert!(!e.accepts(m, p));
+    }
+}
+
+/// #344 R02/R03/V4-02/V5-01: who owns staged work, what happens when the
+/// owner is someone else, and how a resumed run reports the skips it inherited.
+///
+/// Driven through the real `run_phased_scan` — no models: the candidate-less
+/// paths use `EmptyDeps`, whose gather seams panic if reached.
+mod ownership_tests {
+    use std::sync::Arc;
+
+    use charcoal::db::sqlite::SqliteDatabase;
+    use charcoal::db::{Database, ScanKind};
+    use charcoal::pipeline::scan_phases::staging::QueueRow;
+    use charcoal::pipeline::scan_phases::test_support::{EmptyDeps, FailOnce};
+    use charcoal::pipeline::scan_phases::{
+        run_phased_scan, PhasedScanError, RunIdentity, ScanSummary, RUN_GENERATION_KEY,
+        RUN_KIND_KEY,
+    };
+    use charcoal::scoring::generation::scoring_revision;
+    use charcoal::toxicity::classifier::StubClassifier;
+    use charcoal::web::scan_job::{classify_full_scan, ScanCompletion};
+
+    const OWN_USER: &str = "did:plc:ownuser00000000000000";
+
+    async fn open_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        charcoal::db::schema::create_tables(&conn).unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        db.upsert_user(OWN_USER, "ownuser.bsky.social")
+            .await
+            .unwrap();
+        db
+    }
+
+    fn empty_deps() -> EmptyDeps {
+        EmptyDeps::new(Arc::new(StubClassifier::with_script_and_threshold(
+            vec![],
+            0.5,
+        )))
+    }
+
+    /// Seed the marker an interrupted run of `kind` leaves behind.
+    async fn seed_staging(db: &Arc<dyn Database>, kind: ScanKind, phase: &str) {
+        db.set_scan_state(OWN_USER, "scan_phase", phase)
+            .await
+            .unwrap();
+        db.set_scan_state(OWN_USER, RUN_KIND_KEY, kind.as_str())
+            .await
+            .unwrap();
+        db.set_scan_state(OWN_USER, RUN_GENERATION_KEY, scoring_revision())
+            .await
+            .unwrap();
+    }
+
+    /// R02: a fresh start records who owns the staging, and clears the record
+    /// when the run drains.
+    #[tokio::test]
+    async fn staging_ownership_is_recorded_and_cleared() {
+        let db = open_db().await;
+        let deps = empty_deps();
+        let summary = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::refresh())
+            .await
+            .unwrap();
+        assert!(!summary.degraded);
+        assert_eq!(summary.final_phase.as_deref(), Some("done"));
+        assert_eq!(
+            db.get_scan_state(OWN_USER, RUN_KIND_KEY).await.unwrap(),
+            None,
+            "markers cleared on Done"
+        );
+        assert_eq!(
+            db.get_scan_state(OWN_USER, RUN_GENERATION_KEY)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    /// R02: the other kind's resumable staging is refused with a typed error,
+    /// and nothing about it is touched — the caller decides what to do.
+    #[tokio::test]
+    async fn staging_owned_by_the_other_kind_is_refused_untouched() {
+        let db = open_db().await;
+        let deps = empty_deps();
+
+        seed_staging(&db, ScanKind::Refresh, "burst").await;
+        let err = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<PhasedScanError>(),
+            Some(PhasedScanError::OwnedByOtherKind(ScanKind::Refresh))
+        ));
+        assert_eq!(
+            db.get_scan_state(OWN_USER, "scan_phase")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("burst"),
+            "untouched"
+        );
+        assert_eq!(
+            db.get_scan_state(OWN_USER, RUN_KIND_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("refresh")
+        );
+
+        // …and the same in the other direction.
+        seed_staging(&db, ScanKind::Full, "finalize").await;
+        let err = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::refresh())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<PhasedScanError>(),
+            Some(PhasedScanError::OwnedByOtherKind(ScanKind::Full))
+        ));
+
+        // The owner itself resumes it.
+        let summary = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap();
+        assert_eq!(summary.final_phase.as_deref(), Some("done"));
+    }
+
+    /// R02: pre-v18 resumable staging carries no owner. Only full scans
+    /// existed then, so a full scan resumes it and a refresh refuses it —
+    /// never the other way round.
+    #[tokio::test]
+    async fn unowned_resumable_staging_belongs_to_the_full_scan() {
+        let db = open_db().await;
+        let deps = empty_deps();
+        // No RUN_KIND_KEY, but a current generation: an old binary of the same
+        // lineage would have left exactly this.
+        db.set_scan_state(OWN_USER, "scan_phase", "finalize")
+            .await
+            .unwrap();
+        db.set_scan_state(OWN_USER, RUN_GENERATION_KEY, scoring_revision())
+            .await
+            .unwrap();
+
+        let err = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::refresh())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<PhasedScanError>(),
+            Some(PhasedScanError::OwnedByOtherKind(ScanKind::Full))
+        ));
+        assert_eq!(
+            db.get_scan_state(OWN_USER, "scan_phase")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("finalize"),
+            "the refusal touched nothing"
+        );
+
+        let summary = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap();
+        assert_eq!(summary.final_phase.as_deref(), Some("done"));
+    }
+
+    /// R03: staging left by another generation is discarded, not resumed —
+    /// once, up front, instead of failing per account in finalize.
+    #[tokio::test]
+    async fn old_generation_staging_is_discarded_on_resume() {
+        let db = open_db().await;
+        let deps = empty_deps();
+        seed_staging(&db, ScanKind::Refresh, "burst").await;
+        db.set_scan_state(OWN_USER, RUN_GENERATION_KEY, "1999-01-01")
+            .await
+            .unwrap();
+        // A pending row from that run, which the discard must clear.
+        db.enqueue_classifications(
+            OWN_USER,
+            &[QueueRow {
+                account_did: "did:plc:stale".into(),
+                post_uri: "at://stale/1".into(),
+                text: "x".into(),
+                context_text: None,
+                post_kind: "original".into(),
+                onnx_score: 0.5,
+                status: "pending".into(),
+                toxic_token: None,
+                confidence: None,
+                model_id: None,
+                policy_version: None,
+            }],
+        )
+        .await
+        .unwrap();
+        assert!(db.count_pending_classifications(OWN_USER).await.unwrap() > 0);
+
+        // A FULL scan may take it even though a refresh "owned" it: the
+        // generation check runs first, so there is no owner left to respect.
+        let summary = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap();
+        assert!(!summary.degraded);
+        assert_eq!(summary.final_phase.as_deref(), Some("done"));
+        assert_eq!(db.count_pending_classifications(OWN_USER).await.unwrap(), 0);
+    }
+
+    /// V5-01: a resumed run reports the skips of every earlier attempt in the
+    /// same staged run, because `scan_skips` is cleared only at a fresh start.
+    /// A clean-looking resume is therefore still `CompleteWithSkips`, and an
+    /// unreadable count is `CompleteUnverified` — never `Complete`.
+    #[tokio::test]
+    async fn a_resumed_run_keeps_its_earlier_skips() {
+        let db = open_db().await;
+        let deps = empty_deps();
+        seed_staging(&db, ScanKind::Full, "finalize").await;
+        db.record_scan_skip(OWN_USER, "did:plc:gone", "gather", "feed 4xx")
+            .await
+            .unwrap();
+
+        let summary = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap();
+        assert!(!summary.degraded, "this invocation saw no error of its own");
+        assert_eq!(
+            (summary.final_phase.as_deref(), summary.skipped),
+            (Some("done"), Some(1))
+        );
+        assert_eq!(
+            classify_full_scan(
+                summary.degraded,
+                summary.final_phase.as_deref(),
+                summary.skipped
+            ),
+            ScanCompletion::CompleteWithSkips { n: 1 },
+            "the flag alone would have erased the earlier skip"
+        );
+        assert_eq!(
+            charcoal::web::refresh_scan::classify_refresh(1, &summary),
+            charcoal::web::refresh_scan::RefreshOutcome::CompletedWithSkips {
+                candidates: 1,
+                scored: 0,
+                skipped: 1
+            }
+        );
+        assert!(
+            !charcoal::web::refresh_scan::classify_refresh(1, &summary)
+                .bookkeeping()
+                .prove_revision
+        );
+
+        // An unreadable count is unverified, not clean.
+        seed_staging(&db, ScanKind::Full, "finalize").await;
+        let fail_once = FailOnce::new(db.clone());
+        let summary = run_phased_scan(
+            &db,
+            OWN_USER,
+            &[],
+            &deps.deps(Some(&fail_once)),
+            RunIdentity::full(),
+        )
+        .await
+        .unwrap();
+        assert!(fail_once.fired());
+        assert_eq!(
+            (summary.final_phase.as_deref(), summary.skipped),
+            (Some("done"), None)
+        );
+        assert_eq!(
+            classify_full_scan(
+                summary.degraded,
+                summary.final_phase.as_deref(),
+                summary.skipped
+            ),
+            ScanCompletion::CompleteUnverified
+        );
+        assert_eq!(
+            charcoal::web::refresh_scan::classify_refresh(1, &summary),
+            charcoal::web::refresh_scan::RefreshOutcome::CompletedUnverified {
+                candidates: 1,
+                scored: 0
+            }
+        );
+    }
+
+    /// V4-02: with no candidates and no staging the run is a cheap no-op that
+    /// still reaches `done` — which is what makes "always enter the pipeline"
+    /// safe for a full scan that discovered nothing.
+    #[tokio::test]
+    async fn empty_discovery_with_no_staging_completes() {
+        let db = open_db().await;
+        let deps = empty_deps();
+        let summary = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap();
+        assert_eq!(
+            summary,
+            ScanSummary {
+                accounts_scored: 0,
+                regathered: 0,
+                degraded: false,
+                final_phase: Some("done".into()),
+                skipped: Some(0),
+            }
+        );
+        assert_eq!(
+            classify_full_scan(
+                summary.degraded,
+                summary.final_phase.as_deref(),
+                summary.skipped
+            ),
+            ScanCompletion::Complete
+        );
+    }
+}
+
+/// #344 V3-01: which staged verdicts count as evidence for THIS run.
+///
+/// Stages rows directly (no models) and finalizes them under contracts that
+/// do and do not match the recorded producers.
+mod evidence_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use charcoal::bluesky::posts::{Post, PostSample};
+    use charcoal::db::sqlite::SqliteDatabase;
+    use charcoal::db::Database;
+    use charcoal::pipeline::scan_phases::finalize::{finalize_account, FinalizeOutcome};
+    use charcoal::pipeline::scan_phases::staging::{
+        AccountInput, ClassifierIdentity, EvidenceContract, QueueRow, ACCOUNT_INPUT_SCHEMA_VERSION,
+        CLEAN_PASS_POLICY,
+    };
+    use charcoal::scoring::threat::ThreatWeights;
+    use charcoal::topics::fingerprint::TopicFingerprint;
+    use charcoal::toxicity::onnx::ONNX_MODEL_ID;
+
+    const EV_USER: &str = "did:plc:evuser000000000000000";
+
+    async fn open_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        charcoal::db::schema::create_tables(&conn).unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        db.upsert_user(EV_USER, "evuser.bsky.social").await.unwrap();
+        db
+    }
+
+    fn make_post(uri: &str) -> Post {
+        Post {
+            uri: uri.to_string(),
+            text: "a perfectly ordinary original post with enough words".to_string(),
+            created_at: None,
+            like_count: 0,
+            repost_count: 0,
+            quote_count: 0,
+            is_quote: false,
+            langs: vec![],
+        }
+    }
+
+    /// One settled queue row with the given recorded producer.
+    fn staged_row(
+        account_did: &str,
+        uri: &str,
+        model_id: Option<&str>,
+        policy: Option<&str>,
+        toxic: bool,
+    ) -> QueueRow {
+        QueueRow {
+            account_did: account_did.to_string(),
+            post_uri: uri.to_string(),
+            text: "x".to_string(),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: if toxic { 0.85 } else { 0.05 },
+            status: "done".to_string(),
+            toxic_token: Some(toxic),
+            confidence: policy.map(|_| 0.9),
+            model_id: model_id.map(str::to_string),
+            policy_version: policy.map(str::to_string),
+        }
+    }
+
+    /// Stash a current-revision blob whose sample is exactly `rows`' posts,
+    /// then record those rows.
+    async fn stage_account(db: &Arc<dyn Database>, account_did: &str, rows: &[QueueRow]) {
+        let originals: Vec<Post> = rows.iter().map(|r| make_post(&r.post_uri)).collect();
+        let blob = AccountInput {
+            schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+            scoring_generation: charcoal::scoring::generation::scoring_revision().to_string(),
+            account_handle: "acct.handle".to_string(),
+            sample: PostSample {
+                total_posts: originals.len(),
+                originals,
+                replies: vec![],
+                quotes: vec![],
+                reply_ratio: 0.0,
+                quote_ratio: 0.0,
+            },
+            parent_texts: HashMap::new(),
+            median_engagement: 0.0,
+            is_pile_on: false,
+            direct_pairs: None,
+            graph_distance: None,
+            fingerprint_quality: "normal".to_string(),
+            target_embedding: None,
+        };
+        db.stash_account_input(EV_USER, account_did, &serde_json::to_string(&blob).unwrap())
+            .await
+            .unwrap();
+        db.enqueue_classifications(EV_USER, rows).await.unwrap();
+    }
+
+    async fn finalize_account_with(
+        db: &Arc<dyn Database>,
+        account_did: &str,
+        evidence: EvidenceContract<'_>,
+    ) -> FinalizeOutcome {
+        let fp = TopicFingerprint {
+            clusters: vec![],
+            post_count: 0,
+        };
+        let weights = ThreatWeights::default();
+        finalize_account(
+            db,
+            EV_USER,
+            account_did,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &evidence,
+        )
+        .await
+        .unwrap()
+    }
+
+    fn contract<'a>(onnx: &'a str, model: &'a str, policy: &'a str) -> EvidenceContract<'a> {
+        EvidenceContract {
+            onnx_model_id: onnx,
+            classifier: ClassifierIdentity {
+                model_id: model,
+                policy_version: policy,
+            },
+        }
+    }
+
+    /// V3-01 (1): one ONNX-cleared post and one classifier-settled post
+    /// finalize together — no re-gather, no skip.
+    #[tokio::test]
+    async fn finalize_accepts_clean_pass_and_classifier_evidence_together() {
+        let db = open_db().await;
+        stage_account(
+            &db,
+            "did:plc:mixed",
+            &[
+                staged_row(
+                    "did:plc:mixed",
+                    "at://p/1",
+                    Some(ONNX_MODEL_ID),
+                    Some(CLEAN_PASS_POLICY),
+                    false,
+                ),
+                staged_row(
+                    "did:plc:mixed",
+                    "at://p/2",
+                    Some("stub"),
+                    Some("policy-1"),
+                    true,
+                ),
+            ],
+        )
+        .await;
+        assert_eq!(
+            finalize_account_with(
+                &db,
+                "did:plc:mixed",
+                contract(ONNX_MODEL_ID, "stub", "policy-1")
+            )
+            .await,
+            FinalizeOutcome::Scored
+        );
+        assert!(
+            db.get_account_by_did(EV_USER, "did:plc:mixed")
+                .await
+                .unwrap()
+                .is_some(),
+            "a score was persisted"
+        );
+    }
+
+    /// V3-01 (2): change EITHER producer's revision and its evidence is
+    /// rejected — a bounded re-gather, never a silently lowered score.
+    #[tokio::test]
+    async fn finalize_rejects_evidence_from_another_producer_revision() {
+        let db = open_db().await;
+        stage_account(
+            &db,
+            "did:plc:mixed",
+            &[
+                staged_row(
+                    "did:plc:mixed",
+                    "at://p/1",
+                    Some(ONNX_MODEL_ID),
+                    Some(CLEAN_PASS_POLICY),
+                    false,
+                ),
+                staged_row(
+                    "did:plc:mixed",
+                    "at://p/2",
+                    Some("stub"),
+                    Some("policy-1"),
+                    true,
+                ),
+            ],
+        )
+        .await;
+        assert_eq!(
+            finalize_account_with(
+                &db,
+                "did:plc:mixed",
+                contract(ONNX_MODEL_ID, "stub", "policy-2")
+            )
+            .await,
+            FinalizeOutcome::NeedsRegather,
+            "another classifier POLICY"
+        );
+        assert_eq!(
+            finalize_account_with(
+                &db,
+                "did:plc:mixed",
+                contract(ONNX_MODEL_ID, "other", "policy-1")
+            )
+            .await,
+            FinalizeOutcome::NeedsRegather,
+            "another classifier MODEL"
+        );
+        assert_eq!(
+            finalize_account_with(
+                &db,
+                "did:plc:mixed",
+                contract("other-onnx", "stub", "policy-1")
+            )
+            .await,
+            FinalizeOutcome::NeedsRegather,
+            "another ONNX model"
+        );
+        assert!(
+            db.get_account_by_did(EV_USER, "did:plc:mixed")
+                .await
+                .unwrap()
+                .is_none(),
+            "no score was written from rejected evidence"
+        );
+    }
+
+    /// V3-01 (4): unlabelled pre-v18 rows and the decode-error sentinel are
+    /// never accepted, even though both are `done` with a verdict token.
+    #[tokio::test]
+    async fn finalize_rejects_unlabelled_and_sentinel_rows() {
+        let db = open_db().await;
+        stage_account(
+            &db,
+            "did:plc:oldbinary",
+            &[staged_row(
+                "did:plc:oldbinary",
+                "at://p/1",
+                None,
+                None,
+                false,
+            )],
+        )
+        .await;
+        assert_eq!(
+            finalize_account_with(
+                &db,
+                "did:plc:oldbinary",
+                contract(ONNX_MODEL_ID, "stub", "policy-1")
+            )
+            .await,
+            FinalizeOutcome::NeedsRegather
+        );
+
+        stage_account(
+            &db,
+            "did:plc:sentinel",
+            &[staged_row(
+                "did:plc:sentinel",
+                "at://p/9",
+                Some("decode-error"),
+                Some("policy-1"),
+                false,
+            )],
+        )
+        .await;
+        assert_eq!(
+            finalize_account_with(
+                &db,
+                "did:plc:sentinel",
+                contract(ONNX_MODEL_ID, "stub", "policy-1")
+            )
+            .await,
+            FinalizeOutcome::NeedsRegather
+        );
     }
 }

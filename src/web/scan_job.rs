@@ -329,6 +329,156 @@ pub fn classify_full_scan(
     }
 }
 
+/// What a full scan remembers about a refresh drain it performed earlier in
+/// the same owed run (V7-02). Persisted in `scan_state` under [`CARRIED_KEY`].
+///
+/// It has to be persisted, not held in memory, for two reasons: the evidence
+/// it summarises (`scan_skips`, the refresh's staging) is wiped by the full
+/// scan's own fresh start, and the run may be interrupted and finished by
+/// another worker process entirely.
+///
+/// Lifecycle: written as `Draining` BEFORE the drain begins; overwritten with
+/// the drain's classified outcome when the drain fulfils (deleted instead for
+/// a clean drain); consumed — deleted in the same transaction as the cooldown
+/// marker — when the full run fulfils; dropped on load when its revision is
+/// not the running one. A failed or resumable attempt leaves it in place,
+/// because the obligation it belongs to is still owed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CarriedCompletion {
+    /// A drain was started and its outcome never recorded — a crash between
+    /// "the refresh's staging was consumed" and the store. The evidence is
+    /// gone, so the run can never be called clean again.
+    Draining,
+    WithSkips {
+        n: i64,
+    },
+    Unverified,
+}
+
+impl CarriedCompletion {
+    /// `"draining|<rev>"`, `"skips|<n>|<rev>"`, `"unverified|<rev>"`.
+    ///
+    /// The revision is part of the value rather than a second key because the
+    /// two are one fact: this is what was carried *under that revision*, and
+    /// nothing else may consume it.
+    ///
+    /// The revision comes LAST, not first, because `scoring_revision()` is
+    /// itself pipe-separated (`<generation>|onnx=…|emb=…|nli=…`): splitting a
+    /// revision-first value on its first `|` yields the human generation
+    /// component and the rest of the revision, so every value would fail to
+    /// parse and every drain would be silently forgotten. The tag and the skip
+    /// count contain no `|`, so splitting from the front is unambiguous.
+    pub fn encode(self) -> String {
+        let rev = crate::scoring::generation::scoring_revision();
+        match self {
+            CarriedCompletion::Draining => format!("draining|{rev}"),
+            CarriedCompletion::WithSkips { n } => format!("skips|{n}|{rev}"),
+            CarriedCompletion::Unverified => format!("unverified|{rev}"),
+        }
+    }
+
+    /// `None` when the value belongs to another scoring revision, or has no
+    /// revision at all — the caller deletes it. An UNPARSEABLE payload of the
+    /// current revision reads as `Draining`, the conservative answer: something
+    /// was carried and we cannot say it was clean.
+    pub fn parse(value: &str) -> Option<CarriedCompletion> {
+        let current = crate::scoring::generation::scoring_revision();
+        let (tag, rest) = value.split_once('|')?;
+        let carried = match tag {
+            "draining" if rest == current => CarriedCompletion::Draining,
+            "unverified" if rest == current => CarriedCompletion::Unverified,
+            "skips" => {
+                let (n, rev) = rest.split_once('|')?;
+                if rev != current {
+                    return None;
+                }
+                match n.parse::<i64>() {
+                    Ok(n) => CarriedCompletion::WithSkips { n },
+                    Err(_) => {
+                        warn!(
+                            value,
+                            "carried completion has an unreadable skip count — \
+                             treating the drain as unverified"
+                        );
+                        CarriedCompletion::Draining
+                    }
+                }
+            }
+            // An unknown tag of the CURRENT revision still means a drain
+            // happened; only a foreign revision is absence.
+            _ if rest == current => {
+                warn!(
+                    value,
+                    "unparseable carried completion — treating the drain as unverified"
+                );
+                CarriedCompletion::Draining
+            }
+            _ => return None,
+        };
+        Some(carried)
+    }
+
+    /// Only fulfilled-but-not-clean drains are carried: `Complete` has nothing
+    /// to say, and `Resumable` never reaches here (the sentinel stays instead,
+    /// and the next attempt drains again and overwrites it).
+    pub fn from_drain(c: ScanCompletion) -> Option<CarriedCompletion> {
+        match c {
+            ScanCompletion::Complete | ScanCompletion::Resumable => None,
+            ScanCompletion::CompleteWithSkips { n } => Some(CarriedCompletion::WithSkips { n }),
+            ScanCompletion::CompleteUnverified => Some(CarriedCompletion::Unverified),
+        }
+    }
+}
+
+impl From<CarriedCompletion> for ScanCompletion {
+    fn from(c: CarriedCompletion) -> ScanCompletion {
+        match c {
+            CarriedCompletion::Draining | CarriedCompletion::Unverified => {
+                ScanCompletion::CompleteUnverified
+            }
+            CarriedCompletion::WithSkips { n } => ScanCompletion::CompleteWithSkips { n },
+        }
+    }
+}
+
+pub(crate) async fn store_carried_completion(
+    db: &dyn Database,
+    user_did: &str,
+    c: CarriedCompletion,
+) -> anyhow::Result<()> {
+    db.set_scan_state(user_did, CARRIED_KEY, &c.encode())
+        .await
+        .context("storing carried drain outcome")
+}
+
+pub(crate) async fn delete_carried_completion(
+    db: &dyn Database,
+    user_did: &str,
+) -> anyhow::Result<()> {
+    db.delete_scan_state(user_did, CARRIED_KEY)
+        .await
+        .context("clearing carried drain outcome")
+}
+
+/// A foreign-revision value is deleted and reported as absent: the staging it
+/// described was discarded by R03 and must not taint a scan of the new
+/// revision.
+pub(crate) async fn load_carried_completion(
+    db: &dyn Database,
+    user_did: &str,
+) -> anyhow::Result<Option<CarriedCompletion>> {
+    let Some(raw) = db.get_scan_state(user_did, CARRIED_KEY).await? else {
+        return Ok(None);
+    };
+    match CarriedCompletion::parse(&raw) {
+        Some(c) => Ok(Some(c)),
+        None => {
+            delete_carried_completion(db, user_did).await?;
+            Ok(None)
+        }
+    }
+}
+
 /// What a scan future hands back to `run_under_slot`, so the durable queue
 /// outcome (`scan_queue.completion`) keeps the distinction between a
 /// fulfilled request and an interrupted attempt.
@@ -631,11 +781,17 @@ pub(crate) fn launch_scan(
     let scan_manager = state.scan_manager.clone();
 
     tokio::spawn(async move {
-        // Borrowed by the scan future, so they stay put while `user_did` moves
-        // into run_under_slot.
+        // Borrowed by the scan futures, so they stay put while `user_did`
+        // moves into run_under_slot.
         let did = user_did.clone();
         let handle = actor_handle;
         let claim_id = slot.claim_id.clone();
+        let refresh_parts = (
+            config.clone(),
+            db.clone(),
+            models.clone(),
+            scan_manager.clone(),
+        );
 
         run_claim(
             kind,
@@ -646,43 +802,39 @@ pub(crate) fn launch_scan(
             live,
             crate::web::admitter::HEARTBEAT_INTERVAL,
             || run_scan(config, db, models, scan_manager, &did, &handle, &claim_id),
+            || {
+                let (config, db, models, scan_manager) = refresh_parts;
+                crate::web::refresh_scan::run_refresh(
+                    config,
+                    db,
+                    models,
+                    scan_manager,
+                    &did,
+                    &handle,
+                    &claim_id,
+                )
+            },
         )
         .await;
     });
 }
 
-/// The error a `refresh` claim finishes with until Task 9 lands the runner.
-///
-/// Named so the guard below and its test say the same thing, and so the
-/// message an operator sees in `scan_queue.last_error` names the missing piece
-/// rather than describing a scan failure that never happened.
-fn refresh_runner_missing(user_did: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "no refresh runner is built into this binary yet (#344 Task 9) — the queued refresh \
-         for {user_did} was not executed; it will be retried, and a full scan is unaffected"
-    )
-}
-
 /// Run one admitted claim as the kind it was admitted as (#344 F1).
 ///
-/// The guard is here rather than at the admitter because this is the last
+/// The dispatch is here rather than at the admitter because this is the last
 /// point a claim can still be diverted: however a `refresh` row got into the
 /// queue — the tick, a manual enqueue, a migration — it must not execute
 /// `run_scan`. A full scan under a refresh claim would write the full-scan
 /// cooldown marker and an ETA duration sample against a refresh row, which is
 /// exactly what N4 forbids, and would clear a full-scan obligation the refresh
-/// never fulfilled.
+/// never fulfilled. The converse matters just as much: a refresh runner under
+/// a `full` claim would leave the user's requested scan unperformed.
 ///
-/// The refusal is loud and terminal rather than silent or looping: dropping the
-/// row would leave the user's schedule advanced with nothing to show for it,
-/// and re-queueing it would spin. Finishing the claim `failed` releases the
-/// slot, records the reason durably, and lets the hourly retry pick the user up
-/// once a runner exists.
-///
-/// `full` is a closure so the full pipeline is never even constructed for a
-/// refresh claim — which is the property the test asserts.
+/// Both arms are closures so the pipeline for the kind NOT being run is never
+/// even constructed — which is the property the tests assert, in both
+/// directions.
 #[allow(clippy::too_many_arguments)] // the slot lifecycle's own arguments, one call site
-pub(crate) async fn run_claim<R, Fut>(
+pub(crate) async fn run_claim<R, Fut, RR, RFut>(
     kind: crate::db::ScanKind,
     db: Arc<dyn Database>,
     scan_manager: Arc<RwLock<ScanManager>>,
@@ -691,11 +843,16 @@ pub(crate) async fn run_claim<R, Fut>(
     live: crate::web::admitter::LiveScanGuard,
     heartbeat_interval: std::time::Duration,
     full: R,
+    refresh: RR,
 ) -> SlotExit
 where
     R: FnOnce() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<ScanReport>>,
+    RR: FnOnce() -> RFut,
+    RFut: std::future::Future<Output = anyhow::Result<ScanReport>>,
 {
+    // One `ScanReport` contract for both kinds (V4-04), so the slot lifecycle
+    // finishes the row with whichever completion actually happened.
     match kind {
         crate::db::ScanKind::Full => {
             run_under_slot(
@@ -710,14 +867,8 @@ where
             .await
         }
         crate::db::ScanKind::Refresh => {
-            error!(
-                user_did,
-                "a refresh claim was admitted but this binary has no refresh runner — \
-                 finishing it as failed rather than running a full scan under it"
-            );
-            let refusal = refresh_runner_missing(&user_did);
             run_under_slot(
-                async move { Err(refusal) },
+                refresh(),
                 db,
                 scan_manager,
                 user_did,
@@ -744,6 +895,10 @@ async fn record_scan_outcome(
     user_did: &str,
     claim_id: &str,
     result: &anyhow::Result<(usize, usize, bool)>,
+    // What to call a success in the user-visible message. A refresh
+    // discovers nothing, so the shared "Completed: 0 events, N accounts
+    // scored" line would read as a full scan that found nothing.
+    label: &str,
 ) {
     let written = scan_manager
         .write()
@@ -756,11 +911,11 @@ async fn record_scan_outcome(
                     s.phase = WebScanPhase::Done;
                     s.progress_message = if *degraded {
                         format!(
-                            "Completed (incomplete — cost-capped or accounts skipped, \
+                            "{label} (incomplete — cost-capped or accounts skipped, \
                              re-run to resume): {events} events, {accounts} accounts scored"
                         )
                     } else {
-                        format!("Completed: {events} events, {accounts} accounts scored")
+                        format!("{label}: {events} events, {accounts} accounts scored")
                     };
                 }
                 Err(e) => {
@@ -802,14 +957,15 @@ async fn record_scan_outcome(
 /// unconditionally — and a scan that errored two minutes in is stored as a
 /// two-minute *successful* scan, which `scan_queue_entry` then folds into the
 /// median it quotes every queued user as their ETA.
-async fn finish_scan(
+pub(crate) async fn finish_scan(
     scan_manager: &Arc<RwLock<ScanManager>>,
     user_did: &str,
     claim_id: &str,
     result: anyhow::Result<(usize, usize, bool)>,
     completion: crate::db::FinishCompletion,
+    label: &str,
 ) -> anyhow::Result<ScanReport> {
-    record_scan_outcome(scan_manager, user_did, claim_id, &result).await;
+    record_scan_outcome(scan_manager, user_did, claim_id, &result, label).await;
     // Discard only the success tuple — `record_scan_outcome` has already
     // rendered it into the user-visible message. The `Err` must survive, and
     // the classified completion rides out to the durable queue row (#344).
@@ -852,6 +1008,112 @@ pub(crate) struct FullScanRun {
     pub events: usize,
     pub scored: usize,
     pub completion: ScanCompletion,
+}
+
+/// One attempt of the full scan's own pipeline call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OwnRun {
+    /// The pipeline returned: its counters plus the `scan_phase` marker and
+    /// skip count read after it — the completion classifier's inputs.
+    Done {
+        events: usize,
+        scored: usize,
+        degraded: bool,
+        phase: Option<String>,
+        skipped: Option<i64>,
+    },
+    /// `PhasedScanError::OwnedByOtherKind(Refresh)`: a refresh left resumable
+    /// staging. Drain it before this scan may gather.
+    RefreshOwned,
+}
+
+/// Drain a refresh's leftovers, then run the full scan's own pipeline
+/// (V6-01, V7-02, V7-03).
+///
+/// Separated from the pipeline so the whole transition can be driven without
+/// models. `own` runs the full scan's pipeline (called at most twice: before
+/// and after a drain); `drain` runs the refresh's candidates under
+/// `RunIdentity::refresh()` and returns its summary.
+///
+/// Durability: the carried outcome is written BEFORE the drain and overwritten
+/// after it, so a crash anywhere between "the refresh's staging was consumed"
+/// and "the full run fulfilled" still leaves a record that the run must not be
+/// reported clean. The fold happens at the end of whichever attempt finishes
+/// the own run — possibly a later process, which is why it is read back from
+/// the database rather than from a local variable.
+///
+/// A partial drain earns no full-scan bookkeeping: `Resumable` returns
+/// straight out, the sentinel stays, the obligation is kept, and the next
+/// attempt drains again. And a drain alone never completes the request —
+/// only the run's OWN gather reaching `done` does.
+pub(crate) async fn drain_then_run<O, OF, D, DF>(
+    db: &dyn Database,
+    user_did: &str,
+    mut own: O,
+    drain: D,
+) -> anyhow::Result<FullScanRun>
+where
+    O: FnMut() -> OF,
+    OF: std::future::Future<Output = anyhow::Result<OwnRun>>,
+    D: FnOnce() -> DF,
+    DF: std::future::Future<Output = anyhow::Result<crate::pipeline::scan_phases::ScanSummary>>,
+{
+    let mut attempt = own().await?;
+    if matches!(attempt, OwnRun::RefreshOwned) {
+        info!(
+            user_did,
+            "a refresh left resumable staging — draining it before this scan gathers"
+        );
+        store_carried_completion(db, user_did, CarriedCompletion::Draining).await?;
+        let drained = drain().await?;
+        let drain_completion = classify_full_scan(
+            drained.degraded,
+            drained.final_phase.as_deref(),
+            drained.skipped,
+        );
+        if drain_completion == ScanCompletion::Resumable {
+            // The sentinel stays: the next attempt drains again and overwrites
+            // it. Nothing of this scan's own work has happened yet, so there is
+            // nothing to report but "resume me".
+            return Ok(FullScanRun {
+                events: 0,
+                scored: drained.accounts_scored,
+                completion: ScanCompletion::Resumable,
+            });
+        }
+        match CarriedCompletion::from_drain(drain_completion) {
+            Some(c) => store_carried_completion(db, user_did, c).await?,
+            // A clean drain has nothing to carry.
+            None => delete_carried_completion(db, user_did).await?,
+        }
+        attempt = own().await?;
+    }
+    let OwnRun::Done {
+        events,
+        scored,
+        degraded,
+        phase,
+        skipped,
+    } = attempt
+    else {
+        // The drain reached `done` and cleared the markers, so a second
+        // refresh-owned answer means someone else staged work for this user
+        // mid-run — which the single-scan-per-user invariant forbids.
+        anyhow::bail!("refresh-owned staging reappeared after a completed drain");
+    };
+    let own_completion = classify_full_scan(degraded, phase.as_deref(), skipped);
+    // Skip counts are never double-added: the key is SET (not incremented),
+    // the own run's fresh start wiped the drain's rows from `scan_skips`, and
+    // a re-drained (previously resumable) drain overwrites the value.
+    let completion = match load_carried_completion(db, user_did).await? {
+        Some(carried) => own_completion.worst(carried.into()),
+        None => own_completion,
+    };
+    Ok(FullScanRun {
+        events,
+        scored,
+        completion,
+    })
 }
 
 /// Everything a full scan writes about ITSELF, as opposed to about its
@@ -1016,7 +1278,15 @@ where
         ),
         Err(e) => (Err(e), crate::db::FinishCompletion::Failed),
     };
-    finish_scan(&scan_manager, user_did, claim_id, result, finish).await
+    finish_scan(
+        &scan_manager,
+        user_did,
+        claim_id,
+        result,
+        finish,
+        "Completed",
+    )
+    .await
 }
 
 /// The full scan, wrapped so every exit reaches ONE scheduling site (V5-02).
@@ -1444,28 +1714,115 @@ async fn run_scan_inner(
     .await;
 
     let weights = ThreatWeights::default();
-    let result = crate::pipeline::amplification::run(
-        &client,
-        Some(&scorers.scorer),
-        &db,
+
+    // A refresh may have left resumable staging. `drain_then_run` drains it
+    // under THIS scan's models before the full scan gathers, and remembers
+    // durably what the drain cost (V6-01/V7-02) — the fresh gather below wipes
+    // the evidence, and a later process may be the one that finishes the run.
+    //
+    // `own` is called at most twice, so the discovery work above has to be
+    // re-usable: `events` is cloned per attempt. That repeats the follower
+    // expansion once on the drain path only, which is the rare case (a refresh
+    // was interrupted and the user then asked for a scan) and is far cheaper
+    // than the alternative — resuming a refresh's staging under a full scan's
+    // bookkeeping.
+    let run = drain_then_run(
+        db.as_ref(),
         user_did,
-        &fingerprint,
-        &weights,
-        actor_handle,
-        true, // analyze_followers
-        50,   // max_followers_per_amplifier
-        8,    // concurrency
-        embedder.as_deref(),
-        protected_embedding.as_deref(),
-        Some(&protected_topic_centroids),
-        events,
-        median_engagement,
-        &pile_on_dids,
-        &original_text_cache,
-        nli_scorer.as_deref(),
-        protected_posts_with_embeddings.as_deref(),
-        Some(config.data_dir()),
-        &graph_distances,
+        || {
+            let events = events.clone();
+            async {
+                match crate::pipeline::amplification::run(
+                    &client,
+                    Some(&scorers.scorer),
+                    &db,
+                    user_did,
+                    &fingerprint,
+                    &weights,
+                    actor_handle,
+                    true, // analyze_followers
+                    50,   // max_followers_per_amplifier
+                    8,    // concurrency
+                    embedder.as_deref(),
+                    protected_embedding.as_deref(),
+                    Some(&protected_topic_centroids),
+                    events,
+                    median_engagement,
+                    &pile_on_dids,
+                    &original_text_cache,
+                    nli_scorer.as_deref(),
+                    protected_posts_with_embeddings.as_deref(),
+                    Some(config.data_dir()),
+                    &graph_distances,
+                )
+                .await
+                {
+                    Ok((events, scored, degraded)) => {
+                        // Completion is CLASSIFIED, never inferred from `Ok`
+                        // (V2-05): the pipeline returns `Ok` for a cost-capped
+                        // run too. The `scan_phase` marker says whether the
+                        // staging actually drained, and `scan_skips` — which
+                        // survives a burst/finalize resume — says whether this
+                        // scan's coverage has holes even when the resuming
+                        // invocation itself reported none (V5-01).
+                        //
+                        // A failed count read is `None`, not 0: unverifiable is
+                        // a distinct answer from clean, and `classify_full_scan`
+                        // keeps it that way. An unreadable MARKER is an `Err`,
+                        // not a guess — it decides the whole completion.
+                        let phase = db.get_scan_state(user_did, "scan_phase").await?;
+                        let skipped = db.count_scan_skips(user_did).await.ok();
+                        Ok(OwnRun::Done {
+                            events,
+                            scored,
+                            degraded,
+                            phase,
+                            skipped,
+                        })
+                    }
+                    Err(e)
+                        if matches!(
+                            e.downcast_ref::<crate::pipeline::scan_phases::PhasedScanError>(),
+                            Some(
+                                crate::pipeline::scan_phases::PhasedScanError::OwnedByOtherKind(
+                                    crate::db::ScanKind::Refresh
+                                )
+                            )
+                        ) =>
+                    {
+                        Ok(OwnRun::RefreshOwned)
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        },
+        || async {
+            // The refresh that staged this work is gone, so its candidate list
+            // is re-derived from stored state. Finalize needs none of it; only
+            // a bounded per-account re-gather does.
+            let candidates =
+                crate::web::refresh_scan::refresh_drain_candidates(&db, user_did).await?;
+            crate::pipeline::amplification::run_candidates(
+                &client,
+                &scorers.scorer,
+                &db,
+                user_did,
+                &candidates,
+                &fingerprint,
+                &weights,
+                embedder.as_deref(),
+                protected_embedding.as_deref(),
+                Some(&protected_topic_centroids),
+                nli_scorer.as_deref(),
+                protected_posts_with_embeddings.as_deref(),
+                Some(config.data_dir()),
+                median_engagement,
+                8,
+                crate::pipeline::scan_phases::RunIdentity::refresh(),
+                "refresh_feed",
+            )
+            .await
+        },
     )
     .await;
 
@@ -1473,22 +1830,7 @@ async fn run_scan_inner(
 
     record_scan_cache_stats(db.as_ref(), user_did, &scorers).await;
 
-    // Completion is CLASSIFIED, never inferred from `Ok` (V2-05): the pipeline
-    // returns `Ok` for a cost-capped run too. The `scan_phase` marker says
-    // whether the staging actually drained, and `scan_skips` — which survives
-    // a burst/finalize resume — says whether this scan's coverage has holes
-    // even when the resuming invocation itself reported none (V5-01).
-    //
-    // A failed count read is `None`, not 0: unverifiable is a distinct answer
-    // from clean, and `classify_full_scan` keeps it that way.
-    let (events, scored, degraded) = result?;
-    let phase = db.get_scan_state(user_did, "scan_phase").await?;
-    let skipped = db.count_scan_skips(user_did).await.ok();
-    Ok(FullScanRun {
-        events,
-        scored,
-        completion: classify_full_scan(degraded, phase.as_deref(), skipped),
-    })
+    run
 }
 
 /// The slot lifecycle: every exit from `run_under_slot` must free the row it
@@ -1800,7 +2142,7 @@ mod slot_lifecycle_tests {
         .await;
         // Then it finishes successfully — the exact case `SlotExit::Completed`
         // cannot defend against.
-        record_scan_outcome(&mgr, DID, "zombie-claim", &Ok((7, 42, false))).await;
+        record_scan_outcome(&mgr, DID, "zombie-claim", &Ok((7, 42, false)), "Completed").await;
 
         let mgr = mgr.read().await;
         let status = mgr.get_status(DID).expect("status entry");
@@ -1832,7 +2174,7 @@ mod slot_lifecycle_tests {
             WebScanPhase::Scoring
         );
 
-        record_scan_outcome(&mgr, DID, CLAIM, &Ok((7, 42, false))).await;
+        record_scan_outcome(&mgr, DID, CLAIM, &Ok((7, 42, false)), "Completed").await;
         let mgr = mgr.read().await;
         let status = mgr.get_status(DID).expect("status entry");
         assert!(!status.running);
@@ -1851,6 +2193,7 @@ mod slot_lifecycle_tests {
             DID,
             CLAIM,
             &Err(anyhow::anyhow!("constellation unreachable")),
+            "Completed",
         )
         .await;
 
@@ -1892,6 +2235,7 @@ mod slot_lifecycle_tests {
                 &claim_id,
                 Err(anyhow::anyhow!("constellation unreachable mid-burst")),
                 crate::db::FinishCompletion::Failed,
+                "Completed",
             ),
             db.clone(),
             mgr.clone(),
@@ -1971,6 +2315,7 @@ mod slot_lifecycle_tests {
                 &claim_id,
                 Ok((7, 42, false)),
                 crate::db::FinishCompletion::Complete,
+                "Completed",
             ),
             db.clone(),
             mgr.clone(),
@@ -1990,14 +2335,17 @@ mod slot_lifecycle_tests {
         assert!(status.progress_message.contains("42 accounts scored"));
     }
 
-    /// F1: a `refresh` claim must never execute the full scan, however its row
-    /// got into the queue. Until Task 9 lands the runner it finishes `failed`
-    /// with a message naming the missing piece — and, critically, the full
-    /// pipeline is never even constructed, so none of the full scan's
-    /// bookkeeping (the cooldown marker, the ETA duration sample) can be
-    /// written against a refresh row (N4).
+    /// F1 + N4: a `refresh` claim runs the REFRESH, never the full scan,
+    /// however its row got into the queue — and a refresh that actually runs
+    /// to completion writes none of the full scan's bookkeeping.
+    ///
+    /// The second half is the one that needed a real runner: while the refresh
+    /// arm only returned an error, "no cooldown marker was written" was true
+    /// because nothing ran at all. Here the refresh future finishes `Complete`
+    /// and the marker and the ETA duration sample are still absent, which is
+    /// the property N4 is actually about.
     #[tokio::test]
-    async fn a_refresh_claim_never_runs_the_full_scan() {
+    async fn a_refresh_claim_runs_the_refresh_and_writes_no_full_scan_bookkeeping() {
         use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
         let db = test_db();
@@ -2012,8 +2360,10 @@ mod slot_lifecycle_tests {
         let (tx, mut wake_rx) = tokio::sync::mpsc::channel(4);
         let mgr = manager_with_running_scan(&claim.claim_id);
 
-        let constructed = Arc::new(AtomicBool::new(false));
-        let flag = constructed.clone();
+        let full_built = Arc::new(AtomicBool::new(false));
+        let refresh_built = Arc::new(AtomicBool::new(false));
+        let full_flag = full_built.clone();
+        let refresh_flag = refresh_built.clone();
         let exit = run_claim(
             claim.kind,
             db.clone(),
@@ -2026,7 +2376,15 @@ mod slot_lifecycle_tests {
             live_guard(),
             Duration::from_millis(10),
             || {
-                flag.store(true, SeqCst);
+                full_flag.store(true, SeqCst);
+                async {
+                    Ok(ScanReport {
+                        completion: crate::db::FinishCompletion::Complete,
+                    })
+                }
+            },
+            || {
+                refresh_flag.store(true, SeqCst);
                 async {
                     Ok(ScanReport {
                         completion: crate::db::FinishCompletion::Complete,
@@ -2037,10 +2395,11 @@ mod slot_lifecycle_tests {
         .await;
 
         assert!(
-            !constructed.load(SeqCst),
+            !full_built.load(SeqCst),
             "the full pipeline must not even be built for a refresh claim"
         );
-        assert_eq!(exit, SlotExit::Failed);
+        assert!(refresh_built.load(SeqCst), "the refresh runner ran");
+        assert_eq!(exit, SlotExit::Completed);
         let row = db
             .list_scan_queue()
             .await
@@ -2048,16 +2407,9 @@ mod slot_lifecycle_tests {
             .into_iter()
             .find(|r| r.user_did == DID)
             .expect("row exists");
-        assert_eq!(row.status, "failed");
-        assert!(
-            row.last_error
-                .as_deref()
-                .unwrap_or_default()
-                .contains("no refresh runner"),
-            "the recorded reason must name the missing runner: {:?}",
-            row.last_error
-        );
-        // N4: nothing about the FULL scan was recorded against this row.
+        assert_eq!(row.status, "done");
+        assert_eq!(row.completion, Some(crate::db::FinishCompletion::Complete));
+        // N4: a COMPLETED refresh still records nothing about the full scan.
         assert_eq!(
             db.get_scan_state(DID, "last_full_scan_finished_at")
                 .await
@@ -2076,6 +2428,61 @@ mod slot_lifecycle_tests {
             wake_rx.try_recv().is_ok(),
             "the slot was released and the admitter woken"
         );
+    }
+
+    /// The converse of the guard above: a `full` claim runs the full scan and
+    /// never constructs the refresh runner. Without this, "the dispatch keys
+    /// on the kind" is only half asserted.
+    #[tokio::test]
+    async fn a_full_claim_never_runs_the_refresh() {
+        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+
+        let db = test_db();
+        db.upsert_user(DID, "slot.h").await.expect("user");
+        db.enqueue_scan(DID).await.expect("enqueue");
+        let claim = db
+            .claim_next_scan(1, LEASE_SECS)
+            .await
+            .expect("claim")
+            .expect("a queued row exists");
+        assert_eq!(claim.kind, crate::db::ScanKind::Full);
+        let (tx, _wake_rx) = tokio::sync::mpsc::channel(4);
+        let mgr = manager_with_running_scan(&claim.claim_id);
+
+        let refresh_built = Arc::new(AtomicBool::new(false));
+        let refresh_flag = refresh_built.clone();
+        let exit = run_claim(
+            claim.kind,
+            db.clone(),
+            mgr,
+            DID.to_string(),
+            QueueSlot {
+                claim_id: claim.claim_id.clone(),
+                wake: tx,
+            },
+            live_guard(),
+            Duration::from_millis(10),
+            || async {
+                Ok(ScanReport {
+                    completion: crate::db::FinishCompletion::Complete,
+                })
+            },
+            || {
+                refresh_flag.store(true, SeqCst);
+                async {
+                    Ok(ScanReport {
+                        completion: crate::db::FinishCompletion::Complete,
+                    })
+                }
+            },
+        )
+        .await;
+
+        assert!(
+            !refresh_built.load(SeqCst),
+            "the refresh runner must not even be built for a full claim"
+        );
+        assert_eq!(exit, SlotExit::Completed);
     }
 }
 
@@ -2640,11 +3047,11 @@ mod bookkeeping_tests {
     /// makes "exactly one retry per failed attempt, and no other scheduling
     /// call" assertable — asserting only on the database cannot tell one
     /// write from three identical ones.
-    struct CountingFullBooks {
+    pub(super) struct CountingFullBooks {
         inner: DbFullScanBookkeeping,
-        retries: AtomicUsize,
-        successes: AtomicUsize,
-        markers: AtomicUsize,
+        pub(super) retries: AtomicUsize,
+        pub(super) successes: AtomicUsize,
+        pub(super) markers: AtomicUsize,
     }
 
     /// The nightly cadence, passed explicitly so no test reads — or writes —
@@ -2652,7 +3059,7 @@ mod bookkeeping_tests {
     const TEST_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
 
     impl CountingFullBooks {
-        fn new(db: Arc<dyn Database>) -> Self {
+        pub(super) fn new(db: Arc<dyn Database>) -> Self {
             Self {
                 inner: DbFullScanBookkeeping::new(db, TEST_REFRESH_INTERVAL),
                 retries: 0.into(),
@@ -3151,5 +3558,666 @@ mod bookkeeping_tests {
         });
         assert_send(&fut);
         drop(fut);
+    }
+}
+
+/// #344 V6-01/V7-02/V7-03: what a full scan remembers about a refresh drain
+/// it performed, and what that memory does to its own completion.
+///
+/// Driven through the REAL `run_phased_scan` with a candidate-less candidate
+/// list (`EmptyDeps`, whose gather seams panic if reached) so none of it needs
+/// models, and through the real `run_scan_with` so the marker, the schedule
+/// and the proof are the production ones.
+#[cfg(test)]
+mod carried_completion_tests {
+    use super::*;
+
+    use std::sync::atomic::Ordering::SeqCst;
+
+    use crate::db::schema::create_tables;
+    use crate::db::sqlite::SqliteDatabase;
+    use crate::db::FinishCompletion;
+    use crate::pipeline::scan_phases::test_support::{EmptyDeps, FailOnce};
+    use crate::pipeline::scan_phases::{
+        run_phased_scan, PhasedScanError, RunIdentity, SkipCounter, RUN_GENERATION_KEY,
+        RUN_KIND_KEY,
+    };
+    use crate::scoring::generation::scoring_revision;
+    use crate::toxicity::classifier::StubClassifier;
+
+    use super::bookkeeping_tests::CountingFullBooks;
+
+    fn test_db() -> Arc<dyn Database> {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
+        create_tables(&conn).expect("schema");
+        Arc::new(SqliteDatabase::new(conn))
+    }
+
+    fn manager(did: &str, claim_id: &str) -> Arc<RwLock<ScanManager>> {
+        let mut mgr = ScanManager::new();
+        mgr.begin_admitted_scan(did, claim_id);
+        Arc::new(RwLock::new(mgr))
+    }
+
+    fn empty_deps() -> EmptyDeps {
+        // An empty script: with no candidates the burst has nothing to
+        // classify, so the classifier is never called — only its identity is
+        // read, for the evidence contract.
+        EmptyDeps::new(Arc::new(StubClassifier::with_script_and_threshold(
+            vec![],
+            0.5,
+        )))
+    }
+
+    /// The fixture a half-finished refresh leaves behind: a `finalize` marker
+    /// it owns, under the current revision, plus `skips` recorded gaps.
+    async fn refresh_owned_finalize_staging(db: &Arc<dyn Database>, user: &str, skips: usize) {
+        db.set_scan_state(user, "scan_phase", "finalize")
+            .await
+            .unwrap();
+        db.set_scan_state(user, RUN_KIND_KEY, "refresh")
+            .await
+            .unwrap();
+        db.set_scan_state(user, RUN_GENERATION_KEY, scoring_revision())
+            .await
+            .unwrap();
+        for i in 0..skips {
+            db.record_scan_skip(user, &format!("did:plc:skipped{i}"), "gather", "feed 4xx")
+                .await
+                .unwrap();
+        }
+    }
+
+    /// Runs the real pipeline for the "own" closure and reads the classifier
+    /// inputs off the summary, exactly as `run_scan_inner` does.
+    async fn own_run(
+        db: &Arc<dyn Database>,
+        user: &str,
+        deps: &EmptyDeps,
+        skips: Option<&dyn SkipCounter>,
+    ) -> anyhow::Result<OwnRun> {
+        match run_phased_scan(db, user, &[], &deps.deps(skips), RunIdentity::full()).await {
+            Ok(s) => Ok(OwnRun::Done {
+                events: 0,
+                scored: s.accounts_scored,
+                degraded: s.degraded,
+                phase: s.final_phase,
+                skipped: s.skipped,
+            }),
+            Err(e)
+                if matches!(
+                    e.downcast_ref::<PhasedScanError>(),
+                    Some(PhasedScanError::OwnedByOtherKind(
+                        crate::db::ScanKind::Refresh
+                    ))
+                ) =>
+            {
+                Ok(OwnRun::RefreshOwned)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Hand-seed the state a full scan leaves when its own fresh gather is cut
+    /// short: the drain's skip evidence wiped, a full-owned `burst` marker.
+    async fn interrupt_own_run(db: &Arc<dyn Database>, user: &str) -> anyhow::Result<OwnRun> {
+        db.clear_scan_skips(user).await?;
+        db.set_scan_state(user, "scan_phase", "burst").await?;
+        db.set_scan_state(user, RUN_KIND_KEY, "full").await?;
+        db.set_scan_state(user, RUN_GENERATION_KEY, scoring_revision())
+            .await?;
+        Ok(OwnRun::Done {
+            events: 0,
+            scored: 0,
+            degraded: true,
+            phase: Some("burst".into()),
+            skipped: Some(0),
+        })
+    }
+
+    async fn queue_row(db: &Arc<dyn Database>, did: &str) -> crate::db::traits::ScanQueueRow {
+        db.list_scan_queue()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.user_did == did)
+            .expect("row exists")
+    }
+
+    /// V7-03: the drain's skip-count read fails — and ONLY that read. Every
+    /// later database operation (the fresh start's `clear_scan_skips`, the own
+    /// run's count) succeeds, so "the drain is unverified" is separable from
+    /// "the table is broken". The own run is clean and the whole run is still
+    /// unverified: fulfilled, never proof.
+    #[tokio::test]
+    async fn an_unverified_drain_taints_the_full_scan() {
+        let db = test_db();
+        db.upsert_user("did:plc:unv", "unv.h").await.unwrap();
+        db.enqueue_scan("did:plc:unv").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        refresh_owned_finalize_staging(&db, "did:plc:unv", 0).await;
+        let deps = empty_deps();
+        let fail_once = FailOnce::new(db.clone());
+        let drained_summary = std::sync::Mutex::new(None);
+        let carried_before_own_run = std::sync::Mutex::new(None);
+        let books = CountingFullBooks::new(db.clone());
+        let mgr = manager("did:plc:unv", &claim.claim_id);
+
+        let report = run_scan_with(
+            mgr,
+            &books,
+            &chrono::Utc::now,
+            "did:plc:unv",
+            &claim.claim_id,
+            || async {
+                drain_then_run(
+                    db.as_ref(),
+                    "did:plc:unv",
+                    || async {
+                        // Snapshot what a restarted process would see here.
+                        *carried_before_own_run.lock().unwrap() =
+                            db.get_scan_state("did:plc:unv", CARRIED_KEY).await?;
+                        own_run(&db, "did:plc:unv", &deps, Some(&fail_once)).await
+                    },
+                    || async {
+                        let s = run_phased_scan(
+                            &db,
+                            "did:plc:unv",
+                            &[],
+                            &deps.deps(Some(&fail_once)),
+                            RunIdentity::refresh(),
+                        )
+                        .await?;
+                        *drained_summary.lock().unwrap() = Some(s.clone());
+                        Ok(s)
+                    },
+                )
+                .await
+            },
+        )
+        .await
+        .unwrap();
+
+        // 1. The intended read failed and that is what made the drain unverified.
+        let drained = drained_summary.lock().unwrap().clone().unwrap();
+        assert!(
+            fail_once.fired(),
+            "the drain's count read was the one that failed"
+        );
+        assert_eq!(
+            (drained.final_phase.as_deref(), drained.skipped),
+            (Some("done"), None)
+        );
+        assert_eq!(
+            carried_before_own_run.lock().unwrap().clone(),
+            Some(CarriedCompletion::Unverified.encode()),
+            "stored BEFORE the evidence was wiped"
+        );
+        // 2. Cleanup and the own fresh gather worked: the second count read
+        //    delegated and the marker reached `done`.
+        assert_eq!(fail_once.calls(), 2, "one failed read, one delegated read");
+        assert_eq!(
+            db.get_scan_state("did:plc:unv", "scan_phase")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("done")
+        );
+        // 3. Unverified overall despite the clean own run.
+        assert_eq!(report.completion, FinishCompletion::CompleteUnverified);
+        // 4. Marker, retry, no proof, obligation cleared, carried key gone.
+        assert_eq!(
+            (
+                books.markers.load(SeqCst),
+                books.retries.load(SeqCst),
+                books.successes.load(SeqCst)
+            ),
+            (1, 1, 0)
+        );
+        assert_ne!(
+            db.refreshed_generation("did:plc:unv")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(scoring_revision()),
+            "no proof"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:unv", CARRIED_KEY).await.unwrap(),
+            None,
+            "cleared with the marker"
+        );
+        db.finish_queued_scan("did:plc:unv", &claim.claim_id, report.completion, None)
+            .await
+            .unwrap();
+        let row = queue_row(&db, "did:plc:unv").await;
+        assert_eq!(
+            (row.completion, row.full_requested_at),
+            (Some(FinishCompletion::CompleteUnverified), None)
+        );
+    }
+
+    /// V7-02 (1–4): unverified drain → own run interrupted → process restart
+    /// (a new connection over the same file) → clean resume ⇒ STILL
+    /// unverified. While interrupted: no marker, obligation kept, one retry.
+    #[tokio::test]
+    async fn a_carried_drain_outcome_survives_interruption_and_restart() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let open = || -> Arc<dyn Database> {
+            let conn = rusqlite::Connection::open(file.path()).unwrap();
+            create_tables(&conn).unwrap();
+            Arc::new(SqliteDatabase::new(conn))
+        };
+        let db = open();
+        db.upsert_user("did:plc:c", "c.h").await.unwrap();
+        db.enqueue_scan("did:plc:c").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        refresh_owned_finalize_staging(&db, "did:plc:c", 0).await;
+        let deps = empty_deps();
+        let fail_once = FailOnce::new(db.clone());
+        let books = CountingFullBooks::new(db.clone());
+        let mgr = manager("did:plc:c", &claim.claim_id);
+
+        let mut calls = 0;
+        let first = run_scan_with(
+            mgr,
+            &books,
+            &chrono::Utc::now,
+            "did:plc:c",
+            &claim.claim_id,
+            || async {
+                drain_then_run(
+                    db.as_ref(),
+                    "did:plc:c",
+                    || {
+                        calls += 1;
+                        let deps = &deps;
+                        let db = &db;
+                        async move {
+                            if calls == 1 {
+                                return own_run(db, "did:plc:c", deps, None).await;
+                            }
+                            interrupt_own_run(db, "did:plc:c").await
+                        }
+                    },
+                    || async {
+                        run_phased_scan(
+                            &db,
+                            "did:plc:c",
+                            &[],
+                            &deps.deps(Some(&fail_once)),
+                            RunIdentity::refresh(),
+                        )
+                        .await
+                    },
+                )
+                .await
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(first.completion, FinishCompletion::Resumable);
+        assert_eq!(
+            (books.markers.load(SeqCst), books.retries.load(SeqCst)),
+            (0, 1),
+            "interrupted: no marker, one retry"
+        );
+        db.finish_queued_scan(
+            "did:plc:c",
+            &claim.claim_id,
+            FinishCompletion::Resumable,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(
+            queue_row(&db, "did:plc:c")
+                .await
+                .full_requested_at
+                .is_some(),
+            "obligation kept while interrupted"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:c", CARRIED_KEY).await.unwrap(),
+            Some(CarriedCompletion::Unverified.encode())
+        );
+
+        // Restart: new connection, same file.
+        drop(db);
+        let db = open();
+        db.enqueue_scan("did:plc:c").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let books = CountingFullBooks::new(db.clone());
+        let mgr = manager("did:plc:c", &claim.claim_id);
+        let second = run_scan_with(
+            mgr,
+            &books,
+            &chrono::Utc::now,
+            "did:plc:c",
+            &claim.claim_id,
+            || async {
+                drain_then_run(
+                    db.as_ref(),
+                    "did:plc:c",
+                    || own_run(&db, "did:plc:c", &deps, None),
+                    || async { unreachable!("nothing refresh-owned is left to drain") },
+                )
+                .await
+            },
+        )
+        .await
+        .unwrap();
+
+        // The resume itself was clean — the carried outcome still wins.
+        assert_eq!(second.completion, FinishCompletion::CompleteUnverified);
+        assert_eq!(
+            (
+                books.markers.load(SeqCst),
+                books.retries.load(SeqCst),
+                books.successes.load(SeqCst)
+            ),
+            (1, 1, 0)
+        );
+        assert_ne!(
+            db.refreshed_generation("did:plc:c")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(scoring_revision()),
+            "no proof"
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:c", CARRIED_KEY).await.unwrap(),
+            None,
+            "consumed by the fulfilled completion"
+        );
+    }
+
+    /// V7-02 (3): a skip-laden drain's count survives a restart and is counted
+    /// exactly once — the drain's two skips, not four and not zero — and does
+    /// not leak into an unrelated later scan.
+    #[tokio::test]
+    async fn a_carried_skip_count_survives_without_duplication() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let open = || -> Arc<dyn Database> {
+            let conn = rusqlite::Connection::open(file.path()).unwrap();
+            create_tables(&conn).unwrap();
+            Arc::new(SqliteDatabase::new(conn))
+        };
+        let db = open();
+        db.upsert_user("did:plc:s", "s.h").await.unwrap();
+        refresh_owned_finalize_staging(&db, "did:plc:s", 2).await;
+        let deps = empty_deps();
+
+        let mut calls = 0;
+        let first = drain_then_run(
+            db.as_ref(),
+            "did:plc:s",
+            || {
+                calls += 1;
+                let deps = &deps;
+                let db = &db;
+                async move {
+                    if calls == 1 {
+                        return own_run(db, "did:plc:s", deps, None).await;
+                    }
+                    interrupt_own_run(db, "did:plc:s").await
+                }
+            },
+            || async {
+                run_phased_scan(
+                    &db,
+                    "did:plc:s",
+                    &[],
+                    &deps.deps(None),
+                    RunIdentity::refresh(),
+                )
+                .await
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.completion, ScanCompletion::Resumable);
+        assert_eq!(
+            db.get_scan_state("did:plc:s", CARRIED_KEY).await.unwrap(),
+            Some(CarriedCompletion::WithSkips { n: 2 }.encode())
+        );
+
+        drop(db);
+        let db = open();
+        // A claim, so the fulfilled completion's fenced marker write applies.
+        db.enqueue_scan("did:plc:s").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let second = drain_then_run(
+            db.as_ref(),
+            "did:plc:s",
+            || own_run(&db, "did:plc:s", &deps, None),
+            || async { unreachable!("nothing refresh-owned is left to drain") },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            second.completion,
+            ScanCompletion::CompleteWithSkips { n: 2 },
+            "the drain's skips, exactly once"
+        );
+        record_full_scan_completion(db.as_ref(), "did:plc:s", &claim.claim_id, second.completion)
+            .await;
+        assert_eq!(
+            db.get_scan_state("did:plc:s", CARRIED_KEY).await.unwrap(),
+            None
+        );
+
+        let third = drain_then_run(
+            db.as_ref(),
+            "did:plc:s",
+            || own_run(&db, "did:plc:s", &deps, None),
+            || async { unreachable!("nothing refresh-owned is left to drain") },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            third.completion,
+            ScanCompletion::Complete,
+            "no leak into a later scan"
+        );
+    }
+
+    /// V7-02 (durability window): a crash after the drain reached `done` but
+    /// before its outcome was stored leaves only the `Draining` sentinel. The
+    /// next attempt fresh-starts, wipes the skips, completes cleanly — and is
+    /// still reported unverified, which is precisely why the sentinel exists.
+    #[tokio::test]
+    async fn a_lost_drain_outcome_is_treated_as_unverified() {
+        let db = test_db();
+        db.upsert_user("did:plc:l", "l.h").await.unwrap();
+        db.set_scan_state("did:plc:l", "scan_phase", "done")
+            .await
+            .unwrap();
+        db.record_scan_skip("did:plc:l", "did:plc:x", "gather", "feed 4xx")
+            .await
+            .unwrap();
+        store_carried_completion(db.as_ref(), "did:plc:l", CarriedCompletion::Draining)
+            .await
+            .unwrap();
+        let deps = empty_deps();
+
+        let run = drain_then_run(
+            db.as_ref(),
+            "did:plc:l",
+            || own_run(&db, "did:plc:l", &deps, None),
+            || async { unreachable!("the `done` marker is not resumable staging") },
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.completion, ScanCompletion::CompleteUnverified);
+        assert_eq!(
+            db.count_scan_skips("did:plc:l").await.unwrap(),
+            0,
+            "the fresh start wiped the evidence — which is why the sentinel exists"
+        );
+    }
+
+    /// V7-02 (5): a carried value from another scoring revision is dropped on
+    /// load (R03 discarded the staging it described), and a fulfilled
+    /// completion clears the current one while a resumable attempt keeps it.
+    #[tokio::test]
+    async fn a_carried_outcome_from_another_revision_is_dropped_and_a_fulfilled_run_clears_it() {
+        let db = test_db();
+        db.upsert_user("did:plc:g", "g.h").await.unwrap();
+        db.enqueue_scan("did:plc:g").await.unwrap();
+        let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+
+        db.set_scan_state("did:plc:g", CARRIED_KEY, "unverified|1999-01-01")
+            .await
+            .unwrap();
+        assert_eq!(
+            load_carried_completion(db.as_ref(), "did:plc:g")
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:g", CARRIED_KEY).await.unwrap(),
+            None,
+            "deleted on load"
+        );
+
+        store_carried_completion(
+            db.as_ref(),
+            "did:plc:g",
+            CarriedCompletion::WithSkips { n: 1 },
+        )
+        .await
+        .unwrap();
+        record_full_scan_completion(
+            db.as_ref(),
+            "did:plc:g",
+            &claim.claim_id,
+            ScanCompletion::Resumable,
+        )
+        .await;
+        assert!(
+            db.get_scan_state("did:plc:g", CARRIED_KEY)
+                .await
+                .unwrap()
+                .is_some(),
+            "a resumable attempt keeps it"
+        );
+        record_full_scan_completion(
+            db.as_ref(),
+            "did:plc:g",
+            &claim.claim_id,
+            ScanCompletion::CompleteWithSkips { n: 1 },
+        )
+        .await;
+        assert_eq!(
+            db.get_scan_state("did:plc:g", CARRIED_KEY).await.unwrap(),
+            None
+        );
+        assert!(db
+            .get_scan_state("did:plc:g", "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    /// The encoding is the durability contract: every variant round-trips, and
+    /// a value this binary cannot read is taken the conservative way rather
+    /// than optimistically dropped.
+    #[test]
+    fn carried_outcomes_round_trip_and_garbage_reads_conservatively() {
+        for c in [
+            CarriedCompletion::Draining,
+            CarriedCompletion::Unverified,
+            CarriedCompletion::WithSkips { n: 7 },
+        ] {
+            assert_eq!(CarriedCompletion::parse(&c.encode()), Some(c));
+        }
+        // Current revision, unreadable payload ⇒ Draining, which folds to
+        // CompleteUnverified. Never Complete.
+        assert_eq!(
+            CarriedCompletion::parse(&format!("garbage|{}", scoring_revision())),
+            Some(CarriedCompletion::Draining)
+        );
+        assert_eq!(
+            CarriedCompletion::parse(&format!("skips|nan|{}", scoring_revision())),
+            Some(CarriedCompletion::Draining)
+        );
+        // Another revision, and a value with no separator at all, are absent.
+        assert_eq!(CarriedCompletion::parse("unverified|1999-01-01"), None);
+        assert_eq!(CarriedCompletion::parse("skips|2|1999-01-01"), None);
+        assert_eq!(CarriedCompletion::parse("nonsense"), None);
+        // The real revision contains '|' — the regression this encoding exists
+        // for. A revision-first encoding would make every value unparseable.
+        assert!(
+            scoring_revision().contains('|'),
+            "the revision is pipe-separated, which is why the tag comes first"
+        );
+        // Only fulfilled-but-not-clean drains are carried.
+        assert_eq!(
+            CarriedCompletion::from_drain(ScanCompletion::Complete),
+            None
+        );
+        assert_eq!(
+            CarriedCompletion::from_drain(ScanCompletion::Resumable),
+            None
+        );
+        assert_eq!(
+            CarriedCompletion::from_drain(ScanCompletion::CompleteWithSkips { n: 4 }),
+            Some(CarriedCompletion::WithSkips { n: 4 })
+        );
+        assert_eq!(
+            CarriedCompletion::from_drain(ScanCompletion::CompleteUnverified),
+            Some(CarriedCompletion::Unverified)
+        );
+        // Folding back: Draining is as bad as Unverified.
+        assert_eq!(
+            ScanCompletion::from(CarriedCompletion::Draining),
+            ScanCompletion::CompleteUnverified
+        );
+        assert_eq!(
+            ScanCompletion::from(CarriedCompletion::WithSkips { n: 4 }),
+            ScanCompletion::CompleteWithSkips { n: 4 }
+        );
+    }
+
+    /// The store/load pair against a real database, including the delete.
+    #[tokio::test]
+    async fn carried_outcomes_survive_a_round_trip_through_the_database() {
+        let db = test_db();
+        db.upsert_user("did:plc:rt", "rt.h").await.unwrap();
+        assert_eq!(
+            load_carried_completion(db.as_ref(), "did:plc:rt")
+                .await
+                .unwrap(),
+            None,
+            "nothing carried by default"
+        );
+        for c in [
+            CarriedCompletion::Draining,
+            CarriedCompletion::Unverified,
+            CarriedCompletion::WithSkips { n: 3 },
+        ] {
+            store_carried_completion(db.as_ref(), "did:plc:rt", c)
+                .await
+                .unwrap();
+            assert_eq!(
+                load_carried_completion(db.as_ref(), "did:plc:rt")
+                    .await
+                    .unwrap(),
+                Some(c)
+            );
+        }
+        delete_carried_completion(db.as_ref(), "did:plc:rt")
+            .await
+            .unwrap();
+        assert_eq!(
+            load_carried_completion(db.as_ref(), "did:plc:rt")
+                .await
+                .unwrap(),
+            None
+        );
     }
 }
