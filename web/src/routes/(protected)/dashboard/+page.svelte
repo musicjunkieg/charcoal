@@ -396,6 +396,18 @@
 					<span class="tier-count">{status.tier_counts.not_assessed}</span>
 					<span class="tier-label">Not assessed</span>
 				</div>
+				<!-- #344: scored under an older generation or past their window.
+				     Hidden from the tiers until the nightly refresh (High/Elevated)
+				     or a re-engagement re-scores them. Neutral, unlinked. -->
+				{#if status.tier_counts.expired > 0}
+					<div
+						class="tier-card tier-not-assessed"
+						title="Scores past their refresh window — hidden until re-scored"
+					>
+						<span class="tier-count">{status.tier_counts.expired}</span>
+						<span class="tier-label">Expired</span>
+					</div>
+				{/if}
 			</div>
 
 			<!-- Tier legend -->

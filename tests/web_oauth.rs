@@ -450,6 +450,62 @@ mod tests {
         assert_eq!(json["tier_counts"]["total"], 1);
     }
 
+    /// #344: rows scored under an older generation are hidden from every tier
+    /// and reported as `expired`, so the user can see why a list shrank.
+    #[tokio::test]
+    async fn status_reports_expired_rows_outside_the_tiers() {
+        use charcoal::db::models::AccountScore;
+
+        let Some((app, db)) = build_test_app_with_db() else {
+            eprintln!("SKIP: models not present, cannot build test AppState");
+            return;
+        };
+
+        let high = AccountScore {
+            did: "did:plc:wasHigh".to_string(),
+            handle: "washigh.bsky.social".to_string(),
+            toxicity_score: Some(0.9),
+            topic_overlap: Some(0.8),
+            overlap_legacy: None,
+            threat_score: Some(60.0),
+            threat_tier: Some("High".to_string()),
+            posts_analyzed: 50,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: Some("high".to_string()),
+        };
+        db.upsert_account_score(TEST_DID, &high).await.unwrap();
+        // Age the row out of its generation the way migration v18 would.
+        charcoal::web::test_helpers::expire_all_scores(&db, TEST_DID).await;
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .header("cookie", session_cookie(TEST_DID))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            json["tier_counts"]["high"], 0,
+            "expired rows leave the tiers"
+        );
+        assert_eq!(json["tier_counts"]["expired"], 1);
+        assert_eq!(json["tier_counts"]["total"], 0, "expired is not in total");
+    }
+
     // ---- Scan endpoint requires registered user ----
 
     #[tokio::test]

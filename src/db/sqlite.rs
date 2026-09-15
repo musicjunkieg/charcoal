@@ -36,6 +36,17 @@ impl SqliteDatabase {
             conn: Mutex::new(conn),
         }
     }
+
+    /// Run a closure against the raw connection. Test support only: lets
+    /// integration tests shape rows the trait deliberately cannot (age a
+    /// score out of its generation, #344) without widening the trait.
+    pub async fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    ) -> anyhow::Result<T> {
+        let conn = self.conn.lock().await;
+        Ok(f(&conn)?)
+    }
 }
 
 #[async_trait]
@@ -833,6 +844,10 @@ impl Database for SqliteDatabase {
     ) -> Result<super::cache_retention::CacheEviction> {
         let conn = self.conn.lock().await;
         super::queries::evict_stale_cache(&conn, feed_cutoff, score_cutoff)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

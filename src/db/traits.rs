@@ -1245,6 +1245,14 @@ pub trait Database: Send + Sync {
         feed_cutoff: &str,
         score_cutoff: &str,
     ) -> Result<crate::db::cache_retention::CacheEviction>;
+
+    /// Downcast escape hatch for test support (#344). The trait deliberately
+    /// exposes no raw SQL — production code has no business reaching past it
+    /// — but some test fixtures (aging a row out of its scoring generation,
+    /// e.g. `web::test_helpers::expire_all_scores`) need to shape rows the
+    /// trait cannot express without widening it for everyone. Implemented as
+    /// `{ self }` on both backends.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

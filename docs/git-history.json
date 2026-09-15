@@ -1,5 +1,13 @@
 [
   {
+    "hash": "63fccb263a5b4b50cab6bf34aaed9a6433ad1304",
+    "short_hash": "63fccb2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T08:12:22-07:00",
+    "message": "docs(344): document CHARCOAL_COPE_B_POLICY_VERSION\n\nA new operator-facing knob shipped with no reference documentation\n(#344 F6). README gains a bullet in the env list and a \"Stage-2\nclassifier policy\" section saying what the value must equal, that it is\ntrimmed, what the default is, and — the part that matters — exactly what\nhappens when it does not match: every verdict becomes foreign evidence,\nevery account is re-gathered once and then skipped, and no scores are\nwritten. It also records the two guardrails that now exist for it: the\nscan-start probe that refuses to start, and the once-per-batch error for\na scan already in flight.\n\n.env.example gains the whole Stage-2 backend-selection block —\nCHARCOAL_CLASSIFIER, RUNPOD_ENDPOINT_URL, RUNPOD_API_KEY and the policy\nversion — which was undocumented there too.\n\nThe deploy-checklist entry (set it before shipping; bump\nSCORING_GENERATION if the policy itself changed) belongs to the Task 10\nrunbook; this is the reference half.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 2
+  },
+  {
     "hash": "d835154f73cdcab944185e47ea53022548453976",
     "short_hash": "d835154",
     "author": "Bryan Guffey",

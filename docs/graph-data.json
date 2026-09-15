@@ -10163,6 +10163,28 @@
       "created_at": "2026-09-15T05:40:26.480516-07:00",
       "updated_at": "2026-09-15T05:40:26.480516-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
+    },
+    {
+      "id": 934,
+      "change_id": "a187e166-d3ee-4ac7-b990-678512a0617c",
+      "node_type": "outcome",
+      "title": "Task 9 fix wave committed 720f8b9 + 986c3db + 2486483 + e89b1aa + 63fccb2 (F1-F10): Postgres queue fixtures scoped (10/10 clean loops, 845 passed each — the Task 10 isolation evidence now exists); staging-ownership refusal names its remedy (F1 did NOT drain — drain_then_run is web-gated and built from web-only bookkeeping types, so the CLI got an actionable error instead); CoPE-B policy probed at scan start and the mismatch logged once per batch instead of once per post; refresh reports progress and an honest candidates_total; drain gets its own cache prefix; truncated carried sentinel folds to Draining; misleading pre-v18 comment reworded; dead API removed; knob documented. VERIFY_WEB mandated single-command form, exit 0, 60 binaries / 1113 passed / 0 SKIP; clippy x3 + fmt clean (controller confirmed zero warnings independently). CORRECTION: the F5 premise was wrong — warm_up had NO production caller, so probe_identity was wired explicitly, costing one endpoint round trip per scan start. CORRECTION: the F4 race cause was the whole-database refresh tick delivering a sibling test's scored user, not the cascade fixture. Re-review requested.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T08:15:06.195788-07:00",
+      "updated_at": "2026-09-15T08:15:06.195788-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"63fccb2\",\"confidence\":85}"
+    },
+    {
+      "id": 935,
+      "change_id": "f5af23e7-d506-4e7a-a2c2-f5d8dd65470e",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 4: 'N expired' — count_expired wired through the status API, dashboard and CLI (src/web/handlers/status.rs, src/status.rs, web/src/lib/types.ts, web/src/lib/dashboard-state.ts + test, dashboard +page.svelte); plus the Task 9 review minor: move the refresh classifier probe below the candidate count so a NothingDue refresh pays no RunPod cold start",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T08:18:43.630796-07:00",
+      "updated_at": "2026-09-15T08:18:43.630796-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"63fccb2\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -20923,6 +20945,28 @@
       "weight": 1.0,
       "rationale": "Decision on the Task 9 review findings",
       "created_at": "2026-09-15T05:40:26.486656-07:00"
+    },
+    {
+      "id": 989,
+      "from_node_id": 933,
+      "to_node_id": 934,
+      "from_change_id": "83b5788a-8106-4a12-9917-0abebba8c72b",
+      "to_change_id": "a187e166-d3ee-4ac7-b990-678512a0617c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 review findings resolved",
+      "created_at": "2026-09-15T08:15:06.202347-07:00"
+    },
+    {
+      "id": 990,
+      "from_node_id": 877,
+      "to_node_id": 935,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "f5af23e7-d506-4e7a-a2c2-f5d8dd65470e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 4 expired count",
+      "created_at": "2026-09-15T08:18:47.718043-07:00"
     }
   ],
   "documents": [

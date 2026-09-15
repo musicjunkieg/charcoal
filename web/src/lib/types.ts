@@ -38,6 +38,9 @@ export interface TierCounts {
 	// language abstention). Excluded from `total`, so it's a distinct bucket
 	// rather than a threat tier.
 	not_assessed: number;
+	// Rows hidden because they expired or predate the current scoring
+	// generation (#344). Not in total.
+	expired: number;
 	total: number;
 }
 

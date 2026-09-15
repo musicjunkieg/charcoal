@@ -3328,6 +3328,10 @@ impl Database for PgDatabase {
             classifier_verdicts,
         })
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Column list + row reader shared by every action_batches query (#315).
