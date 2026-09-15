@@ -2247,6 +2247,18 @@ impl Database for PgDatabase {
         Ok(())
     }
 
+    async fn request_full_after_refresh(&self, user_did: &str) -> Result<()> {
+        sqlx_core::query::query(
+            "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, $2)
+             WHERE user_did = $1 AND status = 'running' AND kind = 'refresh'",
+        )
+        .bind(user_did)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
         let mut tx = self.pool.begin().await?;
 

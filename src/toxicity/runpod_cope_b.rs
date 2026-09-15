@@ -24,6 +24,7 @@ use backon::{ExponentialBuilder, Retryable};
 use serde::Deserialize;
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tracing::error;
 
 use std::sync::Arc;
 
@@ -159,7 +160,42 @@ fn default_model() -> String {
     "cope-b-a4b".into()
 }
 fn default_policy_version() -> String {
-    "policy-unknown".into()
+    COPE_B_DEFAULT_POLICY.into()
+}
+
+/// What this deployment expects the CoPE-B endpoint to be serving.
+pub const COPE_B_POLICY_ENV: &str = "CHARCOAL_COPE_B_POLICY_VERSION";
+/// The value used when the knob is unset — unchanged from what this
+/// classifier advertised before #344, so an unconfigured deployment behaves
+/// exactly as it did.
+pub const COPE_B_DEFAULT_POLICY: &str = "policy-unknown";
+
+/// The policy identity this binary claims for the hosted CoPE-B classifier
+/// (#344 V3-01).
+///
+/// The classifier runs OUTSIDE the binary, so its identity cannot be composed
+/// into `scoring_revision()` the way the in-binary models are — the operator
+/// declares it instead, alongside the `SCORING_GENERATION` bump the runbook
+/// already requires for a classifier policy change. Resolved once per process:
+/// `ToxicityClassifier::policy_version` returns `&'static str`, and a
+/// per-call env read would also let the advertised identity drift mid-scan.
+///
+/// A leak is the only way to hand a runtime string to a `&'static str` API;
+/// `LazyLock` bounds it to exactly one for the life of the process.
+pub fn cope_b_expected_policy() -> &'static str {
+    static POLICY: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
+        resolve_cope_b_policy(std::env::var(COPE_B_POLICY_ENV).ok().as_deref())
+    });
+    *POLICY
+}
+
+/// The env-free half of [`cope_b_expected_policy`], so the default is
+/// assertable without touching a process-global variable.
+fn resolve_cope_b_policy(raw: Option<&str>) -> &'static str {
+    match raw.map(str::trim) {
+        None | Some("") => COPE_B_DEFAULT_POLICY,
+        Some(v) => Box::leak(v.to_string().into_boxed_str()),
+    }
 }
 
 /// Typed retry classification so backon's `.when()` filter checks an enum
@@ -276,6 +312,23 @@ impl RunPodCopeBClient {
                     return ItemOutcome::Error(format!(
                         "confidence out of contract (finite [0,1]): {confidence}"
                     ));
+                }
+                // The verdict keeps the policy the ENDPOINT reported, never
+                // the one this binary expected (#344 V3-01): a row's
+                // provenance has to describe what actually produced it. When
+                // the two disagree the rows finalize as foreign evidence and
+                // the accounts are re-gathered and then skipped — a visible
+                // gap rather than scores silently attributed to a policy that
+                // did not produce them. Loud, because the fix is one variable.
+                if item.policy_version != cope_b_expected_policy() {
+                    error!(
+                        expected = cope_b_expected_policy(),
+                        reported = %item.policy_version,
+                        "{COPE_B_POLICY_ENV} does not match the policy the CoPE-B endpoint \
+                         reports — these verdicts will not be accepted as current evidence; \
+                         set it to the endpoint's POLICY_VERSION (and bump SCORING_GENERATION \
+                         if the policy itself changed)"
+                    );
                 }
                 ItemOutcome::Verdict(ClassifierVerdict {
                     toxic_token: toxic,
@@ -564,11 +617,12 @@ impl ToxicityClassifier for RunPodCopeBClient {
         "cope-b-a4b"
     }
     fn policy_version(&self) -> &'static str {
-        // Default for trait-level callers (e.g. health-check banner). The
-        // real per-call value lives on ClassifierVerdict.policy_version,
-        // which carries the response field — Chunk 3's handler.py sets it
-        // from the image's POLICY_VERSION build-arg.
-        "policy-unknown"
+        // What this deployment declares the endpoint is serving (#344 V3-01).
+        // It must equal what the endpoint reports on its verdicts: the
+        // classifier cache is keyed by it, and finalize compares a staged
+        // row's recorded policy against it. `map_verdicts` logs loudly when
+        // they diverge.
+        cope_b_expected_policy()
     }
     fn threshold(&self) -> f32 {
         COPE_B_THRESHOLD
@@ -638,6 +692,30 @@ mod tests {
                 .is_none(),
             "a permanent 4xx must not be classified transient"
         );
+    }
+
+    #[test]
+    /// #344 V3-01: the declared policy identity. Unset/blank keeps the
+    /// pre-#344 value, so an unconfigured deployment is unchanged; anything
+    /// else is taken verbatim (it is an opaque server-side identifier, so
+    /// there is nothing to clamp) after trimming, because a trailing newline
+    /// from a copy-paste would silently make every verdict foreign evidence.
+    #[test]
+    fn cope_b_policy_defaults_and_trims() {
+        assert_eq!(resolve_cope_b_policy(None), COPE_B_DEFAULT_POLICY);
+        assert_eq!(resolve_cope_b_policy(Some("")), COPE_B_DEFAULT_POLICY);
+        assert_eq!(resolve_cope_b_policy(Some("   ")), COPE_B_DEFAULT_POLICY);
+        assert_eq!(resolve_cope_b_policy(Some("policy-v1")), "policy-v1");
+        assert_eq!(resolve_cope_b_policy(Some(" policy-v1\n")), "policy-v1");
+    }
+
+    /// The identity a verdict-less caller reads must be the identity the
+    /// response parser compares against — one function, not two constants.
+    #[test]
+    fn advertised_policy_is_the_expected_policy() {
+        let client = RunPodCopeBClient::new("https://example.invalid".into(), "k".into()).unwrap();
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        assert_eq!(dyn_ref.policy_version(), cope_b_expected_policy());
     }
 
     #[test]

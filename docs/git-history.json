@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bf2a5536e530e1646a51f2e525feb9edb0898c8b",
+    "short_hash": "bf2a553",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T02:39:15-07:00",
+    "message": "refactor(344): extract scan setup into src/web/scan_setup.rs\n\nPure move. No logic changes: no renamed items, no changed signatures or\nbodies, no reordered arms, no visibility widened beyond what the move\nrequires to keep compiling. The correctness argument is that the compiler\nand the existing tests prove nothing changed — 1070 tests pass before and\nafter, zero model-gated skips, clippy clean on all three feature sets.\n\nMoved out of scan_job.rs (3555 -> 3155 lines):\n  ScanModels and its loader, ScanScorers, build_scan_scorers,\n  record_scan_cache_stats, embed_protected_posts, pile_on_dids,\n  fingerprint_is_stale, fingerprint_needs_rebuild_for_format,\n  RebuildReason, rebuild_decision, and fingerprint_staleness_tests.\n\nScanModels moved with build_scan_scorers deliberately, so scan_setup is a\nleaf rather than referring back up into scan_job. The pub(crate) re-exports\nleft in scan_job are a bridge for existing call sites; new code should\nimport crate::web::scan_setup directly.\n\nTwo reviewers recommended this seam before the refresh runner lands, so\nthat the runner is reviewed on its own merits rather than among relocated\nlines.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 5
+  },
+  {
     "hash": "a6c00fa70785b9f35f44fdbdc9596d4adf3b550b",
     "short_hash": "a6c00fa",
     "author": "Bryan Guffey",

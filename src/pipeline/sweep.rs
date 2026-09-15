@@ -33,7 +33,8 @@ use crate::pipeline::scan_phases::burst;
 use crate::observability::cache_stats::{record_cache_stats, CacheStats};
 use crate::pipeline::scan_phases::feed_cache::CachedPostFetcher;
 use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
-use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
+use crate::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
+use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps, RunIdentity};
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
@@ -355,9 +356,20 @@ async fn run_sweep_phased(
         gather_concurrency: concurrency,
         burst_concurrency: burst::burst_concurrency(),
         burst_batch: burst::burst_batch(),
+        // Only this binary's own producers count as evidence (R03, V2-01).
+        evidence: EvidenceContract {
+            onnx_model_id: crate::toxicity::onnx::ONNX_MODEL_ID,
+            classifier: ClassifierIdentity {
+                model_id: classifier.model_id(),
+                policy_version: classifier.policy_version(),
+            },
+        },
+        skip_counter: None,
     };
 
-    let summary = run_phased_scan(db, user_did, candidates, &deps).await?;
+    // The sweep is full-scan work: it discovers and scores under the user's own
+    // full-scan identity, and must not resume or consume a refresh's staging.
+    let summary = run_phased_scan(db, user_did, candidates, &deps, RunIdentity::full()).await?;
     if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
         warn!(error = %e, "could not record feed cache stats");
     }

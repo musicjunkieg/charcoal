@@ -1898,6 +1898,17 @@ pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<EnqueueOutcome>
     Ok(outcome)
 }
 
+/// `Database::request_full_after_refresh` — see the trait for the contract.
+pub fn request_full_after_refresh(conn: &Connection, user_did: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+         WHERE user_did = ?1 AND status = 'running' AND kind = 'refresh'",
+        params![user_did, now],
+    )?;
+    Ok(())
+}
+
 /// Same statement the tick uses (`REFRESH_ENQUEUE_SQL`, Task 6): owed full
 /// work is re-queued as full, otherwise a refresh; queued/running rows are
 /// never touched.

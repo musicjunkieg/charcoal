@@ -504,6 +504,11 @@ impl Database for SqliteDatabase {
         super::queries::enqueue_refresh_scan(&conn, user_did)
     }
 
+    async fn request_full_after_refresh(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::request_full_after_refresh(&conn, user_did)
+    }
+
     async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
         // The guard is held for the whole call, which is what makes in-process
         // admission single-file here — see the note in queries.rs on why this

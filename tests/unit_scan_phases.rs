@@ -1008,7 +1008,16 @@ mod gather_tests {
         assert_eq!(clean_row.status, "done");
         assert_eq!(clean_row.toxic_token, Some(false));
         assert_eq!(clean_row.confidence, None);
-        assert_eq!(clean_row.model_id, None);
+        // #344 V3-01: a clean-pass row names its producer so finalize can tell
+        // it from a corrupt row or an old binary's unlabelled staging.
+        assert_eq!(
+            clean_row.model_id.as_deref(),
+            Some(charcoal::toxicity::onnx::ONNX_MODEL_ID)
+        );
+        assert_eq!(
+            clean_row.policy_version.as_deref(),
+            Some(charcoal::pipeline::scan_phases::staging::CLEAN_PASS_POLICY)
+        );
 
         // Blob stashed once and round-trips with schema_version set.
         let payload = db
@@ -1391,9 +1400,21 @@ mod gather_tests {
             None,
             None,
             None,
+            &gather_evidence(),
         )
         .await
         .unwrap()
+    }
+
+    /// The evidence contract these tests' staged rows were written under.
+    fn gather_evidence() -> charcoal::pipeline::scan_phases::staging::EvidenceContract<'static> {
+        charcoal::pipeline::scan_phases::staging::EvidenceContract {
+            onnx_model_id: charcoal::toxicity::onnx::ONNX_MODEL_ID,
+            classifier: charcoal::pipeline::scan_phases::staging::ClassifierIdentity {
+                model_id: "test",
+                policy_version: "p",
+            },
+        }
     }
 
     /// R03: a staged blob from another scoring generation must not be
@@ -1635,6 +1656,19 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &rows).await.unwrap();
     }
 
+    /// The evidence contract matching the provenance `stage_account` writes
+    /// (`model_id = "test"`, `policy_version = "p"`) — #344 V3-01. Finalize
+    /// accepts a staged verdict only from a producer this run actually uses.
+    fn fin_evidence() -> charcoal::pipeline::scan_phases::staging::EvidenceContract<'static> {
+        charcoal::pipeline::scan_phases::staging::EvidenceContract {
+            onnx_model_id: charcoal::toxicity::onnx::ONNX_MODEL_ID,
+            classifier: charcoal::pipeline::scan_phases::staging::ClassifierIdentity {
+                model_id: "test",
+                policy_version: "p",
+            },
+        }
+    }
+
     // ── survivor scored: matches golden case (c) ──
     #[tokio::test]
     async fn finalize_survivor_scores_matching_golden() {
@@ -1651,7 +1685,18 @@ mod finalize_tests {
         stage_account(&db, &sample, &verdicts, None).await;
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -1700,7 +1745,18 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -1738,7 +1794,18 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -1763,7 +1830,18 @@ mod finalize_tests {
         let weights = ThreatWeights::default();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -1813,7 +1891,18 @@ mod finalize_tests {
             .unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -1881,7 +1970,18 @@ mod finalize_tests {
         db.enqueue_classifications(FIN_USER, &[row]).await.unwrap();
 
         let outcome = finalize_account(
-            &db, FIN_USER, ACCT, &fp, &weights, None, None, None, None, None, None,
+            &db,
+            FIN_USER,
+            ACCT,
+            &fp,
+            &weights,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -1954,6 +2054,7 @@ mod finalize_tests {
             maybe_nli.as_ref(), // nli_scorer: present iff the model is on disk
             Some(&ppwe),        // protected_posts_with_embeddings (sentinel)
             None,               // data_dir
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -2067,6 +2168,7 @@ mod finalize_tests {
             Some(&nli),
             Some(&ppwe),
             Some(&data_dir),
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -2139,6 +2241,7 @@ mod finalize_tests {
             Some(&nli),
             None, // protected_posts_with_embeddings (Mode A ignores this)
             Some(&data_dir),
+            &fin_evidence(),
         )
         .await
         .unwrap();
@@ -2883,7 +2986,11 @@ mod orchestration_tests {
 
     use charcoal::bluesky::posts::{Post, PostSample};
     use charcoal::pipeline::scan_phases::gather::{CleanPassScorer, PostFetcher};
-    use charcoal::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
+    use charcoal::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
+    use charcoal::pipeline::scan_phases::{
+        run_phased_scan, CandidateInput, PhasedScanDeps, PhasedScanError, RunIdentity,
+        RUN_GENERATION_KEY, RUN_KIND_KEY,
+    };
     use charcoal::scoring::threat::ThreatWeights;
     use charcoal::topics::fingerprint::{TopicCluster, TopicFingerprint};
     use charcoal::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
@@ -3079,10 +3186,13 @@ mod orchestration_tests {
             "always-ok"
         }
         fn model_id(&self) -> &'static str {
-            "always-ok"
+            // What `ok_verdict()` actually writes: a producer's advertised
+            // identity must equal what it records (#344 V3-01), or finalize
+            // rejects its own verdicts as foreign evidence.
+            "stub"
         }
         fn policy_version(&self) -> &'static str {
-            "always-ok"
+            "stub"
         }
         fn threshold(&self) -> f32 {
             0.0
@@ -3114,10 +3224,13 @@ mod orchestration_tests {
             "cost-cap"
         }
         fn model_id(&self) -> &'static str {
-            "cost-cap"
+            // What `ok_verdict()` actually writes: a producer's advertised
+            // identity must equal what it records (#344 V3-01), or finalize
+            // rejects its own verdicts as foreign evidence.
+            "stub"
         }
         fn policy_version(&self) -> &'static str {
-            "cost-cap"
+            "stub"
         }
         fn threshold(&self) -> f32 {
             0.0
@@ -3151,7 +3264,36 @@ mod orchestration_tests {
             gather_concurrency: 1,
             burst_concurrency: 1,
             burst_batch: 100,
+            // The doubles are honest producers: their advertised identity is
+            // exactly what `ok_verdict()` writes, and `mark_clean` stamps the
+            // real ONNX id (#344 V3-01).
+            evidence: EvidenceContract {
+                onnx_model_id: charcoal::toxicity::onnx::ONNX_MODEL_ID,
+                classifier: ClassifierIdentity {
+                    model_id: classifier.model_id(),
+                    policy_version: classifier.policy_version(),
+                },
+            },
+            skip_counter: None,
         }
+    }
+
+    /// Stamp the ownership markers a real interrupted run leaves behind
+    /// (#344 R02/R03). Hand-seeded resumable staging without them is
+    /// indistinguishable from another binary's leftovers, which
+    /// `run_phased_scan` discards on purpose — see
+    /// `old_generation_staging_is_discarded_on_resume`.
+    async fn seed_owner(db: &Arc<dyn Database>, kind: charcoal::db::ScanKind) {
+        db.set_scan_state(ORCH_USER, RUN_KIND_KEY, kind.as_str())
+            .await
+            .unwrap();
+        db.set_scan_state(
+            ORCH_USER,
+            RUN_GENERATION_KEY,
+            charcoal::scoring::generation::scoring_revision(),
+        )
+        .await
+        .unwrap();
     }
 
     fn candidate(did: &str, handle: &str) -> CandidateInput {
@@ -3192,6 +3334,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3283,6 +3426,7 @@ mod orchestration_tests {
         db.set_scan_state(ORCH_USER, "scan_phase", "burst")
             .await
             .unwrap();
+        seed_owner(&db, charcoal::db::ScanKind::Full).await;
 
         // PanicFetcher proves gather is never called on resume.
         let fetcher = PanicFetcher;
@@ -3297,6 +3441,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3350,6 +3495,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3413,6 +3559,7 @@ mod orchestration_tests {
         db.set_scan_state(ORCH_USER, "scan_phase", "finalize")
             .await
             .unwrap();
+        seed_owner(&db, charcoal::db::ScanKind::Full).await;
 
         // The fetcher returns a FRESH good sample so the re-gather produces a
         // scorable account.
@@ -3430,6 +3577,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3472,6 +3620,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3528,6 +3677,7 @@ mod orchestration_tests {
             ORCH_USER,
             &[],
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3580,6 +3730,7 @@ mod orchestration_tests {
             ORCH_USER,
             &[],
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await;
 
@@ -3674,6 +3825,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3736,6 +3888,7 @@ mod orchestration_tests {
             ORCH_USER,
             &candidates,
             &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
         )
         .await
         .unwrap();
@@ -3759,5 +3912,47 @@ mod orchestration_tests {
             .await
             .unwrap()
             .is_none());
+    }
+}
+
+// ── Evidence provenance (#344 R03, V2-01, V3-01) ──────────────────────────────
+
+/// V3-01 (4): missing or corrupt provenance and the decode-error sentinel
+/// are never accepted as clean-pass evidence.
+#[test]
+fn provenance_distinguishes_missing_foreign_and_sentinel() {
+    use charcoal::pipeline::scan_phases::staging::{
+        ClassifierIdentity, EvidenceContract, Provenance, CLEAN_PASS_POLICY,
+    };
+    let e = EvidenceContract {
+        onnx_model_id: "onnx",
+        classifier: ClassifierIdentity {
+            model_id: "cls",
+            policy_version: "p",
+        },
+    };
+    assert_eq!(
+        e.provenance(Some("onnx"), Some(CLEAN_PASS_POLICY)),
+        Provenance::CleanPass
+    );
+    assert_eq!(e.provenance(Some("cls"), Some("p")), Provenance::Classifier);
+    assert_eq!(e.provenance(None, None), Provenance::Missing);
+    assert_eq!(e.provenance(Some("onnx"), None), Provenance::Missing);
+    assert_eq!(
+        e.provenance(Some("decode-error"), Some("p")),
+        Provenance::DecodeErrorSentinel
+    );
+    assert_eq!(e.provenance(Some("cls"), Some("q")), Provenance::Foreign);
+    assert_eq!(
+        e.provenance(Some("onnx"), Some("p")),
+        Provenance::Foreign,
+        "ONNX model with the classifier's policy is not a clean-pass row"
+    );
+    for (m, p) in [
+        (None, None),
+        (Some("decode-error"), Some("p")),
+        (Some("cls"), Some("q")),
+    ] {
+        assert!(!e.accepts(m, p));
     }
 }

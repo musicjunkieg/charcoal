@@ -905,6 +905,21 @@ pub trait Database: Send + Sync {
     /// `refresh`; never touches a queued or running row of either kind.
     async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()>;
 
+    /// Record that the RUNNING refresh owes a follow-up full scan (#344).
+    ///
+    /// Written by a refresh that deferred because the user has no fingerprint,
+    /// or one built by another embedding model: a refresh never rebuilds a
+    /// fingerprint, so the only way out is a full scan, and asking for one has
+    /// to survive the worker (R09/V2-04). `finish_queued_scan` then hands the
+    /// row over to a queued `full` row dated from the request.
+    ///
+    /// Scoped to `status = 'running' AND kind = 'refresh'` so it can only ever
+    /// annotate the refresh that is asking — never a queued full scan, and
+    /// never a successor's row. `COALESCE` keeps the first request's instant,
+    /// exactly as a user click does, so the queue position is not pushed back
+    /// by a second deferral.
+    async fn request_full_after_refresh(&self, user_did: &str) -> Result<()>;
+
     /// Claim the oldest queued scan if fewer than `limit` are running.
     /// Returns the claim (user_did plus fencing token), or None when at
     /// capacity or empty. `lease_secs` sets how long the claim is valid before

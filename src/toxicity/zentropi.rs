@@ -73,7 +73,24 @@ pub struct ZentropiClient {
     api_key: String,
     labeler_id: String,
     labeler_version_id: Option<String>,
+    /// The endpoint to POST to. A field rather than the module const so the
+    /// trait's policy-identity contract can be exercised against a local mock
+    /// (V3-01) — the production constructor always passes [`ZENTROPI_API_URL`].
+    api_url: String,
+    /// This client's policy identity, resolved ONCE at construction (V3-01).
+    ///
+    /// `ToxicityClassifier::policy_version` returns `&'static str`, and the
+    /// configured labeler version is only known at runtime, so the resolved
+    /// string is leaked — bounded by construction count (one per process in
+    /// production, a handful in tests), never in a loop. This is the same
+    /// string `classify` writes onto its verdicts, which is the whole point:
+    /// finalize validates a row's recorded policy against what the classifier
+    /// advertises, and before this they could differ.
+    policy_version: &'static str,
 }
+
+/// The banner used when no concrete labeler version is configured.
+const ZENTROPI_DEFAULT_POLICY: &str = "zentropi-labeler";
 
 impl ZentropiClient {
     /// Build a new client. Returns an error if `api_key` or `labeler_id` is empty
@@ -82,6 +99,26 @@ impl ZentropiClient {
         api_key: String,
         labeler_id: String,
         labeler_version_id: Option<String>,
+    ) -> Result<Self> {
+        Self::with_api_url(
+            api_key,
+            labeler_id,
+            labeler_version_id,
+            ZENTROPI_API_URL.to_string(),
+        )
+    }
+
+    /// [`ZentropiClient::new`] with the endpoint injected.
+    ///
+    /// `pub` rather than `#[cfg(test)]`: `tests/unit_classifier.rs` is a
+    /// separate crate and cannot see a test-only constructor, and the property
+    /// it checks — advertised policy == written policy, on a cache miss and on
+    /// a cache hit — needs a real request/response round trip.
+    pub fn with_api_url(
+        api_key: String,
+        labeler_id: String,
+        labeler_version_id: Option<String>,
+        api_url: String,
     ) -> Result<Self> {
         if api_key.is_empty() {
             anyhow::bail!("ZENTROPI_API_KEY is empty");
@@ -95,11 +132,18 @@ impl ZentropiClient {
             .build()
             .context("Failed to build reqwest client for Zentropi")?;
 
+        let policy_version: &'static str = match labeler_version_id.as_deref() {
+            Some(v) => Box::leak(v.to_string().into_boxed_str()),
+            None => ZENTROPI_DEFAULT_POLICY,
+        };
+
         Ok(Self {
             client,
             api_key,
             labeler_id,
             labeler_version_id,
+            api_url,
+            policy_version,
         })
     }
 
@@ -155,7 +199,7 @@ impl ZentropiClient {
     async fn send_once(&self, request: &ZentropiLabelerRequest) -> Result<ZentropiResponse> {
         let response = self
             .client
-            .post(ZENTROPI_API_URL)
+            .post(&self.api_url)
             .bearer_auth(&self.api_key)
             .json(request)
             .send()
@@ -376,13 +420,13 @@ impl ToxicityClassifier for ZentropiClient {
             confidence: resp.confidence as f32,
             latency_ms,
             model_id: self.model_id().to_string(),
-            // Prefer the concrete hosted labeler version (ZENTROPI_LABELER_VERSION_ID)
-            // so audit/classifier records identify the exact policy that produced
-            // the verdict; fall back to the static banner only when unset.
-            policy_version: self
-                .labeler_version_id
-                .clone()
-                .unwrap_or_else(|| self.policy_version().to_string()),
+            // ONE identity on every path (V3-01): what this classifier
+            // advertises is exactly what it writes. It used to prefer
+            // `labeler_version_id` here while `policy_version()` returned a
+            // static banner, so a configured deployment wrote rows that
+            // finalize's evidence check — which compares against the
+            // advertised value — would have rejected.
+            policy_version: self.policy_version().to_string(),
         };
         crate::observability::classifier_metrics::record_request(
             self.name(),
@@ -400,11 +444,9 @@ impl ToxicityClassifier for ZentropiClient {
         "cope-a-9b" // bumped to cope-b in Chunk 6 if hosted CoPE-B lands
     }
     fn policy_version(&self) -> &'static str {
-        // The hosted labeler version is identified by ZENTROPI_LABELER_VERSION_ID
-        // at construction; this static accessor is a placeholder until the
-        // version ID is plumbed through (deferred to Chunk 6 alongside hosted
-        // CoPE-B research).
-        "zentropi-labeler"
+        // Resolved at construction from ZENTROPI_LABELER_VERSION_ID, and the
+        // same string `classify` stamps on every verdict (V3-01).
+        self.policy_version
     }
     fn threshold(&self) -> f32 {
         ZENTROPI_THRESHOLD

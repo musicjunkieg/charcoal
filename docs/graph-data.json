@@ -10119,6 +10119,28 @@
       "created_at": "2026-09-15T01:32:23.597602-07:00",
       "updated_at": "2026-09-15T01:32:23.597602-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
+    },
+    {
+      "id": 930,
+      "change_id": "32308bf8-7236-485b-a40c-8caf5e020185",
+      "node_type": "outcome",
+      "title": "scan_setup.rs split committed bf2a553 under decision 929 (option A): pure move of ScanModels + loader, ScanScorers, build_scan_scorers, record_scan_cache_stats, embed_protected_posts, pile_on_dids, fingerprint_is_stale, fingerprint_needs_rebuild_for_format, RebuildReason, rebuild_decision and fingerprint_staleness_tests out of scan_job.rs (3555 -> 3155 lines). ScanModels moved too, so scan_setup is a leaf with no upward reference; explicit pub(crate) re-exports left as a bridge. Web suite 1070 passed / 0 failed / 0 SKIP — IDENTICAL to the pre-move count, which is the evidence it was a pure move; clippy x3 + fmt clean; pre-commit gates passed. The split subagent stalled twice on its own test monitor and was stopped; the controller ran the gates and committed.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T02:39:31.018037-07:00",
+      "updated_at": "2026-09-15T02:39:31.018037-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"bf2a553\",\"confidence\":90}"
+    },
+    {
+      "id": 931,
+      "change_id": "340fc28d-bb86-409a-a20b-109e488e440a",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 9: run_refresh — the refresh runner. RefreshOutcome{Completed,CompletedWithSkips,NothingDue,Deferred,Resumable}, refresh_plan/to_candidate, RunIdentity + RUN_KIND_KEY/RUN_GENERATION_KEY ownership markers, PhasedScanError::OwnedByOtherKind, verdict producer/policy compatibility check, plus deferred Task 5 manifest rows 5-7 (CarriedCompletion + encode/parse/from_drain + store/delete/load, OwnRun, drain_then_run, EmptyDeps/FailOnce/SkipCounter/test_support.rs and their 7 tests) and the Task 6 RESTORE LIST (knob default back to Some(24h) + its test assertions, real dispatch replacing run_claim's Refresh guard and refresh_runner_missing, N4 assertion through run_claim against a refresh that actually runs, same claim fence on the refresh completion path)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T02:39:38.041083-07:00",
+      "updated_at": "2026-09-15T02:39:38.041083-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"bf2a553\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -20835,6 +20857,28 @@
       "weight": 1.0,
       "rationale": "Option weighed",
       "created_at": "2026-09-15T01:32:34.286632-07:00"
+    },
+    {
+      "id": 985,
+      "from_node_id": 929,
+      "to_node_id": 930,
+      "from_change_id": "20924196-fc8a-4e58-953a-1162cdd4af03",
+      "to_change_id": "32308bf8-7236-485b-a40c-8caf5e020185",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision A executed",
+      "created_at": "2026-09-15T02:39:31.025161-07:00"
+    },
+    {
+      "id": 986,
+      "from_node_id": 877,
+      "to_node_id": 931,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "340fc28d-bb86-409a-a20b-109e488e440a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 9 refresh runner",
+      "created_at": "2026-09-15T02:39:38.048062-07:00"
     }
   ],
   "documents": [

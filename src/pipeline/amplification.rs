@@ -30,7 +30,10 @@ use crate::scoring::language::{assess_language, Assessability};
 use crate::observability::cache_stats::{record_cache_stats, CacheStats};
 use crate::pipeline::scan_phases::feed_cache::CachedPostFetcher;
 use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
-use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
+use crate::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
+use crate::pipeline::scan_phases::{
+    run_phased_scan, CandidateInput, PhasedScanDeps, RunIdentity, ScanSummary,
+};
 use crate::scoring::nli::NliScorer;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -375,7 +378,8 @@ pub async fn run(
 
             // A full scan degrades here on purpose (unchanged behaviour): the
             // account still scores on the follower path. The refresh job
-            // (web::refresh) does NOT — see R05 and `direct_pairs_for`.
+            // (`web::refresh_scan`, via `RefreshContextSource::direct_pairs`)
+            // does NOT — see R05 and `direct_pairs_for`.
             let pairs = match direct_pairs_for(db, user_did, did).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -533,7 +537,12 @@ pub async fn run(
         // on every `build_profile`, so no accounts were ever scored. Preserve
         // that by skipping the phased scan entirely.
         None => (0, false),
-        Some(_) if candidates.is_empty() => (0, false),
+        // An empty candidate list is NOT a reason to skip the pipeline (V4-02).
+        // A fresh start with no candidates is a no-op gather → empty burst →
+        // empty finalize → `Done`, which costs almost nothing; a resumable
+        // marker is resumed (own kind) or surfaces `OwnedByOtherKind` so the
+        // caller can drain it. Returning early here is how staged work used to
+        // get stranded behind a scan that found nothing new to score.
         Some(scorer) => {
             // Record how many accounts are queued for scoring so GET
             // /api/status can show a denominator while the phased scan runs.
@@ -542,43 +551,103 @@ pub async fn run(
             db.set_scan_state(user_did, "candidates_total", &candidates.len().to_string())
                 .await?;
 
-            let source = AtpPostFetcher { client };
-            let feed_stats = Arc::new(CacheStats::default());
-            let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
-            let classifier = scorer.classifier();
-
-            let deps = PhasedScanDeps {
-                fetcher: &fetcher,
-                scorer: scorer as &dyn ToxicityScorer,
-                clean_pass: scorer as &dyn CleanPassScorer,
-                classifier: &classifier,
+            let summary = run_candidates(
+                client,
+                scorer,
+                db,
+                user_did,
+                &candidates,
                 protected_fingerprint,
                 weights,
                 embedder,
                 protected_embedding,
                 protected_topic_centroids,
-                // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
-                // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
-                // the NLI scorer and protected-post embeddings are threaded through
-                // for the follower path.
                 nli_scorer,
                 protected_posts_with_embeddings,
                 data_dir,
                 median_engagement,
-                gather_concurrency: concurrency,
-                burst_concurrency: burst::burst_concurrency(),
-                burst_batch: burst::burst_batch(),
-            };
-
-            let summary = run_phased_scan(db, user_did, &candidates, &deps).await?;
-            if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
-                warn!(error = %e, "could not record feed cache stats");
-            }
+                concurrency,
+                RunIdentity::full(),
+            )
+            .await?;
             (summary.accounts_scored, summary.degraded)
         }
     };
 
     Ok((events.len(), accounts_scored, degraded))
+}
+
+/// Build the full scan's `PhasedScanDeps` and run one phased pass over
+/// `candidates` under `identity`.
+///
+/// Extracted from [`run`] because a full scan has two reasons to enter the
+/// pipeline: its own gather (`RunIdentity::full()`) and the **drain** of a
+/// refresh's leftover staging (`RunIdentity::refresh()`, with the refresh's
+/// re-derived candidates) that `web::scan_job::drain_then_run` performs before
+/// the full scan may gather. Both must use the same models, the same evidence
+/// contract and the same concurrency, so they share one construction site
+/// rather than two that can drift.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_candidates(
+    client: &PublicAtpClient,
+    scorer: &TwoStageToxicityScorer,
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    candidates: &[CandidateInput],
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
+    protected_topic_centroids: Option<&[Vec<f64>]>,
+    nli_scorer: Option<&NliScorer>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    data_dir: Option<&std::path::Path>,
+    median_engagement: f64,
+    concurrency: usize,
+    identity: RunIdentity,
+) -> Result<ScanSummary> {
+    let source = AtpPostFetcher { client };
+    let feed_stats = Arc::new(CacheStats::default());
+    let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
+    let classifier = scorer.classifier();
+
+    let deps = PhasedScanDeps {
+        fetcher: &fetcher,
+        scorer: scorer as &dyn ToxicityScorer,
+        clean_pass: scorer as &dyn CleanPassScorer,
+        classifier: &classifier,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        protected_topic_centroids,
+        // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
+        // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
+        // the NLI scorer and protected-post embeddings are threaded through
+        // for the follower path.
+        nli_scorer,
+        protected_posts_with_embeddings,
+        data_dir,
+        median_engagement,
+        gather_concurrency: concurrency,
+        burst_concurrency: burst::burst_concurrency(),
+        burst_batch: burst::burst_batch(),
+        // Only this binary's own producers count as evidence (R03, V2-01).
+        evidence: EvidenceContract {
+            onnx_model_id: crate::toxicity::onnx::ONNX_MODEL_ID,
+            classifier: ClassifierIdentity {
+                model_id: classifier.model_id(),
+                policy_version: classifier.policy_version(),
+            },
+        },
+        skip_counter: None,
+    };
+
+    let summary = run_phased_scan(db, user_did, candidates, &deps, identity).await?;
+    if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
+        warn!(error = %e, "could not record feed cache stats");
+    }
+    Ok(summary)
 }
 
 #[cfg(test)]
