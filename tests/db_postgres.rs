@@ -5419,3 +5419,138 @@ async fn test_pg_a_refresh_completion_records_no_duration_sample() {
     db.delete_user_data(U).await.unwrap();
     reset_scan_queue_fixtures(&url).await;
 }
+
+/// #344 Task 7 Postgres twin of `unit_refresh_candidates`'s main test. Unlike
+/// SQLite, `valid_until` is `NOT NULL` here (R11), so there is no
+/// NULL/malformed-expiry case to represent — that half of the eligibility
+/// rule is SQLite-only and already covered there. This test instead pins
+/// the shared half of the predicate (score floor, expiry-vs-horizon,
+/// old-generation) on the backend that actually runs in production.
+#[tokio::test]
+async fn test_pg_list_refresh_candidates_selects_high_and_elevated_expiring_or_old_generation() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // A dedicated user_did, NOT the shared TEST_USER, for the same reason as
+    // test_pg_get_fresh_scored_dids_matches_is_score_stale: this test asserts
+    // the EXACT ordered row set for the owner, which would be flaky if other
+    // tests concurrently wrote rows under it.
+    const OWNER: &str = "did:plc:pgrc_owner";
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind("did:plc:pgrc_otheruser")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // (did, generation, threat_score, valid_until_offset_sql, graph_distance)
+    let rows: [(&str, &str, f64, &str, Option<&str>); 6] = [
+        // Included:
+        (
+            "did:plc:pgrc_high-expiring",
+            rev,
+            60.0,
+            "NOW() + make_interval(days => 1)",
+            Some("Stranger"),
+        ),
+        (
+            "did:plc:pgrc_high-expired",
+            rev,
+            40.0,
+            "NOW() - make_interval(days => 3)",
+            Some("Follows you"),
+        ),
+        (
+            "did:plc:pgrc_elevated-legacy",
+            "legacy",
+            20.0,
+            "NOW() + make_interval(days => 10)",
+            None,
+        ),
+        (
+            "did:plc:pgrc_elevated-floor",
+            rev,
+            15.0,
+            "NOW() + make_interval(days => 1)",
+            None,
+        ),
+        // Excluded:
+        (
+            "did:plc:pgrc_high-fresh",
+            rev,
+            50.0,
+            "NOW() + make_interval(days => 10)",
+            None,
+        ),
+        (
+            "did:plc:pgrc_watch-legacy",
+            "legacy",
+            14.99,
+            "NOW() + make_interval(days => 1)",
+            None,
+        ),
+    ];
+    for (did, generation, score, valid_until_sql, graph) in rows {
+        sqlx_core::query::query(&format!(
+            "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until, graph_distance)
+             VALUES ($1, $2, $3, $4, 'x', $5, {valid_until_sql}, $6)"
+        ))
+        .bind(OWNER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(score)
+        .bind(generation)
+        .bind(graph)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // A different user's High row must never leak into OWNER's candidates.
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until)
+         VALUES ($1, 'did:plc:pgrc_high-other', 'high-other.handle', 60.0, 'x', $2, NOW() + make_interval(days => 1))",
+    )
+    .bind("did:plc:pgrc_otheruser")
+    .bind(rev)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let candidates = db.list_refresh_candidates(OWNER, 2).await.unwrap();
+    let dids: Vec<&str> = candidates.iter().map(|c| c.did.as_str()).collect();
+    assert_eq!(
+        dids,
+        [
+            "did:plc:pgrc_high-expiring",
+            "did:plc:pgrc_high-expired",
+            "did:plc:pgrc_elevated-legacy",
+            "did:plc:pgrc_elevated-floor",
+        ],
+        "most dangerous first; Watch-tier and fresh High/Elevated rows are excluded"
+    );
+    assert_eq!(candidates[0].graph_distance.as_deref(), Some("Stranger"));
+    assert_eq!(candidates[1].graph_distance.as_deref(), Some("Follows you"));
+
+    // Cleanup.
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind("did:plc:pgrc_otheruser")
+        .execute(&pool)
+        .await
+        .unwrap();
+}

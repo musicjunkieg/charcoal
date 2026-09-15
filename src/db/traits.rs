@@ -17,6 +17,19 @@ use super::models::{
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
+/// One user's candidate for the nightly refresh job (#344 Task 7) — a
+/// High/Elevated account whose score is expiring, already expired, or
+/// stamped with a superseded `scoring_generation`. `graph_distance` rides
+/// along because the refresh runner needs it for the same reasons
+/// `get_ranked_threats` does (display, prioritization) without a second
+/// round-trip per candidate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshCandidate {
+    pub did: String,
+    pub handle: String,
+    pub graph_distance: Option<String>,
+}
+
 /// One account dropped from a scan, with the reason (#226).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanSkip {
@@ -598,6 +611,19 @@ pub trait Database: Send + Sync {
     /// from the clock — unlike `upsert_account_score`, which is the live
     /// scoring path and always stamps from now. Idempotent.
     async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()>;
+
+    /// The nightly refresh job's candidate source (#344 Task 7): rows are
+    /// eligible by score (`ELEVATED_MIN`), eligible when expiring within
+    /// `horizon_days`, already expired, NULL/malformed expiry (SQLite), or
+    /// stamped with an old `scoring_generation` — the complement of the
+    /// fresh predicate, not a copy of it. NULL-score rows never qualify
+    /// (the `>=` comparison is false against NULL). Most dangerous first:
+    /// `threat_score DESC, did`.
+    async fn list_refresh_candidates(
+        &self,
+        user_did: &str,
+        horizon_days: i64,
+    ) -> Result<Vec<RefreshCandidate>>;
 
     // --- Amplification events ---
 

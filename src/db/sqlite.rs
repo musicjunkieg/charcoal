@@ -20,7 +20,8 @@ use super::models::{
 use super::traits::{
     validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
     EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
-    ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    RefreshCandidate, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -187,6 +188,15 @@ impl Database for SqliteDatabase {
     async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()> {
         let conn = self.conn.lock().await;
         super::queries::import_score(&conn, user_did, row)
+    }
+
+    async fn list_refresh_candidates(
+        &self,
+        user_did: &str,
+        horizon_days: i64,
+    ) -> Result<Vec<RefreshCandidate>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_refresh_candidates(&conn, user_did, horizon_days)
     }
 
     async fn insert_amplification_event(

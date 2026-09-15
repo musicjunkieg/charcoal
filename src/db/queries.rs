@@ -19,8 +19,8 @@ use super::models::{
     UserRow,
 };
 use super::traits::{
-    ClassifierVerdictRow, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow, ScanClaim,
-    ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    ClassifierVerdictRow, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow,
+    RefreshCandidate, ScanClaim, ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
 };
 use crate::scoring::generation::scoring_revision;
 
@@ -650,6 +650,45 @@ pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Res
         ],
     )?;
     Ok(())
+}
+
+/// Public so the index test can EXPLAIN exactly this statement (R12).
+/// Params: ?1 user_did, ?2 ThreatTier::ELEVATED_MIN, ?3 "+N days", ?4 scoring_revision().
+/// COALESCE(…, 1): a NULL or malformed valid_until is expired, hence eligible
+/// — the mirror of FRESH_SQL's COALESCE(…, 0) (R11).
+pub const REFRESH_CANDIDATES_SQL: &str = "SELECT did, handle, graph_distance FROM account_scores
+     WHERE user_did = ?1
+       AND threat_score >= ?2
+       AND (scoring_generation != ?4
+            OR COALESCE(datetime(valid_until) <= datetime('now', ?3), 1))
+     ORDER BY threat_score DESC, did";
+
+/// The nightly refresh job's candidate source (#344 Task 7) — see
+/// `Database::list_refresh_candidates` for the eligibility rule.
+pub fn list_refresh_candidates(
+    conn: &Connection,
+    user_did: &str,
+    horizon_days: i64,
+) -> Result<Vec<RefreshCandidate>> {
+    let mut stmt = conn.prepare(REFRESH_CANDIDATES_SQL)?;
+    let rows = stmt
+        .query_map(
+            params![
+                user_did,
+                ThreatTier::ELEVATED_MIN,
+                format!("+{horizon_days} days"),
+                scoring_revision()
+            ],
+            |r| {
+                Ok(RefreshCandidate {
+                    did: r.get(0)?,
+                    handle: r.get(1)?,
+                    graph_distance: r.get(2)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 // --- Amplification events ---

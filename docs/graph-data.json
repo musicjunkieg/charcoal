@@ -9987,6 +9987,28 @@
       "created_at": "2026-09-14T14:28:50.510515-07:00",
       "updated_at": "2026-09-14T14:28:50.510515-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
+    },
+    {
+      "id": 918,
+      "change_id": "ae9dd380-ba0d-48f0-8ac8-7660bf898da1",
+      "node_type": "outcome",
+      "title": "Task 6 fix wave committed a58e310 (F1-F8): knob default disabled on this branch + run_claim Refresh guard (decision 917 A); new Database::scan_claim_is_current fences schedule_success/schedule_retry on both backends, failing closed; env read injected out of schedule_after_success (no #[serial] needed); knob-off no longer strands users; SQLite fence uses TransactionBehavior::Immediate; FullScanRun narrowed to pub(crate); parse_refresh_interval_with makes off/OFF case-insensitive and mutation-provable; quiesce_users_outside lock invariant documented. lib 338 x3 consecutive, 54 binaries, 0 SKIP; VERIFY_PG 821/0 (db_postgres 70); clippy x3 + fmt clean. Re-review requested.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T16:38:09.961064-07:00",
+      "updated_at": "2026-09-14T16:38:09.961064-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"a58e310\",\"confidence\":85}"
+    },
+    {
+      "id": 919,
+      "change_id": "533a66cd-f9da-424e-a7a5-aa783f0c3b48",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 7: list_refresh_candidates — RefreshCandidate rows from account_scores using the complementary expiry predicate (COALESCE(datetime(valid_until) <= datetime('now', ?h), 1) so malformed rows are eligible), High/Elevated only via ThreatTier::ELEVATED_MIN, score-ordered, REFRESH_HORIZON_DAYS window, with the index measured on both backends",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T16:40:21.593968-07:00",
+      "updated_at": "2026-09-14T16:40:21.593968-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"a58e310\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -20538,6 +20560,39 @@
       "weight": 1.0,
       "rationale": "Option weighed",
       "created_at": "2026-09-14T14:28:53.357029-07:00"
+    },
+    {
+      "id": 970,
+      "from_node_id": 917,
+      "to_node_id": 918,
+      "from_change_id": "202a4ee7-059e-481f-9831-76c62ec13271",
+      "to_change_id": "ae9dd380-ba0d-48f0-8ac8-7660bf898da1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision A implemented in the Task 6 fix wave",
+      "created_at": "2026-09-14T16:38:12.304512-07:00"
+    },
+    {
+      "id": 971,
+      "from_node_id": 913,
+      "to_node_id": 918,
+      "from_change_id": "3989b51d-56b3-458d-af1c-12d4391a9c98",
+      "to_change_id": "ae9dd380-ba0d-48f0-8ac8-7660bf898da1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fixes applied to Task 6",
+      "created_at": "2026-09-14T16:38:12.311200-07:00"
+    },
+    {
+      "id": 972,
+      "from_node_id": 877,
+      "to_node_id": 919,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "533a66cd-f9da-424e-a7a5-aa783f0c3b48",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 7 refresh candidates",
+      "created_at": "2026-09-14T16:40:25.135195-07:00"
     }
   ],
   "documents": [

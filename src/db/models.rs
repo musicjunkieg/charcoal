@@ -237,6 +237,12 @@ pub enum ThreatTier {
 }
 
 impl ThreatTier {
+    /// Floor of the Elevated tier (#344 Task 7). Named so the refresh
+    /// candidate query (`threat_score >= ELEVATED_MIN`) and `from_score`
+    /// cannot drift apart — the candidate set is defined as "High or
+    /// Elevated by score", which only holds if both read the same constant.
+    pub const ELEVATED_MIN: f64 = 15.0;
+
     /// Determine the tier from a threat score (0-100).
     ///
     /// Thresholds are tuned for the multiplicative scoring formula where
@@ -249,7 +255,7 @@ impl ThreatTier {
     pub fn from_score(score: f64) -> Self {
         match score {
             s if s >= 35.0 => ThreatTier::High,
-            s if s >= 15.0 => ThreatTier::Elevated,
+            s if s >= Self::ELEVATED_MIN => ThreatTier::Elevated,
             s if s >= 8.0 => ThreatTier::Watch,
             _ => ThreatTier::Low,
         }

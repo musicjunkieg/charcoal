@@ -21,7 +21,7 @@ pub mod traits;
 pub use cache_retention::CacheEviction;
 pub use traits::{
     ClassifierVerdictRow, Database, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow,
-    ScanKind,
+    RefreshCandidate, ScanKind,
 };
 
 use anyhow::Result;

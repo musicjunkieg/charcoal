@@ -24,7 +24,8 @@ use super::models::{
 use super::traits::{
     eta_seconds, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
     EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
-    ScanClaim, ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    RefreshCandidate, ScanClaim, ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    ScoreSnapshot,
 };
 use crate::db::models::ScoringConfidence;
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
@@ -992,6 +993,40 @@ impl Database for PgDatabase {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn list_refresh_candidates(
+        &self,
+        user_did: &str,
+        horizon_days: i64,
+    ) -> Result<Vec<RefreshCandidate>> {
+        // No COALESCE here (unlike SQLite's REFRESH_CANDIDATES_SQL): Postgres
+        // valid_until is NOT NULL after the v18 backfill, so the comparison
+        // is never SQL-unknown — the same reason count_expired/is_score_stale
+        // skip it on this backend.
+        let horizon_days = i32::try_from(horizon_days).context("horizon_days exceeds i32 range")?;
+        let rows = sqlx_core::query::query(
+            "SELECT did, handle, graph_distance FROM account_scores
+             WHERE user_did = $1
+               AND threat_score >= $2
+               AND (scoring_generation <> $4
+                    OR valid_until <= NOW() + make_interval(days => $3))
+             ORDER BY threat_score DESC, did",
+        )
+        .bind(user_did)
+        .bind(ThreatTier::ELEVATED_MIN)
+        .bind(horizon_days)
+        .bind(scoring_revision())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| RefreshCandidate {
+                did: r.get(0),
+                handle: r.get(1),
+                graph_distance: r.get(2),
+            })
+            .collect())
     }
 
     async fn insert_amplification_event(
