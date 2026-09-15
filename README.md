@@ -163,8 +163,8 @@ toxicity + topic overlap score (0-100):
 |------|-------|---------|
 | **Low** | 0-7 | No significant threat signal |
 | **Watch** | 8-14 | Some overlap or toxicity — worth monitoring |
-| **Elevated** | 15-24 | Notable combination of hostility and topic proximity |
-| **High** | 25+ | Strong threat signal — both toxic and topically close |
+| **Elevated** | 15-34 | Notable combination of hostility and topic proximity |
+| **High** | 35+ | Strong threat signal — both toxic and topically close |
 
 ## Score expiry and refresh
 

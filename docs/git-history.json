@@ -1,5 +1,13 @@
 [
   {
+    "hash": "42774ad0b21af9f131b1d730729e6e4fbcce5f36",
+    "short_hash": "42774ad",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T14:32:03-07:00",
+    "message": "docs(344): say what has_own_resumable_staging actually answers\n\nThe doc claimed to mirror the ownership read run_phased_scan performs on\nentry, minus its mutating fallbacks. It does not, in two arms, and both\nwere undocumented:\n\n  - Resumable staging with a current generation but no recorded kind is\n    attributed to Full by run_phased_scan, which resumes and bursts it.\n    This helper returns false for a Full identity, because the kind is\n    absent rather than Full.\n  - An unrecognised phase marker makes run_phased_scan bail; this helper\n    reads it as \"nothing resumable\".\n\nBoth divergences are conservative, and harmless for the only caller: a\nrefresh reaches OwnedByOtherKind or the bail before any classifier call,\nso a skipped probe never precedes classification. But the promise was\nwrong, and a future caller passing RunIdentity::full() would have\ninherited it — skipping a probe and then classifying the staging it had\njust disclaimed. Narrowing the doc is the honest fix; widening the\nfunction would add an arm no caller exercises.\n\nThe test is renamed to match: its assertions were always on the helper\nalone, never on agreement with run_phased_scan, and the states where the\ntwo disagree are exactly the ones a test claiming agreement would have\nhad to cover.\n\nAlso: the dashboard tooltip now names both halves of the expired\npopulation, matching the CLI wording, and prettier formatting is\nrestored in the dashboard-state test.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 11
+  },
+  {
     "hash": "f4489493b04ca0434810b88f06f32cc6003d085c",
     "short_hash": "f448949",
     "author": "Bryan Guffey",

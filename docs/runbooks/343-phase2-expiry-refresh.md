@@ -130,17 +130,26 @@ You need these numbers to check §2 and §3. Run before deploying:
 ```sql
 SELECT user_did,
        COUNT(*)                                            AS rows_total,
-       COUNT(*) FILTER (WHERE threat_score >= 25)          AS high,
-       COUNT(*) FILTER (WHERE threat_score >= 15
-                          AND threat_score <  25)          AS elevated
+       COUNT(*) FILTER (WHERE threat_score >= 15)          AS candidates,
+       COUNT(*) FILTER (WHERE threat_tier = 'High')        AS tier_high,
+       COUNT(*) FILTER (WHERE threat_tier = 'Elevated')    AS tier_elevated
   FROM account_scores
  GROUP BY user_did
  ORDER BY rows_total DESC;
 ```
 
-Write down `rows_total` and `high + elevated` per user. `high + elevated` is
-the number the refresh should re-score for that user; `rows_total` is the
-number that should appear as `expired` immediately after the deploy.
+Write down `rows_total` and `candidates` per user.
+
+- `rows_total` is the number that should appear as `expired` immediately after
+  the deploy (§2).
+- `candidates` is the number the refresh should re-score for that user (§3).
+  Note the predicate: the refresh selects by **score** —
+  `threat_score >= ThreatTier::ELEVATED_MIN`, which is `15.0`
+  (`src/db/models.rs:244`) — not by the stored tier string, deliberately, so
+  the candidate set cannot drift from the tier definition. The two `tier_*`
+  columns are there only so you can reconcile against `GET /api/status`, which
+  *does* bucket by the stored string. `High` starts at **35**, not 25; the
+  "Threat tiers" table in the README said 25 for a long time and was wrong.
 
 ### 0.4 Know that the migration blocks boot
 
@@ -223,6 +232,7 @@ SELECT q.user_did, q.status FROM scan_queue q
                     WHERE s.user_did = q.user_did
                       AND s.key = 'last_full_scan_finished_at');
 ```
+
 - **The queue ETA is null until one full scan completes post-deploy.** The ETA
   median is computed from per-user duration samples written alongside the
   cooldown marker, and no post-deploy scan has written one yet. It also now
@@ -364,6 +374,11 @@ wrote, and returns `CostCapped`:
 railway variables -s charcoal-web -e staging --set CHARCOAL_SCAN_COST_CEILING_CENTS=1
 ```
 
+`--set` without `--skip-deploys` redeploys the service, which is what you want
+here — the process reads the ceiling from its environment, so it only takes
+effect on a restart. **Wait for that deploy to finish before the next step**, or
+the tick you force will be served by the old process with the old ceiling.
+
 Force a tick for one user:
 
 ```sql
@@ -432,6 +447,11 @@ UPDATE users SET next_refresh_at = NOW() WHERE did = '<DID>';
 `refresh_feed_cache_hits >= refresh_feed_cache_misses` for those candidates.
 
 **(b) Cold — a miss is possible and happens.**
+
+**Staging only.** This empties the shared feed cache for *every* user, so the
+next scans pay full fetch cost. It is safe (the cache is an optimisation and
+rebuilds itself) but it is not something to do in production to satisfy a
+runbook step.
 
 ```sql
 DELETE FROM account_feed_snapshots;
