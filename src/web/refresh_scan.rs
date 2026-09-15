@@ -43,7 +43,9 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::relationships::GraphDistance;
 use crate::config::Config;
 use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind};
-use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity, ScanSummary};
+use crate::pipeline::scan_phases::{
+    has_own_resumable_staging, CandidateInput, PhasedScanError, RunIdentity, ScanSummary,
+};
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::web::scan_job::{finish_scan, set_progress, ScanManager, ScanReport, WebScanPhase};
@@ -600,6 +602,20 @@ pub fn classify_refresh(candidates: usize, summary: &ScanSummary) -> RefreshOutc
     }
 }
 
+/// Pure: should this refresh pay the classifier-identity probe round trip?
+///
+/// It must when there is anything fresh to gather (`candidates > 0`) OR when
+/// a prior attempt left this refresh's OWN staging behind at a resumable
+/// phase — that staging still bursts through the classifier below even
+/// though nothing new was gathered this tick. A genuinely empty tick
+/// (`NothingDue`: no candidates, no owned staging) skips the probe entirely,
+/// since nothing downstream will call the classifier — a `RunPod` `warm_up`
+/// round trip is otherwise paid every night for a run that scores nothing
+/// (#344 F6).
+pub(crate) fn refresh_should_probe(candidates: usize, has_own_resumable_staging: bool) -> bool {
+    candidates > 0 || has_own_resumable_staging
+}
+
 /// The refresh's candidate list, re-derived from stored state alone.
 ///
 /// Used by the full scan's drain (`scan_job::drain_then_run`): the refresh
@@ -732,12 +748,25 @@ pub(crate) async fn run_refresh(
             models: Arc::clone(&models),
         });
         let pipeline = move |plan: RefreshPlan| async move {
-            // #344 F5: the first async point a refresh has. A mismatched
-            // Stage-2 policy fails the run (retry in an hour, no score
-            // written) instead of re-gathering every due account and then
-            // skipping it.
-            crate::web::scan_setup::probe_classifier_identity(&scorers).await?;
             let candidates = plan.candidates.len();
+            // #344 F5/F6: probe the Stage-2 classifier identity before this
+            // refresh gathers anything — but only when something will
+            // actually call it. A `NothingDue` tick (no fresh candidates AND
+            // nothing of this refresh's own left staged) makes zero
+            // classifier calls, so paying a RunPod `warm_up` round trip for
+            // it every night is pure waste; a zero-candidate tick that still
+            // owns resumable staging (a prior attempt cut off mid-burst)
+            // bursts below regardless, so it still needs the probe.
+            // `has_own_resumable_staging` is the same ownership read
+            // `run_phased_scan` performs on entry, read here without its
+            // mutating fallbacks.
+            let has_staging = has_own_resumable_staging(&db, &uid, RunIdentity::refresh()).await?;
+            if refresh_should_probe(candidates, has_staging) {
+                // A mismatched Stage-2 policy fails the run (retry in an
+                // hour, no score written) instead of re-gathering every due
+                // account and then skipping it.
+                crate::web::scan_setup::probe_classifier_identity(&scorers).await?;
+            }
             db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
                 .await?;
             // Minor 5: `candidates_total` is the denominator GET /api/status
@@ -866,6 +895,27 @@ mod tests {
         let c = to_candidate(&row, vec![], &HashSet::new());
         assert_eq!(c.direct_pairs, None);
         assert_eq!(c.graph_distance, None);
+    }
+
+    /// #344 F6: a nothing-due tick (no candidates, nothing of its own left
+    /// staged) is the ONLY case that skips the probe — every other
+    /// combination pays it, including the zero-candidate-but-own-staging
+    /// case that still bursts below.
+    #[test]
+    fn probe_is_skipped_only_when_nothing_is_due() {
+        assert!(
+            !refresh_should_probe(0, false),
+            "nothing due: no candidates, no owned staging — no classifier call is coming"
+        );
+        assert!(
+            refresh_should_probe(1, false),
+            "candidates present: the burst below will call the classifier"
+        );
+        assert!(
+            refresh_should_probe(0, true),
+            "own leftover staging still bursts even with zero fresh candidates"
+        );
+        assert!(refresh_should_probe(3, true));
     }
 
     #[test]

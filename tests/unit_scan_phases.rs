@@ -3976,8 +3976,8 @@ mod ownership_tests {
     use charcoal::pipeline::scan_phases::staging::QueueRow;
     use charcoal::pipeline::scan_phases::test_support::{EmptyDeps, FailOnce};
     use charcoal::pipeline::scan_phases::{
-        run_phased_scan, PhasedScanError, RunIdentity, ScanSummary, RUN_GENERATION_KEY,
-        RUN_KIND_KEY,
+        has_own_resumable_staging, run_phased_scan, PhasedScanError, RunIdentity, ScanSummary,
+        RUN_GENERATION_KEY, RUN_KIND_KEY,
     };
     use charcoal::scoring::generation::scoring_revision;
     use charcoal::toxicity::classifier::StubClassifier;
@@ -4277,6 +4277,67 @@ mod ownership_tests {
                 summary.skipped
             ),
             ScanCompletion::Complete
+        );
+    }
+
+    /// #344 F6: `has_own_resumable_staging` is the read a refresh consults
+    /// before deciding whether to pay the classifier-identity probe on a
+    /// zero-candidate tick — it must agree with what `run_phased_scan` would
+    /// actually do with that staging (resume it, refuse it, or find nothing).
+    #[tokio::test]
+    async fn has_own_resumable_staging_agrees_with_run_phased_scan() {
+        let db = open_db().await;
+
+        // No marker at all — a fresh-start user has nothing to resume.
+        assert!(
+            !has_own_resumable_staging(&db, OWN_USER, RunIdentity::refresh())
+                .await
+                .unwrap()
+        );
+
+        // This refresh's own resumable staging, current generation: true, and
+        // matches `run_phased_scan` resuming it without error.
+        seed_staging(&db, ScanKind::Refresh, "burst").await;
+        assert!(
+            has_own_resumable_staging(&db, OWN_USER, RunIdentity::refresh())
+                .await
+                .unwrap()
+        );
+        // A full scan's identity must NOT see this as its own.
+        assert!(
+            !has_own_resumable_staging(&db, OWN_USER, RunIdentity::full())
+                .await
+                .unwrap()
+        );
+
+        // Owned by the other kind: `run_phased_scan` refuses it for a refresh
+        // (OwnedByOtherKind), and this read must agree it isn't the refresh's.
+        seed_staging(&db, ScanKind::Full, "finalize").await;
+        assert!(
+            !has_own_resumable_staging(&db, OWN_USER, RunIdentity::refresh())
+                .await
+                .unwrap()
+        );
+
+        // Own kind, but a stale generation: `run_phased_scan` discards this
+        // rather than resuming it, so it does not count as "own" either.
+        seed_staging(&db, ScanKind::Refresh, "burst").await;
+        db.set_scan_state(OWN_USER, RUN_GENERATION_KEY, "1999-01-01")
+            .await
+            .unwrap();
+        assert!(
+            !has_own_resumable_staging(&db, OWN_USER, RunIdentity::refresh())
+                .await
+                .unwrap()
+        );
+
+        // Own kind and generation, but a non-resumable phase (gather/done):
+        // nothing is staged to resume.
+        seed_staging(&db, ScanKind::Refresh, "gather").await;
+        assert!(
+            !has_own_resumable_staging(&db, OWN_USER, RunIdentity::refresh())
+                .await
+                .unwrap()
         );
     }
 }

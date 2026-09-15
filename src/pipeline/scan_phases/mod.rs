@@ -80,6 +80,36 @@ impl RunIdentity {
     }
 }
 
+/// Read-only: does `user_did` have staging of THIS identity's own kind and
+/// generation sitting at a resumable phase (burst/finalize)?
+///
+/// Mirrors the ownership read `run_phased_scan` performs on entry, without
+/// any of its mutating fallbacks (discarding another generation's staging,
+/// erroring on another kind's) — a caller that only needs to know "would
+/// calling `run_phased_scan` now touch anything of mine" uses this instead of
+/// duplicating that read by hand. Added for #344 F6: a refresh with zero
+/// fresh candidates still has to resume and burst its OWN leftover staging,
+/// so the caller needs this answer before deciding whether the classifier
+/// identity probe is worth paying for.
+pub async fn has_own_resumable_staging(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    identity: RunIdentity,
+) -> Result<bool> {
+    let raw_phase = db.get_scan_state(user_did, "scan_phase").await?;
+    let phase = raw_phase.as_deref().and_then(ScanPhase::from_value);
+    if !matches!(phase, Some(ScanPhase::Burst) | Some(ScanPhase::Finalize)) {
+        return Ok(false);
+    }
+    let owner_kind = db
+        .get_scan_state(user_did, RUN_KIND_KEY)
+        .await?
+        .and_then(|k| ScanKind::from_str(&k));
+    let owner_generation = db.get_scan_state(user_did, RUN_GENERATION_KEY).await?;
+    Ok(owner_kind == Some(identity.kind)
+        && owner_generation.as_deref() == Some(identity.generation))
+}
+
 /// Typed failures the callers of [`run_phased_scan`] match on.
 ///
 /// A typed error rather than a bare string because both callers *act* on it:
