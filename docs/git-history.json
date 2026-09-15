@@ -1,5 +1,13 @@
 [
   {
+    "hash": "a6c00fa70785b9f35f44fdbdc9596d4adf3b550b",
+    "short_hash": "a6c00fa",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T01:25:11-07:00",
+    "message": "refactor(344): extract scan setup helpers; context loaders return errors; rebuild decision checks the embedding model and never falls back to incompatible vectors\n\nTask 8 of the #343 Phase 2 plan. The nightly refresh (Task 9) needs the same\nscorer bundle, protected-post embeddings, pile-on set and direct-pair loading\nthat run_scan and amplification::run build inline, so they move into shared\nhelpers — and the two that used to swallow a failure into an absence now\nreturn Result (R05):\n\n- pipeline::amplification::direct_pairs_for: Ok(empty) means \"the lookup\n  succeeded and there are no pairs\"; Err means \"the lookup failed\". The full\n  scan still degrades at its call site (unchanged behaviour — the account\n  scores on the follower path); the refresh will not.\n- scan_job::embed_protected_posts: replaces fetch_recent_posts().unwrap_or_default()\n  with a context-carrying Result. Behaviour-preserving for scoring (None and\n  Some(vec![]) both mean \"no inferred pairs\") and it gains a log line.\n- scan_job::{ScanScorers, build_scan_scorers, record_scan_cache_stats,\n  pile_on_dids}: bodies moved verbatim out of run_scan_inner.\n\nV2-04: the fingerprint rebuild decision becomes the pure, testable\nrebuild_decision() returning RebuildReason, which now also fires when the\nstored vectors carry a different embedding_model_id — or none at all. Reasons\nare ordered by severity because RebuildReason::fallback_allowed() is read off\nthe returned one: only Stale and Format may fall back to the stored\nfingerprint when the rebuild fails. Absent, Unreadable and IncompatibleModel\nabort the scan before any account is scored, since a score against\nincompatible vectors would be stamped current and hide the real state until\nit expired. The abort lands in run_scan_with as Err, so the obligation is\nkept and the hourly retry is written (V5-02).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 5
+  },
+  {
     "hash": "3a51da5a1153182d91062b28bfd1ef8b8fcabf57",
     "short_hash": "3a51da5",
     "author": "Bryan Guffey",

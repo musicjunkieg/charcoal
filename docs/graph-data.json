@@ -10064,6 +10064,61 @@
       "created_at": "2026-09-14T23:30:59.853280-07:00",
       "updated_at": "2026-09-14T23:30:59.853280-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"3a51da5\",\"confidence\":95}"
+    },
+    {
+      "id": 925,
+      "change_id": "090f9bf5-5ac5-4db7-8a0a-165b57dfa770",
+      "node_type": "outcome",
+      "title": "Task 8 committed a6c00fa: scan setup helpers extracted, context loaders return Result (errors are not absence, R05), direct_pairs_for -> Result, and a new IncompatibleModel rebuild reason so a fingerprint whose embedding_model_id differs from EMBEDDING_MODEL_ID is rebuilt rather than reused. VERIFY_WEB 59 binaries / 1070 passed / 0 failed / 0 SKIP; VERIFY_PG 60 binaries / 831 passed / 0 failed; clippy x3 clean. RED was compile errors for both new surfaces plus a mutation proving Ok(empty) in place of Err fails a_read_failure_is_an_error_not_an_empty_list. Implementer flagged the brief's unit_direct_pairs order assertion as flaky (detected_at is whole-second, ordering is detected_at DESC/id DESC) and made it order-insensitive without changing production behaviour. Recommends extracting ~470 lines to src/web/scan_setup.rs BEFORE Task 9. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T01:28:13.103553-07:00",
+      "updated_at": "2026-09-15T01:28:13.103553-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"a6c00fa\",\"confidence\":85}"
+    },
+    {
+      "id": 926,
+      "change_id": "611ae03a-3a5f-4101-bab0-2ab981799908",
+      "node_type": "option",
+      "title": "scan_job.rs split (Task 8 + Task 6 reviewers both flagged 3555 lines): A — do the pure move to src/web/scan_setup.rs NOW as its own zero-logic commit before Task 9, moving ScanModels + its loader too so the new module is a genuine leaf; Task 9 imports scan_setup directly rather than through a scan_job re-export bridge",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T01:32:23.567794-07:00",
+      "updated_at": "2026-09-15T01:32:23.567794-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
+    },
+    {
+      "id": 927,
+      "change_id": "f5a6fc3a-180c-470d-a7fa-dde3b5a7331f",
+      "node_type": "option",
+      "title": "scan_job.rs split: B — defer to a follow-up branch after #344 merges, keeping this branch strictly to the rev-8 plan and not enlarging the PR surface",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T01:32:23.577849-07:00",
+      "updated_at": "2026-09-15T01:32:23.577849-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":55}"
+    },
+    {
+      "id": 928,
+      "change_id": "8e4d1934-cfc9-46bc-8d20-9123dde001b5",
+      "node_type": "option",
+      "title": "scan_job.rs split: C — fold the move into Task 9's commit",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T01:32:23.587548-07:00",
+      "updated_at": "2026-09-15T01:32:23.587548-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":10}"
+    },
+    {
+      "id": 929,
+      "change_id": "20924196-fc8a-4e58-953a-1162cdd4af03",
+      "node_type": "decision",
+      "title": "scan_job.rs split: choose A. Two independent reviewers (Task 6, Task 8) flagged the file, and Task 9 adds drain_then_run to it — reviewing the branch's largest remaining diff against a ~4000-line file is where real defects hide. A pure move is compiler-verified and reviews in minutes with git diff -M; C was rejected by the Task 8 reviewer as strictly worse (relocated lines hide real changes). B is defensible and keeps the PR to plan, but it leaves Task 9 to be reviewed against the un-split file and then churns those same lines afterwards. Cost accepted: one extra gate cycle. Conditions: ZERO logic changes, no visibility widening beyond what the move requires, ScanModels moved too (or the upward reference documented in the module doc), and Task 9 imports scan_setup directly.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T01:32:23.597602-07:00",
+      "updated_at": "2026-09-15T01:32:23.597602-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -20703,6 +20758,83 @@
       "weight": 1.0,
       "rationale": "Full web suite discharges the Task 7 approval contingency",
       "created_at": "2026-09-14T23:30:59.866998-07:00"
+    },
+    {
+      "id": 978,
+      "from_node_id": 923,
+      "to_node_id": 925,
+      "from_change_id": "eba823f8-07ab-47c8-bd56-a0a0206735d5",
+      "to_change_id": "090f9bf5-5ac5-4db7-8a0a-165b57dfa770",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 implementation outcome",
+      "created_at": "2026-09-15T01:28:13.110917-07:00"
+    },
+    {
+      "id": 979,
+      "from_node_id": 925,
+      "to_node_id": 926,
+      "from_change_id": "090f9bf5-5ac5-4db7-8a0a-165b57dfa770",
+      "to_change_id": "611ae03a-3a5f-4101-bab0-2ab981799908",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Split options raised by the Task 8 review",
+      "created_at": "2026-09-15T01:32:34.254005-07:00"
+    },
+    {
+      "id": 980,
+      "from_node_id": 926,
+      "to_node_id": 929,
+      "from_change_id": "611ae03a-3a5f-4101-bab0-2ab981799908",
+      "to_change_id": "20924196-fc8a-4e58-953a-1162cdd4af03",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-15T01:32:34.260888-07:00"
+    },
+    {
+      "id": 981,
+      "from_node_id": 925,
+      "to_node_id": 927,
+      "from_change_id": "090f9bf5-5ac5-4db7-8a0a-165b57dfa770",
+      "to_change_id": "f5a6fc3a-180c-470d-a7fa-dde3b5a7331f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Split options raised by the Task 8 review",
+      "created_at": "2026-09-15T01:32:34.267490-07:00"
+    },
+    {
+      "id": 982,
+      "from_node_id": 927,
+      "to_node_id": 929,
+      "from_change_id": "f5a6fc3a-180c-470d-a7fa-dde3b5a7331f",
+      "to_change_id": "20924196-fc8a-4e58-953a-1162cdd4af03",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-15T01:32:34.273801-07:00"
+    },
+    {
+      "id": 983,
+      "from_node_id": 925,
+      "to_node_id": 928,
+      "from_change_id": "090f9bf5-5ac5-4db7-8a0a-165b57dfa770",
+      "to_change_id": "8e4d1934-cfc9-46bc-8d20-9123dde001b5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Split options raised by the Task 8 review",
+      "created_at": "2026-09-15T01:32:34.280068-07:00"
+    },
+    {
+      "id": 984,
+      "from_node_id": 928,
+      "to_node_id": 929,
+      "from_change_id": "8e4d1934-cfc9-46bc-8d20-9123dde001b5",
+      "to_change_id": "20924196-fc8a-4e58-953a-1162cdd4af03",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-15T01:32:34.286632-07:00"
     }
   ],
   "documents": [

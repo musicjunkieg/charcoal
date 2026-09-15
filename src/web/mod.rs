@@ -31,6 +31,7 @@ pub mod auth;
 pub mod handlers;
 pub mod refresh;
 pub mod scan_job;
+pub mod scan_setup;
 pub mod test_helpers;
 pub mod typeahead;
 
