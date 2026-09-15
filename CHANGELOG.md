@@ -7,6 +7,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- #344 — `charcoal migrate` copies every score row verbatim
+  (`export_scores` / `import_score`), including expired, legacy and
+  NotAssessed rows, with their original `scored_at`, revision stamp and
+  expiry — and never renews expiry. (It previously copied through the
+  ranked-threats query, which omits NULL-score rows and would now omit
+  hidden ones.) SQLite rows whose `valid_until` is NULL or unparseable
+  arrive in Postgres as `valid_until = scored_at` — expired the instant
+  they were scored, never renewed, never dropped. Corrupt evidence JSON
+  still reads as empty on export (#364).
+- #344 — freshness reads in the pipeline are hard errors; a refresh that
+  cannot load its required context (stored events, protected posts,
+  embeddings) fails and retries rather than scoring without it.
+- #344 — a user's full-scan request made while a refresh is running is
+  recorded durably and runs when the refresh finishes; upgrading a queued
+  refresh to a full scan keeps the user's queue position. The 24 h cooldown
+  anchors on the last *full* scan that was actually fulfilled
+  (`scan_state.last_full_scan_finished_at`, backfilled by migration v18) —
+  never on a queue row's `done` status — so an interrupted scan can be
+  re-run at once. The queue ETA median now samples fulfilled full attempts,
+  including those that completed with skips or unverified, rather than only
+  clean ones.
 - #343 Phase 0/1 measured on staging (2026-09-13, #346). One ONNX session
   already drives 13–15 cores through ort's intra-op threads, so a pool of
   four changed the gather wall by 0 % for +1.5 GB RSS and
@@ -25,6 +46,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   last time (#344), so runs must reset `account_scores` between them.
 
 ### Added
+- #344 / #343 Phase 2 — score expiry and the nightly refresh. Every
+  `account_scores` row carries `scoring_generation` (the build-time scoring
+  *revision*, `src/scoring/generation.rs`: the human `SCORING_GENERATION`
+  composed with the identity of every model this binary loads, so swapping
+  a model expires stored scores by itself) and `valid_until` (3/7/14 days
+  by scoring confidence — the tiers that existed since #135, finally
+  wired). Tier lists, counts and the pipeline's already-scored gates show
+  fresh rows only; expired and old-revision rows are kept, hidden, and
+  reported as `tier_counts.expired` on `GET /api/status`, on the dashboard
+  tier grid and in `charcoal status`. A refresh queue kind
+  (`CHARCOAL_REFRESH_INTERVAL_HOURS`, default 24, `0`/`off` disables, clamp
+  1–168) re-scores each user's High/Elevated rows that expire within two
+  days or predate the current revision, read from the table, on the
+  existing admitter tick — one bounded transaction per tick (25 users), so
+  a crash cannot lose a scheduled refresh. A revision bump makes every user
+  with scores due again (`users.refreshed_generation`). Staged scan work
+  records its owning run kind and revision: a refresh resumes its own
+  interrupted work, never a user's, and never publishes a current stamp
+  from another revision's inputs or another classifier policy's verdicts.
+  Fingerprints record their embedding model; a refresh whose fingerprint is
+  missing or incompatible asks for a full scan instead of rebuilding.
+  Schema v18. Deploy runbook:
+  `docs/runbooks/343-phase2-expiry-refresh.md`.
+- `CHARCOAL_COPE_B_POLICY_VERSION` — the Stage-2 CoPE-B endpoint's own
+  `POLICY_VERSION`, declared to Charcoal because the classifier runs outside
+  this binary. Every scan probes the endpoint before it gathers and refuses
+  to start on a mismatch, naming both values; a mismatch discovered mid-scan
+  logs one error per batch. Unset means `policy-unknown`, today's advertised
+  value. See README "Stage-2 classifier policy".
 - #343 Phase 0 + Phase 1 — measurement hooks and the shared cache. The
   gather now logs `cpu_cores_busy` once a minute and records the observed
   Bluesky `RateLimit-Limit` to `scan_state` once per scan, so the first

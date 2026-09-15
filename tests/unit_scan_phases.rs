@@ -4282,10 +4282,16 @@ mod ownership_tests {
 
     /// #344 F6: `has_own_resumable_staging` is the read a refresh consults
     /// before deciding whether to pay the classifier-identity probe on a
-    /// zero-candidate tick — it must agree with what `run_phased_scan` would
-    /// actually do with that staging (resume it, refuse it, or find nothing).
+    /// zero-candidate tick.
+    ///
+    /// These assertions are on the helper alone — they pin WHICH ownership
+    /// states it calls its own, not that `run_phased_scan` would agree. The
+    /// two documented divergences (half-written ownership under a `Full`
+    /// identity, and an unrecognised phase marker) are precisely the states
+    /// where it would not, so a test claiming agreement would be claiming
+    /// more than it checks.
     #[tokio::test]
-    async fn has_own_resumable_staging_agrees_with_run_phased_scan() {
+    async fn has_own_resumable_staging_claims_only_its_own_kind_and_generation() {
         let db = open_db().await;
 
         // No marker at all — a fresh-start user has nothing to resume.

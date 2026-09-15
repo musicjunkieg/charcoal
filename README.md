@@ -59,6 +59,9 @@ Optional settings (see `.env.example` for details):
   endpoint is serving (only read when `CHARCOAL_CLASSIFIER=runpod`). It must
   equal the value the endpoint reports on its verdicts, **verbatim**; the
   default is `policy-unknown`. See "Stage-2 classifier policy" below.
+- `CHARCOAL_REFRESH_INTERVAL_HOURS` — how often the background score refresh
+  runs (default `24`; `0` or `off` disables it; clamped to 1–168). See
+  "Score expiry and refresh" below.
 
 ### 3. Initialize
 
@@ -162,6 +165,73 @@ toxicity + topic overlap score (0-100):
 | **Watch** | 8-14 | Some overlap or toxicity — worth monitoring |
 | **Elevated** | 15-24 | Notable combination of hostility and topic proximity |
 | **High** | 25+ | Strong threat signal — both toxic and topically close |
+
+## Score expiry and refresh
+
+A threat score is a statement about how an account was behaving *when it was
+scored*. People change, and so do Charcoal's models — so every score now has
+an expiry date, and old scores stop being shown instead of quietly ageing into
+fiction.
+
+**How long a score lasts.** When a score is written, Charcoal records how
+confident it was and stamps an expiry on the row:
+
+| Scoring confidence | What it means | Valid for |
+|---|---|---|
+| High | 50+ posts analysed, full pipeline including context pairs | 14 days |
+| Standard | 25–50 posts, standard sampling | 7 days |
+| Low | fewer than 25 posts, the scorer exited early | 3 days |
+
+The less Charcoal had to look at, the sooner it wants to look again.
+
+**The scoring revision.** Alongside the expiry, each row records the *revision*
+it was scored under. That is one opaque string combining a hand-maintained
+version (`SCORING_GENERATION`) with the identity of every model the binary
+loads — toxicity, embeddings, NLI. Scores from two different revisions are not
+comparable, so swapping any model automatically retires every stored score;
+nobody has to remember to do it. (The database column is called
+`scoring_generation` and some UI copy still says "generation" — same thing.)
+
+**What "Expired" means on the dashboard.** A score is shown only if it has not
+expired **and** it was produced by the revision now running. Everything else is
+hidden — not deleted. The dashboard, `GET /api/status` (`tier_counts.expired`)
+and `charcoal status` all report how many rows are hidden, so a list that
+suddenly shrinks has a visible explanation rather than looking like data loss.
+Nothing is ever removed; an expired row comes back the moment it is re-scored.
+
+**The nightly refresh.** Scores return to the lists two ways. The normal way is
+re-engagement: someone quotes or reposts your post again, and a scan re-scores
+them. The other is a background job that rides on the existing scan admitter —
+no extra process, no extra database lock. Roughly once a day per user, it
+re-scores only the accounts that matter most: the ones already rated **High or
+Elevated** whose scores expire within the next two days, or that were scored
+under an older revision. Low and Watch accounts are left to expire; they will
+be re-scored if they come back.
+
+The admitter ticks every 30 seconds and each tick queues at most 25 users, so
+the work is spread out rather than arriving as one nightly stampede — which
+matters most right after a revision change, when *everybody* is due at once.
+
+```bash
+CHARCOAL_REFRESH_INTERVAL_HOURS=24   # default. 0 or "off" disables the job.
+                                     # Clamped to 1–168 (one week).
+```
+
+**A refresh never replaces a scan you asked for.** If you click Scan while a
+refresh is queued for you, that queued job becomes your full scan and keeps its
+place in line. If a refresh is already *running*, your request is written down
+and becomes a queued full scan the moment the refresh finishes — you do not
+have to click again, and it survives a restart. The 24-hour scan cooldown is
+measured from your last full scan that actually finished; a nightly refresh
+never resets it, and a scan that was interrupted never starts one.
+
+**When a refresh cannot do the job honestly, it does not do it.** A refresh
+cannot rebuild a topic fingerprint, so if yours is missing or was built by a
+different embedding model, the refresh stands down and asks for a full scan
+instead. If it cannot load the stored evidence it needs, it fails and retries
+in an hour rather than writing a score computed without it. Failed, deferred
+and interrupted refreshes retry hourly; only a clean run earns the next nightly
+slot.
 
 ## Toxicity scoring
 

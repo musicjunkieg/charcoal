@@ -10185,6 +10185,28 @@
       "created_at": "2026-09-15T08:18:43.630796-07:00",
       "updated_at": "2026-09-15T08:18:43.630796-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"63fccb2\",\"confidence\":85}"
+    },
+    {
+      "id": 936,
+      "change_id": "d212c752-8506-4a2b-bdae-b225aebd0f5f",
+      "node_type": "outcome",
+      "title": "Task 4 committed 2674ffd (expired count through tier_counts, dashboard card and CLI status) + f448949 (nothing-due refresh pays no classifier cold start — probe moved below the candidate count, gated on refresh_should_probe(candidates, has_own_resumable_staging); full-scan placement deliberately unchanged). Clippy clean x3 + fmt; unit_scan_phases 67 passed, lib refresh 34 passed, probe_is_skipped_only_when_nothing_is_due covers all four gating combinations. The Task 4 subagent was killed by an expired login after VERIFY_PG went green; the controller cleaned a stray web/.chainlink, ran clippy and the covering tests, and committed the probe fix separately. Full VERIFY_WEB running. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T13:37:39.367834-07:00",
+      "updated_at": "2026-09-15T13:37:39.367834-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f448949\",\"confidence\":85}"
+    },
+    {
+      "id": 937,
+      "change_id": "a3ac48c8-d0cb-4772-9b58-c729c86e3744",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 10: docs, runbook, spec amendment, CHANGELOG — docs/runbooks/343-phase2-expiry-refresh.md (incl. the Postgres index plans from task-7-report, the CHARCOAL_COPE_B_POLICY_VERSION pre-deploy check, the SCORING_GENERATION bump procedure, the post-deploy one-free-scan and ETA-median notes), README, spec 4.4/6 amendment, CHANGELOG entry handwritten, and the pass-number verification",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T14:11:32.318274-07:00",
+      "updated_at": "2026-09-15T14:11:32.318274-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f448949\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -20967,6 +20989,28 @@
       "weight": 1.0,
       "rationale": "Plan execution: Task 4 expired count",
       "created_at": "2026-09-15T08:18:47.718043-07:00"
+    },
+    {
+      "id": 991,
+      "from_node_id": 935,
+      "to_node_id": 936,
+      "from_change_id": "f5af23e7-d506-4e7a-a2c2-f5d8dd65470e",
+      "to_change_id": "d212c752-8506-4a2b-bdae-b225aebd0f5f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4 implementation outcome",
+      "created_at": "2026-09-15T13:37:39.376364-07:00"
+    },
+    {
+      "id": 992,
+      "from_node_id": 877,
+      "to_node_id": 937,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "a3ac48c8-d0cb-4772-9b58-c729c86e3744",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 10 docs and runbook",
+      "created_at": "2026-09-15T14:11:32.325328-07:00"
     }
   ],
   "documents": [

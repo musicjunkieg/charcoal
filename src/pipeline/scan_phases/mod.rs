@@ -83,14 +83,30 @@ impl RunIdentity {
 /// Read-only: does `user_did` have staging of THIS identity's own kind and
 /// generation sitting at a resumable phase (burst/finalize)?
 ///
-/// Mirrors the ownership read `run_phased_scan` performs on entry, without
-/// any of its mutating fallbacks (discarding another generation's staging,
-/// erroring on another kind's) — a caller that only needs to know "would
-/// calling `run_phased_scan` now touch anything of mine" uses this instead of
-/// duplicating that read by hand. Added for #344 F6: a refresh with zero
-/// fresh candidates still has to resume and burst its OWN leftover staging,
-/// so the caller needs this answer before deciding whether the classifier
-/// identity probe is worth paying for.
+/// Answers exactly one question: is there resumable staging whose recorded
+/// owner is *this* identity, kind and generation both? Added for #344 F6: a
+/// refresh with zero fresh candidates still has to resume and burst its OWN
+/// leftover staging, so the caller needs this answer before deciding whether
+/// the classifier identity probe is worth paying for.
+///
+/// This is deliberately NOT a general mirror of the ownership read
+/// `run_phased_scan` performs on entry, and two arms diverge — both in the
+/// conservative direction (this says `false` where the entry read would act):
+///
+/// - **Half-written ownership.** Resumable staging carrying a current
+///   generation but NO `scan_run_kind` is attributed to `Full` by
+///   `run_phased_scan`, which then resumes and bursts it. This returns
+///   `false` for `RunIdentity::full()`, because the recorded kind is absent
+///   rather than `Full`.
+/// - **An unrecognised phase marker.** `run_phased_scan` bails rather than
+///   risk wiping staging it cannot interpret; this reads it as "no resumable
+///   staging" and returns `false`.
+///
+/// Both are harmless for the refresh caller — a refusal reaches
+/// `OwnedByOtherKind` or the bail before any classifier call, so a skipped
+/// probe never precedes classification. A future caller passing
+/// `RunIdentity::full()` would need the first arm fixed, or it could skip a
+/// probe and then classify the staging it just disclaimed.
 pub async fn has_own_resumable_staging(
     db: &Arc<dyn Database>,
     user_did: &str,

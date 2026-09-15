@@ -478,6 +478,48 @@ deciduous 890):*
   the reviewer to file those as implementation-gate notes, not
   change-requested findings.
 
+*Amended 2026-09-15 (as built, #344 on `feat/343-phase2-expiry-refresh`).*
+Everything above shipped as designed. Four things the plan did not specify,
+settled during implementation:
+
+- **The Stage-2 classifier's policy is operator-declared.**
+  `CHARCOAL_COPE_B_POLICY_VERSION` names the `POLICY_VERSION` the hosted
+  CoPE-B endpoint serves (default `policy-unknown`, today's advertised
+  value). Verdict rows keep the **endpoint's** reported value, never the
+  configured one — a row's provenance has to describe what actually
+  produced it — and the configured value is what "a producer this binary
+  runs" is checked against. Because a mismatch would otherwise make every
+  verdict foreign evidence and every refresh fail, every scan **probes the
+  endpoint before it gathers anything and refuses to start**, naming both
+  values, and a mismatch that appears mid-scan logs one error per batch.
+  This is a deploy checklist item (runbook §0.1), and it is the concrete
+  form of the rule that a classifier policy change requires a manual
+  `SCORING_GENERATION` bump.
+- **The queue ETA is sampled per user, not from queue rows.** One row per
+  user plus the refresh's conditional rewrite destroyed the old median's
+  input, so a completed full scan writes its duration to `scan_state`
+  alongside the cooldown marker and the median reads those samples. It
+  samples every **fulfilled** full attempt — complete, complete-with-skips
+  and complete-unverified — and excludes resumable ones, so an interrupted
+  attempt never shortens the estimate and a slow degraded one never
+  flatters it.
+- **The refresh records eight `scan_state` keys per run**, zeroed at the
+  start of every run so a previous run's numbers can never be read as this
+  one's: `refresh_last_run_id`, `refresh_last_outcome`,
+  `refresh_last_run_at`, `refresh_candidates`, `refresh_scored`,
+  `refresh_feed_cache_hits`, `refresh_feed_cache_misses` and
+  `refresh_feed_cache_applicable`. `refresh_last_outcome` is the stable
+  string the runbook greps.
+- **A nothing-due refresh pays no classifier cold start.** The identity
+  probe sits below the candidate count and runs only when there are
+  candidates or resumable staging, so the nightly no-op does not meter a
+  RunPod warm-up against the scan cost budget.
+
+Known gaps at ship, all listed in the runbook: `GET /api/status` reports
+"scan running" during a refresh (#365); account-detail and typeahead reads
+still present expired scores as current (outside this plan's scope); the
+Postgres suite has no CI coverage.
+
 ### 4.5 Candidate source trait and soot (S5)
 
 ```rust
@@ -604,6 +646,14 @@ is therefore **not** the cache's main beneficiary. Phase 2 keeps a
 nothing due → not applicable, counters zeroed per run) and records the
 steady-state hit share as a number with no threshold. `SNAPSHOT_TTL` is not
 raised to move that number.
+*Implemented 2026-09-15.* Every pass number above is executed from
+`docs/runbooks/343-phase2-expiry-refresh.md`, which carries the commands and
+the expected readings: the functional cache test is its §6 (a)/(b)/(c), the
+steady-state share is recorded in the table there, and the deploy's
+prerequisites — `CHARCOAL_COPE_B_POLICY_VERSION` matching the endpoint, and
+the `SCORING_GENERATION` bump rule — are its §0. Phase 2 closes when that
+runbook has been executed on staging and its readings pasted back into it,
+not when the code merges.
 
 **Phase 3 — Rate limiting + worker role (4.2, 4.3)**
 *Pass — the #343 acceptance test:* ten gated staging accounts whose

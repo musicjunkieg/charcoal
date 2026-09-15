@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f4489493b04ca0434810b88f06f32cc6003d085c",
+    "short_hash": "f448949",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T13:37:22-07:00",
+    "message": "fix(344): a nothing-due refresh pays no classifier cold start\n\nThe Stage-2 policy probe ran as the first statement of the refresh\npipeline, above the candidate count. A NothingDue tick — no expiring\nrows and nothing of its own left staged — therefore paid a RunPod\nwarm_up round trip, with its long warmup timeout and FlashBoot cold\nstart, metered against the scan cost budget, for a run that makes zero\nclassifier calls. The scheduling tick enqueues on a time deadline, not\non candidate existence, so every user paid this every night.\n\nThe probe now runs below the count, gated on refresh_should_probe:\ncandidates present, or this refresh owns resumable staging (a prior\nattempt cut off mid-burst still bursts, so it still needs the probe).\nhas_own_resumable_staging performs the same ownership read as\nrun_phased_scan, without its mutating fallbacks.\n\nThe full scan probe placement is deliberately unchanged — it sits\nbefore discovery, where one round trip replaces gathering every\naccount and then skipping all of them.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
     "hash": "63fccb263a5b4b50cab6bf34aaed9a6433ad1304",
     "short_hash": "63fccb2",
     "author": "Bryan Guffey",

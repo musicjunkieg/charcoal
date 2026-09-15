@@ -402,7 +402,7 @@
 				{#if status.tier_counts.expired > 0}
 					<div
 						class="tier-card tier-not-assessed"
-						title="Scores past their refresh window — hidden until re-scored"
+						title="Scored under an older generation or past their refresh window — hidden until re-scored"
 					>
 						<span class="tier-count">{status.tier_counts.expired}</span>
 						<span class="tier-label">Expired</span>
