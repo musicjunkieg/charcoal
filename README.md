@@ -55,6 +55,10 @@ Optional settings (see `.env.example` for details):
 - `CHARCOAL_ONNX_SESSIONS` — number of ONNX toxicity sessions to pool
   (default `1`, clamped to 1–8; each is a separate ~126 MB model load).
   Only worth raising if the #343 Phase 0 runbook shows a gain.
+- `CHARCOAL_COPE_B_POLICY_VERSION` — the `POLICY_VERSION` the hosted CoPE-B
+  endpoint is serving (only read when `CHARCOAL_CLASSIFIER=runpod`). It must
+  equal the value the endpoint reports on its verdicts, **verbatim**; the
+  default is `policy-unknown`. See "Stage-2 classifier policy" below.
 
 ### 3. Initialize
 
@@ -180,6 +184,37 @@ are averaged. When they disagree (difference > 0.25), the lower score is used
 by default — this reduces false positives from reclaimed language and cultural
 context that a single model may misclassify. No env var = ONNX-only (same as
 before).
+
+### Stage-2 classifier policy
+
+The Stage-2 classifier (`CHARCOAL_CLASSIFIER=runpod` — the self-hosted CoPE-B
+endpoint) runs **outside** this binary, so Charcoal cannot read its identity
+the way it reads the ONNX model versions it loads itself. The operator declares
+it instead:
+
+```bash
+CHARCOAL_COPE_B_POLICY_VERSION=policy-v1   # the endpoint's own POLICY_VERSION
+```
+
+It must equal, character for character, the `policy_version` the endpoint
+reports on its verdicts. Leading and trailing whitespace is trimmed (a
+copy-pasted trailing newline would otherwise break everything below); unset or
+blank means `policy-unknown`.
+
+**What happens if it does not match.** A stored verdict records the policy that
+actually produced it, and a score may only be published from verdicts this
+binary recognises. So a mismatched value means every Stage-2 verdict is foreign
+evidence: every account is re-gathered once and then skipped, and no scores are
+written. To make that cheap to find rather than expensive to discover:
+
+- every scan **probes the endpoint once before it gathers anything** and
+  refuses to start, naming both values and this variable;
+- if a scan is already running when the endpoint changes, the batch mapper logs
+  one error per batch (not per post) saying the same thing.
+
+The fix is one environment variable. If the endpoint's *policy itself* changed
+(and not just its label), also bump `SCORING_GENERATION` — the stored scores
+were produced under the old policy and should expire.
 
 ## PostgreSQL backend (optional)
 
