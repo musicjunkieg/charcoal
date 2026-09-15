@@ -10141,6 +10141,28 @@
       "created_at": "2026-09-15T02:39:38.041083-07:00",
       "updated_at": "2026-09-15T02:39:38.041083-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"bf2a553\",\"confidence\":80}"
+    },
+    {
+      "id": 932,
+      "change_id": "986e43ec-92c4-4fed-a37e-1467fbdea9af",
+      "node_type": "outcome",
+      "title": "Task 9 committed 6495191 + 8d3d3b5 + d835154: run_refresh with RefreshOutcome, RunIdentity + RUN_KIND/RUN_GENERATION ownership markers, verdict producer/policy provenance, full-scan drain of refresh-owned staging, CarriedCompletion + drain_then_run (deferred Task 5 rows 5-7), and the Task 6 restore list (knob default back to 24h, real dispatch replacing refresh_runner_missing, N4 through run_claim, claim fence on the refresh completion path). VERIFY_WEB lib 364 / 56 binaries / 0 SKIP; VERIFY_PG 839 passed 0 failed; clippy x3 clean; controller independently confirmed cargo check clean on no-features, web and postgres. Review pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T05:34:04.942816-07:00",
+      "updated_at": "2026-09-15T05:34:04.942816-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"d835154\",\"confidence\":80}"
+    },
+    {
+      "id": 933,
+      "change_id": "83b5788a-8106-4a12-9917-0abebba8c72b",
+      "node_type": "decision",
+      "title": "Task 9 review follow-up: fix I1-I3 + cheap minors now, AND fix the pre-existing db_postgres intra-binary race BEFORE Task 10 (its ten-loop isolation evidence runs exactly the parallel --all-targets configuration that produced the flake; one flake in ten invalidates the claim). Also adding a startup-time CoPE-B policy_version probe — deliberate scope addition beyond the plan: the endpoint is already contacted at scan start, and comparing once there converts a full wasted re-gather in prod into a refused start. The knob also gets real operator documentation, not just a runbook line.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T05:40:26.480516-07:00",
+      "updated_at": "2026-09-15T05:40:26.480516-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -20879,6 +20901,28 @@
       "weight": 1.0,
       "rationale": "Plan execution: Task 9 refresh runner",
       "created_at": "2026-09-15T02:39:38.048062-07:00"
+    },
+    {
+      "id": 987,
+      "from_node_id": 931,
+      "to_node_id": 932,
+      "from_change_id": "340fc28d-bb86-409a-a20b-109e488e440a",
+      "to_change_id": "986e43ec-92c4-4fed-a37e-1467fbdea9af",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 implementation outcome",
+      "created_at": "2026-09-15T05:34:04.950154-07:00"
+    },
+    {
+      "id": 988,
+      "from_node_id": 932,
+      "to_node_id": 933,
+      "from_change_id": "986e43ec-92c4-4fed-a37e-1467fbdea9af",
+      "to_change_id": "83b5788a-8106-4a12-9917-0abebba8c72b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision on the Task 9 review findings",
+      "created_at": "2026-09-15T05:40:26.486656-07:00"
     }
   ],
   "documents": [

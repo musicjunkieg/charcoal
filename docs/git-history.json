@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d835154f73cdcab944185e47ea53022548453976",
+    "short_hash": "d835154",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T05:24:33-07:00",
+    "message": "test(344): gate the ownership tests on the web feature\n\nThey assert through classify_full_scan / classify_refresh, which live in\nthe web layer, so the module would not compile under\n--all-targets --features postgres. The ownership behaviour itself is\nbackend-agnostic and VERIFY_WEB is what runs these.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 1
+  },
+  {
     "hash": "bf2a5536e530e1646a51f2e525feb9edb0898c8b",
     "short_hash": "bf2a553",
     "author": "Bryan Guffey",

@@ -1188,12 +1188,31 @@ fn cache_test_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// Every DID used by the scan_queue tests, so they can be cleared wholesale.
-const SCAN_QUEUE_DID_PREFIX: &str = "did:plc:pgtest_q_%";
-
-/// Every DID this file uses. Wider than [`SCAN_QUEUE_DID_PREFIX`] on purpose —
-/// see `reset_scan_queue_fixtures` for why the ETA sample needs the wider net.
+/// Every DID this file uses, for the fixture sweeps that are scoped by DID
+/// (the ETA duration samples in `scan_state`). The scan_queue sweep itself is
+/// deliberately NOT scoped — see `reset_scan_queue_fixtures`.
 const ALL_PG_TEST_DID_PREFIX: &str = "did:plc:pgtest%";
+
+/// One tick's answer, narrowed to the calling test's own fixtures.
+///
+/// `claim_and_enqueue_due_refreshes` is a WHOLE-DATABASE query: it returns
+/// every user it delivered, this file's fixtures and any sibling test's alike.
+/// `quiesce_users_outside` parks the users that exist when it runs, but a
+/// sibling test in this binary that creates a scored user a moment later has
+/// created a user this tick will legitimately select — and an `assert_eq!` on
+/// the raw vector then fails for a reason that has nothing to do with the code
+/// under test (#344 F4).
+///
+/// Every one of these assertions is really asking "did the tick deliver MY
+/// user", so scoping them to the caller's prefix is the assertion they meant,
+/// not a weakening of it. `quiesce_users_outside` still earns its keep: it
+/// keeps foreign users from eating the batch limit.
+fn only(delivered: Vec<String>, prefix: &str) -> Vec<String> {
+    delivered
+        .into_iter()
+        .filter(|d| d.starts_with(prefix))
+        .collect()
+}
 
 /// Clear the whole scan_queue fixture set before a test runs.
 ///
@@ -1208,8 +1227,21 @@ async fn reset_scan_queue_fixtures(url: &str) {
     use sqlx_postgres::Postgres;
 
     let pool = Pool::<Postgres>::connect(url).await.unwrap();
-    sqlx_core::query::query("DELETE FROM scan_queue WHERE user_did LIKE $1")
-        .bind(SCAN_QUEUE_DID_PREFIX)
+    // The WHOLE table, not this group's prefix (#344 F4). `scan_queue` rows are
+    // only ever created by `enqueue_scan`, `enqueue_refresh_scan` and the
+    // refresh tick, and every caller of all three in this binary holds
+    // `scan_queue_test_lock` — and no other test binary opens this database. So
+    // inside the lock the table is exclusively this test's.
+    //
+    // The prefix-scoped delete this replaces could not clean up after the tick:
+    // `claim_and_enqueue_due_refreshes` is a whole-database query, so it
+    // enqueues rows for users OUTSIDE the group's prefix (a sibling test's
+    // scored fixture, created after `quiesce_users_outside` ran). Those rows
+    // survived the reset and broke the position/order assertions in
+    // `test_pg_list_scan_queue_orders_and_numbers_rows` and
+    // `test_pg_scan_queue_breaks_enqueued_at_ties_by_user_did` — intermittently,
+    // only under a parallel `--all-targets` run.
+    sqlx_core::query::query("DELETE FROM scan_queue")
         .execute(&pool)
         .await
         .unwrap();
@@ -4658,10 +4690,12 @@ async fn test_pg_claim_and_enqueue_is_one_transaction_and_bounded() {
     quiesce_users_outside(&url, "did:plc:pgtest_q_sched_%").await;
 
     let next = ahead(24);
-    let first = db
-        .claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
-        .await
-        .unwrap();
+    let first = only(
+        db.claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
+            .await
+            .unwrap(),
+        "did:plc:pgtest_q_sched_",
+    );
     assert_eq!(
         first,
         vec![DUE1.to_string(), DUE2.to_string()],
@@ -4692,10 +4726,12 @@ async fn test_pg_claim_and_enqueue_is_one_transaction_and_bounded() {
         "an undelivered user is untouched"
     );
 
-    let second = db
-        .claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
-        .await
-        .unwrap();
+    let second = only(
+        db.claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
+            .await
+            .unwrap(),
+        "did:plc:pgtest_q_sched_",
+    );
     let mut second_sorted = second.clone();
     second_sorted.sort();
     assert_eq!(
@@ -4704,10 +4740,12 @@ async fn test_pg_claim_and_enqueue_is_one_transaction_and_bounded() {
         "the rest follow on the next tick; the busy user never does"
     );
 
-    let third = db
-        .claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
-        .await
-        .unwrap();
+    let third = only(
+        db.claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
+            .await
+            .unwrap(),
+        "did:plc:pgtest_q_sched_",
+    );
     assert!(third.is_empty(), "nobody is due twice");
 
     // The busy user: row untouched, schedule untouched.
@@ -4776,7 +4814,10 @@ async fn test_pg_two_schedulers_partition_the_due_set() {
         a.claim_and_enqueue_due_refreshes(&now_s, &next, rev, 25),
         b.claim_and_enqueue_due_refreshes(&now_s, &next, rev, 25),
     );
-    let (ra, rb) = (ra.unwrap(), rb.unwrap());
+    let (ra, rb) = (
+        only(ra.unwrap(), "did:plc:pgtest_q_part"),
+        only(rb.unwrap(), "did:plc:pgtest_q_part"),
+    );
 
     let set_a: std::collections::HashSet<_> = ra.iter().cloned().collect();
     let set_b: std::collections::HashSet<_> = rb.iter().cloned().collect();
@@ -4851,26 +4892,32 @@ async fn test_pg_a_completed_full_scan_proves_both_columns_and_the_tick_stays_qu
 
     let next = (now + chrono::Duration::hours(48)).to_rfc3339();
     assert!(
-        db.claim_and_enqueue_due_refreshes(
-            &(now + chrono::Duration::seconds(30)).to_rfc3339(),
-            &next,
-            rev,
-            25
+        only(
+            db.claim_and_enqueue_due_refreshes(
+                &(now + chrono::Duration::seconds(30)).to_rfc3339(),
+                &next,
+                rev,
+                25
+            )
+            .await
+            .unwrap(),
+            "did:plc:pgtest_q_proof",
         )
-        .await
-        .unwrap()
         .is_empty(),
         "no unnecessary refresh right after a full scan"
     );
     assert_eq!(
-        db.claim_and_enqueue_due_refreshes(
-            &(now + chrono::Duration::hours(25)).to_rfc3339(),
-            &next,
-            rev,
-            25
-        )
-        .await
-        .unwrap(),
+        only(
+            db.claim_and_enqueue_due_refreshes(
+                &(now + chrono::Duration::hours(25)).to_rfc3339(),
+                &next,
+                rev,
+                25
+            )
+            .await
+            .unwrap(),
+            "did:plc:pgtest_q_proof",
+        ),
         vec![U.to_string()],
         "and exactly one once the deadline passes"
     );
@@ -4912,14 +4959,17 @@ async fn test_pg_owed_full_work_is_retried_as_a_full_scan() {
     let owed = pg_row(&db, U).await.full_requested_at.expect("still owed");
 
     assert_eq!(
-        db.claim_and_enqueue_due_refreshes(
-            &now.to_rfc3339(),
-            &(now + chrono::Duration::hours(24)).to_rfc3339(),
-            rev,
-            25
-        )
-        .await
-        .unwrap(),
+        only(
+            db.claim_and_enqueue_due_refreshes(
+                &now.to_rfc3339(),
+                &(now + chrono::Duration::hours(24)).to_rfc3339(),
+                rev,
+                25
+            )
+            .await
+            .unwrap(),
+            "did:plc:pgtest_q_owedfull",
+        ),
         vec![U.to_string()]
     );
     let r = pg_row(&db, U).await;
@@ -4995,7 +5045,11 @@ async fn test_pg_scheduler_write_does_not_clobber_a_concurrent_full_enqueue() {
         .into_iter()
         .map(|r| sqlx_core::row::Row::get::<String, _>(&r, 0))
         .collect();
-    assert_eq!(due, vec![U.to_string()], "the user is due at select time");
+    assert_eq!(
+        only(due, "did:plc:pgtest_q_race"),
+        vec![U.to_string()],
+        "the user is due at select time"
+    );
 
     assert_eq!(other.enqueue_scan(U).await.unwrap(), EnqueueOutcome::Queued);
 
