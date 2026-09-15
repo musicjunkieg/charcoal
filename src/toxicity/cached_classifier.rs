@@ -129,6 +129,11 @@ impl ToxicityClassifier for CachedClassifier {
     fn max_batch_size(&self) -> usize {
         self.inner.max_batch_size()
     }
+    /// Delegated, never cached: the probe exists to contact the live endpoint,
+    /// and a cached answer is exactly the stale identity it is checking for.
+    async fn probe_identity(&self) -> anyhow::Result<()> {
+        self.inner.probe_identity().await
+    }
     fn name(&self) -> &'static str {
         self.inner.name()
     }

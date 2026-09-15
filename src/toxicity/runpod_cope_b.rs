@@ -189,6 +189,41 @@ pub fn cope_b_expected_policy() -> &'static str {
     *POLICY
 }
 
+/// What a batch (or a probe) reported that this deployment did not expect.
+///
+/// A struct rather than a bare tuple so the two `String`-shaped halves — the
+/// value the endpoint reported and the value we wanted — can never be swapped
+/// at a call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PolicyDivergence {
+    /// The first divergent value the endpoint reported.
+    reported: String,
+    /// How many slots of this batch diverged. Always ≥ 1.
+    slots: usize,
+}
+
+/// The batch-level policy check, pure so the log-volume property is assertable
+/// without a tracing subscriber (#344 F2): one answer per batch, however many
+/// slots diverge.
+///
+/// Only `ok` slots are considered — an error slot carries no verdict, so its
+/// `policy_version` is the deserialisation default and says nothing about what
+/// the endpoint is serving.
+fn policy_divergence(verdicts: &[RawItem], expected: &str) -> Option<PolicyDivergence> {
+    let mut reported: Option<&str> = None;
+    let mut slots = 0usize;
+    for v in verdicts.iter().filter(|v| v.ok) {
+        if v.policy_version != expected {
+            slots += 1;
+            reported.get_or_insert(v.policy_version.as_str());
+        }
+    }
+    reported.map(|r| PolicyDivergence {
+        reported: r.to_string(),
+        slots,
+    })
+}
+
 /// The env-free half of [`cope_b_expected_policy`], so the default is
 /// assertable without touching a process-global variable.
 fn resolve_cope_b_policy(raw: Option<&str>) -> &'static str {
@@ -296,6 +331,24 @@ impl RunPodCopeBClient {
     /// `ok` is false, or whose `confidence` is missing/NaN/out-of-[0,1], becomes
     /// an `ItemOutcome::Error` (no silent fallback) rather than a Verdict.
     fn map_verdicts(out: RawBatchOutput, latency_ms: u32) -> Vec<ItemOutcome> {
+        // ONE log per batch, not per item (#344 F2). The condition is a
+        // deployment-wide misconfiguration: every slot of every batch of a
+        // 2 900-account scan reports the same divergence, so logging inside the
+        // map produced tens of thousands of identical lines and buried the rest
+        // of the scan. Loud but proportionate: the summary names both values,
+        // the variable, and how many slots diverged.
+        if let Some(divergence) = policy_divergence(&out.verdicts, cope_b_expected_policy()) {
+            error!(
+                expected = cope_b_expected_policy(),
+                reported = %divergence.reported,
+                slots = divergence.slots,
+                batch_slots = out.verdicts.len(),
+                "{COPE_B_POLICY_ENV} does not match the policy the CoPE-B endpoint \
+                 reports — these verdicts will not be accepted as current evidence; \
+                 set it to the endpoint's POLICY_VERSION (and bump SCORING_GENERATION \
+                 if the policy itself changed)"
+            );
+        }
         out.verdicts
             .into_iter()
             .map(|item| {
@@ -319,17 +372,8 @@ impl RunPodCopeBClient {
                 // the two disagree the rows finalize as foreign evidence and
                 // the accounts are re-gathered and then skipped — a visible
                 // gap rather than scores silently attributed to a policy that
-                // did not produce them. Loud, because the fix is one variable.
-                if item.policy_version != cope_b_expected_policy() {
-                    error!(
-                        expected = cope_b_expected_policy(),
-                        reported = %item.policy_version,
-                        "{COPE_B_POLICY_ENV} does not match the policy the CoPE-B endpoint \
-                         reports — these verdicts will not be accepted as current evidence; \
-                         set it to the endpoint's POLICY_VERSION (and bump SCORING_GENERATION \
-                         if the policy itself changed)"
-                    );
-                }
+                // did not produce them. The divergence is reported once per
+                // batch, above.
                 ItemOutcome::Verdict(ClassifierVerdict {
                     toxic_token: toxic,
                     confidence,
@@ -621,8 +665,19 @@ impl ToxicityClassifier for RunPodCopeBClient {
         // It must equal what the endpoint reports on its verdicts: the
         // classifier cache is keyed by it, and finalize compares a staged
         // row's recorded policy against it. `map_verdicts` logs loudly when
-        // they diverge.
+        // they diverge, and `probe_identity` refuses the scan before it can.
         cope_b_expected_policy()
+    }
+
+    /// #344 F5: one probe request at scan start instead of a whole scan's
+    /// worth of foreign evidence.
+    ///
+    /// The divergence is otherwise only visible in `map_verdicts` — after the
+    /// endpoint has been paid for every batch, and with every account facing a
+    /// re-gather and then a skip. Here it costs one round trip (the same
+    /// warm-up that absorbs FlashBoot's cold start) and the scan never starts.
+    async fn probe_identity(&self) -> Result<()> {
+        warm_up(self).await
     }
     fn threshold(&self) -> f32 {
         COPE_B_THRESHOLD
@@ -632,13 +687,45 @@ impl ToxicityClassifier for RunPodCopeBClient {
 /// Helper for the scan manager: invoke once at the start of a scan to absorb
 /// FlashBoot cold start into the "warming up" UX message. Same retry policy,
 /// longer timeout.
+///
+/// It is also the policy probe (#344 F5): the response carries the endpoint's
+/// own `policy_version`, so this is the cheapest place in a scan's life to
+/// learn that `CHARCOAL_COPE_B_POLICY_VERSION` is wrong — before any real
+/// batch is paid for, rather than after every account has been gathered and
+/// scored into evidence finalize will reject.
 pub async fn warm_up(client: &RunPodCopeBClient) -> Result<()> {
-    let (_, _retries) = client
+    let (outcomes, _retries) = client
         .classify_batch_with_timeout(
             &["[Parent post]: warm-up\n\n[Reply]: warm-up".to_string()],
             client.warmup_timeout,
         )
         .await?;
+    check_probe_policy(&outcomes)
+}
+
+/// The policy half of [`warm_up`], separated so the refusal is assertable
+/// without a live endpoint.
+///
+/// A probe slot that did not decode is NOT a policy failure: it says nothing
+/// about what the endpoint is serving, and failing the scan on it would turn
+/// one bad slot into a refused start. `map_verdicts` is still the backstop.
+fn check_probe_policy(outcomes: &[ItemOutcome]) -> Result<()> {
+    let expected = cope_b_expected_policy();
+    for outcome in outcomes {
+        let ItemOutcome::Verdict(v) = outcome else {
+            continue;
+        };
+        if v.policy_version != expected {
+            bail!(
+                "the CoPE-B endpoint reports policy_version {reported:?} but this deployment \
+                 expects {expected:?}. Every verdict would be recorded as foreign evidence and \
+                 every account re-gathered and then skipped, so this scan is refused. Set \
+                 {COPE_B_POLICY_ENV}={reported:?} (and bump SCORING_GENERATION if the policy \
+                 itself changed).",
+                reported = v.policy_version,
+            );
+        }
+    }
     Ok(())
 }
 
@@ -828,5 +915,96 @@ mod tests {
         let out = RunPodCopeBClient::parse_batch_response(batch_json_without_timing(), 1000)
             .expect("parse ok");
         assert!(matches!(out[0], ItemOutcome::Verdict(ref v) if v.toxic_token));
+    }
+
+    fn raw_item(ok: bool, policy: &str) -> RawItem {
+        serde_json::from_value(serde_json::json!({
+            "ok": ok,
+            "toxic": false,
+            "confidence": 0.1,
+            "model": "cope-b-a4b",
+            "policy_version": policy,
+        }))
+        .expect("RawItem fixture")
+    }
+
+    /// #344 F2: the divergence is a DEPLOYMENT-wide misconfiguration, so every
+    /// slot of every batch reports it. One answer per batch is what keeps a
+    /// 2 900-account scan's logs readable; the per-item check produced tens of
+    /// thousands of identical lines.
+    ///
+    /// Pinned on the pure helper rather than on captured log output: the helper
+    /// returns exactly one `Some` per batch by construction, which is the
+    /// property, and asserting it here cannot be defeated by a subscriber's
+    /// filtering.
+    #[test]
+    fn policy_divergence_answers_once_per_batch_however_many_slots_diverge() {
+        let batch: Vec<RawItem> = (0..25).map(|_| raw_item(true, "policy-v2")).collect();
+        let d = policy_divergence(&batch, "policy-v1").expect("25 divergent slots diverge");
+        assert_eq!(d.reported, "policy-v2");
+        assert_eq!(d.slots, 25, "the count is summarised, not logged per slot");
+
+        // The happy path is silent.
+        let agreed: Vec<RawItem> = (0..25).map(|_| raw_item(true, "policy-v1")).collect();
+        assert_eq!(policy_divergence(&agreed, "policy-v1"), None);
+    }
+
+    /// An error slot carries no verdict, so its `policy_version` is the
+    /// deserialisation default and says nothing about what the endpoint serves.
+    /// Counting it would raise a policy alarm for an unrelated decode failure.
+    #[test]
+    fn policy_divergence_ignores_error_slots() {
+        let batch = vec![raw_item(false, "whatever"), raw_item(true, "policy-v1")];
+        assert_eq!(policy_divergence(&batch, "policy-v1"), None);
+
+        let mixed = vec![raw_item(false, "whatever"), raw_item(true, "policy-v2")];
+        let d = policy_divergence(&mixed, "policy-v1").expect("the ok slot diverges");
+        assert_eq!(d.slots, 1, "only the ok slot counts");
+    }
+
+    fn probe_verdict(policy: &str) -> ItemOutcome {
+        ItemOutcome::Verdict(ClassifierVerdict {
+            toxic_token: false,
+            confidence: 0.1,
+            latency_ms: 1,
+            model_id: "cope-b-a4b".into(),
+            policy_version: policy.into(),
+        })
+    }
+
+    /// #344 F5: the probe refuses the scan before a single real batch is paid
+    /// for, and the refusal names both values and the variable to change —
+    /// otherwise the operator learns about it from a scan that gathered every
+    /// account and then skipped every one of them.
+    #[test]
+    fn a_diverging_probe_refuses_the_scan_and_names_both_values() {
+        let expected = cope_b_expected_policy();
+        let err = check_probe_policy(&[probe_verdict("policy-from-the-endpoint")])
+            .expect_err("a divergent probe must refuse the scan");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("policy-from-the-endpoint"),
+            "the refusal must name what the endpoint reported: {msg}"
+        );
+        assert!(
+            msg.contains(expected),
+            "…and what this deployment expected: {msg}"
+        );
+        assert!(
+            msg.contains(COPE_B_POLICY_ENV),
+            "…and the variable to change: {msg}"
+        );
+    }
+
+    /// The probe answers one question only. A slot that did not decode says
+    /// nothing about the policy, and refusing the scan on it would turn one bad
+    /// slot into a refused start; `map_verdicts` is still the backstop.
+    #[test]
+    fn a_matching_or_undecodable_probe_slot_passes() {
+        check_probe_policy(&[probe_verdict(cope_b_expected_policy())])
+            .expect("an agreeing probe starts the scan");
+        check_probe_policy(&[ItemOutcome::Error("slot did not decode".into())])
+            .expect("an undecodable probe slot is not a policy failure");
+        check_probe_policy(&[]).expect("an empty probe response is not a policy failure");
     }
 }

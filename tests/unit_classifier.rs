@@ -436,11 +436,20 @@ mod retry {
         assert!(format!("{err}").contains("401"));
     }
 
+    /// Batch wire shape: verdicts array under output. `policy` is what the
+    /// endpoint claims to be serving.
+    fn warm_up_body(policy: &str) -> String {
+        format!(
+            r#"{{"output":{{"verdicts":[{{"ok":true,"toxic":false,"confidence":0.0,"model":"cope-b-a4b","policy_version":"{policy}"}}]}}}}"#
+        )
+    }
+
     #[tokio::test]
     async fn warm_up_helper_runs_against_endpoint() {
         let server = MockServer::start().await;
-        // Batch wire shape: verdicts array under output.
-        let ok = r#"{"output":{"verdicts":[{"ok":true,"toxic":false,"confidence":0.0,"model":"cope-b-a4b","policy_version":"policy-v3"}]}}"#;
+        // The endpoint agrees with what this deployment declared, so the
+        // warm-up is exactly the request it always was.
+        let ok = warm_up_body(charcoal::toxicity::runpod_cope_b::cope_b_expected_policy());
         Mock::given(method("POST"))
             .and(path("/runsync"))
             .respond_with(ResponseTemplate::new(200).set_body_raw(ok, "application/json"))
@@ -452,6 +461,44 @@ mod retry {
         charcoal::toxicity::runpod_cope_b::warm_up(&client)
             .await
             .unwrap();
+    }
+
+    /// #344 F5: the warm-up IS the policy probe. An endpoint serving a policy
+    /// this deployment did not declare would turn every verdict of the scan
+    /// into foreign evidence — every account re-gathered once and then skipped
+    /// — so the scan is refused here instead, after one request.
+    ///
+    /// Driven through the real HTTP path (not `check_probe_policy` alone) so
+    /// the wiring from response body to refusal is covered end to end.
+    #[tokio::test]
+    async fn warm_up_refuses_a_policy_the_deployment_did_not_declare() {
+        let server = MockServer::start().await;
+        let mismatched = warm_up_body("policy-the-operator-never-configured");
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(mismatched, "application/json"))
+            // Two: `warm_up` directly, then once more through `probe_identity`.
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let client = RunPodCopeBClient::new(server.uri(), "k".into()).unwrap();
+        let err = charcoal::toxicity::runpod_cope_b::warm_up(&client)
+            .await
+            .expect_err("a divergent policy must refuse the scan");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("policy-the-operator-never-configured"),
+            "the refusal must name what the endpoint reported: {msg}"
+        );
+        assert!(
+            msg.contains("CHARCOAL_COPE_B_POLICY_VERSION"),
+            "…and the variable to change: {msg}"
+        );
+
+        // And the same refusal is what `probe_identity` hands the scan start.
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        assert!(dyn_ref.probe_identity().await.is_err());
     }
 
     #[tokio::test]
