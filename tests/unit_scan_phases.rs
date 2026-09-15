@@ -4087,15 +4087,21 @@ mod ownership_tests {
         assert_eq!(summary.final_phase.as_deref(), Some("done"));
     }
 
-    /// R02: pre-v18 resumable staging carries no owner. Only full scans
-    /// existed then, so a full scan resumes it and a refresh refuses it —
-    /// never the other way round.
+    /// R02: a HALF-WRITTEN ownership record — current generation, missing kind
+    /// — is attributed to Full, so a full scan resumes it and a refresh
+    /// refuses it, never the other way round.
+    ///
+    /// This is not the pre-v18 case: staging from before both marker keys
+    /// existed carries no generation either, so it is discarded by the
+    /// generation branch (see `old_generation_staging_is_discarded_on_resume`)
+    /// and never reaches this arm. The only way to produce this state is a
+    /// crash between the two marker writes.
     #[tokio::test]
-    async fn unowned_resumable_staging_belongs_to_the_full_scan() {
+    async fn half_written_ownership_belongs_to_the_full_scan() {
         let db = open_db().await;
         let deps = empty_deps();
-        // No RUN_KIND_KEY, but a current generation: an old binary of the same
-        // lineage would have left exactly this.
+        // The generation marker landed and the kind marker did not — the
+        // window between the two `set_scan_state` calls at a fresh start.
         db.set_scan_state(OWN_USER, "scan_phase", "finalize")
             .await
             .unwrap();
@@ -4565,6 +4571,82 @@ mod evidence_tests {
             )
             .await,
             FinalizeOutcome::NeedsRegather
+        );
+    }
+}
+
+/// #344 F1: the CLI path (`charcoal scan` / `charcoal sweep`) neither drains
+/// refresh-owned staging nor defers — it propagates the refusal to a terminal.
+/// So the refusal has to tell the operator what to do about it.
+///
+/// Deliberately NOT `web`-gated: this is the DEFAULT-feature path. A
+/// `--features web` build can write `scan_run_kind = 'refresh'`; a CLI-only
+/// build cannot, but it shares a database with the web worker that can.
+mod cli_refusal_tests {
+    use std::sync::Arc;
+
+    use charcoal::db::sqlite::SqliteDatabase;
+    use charcoal::db::{Database, ScanKind};
+    use charcoal::pipeline::scan_phases::test_support::EmptyDeps;
+    use charcoal::pipeline::scan_phases::{
+        run_phased_scan, PhasedScanError, RunIdentity, RUN_GENERATION_KEY, RUN_KIND_KEY,
+    };
+    use charcoal::scoring::generation::scoring_revision;
+    use charcoal::toxicity::classifier::StubClassifier;
+
+    const CLI_USER: &str = "did:plc:cliuser00000000000000";
+
+    /// A full scan that finds nothing still enters the pipeline (V4-02), so the
+    /// CLI reaches this refusal even on a run that discovered no candidates.
+    #[tokio::test]
+    async fn the_refusal_names_the_remedy_not_just_the_owner() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        charcoal::db::schema::create_tables(&conn).unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        db.upsert_user(CLI_USER, "cliuser.bsky.social")
+            .await
+            .unwrap();
+
+        // What a nightly refresh interrupted at burst leaves behind.
+        db.set_scan_state(CLI_USER, "scan_phase", "burst")
+            .await
+            .unwrap();
+        db.set_scan_state(CLI_USER, RUN_KIND_KEY, ScanKind::Refresh.as_str())
+            .await
+            .unwrap();
+        db.set_scan_state(CLI_USER, RUN_GENERATION_KEY, scoring_revision())
+            .await
+            .unwrap();
+
+        let deps = EmptyDeps::new(Arc::new(StubClassifier::with_script_and_threshold(
+            vec![],
+            0.5,
+        )));
+        let err = run_phased_scan(&db, CLI_USER, &[], &deps.deps(None), RunIdentity::full())
+            .await
+            .unwrap_err();
+
+        // The typed dispatch the web tier uses is unchanged…
+        assert!(matches!(
+            err.downcast_ref::<PhasedScanError>(),
+            Some(PhasedScanError::OwnedByOtherKind(ScanKind::Refresh))
+        ));
+
+        // …and the text a CLI user actually sees names a remedy. Without this
+        // the whole message was "resumable staging is owned by a Refresh run",
+        // which tells an operator nothing they can act on.
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("Refresh"),
+            "the refusal must still say who owns the staging: {rendered}"
+        );
+        assert!(
+            rendered.contains("drains refresh-owned staging"),
+            "the refusal must name the remedy — a queued full scan drains it: {rendered}"
+        );
+        assert!(
+            rendered.contains("Re-run this command afterwards"),
+            "…and tell the operator what to do once it has: {rendered}"
         );
     }
 }

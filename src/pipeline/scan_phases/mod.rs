@@ -85,10 +85,20 @@ impl RunIdentity {
 /// A typed error rather than a bare string because both callers *act* on it:
 /// a refresh defers, a full scan drains. Matching on message text would make
 /// that dispatch a spelling contract.
+///
+/// The message still has to carry a remedy, because there is a third caller
+/// that acts on neither: `charcoal scan` / `charcoal sweep` propagate this
+/// straight to the terminal (#344 F1). The web tier never reads it — it
+/// downcasts to the variant — so the text is free to address the operator.
 #[derive(Debug, thiserror::Error)]
 pub enum PhasedScanError {
     /// Resumable staging belongs to the other scan kind. Never resumed blindly.
-    #[error("resumable staging is owned by a {0:?} run")]
+    #[error(
+        "resumable staging is owned by a {0:?} run — this scan will not adopt it. \
+         Let the owner finish it: a queued full scan (the web dashboard's \"Scan now\", \
+         or `charcoal serve` with a queued row) drains refresh-owned staging before it \
+         gathers, and the nightly refresh resumes its own. Re-run this command afterwards."
+    )]
     OwnedByOtherKind(ScanKind),
 }
 
@@ -274,11 +284,20 @@ pub async fn run_phased_scan(
         // full scan drains, and both decisions belong to the caller.
         return Err(PhasedScanError::OwnedByOtherKind(owner_kind.expect("checked is_some")).into());
     } else {
-        // A resumable marker with NO owner recorded is pre-v18 staging from the
-        // same binary lineage — treat it as owned by Full, since only full
-        // scans existed then. That is exactly `phase` unchanged for a full
-        // caller; for a refresh caller the `owner_kind.is_some()` guard above
-        // would let it through, so refuse it here instead.
+        // A resumable marker whose generation IS current but whose kind is
+        // missing: a HALF-WRITTEN ownership record. The two markers are written
+        // one after the other, so a crash between them leaves exactly this.
+        //
+        // Note what this arm is *not*: genuinely pre-v18 staging carries
+        // neither key, so `owner_generation` is `None`, the generation branch
+        // above fires first, and the staging is discarded — it never reaches
+        // here. Reasoning from "this is the pre-v18 case" would be reasoning
+        // from a premise that cannot hold.
+        //
+        // A partial record is attributed to Full, the kind that writes staging
+        // on every deployment: that leaves `phase` unchanged for a full caller
+        // (it resumes its own work) and refuses a refresh caller, which the
+        // `owner_kind.is_some()` guard above would otherwise have let through.
         if resumable && owner_kind.is_none() && identity.kind != ScanKind::Full {
             return Err(PhasedScanError::OwnedByOtherKind(ScanKind::Full).into());
         }
