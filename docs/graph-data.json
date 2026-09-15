@@ -10031,6 +10031,39 @@
       "created_at": "2026-09-14T22:09:35.876240-07:00",
       "updated_at": "2026-09-14T22:09:35.876240-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 922,
+      "change_id": "a376bb0d-9f63-46fe-968c-2b3c3afc77f7",
+      "node_type": "outcome",
+      "title": "Task 7 fix wave committed 3a51da5 (F1-F6): Postgres index plans MEASURED on a seeded 2-user/3000-row load (idx_account_scores_user_score chosen by default, 0.38-1.3ms; enable_seqscan=off identical; index-dropped counterfactual reads 3000 rows/124 buffers vs 51 — index is load-bearing; seed rows deleted, table verified empty); F2 REAL BUG fixed — format!(\"{horizon_days:+} days\") replaces \"+{n} days\" which made a negative horizon fail OPEN on SQLite (datetime NULL -> COALESCE(...,1)=1 selects every High/Elevated row) while Postgres narrowed; proven by running the new test against the old spelling first. F3 fresh/candidate partition test, F4 pg NULL-score row with inverted-assertion proof, F5 ELEVATED_MIN literal, F6 trait doc wording. unit_refresh_candidates 6, unit_scoring 63, unit_staleness 6, db_postgres 72, clippy x3 + fmt clean. Index plans section is ready for Task 10 to paste into the runbook. Re-review requested.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T22:30:09.169201-07:00",
+      "updated_at": "2026-09-14T22:30:09.169201-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"3a51da5\",\"confidence\":85}"
+    },
+    {
+      "id": 923,
+      "change_id": "eba823f8-07ab-47c8-bd56-a0a0206735d5",
+      "node_type": "action",
+      "title": "Execute Phase 2 plan Task 8: extract the shared scan setup and make missing context an error, not an absence — helpers in src/web/scan_job.rs return Result, direct_pairs_for -> Result in src/pipeline/amplification.rs, a refresh that cannot obtain required context fails the run (row failed, retry in REFRESH_RETRY_HOURS) and writes no score, never extending the existing High/Elevated row's validity; tests/unit_direct_pairs.rs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T22:32:16.012673-07:00",
+      "updated_at": "2026-09-14T22:32:16.012673-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"3a51da5\",\"confidence\":85}"
+    },
+    {
+      "id": 924,
+      "change_id": "f9721281-d757-4691-9cbe-1b20c9018c53",
+      "node_type": "outcome",
+      "title": "VERIFY_WEB confirmed green at 3a51da5: 1067 passed, 0 failed, zero model-gated skips, exit 0. This discharges the Task 7 re-review's contingency — Task 7 is complete and approved unconditionally.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-14T23:30:59.853280-07:00",
+      "updated_at": "2026-09-14T23:30:59.853280-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"3a51da5\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -20637,6 +20670,39 @@
       "weight": 1.0,
       "rationale": "Gate-command gotcha observed while verifying Task 7",
       "created_at": "2026-09-14T22:09:37.916280-07:00"
+    },
+    {
+      "id": 975,
+      "from_node_id": 920,
+      "to_node_id": 922,
+      "from_change_id": "ce2e4c45-1c82-4d6d-82e7-0199b569c629",
+      "to_change_id": "a376bb0d-9f63-46fe-968c-2b3c3afc77f7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review fixes applied to Task 7",
+      "created_at": "2026-09-14T22:30:09.178076-07:00"
+    },
+    {
+      "id": 976,
+      "from_node_id": 877,
+      "to_node_id": 923,
+      "from_change_id": "0cd682bd-7e88-4303-875c-36f7649e5496",
+      "to_change_id": "eba823f8-07ab-47c8-bd56-a0a0206735d5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan execution: Task 8 shared scan setup + Result helpers",
+      "created_at": "2026-09-14T22:32:18.351061-07:00"
+    },
+    {
+      "id": 977,
+      "from_node_id": 922,
+      "to_node_id": 924,
+      "from_change_id": "a376bb0d-9f63-46fe-968c-2b3c3afc77f7",
+      "to_change_id": "f9721281-d757-4691-9cbe-1b20c9018c53",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Full web suite discharges the Task 7 approval contingency",
+      "created_at": "2026-09-14T23:30:59.866998-07:00"
     }
   ],
   "documents": [

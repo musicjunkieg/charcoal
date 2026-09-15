@@ -24,9 +24,12 @@ use tracing::{debug, error, info, warn};
 use crate::bluesky::client::PublicAtpClient;
 use crate::config::Config;
 use crate::db::Database;
+use crate::observability::cache_stats::CacheStats;
 use crate::scoring::behavioral::detect_pile_on_participants;
 use crate::scoring::threat::ThreatWeights;
+use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
+use crate::toxicity::ensemble::TwoStageToxicityScorer;
 use crate::toxicity::onnx::OnnxToxicityScorer;
 use crate::toxicity::traits::ToxicityScorer;
 
@@ -804,6 +807,190 @@ pub fn fingerprint_needs_rebuild_for_format(
     has_embedding && centroid_rows != json_clusters
 }
 
+/// Why the protected fingerprint must be rebuilt before this scan (#344 V2-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildReason {
+    /// No stored fingerprint at all.
+    Absent,
+    /// A stored fingerprint whose JSON would not parse.
+    Unreadable,
+    /// Older than `FINGERPRINT_MAX_AGE_DAYS` (#296).
+    Stale,
+    /// Embedding present but the centroid rows do not match the JSON (#297/#302).
+    Format,
+    /// The stored vectors were produced by a different embedding model — or by
+    /// one that was never recorded, which is the same thing for our purposes.
+    IncompatibleModel,
+}
+
+impl RebuildReason {
+    /// Only age/format rebuilds may fall back to the stored fingerprint when
+    /// the rebuild fails; incompatible vectors must never be scored against.
+    pub fn fallback_allowed(&self) -> bool {
+        matches!(self, RebuildReason::Stale | RebuildReason::Format)
+    }
+}
+
+/// Pure decision: `None` = the stored fingerprint is usable as-is.
+///
+/// `stored` is `(fingerprint_json, updated_at)`; `parsed_ok` says whether that
+/// JSON deserialized. Reasons are ordered by severity, so the returned reason
+/// is always the strongest one that applies — which matters because
+/// [`RebuildReason::fallback_allowed`] is read off it: an incompatible
+/// fingerprint that is ALSO stale must report `IncompatibleModel`, or a failed
+/// rebuild would be allowed to fall back onto vectors this binary cannot score
+/// against (R03/V2-04).
+pub fn rebuild_decision(
+    stored: Option<&(String, String)>,
+    parsed_ok: bool,
+    has_embedding: bool,
+    stored_model_id: Option<&str>,
+    centroid_rows: usize,
+    json_clusters: usize,
+    now: chrono::NaiveDateTime,
+) -> Option<RebuildReason> {
+    // No row at all: nothing to salvage, and nothing to fall back to.
+    let Some((_, updated_at)) = stored else {
+        return Some(RebuildReason::Absent);
+    };
+    if !parsed_ok {
+        return Some(RebuildReason::Unreadable);
+    }
+    // A keyword-only fingerprint (no embedding) has no vectors to be
+    // incompatible — model-less deployments must not rebuild-loop (#297).
+    if has_embedding && stored_model_id != Some(EMBEDDING_MODEL_ID) {
+        return Some(RebuildReason::IncompatibleModel);
+    }
+    if fingerprint_is_stale(updated_at, now) {
+        return Some(RebuildReason::Stale);
+    }
+    if fingerprint_needs_rebuild_for_format(has_embedding, centroid_rows, json_clusters) {
+        return Some(RebuildReason::Format);
+    }
+    None
+}
+
+/// The scoring stack a scan runs on, plus the cache counters it must persist.
+///
+/// Extracted from `run_scan` (#344 Task 8) because the nightly refresh needs
+/// exactly the same bundle; the counters travel with the scorers so nothing
+/// can build one and forget the other.
+pub(crate) struct ScanScorers {
+    pub scorer: TwoStageToxicityScorer,
+    pub onnx_stats: Arc<CacheStats>,
+    pub classifier_stats: Arc<CacheStats>,
+}
+
+/// Build the two-stage scorer over the shared ONNX models and the caches.
+///
+/// The classifier is required — `build_from_env` errors (and the caller fails
+/// loudly) if unconfigured; there is no silent ONNX-only fallback.
+pub(crate) fn build_scan_scorers(
+    models: &ScanModels,
+    db: &Arc<dyn Database>,
+) -> anyhow::Result<ScanScorers> {
+    // #343 Phase 1: stage-1 / clean-pass ONNX scores are cached by text hash
+    // across users. Hit/miss counts are persisted at the end of the scan.
+    let onnx_stats = Arc::new(CacheStats::default());
+    let primary_scorer: Box<dyn ToxicityScorer> =
+        Box::new(crate::toxicity::cached::CachedToxicityScorer::new(
+            Box::new(Arc::clone(&models.toxicity)),
+            Arc::clone(db),
+            crate::toxicity::onnx::ONNX_MODEL_ID,
+            Arc::clone(&onnx_stats),
+        ));
+
+    // Wrap in the two-stage scorer. ONNX runs as a clean-pass filter
+    // (< 0.10 = cleared); posts at or above the threshold are sent to the
+    // configured Stage-2 classifier (CHARCOAL_CLASSIFIER) for a binary verdict.
+    // #343 Phase 1: stage-2 verdicts are cached by (text hash, model, policy).
+    let classifier_stats = Arc::new(CacheStats::default());
+    let classifier: Arc<dyn crate::toxicity::classifier::ToxicityClassifier> =
+        Arc::new(crate::toxicity::cached_classifier::CachedClassifier::new(
+            crate::toxicity::classifier::build_from_env()?,
+            Arc::clone(db),
+            Arc::clone(&classifier_stats),
+        ));
+    info!(
+        backend = classifier.name(),
+        "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
+    );
+    // Scan-start banner metric so log aggregation can attribute which backend
+    // produced this scan's verdicts.
+    crate::observability::classifier_metrics::record_backend_selected(classifier.name());
+
+    // Concrete scorer (not boxed as `dyn`): the phased scan pipeline (#208)
+    // needs the `TwoStageToxicityScorer`'s inherent `classifier()` accessor and
+    // its `CleanPassScorer` impl, both of which a `dyn ToxicityScorer` erases.
+    Ok(ScanScorers {
+        scorer: TwoStageToxicityScorer::new(primary_scorer, classifier),
+        onnx_stats,
+        classifier_stats,
+    })
+}
+
+/// Persist both cache counters. Best-effort by construction: telemetry must
+/// never fail a run that has already done its work.
+pub(crate) async fn record_scan_cache_stats(db: &dyn Database, user_did: &str, s: &ScanScorers) {
+    if let Err(e) =
+        crate::observability::cache_stats::record_cache_stats(db, user_did, "onnx", &s.onnx_stats)
+            .await
+    {
+        warn!(error = %e, "could not record onnx cache stats");
+    }
+
+    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
+        db,
+        user_did,
+        "classifier",
+        &s.classifier_stats,
+    )
+    .await
+    {
+        warn!(error = %e, "could not record classifier cache stats");
+    }
+}
+
+/// The protected user's recent posts embedded for follower NLI pairing.
+///
+/// `Err` on fetch or embedding failure; `Ok(empty)` when the user has no
+/// posts. The full scan degrades on `Err` at its call site; the refresh does
+/// not (R05).
+pub(crate) async fn embed_protected_posts(
+    client: &PublicAtpClient,
+    embedder: &crate::topics::embeddings::SentenceEmbedder,
+    actor_handle: &str,
+) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+    let pp_texts: Vec<String> = crate::bluesky::posts::fetch_recent_posts(client, actor_handle, 50)
+        .await
+        .context("fetching the protected user's recent posts for NLI pairing")?
+        .iter()
+        .map(|p| p.text.clone())
+        .collect();
+    if pp_texts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let embeddings = embedder
+        .embed_batch(&pp_texts)
+        .await
+        .context("embedding the protected user's posts for NLI pairing")?;
+    Ok(pp_texts.into_iter().zip(embeddings).collect())
+}
+
+/// The accounts that participated in a pile-on against this user.
+pub(crate) async fn pile_on_dids(
+    db: &dyn Database,
+    user_did: &str,
+) -> anyhow::Result<HashSet<String>> {
+    let pile_on_refs = db.get_events_for_pile_on(user_did).await?;
+    Ok(detect_pile_on_participants(
+        &pile_on_refs
+            .iter()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
+            .collect::<Vec<_>>(),
+    ))
+}
+
 /// Write the pipeline's terminal status, fenced by the claim that owns the
 /// entry (#274).
 ///
@@ -1159,42 +1346,7 @@ async fn run_scan_inner(
     // optimisation, and a failed sweep must never abort a scan.
     crate::db::cache_retention::evict_stale_cache_best_effort(db.as_ref()).await;
 
-    // #343 Phase 1: stage-1 / clean-pass ONNX scores are cached by text hash
-    // across users. Hit/miss counts are persisted at the end of the scan.
-    let onnx_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());
-    let primary_scorer: Box<dyn ToxicityScorer> =
-        Box::new(crate::toxicity::cached::CachedToxicityScorer::new(
-            Box::new(Arc::clone(&models.toxicity)),
-            Arc::clone(&db),
-            crate::toxicity::onnx::ONNX_MODEL_ID,
-            Arc::clone(&onnx_cache_stats),
-        ));
-
-    // Wrap in the two-stage scorer. ONNX runs as a clean-pass filter
-    // (< 0.10 = cleared); posts at or above the threshold are sent to the
-    // configured Stage-2 classifier (CHARCOAL_CLASSIFIER) for a binary verdict.
-    // The classifier is required — build_from_env errors (and the scan fails
-    // loudly) if unconfigured; there is no silent ONNX-only fallback.
-    // #343 Phase 1: stage-2 verdicts are cached by (text hash, model, policy).
-    let classifier_cache_stats = Arc::new(crate::observability::cache_stats::CacheStats::default());
-    let classifier: Arc<dyn crate::toxicity::classifier::ToxicityClassifier> =
-        Arc::new(crate::toxicity::cached_classifier::CachedClassifier::new(
-            crate::toxicity::classifier::build_from_env()?,
-            Arc::clone(&db),
-            Arc::clone(&classifier_cache_stats),
-        ));
-    info!(
-        backend = classifier.name(),
-        "Stage-2 toxicity classifier loaded — two-stage scoring enabled"
-    );
-    // Scan-start banner metric so log aggregation can attribute which backend
-    // produced this scan's verdicts.
-    crate::observability::classifier_metrics::record_backend_selected(classifier.name());
-
-    // Concrete scorer (not boxed as `dyn`): the phased scan pipeline (#208)
-    // needs the `TwoStageToxicityScorer`'s inherent `classifier()` accessor and
-    // its `CleanPassScorer` impl, both of which a `dyn ToxicityScorer` erases.
-    let scorer = crate::toxicity::ensemble::TwoStageToxicityScorer::new(primary_scorer, classifier);
+    let scorers = build_scan_scorers(&models, &db)?;
 
     // Phase 2: embedding model — loaded once at boot, shared via Arc::clone.
     //
@@ -1252,6 +1404,10 @@ async fn run_scan_inner(
     let stored = db.get_fingerprint(user_did).await?;
     let mut protected_embedding = db.get_embedding(user_did).await?;
     let mut protected_centroid_rows = db.get_topic_centroids(user_did).await?;
+    // Which model produced the stored vectors (#344 V2-04). A fourth read of
+    // the same non-transactional set, for the same reason as the other three:
+    // one coherent decision beats a torn one, and a rebuild self-heals.
+    let stored_model_id = db.fingerprint_embedding_model(user_did).await?;
 
     // An unreadable stored fingerprint is treated as absent rather than
     // aborting the scan: a rebuild rewrites it, so the row self-heals. (The
@@ -1267,26 +1423,26 @@ async fn run_scan_inner(
                 }
             });
 
-    // Rebuild when absent/unreadable, when older than 14 days (#296), or when
-    // the stored generation predates the clustered format (#297).
-    let needs_rebuild = match (&stored, &stored_fingerprint) {
-        (Some((_, _, updated_at)), Some(parsed)) => {
-            fingerprint_is_stale(updated_at, chrono::Utc::now().naive_utc())
-                || fingerprint_needs_rebuild_for_format(
-                    protected_embedding.is_some(),
-                    protected_centroid_rows.len(),
-                    parsed.clusters.len(),
-                )
-        }
-        _ => true,
-    };
+    // Rebuild when absent/unreadable, when the stored vectors came from
+    // another embedding model (#344 V2-04), when older than 14 days (#296), or
+    // when the stored generation predates the clustered format (#297).
+    let decision_input = stored
+        .as_ref()
+        .map(|(json, _, updated_at)| (json.clone(), updated_at.clone()));
+    let reason = rebuild_decision(
+        decision_input.as_ref(),
+        stored_fingerprint.is_some(),
+        protected_embedding.is_some(),
+        stored_model_id.as_deref(),
+        protected_centroid_rows.len(),
+        stored_fingerprint
+            .as_ref()
+            .map_or(0, |parsed| parsed.clusters.len()),
+        chrono::Utc::now().naive_utc(),
+    );
 
-    let fingerprint: TopicFingerprint = if !needs_rebuild {
-        stored_fingerprint.expect("a fresh, well-formed fingerprint was just parsed")
-    } else {
-        // Absent or stale: (re)build. On a stale-rebuild failure fall
-        // back to the stale fingerprint rather than failing the scan —
-        // stale data beats no scan.
+    let fingerprint: TopicFingerprint = if let Some(reason) = reason {
+        // Absent, stale, mis-formatted or model-incompatible: (re)build.
         let is_rebuild = stored_fingerprint.is_some();
         set_progress(
             &scan_manager,
@@ -1294,8 +1450,8 @@ async fn run_scan_inner(
             claim_id,
             WebScanPhase::Fingerprint,
             if is_rebuild {
-                // Covers both triggers — age (#296) and stored-format
-                // upgrade (#297) — so the copy no longer claims a reason.
+                // Covers every trigger — age (#296), stored-format upgrade
+                // (#297), model change (#344) — so the copy claims no reason.
                 "Refreshing your topic fingerprint…"
             } else {
                 "Building your topic fingerprint from recent posts…"
@@ -1319,12 +1475,27 @@ async fn run_scan_inner(
                 protected_centroid_rows = db.get_topic_centroids(user_did).await?;
                 serde_json::from_str(&json)?
             }
-            Err(e) if is_rebuild => {
-                warn!(error = %e, "Fingerprint refresh failed; using stale fingerprint");
+            Err(e) if reason.fallback_allowed() && is_rebuild => {
+                warn!(error = %e, ?reason, "Fingerprint refresh failed; using the stored (compatible) fingerprint");
                 stored_fingerprint.expect("checked is_rebuild")
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                // Absent, unreadable, or built by another embedding model: there is
+                // nothing safe to fall back to. Abort before any account is scored
+                // (V2-04) — a score against incompatible vectors would be stamped
+                // current and hide the real state until it expired.
+                // Inside run_scan_inner: this Err reaches run_scan_with's
+                // single scheduling site (V5-02) — the obligation is kept and
+                // the hourly retry is written before the row is finished.
+                return Err(e).with_context(|| {
+                    format!(
+                        "fingerprint rebuild required ({reason:?}) and failed — scan aborted before scoring"
+                    )
+                });
+            }
         }
+    } else {
+        stored_fingerprint.expect("a fresh, well-formed fingerprint was just parsed")
     };
 
     // Scoring wants bare vectors; the row's post_count is fingerprint metadata.
@@ -1336,29 +1507,25 @@ async fn run_scan_inner(
     // Build per-post embeddings for follower NLI inferred pair matching.
     // Each protected post gets its own embedding so followers' posts can be
     // matched to the closest protected post for NLI pair scoring.
+    //
+    // A full scan degrades here on purpose: `None` and `Some(vec![])` both mean
+    // "no inferred pairs" to `score_from_sample`, so warning and carrying on is
+    // what this path has always done — it just says so now instead of turning a
+    // fetch failure into an empty list (R05).
     let protected_posts_with_embeddings: Option<Vec<(String, Vec<f64>)>> =
-        if embedder.is_some() && nli_scorer.is_some() {
-            let pp_texts: Vec<String> =
-                crate::bluesky::posts::fetch_recent_posts(&client, actor_handle, 50)
-                    .await
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|p| p.text.clone())
-                    .collect();
-
-            if let Some(ref emb) = embedder {
-                match emb.embed_batch(&pp_texts).await {
-                    Ok(embeddings) => Some(pp_texts.into_iter().zip(embeddings).collect()),
-                    Err(e) => {
-                        warn!(error = %e, "Failed to embed protected posts for NLI pairs");
-                        None
-                    }
+        match (&embedder, &nli_scorer) {
+            (Some(emb), Some(_)) => match embed_protected_posts(&client, emb, actor_handle).await {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    warn!(
+                        error = %format!("{e:#}"),
+                        "protected-post embeddings unavailable; \
+                         followers score without inferred pairs"
+                    );
+                    None
                 }
-            } else {
-                None
-            }
-        } else {
-            None
+            },
+            _ => None,
         };
 
     // Phase 4: fetch amplification events from Constellation
@@ -1509,13 +1676,7 @@ async fn run_scan_inner(
     .await;
 
     let median_engagement = db.get_median_engagement(user_did).await?;
-    let pile_on_refs = db.get_events_for_pile_on(user_did).await?;
-    let pile_on_dids: HashSet<String> = detect_pile_on_participants(
-        &pile_on_refs
-            .iter()
-            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str()))
-            .collect::<Vec<_>>(),
-    );
+    let pile_on_dids = pile_on_dids(db.as_ref(), user_did).await?;
 
     // Phase 5b: classify social graph distance for all amplifiers
     let graph_distances = if !amplifier_did_set.is_empty() {
@@ -1546,7 +1707,7 @@ async fn run_scan_inner(
     let weights = ThreatWeights::default();
     let result = crate::pipeline::amplification::run(
         &client,
-        Some(&scorer),
+        Some(&scorers.scorer),
         &db,
         user_did,
         &fingerprint,
@@ -1571,27 +1732,7 @@ async fn run_scan_inner(
 
     record_observed_rate_limit(db.as_ref(), user_did, client.observed_rate_limit()).await;
 
-    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
-        db.as_ref(),
-        user_did,
-        "onnx",
-        &onnx_cache_stats,
-    )
-    .await
-    {
-        tracing::warn!(error = %e, "could not record onnx cache stats");
-    }
-
-    if let Err(e) = crate::observability::cache_stats::record_cache_stats(
-        db.as_ref(),
-        user_did,
-        "classifier",
-        &classifier_cache_stats,
-    )
-    .await
-    {
-        tracing::warn!(error = %e, "could not record classifier cache stats");
-    }
+    record_scan_cache_stats(db.as_ref(), user_did, &scorers).await;
 
     // Completion is CLASSIFIED, never inferred from `Ok` (V2-05): the pipeline
     // returns `Ok` for a cost-capped run too. The `scan_phase` marker says
@@ -2656,6 +2797,96 @@ mod fingerprint_staleness_tests {
         assert!(fingerprint_needs_rebuild_for_format(true, 2, 3));
         // Healthy clustered generation: no rebuild.
         assert!(!fingerprint_needs_rebuild_for_format(true, 3, 3));
+    }
+
+    #[test]
+    fn rebuild_decision_orders_reasons_and_flags_model_incompatibility() {
+        let now = chrono::Utc::now().naive_utc();
+        let fresh = (now - chrono::Duration::days(1))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        let old = (now - chrono::Duration::days(20))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        let stored = |t: &str| Some(("{}".to_string(), t.to_string()));
+        assert_eq!(
+            rebuild_decision(None, false, false, None, 0, 0, now),
+            Some(RebuildReason::Absent)
+        );
+        assert_eq!(
+            rebuild_decision(
+                stored(&fresh).as_ref(),
+                false,
+                true,
+                Some(EMBEDDING_MODEL_ID),
+                3,
+                3,
+                now
+            ),
+            Some(RebuildReason::Unreadable)
+        );
+        // Same dimensions, same cluster count, different model: incompatible.
+        assert_eq!(
+            rebuild_decision(
+                stored(&fresh).as_ref(),
+                true,
+                true,
+                Some("other-model"),
+                3,
+                3,
+                now
+            ),
+            Some(RebuildReason::IncompatibleModel)
+        );
+        // A vector with NO recorded model is incompatible too — never assume.
+        assert_eq!(
+            rebuild_decision(stored(&fresh).as_ref(), true, true, None, 3, 3, now),
+            Some(RebuildReason::IncompatibleModel)
+        );
+        assert_eq!(
+            rebuild_decision(
+                stored(&old).as_ref(),
+                true,
+                true,
+                Some(EMBEDDING_MODEL_ID),
+                3,
+                3,
+                now
+            ),
+            Some(RebuildReason::Stale)
+        );
+        assert_eq!(
+            rebuild_decision(
+                stored(&fresh).as_ref(),
+                true,
+                true,
+                Some(EMBEDDING_MODEL_ID),
+                0,
+                3,
+                now
+            ),
+            Some(RebuildReason::Format)
+        );
+        assert_eq!(
+            rebuild_decision(
+                stored(&fresh).as_ref(),
+                true,
+                true,
+                Some(EMBEDDING_MODEL_ID),
+                3,
+                3,
+                now
+            ),
+            None
+        );
+        // Keyword-only fingerprints have no vectors to be incompatible.
+        assert_eq!(
+            rebuild_decision(stored(&fresh).as_ref(), true, false, None, 0, 3, now),
+            None
+        );
+        assert!(RebuildReason::Stale.fallback_allowed());
+        assert!(!RebuildReason::IncompatibleModel.fallback_allowed());
+        assert!(!RebuildReason::Absent.fallback_allowed());
     }
 }
 

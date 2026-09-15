@@ -56,6 +56,39 @@ fn tox_suffix(quote_toxicity: Option<f64>, assessable: bool) -> String {
     }
 }
 
+/// Deduplicated (original, amplifier) text pairs from this user's stored
+/// events for `amplifier_did`.
+///
+/// `Ok(empty)` = the lookup succeeded and there are no usable pairs; `Err` =
+/// the lookup failed. Keeping those two answers distinct is the whole point
+/// (#344 R05): the full scan below chooses to degrade on `Err` — the account
+/// still scores on the follower path — but the nightly refresh must not,
+/// because a score written from silently-missing context would be stamped
+/// current and hide the real state until it expired.
+pub async fn direct_pairs_for(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<Vec<(String, String)>> {
+    let db_events = db
+        .get_events_by_amplifier(user_did, amplifier_did)
+        .await
+        .with_context(|| format!("loading stored events for amplifier {amplifier_did}"))?;
+    // The same event can be recorded by more than one scan, so deduplicate
+    // across them rather than scoring the same pair twice.
+    let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for ev in db_events {
+        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text) {
+            if !orig.is_empty() && !amp.is_empty() && seen_pairs.insert((orig.clone(), amp.clone()))
+            {
+                pairs.push((orig, amp));
+            }
+        }
+    }
+    Ok(pairs)
+}
+
 /// Run the amplification detection pipeline.
 ///
 /// Processes pre-fetched amplification events (from Constellation backlinks),
@@ -340,34 +373,20 @@ pub async fn run(
                 continue;
             }
 
-            // Gather direct text pairs from stored events, deduplicating
-            // across scans (the same event can be recorded multiple times)
-            let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
-            let mut pairs: Vec<(String, String)> = Vec::new();
-            match db.get_events_by_amplifier(user_did, did).await {
-                Ok(db_events) => {
-                    for ev in db_events {
-                        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
-                        {
-                            if !orig.is_empty()
-                                && !amp.is_empty()
-                                && seen_pairs.insert((orig.clone(), amp.clone()))
-                            {
-                                pairs.push((orig, amp));
-                            }
-                        }
-                    }
-                }
-                // Continue on error (matching prior behaviour) but make the
-                // dropped pairs visible instead of swallowing the failure.
+            // A full scan degrades here on purpose (unchanged behaviour): the
+            // account still scores on the follower path. The refresh job
+            // (web::refresh) does NOT — see R05 and `direct_pairs_for`.
+            let pairs = match direct_pairs_for(db, user_did, did).await {
+                Ok(p) => p,
                 Err(e) => {
                     warn!(
                         amplifier_did = %did,
-                        error = %e,
-                        "Failed to load stored events for amplifier; direct NLI pairs dropped"
+                        error = %format!("{e:#}"),
+                        "direct NLI pairs dropped for this scan"
                     );
+                    Vec::new()
                 }
-            }
+            };
 
             if seen_dids.insert(did.clone()) {
                 candidates.push(CandidateInput {
