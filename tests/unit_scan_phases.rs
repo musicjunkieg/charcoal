@@ -3962,6 +3962,12 @@ fn provenance_distinguishes_missing_foreign_and_sentinel() {
 ///
 /// Driven through the real `run_phased_scan` — no models: the candidate-less
 /// paths use `EmptyDeps`, whose gather seams panic if reached.
+///
+/// `web`-gated because the completion classifiers these assert against
+/// (`scan_job::classify_full_scan`, `refresh_scan::classify_refresh`) live in
+/// the web layer; the ownership behaviour itself is backend-agnostic and
+/// `VERIFY_WEB` is what runs this module.
+#[cfg(feature = "web")]
 mod ownership_tests {
     use std::sync::Arc;
 
