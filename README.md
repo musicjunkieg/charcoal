@@ -277,8 +277,17 @@ binary recognises. So a mismatched value means every Stage-2 verdict is foreign
 evidence: every account is re-gathered once and then skipped, and no scores are
 written. To make that cheap to find rather than expensive to discover:
 
-- every scan **probes the endpoint once before it gathers anything** and
-  refuses to start, naming both values and this variable;
+- **the web scan paths probe the endpoint before they gather anything** and
+  refuse to start, naming both values and this variable. That is a scan
+  started from the dashboard (`src/web/scan_job.rs`) and the nightly refresh
+  job (`src/web/refresh_scan.rs`, which probes whenever it actually has work
+  to do — candidates due, or its own resumable staging to finish);
+- **the CLI does not probe.** `charcoal scan` and `charcoal sweep`
+  (`src/main.rs`) call the pipelines directly, with no probe in front of them.
+  On those two commands a wrong value still costs what the probe exists to
+  prevent: a full gather — hours of Bluesky fetching — followed by every
+  account being skipped and no scores written. Check the variable by hand
+  before a long CLI run;
 - if a scan is already running when the endpoint changes, the batch mapper logs
   one error per batch (not per post) saying the same thing.
 

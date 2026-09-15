@@ -21,6 +21,11 @@ and replaced by the functional test in §6 — do not reinstate it.
 **Everything below is read from the database.** Railway logs are not part of
 the pass/fail; they are only ever corroboration.
 
+**If this deploy looks wrong and you want to undo it, go to §2b first.**
+Redeploying the previous binary is *not* a rollback here — on Postgres it boots
+green and then fails every score write two hours later. §2b explains why and
+gives you the three things you can actually do instead.
+
 ## Vocabulary (read this once)
 
 - **Scoring revision** — the string stamped on every score row. It is
@@ -97,6 +102,21 @@ railway variables -s charcoal-web -e production --set CHARCOAL_COPE_B_POLICY_VER
 
 If the endpoint's *policy itself* changed and not just its label, also do §0.2.
 
+**Setting it correctly still throws the Stage-2 verdict cache away — once, and
+unavoidably.** The classifier cache is keyed on the classifier's `model_id`
+*and* its `policy_version` (`src/toxicity/cached_classifier.rs:69-73` on the
+read, `:116` on the write). On this branch the RunPod client reports
+`cope_b_expected_policy()` as that `policy_version`
+(`src/toxicity/runpod_cope_b.rs:663-670`); before this branch it reported the
+literal `"policy-unknown"` (same method on `staging`). So every verdict already
+in the cache is filed under `policy-unknown`, no read will ever match it again,
+and every text has to be classified afresh. **There is no value you can pick
+that avoids this** — keeping `policy-unknown` is precisely what the probe above
+now refuses to start with. Nothing is deleted: the orphaned rows simply age out
+after 90 days (`SCORE_RETENTION`, `src/db/cache_retention.rs:25`). What it
+costs on deploy day is in §2 — read that before you deploy, because it lands in
+the same window as the re-scoring.
+
 ### 0.2 `SCORING_GENERATION` — do you need to bump it?
 
 `SCORING_GENERATION` is a constant in `src/scoring/generation.rs`, not a knob.
@@ -165,6 +185,12 @@ at; and the moment `account_scores` is large (tens of millions of rows) this
 step becomes a maintenance window, not a deploy step — at which point the
 index creation should move to `CREATE INDEX CONCURRENTLY` outside the
 transaction. Nothing in this deploy needs that yet.
+
+A migration that *fails* is the good case, not the bad one: the transaction
+rolls back, boot fails, and the old container keeps serving the unmigrated
+database with nothing to undo. §2b spells that out — along with why redeploying
+the old binary *after* a successful migration is a different and much worse
+situation.
 
 ### 0.5 Rolling deploys and the revision
 
@@ -240,6 +266,249 @@ SELECT q.user_did, q.status FROM scan_queue q
   skips or whose skip count could not be verified — not only clean ones, so the
   median is slightly more pessimistic than it used to be. That is deliberate: a
   scan that took 90 minutes and skipped three accounts still took 90 minutes.
+
+### 2a. Deploy day is the most expensive day this feature has
+
+Two costs land in the same window, and they multiply rather than overlap.
+
+1. **Every High/Elevated row in the database is re-scored at once.** The first
+   ticks (§3) make every user with scores due, 25 at a time, and each refresh
+   re-scores that user's whole candidate set. That is the feature working; §0.3
+   told you the number (`candidates`, summed across users).
+
+2. **None of that work can be served from the Stage-2 verdict cache.** The
+   cache is keyed by the classifier's `policy_version`, and this deploy changes
+   what that string is — see §0.1. Every pre-existing cached verdict is now
+   filed under a key nothing reads, so every one of those re-scores is a live
+   RunPod (or Zentropi) call rather than a table read.
+
+So the classifier bill on deploy day is not "the usual nightly refresh". It is
+a full re-score of every candidate with a cold cache, all in the first hours.
+Know the number before you deploy, not after the invoice.
+
+If the spend is the thing that has gone wrong, the brake is **§2b Option 1** —
+turn the nightly job off. It stops new work being claimed; it does not undo
+anything and does not bring hidden scores back.
+
+---
+
+## 2b. Rollback — read this before you undo anything
+
+### The instinctive move is the harmful one
+
+> **Redeploying the previous binary is not a rollback on Postgres.** The old
+> container boots green, passes its health check, serves reads normally — and
+> then fails *every score write* at the end of the next scan, about two hours
+> in, after the user has waited for the whole gather.
+
+Three facts produce that, and they are worth reading rather than just obeying:
+
+1. Migration v18 makes `account_scores.valid_until` `NOT NULL` **with no
+   default**, and drops the default off `scoring_generation`
+   (`migrations/postgres/0018_score_expiry.sql:32-37`). Its header comment says
+   why, in as many words: *"a writer that forgets the stamp must fail, not
+   write 'legacy'."*
+2. **The pre-v18 binary is exactly that writer.** Its `upsert_account_score`
+   INSERT names neither column — check it yourself with
+   `git show staging:src/db/postgres.rs` and read the column list around line
+   452. Every row it tries to write violates the not-null constraint.
+3. **Nothing stops the old binary starting on the newer schema.** The migration
+   runner iterates its *own* embedded list, skips anything above its max
+   version, and treats an already-recorded version as done
+   (`src/db/postgres.rs:391-404`). An old binary has no v18 in its list, so it
+   never considers it at all — it returns `Ok` and boots.
+
+There is no guard, no version check, and no error at startup. The failure is
+silent until the first score write.
+
+**This is Postgres only**, which means production and staging. SQLite keeps
+both defaults (`src/db/schema.rs:633-634` — `scoring_generation` still
+`DEFAULT 'legacy'`, `valid_until` still nullable), so a local SQLite checkout
+will not reproduce it. Do not take a clean local rollback as evidence.
+
+### The safe case: a migration that *fails* needs no rollback
+
+Migrations 2 and up run inside a single transaction
+(`src/db/postgres.rs:411-417`). If v18 raises, the transaction rolls back,
+`db::open()` returns the error, boot fails, and Railway keeps the previous
+container serving the **unmigrated** database. Nothing is half-applied.
+
+Confirm it with:
+
+```bash
+railway run -s Postgres -e production -- sh -c 'psql "$DATABASE_PUBLIC_URL" -tAc "SELECT MAX(version) FROM schema_version"'
+```
+
+**Correct reading:** `17`. The old schema is intact, the old binary is
+consistent with it, and there is nothing to undo. Fix the migration and deploy
+again.
+
+If that returns `18`, the migration committed and you are in the situation the
+rest of this section is about.
+
+### Reading the current scoring revision (you will need it, and nothing prints it)
+
+`scoring_revision()` (`src/scoring/generation.rs:70-72`) is
+`SCORING_GENERATION` joined with the three model ids, e.g.
+`2026-09-13|onnx=detoxify-unbiased-toxic-roberta-quantized|emb=all-MiniLM-L6-v2|nli=nli-deberta-v3-xsmall-fp32`.
+
+**There is no `charcoal` subcommand that prints it** (check `enum Commands` in
+`src/main.rs`), and no routine log line carries it. The single log that
+mentions it is a `warn!` on a staged-blob generation mismatch
+(`src/pipeline/scan_phases/finalize.rs:109-115`) — you cannot summon that on
+demand. So read it off the database, which is the authoritative copy anyway:
+
+```sql
+SELECT scoring_generation, COUNT(*)
+  FROM account_scores
+ GROUP BY 1
+ ORDER BY 2 DESC;
+```
+
+**Correct reading, any time after the new binary has written one score:** two
+rows — `legacy` with the bulk of them, and one value of the `…|onnx=…|emb=…`
+shape. That second value is the current revision. Copy it verbatim, pipes and
+all.
+
+If no scan has run yet under the new binary there is no row to read, and the
+running system cannot tell you. Compose it by hand from the deployed commit:
+`SCORING_GENERATION` (`src/scoring/generation.rs`), `ONNX_MODEL_ID`
+(`src/toxicity/onnx.rs`), `EMBEDDING_MODEL_ID` (`src/topics/embeddings.rs`),
+`NLI_MODEL_ID` (`src/scoring/nli.rs`), joined exactly as `compose_revision`
+does. Getting it wrong is not destructive — it just hides the rows again — but
+check it against a real row as soon as one exists.
+
+### Option 1 — turn the nightly refresh off (preferred; reversible; safe)
+
+**Use it when:** the refresh stampede is the problem — the classifier bill,
+a saturated endpoint, a queue that will not drain. §2a is the stampede.
+
+```bash
+railway variables -s charcoal-web -e production --set CHARCOAL_REFRESH_INTERVAL_HOURS=0
+```
+
+`0` or `off` disables the tick; unset means 24 hours
+(`src/web/refresh.rs:19-46`). This triggers a redeploy — that is fine and is
+what you want, since the knob is read at boot.
+
+**Correct result:** once the new container is healthy, the refresh tick stops
+claiming users. Check that nothing new is being queued, twice, a minute apart:
+
+```sql
+SELECT kind, status, COUNT(*) FROM scan_queue GROUP BY kind, status;
+```
+
+**Correct reading:** the `refresh` / `queued` count is not larger on the second
+reading than the first. Refreshes that were already running are *not* killed;
+they finish normally.
+
+**What this does not do — say it out loud before someone assumes otherwise:**
+it brings nothing back. With refreshes off, every hidden row stays hidden and
+nothing re-scores it on its own. A user gets their tier list back only by
+running a full scan themselves. This is a brake on new work, not a rollback.
+If you leave it off, put it in the deploy notes with a date and an owner — §7
+item 6 is the same warning from the other direction.
+
+### Option 2 — un-hide the existing scores in place (last resort)
+
+**Use it when:** the empty dashboards are themselves the user-visible outage
+and you cannot wait for refreshes to repopulate them. This is the only option
+that brings tier lists back without re-scoring anything.
+
+**Understand what you are doing first.** This is a deliberate lie to the
+freshness system. The scores are not re-computed; you are stamping old numbers
+with the current revision so the fresh predicate stops hiding them. They were
+produced by the previous formula and the previous models, and the entire point
+of this feature is that such scores should *not* be presented as current. You
+are choosing a known-wrong number over a blank page, on purpose, temporarily.
+
+Get the current revision string (previous section), then:
+
+```sql
+UPDATE account_scores
+   SET scoring_generation = '<the current revision, verbatim>',
+       valid_until = NOW() + CASE scoring_confidence
+                               WHEN 'high' THEN INTERVAL '14 days'
+                               WHEN 'low'  THEN INTERVAL '3 days'
+                               ELSE INTERVAL '7 days'
+                             END
+ WHERE scoring_generation = 'legacy';
+```
+
+The `CASE` mirrors what a real score write uses — `staleness_days_for_label`
+(`src/db/models.rs:93-127`): high 14 days, low 3 days, everything else
+including NULL 7 days — so these rows expire on the schedule they would have
+had rather than all at once. **Keep the `WHERE` clause**: it leaves rows the
+new binary genuinely wrote alone.
+
+**Correct result:**
+
+```sql
+SELECT scoring_generation, COUNT(*) FROM account_scores GROUP BY 1;
+```
+
+one row, the current revision, with a count equal to the `rows_total` you wrote
+down in §0.3 — and `GET /api/status` showing `tier_counts.expired` back to `0`
+with the pre-deploy tier counts restored.
+
+**Then close the loop.** Leave the refresh job **on** so High/Elevated accounts
+get genuinely re-scored within their window, or ask each affected user to run a
+full scan. Write down what you did, to which rows, and when — otherwise the
+next person reading `scoring_generation` will believe those numbers are fresh.
+
+### Option 3 — actually roll the binary back (most dangerous)
+
+**Use it only when** the new binary is broken in a way Options 1 and 2 do not
+contain. **Take a database backup first.** The schema must be reversed
+*before* the old container starts, and both halves have to hold.
+
+```sql
+ALTER TABLE account_scores ALTER COLUMN valid_until DROP NOT NULL;
+ALTER TABLE account_scores ALTER COLUMN scoring_generation SET DEFAULT 'legacy';
+DELETE FROM schema_version WHERE version = 18;
+```
+
+What each line is for:
+
+- **Line 1** is the one that stops the old binary's score writes from failing.
+  It is the not-null constraint that breaks it, not the column's existence.
+- **Line 2** restores the default v18 dropped, so the old INSERT — which names
+  neither column — has something to write into `scoring_generation`.
+- **Line 3** removes v18's self-recorded version row. Without it, a later
+  redeploy of the *new* binary sees version 18 already recorded, skips the
+  migration (`src/db/postgres.rs:396-404`), and you are left running the new
+  code against a `valid_until` that is nullable and a `scoring_generation` that
+  silently defaults to `legacy` — exactly the state v18 exists to prevent.
+
+**Do not drop the columns.** They are ignored by the old binary and re-used by
+the new one. The contents of `valid_until` cannot be recovered except by
+re-scoring everything.
+
+**Correct result:**
+
+```sql
+SELECT MAX(version) FROM schema_version;
+SELECT column_name, is_nullable, column_default
+  FROM information_schema.columns
+ WHERE table_name = 'account_scores'
+   AND column_name IN ('valid_until', 'scoring_generation');
+```
+
+**Correct reading:** max version `17`; `valid_until` with `is_nullable = YES`;
+`scoring_generation` with `column_default = 'legacy'::text`. Only then redeploy
+the previous image.
+
+Afterwards the old binary writes rows with `scoring_generation = 'legacy'` and
+`valid_until = NULL` — which is exactly the shape v18 backfills when you
+eventually roll forward again.
+
+**What this does not reverse, deliberately:** everything else v18 added.
+`scan_queue.kind` / `full_requested_at` / `completion`, `users.next_refresh_at`
+/ `refreshed_generation` / `refresh_attempted_generation`,
+`topic_fingerprint.embedding_model_id`, the `scan_state.last_full_scan_finished_at`
+backfill and the `idx_account_scores_user_score` index all stay. They are
+purely additive, the old binary ignores them, and removing them would only
+create work for the roll-forward. Leave them.
 
 ---
 

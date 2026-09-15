@@ -10218,6 +10218,17 @@
       "created_at": "2026-09-15T14:32:53.294893-07:00",
       "updated_at": "2026-09-15T14:32:53.294893-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"42774ad\",\"confidence\":95}"
+    },
+    {
+      "id": 939,
+      "change_id": "1fb22bfb-aff7-4307-9e71-8540f41e2211",
+      "node_type": "outcome",
+      "title": "Task 10 complete: runbook docs/runbooks/343-phase2-expiry-refresh.md (837 lines, incl. the Postgres index plans, the CHARCOAL_COPE_B_POLICY_VERSION pre-deploy check as step 0.1, the SCORING_GENERATION bump procedure, post-deploy expectations and known gaps), CHANGELOG, README, .env.example and the spec amendment — all swept into 42774ad by the controller's concurrent commit — plus e175904 with proofreading corrections found by re-checking docs against source. FOUND A REAL DOC BUG: README's threat-tier table said High starts at 25 while ThreatTier::from_score has long used 35. Final gates: VERIFY_WEB 1116/0/0-SKIP, VERIFY_PG 845/0 clean first try, clippy x3 + fmt clean. #344 left open per plan. All ten plan tasks are now complete.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-15T16:15:51.118872-07:00",
+      "updated_at": "2026-09-15T16:15:51.118872-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"e175904\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -21033,6 +21044,17 @@
       "weight": 1.0,
       "rationale": "Process error observed during the Task 4 fix wave",
       "created_at": "2026-09-15T14:32:57.279379-07:00"
+    },
+    {
+      "id": 994,
+      "from_node_id": 937,
+      "to_node_id": 939,
+      "from_change_id": "a3ac48c8-d0cb-4772-9b58-c729c86e3744",
+      "to_change_id": "1fb22bfb-aff7-4307-9e71-8540f41e2211",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 10 implementation outcome",
+      "created_at": "2026-09-15T16:15:54.249161-07:00"
     }
   ],
   "documents": [

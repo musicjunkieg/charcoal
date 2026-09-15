@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e17590471055d41837b9d022b0380d915491969c",
+    "short_hash": "e175904",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T14:36:04-07:00",
+    "message": "docs(344): correct the High tier floor and tighten the runbook\n\nCorrections found while proofreading Task 10 against source:\n\n- README \"Threat tiers\" said High starts at 25. ThreatTier::from_score\n  (src/db/models.rs:256) has used 35 for a long time, with Elevated\n  running 15-34. The table has been wrong, not the code.\n- Runbook 0.3 counted the pre-deploy top tiers at the same wrong\n  boundary. It now records the refresh candidate count by SCORE\n  (threat_score >= ThreatTier::ELEVATED_MIN, 15.0 — which is how\n  list_refresh_candidates selects, deliberately) alongside the stored\n  tier strings, which is how GET /api/status buckets, so the two can be\n  reconciled without assuming they agree.\n- Runbook 5: railway variables --set redeploys, and the ceiling is only\n  read at process start — say to wait for that deploy before forcing the\n  tick, or the tick runs under the old ceiling.\n- Runbook 6(b): DELETE FROM account_feed_snapshots empties the cache for\n  every user; marked staging-only.\n- Markdown: a fenced block inside a bullet was splitting the list.\n\nRefs #344.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "42774ad0b21af9f131b1d730729e6e4fbcce5f36",
     "short_hash": "42774ad",
     "author": "Bryan Guffey",
