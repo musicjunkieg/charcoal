@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ce8ceaf820ff71153d83b10654d55fbe3aa8b4b0",
+    "short_hash": "ce8ceaf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T21:17:47-07:00",
+    "message": "feat(344): list_refresh_candidates — High/Elevated rows whose expiry is due\n\nThe complement of the fresh predicate: a row is a refresh candidate when\nits valid_until falls within the horizon, is already past, is NULL, or is\nmalformed, or when its scoring_generation is not the current revision.\nCOALESCE(..., 1) on SQLite makes NULL and unparseable expiry eligible, so\na row can never become permanently invisible by being unreadable.\n\nThreatTier::ELEVATED_MIN is the score floor, shared with from_score so the\nquery and the tier mapping cannot drift. Ordering is by score descending\nso a bounded refresh scores the most dangerous accounts first.\n\nThe SQLite plan is asserted, not assumed:\n  SEARCH account_scores USING INDEX idx_account_scores_user_score\n      (user_did=? AND threat_score>?)\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 10
+  },
+  {
     "hash": "a58e310097d4ca6ed4ce71b0decbaea3444da933",
     "short_hash": "a58e310",
     "author": "Bryan Guffey",

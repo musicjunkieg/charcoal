@@ -3,6 +3,7 @@
 // expired (including NULL/malformed expiry, R11), or stamped with an older
 // generation. Most dangerous first.
 
+use charcoal::db::models::ThreatTier;
 use charcoal::db::queries::list_refresh_candidates;
 use charcoal::db::schema::create_tables;
 use charcoal::scoring::generation::{scoring_revision, LEGACY_GENERATION};
@@ -30,6 +31,10 @@ fn insert(
     .unwrap();
 }
 
+/// `{n:+}` renders the sign for both directions — the same spelling the
+/// production modifier in `list_refresh_candidates` now uses. This helper
+/// having had it all along is why the production `format!("+{n} days")`
+/// escaped notice: the fixtures were correct, the query was not.
 fn days(n: i64) -> String {
     format!("datetime('now', '{n:+} days')")
 }
@@ -193,7 +198,6 @@ fn horizon_zero_means_only_already_expired_or_old_generation() {
 
 #[test]
 fn elevated_floor_matches_from_score() {
-    use charcoal::db::models::ThreatTier;
     assert_eq!(
         ThreatTier::from_score(ThreatTier::ELEVATED_MIN),
         ThreatTier::Elevated
@@ -217,9 +221,15 @@ fn candidate_query_uses_the_user_score_index() {
             charcoal::db::queries::REFRESH_CANDIDATES_SQL
         ))
         .unwrap()
-        .query_map(params![USER, 15.0, "+2 days", scoring_revision()], |r| {
-            r.get::<_, String>(3)
-        })
+        .query_map(
+            params![
+                USER,
+                ThreatTier::ELEVATED_MIN,
+                "+2 days",
+                scoring_revision()
+            ],
+            |r| r.get::<_, String>(3),
+        )
         .unwrap()
         .map(Result::unwrap)
         .collect();
@@ -228,4 +238,219 @@ fn candidate_query_uses_the_user_score_index() {
             .any(|line| line.contains("idx_account_scores_user_score")),
         "plan: {plan:?}"
     );
+}
+
+/// A negative horizon must NARROW the candidate set (only rows already
+/// expired by more than `|horizon|` days), never widen it. The old modifier
+/// `format!("+{horizon_days} days")` rendered -1 as "+-1 days", which SQLite
+/// cannot parse: `datetime('now','+-1 days')` is NULL, `COALESCE(… , 1)` then
+/// returns 1 for every row and BOTH the expiry and generation filters
+/// disappear — every High/Elevated row came back. Postgres's
+/// `make_interval(days => -1)` narrowed correctly, so the backends disagreed.
+/// The Postgres twin of this test is
+/// `test_pg_list_refresh_candidates_negative_horizon_narrows` in
+/// `tests/db_postgres.rs`, seeded with the same four rows.
+#[test]
+fn negative_horizon_narrows_the_candidate_set() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    // Expired two days ago: due at horizon 0 AND at horizon -1.
+    insert(
+        &conn,
+        USER,
+        "did:plc:neg-gone-2d",
+        60.0,
+        &days(-2),
+        scoring_revision(),
+        None,
+    );
+    // Expired two hours ago: due at horizon 0, NOT at horizon -1.
+    insert(
+        &conn,
+        USER,
+        "did:plc:neg-gone-2h",
+        50.0,
+        "datetime('now', '-2 hours')",
+        scoring_revision(),
+        None,
+    );
+    // Fresh and current: due at neither horizon.
+    insert(
+        &conn,
+        USER,
+        "did:plc:neg-fresh",
+        40.0,
+        &days(10),
+        scoring_revision(),
+        None,
+    );
+    // Old generation: due at every horizon — that branch is time-independent.
+    insert(
+        &conn,
+        USER,
+        "did:plc:neg-legacy",
+        30.0,
+        &days(10),
+        LEGACY_GENERATION,
+        None,
+    );
+
+    let at_zero: Vec<String> = list_refresh_candidates(&conn, USER, 0)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.did)
+        .collect();
+    let at_minus_one: Vec<String> = list_refresh_candidates(&conn, USER, -1)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.did)
+        .collect();
+
+    assert_eq!(
+        at_zero,
+        [
+            "did:plc:neg-gone-2d",
+            "did:plc:neg-gone-2h",
+            "did:plc:neg-legacy"
+        ],
+        "horizon 0: everything already expired, plus the legacy row"
+    );
+    assert_eq!(
+        at_minus_one,
+        ["did:plc:neg-gone-2d", "did:plc:neg-legacy"],
+        "horizon -1: only rows expired more than a day ago, plus the legacy row"
+    );
+    assert!(
+        at_minus_one.len() < at_zero.len(),
+        "a negative horizon narrows; it must never fail open and widen. \
+         at_minus_one={at_minus_one:?} at_zero={at_zero:?}"
+    );
+    assert!(
+        at_minus_one.iter().all(|did| at_zero.contains(did)),
+        "and the narrower set is a subset of the wider one"
+    );
+}
+
+/// The fresh predicate (`fresh_sql`, used by `get_fresh_scored_dids`) and the
+/// candidate predicate (`REFRESH_CANDIDATES_SQL`) are two hand-written
+/// spellings of one rule. Nothing else fails if one is edited and the other
+/// is not, so this test pins the partition itself: over the High/Elevated
+/// rows, "fresh" and "refresh candidate at horizon 0" must be exact
+/// complements — union is every High/Elevated row, intersection is empty.
+#[test]
+fn fresh_and_candidate_predicates_partition_the_high_elevated_rows() {
+    use std::collections::BTreeSet;
+
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+
+    // (did, score, valid_until SQL, generation)
+    let fixture: [(&str, f64, &str, &str); 10] = [
+        // High/Elevated, fresh:
+        (
+            "did:plc:pt-fresh-high",
+            60.0,
+            "datetime('now', '+10 days')",
+            scoring_revision(),
+        ),
+        (
+            "did:plc:pt-fresh-floor",
+            15.0,
+            "datetime('now', '+10 days')",
+            scoring_revision(),
+        ),
+        // High/Elevated, not fresh — each for a different reason:
+        (
+            "did:plc:pt-expired",
+            50.0,
+            "datetime('now', '-1 days')",
+            scoring_revision(),
+        ),
+        ("did:plc:pt-null", 45.0, "NULL", scoring_revision()),
+        (
+            "did:plc:pt-malformed",
+            40.0,
+            "'yesterday-ish'",
+            scoring_revision(),
+        ),
+        (
+            "did:plc:pt-boundary",
+            35.0,
+            "datetime('now')",
+            scoring_revision(),
+        ),
+        (
+            "did:plc:pt-legacy-unexpired",
+            30.0,
+            "datetime('now', '+10 days')",
+            LEGACY_GENERATION,
+        ),
+        (
+            "did:plc:pt-legacy-expired",
+            25.0,
+            "datetime('now', '-5 days')",
+            LEGACY_GENERATION,
+        ),
+        // Below the floor: in neither half of the partition under test, but
+        // present so the fresh query (which does NOT filter by score) has
+        // rows it must return and the candidate query must still exclude.
+        (
+            "did:plc:pt-watch-fresh",
+            10.0,
+            "datetime('now', '+10 days')",
+            scoring_revision(),
+        ),
+        (
+            "did:plc:pt-watch-expired",
+            9.0,
+            "datetime('now', '-1 days')",
+            scoring_revision(),
+        ),
+    ];
+    for (did, score, valid_until_sql, generation) in fixture {
+        insert(&conn, USER, did, score, valid_until_sql, generation, None);
+    }
+
+    let high_elevated: BTreeSet<String> = fixture
+        .iter()
+        .filter(|(_, score, _, _)| *score >= ThreatTier::ELEVATED_MIN)
+        .map(|(did, ..)| (*did).to_string())
+        .collect();
+    assert_eq!(
+        high_elevated.len(),
+        8,
+        "fixture sanity: 8 rows clear the floor"
+    );
+
+    // The fresh half, restricted to High/Elevated — get_fresh_scored_dids
+    // has no score filter of its own.
+    let fresh_high_elevated: BTreeSet<String> =
+        charcoal::db::queries::get_fresh_scored_dids(&conn, USER)
+            .unwrap()
+            .into_iter()
+            .filter(|did| high_elevated.contains(did))
+            .collect();
+    // The candidate half. Horizon 0 is the complement boundary: fresh is
+    // `valid_until > now`, a candidate at horizon 0 is `valid_until <= now`.
+    let candidates: BTreeSet<String> = list_refresh_candidates(&conn, USER, 0)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.did)
+        .collect();
+
+    assert!(
+        fresh_high_elevated.is_disjoint(&candidates),
+        "no High/Elevated row may be both fresh and a refresh candidate. \
+         fresh={fresh_high_elevated:?} candidates={candidates:?}"
+    );
+    let union: BTreeSet<String> = fresh_high_elevated.union(&candidates).cloned().collect();
+    assert_eq!(
+        union, high_elevated,
+        "every High/Elevated row must land in exactly one half. \
+         fresh={fresh_high_elevated:?} candidates={candidates:?}"
+    );
+    // Both halves must be non-empty, or a predicate that matched nothing (or
+    // everything) would satisfy the two assertions above vacuously.
+    assert_eq!(fresh_high_elevated.len(), 2, "fresh half");
+    assert_eq!(candidates.len(), 6, "candidate half");
 }

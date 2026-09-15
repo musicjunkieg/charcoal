@@ -5526,6 +5526,20 @@ async fn test_pg_list_refresh_candidates_selects_high_and_elevated_expiring_or_o
     .await
     .unwrap();
 
+    // A NotAssessed row: threat_score IS NULL, expired, old generation — due
+    // on every other count, so only the score floor can exclude it. Pinned
+    // here and not just on SQLite because `NULL >= $2` is SQL-unknown, and
+    // three-valued logic is exactly the kind of thing that can differ between
+    // engines; this is the backend production runs on.
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_tier, scoring_generation, valid_until)
+         VALUES ($1, 'did:plc:pgrc_na', 'na.handle', 'NotAssessed', 'legacy', NOW() - make_interval(days => 1))",
+    )
+    .bind(OWNER)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
     let candidates = db.list_refresh_candidates(OWNER, 2).await.unwrap();
     let dids: Vec<&str> = candidates.iter().map(|c| c.did.as_str()).collect();
@@ -5539,6 +5553,10 @@ async fn test_pg_list_refresh_candidates_selects_high_and_elevated_expiring_or_o
         ],
         "most dangerous first; Watch-tier and fresh High/Elevated rows are excluded"
     );
+    assert!(
+        !dids.contains(&"did:plc:pgrc_na"),
+        "a NULL threat_score never clears the floor: {dids:?}"
+    );
     assert_eq!(candidates[0].graph_distance.as_deref(), Some("Stranger"));
     assert_eq!(candidates[1].graph_distance.as_deref(), Some("Follows you"));
 
@@ -5550,6 +5568,123 @@ async fn test_pg_list_refresh_candidates_selects_high_and_elevated_expiring_or_o
         .unwrap();
     sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
         .bind("did:plc:pgrc_otheruser")
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// #344 Task 7 Postgres twin of `negative_horizon_narrows_the_candidate_set`
+/// (`tests/unit_refresh_candidates.rs`), seeded with the same four rows so
+/// the two backends can be compared directly. Postgres always narrowed
+/// correctly (`make_interval(days => -1)`); SQLite used to fail open and
+/// return every High/Elevated row, so this test is what the SQLite fix is
+/// measured against — the DID suffixes and the expected sets match there
+/// exactly.
+#[tokio::test]
+async fn test_pg_list_refresh_candidates_negative_horizon_narrows() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // A dedicated owner for the same reason as the twin above: this test
+    // asserts an exact ordered row set.
+    const OWNER: &str = "did:plc:pgrcneg_owner";
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // (did, generation, threat_score, valid_until SQL)
+    let rows: [(&str, &str, f64, &str); 4] = [
+        // Expired two days ago: due at horizon 0 AND at horizon -1.
+        (
+            "did:plc:pgrcneg_gone-2d",
+            rev,
+            60.0,
+            "NOW() - make_interval(days => 2)",
+        ),
+        // Expired two hours ago: due at horizon 0, NOT at horizon -1.
+        (
+            "did:plc:pgrcneg_gone-2h",
+            rev,
+            50.0,
+            "NOW() - make_interval(hours => 2)",
+        ),
+        // Fresh and current: due at neither horizon.
+        (
+            "did:plc:pgrcneg_fresh",
+            rev,
+            40.0,
+            "NOW() + make_interval(days => 10)",
+        ),
+        // Old generation: due at every horizon — that branch is time-independent.
+        (
+            "did:plc:pgrcneg_legacy",
+            "legacy",
+            30.0,
+            "NOW() + make_interval(days => 10)",
+        ),
+    ];
+    for (did, generation, score, valid_until_sql) in rows {
+        sqlx_core::query::query(&format!(
+            "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until)
+             VALUES ($1, $2, $3, $4, 'x', $5, {valid_until_sql})"
+        ))
+        .bind(OWNER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(score)
+        .bind(generation)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let at_zero: Vec<String> = db
+        .list_refresh_candidates(OWNER, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.did)
+        .collect();
+    let at_minus_one: Vec<String> = db
+        .list_refresh_candidates(OWNER, -1)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.did)
+        .collect();
+
+    assert_eq!(
+        at_zero,
+        [
+            "did:plc:pgrcneg_gone-2d",
+            "did:plc:pgrcneg_gone-2h",
+            "did:plc:pgrcneg_legacy"
+        ],
+        "horizon 0: everything already expired, plus the legacy row"
+    );
+    assert_eq!(
+        at_minus_one,
+        ["did:plc:pgrcneg_gone-2d", "did:plc:pgrcneg_legacy"],
+        "horizon -1: only rows expired more than a day ago, plus the legacy row"
+    );
+    assert!(
+        at_minus_one.len() < at_zero.len(),
+        "a negative horizon narrows; it must never fail open and widen. \
+         at_minus_one={at_minus_one:?} at_zero={at_zero:?}"
+    );
+
+    // Cleanup.
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
         .execute(&pool)
         .await
         .unwrap();

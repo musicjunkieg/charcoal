@@ -653,7 +653,8 @@ pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Res
 }
 
 /// Public so the index test can EXPLAIN exactly this statement (R12).
-/// Params: ?1 user_did, ?2 ThreatTier::ELEVATED_MIN, ?3 "+N days", ?4 scoring_revision().
+/// Params: ?1 user_did, ?2 ThreatTier::ELEVATED_MIN, ?3 a signed SQLite date
+/// modifier ("+2 days", "-1 days"), ?4 scoring_revision().
 /// COALESCE(…, 1): a NULL or malformed valid_until is expired, hence eligible
 /// — the mirror of FRESH_SQL's COALESCE(…, 0) (R11).
 pub const REFRESH_CANDIDATES_SQL: &str = "SELECT did, handle, graph_distance FROM account_scores
@@ -676,7 +677,15 @@ pub fn list_refresh_candidates(
             params![
                 user_did,
                 ThreatTier::ELEVATED_MIN,
-                format!("+{horizon_days} days"),
+                // `{:+}`, not a literal "+": `format!("+{horizon_days} days")`
+                // renders -1 as "+-1 days", which SQLite cannot parse. The
+                // modifier then evaluates to NULL, COALESCE(…, 1) returns 1
+                // for every row, and BOTH the expiry and generation filters
+                // vanish — a negative horizon would select every High/Elevated
+                // row instead of a narrower set. Postgres's
+                // `make_interval(days => -1)` narrows correctly, so the old
+                // spelling also made the two backends disagree.
+                format!("{horizon_days:+} days"),
                 scoring_revision()
             ],
             |r| {

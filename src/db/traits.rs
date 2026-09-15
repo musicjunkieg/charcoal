@@ -612,12 +612,15 @@ pub trait Database: Send + Sync {
     /// scoring path and always stamps from now. Idempotent.
     async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()>;
 
-    /// The nightly refresh job's candidate source (#344 Task 7): rows are
-    /// eligible by score (`ELEVATED_MIN`), eligible when expiring within
-    /// `horizon_days`, already expired, NULL/malformed expiry (SQLite), or
-    /// stamped with an old `scoring_generation` — the complement of the
-    /// fresh predicate, not a copy of it. NULL-score rows never qualify
-    /// (the `>=` comparison is false against NULL). Most dangerous first:
+    /// The nightly refresh job's candidate source (#344 Task 7). A row
+    /// qualifies when it clears the score floor (`threat_score >=`
+    /// [`ThreatTier::ELEVATED_MIN`]) **and** is due: expiring within
+    /// `horizon_days`, already expired, carrying a NULL or malformed
+    /// `valid_until` (SQLite only — the Postgres column is NOT NULL), or
+    /// stamped with an old `scoring_generation`. Both halves must hold; the
+    /// due half is the complement of the fresh predicate, not a copy of it.
+    /// NULL-score rows never qualify: `NULL >= ?` is SQL-unknown, which the
+    /// `WHERE` clause treats as not-matching. Most dangerous first:
     /// `threat_score DESC, did`.
     async fn list_refresh_candidates(
         &self,
