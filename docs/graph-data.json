@@ -10548,6 +10548,39 @@
       "created_at": "2026-09-16T15:42:33.867972-07:00",
       "updated_at": "2026-09-16T15:42:33.867972-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f2bce2f\",\"confidence\":90,\"files\":[\".github/workflows/ci.yml\"]}"
+    },
+    {
+      "id": 969,
+      "change_id": "2ee4df1d-5ccf-4845-9fc1-8ef1fd473eaa",
+      "node_type": "outcome",
+      "title": "#377 fix verified: PR #126 run 35159034759 and PR #124 run 35159045599 green both jobs; Download ONNX models actually ran (cache miss) and succeeded. PR #124 Postgres job: db_postgres 72/72 passed, job total 847 passed 0 failed.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:53:51.927448-07:00",
+      "updated_at": "2026-09-16T15:53:51.927448-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"a4b3d92\",\"confidence\":95}"
+    },
+    {
+      "id": 970,
+      "change_id": "feea26da-3f15-42c3-8130-c6213ebfdbc8",
+      "node_type": "observation",
+      "title": "CodeRabbit on PR #124 (review of ddbc903, 4 threads + 1 outside-diff). Validated: (1) .env.example/CHANGELOG say 'every scan probes' but CLI scan/sweep never probe — VALID doc fix. (2) request_full not claim-fenced and (3) schedule_success/retry check-then-write after owns_claim — REAL TOCTOU but window is the ms between a fresh ownership check and the writes; a successor that claims inside it finishes minutes later and overwrites next_refresh_at itself; worst case one extra full scan. Same class as #348 -> DEFER to a filed issue. (4) admin cooldown-bypass test never writes last_full_scan_finished_at, so it cannot detect cooldown enforcement — VALID. (5) classify_refresh returns NothingDue when 0 candidates but owned staging was resumed and scored — VALID, reports scored=0 and outcome nothing_due.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:12:15.097313-07:00",
+      "updated_at": "2026-09-16T16:12:15.097313-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":90}"
+    },
+    {
+      "id": 971,
+      "change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "node_type": "action",
+      "title": "Fix PR #124 CodeRabbit round: classify_refresh takes has_own_resumable_staging (NothingDue only when both absent); admin bypass test seeds the cooldown marker and proves the user route 429s; docs say only web scans and refreshes with work probe; file claim-fence follow-up for refresh bookkeeping",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:12:15.129087-07:00",
+      "updated_at": "2026-09-16T16:12:15.129087-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"55bc065\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"tests/web_access_admin.rs\",\".env.example\",\"CHANGELOG.md\"]}"
     }
   ],
   "edges": [
@@ -21715,6 +21748,39 @@
       "weight": 1.0,
       "rationale": "Fix",
       "created_at": "2026-09-16T15:42:33.884843-07:00"
+    },
+    {
+      "id": 1026,
+      "from_node_id": 968,
+      "to_node_id": 969,
+      "from_change_id": "6d234bb2-a985-4206-8d86-b6c150dc8d09",
+      "to_change_id": "2ee4df1d-5ccf-4845-9fc1-8ef1fd473eaa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified in CI",
+      "created_at": "2026-09-16T15:53:51.943600-07:00"
+    },
+    {
+      "id": 1027,
+      "from_node_id": 942,
+      "to_node_id": 970,
+      "from_change_id": "fb24c292-344c-46e2-9c3b-2906a7f76fb0",
+      "to_change_id": "feea26da-3f15-42c3-8130-c6213ebfdbc8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next review round on PR #124",
+      "created_at": "2026-09-16T16:12:15.114724-07:00"
+    },
+    {
+      "id": 1028,
+      "from_node_id": 970,
+      "to_node_id": 971,
+      "from_change_id": "feea26da-3f15-42c3-8130-c6213ebfdbc8",
+      "to_change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixes",
+      "created_at": "2026-09-16T16:12:15.145949-07:00"
     }
   ],
   "documents": [

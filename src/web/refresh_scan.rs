@@ -536,6 +536,7 @@ where
             Err(reason) => return Ok(RefreshOutcome::Deferred(reason)),
         };
         let candidates = plan.candidates.len();
+        let has_own_resumable_staging = plan.has_own_resumable_staging;
         // Ownership is enforced inside run_phased_scan (R02). `NothingDue` is
         // decided AFTER it on purpose: a refresh with no candidates still has
         // to resume its own leftover staging.
@@ -551,7 +552,11 @@ where
             }
             Err(e) => return Err(e),
         };
-        Ok(classify_refresh(candidates, &summary))
+        Ok(classify_refresh(
+            candidates,
+            has_own_resumable_staging,
+            &summary,
+        ))
     }
     .await;
 
@@ -624,13 +629,22 @@ where
     .await
 }
 
-/// Pure: the candidate count plus the pipeline's summary → the outcome.
+/// Pure: the candidate count, whether the run owned resumable staging, and
+/// the pipeline's summary → the outcome.
+///
+/// `NothingDue` needs BOTH absent. A refresh with no fresh candidates still
+/// resumes its own leftover `burst`/`finalize` staging and scores it; calling
+/// that `NothingDue` would record `nothing_due` and report zero scored.
 ///
 /// Delegates to the full scan's classifier so the two kinds cannot drift on
 /// what "done" means: the `scan_phase` marker is authoritative about whether
 /// staging drained, and the PERSISTED skip count — which survives a resume —
 /// is authoritative about whether the coverage has holes (V5-01).
-pub fn classify_refresh(candidates: usize, summary: &ScanSummary) -> RefreshOutcome {
+pub fn classify_refresh(
+    candidates: usize,
+    has_own_resumable_staging: bool,
+    summary: &ScanSummary,
+) -> RefreshOutcome {
     use crate::web::scan_job::ScanCompletion;
     match crate::web::scan_job::classify_full_scan(
         summary.degraded,
@@ -647,7 +661,9 @@ pub fn classify_refresh(candidates: usize, summary: &ScanSummary) -> RefreshOutc
             candidates,
             scored: summary.accounts_scored,
         },
-        ScanCompletion::Complete if candidates == 0 => RefreshOutcome::NothingDue,
+        ScanCompletion::Complete if candidates == 0 && !has_own_resumable_staging => {
+            RefreshOutcome::NothingDue
+        }
         ScanCompletion::Complete => RefreshOutcome::Completed {
             candidates,
             scored: summary.accounts_scored,
@@ -1940,19 +1956,29 @@ mod tests {
             skipped,
         };
         assert_eq!(
-            classify_refresh(3, &done(false, Some(0))),
+            classify_refresh(3, false, &done(false, Some(0))),
             RefreshOutcome::Completed {
                 candidates: 3,
                 scored: 2
             }
         );
         assert_eq!(
-            classify_refresh(0, &done(false, Some(0))),
+            classify_refresh(0, false, &done(false, Some(0))),
             RefreshOutcome::NothingDue
+        );
+        // No candidates, but the run resumed this refresh's own staging and
+        // scored it. That is work done, not an empty tick: reporting
+        // NothingDue would record `nothing_due` and a scored count of zero.
+        assert_eq!(
+            classify_refresh(0, true, &done(false, Some(0))),
+            RefreshOutcome::Completed {
+                candidates: 0,
+                scored: 2
+            }
         );
         // A clean resume over earlier persisted skips is NOT clean completion.
         assert_eq!(
-            classify_refresh(3, &done(false, Some(1))),
+            classify_refresh(3, false, &done(false, Some(1))),
             RefreshOutcome::CompletedWithSkips {
                 candidates: 3,
                 scored: 2,
@@ -1960,7 +1986,7 @@ mod tests {
             }
         );
         assert_eq!(
-            classify_refresh(3, &done(false, None)),
+            classify_refresh(3, false, &done(false, None)),
             RefreshOutcome::CompletedUnverified {
                 candidates: 3,
                 scored: 2
@@ -1979,7 +2005,10 @@ mod tests {
                 final_phase: phase.clone(),
                 skipped: Some(0),
             };
-            assert_eq!(classify_refresh(1, &summary), RefreshOutcome::Resumable);
+            assert_eq!(
+                classify_refresh(1, false, &summary),
+                RefreshOutcome::Resumable
+            );
         }
     }
 }

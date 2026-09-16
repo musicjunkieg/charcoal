@@ -71,9 +71,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/runbooks/343-phase2-expiry-refresh.md`.
 - `CHARCOAL_COPE_B_POLICY_VERSION` — the Stage-2 CoPE-B endpoint's own
   `POLICY_VERSION`, declared to Charcoal because the classifier runs outside
-  this binary. Every scan probes the endpoint before it gathers and refuses
-  to start on a mismatch, naming both values; a mismatch discovered mid-scan
-  logs one error per batch. Unset means `policy-unknown`, today's advertised
+  this binary. A web-triggered scan, and a nightly refresh with work to do,
+  probes the endpoint before it gathers and refuses to start on a mismatch,
+  naming both values. The CLI `scan` and `sweep` commands do not probe; they
+  gather first, and a mismatch discovered mid-scan logs one error per batch. Unset means `policy-unknown`, today's advertised
   value. See README "Stage-2 classifier policy".
 - #343 Phase 0 + Phase 1 — measurement hooks and the shared cache. The
   gather now logs `cpu_cores_busy` once a minute and records the observed

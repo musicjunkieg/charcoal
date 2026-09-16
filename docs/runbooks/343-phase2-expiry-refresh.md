@@ -72,9 +72,10 @@ endpoint's actual `POLICY_VERSION` differ by so much as a character, **every
 Stage-2 verdict is foreign evidence**: every account is re-gathered once and
 then skipped, no scores are written, and every refresh fails.
 
-This is loud, not silent — every scan probes the endpoint before it gathers
-anything and refuses to start, naming both values — but a refused scan is still
-a failed deploy day. **The variable is unset in production today, and nobody on
+This is loud, not silent — a web-triggered scan, and a refresh with work to do,
+probes the endpoint before it gathers anything and refuses to start, naming both
+values (the CLI `scan`/`sweep` commands do not probe) — but a refused scan is
+still a failed deploy day. **The variable is unset in production today, and nobody on
 this branch knows the endpoint's value.** Read both sides before deploying.
 
 Read what the endpoint serves (the environment variable on the RunPod endpoint

@@ -4203,7 +4203,7 @@ mod ownership_tests {
             "the flag alone would have erased the earlier skip"
         );
         assert_eq!(
-            charcoal::web::refresh_scan::classify_refresh(1, &summary),
+            charcoal::web::refresh_scan::classify_refresh(1, false, &summary),
             charcoal::web::refresh_scan::RefreshOutcome::CompletedWithSkips {
                 candidates: 1,
                 scored: 0,
@@ -4211,7 +4211,7 @@ mod ownership_tests {
             }
         );
         assert!(
-            !charcoal::web::refresh_scan::classify_refresh(1, &summary)
+            !charcoal::web::refresh_scan::classify_refresh(1, false, &summary)
                 .bookkeeping()
                 .prove_revision
         );
@@ -4242,7 +4242,7 @@ mod ownership_tests {
             ScanCompletion::CompleteUnverified
         );
         assert_eq!(
-            charcoal::web::refresh_scan::classify_refresh(1, &summary),
+            charcoal::web::refresh_scan::classify_refresh(1, false, &summary),
             charcoal::web::refresh_scan::RefreshOutcome::CompletedUnverified {
                 candidates: 1,
                 scored: 0

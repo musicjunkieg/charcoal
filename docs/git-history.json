@@ -1,5 +1,21 @@
 [
   {
+    "hash": "55bc065e3ea36f5842fdc6cecd7162fc2d03b38f",
+    "short_hash": "55bc065",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:11:14-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into feat/343-phase2-expiry-refresh",
+    "files_changed": 0
+  },
+  {
+    "hash": "a4b3d9240eaee4209b609c334d6f6d2026715cf4",
+    "short_hash": "a4b3d92",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:42:49-07:00",
+    "message": "fix(377): download models in the Postgres CI job without the web build\n\nThe Postgres job ran `cargo run --features web -- download-model`, but\nit never builds the frontend, and the web build cannot compile without\nweb/build (include_dir!). A model-cache hit skips the step, so this\npassed on PR #125 and staging and failed on the first cache miss.\nDownload with --features postgres, which the migration step compiles\nanyway.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
     "hash": "f2bce2fdfaa6ad4a0429ca3b9c4acb4268dfc777",
     "short_hash": "f2bce2f",
     "author": "Bryan Guffey",
