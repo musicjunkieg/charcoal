@@ -7,7 +7,8 @@
 # Hooks installed:
 #   pre-commit  — blocks main commits; runs format check; auto-exports
 #                 chainlink issues + deciduous graph; backs up DBs to S3
-#   pre-push    — blocks main pushes; runs full lint + tests
+#   pre-push    — blocks main pushes; runs lint + only the tests the push
+#                 affects (the full suite runs in CI — #367)
 #
 # This file is a TEMPLATE. Customize the language-specific quality gates
 # (search "CUSTOMIZE" in the heredocs below) for your project's stack.
@@ -392,6 +393,24 @@ set -e
 REMOTE="$1"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# Git passes the remote as given on the command line. A push to a URL — this
+# project pushes over HTTPS as `git push https://github.com/…` — passes the URL,
+# not a remote name, so `$REMOTE/<branch>` would never resolve and the change
+# set below would silently shrink to the last commit. Map it back to a named
+# remote: exact name, then a remote with that URL, then origin (the configured
+# origin may be SSH while pushes go over HTTPS, so URLs need not match).
+REMOTE_NAME="$REMOTE"
+if ! git remote | grep -qx "$REMOTE"; then
+    REMOTE_NAME=""
+    for r in $(git remote); do
+        if [ "$(git remote get-url "$r" 2>/dev/null)" = "$REMOTE" ]; then
+            REMOTE_NAME="$r"
+            break
+        fi
+    done
+    [ -n "$REMOTE_NAME" ] || REMOTE_NAME="origin"
+fi
+
 # ── 1. Block pushes to main ──────────────────────────────────────────
 # Git passes push targets on stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
 while read local_ref local_sha remote_ref remote_sha; do
@@ -405,7 +424,7 @@ done
 
 # ── 2. Determine changed files vs the remote ─────────────────────────
 CURRENT_BRANCH=$(git branch --show-current)
-REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE/$CURRENT_BRANCH" 2>/dev/null || echo "")
+REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE_NAME/$CURRENT_BRANCH" 2>/dev/null || echo "")
 
 if [ -n "$REMOTE_REF" ]; then
     # Branch already on the remote: only what this push adds.
@@ -416,7 +435,7 @@ else
     # promoted to main as "changed" (#178). The three-dot form measures from the
     # point this branch forked, so only this branch's own commits count.
     BASE=""
-    for candidate in "$REMOTE/staging" "$REMOTE/main"; do
+    for candidate in "$REMOTE_NAME/staging" "$REMOTE_NAME/main"; do
         if git rev-parse --verify --quiet "$candidate" >/dev/null 2>&1; then
             BASE="$candidate"
             break
