@@ -10339,6 +10339,17 @@
       "created_at": "2026-09-16T13:27:56.627381-07:00",
       "updated_at": "2026-09-16T13:27:56.627381-07:00",
       "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"confidence\":95}"
+    },
+    {
+      "id": 950,
+      "change_id": "8b934c23-0b70-4c80-9557-ed86a71a6d2e",
+      "node_type": "observation",
+      "title": "CORRECTION to node 949: a commit from the worktree would NOT have clobbered docs/graph-data.json with an empty graph. The pre-commit hook's _would_clobber guard compares the fresh export's item count against HEAD and keeps HEAD's version when the fresh one is empty. Linking the worktree's .deciduous/deciduous.db to the real database was still correct, because it keeps the exported graph current, but the stated risk was overstated. The .chainlink half of 949 stands: the work-check hook genuinely blocked every tool.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:29:32.432976-07:00",
+      "updated_at": "2026-09-16T13:29:32.432976-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -21286,6 +21297,17 @@
       "weight": 1.0,
       "rationale": "Hit while working in a worktree for this goal",
       "created_at": "2026-09-16T13:28:00.166132-07:00"
+    },
+    {
+      "id": 1006,
+      "from_node_id": 949,
+      "to_node_id": 950,
+      "from_change_id": "252bb456-b4b5-42bd-ada1-99223d24b773",
+      "to_change_id": "8b934c23-0b70-4c80-9557-ed86a71a6d2e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Corrects an overstated risk in this node",
+      "created_at": "2026-09-16T13:29:32.439673-07:00"
     }
   ],
   "documents": [

@@ -166,6 +166,20 @@ jobs:
         env:
           CHARCOAL_MODEL_DIR: models
 
+      # Apply the migrations to the fresh test database before any test runs,
+      # the same way production does at boot.
+      #
+      # Several tests clean up with raw SQL BEFORE they connect through the
+      # app, and connecting is what runs the migrations. On a long-lived local
+      # database the tables already exist, so this never showed; on CI's empty
+      # one those tests race the ones that connect first and fail with
+      # `relation "…" does not exist` (#376). Migrating here removes the race
+      # for every branch without touching tests/db_postgres.rs.
+      - name: Apply migrations to the test database
+        run: cargo run --features postgres -- init
+        env:
+          DATABASE_URL: postgres://charcoal:charcoal@localhost:5432/charcoal_test
+
       # DATABASE_URL is set on this step only: set job-wide, it would also
       # reach the model download above, and a postgres:// URL switches the
       # binary onto the Postgres backend.
