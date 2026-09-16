@@ -10350,6 +10350,83 @@
       "created_at": "2026-09-16T13:29:32.432976-07:00",
       "updated_at": "2026-09-16T13:29:32.432976-07:00",
       "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"confidence\":95}"
+    },
+    {
+      "id": 951,
+      "change_id": "1b458da6-542f-44b9-ba20-a4ed84716980",
+      "node_type": "observation",
+      "title": "First CI run of the new Postgres job (run 35146971971) FAILED 10/44 db_postgres tests with 'relation does not exist' (account_scores, actions, amplification_events, scan_queue). Pre-existing test-ordering bug: those tests clean up with raw SQL BEFORE connect_postgres, which is what runs migrations. Invisible locally because charcoal_test was migrated long ago; CI starts from an empty DB and runs tests in parallel. The job genuinely ran 44 tests — not a silent skip. Also: my background CI watcher reported exit 0 because I piped gh run watch --exit-status into tail, which masked the failure; caught only by checking job conclusions directly.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:40:27.095216-07:00",
+      "updated_at": "2026-09-16T13:40:27.095216-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 952,
+      "change_id": "efc5426d-97fe-4f49-ab78-863b82e6bc8b",
+      "node_type": "option",
+      "title": "Fix the fresh-DB failures in tests/db_postgres.rs by connecting (migrating) before raw-SQL cleanup",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:40:32.435247-07:00",
+      "updated_at": "2026-09-16T13:40:32.435247-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":40}"
+    },
+    {
+      "id": 953,
+      "change_id": "ae2355b5-970d-49a9-80c8-934530cc0a72",
+      "node_type": "option",
+      "title": "Fix the fresh-DB failures in CI: run charcoal init against the test database before the Postgres tests",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:40:32.445596-07:00",
+      "updated_at": "2026-09-16T13:40:32.445596-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":80}"
+    },
+    {
+      "id": 954,
+      "change_id": "f23bc5ff-4f80-42cc-bea7-d6f4e88f9524",
+      "node_type": "decision",
+      "title": "Chose the CI migration step. tests/db_postgres.rs is heavily rewritten on the #344 branch with its own raw-SQL helpers, so a test-side fix on chore/367 would conflict with PR #124 and still miss that branch. The CI step works identically for both branches and mirrors production, where migrations run at boot. The underlying test-ordering bug is filed as #376 for after #124 merges.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:40:32.455982-07:00",
+      "updated_at": "2026-09-16T13:40:32.455982-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":85}"
+    },
+    {
+      "id": 955,
+      "change_id": "6148d9db-734d-4bdb-99cd-525630ab7407",
+      "node_type": "outcome",
+      "title": "PR #125 CI run 35147932418 GREEN on both jobs after the migration step: Postgres job 758 passed / 0 failed; db_postgres binary itself ran 44 tests, 44 passed (not a silent skip); migration step created 20 tables",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:50:20.234851-07:00",
+      "updated_at": "2026-09-16T13:50:20.234851-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"4eedce3\",\"confidence\":95}"
+    },
+    {
+      "id": 956,
+      "change_id": "aabdfe88-0431-42b2-93ac-994dc51d7f3e",
+      "node_type": "observation",
+      "title": "CodeRabbit CHANGES_REQUESTED on PR #125 (review of dab4cbf), 4 findings. Validated: (1) clippy -D warnings — CI already denies via workflow-level RUSTFLAGS=-D warnings, but the local hook's clippy exits 0 on warnings: VALID for hook only. (2) pin actions to SHAs + persist-credentials:false: valid hardening, apply to all actions. (3) unresolved push URL falls back to origin: VALID — use pre-push stdin remote sha, canonical URL match, else full set. (4) failed three-dot diff becomes empty change set and skips every gate: VALID — fail safe to the full change set.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:55:53.956915-07:00",
+      "updated_at": "2026-09-16T13:55:53.956915-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"confidence\":90}"
+    },
+    {
+      "id": 957,
+      "change_id": "66834949-df75-4e8c-879e-450af1f4e757",
+      "node_type": "action",
+      "title": "Address CodeRabbit on PR #125: hook clippy -D warnings; pre-push change set from stdin remote sha with canonical-URL remote match; any undeterminable change set fails safe to every tracked file; pin CI actions to SHAs with persist-credentials false",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:55:59.516233-07:00",
+      "updated_at": "2026-09-16T13:55:59.516233-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"4eedce3\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\".github/workflows/ci.yml\"]}"
     }
   ],
   "edges": [
@@ -21308,6 +21385,94 @@
       "weight": 1.0,
       "rationale": "Corrects an overstated risk in this node",
       "created_at": "2026-09-16T13:29:32.439673-07:00"
+    },
+    {
+      "id": 1007,
+      "from_node_id": 944,
+      "to_node_id": 951,
+      "from_change_id": "d309e508-ba7c-4439-919f-7217c47c5edd",
+      "to_change_id": "1b458da6-542f-44b9-ba20-a4ed84716980",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CI failure found while validating the goal",
+      "created_at": "2026-09-16T13:40:35.904686-07:00"
+    },
+    {
+      "id": 1008,
+      "from_node_id": 951,
+      "to_node_id": 952,
+      "from_change_id": "1b458da6-542f-44b9-ba20-a4ed84716980",
+      "to_change_id": "efc5426d-97fe-4f49-ab78-863b82e6bc8b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option raised by the failure",
+      "created_at": "2026-09-16T13:40:35.911820-07:00"
+    },
+    {
+      "id": 1009,
+      "from_node_id": 951,
+      "to_node_id": 953,
+      "from_change_id": "1b458da6-542f-44b9-ba20-a4ed84716980",
+      "to_change_id": "ae2355b5-970d-49a9-80c8-934530cc0a72",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option raised by the failure",
+      "created_at": "2026-09-16T13:40:35.918178-07:00"
+    },
+    {
+      "id": 1010,
+      "from_node_id": 952,
+      "to_node_id": 954,
+      "from_change_id": "efc5426d-97fe-4f49-ab78-863b82e6bc8b",
+      "to_change_id": "f23bc5ff-4f80-42cc-bea7-d6f4e88f9524",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option weighed",
+      "created_at": "2026-09-16T13:40:35.924879-07:00"
+    },
+    {
+      "id": 1011,
+      "from_node_id": 953,
+      "to_node_id": 954,
+      "from_change_id": "ae2355b5-970d-49a9-80c8-934530cc0a72",
+      "to_change_id": "f23bc5ff-4f80-42cc-bea7-d6f4e88f9524",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Option chosen",
+      "created_at": "2026-09-16T13:40:35.931519-07:00"
+    },
+    {
+      "id": 1012,
+      "from_node_id": 954,
+      "to_node_id": 955,
+      "from_change_id": "f23bc5ff-4f80-42cc-bea7-d6f4e88f9524",
+      "to_change_id": "6148d9db-734d-4bdb-99cd-525630ab7407",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CI migration step fixed the fresh-DB failures",
+      "created_at": "2026-09-16T13:50:21.968701-07:00"
+    },
+    {
+      "id": 1013,
+      "from_node_id": 944,
+      "to_node_id": 956,
+      "from_change_id": "d309e508-ba7c-4439-919f-7217c47c5edd",
+      "to_change_id": "aabdfe88-0431-42b2-93ac-994dc51d7f3e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit review of the #367 PR",
+      "created_at": "2026-09-16T13:55:59.501542-07:00"
+    },
+    {
+      "id": 1014,
+      "from_node_id": 956,
+      "to_node_id": 957,
+      "from_change_id": "aabdfe88-0431-42b2-93ac-994dc51d7f3e",
+      "to_change_id": "66834949-df75-4e8c-879e-450af1f4e757",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixes for the validated findings",
+      "created_at": "2026-09-16T13:56:02.036996-07:00"
     }
   ],
   "documents": [

@@ -392,60 +392,93 @@ set -e
 
 REMOTE="$1"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+ZERO_SHA=0000000000000000000000000000000000000000
 
-# Git passes the remote as given on the command line. A push to a URL — this
-# project pushes over HTTPS as `git push https://github.com/…` — passes the URL,
-# not a remote name, so `$REMOTE/<branch>` would never resolve and the change
-# set below would silently shrink to the last commit. Map it back to a named
-# remote: exact name, then a remote with that URL, then origin (the configured
-# origin may be SSH while pushes go over HTTPS, so URLs need not match).
-REMOTE_NAME="$REMOTE"
-if ! git remote | grep -qx "$REMOTE"; then
-    REMOTE_NAME=""
+# Reduce a remote URL to host/owner/repo, so the SSH and HTTPS spellings of one
+# repository compare equal: `git@github.com:o/r.git` and
+# `https://github.com/o/r` both become `github.com/o/r`.
+canonical_repo() {
+    echo "$1" | sed -E 's#^[a-z+]+://##; s#^[^@/]+@##; s#^([^/:]+):([^0-9/])#\1/\2#; s#\.git/?$##; s#/+$##' |
+        tr '[:upper:]' '[:lower:]'
+}
+
+# Git passes the remote as given on the command line. A push to a URL passes
+# the URL, not a remote name, so `$REMOTE/<branch>` would never resolve. Map it
+# back to a named remote only when that remote's fetch or push URL is the SAME
+# repository. Guessing `origin` is not safe: a push to some other repository
+# would then be measured against origin's branches, and commits the push really
+# sends could drop out of the change set. Unresolved stays empty.
+REMOTE_NAME=""
+if git remote | grep -qxF -- "$REMOTE"; then
+    REMOTE_NAME="$REMOTE"
+else
+    target=$(canonical_repo "$REMOTE")
     for r in $(git remote); do
-        if [ "$(git remote get-url "$r" 2>/dev/null)" = "$REMOTE" ]; then
+        if [ "$(canonical_repo "$(git remote get-url "$r" 2>/dev/null)")" = "$target" ] ||
+            [ "$(canonical_repo "$(git remote get-url --push "$r" 2>/dev/null)")" = "$target" ]; then
             REMOTE_NAME="$r"
             break
         fi
     done
-    [ -n "$REMOTE_NAME" ] || REMOTE_NAME="origin"
 fi
 
 # ── 1. Block pushes to main ──────────────────────────────────────────
 # Git passes push targets on stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
-while read local_ref local_sha remote_ref remote_sha; do
+# The remote_sha of the line pushing HEAD is the remote's current tip, reported
+# by git itself, so it is the most reliable base for the change set below.
+HEAD_SHA=$(git rev-parse HEAD)
+PUSH_REMOTE_SHA=""
+while read -r local_ref local_sha remote_ref remote_sha; do
     if [ "$remote_ref" = "refs/heads/main" ]; then
         echo ""
         echo "❌ Direct push to main is not allowed. Open a pull request instead."
         echo ""
         exit 1
     fi
+    if [ "$local_sha" = "$HEAD_SHA" ] && [ -z "$PUSH_REMOTE_SHA" ]; then
+        PUSH_REMOTE_SHA="$remote_sha"
+    fi
 done
 
 # ── 2. Determine changed files vs the remote ─────────────────────────
+# Every path below either measures the change set or leaves CHANGE_SET_KNOWN
+# empty. An unknown change set is never treated as an empty one: that would
+# skip every gate. It falls back to all tracked files instead (see below).
 CURRENT_BRANCH=$(git branch --show-current)
-REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE_NAME/$CURRENT_BRANCH" 2>/dev/null || echo "")
+CHANGED=""
+CHANGE_SET_KNOWN=""
 
-if [ -n "$REMOTE_REF" ]; then
-    # Branch already on the remote: only what this push adds.
-    CHANGED=$(git diff --name-only "$REMOTE_REF"..HEAD || true)
-else
+if [ -n "$PUSH_REMOTE_SHA" ] && [ "$PUSH_REMOTE_SHA" != "$ZERO_SHA" ] &&
+    git cat-file -e "$PUSH_REMOTE_SHA^{commit}" 2>/dev/null; then
+    # The branch exists on the remote and we have its tip: only what this
+    # push adds.
+    if CHANGED=$(git diff --name-only "$PUSH_REMOTE_SHA" HEAD); then
+        CHANGE_SET_KNOWN=1
+    fi
+elif [ "$PUSH_REMOTE_SHA" != "$ZERO_SHA" ] && [ -n "$REMOTE_NAME" ] &&
+    REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE_NAME/$CURRENT_BRANCH"); then
+    # No usable stdin (a dry run reads /dev/null): the tracking ref instead.
+    if CHANGED=$(git diff --name-only "$REMOTE_REF" HEAD); then
+        CHANGE_SET_KNOWN=1
+    fi
+elif [ -n "$REMOTE_NAME" ]; then
     # New branch: compare against the branch it was cut FROM. Branches are cut
     # from staging, so the old `main..HEAD` counted every staging commit not yet
     # promoted to main as "changed" (#178). The three-dot form measures from the
-    # point this branch forked, so only this branch's own commits count.
-    BASE=""
+    # point this branch forked, so only this branch's own commits count. It
+    # fails when there is no fork point (a shallow clone, unrelated history).
     for candidate in "$REMOTE_NAME/staging" "$REMOTE_NAME/main"; do
-        if git rev-parse --verify --quiet "$candidate" >/dev/null 2>&1; then
-            BASE="$candidate"
+        git rev-parse --verify --quiet "$candidate" >/dev/null || continue
+        if CHANGED=$(git diff --name-only "$candidate"...HEAD 2>/dev/null); then
+            CHANGE_SET_KNOWN=1
             break
         fi
     done
-    if [ -n "$BASE" ]; then
-        CHANGED=$(git diff --name-only "$BASE"...HEAD || true)
-    else
-        CHANGED=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || true)
-    fi
+fi
+
+if [ -z "$CHANGE_SET_KNOWN" ]; then
+    echo "⚠️  Pre-push: could not tell what this push changes (remote '$REMOTE' unresolved, or no common history) — checking every tracked file"
+    CHANGED=$(git ls-files)
 fi
 
 # Test seam: preview the gate for an arbitrary change set without committing
@@ -514,14 +547,14 @@ if [ -f "$REPO_ROOT/Cargo.toml" ]; then
         # wait for CI; only the Postgres TESTS are handed off.
         PG_TOUCHED=$(echo "$RUST_CHANGED" | grep -E '^src/db/|^migrations/postgres/|^tests/db_postgres\.rs$|(^|/)Cargo\.(toml|lock)$' || true)
 
-        if ! run_gate "cargo clippy (web)" cargo clippy --all-targets --features web --quiet; then
+        if ! run_gate "cargo clippy (web)" cargo clippy --all-targets --features web --quiet -- -D warnings; then
             echo ""
             echo "❌ Clippy warnings. Fix them before pushing."
             echo ""
             exit 1
         fi
         if [ -n "$PG_TOUCHED" ]; then
-            if ! run_gate "cargo clippy (postgres)" cargo clippy --all-targets --features postgres --quiet; then
+            if ! run_gate "cargo clippy (postgres)" cargo clippy --all-targets --features postgres --quiet -- -D warnings; then
                 echo ""
                 echo "❌ Clippy warnings in the Postgres build. Fix them before pushing."
                 echo ""

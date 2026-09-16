@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4eedce3efea084ebded2e613ca9c9f1755b455b2",
+    "short_hash": "4eedce3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T13:39:56-07:00",
+    "message": "ci(367): migrate the fresh test database before the Postgres tests\n\nThe first CI run of the Postgres job failed 10 of 44 db_postgres tests with\n`relation \"…\" does not exist` for account_scores, actions,\namplification_events and scan_queue.\n\nThose tests clean up with raw SQL before they connect through the app, and\nconnecting is what runs the migrations. A long-lived local database already has\nevery table, so this never showed. CI starts from an empty database and runs the\ntests in parallel, so the tests that clean up first lose the race to the ones\nthat connect first.\n\nThe job now runs `charcoal init` against the test database before the tests,\nwhich applies the migrations the way production does at boot. This is a\nworkflow-only fix on purpose: tests/db_postgres.rs is heavily rewritten on the\n#344 branch, with raw-SQL helpers of its own, so a test-side fix here would\nconflict with PR #124 and still miss that branch. The test ordering itself is\ntracked as #376.\n\nThe failure was genuine rather than a silent skip: the job ran 44 Postgres\ntests, which is the thing this job exists to prove.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 2
+  },
+  {
     "hash": "ddbc90387e604e12a77b07354696d5f841b18c99",
     "short_hash": "ddbc903",
     "author": "Bryan Guffey",
