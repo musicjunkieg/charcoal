@@ -423,11 +423,10 @@ else
 fi
 
 # ── 1. Block pushes to main ──────────────────────────────────────────
-# Git passes push targets on stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
-# The remote_sha of the line pushing HEAD is the remote's current tip, reported
-# by git itself, so it is the most reliable base for the change set below.
-HEAD_SHA=$(git rev-parse HEAD)
-PUSH_REMOTE_SHA=""
+# Git passes push targets on stdin, one line per ref:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Read them all first: the change set below needs every one.
+PUSH_LINES=""
 while read -r local_ref local_sha remote_ref remote_sha; do
     if [ "$remote_ref" = "refs/heads/main" ]; then
         echo ""
@@ -435,50 +434,91 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         echo ""
         exit 1
     fi
-    if [ "$local_sha" = "$HEAD_SHA" ] && [ -z "$PUSH_REMOTE_SHA" ]; then
-        PUSH_REMOTE_SHA="$remote_sha"
-    fi
+    PUSH_LINES="$PUSH_LINES$local_sha $remote_sha
+"
 done
 
 # ── 2. Determine changed files vs the remote ─────────────────────────
-# Every path below either measures the change set or leaves CHANGE_SET_KNOWN
-# empty. An unknown change set is never treated as an empty one: that would
-# skip every gate. It falls back to all tracked files instead (see below).
-CURRENT_BRANCH=$(git branch --show-current)
+# The change set is the UNION over every ref this push sends, so a push of
+# several branches cannot drop the paths of the ones not checked out. Each
+# comparison either succeeds or marks the change set unknown. An unknown change
+# set is never treated as an empty one: that would skip every gate. It falls
+# back to all tracked files instead (see below).
 CHANGED=""
-CHANGE_SET_KNOWN=""
+CHANGE_SET_UNKNOWN=""
 
-if [ -n "$PUSH_REMOTE_SHA" ] && [ "$PUSH_REMOTE_SHA" != "$ZERO_SHA" ] &&
-    git cat-file -e "$PUSH_REMOTE_SHA^{commit}" 2>/dev/null; then
-    # The branch exists on the remote and we have its tip: only what this
-    # push adds.
-    if CHANGED=$(git diff --name-only "$PUSH_REMOTE_SHA" HEAD); then
-        CHANGE_SET_KNOWN=1
-    fi
-elif [ "$PUSH_REMOTE_SHA" != "$ZERO_SHA" ] && [ -n "$REMOTE_NAME" ] &&
-    REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE_NAME/$CURRENT_BRANCH"); then
-    # No usable stdin (a dry run reads /dev/null): the tracking ref instead.
-    if CHANGED=$(git diff --name-only "$REMOTE_REF" HEAD); then
-        CHANGE_SET_KNOWN=1
-    fi
-elif [ -n "$REMOTE_NAME" ]; then
-    # New branch: compare against the branch it was cut FROM. Branches are cut
-    # from staging, so the old `main..HEAD` counted every staging commit not yet
-    # promoted to main as "changed" (#178). The three-dot form measures from the
-    # point this branch forked, so only this branch's own commits count. It
-    # fails when there is no fork point (a shallow clone, unrelated history).
+# Print the paths `$1` (a commit) changes relative to where it forked from the
+# remote's staging or main. Branches are cut from staging, so the old
+# `main..HEAD` counted every staging commit not yet promoted to main as
+# "changed" (#178); the three-dot form counts only the branch's own commits. It
+# fails when there is no fork point (a shallow clone, unrelated history), and
+# the function fails if no base works.
+changed_since_fork() {
+    [ -n "$REMOTE_NAME" ] || return 1
     for candidate in "$REMOTE_NAME/staging" "$REMOTE_NAME/main"; do
         git rev-parse --verify --quiet "$candidate" >/dev/null || continue
-        if CHANGED=$(git diff --name-only "$candidate"...HEAD 2>/dev/null); then
-            CHANGE_SET_KNOWN=1
-            break
-        fi
+        git diff --name-only "$candidate...$1" 2>/dev/null && return 0
     done
+    return 1
+}
+
+add_changed() {
+    CHANGED="$CHANGED$1
+"
+}
+
+if [ -n "$PUSH_LINES" ]; then
+    SAW_OTHER_COMMIT=""
+    HEAD_SHA=$(git rev-parse HEAD)
+    while read -r local_sha remote_sha; do
+        [ -n "$local_sha" ] || continue
+        [ "$local_sha" = "$ZERO_SHA" ] && continue # deleting a remote ref: nothing to test
+        [ "$local_sha" = "$HEAD_SHA" ] || SAW_OTHER_COMMIT=1
+        if [ "$remote_sha" != "$ZERO_SHA" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+            # The ref exists on the remote and we have its tip, as reported by
+            # git itself: only what this push adds.
+            if paths=$(git diff --name-only "$remote_sha" "$local_sha"); then
+                add_changed "$paths"
+            else
+                CHANGE_SET_UNKNOWN=1
+            fi
+        elif paths=$(changed_since_fork "$local_sha"); then
+            # A new ref, or a remote tip we have not fetched.
+            add_changed "$paths"
+        else
+            CHANGE_SET_UNKNOWN=1
+        fi
+    done <<EOF_PUSH
+$PUSH_LINES
+EOF_PUSH
+    if [ -n "$SAW_OTHER_COMMIT" ]; then
+        # Tests run against the checked-out tree, not other commits. The paths
+        # of every pushed ref still pick the tests; CI checks each branch.
+        echo "ℹ️  Pre-push: this push sends commits other than the checked-out HEAD — local tests run against HEAD; CI covers each branch"
+    fi
+else
+    # No stdin (a dry run reads /dev/null): the current branch's tracking ref,
+    # else its fork point.
+    CURRENT_BRANCH=$(git branch --show-current)
+    if [ -n "$REMOTE_NAME" ] &&
+        REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE_NAME/$CURRENT_BRANCH"); then
+        if paths=$(git diff --name-only "$REMOTE_REF" HEAD); then
+            add_changed "$paths"
+        else
+            CHANGE_SET_UNKNOWN=1
+        fi
+    elif paths=$(changed_since_fork HEAD); then
+        add_changed "$paths"
+    else
+        CHANGE_SET_UNKNOWN=1
+    fi
 fi
 
-if [ -z "$CHANGE_SET_KNOWN" ]; then
+if [ -n "$CHANGE_SET_UNKNOWN" ]; then
     echo "⚠️  Pre-push: could not tell what this push changes (remote '$REMOTE' unresolved, or no common history) — checking every tracked file"
     CHANGED=$(git ls-files)
+else
+    CHANGED=$(printf '%s' "$CHANGED" | grep -v '^$' | sort -u || true)
 fi
 
 # Test seam: preview the gate for an arbitrary change set without committing

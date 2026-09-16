@@ -10427,6 +10427,17 @@
       "created_at": "2026-09-16T13:55:59.516233-07:00",
       "updated_at": "2026-09-16T13:55:59.516233-07:00",
       "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"4eedce3\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\".github/workflows/ci.yml\"]}"
+    },
+    {
+      "id": 958,
+      "change_id": "6e05e6ea-3bdb-4baa-ad60-57609a18b2af",
+      "node_type": "outcome",
+      "title": "CodeRabbit fixes pushed to PR #125 as ea05fb1: hook stdin-sha change set + canonical remote match + unknown-set fallback to all tracked files, local clippy -D warnings, CI actions SHA-pinned with persist-credentials false; dry-run verified 5 push shapes; all 4 threads replied. CI run 35149675460 pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T13:58:39.374790-07:00",
+      "updated_at": "2026-09-16T13:58:39.374790-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"ea05fb1\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -21473,6 +21484,17 @@
       "weight": 1.0,
       "rationale": "Fixes for the validated findings",
       "created_at": "2026-09-16T13:56:02.036996-07:00"
+    },
+    {
+      "id": 1015,
+      "from_node_id": 957,
+      "to_node_id": 958,
+      "from_change_id": "66834949-df75-4e8c-879e-450af1f4e757",
+      "to_change_id": "6e05e6ea-3bdb-4baa-ad60-57609a18b2af",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of the review fixes",
+      "created_at": "2026-09-16T13:58:40.956160-07:00"
     }
   ],
   "documents": [

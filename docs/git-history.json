@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ea05fb101c68787292f64d9cb81ba2435419ae44",
+    "short_hash": "ea05fb1",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T13:57:54-07:00",
+    "message": "fix(367): address CodeRabbit review on the pre-push hook and CI\n\n- The hook now measures the change set from the remote tip that git\n  reports on stdin. A pushed URL maps to a named remote only when it is\n  the same repository (SSH and HTTPS spellings compare equal); it no\n  longer guesses origin.\n- A change set that cannot be determined (unresolved remote, no fork\n  point) falls back to every tracked file instead of an empty set that\n  skipped every gate.\n- Local clippy gates pass -D warnings. CI already denied warnings via\n  the workflow RUSTFLAGS.\n- CI actions are pinned to full commit SHAs, and checkout no longer\n  persists the token.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 4
+  },
+  {
     "hash": "4eedce3efea084ebded2e613ca9c9f1755b455b2",
     "short_hash": "4eedce3",
     "author": "Bryan Guffey",
