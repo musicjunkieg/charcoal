@@ -244,3 +244,120 @@ async fn metadata_forwards_to_the_inner_classifier() {
     assert_eq!(c.threshold(), 0.5);
     assert!(c.classify_batch(&[]).await.unwrap().is_empty());
 }
+
+/// Advertises `expected` as its identity but stamps every verdict it returns
+/// with `reported` — an endpoint whose policy changed after the scan-start
+/// probe (or whose probe came back as an error slot and so proved nothing).
+struct DriftingClassifier {
+    expected: &'static str,
+    reported: &'static str,
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl ToxicityClassifier for DriftingClassifier {
+    async fn classify(&self, content: &str) -> anyhow::Result<ClassifierVerdict> {
+        match self
+            .classify_batch(std::slice::from_ref(&content.to_string()))
+            .await?
+            .remove(0)
+        {
+            ItemOutcome::Verdict(v) => Ok(v),
+            ItemOutcome::Error(e) => anyhow::bail!("{e}"),
+        }
+    }
+
+    async fn classify_batch(&self, contents: &[String]) -> anyhow::Result<Vec<ItemOutcome>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(contents
+            .iter()
+            .map(|_| {
+                ItemOutcome::Verdict(ClassifierVerdict {
+                    toxic_token: true,
+                    confidence: 0.9,
+                    latency_ms: 42,
+                    model_id: self.model_id().to_string(),
+                    // The provenance the ENDPOINT reported, not the one we asked for.
+                    policy_version: self.reported.to_string(),
+                })
+            })
+            .collect())
+    }
+
+    fn max_batch_size(&self) -> usize {
+        16
+    }
+    fn name(&self) -> &'static str {
+        "drifting"
+    }
+    fn model_id(&self) -> &'static str {
+        "fake-model"
+    }
+    fn policy_version(&self) -> &'static str {
+        self.expected
+    }
+    fn threshold(&self) -> f32 {
+        0.5
+    }
+}
+
+/// #344 Codex review P1: a verdict whose reported identity is not the one this
+/// classifier advertises must never be cached under the advertised identity.
+///
+/// Before the fix, the write path keyed every fresh verdict on the ADVERTISED
+/// model/policy and a hit was rebuilt with the advertised identity too. So the
+/// first finalize correctly rejected the foreign verdict, the bounded re-gather
+/// hit the cache, and the replayed verdict now claimed to be current — a score
+/// produced by the wrong policy would publish. Both halves are asserted: the
+/// foreign verdict is not persisted, and a second classification of the same
+/// text goes back to the endpoint and still reports the foreign policy.
+#[tokio::test]
+async fn a_foreign_verdict_is_never_cached_under_the_advertised_identity() {
+    let db = setup_db();
+    let inner = Arc::new(DriftingClassifier {
+        expected: "policy-expected",
+        reported: "policy-foreign",
+        calls: AtomicUsize::new(0),
+    });
+    let stats = Arc::new(CacheStats::default());
+    let c = CachedClassifier::new(
+        Arc::clone(&inner) as Arc<dyn ToxicityClassifier>,
+        Arc::clone(&db),
+        Arc::clone(&stats),
+    );
+    let batch = texts(&["so bad"]);
+
+    let first = c.classify_batch(&batch).await.unwrap();
+    let ItemOutcome::Verdict(v) = &first[0] else {
+        panic!("expected a verdict, got {first:?}");
+    };
+    assert_eq!(
+        v.policy_version, "policy-foreign",
+        "a fresh verdict keeps the provenance the endpoint reported"
+    );
+
+    // Nothing may be persisted under the advertised identity.
+    let stored = db
+        .get_classifier_verdicts("fake-model", "policy-expected", &[text_sha256("so bad")])
+        .await
+        .unwrap();
+    assert!(
+        stored.is_empty(),
+        "a foreign verdict must not be cached under the advertised policy"
+    );
+
+    // The re-gather case: the same text again must NOT come from the cache.
+    let second = c.classify_batch(&batch).await.unwrap();
+    let ItemOutcome::Verdict(v2) = &second[0] else {
+        panic!("expected a verdict, got {second:?}");
+    };
+    assert_eq!(
+        inner.calls.load(Ordering::SeqCst),
+        2,
+        "a foreign verdict must be re-requested, not replayed from the cache"
+    );
+    assert_eq!(
+        v2.policy_version, "policy-foreign",
+        "a replay must never relabel a foreign verdict as the advertised policy"
+    );
+}

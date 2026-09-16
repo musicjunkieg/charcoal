@@ -141,9 +141,16 @@ pub async fn enqueue_due_refreshes(
 
 /// After a completed refresh or a successful full scan: next nightly, and
 /// this generation is proven for the user. Best-effort — the scan already
-/// succeeded; a scheduling failure is logged and the user is caught by the
-/// generation rule (`refresh_attempted_generation` still differs) on a later
-/// tick.
+/// succeeded, so failures are logged rather than propagated.
+///
+/// **The proof is written only if the deadline write succeeded.** The proof
+/// (`mark_refreshed_generation`) stamps `refresh_attempted_generation` as
+/// current, which silences `REFRESH_DUE_SQL`'s generation clause. For a user
+/// whose `next_refresh_at` is still NULL — anyone on their first successful
+/// scan — a failed deadline write followed by a successful proof would leave
+/// neither due-ness clause able to fire, and the user would never be refreshed
+/// again (#344 Codex review P2). Skipping the proof keeps the attempted
+/// generation stale, so the generation clause catches the user on a later tick.
 ///
 /// `interval` is injected rather than read from the environment here: the
 /// proof below stamps `refresh_attempted_generation`, so skipping the deadline
@@ -157,7 +164,11 @@ pub async fn schedule_after_success(
     interval: Duration,
 ) {
     if let Err(e) = db.schedule_refresh(user_did, &plus(now, interval)).await {
-        warn!(error = %format!("{e:#}"), "could not schedule the next refresh");
+        warn!(
+            error = %format!("{e:#}"),
+            "could not schedule the next refresh — leaving the generation unproven so a later tick still finds this user"
+        );
+        return;
     }
     // Proof: sets refreshed_generation AND refresh_attempted_generation.
     if let Err(e) = db
@@ -696,6 +707,59 @@ mod tests {
 
     /// The claim is one transaction: when creating the queue row fails, the
     /// schedule is NOT advanced, so the user is still due next tick (R04).
+    /// #344 Codex review P2: a failed deadline write must not be followed by a
+    /// successful proof write.
+    ///
+    /// `schedule_after_success` writes the deadline, then `mark_refreshed_generation`
+    /// — which stamps BOTH `refreshed_generation` and `refresh_attempted_generation`.
+    /// For a user's first successful full scan `next_refresh_at` is still NULL,
+    /// so if the deadline write fails and the proof succeeds, the user is left
+    /// with a NULL deadline and a current attempted generation. `REFRESH_DUE_SQL`
+    /// then matches neither its deadline clause (NULL) nor its generation clause
+    /// (current), and the user is never refreshed again.
+    ///
+    /// A trigger refuses writes to `next_refresh_at` only. `mark_refreshed_generation`
+    /// sets different columns, so without the fix it would succeed — which is
+    /// exactly the half-write this pins.
+    #[tokio::test]
+    async fn a_failed_deadline_write_does_not_strand_the_user() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_deadline BEFORE UPDATE OF next_refresh_at ON users
+             BEGIN SELECT RAISE(ABORT, 'disk on fire'); END;",
+        )
+        .unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        let now = Utc::now();
+        // A first-scan user: scores, no deadline, never attempted.
+        user(&db, "did:plc:first", None, None).await;
+
+        schedule_after_success(db.as_ref(), "did:plc:first", now, Duration::from_secs(3600)).await;
+
+        assert_eq!(
+            db.next_refresh_at("did:plc:first").await.unwrap(),
+            None,
+            "the trigger refused the deadline write"
+        );
+        // This NULL is what keeps the user reachable: `REFRESH_DUE_SQL` selects
+        // on `refresh_attempted_generation IS NULL`, so a later tick finds them.
+        // (The tick cannot be exercised here — it writes `next_refresh_at` in
+        // its own transaction, which the same trigger would refuse.)
+        assert_eq!(
+            db.refresh_attempted_generation("did:plc:first")
+                .await
+                .unwrap(),
+            None,
+            "the proof must not be stamped when the deadline write failed"
+        );
+        assert_eq!(
+            db.refreshed_generation("did:plc:first").await.unwrap(),
+            None,
+            "a revision is not proven by a scan whose schedule could not be written"
+        );
+    }
+
     #[tokio::test]
     async fn a_failed_enqueue_rolls_back_the_schedule_advance() {
         let conn = Connection::open_in_memory().unwrap();

@@ -73,10 +73,46 @@ pub async fn direct_pairs_for(
     user_did: &str,
     amplifier_did: &str,
 ) -> Result<Vec<(String, String)>> {
+    let (_had_events, pairs) = load_amplifier_pairs(db, user_did, amplifier_did).await?;
+    Ok(pairs)
+}
+
+/// Like [`direct_pairs_for`], but keeps "is this an amplifier at all" separate
+/// from "did its events yield any usable pairs".
+///
+/// - `Ok(None)` — no stored events: a follower.
+/// - `Ok(Some(pairs))` — an amplifier. `pairs` may be EMPTY: a like or repost,
+///   or an event with no usable text, is still amplification.
+///
+/// Finalize reads `CandidateInput::direct_pairs.is_some()` as "amplifier", and
+/// an amplifier with nothing to compare skips NLI. The full scan always stages
+/// its amplifiers as `Some(pairs)`, empty or not. A refresh that collapsed an
+/// empty result to `None` would re-score such an account on the FOLLOWER path
+/// and overwrite the full scan's score with a differently computed one (#344
+/// Codex review P2). This is the answer a refresh needs; the full scan already
+/// knows every account it iterates is an amplifier, so it keeps
+/// [`direct_pairs_for`].
+pub async fn amplifier_pairs_for(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<Option<Vec<(String, String)>>> {
+    let (had_events, pairs) = load_amplifier_pairs(db, user_did, amplifier_did).await?;
+    Ok(had_events.then_some(pairs))
+}
+
+/// The shared load behind both helpers: whether any events exist for this
+/// amplifier, and the deduplicated usable pairs among them.
+async fn load_amplifier_pairs(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<(bool, Vec<(String, String)>)> {
     let db_events = db
         .get_events_by_amplifier(user_did, amplifier_did)
         .await
         .with_context(|| format!("loading stored events for amplifier {amplifier_did}"))?;
+    let had_events = !db_events.is_empty();
     // The same event can be recorded by more than one scan, so deduplicate
     // across them rather than scoring the same pair twice.
     let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
@@ -89,7 +125,7 @@ pub async fn direct_pairs_for(
             }
         }
     }
-    Ok(pairs)
+    Ok((had_events, pairs))
 }
 
 /// Run the amplification detection pipeline.

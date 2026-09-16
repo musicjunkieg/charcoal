@@ -43,9 +43,7 @@ use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::relationships::GraphDistance;
 use crate::config::Config;
 use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind};
-use crate::pipeline::scan_phases::{
-    has_own_resumable_staging, CandidateInput, PhasedScanError, RunIdentity, ScanSummary,
-};
+use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity, ScanSummary};
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::web::scan_job::{finish_scan, set_progress, ScanManager, ScanReport, WebScanPhase};
@@ -215,17 +213,21 @@ impl RefreshOutcome {
 /// Turn a stored candidate row into a pipeline candidate.
 pub fn to_candidate(
     row: &RefreshCandidate,
-    pairs: Vec<(String, String)>,
+    pairs: Option<Vec<(String, String)>>,
     pile_on: &HashSet<String>,
 ) -> CandidateInput {
     CandidateInput {
         account_did: row.did.clone(),
         account_handle: row.handle.clone(),
         is_pile_on: pile_on.contains(&row.did),
-        // `None`, not `Some(vec![])`: finalize reads `direct_pairs.is_some()`
-        // as "this is an amplifier", and an amplifier with nothing to say
-        // skips NLI entirely. An account with no stored pairs is a follower.
-        direct_pairs: if pairs.is_empty() { None } else { Some(pairs) },
+        // Passed through unchanged. Finalize reads `direct_pairs.is_some()` as
+        // "this is an amplifier", so the amplifier/follower decision must come
+        // from whether the account HAS events, never from whether its events
+        // yielded usable pairs. An amplifier whose only engagement was a like
+        // or repost is `Some(vec![])` — exactly how the full scan stages it —
+        // and collapsing that to `None` would re-score it on the follower path
+        // (#344 Codex review P2).
+        direct_pairs: pairs,
         // An unparseable stored value is `None` — no distance multiplier —
         // rather than a guess.
         graph_distance: row
@@ -244,6 +246,11 @@ pub struct RefreshPlan {
     pub protected_posts: Vec<(String, Vec<f64>)>,
     pub median_engagement: f64,
     pub candidates: Vec<CandidateInput>,
+    /// Whether this refresh owns resumable staging. Read once, in
+    /// `prepare_refresh`, and carried here so the pipeline's classifier-probe
+    /// decision and the context-load decision are made from the same answer
+    /// rather than two reads of the same state.
+    pub has_own_resumable_staging: bool,
 }
 
 /// The fallible context loads, behind a trait so the failure path is testable
@@ -263,12 +270,29 @@ pub trait RefreshContextSource: Send + Sync {
         actor_handle: &str,
     ) -> anyhow::Result<Vec<(String, Vec<f64>)>>;
     async fn pile_on(&self, user_did: &str) -> anyhow::Result<HashSet<String>>;
+    /// `Ok(None)` = not an amplifier (no stored events); `Ok(Some(pairs))` =
+    /// an amplifier, whose `pairs` may be empty. See
+    /// [`crate::pipeline::amplification::amplifier_pairs_for`].
     async fn direct_pairs(
         &self,
         user_did: &str,
         amplifier_did: &str,
-    ) -> anyhow::Result<Vec<(String, String)>>;
+    ) -> anyhow::Result<Option<Vec<(String, String)>>>;
     async fn median_engagement(&self, user_did: &str) -> anyhow::Result<f64>;
+
+    /// Does this user have resumable staging that THIS refresh owns?
+    ///
+    /// Decides whether a zero-candidate refresh still needs its context: owned
+    /// staging is resumed and finalized, and finalize's follower pass consumes
+    /// the protected-post embeddings. With neither candidates nor owned
+    /// staging there is nothing for that context to feed.
+    ///
+    /// The default answers `true` — "assume there is work" — so an
+    /// implementation that does not override it keeps loading context. The
+    /// safe failure is a wasted load, never a skipped one.
+    async fn has_own_resumable_staging(&self, _user_did: &str) -> anyhow::Result<bool> {
+        Ok(true)
+    }
 }
 
 /// Everything before the pipeline, through the injectable boundary.
@@ -299,9 +323,37 @@ pub async fn prepare_refresh(
     }
     // 2. Candidates from the table.
     let rows = ctx.candidates(user_did).await?;
+    let has_own_resumable_staging = ctx.has_own_resumable_staging(user_did).await?;
+    // 2b. Nothing to score and nothing of our own to resume: skip the context
+    //     loads entirely (#344 Codex review P2). They fetch and embed up to 50
+    //     protected posts — Bluesky and ONNX work — and read pile-on and
+    //     median engagement. None of it is consumed here: the pipeline gathers
+    //     no candidates and finalizes no staging. Loading it anyway cost every
+    //     idle user that work nightly, and a transient failure in a load whose
+    //     result was never needed turned an idle night into hourly retries.
+    //
+    //     `NothingDue` is still decided by the pipeline, AFTER it runs
+    //     (`classify_refresh`), exactly as before — this changes what is
+    //     loaded, not how the outcome is classified. The empty context below
+    //     is never read, because every path with no candidates and no owned
+    //     staging returns before finalize: a fresh start with nothing to
+    //     gather, stale staging discarded, or another kind's staging deferred.
+    if rows.is_empty() && !has_own_resumable_staging {
+        return Ok(Ok(RefreshPlan {
+            fingerprint,
+            protected_embedding,
+            centroids,
+            protected_posts: Vec::new(),
+            median_engagement: 0.0,
+            candidates: Vec::new(),
+            has_own_resumable_staging,
+        }));
+    }
     // 3. Required context (R05): any failure here is an Err. Missing context
     //    would systematically LOWER every High/Elevated score we are about to
-    //    overwrite — and stamp the result current.
+    //    overwrite — and stamp the result current. Loaded whenever there is
+    //    work, including a zero-candidate refresh that owns staging: finalize's
+    //    follower pass on the resumed accounts consumes the protected posts.
     let protected_posts = ctx.protected_posts_embeddings(actor_handle).await?;
     let pile_on = ctx.pile_on(user_did).await?;
     let median_engagement = ctx.median_engagement(user_did).await?;
@@ -317,6 +369,7 @@ pub async fn prepare_refresh(
         protected_posts,
         median_engagement,
         candidates,
+        has_own_resumable_staging,
     }))
 }
 
@@ -634,7 +687,7 @@ pub(crate) async fn refresh_drain_candidates(
     let mut candidates = Vec::with_capacity(rows.len());
     for row in &rows {
         let pairs =
-            crate::pipeline::amplification::direct_pairs_for(db, user_did, &row.did).await?;
+            crate::pipeline::amplification::amplifier_pairs_for(db, user_did, &row.did).await?;
         candidates.push(to_candidate(row, pairs, &pile_on));
     }
     Ok(candidates)
@@ -692,12 +745,26 @@ impl RefreshContextSource for LiveRefreshContext {
         &self,
         user_did: &str,
         amplifier_did: &str,
-    ) -> anyhow::Result<Vec<(String, String)>> {
-        crate::pipeline::amplification::direct_pairs_for(&self.db, user_did, amplifier_did).await
+    ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+        crate::pipeline::amplification::amplifier_pairs_for(&self.db, user_did, amplifier_did).await
     }
 
     async fn median_engagement(&self, user_did: &str) -> anyhow::Result<f64> {
         self.db.get_median_engagement(user_did).await
+    }
+
+    /// The real ownership read — the same one `run_phased_scan` performs on
+    /// entry, without its mutating fallbacks. Overrides the conservative
+    /// trait default, which would never let an idle refresh skip its loads.
+    async fn has_own_resumable_staging(&self, user_did: &str) -> anyhow::Result<bool> {
+        // Fully qualified: this method shares the free function's name, and a
+        // bare call reads like recursion even though it cannot resolve to one.
+        crate::pipeline::scan_phases::has_own_resumable_staging(
+            &self.db,
+            user_did,
+            RunIdentity::refresh(),
+        )
+        .await
     }
 }
 
@@ -757,10 +824,10 @@ pub(crate) async fn run_refresh(
             // it every night is pure waste; a zero-candidate tick that still
             // owns resumable staging (a prior attempt cut off mid-burst)
             // bursts below regardless, so it still needs the probe.
-            // `has_own_resumable_staging` is the same ownership read
-            // `run_phased_scan` performs on entry, read here without its
-            // mutating fallbacks.
-            let has_staging = has_own_resumable_staging(&db, &uid, RunIdentity::refresh()).await?;
+            // The ownership answer comes from the plan: `prepare_refresh` read
+            // it once and used it to decide whether to load context at all, so
+            // the probe and the context load are decided from the same answer.
+            let has_staging = plan.has_own_resumable_staging;
             if refresh_should_probe(candidates, has_staging) {
                 // A mismatched Stage-2 policy fails the run (retry in an
                 // hour, no score written) instead of re-gathering every due
@@ -872,7 +939,7 @@ mod tests {
             graph_distance: Some("Follows you".into()),
         };
         let pile_on: HashSet<String> = ["did:plc:a".to_string()].into_iter().collect();
-        let c = to_candidate(&row, vec![("o".into(), "r".into())], &pile_on);
+        let c = to_candidate(&row, Some(vec![("o".into(), "r".into())]), &pile_on);
         assert_eq!(c.account_did, "did:plc:a");
         assert!(c.is_pile_on);
         assert_eq!(c.graph_distance, Some(GraphDistance::InboundFollow));
@@ -882,19 +949,37 @@ mod tests {
         );
     }
 
-    /// No stored pairs ⇒ follower path (`direct_pairs: None`), NOT
-    /// `Some(vec![])`, which finalize would treat as an amplifier with nothing
-    /// to say and skip NLI entirely.
+    /// #344 Codex review P2: the amplifier/follower decision comes from whether
+    /// the account HAS events, not from whether those events yielded usable
+    /// pairs. Finalize reads `direct_pairs.is_some()` as "amplifier".
+    ///
+    /// This test used to assert the opposite — that an empty pair list meant a
+    /// follower. That was the bug: an amplifier whose only engagement was a like
+    /// or repost has events but no text pairs, and the full scan stages it as
+    /// `Some(vec![])`. Collapsing it to `None` re-scored it on the follower
+    /// path. Both shapes are pinned so neither can regress into the other.
     #[test]
-    fn no_pairs_means_follower_mode_and_unparseable_distance_is_none() {
+    fn amplifier_mode_follows_event_existence_not_pair_count() {
         let row = RefreshCandidate {
             did: "did:plc:b".into(),
             handle: "b.handle".into(),
             graph_distance: Some("not a distance".into()),
         };
-        let c = to_candidate(&row, vec![], &HashSet::new());
-        assert_eq!(c.direct_pairs, None);
-        assert_eq!(c.graph_distance, None);
+
+        // No stored events at all: a follower.
+        let follower = to_candidate(&row, None, &HashSet::new());
+        assert_eq!(follower.direct_pairs, None, "no events ⇒ follower path");
+
+        // Events exist but none carried usable text: still an amplifier.
+        let quiet_amplifier = to_candidate(&row, Some(vec![]), &HashSet::new());
+        assert_eq!(
+            quiet_amplifier.direct_pairs,
+            Some(vec![]),
+            "an amplifier with no usable pairs must stay an amplifier, as the full scan stages it"
+        );
+
+        // An unparseable stored distance is `None`, not a guess.
+        assert_eq!(follower.graph_distance, None);
     }
 
     /// #344 F6: a nothing-due tick (no candidates, nothing of its own left
@@ -1209,8 +1294,12 @@ mod tests {
         async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
             Ok(HashSet::new())
         }
-        async fn direct_pairs(&self, _: &str, _: &str) -> anyhow::Result<Vec<(String, String)>> {
-            Ok(vec![])
+        async fn direct_pairs(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+            Ok(None)
         }
         async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
             Ok(0.0)
@@ -1408,8 +1497,12 @@ mod tests {
         async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
             Ok(HashSet::new())
         }
-        async fn direct_pairs(&self, _: &str, _: &str) -> anyhow::Result<Vec<(String, String)>> {
-            Ok(vec![])
+        async fn direct_pairs(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+            Ok(None)
         }
         async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
             Ok(0.0)
@@ -1429,6 +1522,126 @@ mod tests {
             plan.candidates[0].direct_pairs, None,
             "follower path, not an error"
         );
+    }
+
+    /// A usable, compatible fingerprint for the load-skip tests below.
+    fn usable_fingerprint() -> StoredFingerprint {
+        (
+            TopicFingerprint {
+                clusters: vec![],
+                post_count: 0,
+            },
+            None,
+            vec![],
+            None,
+        )
+    }
+
+    /// #344 Codex review P2: with no candidates and no owned staging there is
+    /// nothing for the context to feed, so none of it may be loaded.
+    ///
+    /// Every context load panics. Before the fix `prepare_refresh` loaded all
+    /// of them unconditionally — fetching and embedding up to 50 protected
+    /// posts for every idle user, every night — so this test would have
+    /// panicked on the first one.
+    #[tokio::test]
+    async fn an_idle_refresh_loads_no_context() {
+        struct Idle;
+        #[async_trait]
+        impl RefreshContextSource for Idle {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
+                Ok(Some(usable_fingerprint()))
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![])
+            }
+            async fn has_own_resumable_staging(&self, _: &str) -> anyhow::Result<bool> {
+                Ok(false)
+            }
+            async fn protected_posts_embeddings(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                panic!("an idle refresh must not fetch or embed protected posts")
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
+                panic!("an idle refresh must not read pile-on")
+            }
+            async fn direct_pairs(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+                panic!("an idle refresh has no candidates to read pairs for")
+            }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
+                panic!("an idle refresh must not read median engagement")
+            }
+        }
+
+        let plan = prepare_refresh(&Idle, "did:plc:idle", "idle.h")
+            .await
+            .unwrap()
+            .expect("an idle refresh is not deferred — NothingDue is decided later");
+        assert!(plan.candidates.is_empty());
+        assert!(!plan.has_own_resumable_staging);
+    }
+
+    /// The safety half of the fix above: a refresh with NO new candidates but
+    /// resumable staging of its own must STILL load its context.
+    ///
+    /// Owned staging is resumed and finalized, and finalize's follower pass
+    /// consumes the protected-post embeddings. Skipping the loads here would
+    /// finalize those accounts from missing context and stamp the result
+    /// current — the exact R05 failure. The sentinel proves the load ran and
+    /// reached the plan.
+    #[tokio::test]
+    async fn a_zero_candidate_refresh_that_owns_staging_still_loads_context() {
+        struct ResumingOnly;
+        #[async_trait]
+        impl RefreshContextSource for ResumingOnly {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
+                Ok(Some(usable_fingerprint()))
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![])
+            }
+            async fn has_own_resumable_staging(&self, _: &str) -> anyhow::Result<bool> {
+                Ok(true)
+            }
+            async fn protected_posts_embeddings(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                Ok(vec![("sentinel post".to_string(), vec![0.5])])
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
+                Ok(HashSet::new())
+            }
+            async fn direct_pairs(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+                Ok(None)
+            }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
+                Ok(7.0)
+            }
+        }
+
+        let plan = prepare_refresh(&ResumingOnly, "did:plc:resume", "resume.h")
+            .await
+            .unwrap()
+            .expect("not deferred");
+        assert!(plan.candidates.is_empty(), "no NEW candidates");
+        assert!(plan.has_own_resumable_staging);
+        assert_eq!(
+            plan.protected_posts,
+            vec![("sentinel post".to_string(), vec![0.5])],
+            "context must still load when there is owned staging to resume"
+        );
+        assert_eq!(plan.median_engagement, 7.0);
     }
 
     /// A refresh never rebuilds a fingerprint: absent or built by another
@@ -1457,7 +1670,7 @@ mod tests {
                 &self,
                 _: &str,
                 _: &str,
-            ) -> anyhow::Result<Vec<(String, String)>> {
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
                 panic!("no context is loaded for a deferred refresh")
             }
             async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
@@ -1502,7 +1715,7 @@ mod tests {
                 &self,
                 _: &str,
                 _: &str,
-            ) -> anyhow::Result<Vec<(String, String)>> {
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
                 panic!("no context is loaded for a deferred refresh")
             }
             async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
@@ -1545,7 +1758,7 @@ mod tests {
                 &self,
                 _: &str,
                 _: &str,
-            ) -> anyhow::Result<Vec<(String, String)>> {
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
                 unreachable!()
             }
             async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {

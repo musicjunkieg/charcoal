@@ -1,5 +1,45 @@
 [
   {
+    "hash": "a9f792a864ba904f4defbac26a5ad4bf3fbcec4b",
+    "short_hash": "a9f792a",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T14:54:53-07:00",
+    "message": "fix(367): address Codex review — frontend build, Postgres trigger, combined lint\n\n- The web build embeds web/build (include_dir!), which is gitignored,\n  so on a fresh clone or worktree every Rust push failed web clippy.\n  The hook now builds the frontend once when web/build is missing.\n- Postgres clippy also triggers on any changed Rust file with\n  Postgres-only sections (src/main.rs selects the backend that way),\n  not only on src/db paths. Locally it lints the production\n  web,postgres combination.\n- CI lints --features web,postgres, the combination the Dockerfile\n  builds. Each feature alone was linted, never the two together.\n\nVerified by running the hook for real in a worktree with no web/build:\nfrontend built, both clippy gates clean with -D warnings.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 5
+  },
+  {
+    "hash": "f772a3d1dd9798a01b1a6172a04fb71152590ca1",
+    "short_hash": "f772a3d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T14:05:55-07:00",
+    "message": "fix(367): union the change set across every ref a push sends\n\nThe hook took the base only from the stdin line pushing HEAD, so a push\nof several branches measured only the checked-out one and could skip\ntests for paths the others change. It now reads every pushed ref and\nunions their changed paths, each against its remote tip or, for a new\nref, its fork point. Any comparison that fails still marks the change\nset unknown, which checks every tracked file. Deleting a remote ref\nadds nothing. When a pushed ref is not HEAD, the hook says local tests\nrun against HEAD and CI covers each branch.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
+    "hash": "ea05fb101c68787292f64d9cb81ba2435419ae44",
+    "short_hash": "ea05fb1",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T13:57:54-07:00",
+    "message": "fix(367): address CodeRabbit review on the pre-push hook and CI\n\n- The hook now measures the change set from the remote tip that git\n  reports on stdin. A pushed URL maps to a named remote only when it is\n  the same repository (SSH and HTTPS spellings compare equal); it no\n  longer guesses origin.\n- A change set that cannot be determined (unresolved remote, no fork\n  point) falls back to every tracked file instead of an empty set that\n  skipped every gate.\n- Local clippy gates pass -D warnings. CI already denied warnings via\n  the workflow RUSTFLAGS.\n- CI actions are pinned to full commit SHAs, and checkout no longer\n  persists the token.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 4
+  },
+  {
+    "hash": "4eedce3efea084ebded2e613ca9c9f1755b455b2",
+    "short_hash": "4eedce3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T13:39:56-07:00",
+    "message": "ci(367): migrate the fresh test database before the Postgres tests\n\nThe first CI run of the Postgres job failed 10 of 44 db_postgres tests with\n`relation \"…\" does not exist` for account_scores, actions,\namplification_events and scan_queue.\n\nThose tests clean up with raw SQL before they connect through the app, and\nconnecting is what runs the migrations. A long-lived local database already has\nevery table, so this never showed. CI starts from an empty database and runs the\ntests in parallel, so the tests that clean up first lose the race to the ones\nthat connect first.\n\nThe job now runs `charcoal init` against the test database before the tests,\nwhich applies the migrations the way production does at boot. This is a\nworkflow-only fix on purpose: tests/db_postgres.rs is heavily rewritten on the\n#344 branch, with raw-SQL helpers of its own, so a test-side fix here would\nconflict with PR #124 and still miss that branch. The test ordering itself is\ntracked as #376.\n\nThe failure was genuine rather than a silent skip: the job ran 44 Postgres\ntests, which is the thing this job exists to prove.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 2
+  },
+  {
+    "hash": "ddbc90387e604e12a77b07354696d5f841b18c99",
+    "short_hash": "ddbc903",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T16:33:38-07:00",
+    "message": "docs(344): add a Rollback section, correct the probe claim, record the cache cold start\n\nF1: new §2b \"Rollback\" in the Phase 2 runbook. The deploy's designed\nfirst-minute behaviour is \"every tier list goes to zero\", and the instinctive\nundo — redeploy the previous binary — is actively harmful on Postgres: v18\nmakes account_scores.valid_until NOT NULL with no default and drops the\nscoring_generation default (0018_score_expiry.sql:32-37), the pre-v18\nupsert_account_score names neither column (staging src/db/postgres.rs ~452),\nand nothing stops the old binary booting on the newer schema because the\nrunner only iterates its own embedded list (src/db/postgres.rs:391-404). So\nit boots green and then fails every score write ~2h later. The section states\nthat first, then: a FAILED migration is the safe case (one transaction,\n:411-417, nothing to undo); three graded options with real commands and\ncorrect readings — disable the nightly job (a stampede brake, not a\nrollback), un-hide in place (the SQL, flagged as a deliberate lie to the\nfreshness system), and a real binary rollback (schema reversed first, most\ndangerous); and how to read the current scoring revision off a row, since no\nCLI subcommand prints it and the only log that carries it is a staged-blob\nmismatch warn!.\n\nF2: README:280 claimed every scan probes the classifier endpoint before\ngathering. True only for the two web paths (scan_job.rs:1384,\nrefresh_scan.rs:768, the latter conditional on having work). charcoal scan\nand charcoal sweep call the pipelines directly, so on the CLI a wrong policy\nvalue still costs a full gather and then skips every account.\n\nF3: runbook §0.1 and a new §2a record that this deploy cold-starts the\nStage-2 verdict cache. CachedClassifier keys on policy_version\n(cached_classifier.rs:69-73, :116), which now returns cope_b_expected_policy()\n(runpod_cope_b.rs:663-670) where it returned \"policy-unknown\" before, so every\ncached verdict is unreachable. Unavoidable — keeping \"policy-unknown\" is what\nthe probe refuses. Orphans age out at 90 days (cache_retention.rs:25). It\nlands in the same window as re-scoring every High/Elevated row, so deploy day\nis a real classifier bill.\n\nDocumentation only; no code changed.\n\nRefs #344\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
     "hash": "e17590471055d41837b9d022b0380d915491969c",
     "short_hash": "e175904",
     "author": "Bryan Guffey",

@@ -81,8 +81,9 @@ pub struct ZentropiClient {
     ///
     /// `ToxicityClassifier::policy_version` returns `&'static str`, and the
     /// configured labeler version is only known at runtime, so the resolved
-    /// string is leaked — bounded by construction count (one per process in
-    /// production, a handful in tests), never in a loop. This is the same
+    /// string is leaked — once per DISTINCT value, via [`intern_policy`]. (It
+    /// is not bounded by construction count: the client is rebuilt for every
+    /// full scan and every nightly refresh.) This is the same
     /// string `classify` writes onto its verdicts, which is the whole point:
     /// finalize validates a row's recorded policy against what the classifier
     /// advertises, and before this they could differ.
@@ -91,6 +92,41 @@ pub struct ZentropiClient {
 
 /// The banner used when no concrete labeler version is configured.
 const ZENTROPI_DEFAULT_POLICY: &str = "zentropi-labeler";
+
+/// Hand a runtime policy string to the `&'static str` that
+/// `ToxicityClassifier::policy_version` requires, leaking each DISTINCT value
+/// at most once for the life of the process.
+///
+/// A leak is the only way to turn a runtime `String` into `&'static str`, so
+/// the question is only how many. `ZentropiClient` is rebuilt for every full
+/// scan and every nightly refresh (`build_scan_scorers` calls
+/// `build_from_env`), so leaking in the constructor grew memory without bound
+/// — one allocation per scan (#344 Codex review P2). Interning bounds it to the
+/// number of distinct configured values, which in a deployment is one.
+///
+/// Not a single `LazyLock` over the environment, as the RunPod client uses:
+/// [`ZentropiClient::with_api_url`] takes the version as a parameter so tests
+/// can construct clients with different values, and those must not collapse
+/// into whichever value happened to be read first.
+fn intern_policy(value: &str) -> &'static str {
+    use std::collections::HashSet;
+    use std::sync::{LazyLock, Mutex};
+
+    static INTERNED: LazyLock<Mutex<HashSet<&'static str>>> =
+        LazyLock::new(|| Mutex::new(HashSet::new()));
+
+    // A poisoned lock only means another thread panicked mid-insert; the set
+    // itself is still a valid set of leaked strings, so keep using it.
+    let mut set = INTERNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(existing) = set.get(value) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(value.to_string().into_boxed_str());
+    set.insert(leaked);
+    leaked
+}
 
 impl ZentropiClient {
     /// Build a new client. Returns an error if `api_key` or `labeler_id` is empty
@@ -133,7 +169,7 @@ impl ZentropiClient {
             .context("Failed to build reqwest client for Zentropi")?;
 
         let policy_version: &'static str = match labeler_version_id.as_deref() {
-            Some(v) => Box::leak(v.to_string().into_boxed_str()),
+            Some(v) => intern_policy(v),
             None => ZENTROPI_DEFAULT_POLICY,
         };
 
@@ -456,6 +492,43 @@ impl ToxicityClassifier for ZentropiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #344 Codex review P2: the client is rebuilt for every full scan and
+    /// every nightly refresh, so leaking the policy string per construction
+    /// grew memory without bound. Pointer identity is the observable proof
+    /// that repeat constructions reuse ONE leaked allocation.
+    ///
+    /// The value is unique to this test so a parallel test interning the same
+    /// string cannot make the first construction a hit and mask a regression.
+    #[test]
+    fn a_repeated_policy_is_leaked_once_not_per_construction() {
+        let policy = "intern-test-policy-a3f9";
+        let build = |version: &str| {
+            ZentropiClient::new(
+                "key".to_string(),
+                "labeler".to_string(),
+                Some(version.to_string()),
+            )
+            .expect("valid client")
+        };
+
+        let first = build(policy);
+        let second = build(policy);
+        assert!(
+            std::ptr::eq(first.policy_version(), second.policy_version()),
+            "the same policy must reuse one allocation, not leak a new one per scan"
+        );
+        assert_eq!(first.policy_version(), policy);
+
+        // Distinct values must stay distinct — interning must not collapse
+        // different configured policies into one.
+        let other = build("intern-test-policy-b7c2");
+        assert_eq!(other.policy_version(), "intern-test-policy-b7c2");
+        assert!(!std::ptr::eq(
+            first.policy_version(),
+            other.policy_version()
+        ));
+    }
 
     #[test]
     fn response_is_toxic_returns_true_for_label_1() {

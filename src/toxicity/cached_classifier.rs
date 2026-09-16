@@ -101,15 +101,29 @@ impl ToxicityClassifier for CachedClassifier {
             );
         }
 
+        // Only cache a verdict whose REPORTED identity is the one this
+        // classifier advertises. The row is keyed on the advertised
+        // model/policy and a hit is rebuilt with that identity
+        // (`verdict_from_row`) — the row itself stores no provenance. So caching
+        // a foreign verdict would launder it: the first finalize correctly
+        // rejects it as foreign evidence, the bounded re-gather hits the cache,
+        // and the replay now claims to be current, publishing a score the
+        // wrong model or policy produced (#344 Codex review P1). A foreign
+        // verdict still flows out below with its true provenance; it just is
+        // not remembered, so the next request goes back to the endpoint.
         let rows: Vec<ClassifierVerdictRow> = miss_slot
             .iter()
             .filter_map(|(hash, &slot)| match &fresh[slot] {
-                ItemOutcome::Verdict(v) => Some(ClassifierVerdictRow {
-                    text_sha256: (*hash).to_string(),
-                    toxic_token: v.toxic_token,
-                    confidence: f64::from(v.confidence),
-                }),
-                ItemOutcome::Error(_) => None,
+                ItemOutcome::Verdict(v)
+                    if v.model_id == model_id && v.policy_version == policy_version =>
+                {
+                    Some(ClassifierVerdictRow {
+                        text_sha256: (*hash).to_string(),
+                        toxic_token: v.toxic_token,
+                        confidence: f64::from(v.confidence),
+                    })
+                }
+                ItemOutcome::Verdict(_) | ItemOutcome::Error(_) => None,
             })
             .collect();
         self.db
