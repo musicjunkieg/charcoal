@@ -10482,6 +10482,72 @@
       "created_at": "2026-09-16T14:48:24.900346-07:00",
       "updated_at": "2026-09-16T14:48:24.900346-07:00",
       "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"f772a3d\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\".github/workflows/ci.yml\",\"CLAUDE.md\"]}"
+    },
+    {
+      "id": 963,
+      "change_id": "a4057384-e8f9-4380-858f-4e85fe6b5354",
+      "node_type": "outcome",
+      "title": "Codex fixes pushed to PR #125 as a9f792a: hook builds missing web/build, postgres clippy triggers on any changed .rs with feature = \"postgres\" and lints web,postgres, CI check job lints web,postgres, CLAUDE.md updated. Real (non-dry) hook run in the web/build-less worktree: frontend built, clippy web + web,postgres clean with -D warnings, exit 0.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T14:55:02.320947-07:00",
+      "updated_at": "2026-09-16T14:55:02.320947-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"a9f792a\",\"confidence\":90}"
+    },
+    {
+      "id": 964,
+      "change_id": "785ce5ba-c114-4c42-9906-de40ce7c6126",
+      "node_type": "outcome",
+      "title": "PR #125 a9f792a: CI run 35154965075 green both jobs, all 4 clippy steps (web, no features, web+postgres, postgres) success; CodeRabbit reviewed a9f792a with no actionable comments, decision still APPROVED, auto-review now paused on the branch. Ready to merge.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:03:05.427080-07:00",
+      "updated_at": "2026-09-16T15:03:05.427080-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"a9f792a\",\"confidence\":95}"
+    },
+    {
+      "id": 965,
+      "change_id": "da95441f-37d5-42d8-be58-9e8a3b2d866b",
+      "node_type": "outcome",
+      "title": "Codex fixes for PR #124 committed as 0978092 (untested yet; tests run via pre-push after pulling staging so PR #124 gets the new Postgres CI job)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:18:15.917721-07:00",
+      "updated_at": "2026-09-16T15:18:15.917721-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"0978092\",\"confidence\":80}"
+    },
+    {
+      "id": 966,
+      "change_id": "93b3337e-19b1-47b5-b5f7-2f423ccfec79",
+      "node_type": "outcome",
+      "title": "feat/343 pushed f2bce2f (Codex fixes 0978092 + staging merge with #367). Pre-push ran --lib + 5 affected binaries: 495 passed, 0 failed. First SSH push died silently (exit 141) during the ~3 min hook; retry with ssh ServerAliveInterval=15 landed; ls-remote confirms. PR #124 CI run 35157988524 (now includes Postgres job) pending.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:30:30.077244-07:00",
+      "updated_at": "2026-09-16T15:30:30.077244-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f2bce2f\",\"confidence\":90}"
+    },
+    {
+      "id": 967,
+      "change_id": "5869533b-a719-44ec-ba4f-b627dfc5cf2f",
+      "node_type": "observation",
+      "title": "#377: PR #124 CI run 35157988524 Postgres job failed at 'Download ONNX models' — step runs cargo run --features web, the Postgres job never builds web/build, include_dir! panics. Latent since #367 (PR #125 + staging runs hit the model cache so the step was skipped); any cache miss breaks it.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:42:33.838354-07:00",
+      "updated_at": "2026-09-16T15:42:33.838354-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 968,
+      "change_id": "6d234bb2-a985-4206-8d86-b6c150dc8d09",
+      "node_type": "action",
+      "title": "Fix #377: Postgres job downloads models with --features postgres (the build its init step compiles anyway). Branch fix/377-ci-model-download off staging -> PR; identical edit on feat/343 so PR #124 CI proceeds",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:42:33.867972-07:00",
+      "updated_at": "2026-09-16T15:42:33.867972-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f2bce2f\",\"confidence\":90,\"files\":[\".github/workflows/ci.yml\"]}"
     }
   ],
   "edges": [
@@ -21583,6 +21649,72 @@
       "weight": 1.0,
       "rationale": "Fixes for validated findings",
       "created_at": "2026-09-16T14:48:24.915895-07:00"
+    },
+    {
+      "id": 1020,
+      "from_node_id": 962,
+      "to_node_id": 963,
+      "from_change_id": "23a91d85-b562-4563-8105-98c8e3b8ed5a",
+      "to_change_id": "a4057384-e8f9-4380-858f-4e85fe6b5354",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-09-16T14:55:02.339806-07:00"
+    },
+    {
+      "id": 1021,
+      "from_node_id": 963,
+      "to_node_id": 964,
+      "from_change_id": "a4057384-e8f9-4380-858f-4e85fe6b5354",
+      "to_change_id": "785ce5ba-c114-4c42-9906-de40ce7c6126",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verification",
+      "created_at": "2026-09-16T15:03:05.442928-07:00"
+    },
+    {
+      "id": 1022,
+      "from_node_id": 942,
+      "to_node_id": 965,
+      "from_change_id": "fb24c292-344c-46e2-9c3b-2906a7f76fb0",
+      "to_change_id": "da95441f-37d5-42d8-be58-9e8a3b2d866b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Commit of held fixes",
+      "created_at": "2026-09-16T15:18:15.933241-07:00"
+    },
+    {
+      "id": 1023,
+      "from_node_id": 965,
+      "to_node_id": 966,
+      "from_change_id": "da95441f-37d5-42d8-be58-9e8a3b2d866b",
+      "to_change_id": "93b3337e-19b1-47b5-b5f7-2f423ccfec79",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Tested and pushed",
+      "created_at": "2026-09-16T15:30:30.104239-07:00"
+    },
+    {
+      "id": 1024,
+      "from_node_id": 944,
+      "to_node_id": 967,
+      "from_change_id": "d309e508-ba7c-4439-919f-7217c47c5edd",
+      "to_change_id": "5869533b-a719-44ec-ba4f-b627dfc5cf2f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Defect in #367 CI job",
+      "created_at": "2026-09-16T15:42:33.854592-07:00"
+    },
+    {
+      "id": 1025,
+      "from_node_id": 967,
+      "to_node_id": 968,
+      "from_change_id": "5869533b-a719-44ec-ba4f-b627dfc5cf2f",
+      "to_change_id": "6d234bb2-a985-4206-8d86-b6c150dc8d09",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix",
+      "created_at": "2026-09-16T15:42:33.884843-07:00"
     }
   ],
   "documents": [

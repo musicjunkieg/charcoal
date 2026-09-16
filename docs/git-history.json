@@ -1,5 +1,29 @@
 [
   {
+    "hash": "f2bce2fdfaa6ad4a0429ca3b9c4acb4268dfc777",
+    "short_hash": "f2bce2f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:18:26-07:00",
+    "message": "Merge staging into feat/343-phase2-expiry-refresh\n\nBrings in #367 (PR #125): the affected-tests pre-push hook and the\nPostgres CI job, so PR #124 gets Postgres coverage in CI. The two\ngenerated decision-graph exports conflicted and were regenerated with\ndeciduous sync.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 0
+  },
+  {
+    "hash": "09780928b5b131974743766fed64ee2a2f3f9320",
+    "short_hash": "0978092",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:18:05-07:00",
+    "message": "fix(344): address Codex review of PR #124\n\n- CachedClassifier caches a verdict only when its reported model and\n  policy match the advertised identity, so a foreign verdict can never\n  be stored as a current one.\n- schedule_after_success stops before marking the generation when the\n  deadline write fails, so a first-scan user is not stranded with no\n  next_refresh_at.\n- prepare_refresh skips the context loads only when there are no\n  candidates AND the user owns no resumable staging (resume consumes\n  the protected posts at finalize).\n- An amplifier whose events yield no usable pairs stays an amplifier;\n  mode follows event existence, not pair count.\n- ZentropiClient interns its policy string, leaking each distinct value\n  once instead of once per construction (per scan).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 8
+  },
+  {
+    "hash": "a9f792a864ba904f4defbac26a5ad4bf3fbcec4b",
+    "short_hash": "a9f792a",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T14:54:53-07:00",
+    "message": "fix(367): address Codex review — frontend build, Postgres trigger, combined lint\n\n- The web build embeds web/build (include_dir!), which is gitignored,\n  so on a fresh clone or worktree every Rust push failed web clippy.\n  The hook now builds the frontend once when web/build is missing.\n- Postgres clippy also triggers on any changed Rust file with\n  Postgres-only sections (src/main.rs selects the backend that way),\n  not only on src/db paths. Locally it lints the production\n  web,postgres combination.\n- CI lints --features web,postgres, the combination the Dockerfile\n  builds. Each feature alone was linted, never the two together.\n\nVerified by running the hook for real in a worktree with no web/build:\nfrontend built, both clippy gates clean with -D warnings.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 5
+  },
+  {
     "hash": "f772a3d1dd9798a01b1a6172a04fb71152590ca1",
     "short_hash": "f772a3d",
     "author": "Bryan Guffey",
