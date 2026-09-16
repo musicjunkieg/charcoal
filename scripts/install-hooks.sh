@@ -382,7 +382,8 @@ cat > "$HOOKS_DIR/pre-push" << 'HOOK'
 #
 # Rules:
 #   1. Block pushes to main (PRs only — GitHub enforces this too, but belt+suspenders)
-#   2. Run full lint + tests for changed files in commits being pushed
+#   2. Lint, and run ONLY the tests affected by the commits being pushed.
+#      The full suite runs in CI on every pull request (#367).
 #
 # Bypass (emergency only): git push --no-verify
 
@@ -404,27 +405,147 @@ done
 
 # ── 2. Determine changed files vs the remote ─────────────────────────
 CURRENT_BRANCH=$(git branch --show-current)
-REMOTE_REF=$(git rev-parse "$REMOTE/$CURRENT_BRANCH" 2>/dev/null || echo "")
+REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE/$CURRENT_BRANCH" 2>/dev/null || echo "")
 
 if [ -n "$REMOTE_REF" ]; then
+    # Branch already on the remote: only what this push adds.
     CHANGED=$(git diff --name-only "$REMOTE_REF"..HEAD || true)
 else
-    # New branch — check vs main
-    CHANGED=$(git diff --name-only main..HEAD 2>/dev/null || true)
+    # New branch: compare against the branch it was cut FROM. Branches are cut
+    # from staging, so the old `main..HEAD` counted every staging commit not yet
+    # promoted to main as "changed" (#178). The three-dot form measures from the
+    # point this branch forked, so only this branch's own commits count.
+    BASE=""
+    for candidate in "$REMOTE/staging" "$REMOTE/main"; do
+        if git rev-parse --verify --quiet "$candidate" >/dev/null 2>&1; then
+            BASE="$candidate"
+            break
+        fi
+    done
+    if [ -n "$BASE" ]; then
+        CHANGED=$(git diff --name-only "$BASE"...HEAD || true)
+    else
+        CHANGED=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || true)
+    fi
+fi
+
+# Test seam: preview the gate for an arbitrary change set without committing
+# it. Combine with CHARCOAL_HOOK_DRY_RUN to see what a push WOULD run.
+if [ -n "$CHARCOAL_HOOK_CHANGED_FILES" ]; then
+    CHANGED="$CHARCOAL_HOOK_CHANGED_FILES"
 fi
 
 # ── 3. Language-specific quality gates ───────────────────────────────
 # CUSTOMIZE: add/remove gates as your project's stack requires.
 
-# Rust: clippy + tests
+# Rust: clippy + ONLY the tests this push affects
+#
+# ┌─ LOCAL EXCEPTION TO THE TEMPLATE (#367) ─────────────────────────────┐
+# │ Charcoal-specific: feature names, the module→test mapping, and the   │
+# │ Postgres hand-off to CI. `update-project-from-template` will replace │
+# │ this block with the template's run-everything version. Re-apply it,  │
+# │ or every push silently goes back to running the whole suite.         │
+# └──────────────────────────────────────────────────────────────────────┘
+#
+# This gate is fast feedback on what THIS push touched — it is NOT the safety
+# net. The full suite (every feature, every test binary, the Postgres suite,
+# the model-gated tests) runs in CI on every pull request. The selection below
+# is a heuristic: a change can break a test it does not obviously touch, and
+# CI is what catches that.
+#
+# Preview what a push would run, without running it:
+#   CHARCOAL_HOOK_DRY_RUN=1 .git/hooks/pre-push origin < /dev/null
+# ...optionally for a hypothetical change set (newline-separated paths):
+#   CHARCOAL_HOOK_CHANGED_FILES="src/web/refresh.rs" CHARCOAL_HOOK_DRY_RUN=1 \
+#     .git/hooks/pre-push origin < /dev/null
 if [ -f "$REPO_ROOT/Cargo.toml" ]; then
-    if echo "$CHANGED" | grep -qE '\.(rs|toml)$'; then
-        echo "🔍 Pre-push: cargo clippy..."
-        if ! (cd "$REPO_ROOT" && cargo clippy --all-targets --quiet 2>&1); then
+    RUST_CHANGED=$(echo "$CHANGED" | grep -E '\.rs$|(^|/)Cargo\.(toml|lock)$|^migrations/' || true)
+    if [ -n "$RUST_CHANGED" ]; then
+        # Run a gate, or in dry-run mode just print it. The command runs from
+        # the repo root so a push from a subdirectory behaves the same.
+        run_gate() {
+            local label="$1"
+            shift
+            if [ -n "$CHARCOAL_HOOK_DRY_RUN" ]; then
+                echo "   [dry run] $label: $*"
+                return 0
+            fi
+            echo "🔍 Pre-push: $label..."
+            (cd "$REPO_ROOT" && "$@" 2>&1)
+        }
+
+        # A test file gated `#![cfg(feature = "postgres")]` compiles to ZERO
+        # tests without that feature and would "pass" having run nothing. Those
+        # need a live database, so they belong to the Postgres suite in CI.
+        is_postgres_test() {
+            grep -q '^#!\[cfg(feature = "postgres")\]' "$1"
+        }
+
+        # Add `--test <name>` once.
+        TEST_ARGS=""
+        add_test() {
+            case " $TEST_ARGS " in
+                *" --test $1 "*) ;;
+                *) TEST_ARGS="$TEST_ARGS --test $1" ;;
+            esac
+        }
+
+        # Paths that the Postgres build compiles or depends on. Clippy still
+        # type-checks the Postgres build locally, so a compile error cannot
+        # wait for CI; only the Postgres TESTS are handed off.
+        PG_TOUCHED=$(echo "$RUST_CHANGED" | grep -E '^src/db/|^migrations/postgres/|^tests/db_postgres\.rs$|(^|/)Cargo\.(toml|lock)$' || true)
+
+        if ! run_gate "cargo clippy (web)" cargo clippy --all-targets --features web --quiet; then
             echo ""
             echo "❌ Clippy warnings. Fix them before pushing."
             echo ""
             exit 1
+        fi
+        if [ -n "$PG_TOUCHED" ]; then
+            if ! run_gate "cargo clippy (postgres)" cargo clippy --all-targets --features postgres --quiet; then
+                echo ""
+                echo "❌ Clippy warnings in the Postgres build. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        fi
+
+        # 1. A changed integration-test file runs directly.
+        PG_TESTS_CHANGED=""
+        for f in $(echo "$RUST_CHANGED" | grep -E '^tests/[^/]+\.rs$' || true); do
+            [ -f "$REPO_ROOT/$f" ] || continue # deleted in this push
+            if is_postgres_test "$REPO_ROOT/$f"; then
+                PG_TESTS_CHANGED="$PG_TESTS_CHANGED $(basename "$f" .rs)"
+            else
+                add_test "$(basename "$f" .rs)"
+            fi
+        done
+
+        # 2. Changed library code runs its own inline unit tests (`--lib`), plus
+        #    every integration test that names the changed module by its full
+        #    path. `src/web/refresh.rs` → `charcoal::web::refresh`; `mod.rs`
+        #    maps to its directory. A prefix can over-match a sibling (for
+        #    example `…::refresh` also matches `…::refresh_scan`), which costs
+        #    an extra test binary, never a missed one.
+        SRC_CHANGED=$(echo "$RUST_CHANGED" | grep -E '^src/.+\.rs$' || true)
+        if [ -n "$SRC_CHANGED" ]; then
+            TEST_ARGS="--lib$TEST_ARGS"
+            for f in $SRC_CHANGED; do
+                mod=${f#src/}
+                mod=${mod%.rs}
+                mod=${mod%/mod}
+                case "$mod" in
+                    lib | main) continue ;; # crate roots: covered by --lib
+                esac
+                modpath="charcoal::$(echo "$mod" | sed 's#/#::#g')"
+                for t in "$REPO_ROOT"/tests/*.rs; do
+                    [ -f "$t" ] || continue
+                    is_postgres_test "$t" && continue
+                    if grep -qF "$modpath" "$t"; then
+                        add_test "$(basename "$t" .rs)"
+                    fi
+                done
+            done
         fi
 
         # ┌─ LOCAL EXCEPTION TO THE TEMPLATE ────────────────────────────────┐
@@ -443,12 +564,24 @@ if [ -f "$REPO_ROOT/Cargo.toml" ]; then
             export CHARCOAL_MODEL_DIR="$REPO_ROOT/models"
         fi
 
-        echo "🔍 Pre-push: cargo test..."
-        if ! (cd "$REPO_ROOT" && cargo test --quiet 2>&1); then
-            echo ""
-            echo "❌ Tests failed. Fix them before pushing."
-            echo ""
-            exit 1
+        if [ -n "$TEST_ARGS" ]; then
+            # `--features web` rather than the default: web is where most of
+            # the code lives, and the default build does not compile it at all,
+            # so the old run-everything default gave web changes no local
+            # coverage. Every non-Postgres test binary compiles under web.
+            # shellcheck disable=SC2086 # TEST_ARGS is deliberately word-split
+            if ! run_gate "cargo test (affected: ${TEST_ARGS# })" cargo test --features web $TEST_ARGS --quiet; then
+                echo ""
+                echo "❌ Tests failed. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        else
+            echo "⏭️  Pre-push: no local tests to run (dependency, migration or Postgres-only changes) — the full suite runs in CI"
+        fi
+
+        if [ -n "$PG_TOUCHED$PG_TESTS_CHANGED" ]; then
+            echo "ℹ️  Pre-push: this push affects the Postgres build — the Postgres suite runs in CI on the pull request"
         fi
         echo "✅ Rust gates passed"
     fi

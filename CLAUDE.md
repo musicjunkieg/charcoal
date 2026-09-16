@@ -137,10 +137,21 @@ the role once with `createuser -s charcoal`. If the database is missing,
 ### Git hooks
 
 After cloning, run `./scripts/install-hooks.sh` to install quality gates:
-- **pre-commit**: blocks commits with formatting errors, clippy warnings,
-  or failing tests (skipped for docs-only commits — markdown/text files)
-- **pre-push**: blocks pushes with failing tests or clippy warnings
-  (skipped for docs-only pushes)
+- **pre-commit**: `cargo fmt --check` only — plus the chainlink export, the
+  deciduous sync and the database backup. It does **not** run clippy or tests,
+  so committing is cheap. (This line used to claim otherwise.)
+- **pre-push**: clippy, then **only the tests this push affects** (#367):
+  changed test files run directly; changed library code runs `--lib` plus every
+  integration test that names the changed module by path. The Postgres suite is
+  **not** run locally — it needs a live database — and runs in CI instead.
+  Preview what a push would run without running it:
+  `CHARCOAL_HOOK_DRY_RUN=1 .git/hooks/pre-push origin < /dev/null`
+
+**CI is the full safety net, not the hooks.** Every pull request runs the whole
+suite: both lint configurations plus the web tests in one job, and the Postgres
+lint and tests (against Postgres 18 with pgvector) in a parallel job. The
+pre-push selection is a heuristic for fast feedback; a change can break a test
+it does not obviously touch, and CI is what catches that.
 
 ### Keep it runnable
 
