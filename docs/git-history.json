@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f772a3d1dd9798a01b1a6172a04fb71152590ca1",
+    "short_hash": "f772a3d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T14:05:55-07:00",
+    "message": "fix(367): union the change set across every ref a push sends\n\nThe hook took the base only from the stdin line pushing HEAD, so a push\nof several branches measured only the checked-out one and could skip\ntests for paths the others change. It now reads every pushed ref and\nunions their changed paths, each against its remote tip or, for a new\nref, its fork point. Any comparison that fails still marks the change\nset unknown, which checks every tracked file. Deleting a remote ref\nadds nothing. When a pushed ref is not HEAD, the hook says local tests\nrun against HEAD and CI covers each branch.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
     "hash": "ea05fb101c68787292f64d9cb81ba2435419ae44",
     "short_hash": "ea05fb1",
     "author": "Bryan Guffey",

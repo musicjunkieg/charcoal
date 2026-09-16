@@ -63,10 +63,18 @@ jobs:
 
       # The default build (no web, no postgres) is what `charcoal` compiles to
       # without flags, and it gates different code than the web build. The
-      # Postgres build is linted in its own job below. Together the three are
-      # the project's full lint gate (#367).
+      # Postgres build is linted alone in its own job below. With the combined
+      # production build after this, the four are the project's full lint gate
+      # (#367).
       - name: Clippy (no features)
         run: cargo clippy --all-targets
+
+      # Production builds web and Postgres together (Dockerfile:
+      # `--features web,postgres`). Code can compile under each feature alone
+      # and still fail combined, so lint the combination too. It needs
+      # web/build, which the frontend step above produced, but no database.
+      - name: Clippy (web + postgres)
+        run: cargo clippy --all-targets --features web,postgres
 
       # The ONNX regression tests (tests/unit_toxicity_token_limit.rs, #220) are
       # model-gated and SKIP when the model files are absent. Without this the

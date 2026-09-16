@@ -582,10 +582,46 @@ if [ -f "$REPO_ROOT/Cargo.toml" ]; then
             esac
         }
 
-        # Paths that the Postgres build compiles or depends on. Clippy still
-        # type-checks the Postgres build locally, so a compile error cannot
-        # wait for CI; only the Postgres TESTS are handed off.
+        # Code the Postgres build compiles differently. Clippy still type-checks
+        # it locally, so a compile error cannot wait for CI; only the Postgres
+        # TESTS are handed off. Two triggers: paths that belong to the Postgres
+        # backend, and any changed Rust file that has Postgres-only sections
+        # (`src/main.rs` selects the backend that way). A change the triggers
+        # cannot see, such as deleting the last Postgres-only section of a
+        # file, is caught by CI.
         PG_TOUCHED=$(echo "$RUST_CHANGED" | grep -E '^src/db/|^migrations/postgres/|^tests/db_postgres\.rs$|(^|/)Cargo\.(toml|lock)$' || true)
+        for f in $(echo "$RUST_CHANGED" | grep -E '\.rs$' || true); do
+            [ -f "$REPO_ROOT/$f" ] || continue # deleted in this push
+            if grep -q 'feature = "postgres"' "$REPO_ROOT/$f"; then
+                PG_TOUCHED="$PG_TOUCHED
+$f"
+            fi
+        done
+
+        # `--features web` embeds the frontend at compile time
+        # (`include_dir!("…/web/build")` in src/web/mod.rs), and web/build is
+        # gitignored. A fresh clone or a new worktree has none, and without it
+        # every web compile fails, so build it once here rather than reject the
+        # push. After that it is reused; a stale build still compiles.
+        if [ ! -d "$REPO_ROOT/web/build" ]; then
+            if [ -n "$CHARCOAL_HOOK_DRY_RUN" ]; then
+                echo "   [dry run] frontend build: web/build is missing"
+            elif ! command -v npm >/dev/null 2>&1; then
+                echo ""
+                echo "❌ web/build is missing and npm is not installed. The web build embeds it."
+                echo "   Install Node, then: npm --prefix web ci && npm --prefix web run build"
+                echo ""
+                exit 1
+            else
+                echo "🔍 Pre-push: web/build is missing — building the frontend once..."
+                if ! (cd "$REPO_ROOT" && { [ -d web/node_modules ] || npm --prefix web ci; } && npm --prefix web run build) 2>&1; then
+                    echo ""
+                    echo "❌ Frontend build failed. The web build embeds web/build, so it must build first."
+                    echo ""
+                    exit 1
+                fi
+            fi
+        fi
 
         if ! run_gate "cargo clippy (web)" cargo clippy --all-targets --features web --quiet -- -D warnings; then
             echo ""
@@ -593,8 +629,10 @@ if [ -f "$REPO_ROOT/Cargo.toml" ]; then
             echo ""
             exit 1
         fi
+        # Locally, lint Postgres as production builds it: together with web
+        # (Dockerfile: `--features web,postgres`). CI also lints Postgres alone.
         if [ -n "$PG_TOUCHED" ]; then
-            if ! run_gate "cargo clippy (postgres)" cargo clippy --all-targets --features postgres --quiet -- -D warnings; then
+            if ! run_gate "cargo clippy (web + postgres)" cargo clippy --all-targets --features web,postgres --quiet -- -D warnings; then
                 echo ""
                 echo "❌ Clippy warnings in the Postgres build. Fix them before pushing."
                 echo ""

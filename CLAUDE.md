@@ -142,14 +142,19 @@ After cloning, run `./scripts/install-hooks.sh` to install quality gates:
   so committing is cheap. (This line used to claim otherwise.)
 - **pre-push**: clippy, then **only the tests this push affects** (#367):
   changed test files run directly; changed library code runs `--lib` plus every
-  integration test that names the changed module by path. The Postgres suite is
-  **not** run locally — it needs a live database — and runs in CI instead.
+  integration test that names the changed module by path. When a push touches
+  Postgres code (`src/db/`, its migrations, or any file with Postgres-only
+  sections), it also lints the production `web,postgres` build. The Postgres
+  suite is **not** run locally — it needs a live database — and runs in CI
+  instead. The web build embeds `web/build`; on a fresh clone or worktree the
+  hook builds the frontend once before linting.
   Preview what a push would run without running it:
   `CHARCOAL_HOOK_DRY_RUN=1 .git/hooks/pre-push origin < /dev/null`
 
 **CI is the full safety net, not the hooks.** Every pull request runs the whole
-suite: both lint configurations plus the web tests in one job, and the Postgres
-lint and tests (against Postgres 18 with pgvector) in a parallel job. The
+suite. One job lints with no features, with web, and with the production web +
+Postgres combination, then runs the web tests. A parallel job lints Postgres
+alone and runs its tests against Postgres 18 with pgvector. The
 pre-push selection is a heuristic for fast feedback; a change can break a test
 it does not obviously touch, and CI is what catches that.
 

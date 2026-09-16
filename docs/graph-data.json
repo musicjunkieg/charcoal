@@ -10438,6 +10438,50 @@
       "created_at": "2026-09-16T13:58:39.374790-07:00",
       "updated_at": "2026-09-16T13:58:39.374790-07:00",
       "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"ea05fb1\",\"confidence\":85}"
+    },
+    {
+      "id": 959,
+      "change_id": "1017b200-006d-4392-ba6b-b3d866efc2a3",
+      "node_type": "outcome",
+      "title": "CodeRabbit round 2 on PR #125 (1 finding, valid): multi-ref pushes only measured HEAD's line. f772a3d unions changed paths over every pushed ref (remote tip or fork point per ref; failure -> all tracked files; deletions add nothing). Dry-run verified incl. HEAD + 343 branch picking 343's tests. Round-1 CI run 35149675460 green both jobs.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T14:06:07.504465-07:00",
+      "updated_at": "2026-09-16T14:06:07.504465-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"f772a3d\",\"confidence\":85}"
+    },
+    {
+      "id": 960,
+      "change_id": "520e3a6f-7fe9-43e4-a583-bf17b301e5c7",
+      "node_type": "outcome",
+      "title": "PR #125 CodeRabbit APPROVED f772a3d (2026-09-16 21:10Z); all 5 threads resolved, review bodies empty; CI run 35150457623 green both jobs. Ready for Bryan to merge to staging.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T14:17:11.305701-07:00",
+      "updated_at": "2026-09-16T14:17:11.305701-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"f772a3d\",\"confidence\":95}"
+    },
+    {
+      "id": 961,
+      "change_id": "b56b3bde-4b4b-480f-a2fb-e1f841e6f579",
+      "node_type": "observation",
+      "title": "Codex review of PR #125 (base staging), 3 findings, all VALID against the #367 goal (fast local feedback, CI = full safety net): P1 web clippy needs web/build (include_dir!, gitignored) so a fresh clone/worktree fails every Rust push — confirmed, .worktrees/367 has no web/build; the old default-features hook never compiled web. P2 CI never compiles web+postgres together though Dockerfile builds --features web,postgres. P2 PG_TOUCHED path regex misses postgres-gated code outside src/db (src/main.rs has 6 cfg(feature=postgres) sites).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T14:48:24.869109-07:00",
+      "updated_at": "2026-09-16T14:48:24.869109-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"confidence\":90}"
+    },
+    {
+      "id": 962,
+      "change_id": "23a91d85-b562-4563-8105-98c8e3b8ed5a",
+      "node_type": "action",
+      "title": "Fix Codex findings on PR #125: hook builds web/build when missing (npm ci if needed) before web clippy; local postgres clippy triggers on any changed .rs containing feature = \"postgres\" and lints the production web,postgres combination; CI check job adds clippy --features web,postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T14:48:24.900346-07:00",
+      "updated_at": "2026-09-16T14:48:24.900346-07:00",
+      "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"f772a3d\",\"confidence\":85,\"files\":[\"scripts/install-hooks.sh\",\".github/workflows/ci.yml\",\"CLAUDE.md\"]}"
     }
   ],
   "edges": [
@@ -21495,6 +21539,50 @@
       "weight": 1.0,
       "rationale": "Result of the review fixes",
       "created_at": "2026-09-16T13:58:40.956160-07:00"
+    },
+    {
+      "id": 1016,
+      "from_node_id": 957,
+      "to_node_id": 959,
+      "from_change_id": "66834949-df75-4e8c-879e-450af1f4e757",
+      "to_change_id": "1017b200-006d-4392-ba6b-b3d866efc2a3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Second review round",
+      "created_at": "2026-09-16T14:06:07.529075-07:00"
+    },
+    {
+      "id": 1017,
+      "from_node_id": 959,
+      "to_node_id": 960,
+      "from_change_id": "1017b200-006d-4392-ba6b-b3d866efc2a3",
+      "to_change_id": "520e3a6f-7fe9-43e4-a583-bf17b301e5c7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review loop closed",
+      "created_at": "2026-09-16T14:17:11.324140-07:00"
+    },
+    {
+      "id": 1018,
+      "from_node_id": 944,
+      "to_node_id": 961,
+      "from_change_id": "d309e508-ba7c-4439-919f-7217c47c5edd",
+      "to_change_id": "b56b3bde-4b4b-480f-a2fb-e1f841e6f579",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codex review of #367",
+      "created_at": "2026-09-16T14:48:24.886155-07:00"
+    },
+    {
+      "id": 1019,
+      "from_node_id": 961,
+      "to_node_id": 962,
+      "from_change_id": "b56b3bde-4b4b-480f-a2fb-e1f841e6f579",
+      "to_change_id": "23a91d85-b562-4563-8105-98c8e3b8ed5a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixes for validated findings",
+      "created_at": "2026-09-16T14:48:24.915895-07:00"
     }
   ],
   "documents": [
