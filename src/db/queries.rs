@@ -1899,14 +1899,18 @@ pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<EnqueueOutcome>
 }
 
 /// `Database::request_full_after_refresh` — see the trait for the contract.
-pub fn request_full_after_refresh(conn: &Connection, user_did: &str) -> Result<()> {
+pub fn request_full_after_refresh(
+    conn: &Connection,
+    user_did: &str,
+    claim_id: &str,
+) -> Result<bool> {
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
+    let changed = conn.execute(
         "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
-         WHERE user_did = ?1 AND status = 'running' AND kind = 'refresh'",
-        params![user_did, now],
+         WHERE user_did = ?1 AND status = 'running' AND kind = 'refresh' AND claim_id = ?3",
+        params![user_did, now, claim_id],
     )?;
-    Ok(())
+    Ok(changed > 0)
 }
 
 /// Same statement the tick uses (`REFRESH_ENQUEUE_SQL`, Task 6): owed full
@@ -1978,6 +1982,60 @@ pub fn schedule_retry_at(
         params![user_did, at_rfc3339, attempted_generation],
     )?;
     Ok(())
+}
+
+/// `Database::apply_refresh_schedule` — see the trait for the contract.
+pub fn apply_refresh_schedule(
+    conn: &Connection,
+    user_did: &str,
+    claim_id: &str,
+    write: super::traits::RefreshScheduleWrite<'_>,
+) -> Result<bool> {
+    use super::traits::RefreshScheduleWrite;
+    // Immediate, as in `finish_full_scan_state`: this reads ownership and then
+    // writes on its strength, and a Deferred transaction would take no write
+    // lock until its first UPDATE, leaving room for a reclaim in between.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let owner: Option<Option<String>> = tx
+        .query_row(
+            "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if !matches!(owner, Some(Some(ref owner)) if owner == claim_id) {
+        // Dropping the transaction rolls it back; nothing was written.
+        return Ok(false);
+    }
+    match write {
+        RefreshScheduleWrite::Success {
+            next_at_rfc3339,
+            generation,
+        } => {
+            // Deadline and proof together: a proof without a deadline would
+            // hide the user from the tick's revision clause with nothing
+            // scheduled to bring them back.
+            tx.execute(
+                "UPDATE users
+                    SET next_refresh_at = ?2,
+                        refreshed_generation = ?3,
+                        refresh_attempted_generation = ?3
+                  WHERE did = ?1",
+                params![user_did, next_at_rfc3339, generation],
+            )?;
+        }
+        RefreshScheduleWrite::Retry {
+            at_rfc3339,
+            attempted_generation,
+        } => {
+            tx.execute(
+                "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+                params![user_did, at_rfc3339, attempted_generation],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(true)
 }
 
 /// Proof. Sets BOTH columns (V3-04): a proven revision is also an attempted

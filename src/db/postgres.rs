@@ -2247,16 +2247,25 @@ impl Database for PgDatabase {
         Ok(())
     }
 
-    async fn request_full_after_refresh(&self, user_did: &str) -> Result<()> {
-        sqlx_core::query::query(
-            "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, $2)
-             WHERE user_did = $1 AND status = 'running' AND kind = 'refresh'",
+    async fn request_full_after_refresh(&self, user_did: &str, claim_id: &str) -> Result<bool> {
+        // The claim is matched by the UPDATE itself, which locks the row it
+        // changes: a concurrent reclaim either commits first (and this
+        // re-checks the new claim_id and matches nothing) or waits.
+        //
+        // `$2::timestamptz`: the column is a timestamp and the bind is RFC 3339
+        // text, and COALESCE will not unify the two. Without the cast this
+        // statement failed on every call, so a deferred refresh never recorded
+        // its follow-up full scan on Postgres.
+        let result = sqlx_core::query::query(
+            "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, $2::timestamptz)
+             WHERE user_did = $1 AND status = 'running' AND kind = 'refresh' AND claim_id = $3",
         )
         .bind(user_did)
         .bind(chrono::Utc::now().to_rfc3339())
+        .bind(claim_id)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
@@ -2639,6 +2648,66 @@ impl Database for PgDatabase {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn apply_refresh_schedule(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        write: super::traits::RefreshScheduleWrite<'_>,
+    ) -> Result<bool> {
+        use super::traits::RefreshScheduleWrite;
+        let mut tx = self.pool.begin().await?;
+        // `FOR UPDATE` holds the queue row until commit, so a reclaim cannot
+        // change its claim between this check and the writes below — see the
+        // SQLite twin and `finish_full_scan_state`.
+        let owner: Option<Option<String>> = sqlx_core::query::query(
+            "SELECT claim_id FROM scan_queue WHERE user_did = $1 FOR UPDATE",
+        )
+        .bind(user_did)
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(|r| r.get::<Option<String>, _>(0));
+        if !matches!(owner, Some(Some(ref owner)) if owner == claim_id) {
+            // Dropping `tx` rolls back; nothing was written.
+            return Ok(false);
+        }
+        match write {
+            RefreshScheduleWrite::Success {
+                next_at_rfc3339,
+                generation,
+            } => {
+                sqlx_core::query::query(
+                    "UPDATE users
+                        SET next_refresh_at = $2::timestamptz,
+                            refreshed_generation = $3,
+                            refresh_attempted_generation = $3
+                      WHERE did = $1",
+                )
+                .bind(user_did)
+                .bind(next_at_rfc3339)
+                .bind(generation)
+                .execute(&mut *tx)
+                .await?;
+            }
+            RefreshScheduleWrite::Retry {
+                at_rfc3339,
+                attempted_generation,
+            } => {
+                sqlx_core::query::query(
+                    "UPDATE users
+                        SET next_refresh_at = $2::timestamptz, refresh_attempted_generation = $3
+                      WHERE did = $1",
+                )
+                .bind(user_did)
+                .bind(at_rfc3339)
+                .bind(attempted_generation)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await?;
+        Ok(true)
     }
 
     async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()> {

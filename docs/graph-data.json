@@ -10581,6 +10581,17 @@
       "created_at": "2026-09-16T16:12:15.129087-07:00",
       "updated_at": "2026-09-16T16:12:15.129087-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"55bc065\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"tests/web_access_admin.rs\",\".env.example\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 972,
+      "change_id": "8b41ba5f-0f03-49ba-b458-a3aa895b8bc5",
+      "node_type": "outcome",
+      "title": "PR #124 CodeRabbit round pushed as 5749eb3: classify_refresh resumed-staging fix, admin cooldown-bypass fixture proves 429 then 202, probe docs corrected (env/CHANGELOG/runbook); claim-fence x2 deferred to #378 with reasoning. Pre-push: --lib + unit_scan_phases + web_access_admin = 447 passed, 0 failed. All 5 findings replied.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:20:36.599928-07:00",
+      "updated_at": "2026-09-16T16:20:36.599928-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"5749eb3\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -21781,6 +21792,17 @@
       "weight": 1.0,
       "rationale": "Fixes",
       "created_at": "2026-09-16T16:12:15.145949-07:00"
+    },
+    {
+      "id": 1029,
+      "from_node_id": 971,
+      "to_node_id": 972,
+      "from_change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "to_change_id": "8b41ba5f-0f03-49ba-b458-a3aa895b8bc5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-09-16T16:20:36.623897-07:00"
     }
   ],
   "documents": [

@@ -11,7 +11,7 @@
 use anyhow::Result;
 use charcoal::db::models::AccountScore;
 use charcoal::db::traits::LAST_FULL_SCAN_DURATION_KEY;
-use charcoal::db::{EnqueueOutcome, FinishCompletion, ScanKind};
+use charcoal::db::{EnqueueOutcome, FinishCompletion, RefreshScheduleWrite, ScanKind};
 use charcoal::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 const TEST_USER: &str = "did:plc:pgtest_user000000000000";
@@ -5426,6 +5426,83 @@ async fn test_pg_scan_claim_is_current_only_for_the_holder() {
         .scan_claim_is_current(U, &successor.claim_id)
         .await
         .unwrap());
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// Postgres twin of the SQLite fence test (CodeRabbit, PR #124): a worker
+/// whose lease lapsed, and whose row a successor reclaimed, moves no schedule
+/// and requests no full scan. The ownership read and the writes share one
+/// transaction (`FOR UPDATE`), so no reclaim can land between them.
+#[tokio::test]
+async fn test_pg_a_superseded_claim_moves_no_schedule_and_requests_no_full_scan() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_fence";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "fence.h").await.unwrap();
+    db.enqueue_refresh_scan(U).await.unwrap();
+    // An already-expired lease, so the reclaim below is the real one.
+    let stale = db.claim_next_scan(8, -1).await.unwrap().unwrap().claim_id;
+    assert!(db.reclaim_expired_scans().await.unwrap() >= 1);
+    let successor = db.claim_next_scan(8, 60).await.unwrap().unwrap().claim_id;
+    assert_ne!(stale, successor);
+
+    let next_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+    let success = RefreshScheduleWrite::Success {
+        next_at_rfc3339: &next_at,
+        generation: "rev-fence",
+    };
+    let retry = RefreshScheduleWrite::Retry {
+        at_rfc3339: &next_at,
+        attempted_generation: "rev-fence",
+    };
+    assert!(
+        !db.apply_refresh_schedule(U, &stale, success).await.unwrap(),
+        "a stale claim's success schedule writes nothing"
+    );
+    assert!(
+        !db.apply_refresh_schedule(U, &stale, retry).await.unwrap(),
+        "a stale claim's retry schedule writes nothing"
+    );
+    assert!(
+        !db.request_full_after_refresh(U, &stale).await.unwrap(),
+        "a stale claim's full-scan request writes nothing"
+    );
+    assert_eq!(db.next_refresh_at(U).await.unwrap(), None);
+    assert_eq!(db.refreshed_generation(U).await.unwrap(), None);
+    assert_eq!(db.refresh_attempted_generation(U).await.unwrap(), None);
+    let row = db
+        .list_scan_queue()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.user_did == U)
+        .unwrap();
+    assert_eq!(row.full_requested_at, None, "no full scan requested");
+
+    // The successor's own writes still land.
+    assert!(db.request_full_after_refresh(U, &successor).await.unwrap());
+    assert!(db
+        .apply_refresh_schedule(U, &successor, success)
+        .await
+        .unwrap());
+    assert!(db.next_refresh_at(U).await.unwrap().is_some());
+    assert_eq!(
+        db.refreshed_generation(U).await.unwrap().as_deref(),
+        Some("rev-fence")
+    );
+    assert_eq!(
+        db.refresh_attempted_generation(U).await.unwrap().as_deref(),
+        Some("rev-fence"),
+        "a success proves both columns"
+    );
 
     db.delete_user_data(U).await.unwrap();
     reset_scan_queue_fixtures(&url).await;

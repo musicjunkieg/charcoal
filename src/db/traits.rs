@@ -289,6 +289,24 @@ impl FinishCompletion {
     }
 }
 
+/// A claim-fenced refresh schedule write (see
+/// [`Database::apply_refresh_schedule`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshScheduleWrite<'a> {
+    /// A completed run: the next deadline plus the proof — `refreshed_generation`
+    /// and `refresh_attempted_generation` both set to `generation` (V3-04).
+    Success {
+        next_at_rfc3339: &'a str,
+        generation: &'a str,
+    },
+    /// A failed or deferred attempt: the backoff deadline plus
+    /// `refresh_attempted_generation` (V4-01).
+    Retry {
+        at_rfc3339: &'a str,
+        attempted_generation: &'a str,
+    },
+}
+
 /// A successful claim on a queued scan (#257).
 ///
 /// `claim_id` is a fencing token minted by the claim. `heartbeat_scan` and
@@ -913,12 +931,15 @@ pub trait Database: Send + Sync {
     /// to survive the worker (R09/V2-04). `finish_queued_scan` then hands the
     /// row over to a queued `full` row dated from the request.
     ///
-    /// Scoped to `status = 'running' AND kind = 'refresh'` so it can only ever
-    /// annotate the refresh that is asking — never a queued full scan, and
-    /// never a successor's row. `COALESCE` keeps the first request's instant,
-    /// exactly as a user click does, so the queue position is not pushed back
-    /// by a second deferral.
-    async fn request_full_after_refresh(&self, user_did: &str) -> Result<()>;
+    /// Scoped to `status = 'running' AND kind = 'refresh' AND claim_id` so it
+    /// can only ever annotate the refresh that is asking — never a queued full
+    /// scan, and never a successor that reclaimed the row after this worker's
+    /// lease lapsed. The claim is matched in the same statement as the write,
+    /// so there is no gap between checking ownership and writing. Returns
+    /// whether a row was annotated. `COALESCE` keeps the first request's
+    /// instant, exactly as a user click does, so the queue position is not
+    /// pushed back by a second deferral.
+    async fn request_full_after_refresh(&self, user_did: &str, claim_id: &str) -> Result<bool>;
 
     /// Claim the oldest queued scan if fewer than `limit` are running.
     /// Returns the claim (user_did plus fencing token), or None when at
@@ -1032,6 +1053,24 @@ pub trait Database: Send + Sync {
         at_rfc3339: &str,
         attempted_generation: &str,
     ) -> Result<()>;
+
+    /// Write a refresh schedule only while `claim_id` still owns the user's
+    /// queue row, checked and written in ONE transaction.
+    ///
+    /// A worker checks ownership once before its bookkeeping, but a lease can
+    /// lapse and a successor reclaim the row between that check and a plain
+    /// write, and the stale worker would then move the successor's deadline
+    /// and generation markers. Here the ownership read locks the queue row
+    /// (`FOR UPDATE` on Postgres, an Immediate transaction on SQLite, the same
+    /// guarantee `finish_full_scan_state` relies on), so a reclaim waits for
+    /// the write or the write sees the new owner. Returns `Ok(false)`, having
+    /// written nothing, when the claim no longer owns the row.
+    async fn apply_refresh_schedule(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        write: RefreshScheduleWrite<'_>,
+    ) -> Result<bool>;
 
     /// Proof: sets BOTH `refreshed_generation` and
     /// `refresh_attempted_generation` (V3-04) — a proven revision is also an

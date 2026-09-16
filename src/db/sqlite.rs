@@ -515,9 +515,9 @@ impl Database for SqliteDatabase {
         super::queries::enqueue_refresh_scan(&conn, user_did)
     }
 
-    async fn request_full_after_refresh(&self, user_did: &str) -> Result<()> {
+    async fn request_full_after_refresh(&self, user_did: &str, claim_id: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::request_full_after_refresh(&conn, user_did)
+        super::queries::request_full_after_refresh(&conn, user_did, claim_id)
     }
 
     async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
@@ -608,6 +608,16 @@ impl Database for SqliteDatabase {
     ) -> Result<()> {
         let conn = self.conn.lock().await;
         super::queries::schedule_retry_at(&conn, user_did, at_rfc3339, attempted_generation)
+    }
+
+    async fn apply_refresh_schedule(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        write: super::traits::RefreshScheduleWrite<'_>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::apply_refresh_schedule(&conn, user_did, claim_id, write)
     }
 
     async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()> {

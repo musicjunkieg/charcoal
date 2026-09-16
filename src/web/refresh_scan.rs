@@ -391,11 +391,11 @@ pub trait RefreshBookkeeping: Send + Sync {
         label: &str,
         at: DateTime<Utc>,
     ) -> anyhow::Result<()>;
-    async fn request_full(&self, user_did: &str) -> anyhow::Result<()>;
+    async fn request_full(&self, user_did: &str, claim_id: &str) -> anyhow::Result<()>;
     /// Best-effort by contract: logs and counts a failure, never returns it.
     /// `now` is the attempt's END instant, from the injected clock (V6-02).
-    async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>);
-    async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>);
+    async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
+    async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
 }
 
 /// The production bookkeeping.
@@ -477,22 +477,33 @@ impl RefreshBookkeeping for DbBookkeeping {
             .await
     }
 
-    async fn request_full(&self, user_did: &str) -> anyhow::Result<()> {
-        self.db.request_full_after_refresh(user_did).await
+    async fn request_full(&self, user_did: &str, claim_id: &str) -> anyhow::Result<()> {
+        if !self
+            .db
+            .request_full_after_refresh(user_did, claim_id)
+            .await?
+        {
+            warn!(
+                user_did,
+                "the claim no longer owns the running refresh — no follow-up full scan requested"
+            );
+        }
+        Ok(())
     }
 
-    async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>) {
+    async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
         crate::web::refresh::schedule_after_success(
             self.db.as_ref(),
             user_did,
+            claim_id,
             now,
             self.refresh_interval,
         )
         .await
     }
 
-    async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>) {
-        crate::web::refresh::schedule_retry(self.db.as_ref(), user_did, now).await
+    async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
+        crate::web::refresh::schedule_retry(self.db.as_ref(), user_did, claim_id, now).await
     }
 }
 
@@ -595,16 +606,16 @@ where
         // Exactly one scheduling site. The slot lifecycle (`run_under_slot`)
         // does NOT schedule; it only finishes the queue row.
         match books_for {
-            Some(b) if b.prove_revision => books.schedule_success(user_did, now).await,
+            Some(b) if b.prove_revision => books.schedule_success(user_did, claim_id, now).await,
             Some(b) => {
                 if b.request_full {
-                    if let Err(e) = books.request_full(user_did).await {
+                    if let Err(e) = books.request_full(user_did, claim_id).await {
                         warn!(error = %format!("{e:#}"), "could not request the follow-up full scan");
                     }
                 }
-                books.schedule_retry(user_did, now).await;
+                books.schedule_retry(user_did, claim_id, now).await;
             }
-            None => books.schedule_retry(user_did, now).await,
+            None => books.schedule_retry(user_did, claim_id, now).await,
         }
     } else {
         warn!(
@@ -1172,16 +1183,16 @@ mod tests {
         async fn record_outcome(&self, u: &str, l: &str, at: DateTime<Utc>) -> anyhow::Result<()> {
             self.inner.record_outcome(u, l, at).await
         }
-        async fn request_full(&self, u: &str) -> anyhow::Result<()> {
-            self.inner.request_full(u).await
+        async fn request_full(&self, u: &str, c: &str) -> anyhow::Result<()> {
+            self.inner.request_full(u, c).await
         }
-        async fn schedule_success(&self, u: &str, now: DateTime<Utc>) {
+        async fn schedule_success(&self, u: &str, c: &str, now: DateTime<Utc>) {
             self.successes.fetch_add(1, SeqCst);
-            self.inner.schedule_success(u, now).await
+            self.inner.schedule_success(u, c, now).await
         }
-        async fn schedule_retry(&self, u: &str, now: DateTime<Utc>) {
+        async fn schedule_retry(&self, u: &str, c: &str, now: DateTime<Utc>) {
             self.retries.fetch_add(1, SeqCst);
-            self.inner.schedule_retry(u, now).await
+            self.inner.schedule_retry(u, c, now).await
         }
     }
 

@@ -1156,8 +1156,8 @@ pub trait FullScanBookkeeping: Send + Sync {
     /// Best-effort: the marker (+ ETA sample + carried-key delete), written
     /// only for fulfilled completions and only under this claim.
     async fn record_completion(&self, user_did: &str, claim_id: &str, completion: ScanCompletion);
-    async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>);
-    async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>);
+    async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
+    async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
 }
 
 /// The production bookkeeping: Task 5's marker plus the refresh schedulers.
@@ -1204,18 +1204,19 @@ impl FullScanBookkeeping for DbFullScanBookkeeping {
         record_full_scan_completion(self.db.as_ref(), user_did, claim_id, completion).await;
     }
 
-    async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>) {
+    async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
         crate::web::refresh::schedule_after_success(
             self.db.as_ref(),
             user_did,
+            claim_id,
             now,
             self.refresh_interval,
         )
         .await;
     }
 
-    async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>) {
-        crate::web::refresh::schedule_retry(self.db.as_ref(), user_did, now).await;
+    async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
+        crate::web::refresh::schedule_retry(self.db.as_ref(), user_did, claim_id, now).await;
     }
 }
 
@@ -1279,11 +1280,11 @@ where
             books.record_completion(user_did, claim_id, c).await; // no-op for Resumable
         }
         match completion {
-            Some(ScanCompletion::Complete) => books.schedule_success(user_did, now).await,
+            Some(ScanCompletion::Complete) => books.schedule_success(user_did, claim_id, now).await,
             // CompleteWithSkips / CompleteUnverified: fulfilled (marker written,
             // obligation cleared by finish), not clean — retry, no proof.
             // Resumable and Err: obligation kept, retry.
-            _ => books.schedule_retry(user_did, now).await,
+            _ => books.schedule_retry(user_did, claim_id, now).await,
         }
     } else {
         warn!(
@@ -3127,14 +3128,14 @@ mod bookkeeping_tests {
                 .await;
         }
 
-        async fn schedule_success(&self, user_did: &str, now: DateTime<Utc>) {
+        async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
             self.successes.fetch_add(1, SeqCst);
-            self.inner.schedule_success(user_did, now).await;
+            self.inner.schedule_success(user_did, claim_id, now).await;
         }
 
-        async fn schedule_retry(&self, user_did: &str, now: DateTime<Utc>) {
+        async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
             self.retries.fetch_add(1, SeqCst);
-            self.inner.schedule_retry(user_did, now).await;
+            self.inner.schedule_retry(user_did, claim_id, now).await;
         }
     }
 

@@ -13,7 +13,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
 
-use crate::db::Database;
+use crate::db::{Database, RefreshScheduleWrite};
 use crate::scoring::generation::scoring_revision;
 
 pub const REFRESH_INTERVAL_ENV: &str = "CHARCOAL_REFRESH_INTERVAL_HOURS";
@@ -143,39 +143,47 @@ pub async fn enqueue_due_refreshes(
 /// this generation is proven for the user. Best-effort — the scan already
 /// succeeded, so failures are logged rather than propagated.
 ///
-/// **The proof is written only if the deadline write succeeded.** The proof
-/// (`mark_refreshed_generation`) stamps `refresh_attempted_generation` as
-/// current, which silences `REFRESH_DUE_SQL`'s generation clause. For a user
-/// whose `next_refresh_at` is still NULL — anyone on their first successful
-/// scan — a failed deadline write followed by a successful proof would leave
-/// neither due-ness clause able to fire, and the user would never be refreshed
-/// again (#344 Codex review P2). Skipping the proof keeps the attempted
-/// generation stale, so the generation clause catches the user on a later tick.
+/// **The deadline and the proof are one write.** The proof stamps
+/// `refresh_attempted_generation` as current, which silences
+/// `REFRESH_DUE_SQL`'s generation clause. For a user whose `next_refresh_at` is
+/// still NULL — anyone on their first successful scan — a proof without a
+/// deadline would leave neither due-ness clause able to fire, and the user
+/// would never be refreshed again (#344 Codex review P2). Written together,
+/// a failure leaves both stale and the generation clause catches the user on
+/// a later tick.
+///
+/// **Fenced on `claim_id`.** The write lands only while this claim still owns
+/// the user's queue row, checked in the same transaction: a worker whose
+/// lease lapsed must not move a successor's schedule (CodeRabbit, PR #124).
 ///
 /// `interval` is injected rather than read from the environment here: the
-/// proof below stamps `refresh_attempted_generation`, so skipping the deadline
+/// proof stamps `refresh_attempted_generation`, so skipping the deadline
 /// would strand the user (see [`refresh_deadline_interval`]), and a function
 /// that reads a process-global variable cannot be tested in parallel with
 /// anything that writes one.
 pub async fn schedule_after_success(
     db: &dyn Database,
     user_did: &str,
+    claim_id: &str,
     now: DateTime<Utc>,
     interval: Duration,
 ) {
-    if let Err(e) = db.schedule_refresh(user_did, &plus(now, interval)).await {
-        warn!(
+    let next_at = plus(now, interval);
+    let write = RefreshScheduleWrite::Success {
+        next_at_rfc3339: &next_at,
+        generation: scoring_revision(),
+    };
+    match db.apply_refresh_schedule(user_did, claim_id, write).await {
+        Ok(true) => {}
+        Ok(false) => warn!(
+            user_did,
+            "the claim no longer owns the queue row — not scheduling the next refresh; \
+             the successor owns this user's schedule"
+        ),
+        Err(e) => warn!(
             error = %format!("{e:#}"),
-            "could not schedule the next refresh — leaving the generation unproven so a later tick still finds this user"
-        );
-        return;
-    }
-    // Proof: sets refreshed_generation AND refresh_attempted_generation.
-    if let Err(e) = db
-        .mark_refreshed_generation(user_did, scoring_revision())
-        .await
-    {
-        warn!(error = %format!("{e:#}"), "could not record refreshed_generation");
+            "could not schedule the next refresh — the generation stays unproven so a later tick still finds this user"
+        ),
     }
 }
 
@@ -184,17 +192,22 @@ pub async fn schedule_after_success(
 /// `refresh_attempted_generation` (V2-03, V4-01): an attempt happened —
 /// whether the tick claimed it or the user clicked — so the revision clause
 /// stays quiet until the deadline. `refreshed_generation` stays unproven so
-/// the runbook can see the user is behind. One statement on both backends.
-pub async fn schedule_retry(db: &dyn Database, user_did: &str, now: DateTime<Utc>) {
-    if let Err(e) = db
-        .schedule_retry_at(
+/// the runbook can see the user is behind. One write, fenced on `claim_id`
+/// exactly as [`schedule_after_success`] is.
+pub async fn schedule_retry(db: &dyn Database, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
+    let at = plus(now, Duration::from_secs(REFRESH_RETRY_HOURS * 3600));
+    let write = RefreshScheduleWrite::Retry {
+        at_rfc3339: &at,
+        attempted_generation: scoring_revision(),
+    };
+    match db.apply_refresh_schedule(user_did, claim_id, write).await {
+        Ok(true) => {}
+        Ok(false) => warn!(
             user_did,
-            &plus(now, Duration::from_secs(REFRESH_RETRY_HOURS * 3600)),
-            scoring_revision(),
-        )
-        .await
-    {
-        warn!(error = %format!("{e:#}"), "could not schedule the refresh retry");
+            "the claim no longer owns the queue row — not scheduling the refresh retry; \
+             the successor owns this user's schedule"
+        ),
+        Err(e) => warn!(error = %format!("{e:#}"), "could not schedule the refresh retry"),
     }
 }
 
@@ -213,6 +226,17 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         create_tables(&conn).unwrap();
         Arc::new(SqliteDatabase::new(conn))
+    }
+
+    /// A claim on the user's queue row. The scheduling writes are fenced on
+    /// it, so a test that schedules must hold one, exactly as a worker does.
+    async fn claimed(db: &Arc<dyn Database>, did: &str) -> String {
+        db.enqueue_scan(did).await.unwrap();
+        db.claim_next_scan(8, 60)
+            .await
+            .unwrap()
+            .expect("the queued row is claimed")
+            .claim_id
     }
 
     /// A user with one score row (so they are eligible), scheduled `at`,
@@ -288,7 +312,15 @@ mod tests {
             deadline_interval(None),
             Duration::from_secs(DEFAULT_REFRESH_INTERVAL_HOURS * 3600)
         );
-        schedule_after_success(db.as_ref(), "did:plc:parked", now, deadline_interval(None)).await;
+        let claim = claimed(&db, "did:plc:parked").await;
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:parked",
+            &claim,
+            now,
+            deadline_interval(None),
+        )
+        .await;
         assert_eq!(
             db.next_refresh_at("did:plc:parked").await.unwrap(),
             Some((now + ChronoDuration::hours(DEFAULT_REFRESH_INTERVAL_HOURS as i64)).to_rfc3339()),
@@ -420,6 +452,8 @@ mod tests {
         );
         // The refresh runs and fails: the row finishes, the retry is scheduled.
         let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        // Production order: schedule while the claim is held, then finish.
+        schedule_retry(db.as_ref(), "did:plc:retry", &claim.claim_id, now).await;
         db.finish_queued_scan(
             "did:plc:retry",
             &claim.claim_id,
@@ -428,7 +462,6 @@ mod tests {
         )
         .await
         .unwrap();
-        schedule_retry(db.as_ref(), "did:plc:retry", now).await;
 
         assert_eq!(
             enqueue_due_refreshes(
@@ -453,6 +486,8 @@ mod tests {
 
         // A newer revision arrives while a fresh backoff is pending.
         let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        let t = now + ChronoDuration::minutes(62);
+        schedule_retry(db.as_ref(), "did:plc:retry", &claim.claim_id, t).await;
         db.finish_queued_scan(
             "did:plc:retry",
             &claim.claim_id,
@@ -461,8 +496,6 @@ mod tests {
         )
         .await
         .unwrap();
-        let t = now + ChronoDuration::minutes(62);
-        schedule_retry(db.as_ref(), "did:plc:retry", t).await;
         let promptly = db
             .claim_and_enqueue_due_refreshes(
                 &(t + ChronoDuration::seconds(30)).to_rfc3339(),
@@ -601,6 +634,7 @@ mod tests {
         schedule_after_success(
             db.as_ref(),
             "did:plc:manual",
+            &claim.claim_id,
             now,
             Duration::from_secs(24 * 3600),
         )
@@ -734,8 +768,16 @@ mod tests {
         let now = Utc::now();
         // A first-scan user: scores, no deadline, never attempted.
         user(&db, "did:plc:first", None, None).await;
+        let claim = claimed(&db, "did:plc:first").await;
 
-        schedule_after_success(db.as_ref(), "did:plc:first", now, Duration::from_secs(3600)).await;
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:first",
+            &claim,
+            now,
+            Duration::from_secs(3600),
+        )
+        .await;
 
         assert_eq!(
             db.next_refresh_at("did:plc:first").await.unwrap(),
@@ -800,9 +842,11 @@ mod tests {
         let db = db();
         let now = Utc::now();
         user(&db, "did:plc:u", None, None).await;
+        let claim = claimed(&db, "did:plc:u").await;
         schedule_after_success(
             db.as_ref(),
             "did:plc:u",
+            &claim,
             now,
             Duration::from_secs(24 * 3600),
         )
@@ -817,7 +861,7 @@ mod tests {
             Some(scoring_revision())
         );
 
-        schedule_retry(db.as_ref(), "did:plc:u", now).await;
+        schedule_retry(db.as_ref(), "did:plc:u", &claim, now).await;
         let next = db.next_refresh_at("did:plc:u").await.unwrap().unwrap();
         assert_eq!(
             next,
@@ -860,6 +904,9 @@ mod tests {
         // 1–2. Their first full scan is claimed and fails before any write.
         db.enqueue_scan("did:plc:first").await.unwrap();
         let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
+        // Production order: the retry is scheduled while the claim is held,
+        // then the queue row is finished.
+        schedule_retry(db.as_ref(), "did:plc:first", &claim.claim_id, now).await;
         db.finish_queued_scan(
             "did:plc:first",
             &claim.claim_id,
@@ -868,7 +915,6 @@ mod tests {
         )
         .await
         .unwrap();
-        schedule_retry(db.as_ref(), "did:plc:first", now).await;
         let owed = db
             .list_scan_queue()
             .await
@@ -924,5 +970,78 @@ mod tests {
             .unwrap()
             .iter()
             .all(|r| r.user_did != "did:plc:nobody"));
+    }
+
+    /// A worker whose lease lapsed, and whose row a successor has reclaimed,
+    /// writes no schedule and requests no full scan (CodeRabbit, PR #124).
+    /// The ownership check and the writes are one atomic step, so there is no
+    /// window between "still mine" and "write" for a successor to claim in.
+    #[tokio::test]
+    async fn a_superseded_claim_moves_no_schedule_and_requests_no_full_scan() {
+        let db = db();
+        let now = Utc::now();
+        user(&db, "did:plc:z", None, None).await;
+        db.enqueue_refresh_scan("did:plc:z").await.unwrap();
+        // An already-expired lease, so the reclaim below is the real one.
+        let stale = db
+            .claim_next_scan(8, -1)
+            .await
+            .unwrap()
+            .expect("the refresh is claimed")
+            .claim_id;
+        assert_eq!(db.reclaim_expired_scans().await.unwrap(), 1);
+        let successor = db
+            .claim_next_scan(8, 60)
+            .await
+            .unwrap()
+            .expect("the successor claims the re-queued row")
+            .claim_id;
+        assert_ne!(stale, successor);
+
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:z",
+            &stale,
+            now,
+            Duration::from_secs(3600),
+        )
+        .await;
+        schedule_retry(db.as_ref(), "did:plc:z", &stale, now).await;
+        assert!(
+            !db.request_full_after_refresh("did:plc:z", &stale)
+                .await
+                .unwrap(),
+            "a stale claim's full-scan request reports that it wrote nothing"
+        );
+
+        assert_eq!(db.next_refresh_at("did:plc:z").await.unwrap(), None);
+        assert_eq!(db.refreshed_generation("did:plc:z").await.unwrap(), None);
+        assert_eq!(
+            db.refresh_attempted_generation("did:plc:z").await.unwrap(),
+            None
+        );
+        let row = db
+            .list_scan_queue()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.user_did == "did:plc:z")
+            .unwrap();
+        assert_eq!(row.full_requested_at, None, "no full scan requested");
+
+        // The successor's own writes still land.
+        assert!(db
+            .request_full_after_refresh("did:plc:z", &successor)
+            .await
+            .unwrap());
+        schedule_retry(db.as_ref(), "did:plc:z", &successor, now).await;
+        assert!(db.next_refresh_at("did:plc:z").await.unwrap().is_some());
+        assert_eq!(
+            db.refresh_attempted_generation("did:plc:z")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(scoring_revision())
+        );
     }
 }

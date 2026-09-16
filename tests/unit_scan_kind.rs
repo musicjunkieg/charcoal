@@ -562,6 +562,10 @@ async fn a_requested_full_scan_survives_an_interrupted_drain_and_runs_without_an
         .unwrap();
     let claim = db.claim_next_scan(1, 60).await.unwrap().unwrap();
     assert_eq!(claim.kind, ScanKind::Full);
+    // Production order: the retry is scheduled while the claim is held, then
+    // the queue row is finished.
+    let now = chrono::Utc::now();
+    charcoal::web::refresh::schedule_retry(db.as_ref(), USER, &claim.claim_id, now).await;
     db.finish_queued_scan(USER, &claim.claim_id, FinishCompletion::Resumable, None)
         .await
         .unwrap();
@@ -575,8 +579,6 @@ async fn a_requested_full_scan_survives_an_interrupted_drain_and_runs_without_an
         Some(requested.as_str()),
         "still owed"
     );
-    let now = chrono::Utc::now();
-    charcoal::web::refresh::schedule_retry(db.as_ref(), USER, now).await;
     // 3. Restart. The tick, after the deadline, re-queues OWED work as full.
     drop(db);
     let db = open();
