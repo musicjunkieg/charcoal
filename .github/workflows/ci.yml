@@ -6,6 +6,9 @@ on:
   push:
     branches: [main, staging]
 
+# Actions are pinned to full commit SHAs, with the release in a trailing
+# comment: a tag can be moved to different code, a commit cannot.
+#
 # The default GITHUB_TOKEN grants write scopes this workflow never uses;
 # checkout + build + test only ever need to read the repo (CodeQL alert 23).
 permissions:
@@ -21,15 +24,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this job pushes, so the token need not stay on disk.
+          persist-credentials: false
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-16
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache cargo registry & build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -39,7 +46,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -54,6 +61,21 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --features web
 
+      # The default build (no web, no postgres) is what `charcoal` compiles to
+      # without flags, and it gates different code than the web build. The
+      # Postgres build is linted alone in its own job below. With the combined
+      # production build after this, the four are the project's full lint gate
+      # (#367).
+      - name: Clippy (no features)
+        run: cargo clippy --all-targets
+
+      # Production builds web and Postgres together (Dockerfile:
+      # `--features web,postgres`). Code can compile under each feature alone
+      # and still fail combined, so lint the combination too. It needs
+      # web/build, which the frontend step above produced, but no database.
+      - name: Clippy (web + postgres)
+        run: cargo clippy --all-targets --features web,postgres
+
       # The ONNX regression tests (tests/unit_toxicity_token_limit.rs, #220) are
       # model-gated and SKIP when the model files are absent. Without this the
       # suite goes green in CI while never exercising the path at all — a
@@ -63,7 +85,7 @@ jobs:
       # includes download.rs so changing a model URL busts the cache.
       - name: Cache ONNX models
         id: cache-models
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: models
           key: ${{ runner.os }}-charcoal-models-${{ hashFiles('src/toxicity/download.rs') }}
@@ -78,3 +100,117 @@ jobs:
         run: cargo test --features web
         env:
           CHARCOAL_MODEL_DIR: models
+
+  # The Postgres suite (#367). Production runs on Postgres, but until this job
+  # existed its tests — including every migration — ran only on a developer's
+  # machine. It runs in parallel with the job above, so it adds coverage
+  # without adding to the time a pull request waits on the slowest job.
+  #
+  # Local pushes deliberately skip the Postgres tests (they need a live
+  # database); this job is what makes that safe.
+  postgres:
+    name: Postgres Lint & Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Postgres 18 with pgvector, matching production (18.4). The image's
+        # POSTGRES_USER is a superuser, which migration 1 needs to run
+        # `CREATE EXTENSION vector`. The password guards a container that
+        # exists only for this job and is not a secret.
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: charcoal
+          POSTGRES_PASSWORD: charcoal
+          POSTGRES_DB: charcoal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U charcoal -d charcoal_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Nothing in this job pushes, so the token need not stay on disk.
+          persist-credentials: false
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 2026-09-16
+        with:
+          toolchain: stable
+          components: clippy
+
+      # A separate key from the web job: both jobs finish around the same time,
+      # and two jobs saving one cache key means one silently loses. The web
+      # cache is a fallback — its dependency builds are a head start here.
+      - name: Cache cargo registry & build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-postgres-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-postgres-
+            ${{ runner.os }}-cargo-
+
+      # The destructive migration fixtures only ever touch a database whose
+      # name ends in `_migrations` (they refuse any other), so it must exist
+      # alongside the ordinary test database.
+      - name: Create the migrations test database
+        run: psql -h localhost -U charcoal -d charcoal_test -c "CREATE DATABASE charcoal_test_migrations;"
+        env:
+          PGPASSWORD: charcoal
+
+      - name: Clippy (postgres)
+        run: cargo clippy --all-targets --features postgres
+
+      # Same cache entry as the web job, so this normally restores rather than
+      # downloads. Model-gated tests compiled under the Postgres build must
+      # have their models too, or they cannot fail.
+      - name: Cache ONNX models
+        id: cache-models
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: models
+          key: ${{ runner.os }}-charcoal-models-${{ hashFiles('src/toxicity/download.rs') }}
+
+      - name: Download ONNX models
+        if: steps.cache-models.outputs.cache-hit != 'true'
+        run: cargo run --features web -- download-model
+        env:
+          CHARCOAL_MODEL_DIR: models
+
+      # Apply the migrations to the fresh test database before any test runs,
+      # the same way production does at boot.
+      #
+      # Several tests clean up with raw SQL BEFORE they connect through the
+      # app, and connecting is what runs the migrations. On a long-lived local
+      # database the tables already exist, so this never showed; on CI's empty
+      # one those tests race the ones that connect first and fail with
+      # `relation "…" does not exist` (#376). Migrating here removes the race
+      # for every branch without touching tests/db_postgres.rs.
+      - name: Apply migrations to the test database
+        run: cargo run --features postgres -- init
+        env:
+          DATABASE_URL: postgres://charcoal:charcoal@localhost:5432/charcoal_test
+
+      # DATABASE_URL is set on this step only: set job-wide, it would also
+      # reach the model download above, and a postgres:// URL switches the
+      # binary onto the Postgres backend.
+      #
+      # Both URLs must reach the tests, because a Postgres test with no URL
+      # SKIPS — it passes having checked nothing. From #344 on, the test file
+      # reads GitHub's CI=true and panics instead of skipping when either URL
+      # is missing. Before #344 lands there is no such guard, so these two
+      # lines are the only thing standing between this job and a false green.
+      - name: Tests (postgres)
+        run: cargo test --all-targets --features postgres
+        env:
+          CHARCOAL_MODEL_DIR: models
+          DATABASE_URL: postgres://charcoal:charcoal@localhost:5432/charcoal_test
+          DATABASE_URL_MIGRATIONS: postgres://charcoal:charcoal@localhost:5432/charcoal_test_migrations

@@ -10504,6 +10504,17 @@
       "created_at": "2026-09-16T15:03:05.427080-07:00",
       "updated_at": "2026-09-16T15:03:05.427080-07:00",
       "metadata_json": "{\"branch\":\"chore/367-test-speed\",\"commit\":\"a9f792a\",\"confidence\":95}"
+    },
+    {
+      "id": 965,
+      "change_id": "da95441f-37d5-42d8-be58-9e8a3b2d866b",
+      "node_type": "outcome",
+      "title": "Codex fixes for PR #124 committed as 0978092 (untested yet; tests run via pre-push after pulling staging so PR #124 gets the new Postgres CI job)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:18:15.917721-07:00",
+      "updated_at": "2026-09-16T15:18:15.917721-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"0978092\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -21627,6 +21638,17 @@
       "weight": 1.0,
       "rationale": "Verification",
       "created_at": "2026-09-16T15:03:05.442928-07:00"
+    },
+    {
+      "id": 1022,
+      "from_node_id": 942,
+      "to_node_id": 965,
+      "from_change_id": "fb24c292-344c-46e2-9c3b-2906a7f76fb0",
+      "to_change_id": "da95441f-37d5-42d8-be58-9e8a3b2d866b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Commit of held fixes",
+      "created_at": "2026-09-16T15:18:15.933241-07:00"
     }
   ],
   "documents": [

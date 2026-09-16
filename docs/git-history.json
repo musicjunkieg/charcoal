@@ -1,5 +1,13 @@
 [
   {
+    "hash": "09780928b5b131974743766fed64ee2a2f3f9320",
+    "short_hash": "0978092",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:18:05-07:00",
+    "message": "fix(344): address Codex review of PR #124\n\n- CachedClassifier caches a verdict only when its reported model and\n  policy match the advertised identity, so a foreign verdict can never\n  be stored as a current one.\n- schedule_after_success stops before marking the generation when the\n  deadline write fails, so a first-scan user is not stranded with no\n  next_refresh_at.\n- prepare_refresh skips the context loads only when there are no\n  candidates AND the user owns no resumable staging (resume consumes\n  the protected posts at finalize).\n- An amplifier whose events yield no usable pairs stays an amplifier;\n  mode follows event existence, not pair count.\n- ZentropiClient interns its policy string, leaking each distinct value\n  once instead of once per construction (per scan).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 8
+  },
+  {
     "hash": "a9f792a864ba904f4defbac26a5ad4bf3fbcec4b",
     "short_hash": "a9f792a",
     "author": "Bryan Guffey",
