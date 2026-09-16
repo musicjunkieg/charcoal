@@ -7,7 +7,8 @@
 # Hooks installed:
 #   pre-commit  — blocks main commits; runs format check; auto-exports
 #                 chainlink issues + deciduous graph; backs up DBs to S3
-#   pre-push    — blocks main pushes; runs full lint + tests
+#   pre-push    — blocks main pushes; runs lint + only the tests the push
+#                 affects (the full suite runs in CI — #367)
 #
 # This file is a TEMPLATE. Customize the language-specific quality gates
 # (search "CUSTOMIZE" in the heredocs below) for your project's stack.
@@ -382,7 +383,8 @@ cat > "$HOOKS_DIR/pre-push" << 'HOOK'
 #
 # Rules:
 #   1. Block pushes to main (PRs only — GitHub enforces this too, but belt+suspenders)
-#   2. Run full lint + tests for changed files in commits being pushed
+#   2. Lint, and run ONLY the tests affected by the commits being pushed.
+#      The full suite runs in CI on every pull request (#367).
 #
 # Bypass (emergency only): git push --no-verify
 
@@ -390,41 +392,290 @@ set -e
 
 REMOTE="$1"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+ZERO_SHA=0000000000000000000000000000000000000000
+
+# Reduce a remote URL to host/owner/repo, so the SSH and HTTPS spellings of one
+# repository compare equal: `git@github.com:o/r.git` and
+# `https://github.com/o/r` both become `github.com/o/r`.
+canonical_repo() {
+    echo "$1" | sed -E 's#^[a-z+]+://##; s#^[^@/]+@##; s#^([^/:]+):([^0-9/])#\1/\2#; s#\.git/?$##; s#/+$##' |
+        tr '[:upper:]' '[:lower:]'
+}
+
+# Git passes the remote as given on the command line. A push to a URL passes
+# the URL, not a remote name, so `$REMOTE/<branch>` would never resolve. Map it
+# back to a named remote only when that remote's fetch or push URL is the SAME
+# repository. Guessing `origin` is not safe: a push to some other repository
+# would then be measured against origin's branches, and commits the push really
+# sends could drop out of the change set. Unresolved stays empty.
+REMOTE_NAME=""
+if git remote | grep -qxF -- "$REMOTE"; then
+    REMOTE_NAME="$REMOTE"
+else
+    target=$(canonical_repo "$REMOTE")
+    for r in $(git remote); do
+        if [ "$(canonical_repo "$(git remote get-url "$r" 2>/dev/null)")" = "$target" ] ||
+            [ "$(canonical_repo "$(git remote get-url --push "$r" 2>/dev/null)")" = "$target" ]; then
+            REMOTE_NAME="$r"
+            break
+        fi
+    done
+fi
 
 # ── 1. Block pushes to main ──────────────────────────────────────────
-# Git passes push targets on stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
-while read local_ref local_sha remote_ref remote_sha; do
+# Git passes push targets on stdin, one line per ref:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Read them all first: the change set below needs every one.
+PUSH_LINES=""
+while read -r local_ref local_sha remote_ref remote_sha; do
     if [ "$remote_ref" = "refs/heads/main" ]; then
         echo ""
         echo "❌ Direct push to main is not allowed. Open a pull request instead."
         echo ""
         exit 1
     fi
+    PUSH_LINES="$PUSH_LINES$local_sha $remote_sha
+"
 done
 
 # ── 2. Determine changed files vs the remote ─────────────────────────
-CURRENT_BRANCH=$(git branch --show-current)
-REMOTE_REF=$(git rev-parse "$REMOTE/$CURRENT_BRANCH" 2>/dev/null || echo "")
+# The change set is the UNION over every ref this push sends, so a push of
+# several branches cannot drop the paths of the ones not checked out. Each
+# comparison either succeeds or marks the change set unknown. An unknown change
+# set is never treated as an empty one: that would skip every gate. It falls
+# back to all tracked files instead (see below).
+CHANGED=""
+CHANGE_SET_UNKNOWN=""
 
-if [ -n "$REMOTE_REF" ]; then
-    CHANGED=$(git diff --name-only "$REMOTE_REF"..HEAD || true)
+# Print the paths `$1` (a commit) changes relative to where it forked from the
+# remote's staging or main. Branches are cut from staging, so the old
+# `main..HEAD` counted every staging commit not yet promoted to main as
+# "changed" (#178); the three-dot form counts only the branch's own commits. It
+# fails when there is no fork point (a shallow clone, unrelated history), and
+# the function fails if no base works.
+changed_since_fork() {
+    [ -n "$REMOTE_NAME" ] || return 1
+    for candidate in "$REMOTE_NAME/staging" "$REMOTE_NAME/main"; do
+        git rev-parse --verify --quiet "$candidate" >/dev/null || continue
+        git diff --name-only "$candidate...$1" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+add_changed() {
+    CHANGED="$CHANGED$1
+"
+}
+
+if [ -n "$PUSH_LINES" ]; then
+    SAW_OTHER_COMMIT=""
+    HEAD_SHA=$(git rev-parse HEAD)
+    while read -r local_sha remote_sha; do
+        [ -n "$local_sha" ] || continue
+        [ "$local_sha" = "$ZERO_SHA" ] && continue # deleting a remote ref: nothing to test
+        [ "$local_sha" = "$HEAD_SHA" ] || SAW_OTHER_COMMIT=1
+        if [ "$remote_sha" != "$ZERO_SHA" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+            # The ref exists on the remote and we have its tip, as reported by
+            # git itself: only what this push adds.
+            if paths=$(git diff --name-only "$remote_sha" "$local_sha"); then
+                add_changed "$paths"
+            else
+                CHANGE_SET_UNKNOWN=1
+            fi
+        elif paths=$(changed_since_fork "$local_sha"); then
+            # A new ref, or a remote tip we have not fetched.
+            add_changed "$paths"
+        else
+            CHANGE_SET_UNKNOWN=1
+        fi
+    done <<EOF_PUSH
+$PUSH_LINES
+EOF_PUSH
+    if [ -n "$SAW_OTHER_COMMIT" ]; then
+        # Tests run against the checked-out tree, not other commits. The paths
+        # of every pushed ref still pick the tests; CI checks each branch.
+        echo "ℹ️  Pre-push: this push sends commits other than the checked-out HEAD — local tests run against HEAD; CI covers each branch"
+    fi
 else
-    # New branch — check vs main
-    CHANGED=$(git diff --name-only main..HEAD 2>/dev/null || true)
+    # No stdin (a dry run reads /dev/null): the current branch's tracking ref,
+    # else its fork point.
+    CURRENT_BRANCH=$(git branch --show-current)
+    if [ -n "$REMOTE_NAME" ] &&
+        REMOTE_REF=$(git rev-parse --verify --quiet "$REMOTE_NAME/$CURRENT_BRANCH"); then
+        if paths=$(git diff --name-only "$REMOTE_REF" HEAD); then
+            add_changed "$paths"
+        else
+            CHANGE_SET_UNKNOWN=1
+        fi
+    elif paths=$(changed_since_fork HEAD); then
+        add_changed "$paths"
+    else
+        CHANGE_SET_UNKNOWN=1
+    fi
+fi
+
+if [ -n "$CHANGE_SET_UNKNOWN" ]; then
+    echo "⚠️  Pre-push: could not tell what this push changes (remote '$REMOTE' unresolved, or no common history) — checking every tracked file"
+    CHANGED=$(git ls-files)
+else
+    CHANGED=$(printf '%s' "$CHANGED" | grep -v '^$' | sort -u || true)
+fi
+
+# Test seam: preview the gate for an arbitrary change set without committing
+# it. Combine with CHARCOAL_HOOK_DRY_RUN to see what a push WOULD run.
+if [ -n "$CHARCOAL_HOOK_CHANGED_FILES" ]; then
+    CHANGED="$CHARCOAL_HOOK_CHANGED_FILES"
 fi
 
 # ── 3. Language-specific quality gates ───────────────────────────────
 # CUSTOMIZE: add/remove gates as your project's stack requires.
 
-# Rust: clippy + tests
+# Rust: clippy + ONLY the tests this push affects
+#
+# ┌─ LOCAL EXCEPTION TO THE TEMPLATE (#367) ─────────────────────────────┐
+# │ Charcoal-specific: feature names, the module→test mapping, and the   │
+# │ Postgres hand-off to CI. `update-project-from-template` will replace │
+# │ this block with the template's run-everything version. Re-apply it,  │
+# │ or every push silently goes back to running the whole suite.         │
+# └──────────────────────────────────────────────────────────────────────┘
+#
+# This gate is fast feedback on what THIS push touched — it is NOT the safety
+# net. The full suite (every feature, every test binary, the Postgres suite,
+# the model-gated tests) runs in CI on every pull request. The selection below
+# is a heuristic: a change can break a test it does not obviously touch, and
+# CI is what catches that.
+#
+# Preview what a push would run, without running it:
+#   CHARCOAL_HOOK_DRY_RUN=1 .git/hooks/pre-push origin < /dev/null
+# ...optionally for a hypothetical change set (newline-separated paths):
+#   CHARCOAL_HOOK_CHANGED_FILES="src/web/refresh.rs" CHARCOAL_HOOK_DRY_RUN=1 \
+#     .git/hooks/pre-push origin < /dev/null
 if [ -f "$REPO_ROOT/Cargo.toml" ]; then
-    if echo "$CHANGED" | grep -qE '\.(rs|toml)$'; then
-        echo "🔍 Pre-push: cargo clippy..."
-        if ! (cd "$REPO_ROOT" && cargo clippy --all-targets --quiet 2>&1); then
+    RUST_CHANGED=$(echo "$CHANGED" | grep -E '\.rs$|(^|/)Cargo\.(toml|lock)$|^migrations/' || true)
+    if [ -n "$RUST_CHANGED" ]; then
+        # Run a gate, or in dry-run mode just print it. The command runs from
+        # the repo root so a push from a subdirectory behaves the same.
+        run_gate() {
+            local label="$1"
+            shift
+            if [ -n "$CHARCOAL_HOOK_DRY_RUN" ]; then
+                echo "   [dry run] $label: $*"
+                return 0
+            fi
+            echo "🔍 Pre-push: $label..."
+            (cd "$REPO_ROOT" && "$@" 2>&1)
+        }
+
+        # A test file gated `#![cfg(feature = "postgres")]` compiles to ZERO
+        # tests without that feature and would "pass" having run nothing. Those
+        # need a live database, so they belong to the Postgres suite in CI.
+        is_postgres_test() {
+            grep -q '^#!\[cfg(feature = "postgres")\]' "$1"
+        }
+
+        # Add `--test <name>` once.
+        TEST_ARGS=""
+        add_test() {
+            case " $TEST_ARGS " in
+                *" --test $1 "*) ;;
+                *) TEST_ARGS="$TEST_ARGS --test $1" ;;
+            esac
+        }
+
+        # Code the Postgres build compiles differently. Clippy still type-checks
+        # it locally, so a compile error cannot wait for CI; only the Postgres
+        # TESTS are handed off. Two triggers: paths that belong to the Postgres
+        # backend, and any changed Rust file that has Postgres-only sections
+        # (`src/main.rs` selects the backend that way). A change the triggers
+        # cannot see, such as deleting the last Postgres-only section of a
+        # file, is caught by CI.
+        PG_TOUCHED=$(echo "$RUST_CHANGED" | grep -E '^src/db/|^migrations/postgres/|^tests/db_postgres\.rs$|(^|/)Cargo\.(toml|lock)$' || true)
+        for f in $(echo "$RUST_CHANGED" | grep -E '\.rs$' || true); do
+            [ -f "$REPO_ROOT/$f" ] || continue # deleted in this push
+            if grep -q 'feature = "postgres"' "$REPO_ROOT/$f"; then
+                PG_TOUCHED="$PG_TOUCHED
+$f"
+            fi
+        done
+
+        # `--features web` embeds the frontend at compile time
+        # (`include_dir!("…/web/build")` in src/web/mod.rs), and web/build is
+        # gitignored. A fresh clone or a new worktree has none, and without it
+        # every web compile fails, so build it once here rather than reject the
+        # push. After that it is reused; a stale build still compiles.
+        if [ ! -d "$REPO_ROOT/web/build" ]; then
+            if [ -n "$CHARCOAL_HOOK_DRY_RUN" ]; then
+                echo "   [dry run] frontend build: web/build is missing"
+            elif ! command -v npm >/dev/null 2>&1; then
+                echo ""
+                echo "❌ web/build is missing and npm is not installed. The web build embeds it."
+                echo "   Install Node, then: npm --prefix web ci && npm --prefix web run build"
+                echo ""
+                exit 1
+            else
+                echo "🔍 Pre-push: web/build is missing — building the frontend once..."
+                if ! (cd "$REPO_ROOT" && { [ -d web/node_modules ] || npm --prefix web ci; } && npm --prefix web run build) 2>&1; then
+                    echo ""
+                    echo "❌ Frontend build failed. The web build embeds web/build, so it must build first."
+                    echo ""
+                    exit 1
+                fi
+            fi
+        fi
+
+        if ! run_gate "cargo clippy (web)" cargo clippy --all-targets --features web --quiet -- -D warnings; then
             echo ""
             echo "❌ Clippy warnings. Fix them before pushing."
             echo ""
             exit 1
+        fi
+        # Locally, lint Postgres as production builds it: together with web
+        # (Dockerfile: `--features web,postgres`). CI also lints Postgres alone.
+        if [ -n "$PG_TOUCHED" ]; then
+            if ! run_gate "cargo clippy (web + postgres)" cargo clippy --all-targets --features web,postgres --quiet -- -D warnings; then
+                echo ""
+                echo "❌ Clippy warnings in the Postgres build. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        fi
+
+        # 1. A changed integration-test file runs directly.
+        PG_TESTS_CHANGED=""
+        for f in $(echo "$RUST_CHANGED" | grep -E '^tests/[^/]+\.rs$' || true); do
+            [ -f "$REPO_ROOT/$f" ] || continue # deleted in this push
+            if is_postgres_test "$REPO_ROOT/$f"; then
+                PG_TESTS_CHANGED="$PG_TESTS_CHANGED $(basename "$f" .rs)"
+            else
+                add_test "$(basename "$f" .rs)"
+            fi
+        done
+
+        # 2. Changed library code runs its own inline unit tests (`--lib`), plus
+        #    every integration test that names the changed module by its full
+        #    path. `src/web/refresh.rs` → `charcoal::web::refresh`; `mod.rs`
+        #    maps to its directory. A prefix can over-match a sibling (for
+        #    example `…::refresh` also matches `…::refresh_scan`), which costs
+        #    an extra test binary, never a missed one.
+        SRC_CHANGED=$(echo "$RUST_CHANGED" | grep -E '^src/.+\.rs$' || true)
+        if [ -n "$SRC_CHANGED" ]; then
+            TEST_ARGS="--lib$TEST_ARGS"
+            for f in $SRC_CHANGED; do
+                mod=${f#src/}
+                mod=${mod%.rs}
+                mod=${mod%/mod}
+                case "$mod" in
+                    lib | main) continue ;; # crate roots: covered by --lib
+                esac
+                modpath="charcoal::$(echo "$mod" | sed 's#/#::#g')"
+                for t in "$REPO_ROOT"/tests/*.rs; do
+                    [ -f "$t" ] || continue
+                    is_postgres_test "$t" && continue
+                    if grep -qF "$modpath" "$t"; then
+                        add_test "$(basename "$t" .rs)"
+                    fi
+                done
+            done
         fi
 
         # ┌─ LOCAL EXCEPTION TO THE TEMPLATE ────────────────────────────────┐
@@ -443,12 +694,24 @@ if [ -f "$REPO_ROOT/Cargo.toml" ]; then
             export CHARCOAL_MODEL_DIR="$REPO_ROOT/models"
         fi
 
-        echo "🔍 Pre-push: cargo test..."
-        if ! (cd "$REPO_ROOT" && cargo test --quiet 2>&1); then
-            echo ""
-            echo "❌ Tests failed. Fix them before pushing."
-            echo ""
-            exit 1
+        if [ -n "$TEST_ARGS" ]; then
+            # `--features web` rather than the default: web is where most of
+            # the code lives, and the default build does not compile it at all,
+            # so the old run-everything default gave web changes no local
+            # coverage. Every non-Postgres test binary compiles under web.
+            # shellcheck disable=SC2086 # TEST_ARGS is deliberately word-split
+            if ! run_gate "cargo test (affected: ${TEST_ARGS# })" cargo test --features web $TEST_ARGS --quiet; then
+                echo ""
+                echo "❌ Tests failed. Fix them before pushing."
+                echo ""
+                exit 1
+            fi
+        else
+            echo "⏭️  Pre-push: no local tests to run (dependency, migration or Postgres-only changes) — the full suite runs in CI"
+        fi
+
+        if [ -n "$PG_TOUCHED$PG_TESTS_CHANGED" ]; then
+            echo "ℹ️  Pre-push: this push affects the Postgres build — the Postgres suite runs in CI on the pull request"
         fi
         echo "✅ Rust gates passed"
     fi
