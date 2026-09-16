@@ -179,9 +179,13 @@ jobs:
           path: models
           key: ${{ runner.os }}-charcoal-models-${{ hashFiles('src/toxicity/download.rs') }}
 
+      # `--features postgres`, not web: this job never builds the frontend,
+      # and the web build cannot compile without web/build. It is also the
+      # build the migration step below compiles anyway. A cache hit skips this
+      # step, which is how a web build here went unnoticed until a miss (#377).
       - name: Download ONNX models
         if: steps.cache-models.outputs.cache-hit != 'true'
-        run: cargo run --features web -- download-model
+        run: cargo run --features postgres -- download-model
         env:
           CHARCOAL_MODEL_DIR: models
 

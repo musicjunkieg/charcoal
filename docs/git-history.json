@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f2bce2fdfaa6ad4a0429ca3b9c4acb4268dfc777",
+    "short_hash": "f2bce2f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:18:26-07:00",
+    "message": "Merge staging into feat/343-phase2-expiry-refresh\n\nBrings in #367 (PR #125): the affected-tests pre-push hook and the\nPostgres CI job, so PR #124 gets Postgres coverage in CI. The two\ngenerated decision-graph exports conflicted and were regenerated with\ndeciduous sync.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 0
+  },
+  {
     "hash": "09780928b5b131974743766fed64ee2a2f3f9320",
     "short_hash": "0978092",
     "author": "Bryan Guffey",
