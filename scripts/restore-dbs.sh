@@ -56,25 +56,34 @@ export AWS_ACCESS_KEY_ID="$BACKUP_S3_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$BACKUP_S3_SECRET_ACCESS_KEY"
 
 S3="s3://$BACKUP_S3_BUCKET"
-ENDPOINT="--endpoint-url=$BACKUP_S3_ENDPOINT --region=${BACKUP_S3_REGION:-auto}"
+ENDPOINT=(--endpoint-url "$BACKUP_S3_ENDPOINT" --region "${BACKUP_S3_REGION:-auto}")
 
 echo "🗄️  Restoring databases from $BACKUP_S3_BUCKET..."
 
 # ── chainlink issues ─────────────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.chainlink"
-if aws s3 cp "$S3/issues.db" "$REPO_ROOT/.chainlink/issues.db" $ENDPOINT --quiet; then
+RESTORE_FAILED=0
+if aws s3 cp "$S3/issues.db" "$REPO_ROOT/.chainlink/issues.db" "${ENDPOINT[@]}" --quiet; then
     echo "✅ .chainlink/issues.db restored"
 else
     echo "❌ Failed to restore issues.db — check bucket name and credentials"
+    RESTORE_FAILED=1
 fi
 
 # ── deciduous decision graph ─────────────────────────────────────────
 mkdir -p "$REPO_ROOT/.deciduous"
-if aws s3 cp "$S3/deciduous.db" "$REPO_ROOT/.deciduous/deciduous.db" $ENDPOINT --quiet; then
+if aws s3 cp "$S3/deciduous.db" "$REPO_ROOT/.deciduous/deciduous.db" "${ENDPOINT[@]}" --quiet; then
     echo "✅ .deciduous/deciduous.db restored"
 else
     echo "❌ Failed to restore deciduous.db — check bucket name and credentials"
+    RESTORE_FAILED=1
 fi
 
 echo ""
+if [ "$RESTORE_FAILED" -ne 0 ]; then
+    # Both restores are attempted above so one failure doesn't mask the
+    # other, but automation must not proceed on a missing/stale database.
+    echo "Done with errors — at least one restore failed."
+    exit 1
+fi
 echo "Done. Run 'chainlink list' and 'deciduous nodes' to verify."
