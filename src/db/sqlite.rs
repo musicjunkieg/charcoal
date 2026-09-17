@@ -15,12 +15,13 @@ use tokio::sync::Mutex;
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
-    NewAmplificationEvent, UserLabel, UserRow,
+    NewAmplificationEvent, StoredScore, UserLabel, UserRow,
 };
 use super::traits::{
     validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
-    FeedSnapshot, NewAction, OauthSessionRow, OnnxScoreRow, ScanClaim, ScanQueueDepth,
-    ScanQueueEntry, ScanQueueRow, ScanSkip, ScoreSnapshot,
+    EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
+    RefreshCandidate, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
+    ScoreSnapshot,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -34,6 +35,17 @@ impl SqliteDatabase {
         Self {
             conn: Mutex::new(conn),
         }
+    }
+
+    /// Run a closure against the raw connection. Test support only: lets
+    /// integration tests shape rows the trait deliberately cannot (age a
+    /// score out of its generation, #344) without widening the trait.
+    pub async fn with_conn<T>(
+        &self,
+        f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T>,
+    ) -> anyhow::Result<T> {
+        let conn = self.conn.lock().await;
+        Ok(f(&conn)?)
     }
 }
 
@@ -62,6 +74,28 @@ impl Database for SqliteDatabase {
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()> {
         let conn = self.conn.lock().await;
         super::queries::set_scan_state(&conn, user_did, key, value)
+    }
+
+    async fn delete_scan_state(&self, user_did: &str, key: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::delete_scan_state(&conn, user_did, key)
+    }
+
+    async fn finish_full_scan_state(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+        claim_id: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::finish_full_scan_state(
+            &conn,
+            user_did,
+            finished_at_rfc3339,
+            carried_key,
+            claim_id,
+        )
     }
 
     async fn get_all_scan_state(&self, user_did: &str) -> Result<Vec<(String, String)>> {
@@ -101,6 +135,7 @@ impl Database for SqliteDatabase {
         fingerprint_json: &str,
         post_count: u32,
         embedding: Option<&[f64]>,
+        embedding_model_id: Option<&str>,
         clusters: &[ClusterCentroid],
     ) -> Result<()> {
         validate_bundle(embedding, clusters)?;
@@ -112,6 +147,7 @@ impl Database for SqliteDatabase {
             fingerprint_json,
             post_count,
             embedding_json.as_deref(),
+            embedding_model_id,
             clusters,
         )
     }
@@ -119,6 +155,11 @@ impl Database for SqliteDatabase {
     async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>> {
         let conn = self.conn.lock().await;
         super::queries::get_topic_centroids(&conn, user_did)
+    }
+
+    async fn fingerprint_embedding_model(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::fingerprint_embedding_model(&conn, user_did)
     }
 
     async fn upsert_account_score(&self, user_did: &str, score: &AccountScore) -> Result<()> {
@@ -135,18 +176,38 @@ impl Database for SqliteDatabase {
         super::queries::get_ranked_threats(&conn, user_did, min_score)
     }
 
-    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool> {
+    async fn is_score_stale(&self, user_did: &str, did: &str) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::is_score_stale(&conn, user_did, did, max_age_days)
+        super::queries::is_score_stale(&conn, user_did, did)
     }
 
-    async fn get_fresh_scored_dids(
+    async fn get_fresh_scored_dids(&self, user_did: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::get_fresh_scored_dids(&conn, user_did)
+    }
+
+    async fn count_expired(&self, user_did: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::count_expired(&conn, user_did)
+    }
+
+    async fn export_scores(&self, user_did: &str) -> Result<Vec<StoredScore>> {
+        let conn = self.conn.lock().await;
+        super::queries::export_scores(&conn, user_did)
+    }
+
+    async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::import_score(&conn, user_did, row)
+    }
+
+    async fn list_refresh_candidates(
         &self,
         user_did: &str,
-        max_age_days: i64,
-    ) -> Result<Vec<String>> {
+        horizon_days: i64,
+    ) -> Result<Vec<RefreshCandidate>> {
         let conn = self.conn.lock().await;
-        super::queries::get_fresh_scored_dids(&conn, user_did, max_age_days)
+        super::queries::list_refresh_candidates(&conn, user_did, horizon_days)
     }
 
     async fn insert_amplification_event(
@@ -444,9 +505,19 @@ impl Database for SqliteDatabase {
 
     // --- Scan admission queue (#257) ---
 
-    async fn enqueue_scan(&self, user_did: &str) -> Result<()> {
+    async fn enqueue_scan(&self, user_did: &str) -> Result<EnqueueOutcome> {
         let conn = self.conn.lock().await;
         super::queries::enqueue_scan(&conn, user_did)
+    }
+
+    async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::enqueue_refresh_scan(&conn, user_did)
+    }
+
+    async fn request_full_after_refresh(&self, user_did: &str, claim_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::request_full_after_refresh(&conn, user_did, claim_id)
     }
 
     async fn claim_next_scan(&self, limit: usize, lease_secs: i64) -> Result<Option<ScanClaim>> {
@@ -467,14 +538,20 @@ impl Database for SqliteDatabase {
         super::queries::heartbeat_scan(&conn, user_did, claim_id, lease_secs)
     }
 
+    async fn scan_claim_is_current(&self, user_did: &str, claim_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::scan_claim_is_current(&conn, user_did, claim_id)
+    }
+
     async fn finish_queued_scan(
         &self,
         user_did: &str,
         claim_id: &str,
+        completion: FinishCompletion,
         error: Option<&str>,
     ) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::finish_queued_scan(&conn, user_did, claim_id, error)
+        super::queries::finish_queued_scan(&conn, user_did, claim_id, completion, error)
     }
 
     async fn reclaim_expired_scans(&self) -> Result<usize> {
@@ -499,6 +576,79 @@ impl Database for SqliteDatabase {
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>> {
         let conn = self.conn.lock().await;
         super::queries::list_scan_queue(&conn)
+    }
+
+    // --- Refresh schedule (#343 §4.4, #344) ---
+
+    async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::next_refresh_at(&conn, user_did)
+    }
+
+    async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::refreshed_generation(&conn, user_did)
+    }
+
+    async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::refresh_attempted_generation(&conn, user_did)
+    }
+
+    async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::schedule_refresh(&conn, user_did, at_rfc3339)
+    }
+
+    async fn schedule_retry_at(
+        &self,
+        user_did: &str,
+        at_rfc3339: &str,
+        attempted_generation: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::schedule_retry_at(&conn, user_did, at_rfc3339, attempted_generation)
+    }
+
+    async fn apply_refresh_schedule(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        write: super::traits::RefreshScheduleWrite<'_>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::apply_refresh_schedule(&conn, user_did, claim_id, write)
+    }
+
+    async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::mark_refreshed_generation(&conn, user_did, generation)
+    }
+
+    async fn mark_refresh_attempted_generation(
+        &self,
+        user_did: &str,
+        generation: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::mark_refresh_attempted_generation(&conn, user_did, generation)
+    }
+
+    async fn claim_and_enqueue_due_refreshes(
+        &self,
+        now_rfc3339: &str,
+        next_rfc3339: &str,
+        current_generation: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock().await;
+        super::queries::claim_and_enqueue_due_refreshes(
+            &conn,
+            now_rfc3339,
+            next_rfc3339,
+            current_generation,
+            limit,
+        )
     }
 
     // --- Access requests (#309) ---
@@ -705,6 +855,10 @@ impl Database for SqliteDatabase {
         let conn = self.conn.lock().await;
         super::queries::evict_stale_cache(&conn, feed_cutoff, score_cutoff)
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
@@ -764,6 +918,7 @@ mod tests {
             "{\"clusters\":[],\"post_count\":42}",
             42,
             Some(&emb),
+            Some(crate::topics::embeddings::EMBEDDING_MODEL_ID),
             &clusters,
         )
         .await
@@ -798,7 +953,7 @@ mod tests {
                 post_count: 7,
             },
         ];
-        db.save_fingerprint_bundle(TEST_USER, "{}", 18, None, &three)
+        db.save_fingerprint_bundle(TEST_USER, "{}", 18, None, None, &three)
             .await
             .unwrap();
         let two = vec![
@@ -811,7 +966,7 @@ mod tests {
                 post_count: 8,
             },
         ];
-        db.save_fingerprint_bundle(TEST_USER, "{}", 17, None, &two)
+        db.save_fingerprint_bundle(TEST_USER, "{}", 17, None, None, &two)
             .await
             .unwrap();
         let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
@@ -826,7 +981,7 @@ mod tests {
     #[tokio::test]
     async fn test_bundle_keyword_only_is_legal() {
         let db = test_db().await;
-        db.save_fingerprint_bundle(TEST_USER, "{}", 10, None, &[])
+        db.save_fingerprint_bundle(TEST_USER, "{}", 10, None, None, &[])
             .await
             .unwrap();
         assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
@@ -840,7 +995,7 @@ mod tests {
             centroid: vec![0.5; 384],
             post_count: 3,
         }];
-        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, None, &good)
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, None, None, &good)
             .await
             .unwrap();
 
@@ -849,7 +1004,7 @@ mod tests {
             post_count: 4,
         }];
         assert!(db
-            .save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &bad)
+            .save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, None, &bad)
             .await
             .is_err());
 
@@ -868,14 +1023,21 @@ mod tests {
             post_count: 3,
         }];
         let emb = vec![0.25; 384];
-        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":1}", 3, Some(&emb), &clusters)
-            .await
-            .unwrap();
+        db.save_fingerprint_bundle(
+            TEST_USER,
+            "{\"gen\":1}",
+            3,
+            Some(&emb),
+            Some(crate::topics::embeddings::EMBEDDING_MODEL_ID),
+            &clusters,
+        )
+        .await
+        .unwrap();
         assert!(db.get_embedding(TEST_USER).await.unwrap().is_some());
 
         // Downgrade to keyword-only: the new generation replaces EVERYTHING —
         // a stale embedding surviving here would mix generations (#302).
-        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, &[])
+        db.save_fingerprint_bundle(TEST_USER, "{\"gen\":2}", 4, None, None, &[])
             .await
             .unwrap();
         assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
@@ -889,7 +1051,7 @@ mod tests {
             centroid: vec![0.5; 384],
             post_count: 3,
         }];
-        db.save_fingerprint_bundle(TEST_USER, "{}", 3, None, &clusters)
+        db.save_fingerprint_bundle(TEST_USER, "{}", 3, None, None, &clusters)
             .await
             .unwrap();
         db.delete_user_data(TEST_USER).await.unwrap();
@@ -1055,7 +1217,7 @@ mod tests {
     async fn test_trait_is_score_stale_missing() {
         let db = test_db().await;
         assert!(db
-            .is_score_stale(TEST_USER, "did:plc:missing", 7)
+            .is_score_stale(TEST_USER, "did:plc:missing")
             .await
             .unwrap());
     }

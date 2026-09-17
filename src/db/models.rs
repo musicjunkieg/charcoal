@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A scored account in the threat list.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AccountScore {
     pub did: String,
     pub handle: String,
@@ -36,6 +36,36 @@ pub struct AccountScore {
     pub scoring_confidence: Option<String>,
 }
 
+impl AccountScore {
+    /// Construct a minimal valid `AccountScore` for unit tests, mirroring
+    /// `AccountInput::new_for_test`.
+    ///
+    /// Everything optional is `None`, collections are empty, and `scored_at`
+    /// is now — the shape a test needs when it only cares about one or two
+    /// fields (a tier, a score) and must not hand-write the other thirteen.
+    /// Deliberately not `#[cfg(test)]`: integration tests in `tests/` compile
+    /// against the library, where a `cfg(test)` item does not exist.
+    pub fn default_for_test(did: &str) -> Self {
+        AccountScore {
+            did: did.to_string(),
+            handle: format!("{}.test", did.trim_start_matches("did:plc:")),
+            toxicity_score: None,
+            topic_overlap: None,
+            overlap_legacy: None,
+            threat_score: None,
+            threat_tier: None,
+            posts_analyzed: 0,
+            top_toxic_posts: vec![],
+            scored_at: chrono::Utc::now().to_rfc3339(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: None,
+        }
+    }
+}
+
 /// One stored topic centroid. Label/keywords/weight live in the fingerprint
 /// JSON (clusters[i] ↔ cluster_index i); this is only what scoring needs.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,17 +74,21 @@ pub struct ClusterCentroid {
     pub post_count: u32,
 }
 
-/// Confidence level of a scoring result based on data volume.
+/// Confidence level of a scoring result.
 ///
-/// Used to prioritize re-scoring: Low confidence accounts are re-scored
-/// sooner (3 days) than High confidence accounts (14 days).
+/// Set by `scoring::profile`, not by a post count: `Low` when Stage 1 exits
+/// early, otherwise `High` or `Standard` by the topic fingerprint's quality
+/// (`FingerprintQuality`). Drives expiry: Low confidence scores expire sooner
+/// (3 days) than High confidence scores (14 days).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScoringConfidence {
-    /// < 25 posts analyzed, early exit
+    /// Stage 1 early exit: every sampled post was clean and the topic overlap
+    /// was below the gate, so the account was never fully scored.
     Low,
-    /// 25-50 posts, standard sampling
+    /// Fully scored, but the fingerprint was `Degraded` or `Unreliable`
+    /// (fewer than 15 original posts).
     Standard,
-    /// 50+ posts, full analysis with context pairs
+    /// Fully scored with a `Normal` fingerprint (at least 15 original posts).
     High,
 }
 
@@ -75,14 +109,58 @@ impl ScoringConfidence {
             ScoringConfidence::High => "high",
         }
     }
+
+    /// Inverse of [`as_str`](Self::as_str). `None` for anything the enum
+    /// never produced.
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "low" => Some(ScoringConfidence::Low),
+            "standard" => Some(ScoringConfidence::Standard),
+            "high" => Some(ScoringConfidence::High),
+            _ => None,
+        }
+    }
+
+    /// Staleness window for a stored `scoring_confidence` label (#344).
+    /// `None` (NotAssessed / insufficient-data rows) and unknown labels fall
+    /// back to Standard (7 days) — never 0, never forever.
+    pub fn staleness_days_for_label(label: Option<&str>) -> i64 {
+        label
+            .and_then(Self::from_label)
+            .unwrap_or(ScoringConfidence::Standard)
+            .staleness_days()
+    }
 }
 
 /// A single post with its toxicity score, kept as evidence.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToxicPost {
     pub text: String,
     pub toxicity: f64,
     pub uri: String,
+}
+
+/// One `account_scores` row with its provenance, for lossless export/import
+/// (#344 R01). The presentation reads (`get_ranked_threats`, counts) hide
+/// expired rows; this does not, and `import_score` writes it back verbatim.
+/// How a row's expiry left its backend (V2-06). Postgres rows are always
+/// `At`; SQLite can hold NULL or text `datetime()` cannot parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportedExpiry {
+    /// RFC3339 UTC, fractional seconds as the source had them.
+    At(String),
+    Missing,
+    /// The raw SQLite text, for the log line the importer writes.
+    Invalid(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredScore {
+    pub score: AccountScore,
+    /// RFC3339 UTC.
+    pub scored_at: String,
+    pub scoring_generation: String,
+    pub valid_until: ExportedExpiry,
 }
 
 /// An amplification event — someone quoted or reposted the protected user.
@@ -163,6 +241,12 @@ pub enum ThreatTier {
 }
 
 impl ThreatTier {
+    /// Floor of the Elevated tier (#344 Task 7). Named so the refresh
+    /// candidate query (`threat_score >= ELEVATED_MIN`) and `from_score`
+    /// cannot drift apart — the candidate set is defined as "High or
+    /// Elevated by score", which only holds if both read the same constant.
+    pub const ELEVATED_MIN: f64 = 15.0;
+
     /// Determine the tier from a threat score (0-100).
     ///
     /// Thresholds are tuned for the multiplicative scoring formula where
@@ -175,7 +259,7 @@ impl ThreatTier {
     pub fn from_score(score: f64) -> Self {
         match score {
             s if s >= 35.0 => ThreatTier::High,
-            s if s >= 15.0 => ThreatTier::Elevated,
+            s if s >= Self::ELEVATED_MIN => ThreatTier::Elevated,
             s if s >= 8.0 => ThreatTier::Watch,
             _ => ThreatTier::Low,
         }

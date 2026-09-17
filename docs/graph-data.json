@@ -10548,6 +10548,94 @@
       "created_at": "2026-09-16T15:42:33.867972-07:00",
       "updated_at": "2026-09-16T15:42:33.867972-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f2bce2f\",\"confidence\":90,\"files\":[\".github/workflows/ci.yml\"]}"
+    },
+    {
+      "id": 969,
+      "change_id": "2ee4df1d-5ccf-4845-9fc1-8ef1fd473eaa",
+      "node_type": "outcome",
+      "title": "#377 fix verified: PR #126 run 35159034759 and PR #124 run 35159045599 green both jobs; Download ONNX models actually ran (cache miss) and succeeded. PR #124 Postgres job: db_postgres 72/72 passed, job total 847 passed 0 failed.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T15:53:51.927448-07:00",
+      "updated_at": "2026-09-16T15:53:51.927448-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"a4b3d92\",\"confidence\":95}"
+    },
+    {
+      "id": 970,
+      "change_id": "feea26da-3f15-42c3-8130-c6213ebfdbc8",
+      "node_type": "observation",
+      "title": "CodeRabbit on PR #124 (review of ddbc903, 4 threads + 1 outside-diff). Validated: (1) .env.example/CHANGELOG say 'every scan probes' but CLI scan/sweep never probe — VALID doc fix. (2) request_full not claim-fenced and (3) schedule_success/retry check-then-write after owns_claim — REAL TOCTOU but window is the ms between a fresh ownership check and the writes; a successor that claims inside it finishes minutes later and overwrites next_refresh_at itself; worst case one extra full scan. Same class as #348 -> DEFER to a filed issue. (4) admin cooldown-bypass test never writes last_full_scan_finished_at, so it cannot detect cooldown enforcement — VALID. (5) classify_refresh returns NothingDue when 0 candidates but owned staging was resumed and scored — VALID, reports scored=0 and outcome nothing_due.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:12:15.097313-07:00",
+      "updated_at": "2026-09-16T16:12:15.097313-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":90}"
+    },
+    {
+      "id": 971,
+      "change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "node_type": "action",
+      "title": "Fix PR #124 CodeRabbit round: classify_refresh takes has_own_resumable_staging (NothingDue only when both absent); admin bypass test seeds the cooldown marker and proves the user route 429s; docs say only web scans and refreshes with work probe; file claim-fence follow-up for refresh bookkeeping",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:12:15.129087-07:00",
+      "updated_at": "2026-09-16T16:12:15.129087-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"55bc065\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"tests/web_access_admin.rs\",\".env.example\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 972,
+      "change_id": "8b41ba5f-0f03-49ba-b458-a3aa895b8bc5",
+      "node_type": "outcome",
+      "title": "PR #124 CodeRabbit round pushed as 5749eb3: classify_refresh resumed-staging fix, admin cooldown-bypass fixture proves 429 then 202, probe docs corrected (env/CHANGELOG/runbook); claim-fence x2 deferred to #378 with reasoning. Pre-push: --lib + unit_scan_phases + web_access_admin = 447 passed, 0 failed. All 5 findings replied.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:20:36.599928-07:00",
+      "updated_at": "2026-09-16T16:20:36.599928-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"5749eb3\",\"confidence\":90}"
+    },
+    {
+      "id": 973,
+      "change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "node_type": "observation",
+      "title": "Correction: deferring the two claim-fence findings to #378 broke Bryan's standing rule (implement every finding that holds; defer only out-of-scope or refuted). Implemented instead as 9e253fa: Database::apply_refresh_schedule (ownership read + write in one tx, Immediate/FOR UPDATE) and claim-matched request_full_after_refresh; mutation check confirmed the SQLite test fails without the fence. The new Postgres test exposed a pre-existing prod bug: request_full_after_refresh COALESCE(timestamptz, text) errored on every call, so on Postgres a deferred refresh never recorded its follow-up full scan; fixed with ::timestamptz.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:40:11.419484-07:00",
+      "updated_at": "2026-09-16T16:40:11.419484-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"9e253fa\",\"confidence\":95}"
+    },
+    {
+      "id": 974,
+      "change_id": "8671063c-21a7-4e35-8938-936993b232ea",
+      "node_type": "observation",
+      "title": "CORRECTION to 973: the request_full_after_refresh COALESCE bug was NOT a prod bug. The method was added on this branch (6495191, #344) and has never reached staging or main; it would have shipped with PR #124 and is fixed before merge.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:40:17.975492-07:00",
+      "updated_at": "2026-09-16T16:40:17.975492-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 975,
+      "change_id": "ae03466c-3bc1-415d-b1a2-c8c9acb6ac18",
+      "node_type": "outcome",
+      "title": "PR #124 claim-fence round landed at 39e20fe (9e253fa fence + test fix). Full local web suite 60 binaries 1122 passed 0 failed 0 SKIP; hook 30 binaries 871 passed; Postgres fence test passes locally. Threads updated to fixed, #378 closed. Awaiting CI + CodeRabbit re-review.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T17:52:21.870161-07:00",
+      "updated_at": "2026-09-16T17:52:21.870161-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"39e20fe\",\"confidence\":90}"
+    },
+    {
+      "id": 976,
+      "change_id": "66e87dcc-a710-49b9-a364-a1c2c48334a9",
+      "node_type": "observation",
+      "title": "CodeRabbit round on 39e20fe (4 findings). (1) v18 migration lock: REFUTED with evidence — prod account_scores 5,427 rows/5 MB, staging 61,330/55 MB; the v18 transaction on a local 101 MB 61k-row table took 499 ms; lock starts at ADD COLUMN so CONCURRENTLY index alone would not help; runbook updated with numbers. (2) README confidence table wrong — confidence is Stage-1 early exit (Low) vs FingerprintQuality Normal (High, >=15 originals) / Degraded|Unreliable (Standard), not post counts; also the ScoringConfidence doc comments: FIXED. (3) staging mutations not claim-fenced: VALID but pre-existing on main (clear_scan_staging/enqueue_classifications/stash_account_input/set_scan_state), not introduced here -> out of scope, widened #348. (4) CarriedCompletion::parse('skips|2') returned None: FIXED with red-then-green test.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T18:09:08.393204-07:00",
+      "updated_at": "2026-09-16T18:09:08.393204-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -21715,6 +21803,94 @@
       "weight": 1.0,
       "rationale": "Fix",
       "created_at": "2026-09-16T15:42:33.884843-07:00"
+    },
+    {
+      "id": 1026,
+      "from_node_id": 968,
+      "to_node_id": 969,
+      "from_change_id": "6d234bb2-a985-4206-8d86-b6c150dc8d09",
+      "to_change_id": "2ee4df1d-5ccf-4845-9fc1-8ef1fd473eaa",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified in CI",
+      "created_at": "2026-09-16T15:53:51.943600-07:00"
+    },
+    {
+      "id": 1027,
+      "from_node_id": 942,
+      "to_node_id": 970,
+      "from_change_id": "fb24c292-344c-46e2-9c3b-2906a7f76fb0",
+      "to_change_id": "feea26da-3f15-42c3-8130-c6213ebfdbc8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next review round on PR #124",
+      "created_at": "2026-09-16T16:12:15.114724-07:00"
+    },
+    {
+      "id": 1028,
+      "from_node_id": 970,
+      "to_node_id": 971,
+      "from_change_id": "feea26da-3f15-42c3-8130-c6213ebfdbc8",
+      "to_change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixes",
+      "created_at": "2026-09-16T16:12:15.145949-07:00"
+    },
+    {
+      "id": 1029,
+      "from_node_id": 971,
+      "to_node_id": 972,
+      "from_change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "to_change_id": "8b41ba5f-0f03-49ba-b458-a3aa895b8bc5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-09-16T16:20:36.623897-07:00"
+    },
+    {
+      "id": 1030,
+      "from_node_id": 971,
+      "to_node_id": 973,
+      "from_change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "to_change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Correction and fix",
+      "created_at": "2026-09-16T16:40:11.438590-07:00"
+    },
+    {
+      "id": 1031,
+      "from_node_id": 973,
+      "to_node_id": 974,
+      "from_change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "to_change_id": "8671063c-21a7-4e35-8938-936993b232ea",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Correction",
+      "created_at": "2026-09-16T16:40:17.994864-07:00"
+    },
+    {
+      "id": 1032,
+      "from_node_id": 973,
+      "to_node_id": 975,
+      "from_change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "to_change_id": "ae03466c-3bc1-415d-b1a2-c8c9acb6ac18",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-09-16T17:52:21.888197-07:00"
+    },
+    {
+      "id": 1033,
+      "from_node_id": 975,
+      "to_node_id": 976,
+      "from_change_id": "ae03466c-3bc1-415d-b1a2-c8c9acb6ac18",
+      "to_change_id": "66e87dcc-a710-49b9-a364-a1c2c48334a9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next CodeRabbit round",
+      "created_at": "2026-09-16T18:09:08.408808-07:00"
     }
   ],
   "documents": [

@@ -170,11 +170,20 @@ pub async fn build_user_fingerprint(
         }
     };
     let json = serde_json::to_string(&artifacts.fingerprint)?;
+    // embedding_model_id (#344) records which model produced the vector, so
+    // input-compatibility checks (R03) can tell a current-model embedding
+    // from a stale one without re-deriving it. None when the embedding
+    // itself is None — a keyword-only fingerprint has no model to record.
+    let embedding_model_id = artifacts
+        .mean_embedding
+        .is_some()
+        .then_some(crate::topics::embeddings::EMBEDDING_MODEL_ID);
     db.save_fingerprint_bundle(
         user_did,
         &json,
         artifacts.fingerprint.post_count,
         artifacts.mean_embedding.as_deref(),
+        embedding_model_id,
         &artifacts.clusters,
     )
     .await?;

@@ -55,6 +55,13 @@ Optional settings (see `.env.example` for details):
 - `CHARCOAL_ONNX_SESSIONS` — number of ONNX toxicity sessions to pool
   (default `1`, clamped to 1–8; each is a separate ~126 MB model load).
   Only worth raising if the #343 Phase 0 runbook shows a gain.
+- `CHARCOAL_COPE_B_POLICY_VERSION` — the `POLICY_VERSION` the hosted CoPE-B
+  endpoint is serving (only read when `CHARCOAL_CLASSIFIER=runpod`). It must
+  equal the value the endpoint reports on its verdicts, **verbatim**; the
+  default is `policy-unknown`. See "Stage-2 classifier policy" below.
+- `CHARCOAL_REFRESH_INTERVAL_HOURS` — how often the background score refresh
+  runs (default `24`; `0` or `off` disables it; clamped to 1–168). See
+  "Score expiry and refresh" below.
 
 ### 3. Initialize
 
@@ -156,8 +163,79 @@ toxicity + topic overlap score (0-100):
 |------|-------|---------|
 | **Low** | 0-7 | No significant threat signal |
 | **Watch** | 8-14 | Some overlap or toxicity — worth monitoring |
-| **Elevated** | 15-24 | Notable combination of hostility and topic proximity |
-| **High** | 25+ | Strong threat signal — both toxic and topically close |
+| **Elevated** | 15-34 | Notable combination of hostility and topic proximity |
+| **High** | 35+ | Strong threat signal — both toxic and topically close |
+
+## Score expiry and refresh
+
+A threat score is a statement about how an account was behaving *when it was
+scored*. People change, and so do Charcoal's models — so every score now has
+an expiry date, and old scores stop being shown instead of quietly ageing into
+fiction.
+
+**How long a score lasts.** When a score is written, Charcoal records how
+confident it was and stamps an expiry on the row:
+
+| Scoring confidence | What it means | Valid for |
+|---|---|---|
+| High | Fully scored, and the account had at least 15 original posts to build its topic fingerprint from | 14 days |
+| Standard | Fully scored, but with fewer than 15 original posts, so the fingerprint leaned on replies and quotes or was unreliable | 7 days |
+| Low | Not fully scored: the first pass found only clean posts on unrelated topics and stopped early | 3 days |
+
+Confidence is not a post count. It comes from the fingerprint's quality and
+whether the scorer stopped early, so two accounts with the same number of posts
+can land in different rows.
+
+The less Charcoal had to look at, the sooner it wants to look again.
+
+**The scoring revision.** Alongside the expiry, each row records the *revision*
+it was scored under. That is one opaque string combining a hand-maintained
+version (`SCORING_GENERATION`) with the identity of every model the binary
+loads — toxicity, embeddings, NLI. Scores from two different revisions are not
+comparable, so swapping any model automatically retires every stored score;
+nobody has to remember to do it. (The database column is called
+`scoring_generation` and some UI copy still says "generation" — same thing.)
+
+**What "Expired" means on the dashboard.** A score is shown only if it has not
+expired **and** it was produced by the revision now running. Everything else is
+hidden — not deleted. The dashboard, `GET /api/status` (`tier_counts.expired`)
+and `charcoal status` all report how many rows are hidden, so a list that
+suddenly shrinks has a visible explanation rather than looking like data loss.
+Nothing is ever removed; an expired row comes back the moment it is re-scored.
+
+**The nightly refresh.** Scores return to the lists two ways. The normal way is
+re-engagement: someone quotes or reposts your post again, and a scan re-scores
+them. The other is a background job that rides on the existing scan admitter —
+no extra process, no extra database lock. Roughly once a day per user, it
+re-scores only the accounts that matter most: the ones already rated **High or
+Elevated** whose scores expire within the next two days, or that were scored
+under an older revision. Low and Watch accounts are left to expire; they will
+be re-scored if they come back.
+
+The admitter ticks every 30 seconds and each tick queues at most 25 users, so
+the work is spread out rather than arriving as one nightly stampede — which
+matters most right after a revision change, when *everybody* is due at once.
+
+```bash
+CHARCOAL_REFRESH_INTERVAL_HOURS=24   # default. 0 or "off" disables the job.
+                                     # Clamped to 1–168 (one week).
+```
+
+**A refresh never replaces a scan you asked for.** If you click Scan while a
+refresh is queued for you, that queued job becomes your full scan and keeps its
+place in line. If a refresh is already *running*, your request is written down
+and becomes a queued full scan the moment the refresh finishes — you do not
+have to click again, and it survives a restart. The 24-hour scan cooldown is
+measured from your last full scan that actually finished; a nightly refresh
+never resets it, and a scan that was interrupted never starts one.
+
+**When a refresh cannot do the job honestly, it does not do it.** A refresh
+cannot rebuild a topic fingerprint, so if yours is missing or was built by a
+different embedding model, the refresh stands down and asks for a full scan
+instead. If it cannot load the stored evidence it needs, it fails and retries
+in an hour rather than writing a score computed without it. Failed, deferred
+and interrupted refreshes retry hourly; only a clean run earns the next nightly
+slot.
 
 ## Toxicity scoring
 
@@ -180,6 +258,46 @@ are averaged. When they disagree (difference > 0.25), the lower score is used
 by default — this reduces false positives from reclaimed language and cultural
 context that a single model may misclassify. No env var = ONNX-only (same as
 before).
+
+### Stage-2 classifier policy
+
+The Stage-2 classifier (`CHARCOAL_CLASSIFIER=runpod` — the self-hosted CoPE-B
+endpoint) runs **outside** this binary, so Charcoal cannot read its identity
+the way it reads the ONNX model versions it loads itself. The operator declares
+it instead:
+
+```bash
+CHARCOAL_COPE_B_POLICY_VERSION=policy-v1   # the endpoint's own POLICY_VERSION
+```
+
+It must equal, character for character, the `policy_version` the endpoint
+reports on its verdicts. Leading and trailing whitespace is trimmed (a
+copy-pasted trailing newline would otherwise break everything below); unset or
+blank means `policy-unknown`.
+
+**What happens if it does not match.** A stored verdict records the policy that
+actually produced it, and a score may only be published from verdicts this
+binary recognises. So a mismatched value means every Stage-2 verdict is foreign
+evidence: every account is re-gathered once and then skipped, and no scores are
+written. To make that cheap to find rather than expensive to discover:
+
+- **the web scan paths probe the endpoint before they gather anything** and
+  refuse to start, naming both values and this variable. That is a scan
+  started from the dashboard (`src/web/scan_job.rs`) and the nightly refresh
+  job (`src/web/refresh_scan.rs`, which probes whenever it actually has work
+  to do — candidates due, or its own resumable staging to finish);
+- **the CLI does not probe.** `charcoal scan` and `charcoal sweep`
+  (`src/main.rs`) call the pipelines directly, with no probe in front of them.
+  On those two commands a wrong value still costs what the probe exists to
+  prevent: a full gather — hours of Bluesky fetching — followed by every
+  account being skipped and no scores written. Check the variable by hand
+  before a long CLI run;
+- if a scan is already running when the endpoint changes, the batch mapper logs
+  one error per batch (not per post) saying the same thing.
+
+The fix is one environment variable. If the endpoint's *policy itself* changed
+(and not just its label), also bump `SCORING_GENERATION` — the stored scores
+were produced under the old policy and should expire.
 
 ## PostgreSQL backend (optional)
 

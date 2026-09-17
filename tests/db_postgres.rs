@@ -10,15 +10,87 @@
 
 use anyhow::Result;
 use charcoal::db::models::AccountScore;
+use charcoal::db::traits::LAST_FULL_SCAN_DURATION_KEY;
+use charcoal::db::{EnqueueOutcome, FinishCompletion, RefreshScheduleWrite, ScanKind};
 use charcoal::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
 const TEST_USER: &str = "did:plc:pgtest_user000000000000";
 
-/// Skip the test if DATABASE_URL is not set or doesn't point to Postgres.
+/// In CI the Postgres service is mandatory; a missing DATABASE_URL must fail
+/// the job, not turn every test in this file into a silent early return.
 fn database_url() -> Option<String> {
-    std::env::var("DATABASE_URL")
+    let url = std::env::var("DATABASE_URL")
         .ok()
-        .filter(|u| u.starts_with("postgres://") || u.starts_with("postgresql://"))
+        .filter(|u| u.starts_with("postgres://"));
+    if url.is_none() && std::env::var("CI").is_ok() {
+        panic!("DATABASE_URL is required in CI for tests/db_postgres.rs");
+    }
+    url
+}
+
+/// The dedicated database destructive migration fixtures are allowed to reset
+/// (V3-06) — everything else in this file uses `database_url()`'s ordinary
+/// `charcoal_test` database and must never see a table dropped out from under
+/// it. Same CI contract as `database_url()`.
+fn migrations_database_url() -> Option<String> {
+    let url = std::env::var("DATABASE_URL_MIGRATIONS")
+        .ok()
+        .filter(|u| u.starts_with("postgres://"));
+    if url.is_none() && std::env::var("CI").is_ok() {
+        panic!("DATABASE_URL_MIGRATIONS is required in CI for tests/db_postgres.rs");
+    }
+    url
+}
+
+/// Process-local half of the double serialization for tests that reset the
+/// `_migrations` database (V4-05). The Postgres session advisory lock taken
+/// in `migrations_fixture` covers separate processes or overlapping CI
+/// invocations; this mutex covers tests within this one binary, matching the
+/// `scan_queue_test_lock` / `cache_test_lock` pattern above.
+fn migrations_db_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Guard for a test against the dedicated `_migrations` database, built to an
+/// AUTHENTIC older-schema state (V2-07) by `migrate_postgres_through`. Holds
+/// the process-local mutex AND a dedicated (non-pooled) Postgres connection
+/// carrying a session advisory lock
+/// (`pg_advisory_lock(hashtext('charcoal_migrations_fixture'))`) for its
+/// whole lifetime — released together when the guard drops at the end of the
+/// test, so a second test binary or an overlapping CI invocation blocks
+/// rather than interleaves (V4-05). The drop-all inside
+/// `migrate_postgres_through` happens at construction time, under both
+/// locks, so a failed test leaves nothing for the next one to trip over.
+struct MigrationsFixture {
+    _mutex_guard: tokio::sync::MutexGuard<'static, ()>,
+    _lock_conn: sqlx_postgres::PgConnection,
+}
+
+async fn migrations_fixture(url: &str, max_version: i64) -> MigrationsFixture {
+    use sqlx_core::connection::Connection;
+
+    let mutex_guard = migrations_db_lock().lock().await;
+
+    // A dedicated (non-pooled) connection: the session advisory lock it takes
+    // is released when THIS connection's session ends, which happens exactly
+    // when it drops at the end of the test — no pool reuse to worry about.
+    let mut lock_conn = sqlx_postgres::PgConnection::connect(url)
+        .await
+        .expect("connect dedicated advisory-lock connection to the migrations database");
+    sqlx_core::query::query("SELECT pg_advisory_lock(hashtext('charcoal_migrations_fixture'))")
+        .execute(&mut lock_conn)
+        .await
+        .expect("acquire charcoal_migrations_fixture advisory lock");
+
+    charcoal::db::postgres::migrate_postgres_through(url, max_version)
+        .await
+        .expect("reset migrations database to the requested version");
+
+    MigrationsFixture {
+        _mutex_guard: mutex_guard,
+        _lock_conn: lock_conn,
+    }
 }
 
 /// Delete rows written by this test file so tests are idempotent across runs.
@@ -96,41 +168,58 @@ async fn test_pg_scan_state_roundtrip() {
 
 #[tokio::test]
 async fn test_pg_fingerprint_roundtrip() {
+    // A dedicated user_did, NOT the shared TEST_USER: topic_fingerprint's
+    // primary key is user_did ALONE (one row per user, unlike account_scores'
+    // (user_did, did) composite), so every test that writes a fingerprint
+    // under TEST_USER races the same singleton row against every other such
+    // test running concurrently in this file (#344 fixup — observed as a
+    // real, reproducible failure, not a hypothetical).
+    const OWNER: &str = "did:plc:pgtest_fp_roundtrip_own";
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 
-    db.save_fingerprint(TEST_USER, r#"{"topics": ["test"]}"#, 42)
+    db.save_fingerprint(OWNER, r#"{"topics": ["test"]}"#, 42)
         .await
         .unwrap();
-    let (json, count, _) = db.get_fingerprint(TEST_USER).await.unwrap().unwrap();
+    let (json, count, _) = db.get_fingerprint(OWNER).await.unwrap().unwrap();
     assert_eq!(json, r#"{"topics": ["test"]}"#);
     assert_eq!(count, 42);
+
+    db.delete_user_data(OWNER).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_pg_embedding_roundtrip() {
+    // Dedicated user_did — see test_pg_fingerprint_roundtrip: TEST_USER's
+    // topic_fingerprint row is a singleton other concurrent tests also
+    // write, so sharing it here is a real race (observed: this test's own
+    // "ensure fingerprint row exists" step can be clobbered by another
+    // test's concurrent delete-then-rewrite before save_embedding runs).
+    const OWNER: &str = "did:plc:pgtest_emb_roundtrip_own";
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 
     // Ensure fingerprint row exists
-    db.save_fingerprint(TEST_USER, r#"{"clusters":[]}"#, 10)
+    db.save_fingerprint(OWNER, r#"{"clusters":[]}"#, 10)
         .await
         .unwrap();
 
     let embedding: Vec<f64> = (0..384).map(|i| i as f64 / 384.0).collect();
-    db.save_embedding(TEST_USER, &embedding).await.unwrap();
+    db.save_embedding(OWNER, &embedding).await.unwrap();
 
-    let loaded = db.get_embedding(TEST_USER).await.unwrap().unwrap();
+    let loaded = db.get_embedding(OWNER).await.unwrap().unwrap();
     assert_eq!(loaded.len(), 384);
     // f64→f32→f64 round-trip loses some precision
     assert!((loaded[0] - 0.0).abs() < 0.001);
     assert!((loaded[383] - 383.0 / 384.0).abs() < 0.001);
+
+    db.delete_user_data(OWNER).await.unwrap();
 }
 
 /// #302: `save_fingerprint_bundle` writes the fingerprint row, the mean
@@ -140,11 +229,15 @@ async fn test_pg_embedding_roundtrip() {
 /// bundle IS the generation, not an incremental patch.
 #[tokio::test]
 async fn test_pg_bundle_roundtrip_and_replacement() {
+    // Dedicated user_did — see test_pg_fingerprint_roundtrip: topic_fingerprint
+    // is a per-user singleton, so sharing TEST_USER here races every other
+    // concurrently-running test that also writes a fingerprint for it.
+    const OWNER: &str = "did:plc:pgtest_bundle_roundtrip";
     let Some(url) = database_url() else {
         return;
     };
-    cleanup_test_data(&url).await.unwrap();
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 
     let clusters = vec![
         charcoal::db::models::ClusterCentroid {
@@ -157,11 +250,18 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         },
     ];
     let emb = vec![0.125; 384];
-    db.save_fingerprint_bundle(TEST_USER, "{}", 42, Some(&emb), &clusters)
-        .await
-        .unwrap();
+    db.save_fingerprint_bundle(
+        OWNER,
+        "{}",
+        42,
+        Some(&emb),
+        Some(charcoal::topics::embeddings::EMBEDDING_MODEL_ID),
+        &clusters,
+    )
+    .await
+    .unwrap();
 
-    let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+    let stored = db.get_topic_centroids(OWNER).await.unwrap();
     assert_eq!(stored.len(), 2);
     // pgvector stores f32 — compare with tolerance, same as the
     // mean-embedding tests.
@@ -177,10 +277,10 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         centroid: vec![0.9; 384],
         post_count: 9,
     }];
-    db.save_fingerprint_bundle(TEST_USER, "{}", 9, None, &one)
+    db.save_fingerprint_bundle(OWNER, "{}", 9, None, None, &one)
         .await
         .unwrap();
-    let stored = db.get_topic_centroids(TEST_USER).await.unwrap();
+    let stored = db.get_topic_centroids(OWNER).await.unwrap();
     assert_eq!(stored.len(), 1);
     // Count alone would also pass if the delete ran but the insert did not —
     // assert the survivor is the NEW generation's row, not an old one.
@@ -190,9 +290,9 @@ async fn test_pg_bundle_roundtrip_and_replacement() {
         "the surviving row must be the new generation's centroid"
     );
     // None embedding leaves the column NULL for this generation.
-    assert!(db.get_embedding(TEST_USER).await.unwrap().is_none());
+    assert!(db.get_embedding(OWNER).await.unwrap().is_none());
 
-    cleanup_test_data(&url).await.unwrap();
+    db.delete_user_data(OWNER).await.unwrap();
 }
 
 /// Deleting a user must cascade to `topic_clusters` (FK ON DELETE CASCADE,
@@ -215,7 +315,7 @@ async fn test_pg_delete_user_cascades_topic_clusters() {
         centroid: vec![0.5; 384],
         post_count: 3,
     }];
-    db.save_fingerprint_bundle(DEL_USER, "{}", 3, None, &clusters)
+    db.save_fingerprint_bundle(DEL_USER, "{}", 3, None, None, &clusters)
         .await
         .unwrap();
     assert_eq!(
@@ -605,7 +705,7 @@ async fn test_pg_is_score_stale_missing() {
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
     assert!(db
-        .is_score_stale(TEST_USER, "did:plc:nonexistent_pg", 7)
+        .is_score_stale(TEST_USER, "did:plc:nonexistent_pg")
         .await
         .unwrap());
 }
@@ -832,6 +932,12 @@ async fn test_pg_staging_round_trip() {
     );
 }
 
+/// #344 R11: the fresh predicate on Postgres — `scoring_generation = $n AND
+/// valid_until > NOW()`, natively boolean (no COALESCE needed; valid_until is
+/// NOT NULL here) — matches the SQLite semantics pinned in
+/// `unit_staleness::fresh_set_is_exactly_the_non_stale_dids_including_null_and_malformed_expiry`.
+/// Four rows: one fresh, three not (wrong revision, past expiry, and the
+/// exact boundary one second before NOW — strict `>`, not `>=`).
 #[tokio::test]
 async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
     use sqlx_core::pool::Pool;
@@ -842,12 +948,110 @@ async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
         return;
     };
 
-    // Marker DIDs unique to this test; clean them up first so a prior run's rows
-    // can't leak in.
-    let fresh_did = "did:plc:pgfresh_stale_test_ok";
-    let stale_did = "did:plc:pgfresh_stale_test_old";
+    // A dedicated user_did, NOT the shared TEST_USER: get_fresh_scored_dids
+    // and count_expired aggregate over every row for the user_did, and many
+    // other tests in this file concurrently write fresh rows under
+    // TEST_USER — an aggregate assertion scoped to TEST_USER would be
+    // flaky under real parallel execution. Scoping to a DID nothing else
+    // touches makes the aggregate exact and safe.
+    const OWNER: &str = "did:plc:pgfresh_owner_user";
+    let current_did = "did:plc:pgfresh_current";
+    let expired_did = "did:plc:pgfresh_expired";
+    let legacy_did = "did:plc:pgfresh_legacy";
+    let boundary_did = "did:plc:pgfresh_boundary";
     let pool = Pool::<Postgres>::connect(&url).await.unwrap();
-    for did in [fresh_did, stale_did] {
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let rev = charcoal::scoring::generation::scoring_revision();
+    // (did, generation, valid_until_offset_sql)
+    let rows: [(&str, &str, &str); 4] = [
+        (current_did, rev, "NOW() + make_interval(days => 5)"),
+        (expired_did, rev, "NOW() - make_interval(days => 1)"),
+        (legacy_did, "legacy", "NOW() + make_interval(days => 5)"),
+        (boundary_did, rev, "NOW() - INTERVAL '1 second'"),
+    ];
+    for (did, generation, valid_until_sql) in rows {
+        sqlx_core::query::query(&format!(
+            "INSERT INTO account_scores (user_did, did, handle, scoring_generation, valid_until)
+             VALUES ($1, $2, $3, $4, {valid_until_sql})"
+        ))
+        .bind(OWNER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(generation)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let fresh: HashSet<String> = db
+        .get_fresh_scored_dids(OWNER)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+
+    assert_eq!(
+        fresh,
+        HashSet::from([current_did.to_string()]),
+        "only the current-revision, not-yet-expired row is fresh"
+    );
+
+    // Equivalence with the per-DID path, including a never-scored DID which
+    // must be stale/absent.
+    for did in [
+        current_did,
+        expired_did,
+        legacy_did,
+        boundary_did,
+        "did:plc:pgfresh_never_scored",
+    ] {
+        let stale = db.is_score_stale(OWNER, did).await.unwrap();
+        assert_eq!(
+            fresh.contains(did),
+            !stale,
+            "fresh-set membership must equal !is_score_stale for {did}"
+        );
+    }
+
+    // Every stored non-fresh row is counted — 3 of 4 (R11).
+    assert_eq!(db.count_expired(OWNER).await.unwrap(), 3);
+
+    // Cleanup.
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// #344: `upsert_account_score` stamps `scoring_generation` and `valid_until`
+/// from the confidence tier (3/7/14 d) — the write-path twin of
+/// `unit_staleness::upsert_stamps_generation_and_valid_until_from_confidence`,
+/// on the backend that actually runs in production.
+#[tokio::test]
+async fn test_pg_upsert_stamps_generation_and_valid_until_from_confidence() {
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    let dids = [
+        "did:plc:pgstamp_low",
+        "did:plc:pgstamp_standard",
+        "did:plc:pgstamp_high",
+        "did:plc:pgstamp_none",
+        "did:plc:pgstamp_bogus",
+    ];
+    for did in dids {
         sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
             .bind(TEST_USER)
             .bind(did)
@@ -856,52 +1060,52 @@ async fn test_pg_get_fresh_scored_dids_matches_is_score_stale() {
             .unwrap();
     }
 
-    // Insert both fresh, then age one to 8 days (stale). Raw INSERT so we can
-    // control scored_at directly (the trait upsert always stamps NOW()).
-    for (did, age_days) in [(fresh_did, 0i32), (stale_did, 8i32)] {
-        sqlx_core::query::query(
-            "INSERT INTO account_scores (user_did, did, handle, scored_at)
-             VALUES ($1, $2, $3, NOW() - make_interval(days => $4))",
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let rev = charcoal::scoring::generation::scoring_revision();
+    for (did, confidence, expected_days) in [
+        (dids[0], Some("low"), 3.0_f64),
+        (dids[1], Some("standard"), 7.0),
+        (dids[2], Some("high"), 14.0),
+        (dids[3], None, 7.0),
+        (dids[4], Some("bogus"), 7.0),
+    ] {
+        let score = AccountScore {
+            did: did.to_string(),
+            handle: format!("{did}.handle"),
+            toxicity_score: Some(0.5),
+            topic_overlap: Some(0.5),
+            overlap_legacy: None,
+            threat_score: Some(20.0),
+            threat_tier: Some("Elevated".to_string()),
+            posts_analyzed: 50,
+            top_toxic_posts: vec![],
+            scored_at: String::new(),
+            behavioral_signals: None,
+            context_score: None,
+            graph_distance: None,
+            fingerprint_quality: None,
+            scoring_confidence: confidence.map(str::to_string),
+        };
+        db.upsert_account_score(TEST_USER, &score).await.unwrap();
+
+        let row = sqlx_core::query::query(
+            "SELECT scoring_generation,
+                    (EXTRACT(EPOCH FROM (valid_until - scored_at)) / 86400.0)::float8
+             FROM account_scores WHERE user_did = $1 AND did = $2",
         )
         .bind(TEST_USER)
         .bind(did)
-        .bind(format!("{did}.handle"))
-        .bind(age_days)
-        .execute(&pool)
+        .fetch_one(&pool)
         .await
         .unwrap();
+        let generation: String = row.get(0);
+        let days: f64 = row.get(1);
+        assert_eq!(generation, rev, "{did}");
+        assert!((days - expected_days).abs() < 0.01, "{did}: {days} days");
+        assert!(!db.is_score_stale(TEST_USER, did).await.unwrap(), "{did}");
     }
 
-    let db = charcoal::db::connect_postgres(&url).await.unwrap();
-    let fresh: HashSet<String> = db
-        .get_fresh_scored_dids(TEST_USER, 7)
-        .await
-        .unwrap()
-        .into_iter()
-        .collect();
-
-    assert!(
-        fresh.contains(fresh_did),
-        "recently-scored DID must be fresh"
-    );
-    assert!(
-        !fresh.contains(stale_did),
-        "8-day-old DID must not be fresh"
-    );
-
-    // Equivalence with the per-DID path (same make_interval cutoff), including
-    // a never-scored DID which must be stale/absent.
-    for did in [fresh_did, stale_did, "did:plc:pgfresh_never_scored"] {
-        let stale = db.is_score_stale(TEST_USER, did, 7).await.unwrap();
-        assert_eq!(
-            fresh.contains(did),
-            !stale,
-            "fresh-set membership must equal !is_score_stale for {did}"
-        );
-    }
-
-    // Cleanup.
-    for did in [fresh_did, stale_did] {
+    for did in dids {
         sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
             .bind(TEST_USER)
             .bind(did)
@@ -984,8 +1188,31 @@ fn cache_test_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// Every DID used by the scan_queue tests, so they can be cleared wholesale.
-const SCAN_QUEUE_DID_PREFIX: &str = "did:plc:pgtest_q_%";
+/// Every DID this file uses, for the fixture sweeps that are scoped by DID
+/// (the ETA duration samples in `scan_state`). The scan_queue sweep itself is
+/// deliberately NOT scoped — see `reset_scan_queue_fixtures`.
+const ALL_PG_TEST_DID_PREFIX: &str = "did:plc:pgtest%";
+
+/// One tick's answer, narrowed to the calling test's own fixtures.
+///
+/// `claim_and_enqueue_due_refreshes` is a WHOLE-DATABASE query: it returns
+/// every user it delivered, this file's fixtures and any sibling test's alike.
+/// `quiesce_users_outside` parks the users that exist when it runs, but a
+/// sibling test in this binary that creates a scored user a moment later has
+/// created a user this tick will legitimately select — and an `assert_eq!` on
+/// the raw vector then fails for a reason that has nothing to do with the code
+/// under test (#344 F4).
+///
+/// Every one of these assertions is really asking "did the tick deliver MY
+/// user", so scoping them to the caller's prefix is the assertion they meant,
+/// not a weakening of it. `quiesce_users_outside` still earns its keep: it
+/// keeps foreign users from eating the batch limit.
+fn only(delivered: Vec<String>, prefix: &str) -> Vec<String> {
+    delivered
+        .into_iter()
+        .filter(|d| d.starts_with(prefix))
+        .collect()
+}
 
 /// Clear the whole scan_queue fixture set before a test runs.
 ///
@@ -1000,11 +1227,61 @@ async fn reset_scan_queue_fixtures(url: &str) {
     use sqlx_postgres::Postgres;
 
     let pool = Pool::<Postgres>::connect(url).await.unwrap();
-    sqlx_core::query::query("DELETE FROM scan_queue WHERE user_did LIKE $1")
-        .bind(SCAN_QUEUE_DID_PREFIX)
+    // The WHOLE table, not this group's prefix (#344 F4). `scan_queue` rows are
+    // only ever created by `enqueue_scan`, `enqueue_refresh_scan` and the
+    // refresh tick, and every caller of all three in this binary holds
+    // `scan_queue_test_lock` — and no other test binary opens this database. So
+    // inside the lock the table is exclusively this test's.
+    //
+    // The prefix-scoped delete this replaces could not clean up after the tick:
+    // `claim_and_enqueue_due_refreshes` is a whole-database query, so it
+    // enqueues rows for users OUTSIDE the group's prefix (a sibling test's
+    // scored fixture, created after `quiesce_users_outside` ran). Those rows
+    // survived the reset and broke the position/order assertions in
+    // `test_pg_list_scan_queue_orders_and_numbers_rows` and
+    // `test_pg_scan_queue_breaks_enqueued_at_ties_by_user_did` — intermittently,
+    // only under a parallel `--all-targets` run.
+    sqlx_core::query::query("DELETE FROM scan_queue")
         .execute(&pool)
         .await
         .unwrap();
+    // Since #344 F1 the ETA median is drawn from `scan_state`, so a duration
+    // sample left behind by a panicking test skews every later ETA assertion
+    // in this group exactly the way a stray queue row used to.
+    //
+    // The prefix is DELIBERATELY wider than the queue group's (#344 N1): the
+    // median is a whole-table figure, so a sample written by ANY test in this
+    // file — every one of which fulfils a full scan under a `did:plc:pgtest…`
+    // DID — skews the assertions here, not only one this group's reset would
+    // have caught.
+    sqlx_core::query::query("DELETE FROM scan_state WHERE key = $1 AND user_did LIKE $2")
+        .bind(LAST_FULL_SCAN_DURATION_KEY)
+        .bind(ALL_PG_TEST_DID_PREFIX)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// Record a full-scan duration sample of exactly `duration_secs` for
+/// `user_did`, the way `finish_full_scan_state` does — the only population the
+/// ETA median is drawn from since #344 F1. Written directly because a real
+/// scan stamps wall-clock times and these tests need durations they can name.
+async fn seed_full_scan_duration(url: &str, user_did: &str, duration_secs: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (user_did, key) DO UPDATE SET value = $3, updated_at = NOW()",
+    )
+    .bind(user_did)
+    .bind(LAST_FULL_SCAN_DURATION_KEY)
+    .bind(duration_secs)
+    .execute(&pool)
+    .await
+    .unwrap();
 }
 
 /// Admission must never exceed the cap, and claims must come back in FIFO
@@ -1097,7 +1374,9 @@ async fn test_pg_stale_claim_cannot_finish_or_heartbeat() {
         "a stale claim must not extend the new owner's lease"
     );
     assert!(
-        !db.finish_queued_scan(U, &a.claim_id, None).await.unwrap(),
+        !db.finish_queued_scan(U, &a.claim_id, FinishCompletion::Complete, None)
+            .await
+            .unwrap(),
         "a stale claim must not finish the new owner's scan"
     );
     assert_eq!(
@@ -1108,7 +1387,10 @@ async fn test_pg_stale_claim_cannot_finish_or_heartbeat() {
 
     // B, holding the live token, succeeds.
     assert!(db.heartbeat_scan(U, &b.claim_id, 120).await.unwrap());
-    assert!(db.finish_queued_scan(U, &b.claim_id, None).await.unwrap());
+    assert!(db
+        .finish_queued_scan(U, &b.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap());
     assert_eq!(
         db.scan_queue_entry(U, 1).await.unwrap().unwrap().status,
         "done"
@@ -1140,7 +1422,7 @@ async fn test_pg_finish_records_failure() {
 
     let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
     assert!(db
-        .finish_queued_scan(U, &claim.claim_id, Some("boom"))
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Failed, Some("boom"))
         .await
         .unwrap());
 
@@ -1153,7 +1435,7 @@ async fn test_pg_finish_records_failure() {
 
     // Finishing twice must be a no-op, not a second state change.
     assert!(
-        !db.finish_queued_scan(U, &claim.claim_id, None)
+        !db.finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
             .await
             .unwrap(),
         "the row is no longer running, so finish must not fire again"
@@ -1191,18 +1473,19 @@ async fn test_pg_running_scan_has_no_eta() {
     db.delete_user_data(U).await.unwrap();
 }
 
-/// The two backends must quote the SAME `eta_seconds` for the same scan
-/// history. They compute the median duration by different routes — Postgres
-/// via `EXTRACT(EPOCH FROM (finished_at - started_at))`, SQLite in Rust — and
-/// the SQLite side used `num_seconds()`, which truncates, while `EXTRACT`
-/// keeps fractional seconds. A user whose deployment moved from SQLite to
-/// Postgres therefore saw the estimate change with no change in history.
+/// The two backends must quote the SAME `eta_seconds` for the same duration
+/// history. Both read the raw `scan_state` sample and hand it to the shared
+/// median helper, so the only way they can disagree is if one of them starts
+/// truncating — which is exactly what the SQLite side used to do with
+/// `num_seconds()` while Postgres's `EXTRACT` kept the fraction, changing a
+/// user's estimate when their deployment moved backends with no change in
+/// history.
 ///
-/// Both sides are seeded with the SAME hand-written timestamps rather than
-/// real scans, because a wall-clock duration differs between the two runs and
-/// could not be compared for equality at all. The duration carries a half
-/// second and the queued user sits two batches out, so truncation is visible:
-/// 181s correct, 180s truncated.
+/// Both sides are seeded with the SAME hand-written duration rather than real
+/// scans, because a wall-clock duration differs between the two runs and could
+/// not be compared for equality at all. It carries a half second and the
+/// queued user sits two batches out, so truncation is visible: 181s correct,
+/// 180s truncated.
 #[tokio::test]
 async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     let _guard = scan_queue_test_lock().lock().await;
@@ -1211,8 +1494,7 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     const A: &str = "did:plc:pgtest_q_ooooooooooooo";
     const B: &str = "did:plc:pgtest_q_ppppppppppppp";
     // A 90.5-second scan: the half second is the whole point.
-    const STARTED: &str = "2026-08-06T00:00:00+00:00";
-    const FINISHED: &str = "2026-08-06T00:01:30.5+00:00";
+    const DURATION: &str = "90.5";
 
     let Some(url) = database_url() else {
         return;
@@ -1222,11 +1504,13 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite");
     charcoal::db::schema::create_tables(&conn).expect("schema");
     conn.execute(
-        "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-         VALUES (?1, 'done', ?2, ?2, ?3)",
-        rusqlite::params![DONE, STARTED, FINISHED],
+        // Since #344 F1 the median is drawn from `scan_state`; a `done`
+        // `scan_queue` row is invisible to it on both backends.
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES (?1, ?2, ?3, datetime('now'))",
+        rusqlite::params![DONE, LAST_FULL_SCAN_DURATION_KEY, DURATION],
     )
-    .expect("seed the completed scan");
+    .expect("seed the duration sample");
     charcoal::db::queries::enqueue_scan(&conn, A).expect("enqueue A");
     std::thread::sleep(std::time::Duration::from_millis(10));
     charcoal::db::queries::enqueue_scan(&conn, B).expect("enqueue B");
@@ -1237,22 +1521,7 @@ async fn test_pg_eta_matches_sqlite_for_fractional_durations() {
     // --- Postgres side -----------------------------------------------------
     reset_scan_queue_fixtures(&url).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
-    {
-        use sqlx_core::pool::Pool;
-        use sqlx_postgres::Postgres;
-
-        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
-        sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', $2, $2, $3)",
-        )
-        .bind(DONE)
-        .bind(chrono::DateTime::parse_from_rfc3339(STARTED).unwrap())
-        .bind(chrono::DateTime::parse_from_rfc3339(FINISHED).unwrap())
-        .execute(&pool)
-        .await
-        .expect("seed the completed scan");
-    }
+    seed_full_scan_duration(&url, DONE, DURATION).await;
     db.upsert_user(A, "q.bsky.social").await.unwrap();
     db.upsert_user(B, "q.bsky.social").await.unwrap();
     db.enqueue_scan(A).await.unwrap();
@@ -1351,9 +1620,14 @@ async fn test_pg_scan_queue_depth_counts_queued_and_running() {
     );
 
     // Finished rows are neither waiting nor holding a slot.
-    db.finish_queued_scan(&claim.user_did, &claim.claim_id, None)
-        .await
-        .unwrap();
+    db.finish_queued_scan(
+        &claim.user_did,
+        &claim.claim_id,
+        FinishCompletion::Complete,
+        None,
+    )
+    .await
+    .unwrap();
     let finished = db.scan_queue_depth().await.unwrap();
     assert_eq!(
         (finished.queued, finished.running),
@@ -1543,7 +1817,7 @@ async fn test_pg_null_lease_is_reclaimed() {
 async fn test_pg_eta_accounts_for_the_concurrency_cap() {
     let _guard = scan_queue_test_lock().lock().await;
 
-    // One finished scan of a known duration gives a deterministic median.
+    // One recorded duration sample gives a deterministic median.
     // Unique to this test — see the note in test_pg_null_lease_is_reclaimed.
     const DONE: &str = "did:plc:pgtest_q_uuuuuuuuuuuuu";
     // Four queued rows so the last one sits at position 4.
@@ -1560,28 +1834,16 @@ async fn test_pg_eta_accounts_for_the_concurrency_cap() {
     reset_scan_queue_fixtures(&url).await;
     let db = charcoal::db::connect_postgres(&url).await.unwrap();
 
-    // The median is a whole-table figure, so this test needs the table to hold
-    // exactly one finished row — its own. `reset_scan_queue_fixtures` above
-    // cleared the group's rows; anything else in scan_queue at this point
-    // belongs to production data in a shared database, which this test cannot
-    // and should not assume away, so it asserts nothing about other users.
-    {
-        use sqlx_core::pool::Pool;
-        use sqlx_postgres::Postgres;
-        let pool = Pool::<Postgres>::connect(&url).await.unwrap();
-
-        db.delete_user_data(DONE).await.unwrap();
-        db.upsert_user(DONE, "q.bsky.social").await.unwrap();
-        // A 'done' row lasting exactly 600s.
-        sqlx_core::query::query(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-             VALUES ($1, 'done', NOW(), NOW() - INTERVAL '600 seconds', NOW())",
-        )
-        .bind(DONE)
-        .execute(&pool)
-        .await
-        .unwrap();
-    }
+    // The median is a whole-table figure, so this test needs the duration
+    // samples to be exactly one — its own. `reset_scan_queue_fixtures` above
+    // cleared the group's queue rows AND its duration keys; anything else in
+    // `scan_state` at this point belongs to production data in a shared
+    // database, which this test cannot and should not assume away, so it
+    // asserts nothing about other users.
+    db.delete_user_data(DONE).await.unwrap();
+    db.upsert_user(DONE, "q.bsky.social").await.unwrap();
+    // A full scan that lasted exactly 600s.
+    seed_full_scan_duration(&url, DONE, "600").await;
 
     for d in QUEUED {
         db.delete_user_data(d).await.unwrap();
@@ -1724,9 +1986,14 @@ async fn test_pg_list_scan_queue_orders_and_numbers_rows() {
 
     // A failed scan must be distinguishable from one that never ran, which is
     // the whole reason #288 exists.
-    db.finish_queued_scan(CHARLIE, &claim.claim_id, Some("gather exploded"))
-        .await
-        .unwrap();
+    db.finish_queued_scan(
+        CHARLIE,
+        &claim.claim_id,
+        FinishCompletion::Failed,
+        Some("gather exploded"),
+    )
+    .await
+    .unwrap();
     let failed = db
         .list_scan_queue()
         .await
@@ -1823,12 +2090,520 @@ async fn test_pg_scan_queue_breaks_enqueued_at_ties_by_user_did() {
         "the total order is (enqueued_at, user_did), so ALPHA goes first"
     );
 
-    db.finish_queued_scan(ALPHA, &claim.claim_id, None)
+    db.finish_queued_scan(ALPHA, &claim.claim_id, FinishCompletion::Complete, None)
         .await
         .unwrap();
     for d in [ALPHA, BRAVO, CHARLIE] {
         db.delete_user_data(d).await.unwrap();
     }
+}
+
+// ── #344: scan_queue.kind, the full-request obligation, the handover ────────
+//
+// Postgres twins of `tests/unit_scan_kind.rs`. They share the scan_queue
+// fixture prefix, lock and wholesale reset used by the #257 tests above rather
+// than a prefix of their own: cap, position and median are whole-table
+// figures, so one row left behind by a panicking test breaks every later one.
+
+/// The refresh → owed-full handover, end to end (R09/V3-03).
+#[tokio::test]
+async fn test_pg_enqueue_outcomes_and_handover() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kind_handover";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "kind.bsky.social").await.unwrap();
+
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("claimed");
+    assert_eq!(claim.kind, ScanKind::Refresh);
+
+    assert_eq!(
+        db.enqueue_scan(U).await.unwrap(),
+        EnqueueOutcome::QueuedAfterRefresh
+    );
+    let requested = pg_row(&db, U)
+        .await
+        .full_requested_at
+        .expect("request recorded");
+    assert_eq!(
+        db.enqueue_scan(U).await.unwrap(),
+        EnqueueOutcome::QueuedAfterRefresh,
+        "a second click coalesces"
+    );
+    assert_eq!(
+        pg_row(&db, U).await.full_requested_at.as_deref(),
+        Some(requested.as_str()),
+        "and does not move the request time"
+    );
+
+    // The refresh finishes: the row becomes the user's queued FULL scan,
+    // dated from the request, with the obligation still recorded.
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap());
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("queued", ScanKind::Full));
+    assert_eq!(row.enqueued_at, requested);
+    assert_eq!(row.full_requested_at.as_deref(), Some(requested.as_str()));
+    assert_eq!(
+        row.completion, None,
+        "the handover clears the refresh's own"
+    );
+
+    let claim = db.claim_next_scan(1, 120).await.unwrap().expect("admitted");
+    assert_eq!(claim.kind, ScanKind::Full);
+
+    // A resumable full attempt keeps the obligation; an unverified one
+    // fulfils it (V6-01).
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap());
+    let row = pg_row(&db, U).await;
+    assert_eq!(row.completion, Some(FinishCompletion::Resumable));
+    assert_eq!(row.full_requested_at.as_deref(), Some(requested.as_str()));
+
+    db.enqueue_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(1, 120).await.unwrap().unwrap();
+    assert!(db
+        .finish_queued_scan(
+            U,
+            &claim.claim_id,
+            FinishCompletion::CompleteUnverified,
+            None
+        )
+        .await
+        .unwrap());
+    let row = pg_row(&db, U).await;
+    assert_eq!(row.completion, Some(FinishCompletion::CompleteUnverified));
+    assert!(row.full_requested_at.is_none(), "fulfilled");
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A user's click over a queued refresh keeps the place the refresh held.
+#[tokio::test]
+async fn test_pg_full_enqueue_upgrades_queued_refresh_keeping_position() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kind_upgrade";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "up.bsky.social").await.unwrap();
+
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let before = pg_row(&db, U).await.enqueued_at;
+    assert_eq!(db.enqueue_scan(U).await.unwrap(), EnqueueOutcome::Queued);
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("queued", ScanKind::Full));
+    assert_eq!(
+        row.enqueued_at, before,
+        "the user keeps the place the refresh held (R09)"
+    );
+    assert!(row.full_requested_at.is_some());
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// A refresh enqueue never downgrades a queued full row, never touches a
+/// running one, and re-queues OWED full work as full (V3-03).
+#[tokio::test]
+async fn test_pg_refresh_never_downgrades() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_kind_nodown";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "nd.bsky.social").await.unwrap();
+
+    // Queued full: untouched.
+    db.enqueue_scan(U).await.unwrap();
+    db.enqueue_refresh_scan(U).await.unwrap();
+    assert_eq!(pg_row(&db, U).await.kind, ScanKind::Full);
+
+    // Running full: untouched, and the claim still owns the row.
+    let claim = db.claim_next_scan(1, 120).await.unwrap().unwrap();
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("running", ScanKind::Full));
+    assert!(db
+        .finish_queued_scan(U, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap());
+
+    // Finished but still owed: re-queued as FULL, never as a refresh.
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let row = pg_row(&db, U).await;
+    assert_eq!((row.status.as_str(), row.kind), ("queued", ScanKind::Full));
+    assert_eq!(
+        row.completion, None,
+        "a re-queue clears the stale completion"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// Postgres twin of
+/// `unit_scan_kind::a_full_enqueue_records_the_obligation_on_a_*_full_row_that_lacks_one`
+/// (#344 Minor 3): the `COALESCE` on the already-queued and already-running
+/// arms records the obligation for a user whose own full scan is already in
+/// flight. A row written by a pre-v18 binary carries `full_requested_at IS
+/// NULL`, and the enqueue has to repair it — otherwise an interrupted attempt
+/// on that row is never retried, because nothing says a full scan is owed.
+#[tokio::test]
+async fn test_pg_enqueue_records_the_obligation_on_in_flight_full_rows() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const QUEUED: &str = "did:plc:pgtest_q_oblig_queued";
+    const RUNNING: &str = "did:plc:pgtest_q_oblig_running";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+         VALUES ($1, 'queued', 'full', $2, NULL)",
+    )
+    .bind(QUEUED)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at, full_requested_at)
+         VALUES ($1, 'running', 'full', 'claim-1', $2, $2, NULL)",
+    )
+    .bind(RUNNING)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        db.enqueue_scan(QUEUED).await.unwrap(),
+        EnqueueOutcome::AlreadyQueued
+    );
+    let r = pg_row(&db, QUEUED).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+    assert!(
+        r.full_requested_at.is_some(),
+        "the obligation is recorded even though nothing else changed"
+    );
+    assert_eq!(
+        r.enqueued_at, "2026-09-10T00:00:00+00:00",
+        "and the user keeps the place they already held"
+    );
+
+    assert_eq!(
+        db.enqueue_scan(RUNNING).await.unwrap(),
+        EnqueueOutcome::AlreadyRunning
+    );
+    let r = pg_row(&db, RUNNING).await;
+    assert_eq!((r.status.as_str(), r.kind), ("running", ScanKind::Full));
+    assert!(
+        r.full_requested_at.is_some(),
+        "the obligation is recorded; the running scan is left alone"
+    );
+    assert_eq!(r.started_at.as_deref(), Some("2026-09-10T00:00:00+00:00"));
+
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// Postgres twin of
+/// `unit_scan_kind::the_eta_median_survives_the_refresh_that_rewrites_the_queue_row`
+/// (#344 F1): a fulfilled full scan records its duration in `scan_state`, and
+/// the nightly refresh that reuses the very same queue row cannot erase it.
+///
+/// Sourced from the queue row, the second half of this went to `None` and
+/// every queued user's ETA disappeared for good the first night the tick ran.
+#[tokio::test]
+async fn test_pg_eta_median_survives_the_refresh_that_rewrites_the_queue_row() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const WAITER: &str = "did:plc:pgtest_q_kind_waiter";
+    const SCANNER: &str = "did:plc:pgtest_q_kind_scanner";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.upsert_user(SCANNER, "q.bsky.social").await.unwrap();
+
+    // A running full scan whose start is an hour before it fulfils, written
+    // directly so the derived duration is a number this test can name.
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+         VALUES ($1, 'running', 'full', 'claim-1', $2, $2)",
+    )
+    .bind(SCANNER)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Production order: the marker while the row is still running, then the
+    // row is finished.
+    db.finish_full_scan_state(
+        SCANNER,
+        "2026-09-10T01:00:00+00:00",
+        "full_carried_completion",
+        "claim-1",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        db.get_scan_state(SCANNER, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("3600"),
+        "one hour of full scan, in whole seconds"
+    );
+    assert!(db
+        .finish_queued_scan(SCANNER, "claim-1", FinishCompletion::Complete, None)
+        .await
+        .unwrap());
+
+    db.enqueue_scan(WAITER).await.unwrap();
+    assert_eq!(
+        db.scan_queue_entry(WAITER, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .eta_seconds,
+        Some(3600),
+        "the median is the recorded sample"
+    );
+
+    // The nightly refresh now takes over that user's one queue row.
+    db.enqueue_refresh_scan(SCANNER).await.unwrap();
+    let r = pg_row(&db, SCANNER).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Refresh));
+    assert_eq!(
+        r.started_at, None,
+        "the refresh really did wipe the timing the old median read"
+    );
+    assert_eq!(
+        db.scan_queue_entry(WAITER, 1)
+            .await
+            .unwrap()
+            .unwrap()
+            .eta_seconds,
+        Some(3600),
+        "the sample lives in scan_state, so the refresh cannot take it away"
+    );
+
+    db.delete_user_data(SCANNER).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// The negative control for the move (#344 F1) on Postgres: the queue row is
+/// not a median source any more. Clean, done, `kind = 'full'` rows with real
+/// durations and no `scan_state` sample must quote no ETA.
+#[tokio::test]
+async fn test_pg_eta_median_is_not_read_from_the_queue_row() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const WAITER: &str = "did:plc:pgtest_q_kind_waiter2";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    for did in [
+        "did:plc:pgtest_q_kind_clean1",
+        "did:plc:pgtest_q_kind_clean2",
+    ] {
+        sqlx_core::query::query(
+            "INSERT INTO scan_queue (user_did, status, kind, completion, enqueued_at, started_at, finished_at)
+             VALUES ($1, 'done', 'full', 'complete', NOW(), NOW() - INTERVAL '3600 seconds', NOW())",
+        )
+        .bind(did)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    db.enqueue_scan(WAITER).await.unwrap();
+    let entry = db.scan_queue_entry(WAITER, 1).await.unwrap().unwrap();
+    assert_eq!(
+        entry.eta_seconds, None,
+        "no recorded duration sample means no ETA, however many done rows there are"
+    );
+
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// V7-02: the cooldown marker and the carried drain outcome are written and
+/// retired together, and the delete touches exactly one key.
+#[tokio::test]
+async fn test_pg_finish_full_scan_state_is_one_transaction() {
+    const U: &str = "did:plc:pgtest_fullstate00000";
+    const CARRIED: &str = "full_carried_completion";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "fs.bsky.social").await.unwrap();
+    db.set_scan_state(U, CARRIED, "whatever").await.unwrap();
+    db.set_scan_state(U, "scan_phase", "done").await.unwrap();
+
+    // A running row this worker holds — the bookkeeping is fenced by the
+    // claim (#344 N2) — but with no `started_at`, so there is no duration to
+    // sample and the last assertion below still means what it says.
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at)
+         VALUES ($1, 'running', 'full', 'claim-1', NOW())",
+    )
+    .bind(U)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    db.finish_full_scan_state(U, "2026-09-14T00:00:00+00:00", CARRIED, "claim-1")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.get_scan_state(U, "last_full_scan_finished_at")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("2026-09-14T00:00:00+00:00")
+    );
+    assert_eq!(db.get_scan_state(U, CARRIED).await.unwrap(), None);
+    assert_eq!(
+        db.get_scan_state(U, "scan_phase").await.unwrap().as_deref(),
+        Some("done"),
+        "the delete is scoped to one key"
+    );
+    assert_eq!(
+        db.get_scan_state(U, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap(),
+        None,
+        "no started_at, so no ETA sample to invent (#344 F1)"
+    );
+
+    // Deleting an absent key is not an error — absence is the wanted state.
+    db.delete_scan_state(U, CARRIED).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// #344 F2, the failure half of the one-transaction property on Postgres:
+/// with a failure injected before the commit, neither the cooldown anchor nor
+/// the duration sample may survive, and the carried key must still be there.
+///
+/// Without the transaction (or with a commit between the statements) the
+/// marker is already durable when the failure lands and this goes red — which
+/// is the point: the happy-path test above cannot tell a transaction from
+/// three independent writes.
+#[tokio::test]
+async fn test_pg_a_failure_inside_finish_full_scan_state_rolls_back_every_write() {
+    const U: &str = "did:plc:pgtest_fullstate_rb00";
+    const CARRIED: &str = "full_carried_completion";
+    let Some(url) = database_url() else {
+        return;
+    };
+    // The concrete type, not `connect_postgres`'s `Arc<dyn Database>`: the
+    // failure seam is an inherent method, not part of the trait.
+    use charcoal::db::Database as _;
+    let db = charcoal::db::postgres::PgDatabase::connect(&url)
+        .await
+        .unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "fs.bsky.social").await.unwrap();
+    db.set_scan_state(U, CARRIED, "whatever").await.unwrap();
+
+    // A running row, so the duration sample would be written too if the
+    // transaction committed — both writes have to disappear.
+    let pool = sqlx_core::pool::Pool::<sqlx_postgres::Postgres>::connect(&url)
+        .await
+        .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+         VALUES ($1, 'running', 'full', 'claim-1', $2, $2)",
+    )
+    .bind(U)
+    .bind(chrono::DateTime::parse_from_rfc3339("2026-09-10T00:00:00+00:00").unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let err = db
+        .finish_full_scan_state_failing_for_test(U, "2026-09-10T01:00:00+00:00", CARRIED, "claim-1")
+        .await
+        .expect_err("the injected statement must fail");
+    assert!(
+        format!("{err:#}").contains("null value in column"),
+        "the failure must be the injected NOT NULL violation: {err:#}"
+    );
+
+    assert_eq!(
+        db.get_scan_state(U, "last_full_scan_finished_at")
+            .await
+            .unwrap(),
+        None,
+        "the cooldown anchor must not survive a failed transaction"
+    );
+    assert_eq!(
+        db.get_scan_state(U, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap(),
+        None,
+        "nor may the ETA sample"
+    );
+    assert_eq!(
+        db.get_scan_state(U, CARRIED).await.unwrap().as_deref(),
+        Some("whatever"),
+        "and the carried drain outcome is still owed"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+}
+
+/// The `ScanQueueRow` view of the new columns, on the Postgres mapper.
+async fn pg_row(
+    db: &std::sync::Arc<dyn charcoal::db::Database>,
+    did: &str,
+) -> charcoal::db::traits::ScanQueueRow {
+    db.list_scan_queue()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.user_did == did)
+        .expect("row exists")
 }
 
 // --- Access requests (#309) ---
@@ -2952,4 +3727,2096 @@ async fn test_pg_cache_batch_upserts_round_trip_and_update() {
         .unwrap();
     assert!(!got["batch1"].toxic_token);
     assert_eq!(got["batch1"].confidence, 0.2);
+}
+
+/// v18 (#344): fresh connect adds expiry/generation, queue kind, refresh
+/// schedule and embedding-model-id columns, the (user_did, threat_score)
+/// index, and records 18. Runs against the ordinary `charcoal_test` database
+/// — non-destructive, so no fixture lock is needed.
+#[tokio::test]
+async fn test_pg_migration_v18_creates_expiry_and_refresh_columns() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    for (table, col) in [
+        ("account_scores", "scoring_generation"),
+        ("account_scores", "valid_until"),
+        ("scan_queue", "kind"),
+        ("scan_queue", "full_requested_at"),
+        ("scan_queue", "completion"),
+        ("users", "next_refresh_at"),
+        ("users", "refreshed_generation"),
+        ("users", "refresh_attempted_generation"),
+        ("topic_fingerprint", "embedding_model_id"),
+    ] {
+        let exists: bool = sqlx_core::query::query(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+        )
+        .bind(table)
+        .bind(col)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(exists, "{table}.{col}");
+    }
+
+    let has_index: bool = sqlx_core::query::query(
+        "SELECT COUNT(*) > 0 FROM pg_indexes
+         WHERE schemaname = 'public' AND indexname = 'idx_account_scores_user_score'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(has_index);
+
+    let recorded: bool =
+        sqlx_core::query::query("SELECT COUNT(*) > 0 FROM schema_version WHERE version = 18")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert!(recorded, "0018 must self-record its version");
+}
+
+/// v18 upgrade, on the dedicated `_migrations` database (V3-06): an
+/// AUTHENTIC v17 fixture (via `migrate_postgres_through`, not columns
+/// reconstructed by dropping them off a current database — V2-07) with live
+/// data, upgraded by a normal `connect_postgres` boot. Mirrors
+/// `test_migration_v18_upgrades_a_v17_database` in `src/db/schema.rs`.
+#[tokio::test]
+async fn test_pg_migration_v18_upgrades_from_v17() {
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let _fixture = migrations_fixture(&murl, 17).await;
+    let pool = Pool::<Postgres>::connect(&murl).await.unwrap();
+
+    // Precondition: genuinely at v17, valid_until does not exist yet.
+    // MAX(int4) stays int4 in Postgres (unlike COUNT(*), which is always
+    // bigint) — cast explicitly so sqlx's i64 decode doesn't reject it.
+    let max: i64 = sqlx_core::query::query("SELECT MAX(version)::bigint FROM schema_version")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(max, 17, "fixture is genuinely at v17 before the upgrade");
+    let has_valid_until: bool = sqlx_core::query::query(
+        "SELECT COUNT(*) > 0 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'account_scores' AND column_name = 'valid_until'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(!has_valid_until);
+
+    const V18_SCORED: &str = "did:plc:v18scored";
+    const V18_UNSCORED: &str = "did:plc:v18unscored";
+    const V18_WAITING: &str = "did:plc:v18waiting";
+    const V18_ACCT: &str = "did:plc:v18acct";
+    const V18_NA: &str = "did:plc:v18na";
+    // pgvector's `vector(384)` column enforces the dimension on insert, so a
+    // short literal like SQLite's `[0.1,0.2]` fixture would fail here.
+    let vector_384 = format!("[{}]", vec!["0.1"; 384].join(","));
+
+    sqlx_core::query::query(
+        "INSERT INTO users (did, handle) VALUES ($1, 'scored.test'), ($2, 'unscored.test')",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_UNSCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at)
+         VALUES ($1, $2, 'acct.test', 40.0, 'High', '2026-09-01T12:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_ACCT)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_tier, scored_at)
+         VALUES ($1, $2, 'na.test', 'NotAssessed', '2026-09-02T12:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_NA)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+         VALUES ($1, 'done', '2026-09-01T11:00:00+00:00'::timestamptz,
+                 '2026-09-01T11:00:00+00:00'::timestamptz, '2026-09-01T12:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_SCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, enqueued_at)
+         VALUES ($1, 'queued', '2026-09-01T13:00:00+00:00'::timestamptz)",
+    )
+    .bind(V18_WAITING)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+         VALUES ($1, '{\"clusters\":[],\"post_count\":0}', 0, $2::vector)",
+    )
+    .bind(V18_SCORED)
+    .bind(&vector_384)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx_core::query::query(
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+         VALUES ($1, '{\"clusters\":[],\"post_count\":0}', 0, NULL)",
+    )
+    .bind(V18_UNSCORED)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The upgrade itself — an ordinary boot against the migrations database.
+    let _db = charcoal::db::connect_postgres(&murl).await.unwrap();
+
+    let row = sqlx_core::query::query(
+        "SELECT scoring_generation, valid_until = scored_at + INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = $2",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_ACCT)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let generation: String = row.get(0);
+    let valid_matches_14d: bool = row.get(1);
+    assert_eq!(generation, "legacy");
+    assert!(valid_matches_14d, "scored_at + 14 days");
+
+    let na_valid_matches_14d: bool = sqlx_core::query::query(
+        "SELECT valid_until = scored_at + INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = $2",
+    )
+    .bind(V18_SCORED)
+    .bind(V18_NA)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(na_valid_matches_14d, "NULL-score rows are backfilled too");
+
+    let is_nullable: String = sqlx_core::query::query(
+        "SELECT is_nullable FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'account_scores' AND column_name = 'valid_until'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(
+        is_nullable, "NO",
+        "Postgres valid_until is NOT NULL after backfill"
+    );
+
+    let queue_row = sqlx_core::query::query(
+        "SELECT kind, completion, full_requested_at FROM scan_queue WHERE user_did = $1",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let kind: String = queue_row.get(0);
+    let completion: Option<String> = queue_row.get(1);
+    let done_requested: Option<chrono::DateTime<chrono::Utc>> = queue_row.get(2);
+    assert_eq!(kind, "full");
+    assert!(completion.is_none());
+    assert!(
+        done_requested.is_none(),
+        "a finished row owes nothing, so it keeps a NULL obligation"
+    );
+
+    // A row still in flight at deploy time IS an outstanding request, and
+    // enqueued_at is when the user made it. Left NULL, the tick would never
+    // retry an attempt interrupted across the deploy as full work.
+    let waiting = sqlx_core::query::query(
+        "SELECT status, full_requested_at = enqueued_at FROM scan_queue WHERE user_did = $1",
+    )
+    .bind(V18_WAITING)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let waiting_status: String = waiting.get(0);
+    let waiting_backfilled: Option<bool> = waiting.get(1);
+    assert_eq!(waiting_status, "queued");
+    assert_eq!(
+        waiting_backfilled,
+        Some(true),
+        "an in-flight row's obligation is backfilled from enqueued_at"
+    );
+
+    let user_row = sqlx_core::query::query(
+        "SELECT next_refresh_at IS NULL, refreshed_generation IS NULL, refresh_attempted_generation IS NULL
+         FROM users WHERE did = $1",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let next_is_null: bool = user_row.get(0);
+    let refreshed_is_null: bool = user_row.get(1);
+    let attempted_is_null: bool = user_row.get(2);
+    assert!(
+        next_is_null && refreshed_is_null && attempted_is_null,
+        "due-ness comes from the NULL attempted generation, not a stamped time"
+    );
+
+    let with_vec: Option<String> = sqlx_core::query::query(
+        "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = $1",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(with_vec.as_deref(), Some("all-MiniLM-L6-v2"));
+    let without_vec: Option<String> = sqlx_core::query::query(
+        "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = $1",
+    )
+    .bind(V18_UNSCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        without_vec.is_none(),
+        "keyword-only fingerprints have no embedding model"
+    );
+
+    let marker: String = sqlx_core::query::query(
+        "SELECT value FROM scan_state WHERE user_did = $1 AND key = 'last_full_scan_finished_at'",
+    )
+    .bind(V18_SCORED)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(
+        marker, "2026-09-01T12:00:00+00:00",
+        "cooldown anchor backfilled from the done row"
+    );
+
+    let has_index: bool = sqlx_core::query::query(
+        "SELECT COUNT(*) > 0 FROM pg_indexes
+         WHERE schemaname = 'public' AND indexname = 'idx_account_scores_user_score'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(has_index);
+
+    let version_count: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM schema_version WHERE version = 18")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(version_count, 1);
+}
+
+/// V3-06: the destructive reset must refuse anything but the dedicated
+/// `_migrations` database. No fixture/lock needed — the `bail!` happens
+/// before any connection is opened.
+#[tokio::test]
+async fn test_migrate_postgres_through_refuses_a_non_migrations_database() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    let result = charcoal::db::postgres::migrate_postgres_through(&url, 17).await;
+    assert!(
+        result.is_err(),
+        "must refuse to reset a database whose name does not end in _migrations"
+    );
+}
+
+/// V4-05: two `migrations_fixture` calls in one process never run
+/// concurrently. Proven two ways: an active-guard counter never exceeds 1,
+/// and each call's own sentinel row is the ONLY row present at its own
+/// check-point — proof the other call's drop-all (whichever ran first)
+/// completed, and the other call's own insert (if it ran second) had not
+/// started yet, at the moment this call looked.
+#[tokio::test]
+async fn test_migrations_fixture_serializes_concurrent_calls() {
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+
+    static ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static MAX_ACTIVE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    async fn hold_fixture(url: &str, marker: &str) -> i64 {
+        use sqlx_core::pool::Pool;
+        use sqlx_core::row::Row;
+        use sqlx_postgres::Postgres;
+
+        let _guard = migrations_fixture(url, 17).await;
+        let now = ACTIVE.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        MAX_ACTIVE.fetch_max(now, std::sync::atomic::Ordering::SeqCst);
+
+        let pool = Pool::<Postgres>::connect(url).await.unwrap();
+        sqlx_core::query::query("INSERT INTO users (did, handle) VALUES ($1, 'concurrent.test')")
+            .bind(marker)
+            .execute(&pool)
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let count: i64 = sqlx_core::query::query(
+            "SELECT COUNT(*) FROM users WHERE did LIKE 'did:plc:v18concurrent_%'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+
+        ACTIVE.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        count
+    }
+
+    // `tokio::join!` rather than `tokio::spawn`: both futures run on this
+    // task, interleaved at await points, which is enough to prove
+    // serialization without fighting sqlx-core's `Executor` HRTB across a
+    // spawned (`Send + 'static`) boundary.
+    let (count_a, count_b) = tokio::join!(
+        hold_fixture(&murl, "did:plc:v18concurrent_a"),
+        hold_fixture(&murl, "did:plc:v18concurrent_b")
+    );
+
+    assert_eq!(
+        MAX_ACTIVE.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "migrations_fixture must serialize — two guards were live at once"
+    );
+    assert_eq!(
+        count_a, 1,
+        "whichever call ran first sees only its own sentinel"
+    );
+    assert_eq!(
+        count_b, 1,
+        "the second call's drop-all wiped the first's sentinel before inserting its own"
+    );
+}
+
+/// #344 R01/V2-06/V2-07: `charcoal migrate`'s real path — export_scores on an
+/// authentic SQLite source (one row backfilled from a genuine v17 fixture,
+/// the rest inserted directly at v18, matching `unit_score_export::seeded()`)
+/// piped through import_score into Postgres. Destructive on the Postgres
+/// side (drop-all via `migrate_postgres_through`), so this runs on the
+/// dedicated `_migrations` database under the double lock (V3-06/V4-05),
+/// not `charcoal_test`.
+#[tokio::test]
+async fn test_pg_migrate_from_sqlite_preserves_every_row() {
+    use charcoal::db::schema::{create_tables, create_tables_through};
+    use charcoal::db::sqlite::SqliteDatabase;
+    use charcoal::scoring::generation::{scoring_revision, LEGACY_GENERATION};
+    use rusqlite::{params, Connection};
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(murl) = migrations_database_url() else {
+        return;
+    };
+    const MIG_USER: &str = "did:plc:pgmig_user";
+
+    // --- Build the SQLite source: v17 fixture for the legacy row, v18 for
+    // the rest, exactly as unit_score_export::seeded() does. ---
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables_through(&conn, 17).unwrap();
+    conn.execute(
+        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at)
+         VALUES (?1, 'did:plc:pgmig_leg', 'leg.h', 50.0, 'High', datetime('now', '-140 days'))",
+        params![MIG_USER],
+    )
+    .unwrap();
+    create_tables(&conn).unwrap(); // v18 boot: backfills the legacy row
+
+    let rev = scoring_revision();
+    let rows = [
+        (
+            "did:plc:pgmig_cur",
+            "40.0",
+            "'High'",
+            "datetime('now', '-4 days')",
+            "datetime('now', '+10 days')",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_exp",
+            "20.0",
+            "'Elevated'",
+            "datetime('now', '-13 days')",
+            "datetime('now', '-6 days')",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_na",
+            "NULL",
+            "'NotAssessed'",
+            "datetime('now', '-12 days')",
+            "datetime('now', '-5 days')",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_nul",
+            "30.0",
+            "'Elevated'",
+            "datetime('now', '-2 days')",
+            "NULL",
+            rev,
+        ),
+        (
+            "did:plc:pgmig_bad",
+            "35.0",
+            "'High'",
+            "datetime('now', '-2 days')",
+            "'not a timestamp'",
+            rev,
+        ),
+    ];
+    for (did, score, tier, scored_at, valid_until, generation) in rows {
+        conn.execute(
+            &format!(
+                "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at, scoring_generation, valid_until)
+                 VALUES (?1, ?2, ?3, {score}, {tier}, {scored_at}, ?4, {valid_until})"
+            ),
+            params![MIG_USER, did, format!("{did}.h"), generation],
+        )
+        .unwrap();
+    }
+    let src: std::sync::Arc<dyn charcoal::db::Database> =
+        std::sync::Arc::new(SqliteDatabase::new(conn));
+
+    // --- Destination: a clean v18 Postgres, via the destructive fixture. ---
+    let _fixture = migrations_fixture(&murl, 18).await;
+    let pg_db = charcoal::db::connect_postgres(&murl).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&murl).await.unwrap();
+
+    // The sequence `charcoal migrate` runs: export every row, import every row.
+    let exported = src.export_scores(MIG_USER).await.unwrap();
+    assert_eq!(exported.len(), 6);
+    for row in &exported {
+        pg_db.import_score(MIG_USER, row).await.unwrap();
+    }
+
+    let count: i64 =
+        sqlx_core::query::query("SELECT COUNT(*) FROM account_scores WHERE user_did = $1")
+            .bind(MIG_USER)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(count, 6);
+
+    // Direct SQL against Postgres — not a re-export of the SQLite source —
+    // so this actually checks what `import_score` wrote, not a tautology
+    // about `exported`.
+    for did in [
+        "did:plc:pgmig_cur",
+        "did:plc:pgmig_exp",
+        "did:plc:pgmig_na",
+        "did:plc:pgmig_nul",
+        "did:plc:pgmig_bad",
+    ] {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT scoring_generation = $3 FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(did)
+        .bind(rev)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{did}: migrated scoring_generation must equal the current revision, as read back from Postgres"
+        );
+    }
+    let leg_row = sqlx_core::query::query(
+        "SELECT scoring_generation FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_leg'",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let leg_generation: String = leg_row.get(0);
+    assert_eq!(leg_generation, LEGACY_GENERATION);
+
+    let na_threat_score_is_null: bool = sqlx_core::query::query(
+        "SELECT threat_score IS NULL FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_na'",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        na_threat_score_is_null,
+        "NotAssessed row carries its NULL score verbatim"
+    );
+
+    for did in ["did:plc:pgmig_nul", "did:plc:pgmig_bad"] {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT valid_until = scored_at FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(did)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{did}: NULL/malformed expiry imports as expired-when-scored"
+        );
+    }
+
+    let leg_valid_matches_14d: bool = sqlx_core::query::query(
+        "SELECT valid_until - scored_at = INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = 'did:plc:pgmig_leg'",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert!(
+        leg_valid_matches_14d,
+        "legacy row's v18 backfill (scored_at + 14 d) survives migration"
+    );
+
+    // Every scored_at carried through unchanged: compare against the exact
+    // instant the SQLite source exported (parsed from its own RFC3339 text),
+    // not a re-formatted string — SQLite and Postgres render fractional
+    // seconds differently (milliseconds vs microseconds) even for the same
+    // instant.
+    for row in &exported {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT scored_at = $3::timestamptz FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(&row.score.did)
+        .bind(&row.scored_at)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{}: scored_at must survive migration exactly",
+            row.score.did
+        );
+    }
+
+    assert_eq!(pg_db.count_expired(MIG_USER).await.unwrap(), 5);
+    assert_eq!(
+        pg_db.get_ranked_threats(MIG_USER, 0.0).await.unwrap().len(),
+        1
+    );
+
+    // Re-import (as a second `charcoal migrate` run would): idempotent, no
+    // row is renewed or changed.
+    for row in &exported {
+        pg_db.import_score(MIG_USER, row).await.unwrap();
+    }
+    for row in &exported {
+        let matches: bool = sqlx_core::query::query(
+            "SELECT scored_at = $3::timestamptz FROM account_scores WHERE user_did = $1 AND did = $2",
+        )
+        .bind(MIG_USER)
+        .bind(&row.score.did)
+        .bind(&row.scored_at)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+        assert!(
+            matches,
+            "{}: re-import must not change scored_at",
+            row.score.did
+        );
+    }
+    assert_eq!(
+        pg_db.count_expired(MIG_USER).await.unwrap(),
+        5,
+        "re-import must not change expiry counts"
+    );
+
+    // --- The refresh schedule (#344): the three `users` columns migrate too,
+    // or the destination either refreshes a user it just refreshed or forgets
+    // one that is behind. The attempt is DELIBERATELY a different revision
+    // from the proof: `mark_refreshed_generation` sets both columns, so a
+    // migration that stopped there would silently overwrite a pending attempt
+    // and this assertion would catch it.
+    const DEADLINE: &str = "2026-10-01T12:00:00+00:00";
+    src.upsert_user(MIG_USER, "mig.h").await.unwrap();
+    src.schedule_refresh(MIG_USER, DEADLINE).await.unwrap();
+    src.mark_refreshed_generation(MIG_USER, "proven-revision")
+        .await
+        .unwrap();
+    src.mark_refresh_attempted_generation(MIG_USER, "attempted-revision")
+        .await
+        .unwrap();
+    pg_db.upsert_user(MIG_USER, "mig.h").await.unwrap();
+
+    // Exactly the sequence `charcoal migrate` runs.
+    if let Some(at) = src.next_refresh_at(MIG_USER).await.unwrap() {
+        pg_db.schedule_refresh(MIG_USER, &at).await.unwrap();
+    }
+    if let Some(g) = src.refreshed_generation(MIG_USER).await.unwrap() {
+        pg_db.mark_refreshed_generation(MIG_USER, &g).await.unwrap();
+    }
+    if let Some(a) = src.refresh_attempted_generation(MIG_USER).await.unwrap() {
+        pg_db
+            .mark_refresh_attempted_generation(MIG_USER, &a)
+            .await
+            .unwrap();
+    }
+
+    let (next_at, proven, attempted): (
+        Option<chrono::DateTime<chrono::Utc>>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx_core::query::query(
+        "SELECT next_refresh_at, refreshed_generation, refresh_attempted_generation
+           FROM users WHERE did = $1",
+    )
+    .bind(MIG_USER)
+    .fetch_one(&pool)
+    .await
+    .map(|r| (r.get(0), r.get(1), r.get(2)))
+    .unwrap();
+    assert_eq!(
+        next_at.map(|t| t.to_rfc3339()).as_deref(),
+        Some(DEADLINE),
+        "the deadline survives migration"
+    );
+    assert_eq!(proven.as_deref(), Some("proven-revision"));
+    assert_eq!(
+        attempted.as_deref(),
+        Some("attempted-revision"),
+        "a pending attempt is copied verbatim, not overwritten by the proof"
+    );
+}
+
+/// #344 V2-06: Postgres keeps microseconds through export/import — the
+/// precision contract, positive direction.
+#[tokio::test]
+async fn test_pg_export_import_keeps_microseconds() {
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let src_did = "did:plc:pgmicro_src";
+    let dst_did = "did:plc:pgmicro_dst";
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    for did in [src_did, dst_did] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+            .bind(TEST_USER)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, scoring_generation, scored_at, valid_until)
+         VALUES ($1, $2, $3, 'legacy', '2026-09-01 12:00:00.123456+00'::timestamptz,
+                 '2026-09-01 12:00:00.123456+00'::timestamptz + INTERVAL '14 days')",
+    )
+    .bind(TEST_USER)
+    .bind(src_did)
+    .bind(format!("{src_did}.handle"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let exported = db.export_scores(TEST_USER).await.unwrap();
+    let src_row = exported
+        .iter()
+        .find(|r| r.score.did == src_did)
+        .expect("source row exported");
+    let mut dst_row = src_row.clone();
+    dst_row.score.did = dst_did.to_string();
+    dst_row.score.handle = format!("{dst_did}.handle");
+    db.import_score(TEST_USER, &dst_row).await.unwrap();
+
+    let row = sqlx_core::query::query(
+        "SELECT scored_at = '2026-09-01 12:00:00.123456+00'::timestamptz,
+                valid_until = '2026-09-01 12:00:00.123456+00'::timestamptz + INTERVAL '14 days'
+         FROM account_scores WHERE user_did = $1 AND did = $2",
+    )
+    .bind(TEST_USER)
+    .bind(dst_did)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let scored_matches: bool = row.get(0);
+    let valid_matches: bool = row.get(1);
+    assert!(
+        scored_matches,
+        "scored_at keeps microseconds through export/import"
+    );
+    assert!(
+        valid_matches,
+        "valid_until keeps microseconds through export/import"
+    );
+
+    for did in [src_did, dst_did] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+            .bind(TEST_USER)
+            .bind(did)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}
+
+/// #344 V2-06: the documented one-way truncation — a Postgres source's
+/// microseconds are truncated to whole seconds when imported into SQLite
+/// (SQLite's `datetime()` column form), and only there.
+#[tokio::test]
+async fn test_pg_import_into_sqlite_truncates_to_seconds() {
+    use charcoal::db::sqlite::SqliteDatabase;
+    use rusqlite::Connection;
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    let src_did = "did:plc:pgtrunc_src";
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+        .bind(TEST_USER)
+        .bind(src_did)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, scoring_generation, scored_at, valid_until)
+         VALUES ($1, $2, $3, 'legacy', '2026-09-01 12:00:00.123456+00'::timestamptz,
+                 '2026-09-01 12:00:00.123456+00'::timestamptz + INTERVAL '14 days')",
+    )
+    .bind(TEST_USER)
+    .bind(src_did)
+    .bind(format!("{src_did}.handle"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pg_db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let exported = pg_db.export_scores(TEST_USER).await.unwrap();
+    let row = exported
+        .iter()
+        .find(|r| r.score.did == src_did)
+        .expect("source row exported")
+        .clone();
+
+    let sqlite_conn = Connection::open_in_memory().unwrap();
+    charcoal::db::schema::create_tables(&sqlite_conn).unwrap();
+    let sqlite_db: std::sync::Arc<dyn charcoal::db::Database> =
+        std::sync::Arc::new(SqliteDatabase::new(sqlite_conn));
+    sqlite_db.import_score(TEST_USER, &row).await.unwrap();
+
+    let (stored_scored_at, stored_valid_until): (String, String) = {
+        // Reach into the SqliteDatabase's connection isn't exposed, so
+        // re-export and check the truncated value the same way the rest of
+        // this suite verifies SQLite state — through the trait.
+        let back = sqlite_db.export_scores(TEST_USER).await.unwrap();
+        let r = back.iter().find(|r| r.score.did == src_did).unwrap();
+        let charcoal::db::models::ExportedExpiry::At(valid_until) = &r.valid_until else {
+            panic!("imported row must have a well-formed expiry");
+        };
+        (r.scored_at.clone(), valid_until.clone())
+    };
+    // SQLite's datetime() column form is whole seconds — the microsecond
+    // fraction from the Postgres source is truncated on import, and
+    // re-exporting renders that truncated value back out with a
+    // millisecond field of all zeros.
+    assert!(
+        stored_scored_at.starts_with("2026-09-01T12:00:00.000"),
+        "scored_at truncated to whole seconds: {stored_scored_at}"
+    );
+    assert!(
+        stored_valid_until.starts_with("2026-09-15T12:00:00.000"),
+        "valid_until truncated to whole seconds: {stored_valid_until}"
+    );
+
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1 AND did = $2")
+        .bind(TEST_USER)
+        .bind(src_did)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+// --- Refresh schedule (#343 §4.4, #344) ---
+
+/// Make the users a tick test seeded the ONLY due population.
+///
+/// The tick's SELECT is a whole-table query, exactly like the queue's cap and
+/// its ETA median, so every user this database has ever held is a candidate.
+/// Parking the rest — a deadline a year out AND the current revision recorded
+/// as attempted, which is what both due clauses read — is the scheduling twin
+/// of `reset_scan_queue_fixtures`: without it a tick with a limit of 2 could
+/// spend its whole batch on somebody else's fixture, and would enqueue scans
+/// for users no test is watching.
+///
+/// **Invariant (#344 F8): this writes `users` rows that belong to OTHER tests**
+/// — every DID outside `keep_prefix`, in the shared `charcoal_test` database —
+/// and the only thing keeping that safe is the process-local
+/// `scan_queue_test_lock`. So: any Postgres test that asserts on
+/// `next_refresh_at`, `refresh_attempted_generation` or `refreshed_generation`
+/// MUST hold `scan_queue_test_lock` for the whole of its assertions, whether
+/// or not it calls this helper. A test that reads those columns without the
+/// lock can have them rewritten underneath it by a tick test running in
+/// parallel, and will fail for reasons that have nothing to do with the code
+/// under test.
+async fn quiesce_users_outside(url: &str, keep_prefix: &str) {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let pool = Pool::<Postgres>::connect(url).await.unwrap();
+    sqlx_core::query::query(
+        "UPDATE users
+            SET next_refresh_at = NOW() + INTERVAL '365 days',
+                refresh_attempted_generation = $1
+          WHERE did NOT LIKE $2",
+    )
+    .bind(charcoal::scoring::generation::scoring_revision())
+    .bind(keep_prefix)
+    .execute(&pool)
+    .await
+    .unwrap();
+}
+
+/// A refresh-eligible user: one score row, a deadline, and a recorded attempt.
+async fn seed_refreshable(
+    db: &std::sync::Arc<dyn charcoal::db::Database>,
+    did: &str,
+    next_refresh_at: Option<&str>,
+    attempted: Option<&str>,
+) {
+    db.upsert_user(did, &format!("{did}.h")).await.unwrap();
+    let mut score = AccountScore::default_for_test("did:plc:pgtest_q_scored");
+    score.threat_score = Some(40.0);
+    score.threat_tier = Some("High".into());
+    db.upsert_account_score(did, &score).await.unwrap();
+    if let Some(at) = next_refresh_at {
+        db.schedule_refresh(did, at).await.unwrap();
+    }
+    if let Some(g) = attempted {
+        db.mark_refreshed_generation(did, g).await.unwrap();
+    }
+}
+
+/// The tick is ONE bounded transaction (R04): it claims at most `limit` due
+/// users, writes each queue row conditionally, and advances the schedule for
+/// exactly the users it delivered — never for a user who already had work.
+#[tokio::test]
+async fn test_pg_claim_and_enqueue_is_one_transaction_and_bounded() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const DUE1: &str = "did:plc:pgtest_q_sched_due1";
+    const DUE2: &str = "did:plc:pgtest_q_sched_due2";
+    const DUE3: &str = "did:plc:pgtest_q_sched_due3";
+    const NOTDUE: &str = "did:plc:pgtest_q_sched_notdue";
+    const NOSCORE: &str = "did:plc:pgtest_q_sched_noscore";
+    const DUEREV: &str = "did:plc:pgtest_q_sched_duerev";
+    const BUSY: &str = "did:plc:pgtest_q_sched_busy";
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    for did in [DUE1, DUE2, DUE3, NOTDUE, NOSCORE, DUEREV, BUSY] {
+        db.delete_user_data(did).await.unwrap();
+    }
+
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let now = chrono::Utc::now();
+    let ago = |h: i64| (now - chrono::Duration::hours(h)).to_rfc3339();
+    let ahead = |h: i64| (now + chrono::Duration::hours(h)).to_rfc3339();
+
+    // Distinct deadlines so the `ORDER BY next_refresh_at, did` batches are
+    // deterministic rather than "whatever Postgres felt like".
+    seed_refreshable(&db, DUE1, Some(&ago(3)), Some(rev)).await;
+    seed_refreshable(&db, DUE2, Some(&ago(2)), Some(rev)).await;
+    seed_refreshable(&db, DUE3, Some(&ago(1)), Some(rev)).await;
+    seed_refreshable(&db, NOTDUE, Some(&ahead(5)), Some(rev)).await;
+    seed_refreshable(&db, DUEREV, Some(&ahead(4)), Some("an-older-revision")).await;
+    seed_refreshable(&db, BUSY, Some(&ago(6)), Some(rev)).await;
+    // Eligible by neither clause: no score row and no owed full scan.
+    db.upsert_user(NOSCORE, "noscore.h").await.unwrap();
+    db.schedule_refresh(NOSCORE, &ago(9)).await.unwrap();
+    // BUSY already has work, so the tick must leave them completely alone.
+    db.enqueue_scan(BUSY).await.unwrap();
+
+    quiesce_users_outside(&url, "did:plc:pgtest_q_sched_%").await;
+
+    let next = ahead(24);
+    let first = only(
+        db.claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
+            .await
+            .unwrap(),
+        "did:plc:pgtest_q_sched_",
+    );
+    assert_eq!(
+        first,
+        vec![DUE1.to_string(), DUE2.to_string()],
+        "the batch is bounded and taken in deadline order"
+    );
+    for did in [DUE1, DUE2] {
+        let r = pg_row(&db, did).await;
+        assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Refresh));
+        assert_eq!(
+            db.refresh_attempted_generation(did)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(rev)
+        );
+        assert!(
+            db.next_refresh_at(did).await.unwrap().is_some(),
+            "the delivered user's deadline moved out"
+        );
+    }
+    // The users this batch did NOT reach keep their old schedule.
+    assert_eq!(
+        db.refresh_attempted_generation(DUEREV)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("an-older-revision"),
+        "an undelivered user is untouched"
+    );
+
+    let second = only(
+        db.claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
+            .await
+            .unwrap(),
+        "did:plc:pgtest_q_sched_",
+    );
+    let mut second_sorted = second.clone();
+    second_sorted.sort();
+    assert_eq!(
+        second_sorted,
+        vec![DUE3.to_string(), DUEREV.to_string()],
+        "the rest follow on the next tick; the busy user never does"
+    );
+
+    let third = only(
+        db.claim_and_enqueue_due_refreshes(&now.to_rfc3339(), &next, rev, 2)
+            .await
+            .unwrap(),
+        "did:plc:pgtest_q_sched_",
+    );
+    assert!(third.is_empty(), "nobody is due twice");
+
+    // The busy user: row untouched, schedule untouched.
+    let busy = pg_row(&db, BUSY).await;
+    assert_eq!(
+        (busy.status.as_str(), busy.kind),
+        ("queued", ScanKind::Full),
+        "a queued full scan is never downgraded"
+    );
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&db.next_refresh_at(BUSY).await.unwrap().unwrap())
+            .unwrap()
+            < now,
+        "the busy user's deadline was not advanced"
+    );
+    // And the ineligible one was never selected at all.
+    assert!(
+        db.list_scan_queue()
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.user_did != NOSCORE),
+        "a user with no scores and nothing owed is never refreshed"
+    );
+
+    for did in [DUE1, DUE2, DUE3, NOTDUE, NOSCORE, DUEREV, BUSY] {
+        db.delete_user_data(did).await.unwrap();
+    }
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// `FOR UPDATE … SKIP LOCKED`: two replicas ticking at the same moment
+/// PARTITION the due set. Without it one blocks on the other's row locks and,
+/// worse, both could deliver the same user.
+#[tokio::test]
+async fn test_pg_two_schedulers_partition_the_due_set() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let a = charcoal::db::connect_postgres(&url).await.unwrap();
+    let b = charcoal::db::connect_postgres(&url).await.unwrap();
+
+    let dids: Vec<String> = (0..10)
+        .map(|i| format!("did:plc:pgtest_q_part{i:02}"))
+        .collect();
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let now = chrono::Utc::now();
+    for (i, did) in dids.iter().enumerate() {
+        a.delete_user_data(did).await.unwrap();
+        seed_refreshable(
+            &a,
+            did,
+            Some(&(now - chrono::Duration::hours(10 - i as i64)).to_rfc3339()),
+            Some(rev),
+        )
+        .await;
+    }
+    quiesce_users_outside(&url, "did:plc:pgtest_q_part%").await;
+
+    let next = (now + chrono::Duration::hours(24)).to_rfc3339();
+    let now_s = now.to_rfc3339();
+    let (ra, rb) = tokio::join!(
+        a.claim_and_enqueue_due_refreshes(&now_s, &next, rev, 25),
+        b.claim_and_enqueue_due_refreshes(&now_s, &next, rev, 25),
+    );
+    let (ra, rb) = (
+        only(ra.unwrap(), "did:plc:pgtest_q_part"),
+        only(rb.unwrap(), "did:plc:pgtest_q_part"),
+    );
+
+    let set_a: std::collections::HashSet<_> = ra.iter().cloned().collect();
+    let set_b: std::collections::HashSet<_> = rb.iter().cloned().collect();
+    assert!(
+        set_a.is_disjoint(&set_b),
+        "no user may be delivered twice: {ra:?} vs {rb:?}"
+    );
+    let union: std::collections::HashSet<_> = set_a.union(&set_b).cloned().collect();
+    let expected: std::collections::HashSet<_> = dids.iter().cloned().collect();
+    assert_eq!(
+        union, expected,
+        "between them the two ticks cover the due set"
+    );
+
+    for did in &dids {
+        a.delete_user_data(did).await.unwrap();
+    }
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// Postgres twin of `a_completed_manual_full_scan_proves_both_columns_and_the_tick_stays_quiet`
+/// (V3-04), driven through the same database calls the web tier's
+/// `record_full_scan_completion` / `schedule_after_success` make. (Those live
+/// behind `--features web`, which `VERIFY_PG` does not enable, so the
+/// contract under test here is the database half of them.)
+#[tokio::test]
+async fn test_pg_a_completed_full_scan_proves_both_columns_and_the_tick_stays_quiet() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_proof";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let now = chrono::Utc::now();
+    seed_refreshable(&db, U, None, None).await; // never attempted
+    quiesce_users_outside(&url, "did:plc:pgtest_q_proof%").await;
+
+    db.enqueue_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    // record_full_scan_completion(Complete):
+    db.finish_full_scan_state(
+        U,
+        &now.to_rfc3339(),
+        "full_carried_completion",
+        &claim.claim_id,
+    )
+    .await
+    .unwrap();
+    // schedule_after_success(now):
+    db.schedule_refresh(U, &(now + chrono::Duration::hours(24)).to_rfc3339())
+        .await
+        .unwrap();
+    db.mark_refreshed_generation(U, rev).await.unwrap();
+    db.finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.refreshed_generation(U).await.unwrap().as_deref(),
+        Some(rev)
+    );
+    assert_eq!(
+        db.refresh_attempted_generation(U).await.unwrap().as_deref(),
+        Some(rev),
+        "proof is also an attempt, so the revision clause stays quiet"
+    );
+
+    let next = (now + chrono::Duration::hours(48)).to_rfc3339();
+    assert!(
+        only(
+            db.claim_and_enqueue_due_refreshes(
+                &(now + chrono::Duration::seconds(30)).to_rfc3339(),
+                &next,
+                rev,
+                25
+            )
+            .await
+            .unwrap(),
+            "did:plc:pgtest_q_proof",
+        )
+        .is_empty(),
+        "no unnecessary refresh right after a full scan"
+    );
+    assert_eq!(
+        only(
+            db.claim_and_enqueue_due_refreshes(
+                &(now + chrono::Duration::hours(25)).to_rfc3339(),
+                &next,
+                rev,
+                25
+            )
+            .await
+            .unwrap(),
+            "did:plc:pgtest_q_proof",
+        ),
+        vec![U.to_string()],
+        "and exactly one once the deadline passes"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// Postgres twin of `owed_full_work_is_retried_as_a_full_scan` (V3-03): the
+/// tick re-queues owed work as FULL, never as a refresh.
+#[tokio::test]
+async fn test_pg_owed_full_work_is_retried_as_a_full_scan() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_owedfull";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let now = chrono::Utc::now();
+    seed_refreshable(
+        &db,
+        U,
+        Some(&(now - chrono::Duration::hours(1)).to_rfc3339()),
+        Some(rev),
+    )
+    .await;
+    quiesce_users_outside(&url, "did:plc:pgtest_q_owedfull%").await;
+
+    db.enqueue_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    db.finish_queued_scan(U, &claim.claim_id, FinishCompletion::Resumable, None)
+        .await
+        .unwrap();
+    let owed = pg_row(&db, U).await.full_requested_at.expect("still owed");
+
+    assert_eq!(
+        only(
+            db.claim_and_enqueue_due_refreshes(
+                &now.to_rfc3339(),
+                &(now + chrono::Duration::hours(24)).to_rfc3339(),
+                rev,
+                25
+            )
+            .await
+            .unwrap(),
+            "did:plc:pgtest_q_owedfull",
+        ),
+        vec![U.to_string()]
+    );
+    let r = pg_row(&db, U).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+    assert_eq!(
+        r.full_requested_at.as_deref(),
+        Some(owed.as_str()),
+        "the obligation keeps its original timestamp"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// V2-02 at the SQL level, on the backend the race is real on: the tick's
+/// conditional write refuses to clobber a row that changed between the select
+/// and the write. Three variants, all running the real `pub const`
+/// statements — a paraphrase would prove nothing about production.
+#[tokio::test]
+async fn test_pg_scheduler_write_does_not_clobber_a_concurrent_full_enqueue() {
+    use charcoal::db::postgres::{REFRESH_DUE_SQL, REFRESH_ENQUEUE_SQL};
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_race";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let other = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let now = chrono::Utc::now();
+    let now_s = now.to_rfc3339();
+    seed_refreshable(
+        &db,
+        U,
+        Some(&(now - chrono::Duration::hours(1)).to_rfc3339()),
+        Some(rev),
+    )
+    .await;
+    quiesce_users_outside(&url, "did:plc:pgtest_q_race%").await;
+
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+
+    // Put the user in the "finished, may be re-queued" state the tick expects.
+    let seed_done = |db: &std::sync::Arc<dyn charcoal::db::Database>| {
+        let db = db.clone();
+        async move {
+            db.enqueue_refresh_scan(U).await.unwrap();
+            let c = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+            db.finish_queued_scan(U, &c.claim_id, FinishCompletion::Complete, None)
+                .await
+                .unwrap();
+        }
+    };
+
+    // --- Variant 1: the row is finished at select time; a manual enqueue
+    // commits in between and the tick's write must not reset it.
+    seed_done(&db).await;
+    let mut tx = pool.begin().await.unwrap();
+    let due: Vec<String> = sqlx_core::query::query(REFRESH_DUE_SQL)
+        .bind(&now_s)
+        .bind(rev)
+        .bind(25i64)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| sqlx_core::row::Row::get::<String, _>(&r, 0))
+        .collect();
+    assert_eq!(
+        only(due, "did:plc:pgtest_q_race"),
+        vec![U.to_string()],
+        "the user is due at select time"
+    );
+
+    assert_eq!(other.enqueue_scan(U).await.unwrap(), EnqueueOutcome::Queued);
+
+    let affected = sqlx_core::query::query(REFRESH_ENQUEUE_SQL)
+        .bind(U)
+        .bind(&now_s)
+        .execute(&mut *tx)
+        .await
+        .unwrap()
+        .rows_affected();
+    assert_eq!(affected, 0, "the conditional write affects nothing");
+    tx.commit().await.unwrap();
+
+    let r = pg_row(&db, U).await;
+    assert_eq!(
+        (r.status.as_str(), r.kind),
+        ("queued", ScanKind::Full),
+        "the user's full scan survives"
+    );
+    assert!(r.full_requested_at.is_some());
+
+    // --- Variant 2: the full scan is not just queued but ADMITTED between the
+    // select and the write. Its claim and lease must survive untouched.
+    let claim = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    let running = pg_row(&db, U).await;
+    let affected = sqlx_core::query::query(REFRESH_ENQUEUE_SQL)
+        .bind(U)
+        .bind(&now_s)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .rows_affected();
+    assert_eq!(affected, 0, "a running row is never reset");
+    let after = pg_row(&db, U).await;
+    assert_eq!(
+        (after.status.as_str(), after.kind),
+        ("running", ScanKind::Full)
+    );
+    assert_eq!(after.started_at, running.started_at);
+    let (claim_id, lease): (Option<String>, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx_core::query::query(
+            "SELECT claim_id, lease_expires FROM scan_queue WHERE user_did = $1",
+        )
+        .bind(U)
+        .fetch_one(&pool)
+        .await
+        .map(|r| {
+            (
+                sqlx_core::row::Row::get::<Option<String>, _>(&r, 0),
+                sqlx_core::row::Row::get::<Option<chrono::DateTime<chrono::Utc>>, _>(&r, 1),
+            )
+        })
+        .unwrap();
+    assert_eq!(claim_id.as_deref(), Some(claim.claim_id.as_str()));
+    assert!(lease.is_some(), "the admitted scan keeps its lease");
+    db.finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap();
+
+    // --- Variant 3: no queue row exists at select time; the manual enqueue
+    // INSERTS one in between. The tick's INSERT conflicts, the WHERE sees
+    // 'queued', and it affects nothing.
+    db.delete_user_data(U).await.unwrap();
+    seed_refreshable(
+        &db,
+        U,
+        Some(&(now - chrono::Duration::hours(1)).to_rfc3339()),
+        Some(rev),
+    )
+    .await;
+    assert!(
+        db.list_scan_queue()
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.user_did != U),
+        "no queue row at select time"
+    );
+    assert_eq!(other.enqueue_scan(U).await.unwrap(), EnqueueOutcome::Queued);
+    let affected = sqlx_core::query::query(REFRESH_ENQUEUE_SQL)
+        .bind(U)
+        .bind(&now_s)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .rows_affected();
+    assert_eq!(
+        affected, 0,
+        "an insert that conflicts with a queued row does nothing"
+    );
+    let r = pg_row(&db, U).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// V4-03/V5-03: two FIRST enqueues for a user with no row serialize on the
+/// per-user advisory lock. `SELECT … FOR UPDATE` locks nothing on an absent
+/// row, so without that lock both callers would see "no row" and the loser's
+/// `ON CONFLICT DO UPDATE` could reset a job the winner's worker already has.
+#[tokio::test]
+async fn test_pg_first_enqueues_serialize_on_the_user_lock() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_firstlock";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let b_db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "firstlock.h").await.unwrap();
+
+    // A takes the same advisory lock `enqueue_scan` takes, and holds it.
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    let mut a = pool.begin().await.unwrap();
+    sqlx_core::query::query("SELECT pg_advisory_xact_lock(hashtext('scan_queue:' || $1))")
+        .bind(U)
+        .execute(&mut *a)
+        .await
+        .unwrap();
+
+    let task = tokio::spawn(async move { b_db.enqueue_scan(U).await });
+
+    // Establish that B is WAITING on that lock — polled, never inferred from
+    // a sleep: a sleep-based version passes even when the lock does nothing.
+    let waiting = Pool::<Postgres>::connect(&url).await.unwrap();
+    let mut saw_wait = false;
+    for _ in 0..200 {
+        let n: i64 = sqlx_core::query::query(
+            "SELECT count(*) FROM pg_locks
+              WHERE locktype = 'advisory' AND NOT granted
+                AND objid = hashtext('scan_queue:' || $1)::oid",
+        )
+        .bind(U)
+        .fetch_one(&waiting)
+        .await
+        .map(|r| sqlx_core::row::Row::get::<i64, _>(&r, 0))
+        .unwrap();
+        if n == 1 {
+            saw_wait = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        saw_wait,
+        "the second enqueue must block on the per-user advisory lock"
+    );
+
+    // Only now does A create the row and commit.
+    sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+         VALUES ($1, 'queued', 'full', NOW(), NOW())",
+    )
+    .bind(U)
+    .execute(&mut *a)
+    .await
+    .unwrap();
+    a.commit().await.unwrap();
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), task)
+        .await
+        .expect("B must return once the lock is released")
+        .expect("task")
+        .expect("enqueue");
+    assert_eq!(
+        outcome,
+        EnqueueOutcome::AlreadyQueued,
+        "B answers for the state A committed, it does not reset it"
+    );
+
+    let rows = db.list_scan_queue().await.unwrap();
+    assert_eq!(rows.iter().filter(|r| r.user_did == U).count(), 1);
+    let r = pg_row(&db, U).await;
+    assert_eq!((r.status.as_str(), r.kind), ("queued", ScanKind::Full));
+    assert!(r.full_requested_at.is_some(), "one obligation, coalesced");
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// V4-03/V5-03: a second click while a full scan is RUNNING must not disturb
+/// it. The state is established and committed first, so this is a contract
+/// test rather than a race whose outcome depends on who wins.
+#[tokio::test]
+async fn test_pg_enqueue_preserves_a_committed_running_claim() {
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row as _;
+    use sqlx_postgres::Postgres;
+
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_running_claim";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let a = charcoal::db::connect_postgres(&url).await.unwrap();
+    let b = charcoal::db::connect_postgres(&url).await.unwrap();
+    a.delete_user_data(U).await.unwrap();
+    a.upsert_user(U, "runclaim.h").await.unwrap();
+
+    assert_eq!(a.enqueue_scan(U).await.unwrap(), EnqueueOutcome::Queued);
+    let claim = a.claim_next_scan(8, 60).await.unwrap().unwrap();
+    let before = pg_row(&a, U).await;
+    let owed = before.full_requested_at.clone().expect("obligation");
+
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    let lease_of = |pool: Pool<Postgres>| async move {
+        sqlx_core::query::query(
+            "SELECT claim_id, lease_expires FROM scan_queue WHERE user_did = $1",
+        )
+        .bind(U)
+        .fetch_one(&pool)
+        .await
+        .map(|r| {
+            (
+                r.get::<Option<String>, _>(0),
+                r.get::<Option<chrono::DateTime<chrono::Utc>>, _>(1),
+            )
+        })
+        .unwrap()
+    };
+    let lease_before = lease_of(pool.clone()).await;
+
+    for _ in 0..3 {
+        assert_eq!(
+            b.enqueue_scan(U).await.unwrap(),
+            EnqueueOutcome::AlreadyRunning
+        );
+    }
+    let after = pg_row(&a, U).await;
+    assert_eq!(
+        (after.status.as_str(), after.kind),
+        ("running", ScanKind::Full)
+    );
+    assert_eq!(after.started_at, before.started_at);
+    assert_eq!(after.full_requested_at.as_deref(), Some(owed.as_str()));
+    assert_eq!(lease_of(pool.clone()).await, lease_before);
+    assert_eq!(lease_before.0.as_deref(), Some(claim.claim_id.as_str()));
+
+    // The defense-in-depth clause: the raw absent-row INSERT run against a
+    // running row affects nothing.
+    let affected = sqlx_core::query::query(
+        "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+         VALUES ($1, 'queued', 'full', NOW(), NOW())
+         ON CONFLICT (user_did) DO UPDATE
+           SET status = 'queued', kind = 'full', enqueued_at = NOW(),
+               started_at = NULL, finished_at = NULL,
+               lease_expires = NULL, last_error = NULL,
+               claim_id = NULL, completion = NULL,
+               full_requested_at = COALESCE(scan_queue.full_requested_at, NOW())
+         WHERE scan_queue.status IN ('done', 'failed')",
+    )
+    .bind(U)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .rows_affected();
+    assert_eq!(affected, 0);
+    assert_eq!(lease_of(pool.clone()).await, lease_before);
+
+    a.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// N2, Postgres twin: a worker whose claim is gone writes NOTHING — no
+/// cooldown anchor, no ETA sample from the successor's clock, no retirement
+/// of a drain outcome the successor still owes.
+#[tokio::test]
+async fn test_pg_a_superseded_worker_records_no_completion() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_zombie";
+    const CARRIED: &str = "full_carried_completion";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "zombie.h").await.unwrap();
+
+    db.enqueue_scan(U).await.unwrap();
+    // An already-expired lease, so the reclaim below is the real one.
+    let stale = db.claim_next_scan(8, -1).await.unwrap().unwrap();
+    db.set_scan_state(U, CARRIED, "carried").await.unwrap();
+    assert!(db.reclaim_expired_scans().await.unwrap() >= 1);
+    let successor = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    assert_ne!(successor.claim_id, stale.claim_id);
+
+    db.finish_full_scan_state(U, "2026-09-14T00:00:00+00:00", CARRIED, &stale.claim_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_scan_state(U, "last_full_scan_finished_at")
+            .await
+            .unwrap(),
+        None,
+        "no cooldown anchor from a worker that lost its claim"
+    );
+    assert_eq!(
+        db.get_scan_state(U, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap(),
+        None,
+        "no ETA sample from the successor's started_at"
+    );
+    assert_eq!(
+        db.get_scan_state(U, CARRIED).await.unwrap().as_deref(),
+        Some("carried"),
+        "the successor's obligation is not retired by its predecessor"
+    );
+
+    // The successor, holding the real claim, writes all three.
+    db.finish_full_scan_state(U, "2026-09-14T00:00:00+00:00", CARRIED, &successor.claim_id)
+        .await
+        .unwrap();
+    assert!(db
+        .get_scan_state(U, "last_full_scan_finished_at")
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(db.get_scan_state(U, CARRIED).await.unwrap(), None);
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// F2, Postgres twin: the ownership probe `run_scan_with` fences all three of
+/// its completion writes on. The refresh schedule lives on `users`, so it
+/// cannot be fenced by a `WHERE claim_id = $n` on `scan_queue` — this read is
+/// what stands in for that. The mismatch is produced the way production
+/// produces it: a real claim, a real reclaim, a real successor.
+#[tokio::test]
+async fn test_pg_scan_claim_is_current_only_for_the_holder() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_owner";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "owner.h").await.unwrap();
+
+    assert!(
+        !db.scan_claim_is_current(U, "claim-1").await.unwrap(),
+        "no row at all"
+    );
+    db.enqueue_scan(U).await.unwrap();
+    assert!(
+        !db.scan_claim_is_current(U, "claim-1").await.unwrap(),
+        "queued, so claim_id is still NULL"
+    );
+    // An already-expired lease, so the reclaim below is the real one.
+    let stale = db.claim_next_scan(8, -1).await.unwrap().unwrap();
+    assert!(db.scan_claim_is_current(U, &stale.claim_id).await.unwrap());
+    assert!(db.reclaim_expired_scans().await.unwrap() >= 1);
+    let successor = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    assert_ne!(successor.claim_id, stale.claim_id);
+    assert!(
+        !db.scan_claim_is_current(U, &stale.claim_id).await.unwrap(),
+        "the superseded worker no longer owns the row"
+    );
+    assert!(db
+        .scan_claim_is_current(U, &successor.claim_id)
+        .await
+        .unwrap());
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// Postgres twin of the SQLite fence test (CodeRabbit, PR #124): a worker
+/// whose lease lapsed, and whose row a successor reclaimed, moves no schedule
+/// and requests no full scan. The ownership read and the writes share one
+/// transaction (`FOR UPDATE`), so no reclaim can land between them.
+#[tokio::test]
+async fn test_pg_a_superseded_claim_moves_no_schedule_and_requests_no_full_scan() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_fence";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "fence.h").await.unwrap();
+    db.enqueue_refresh_scan(U).await.unwrap();
+    // An already-expired lease, so the reclaim below is the real one.
+    let stale = db.claim_next_scan(8, -1).await.unwrap().unwrap().claim_id;
+    assert!(db.reclaim_expired_scans().await.unwrap() >= 1);
+    let successor = db.claim_next_scan(8, 60).await.unwrap().unwrap().claim_id;
+    assert_ne!(stale, successor);
+
+    let next_at = (chrono::Utc::now() + chrono::Duration::hours(24)).to_rfc3339();
+    let success = RefreshScheduleWrite::Success {
+        next_at_rfc3339: &next_at,
+        generation: "rev-fence",
+    };
+    let retry = RefreshScheduleWrite::Retry {
+        at_rfc3339: &next_at,
+        attempted_generation: "rev-fence",
+    };
+    assert!(
+        !db.apply_refresh_schedule(U, &stale, success).await.unwrap(),
+        "a stale claim's success schedule writes nothing"
+    );
+    assert!(
+        !db.apply_refresh_schedule(U, &stale, retry).await.unwrap(),
+        "a stale claim's retry schedule writes nothing"
+    );
+    assert!(
+        !db.request_full_after_refresh(U, &stale).await.unwrap(),
+        "a stale claim's full-scan request writes nothing"
+    );
+    assert_eq!(db.next_refresh_at(U).await.unwrap(), None);
+    assert_eq!(db.refreshed_generation(U).await.unwrap(), None);
+    assert_eq!(db.refresh_attempted_generation(U).await.unwrap(), None);
+    let row = db
+        .list_scan_queue()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.user_did == U)
+        .unwrap();
+    assert_eq!(row.full_requested_at, None, "no full scan requested");
+
+    // The successor's own writes still land.
+    assert!(db.request_full_after_refresh(U, &successor).await.unwrap());
+    assert!(db
+        .apply_refresh_schedule(U, &successor, success)
+        .await
+        .unwrap());
+    assert!(db.next_refresh_at(U).await.unwrap().is_some());
+    assert_eq!(
+        db.refreshed_generation(U).await.unwrap().as_deref(),
+        Some("rev-fence")
+    );
+    assert_eq!(
+        db.refresh_attempted_generation(U).await.unwrap().as_deref(),
+        Some("rev-fence"),
+        "a success proves both columns"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// N4, Postgres twin: a refresh runs the whole queue lifecycle but records no
+/// full-scan duration sample. A refresh is a fraction of a full scan's work,
+/// and one folded into the median would quote every queued user an ETA they
+/// cannot get.
+#[tokio::test]
+async fn test_pg_a_refresh_completion_records_no_duration_sample() {
+    let _guard = scan_queue_test_lock().lock().await;
+
+    const U: &str = "did:plc:pgtest_q_refresh_eta";
+    let Some(url) = database_url() else {
+        return;
+    };
+    reset_scan_queue_fixtures(&url).await;
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(U).await.unwrap();
+    db.upsert_user(U, "refeta.h").await.unwrap();
+
+    db.enqueue_refresh_scan(U).await.unwrap();
+    let claim = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+    assert_eq!(claim.kind, ScanKind::Refresh);
+    db.finish_queued_scan(U, &claim.claim_id, FinishCompletion::Complete, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.get_scan_state(U, LAST_FULL_SCAN_DURATION_KEY)
+            .await
+            .unwrap(),
+        None,
+        "a refresh duration must never reach the full-scan ETA median"
+    );
+    assert_eq!(
+        db.get_scan_state(U, "last_full_scan_finished_at")
+            .await
+            .unwrap(),
+        None,
+        "and it anchors no cooldown either"
+    );
+
+    db.delete_user_data(U).await.unwrap();
+    reset_scan_queue_fixtures(&url).await;
+}
+
+/// #344 Task 7 Postgres twin of `unit_refresh_candidates`'s main test. Unlike
+/// SQLite, `valid_until` is `NOT NULL` here (R11), so there is no
+/// NULL/malformed-expiry case to represent — that half of the eligibility
+/// rule is SQLite-only and already covered there. This test instead pins
+/// the shared half of the predicate (score floor, expiry-vs-horizon,
+/// old-generation) on the backend that actually runs in production.
+#[tokio::test]
+async fn test_pg_list_refresh_candidates_selects_high_and_elevated_expiring_or_old_generation() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // A dedicated user_did, NOT the shared TEST_USER, for the same reason as
+    // test_pg_get_fresh_scored_dids_matches_is_score_stale: this test asserts
+    // the EXACT ordered row set for the owner, which would be flaky if other
+    // tests concurrently wrote rows under it.
+    const OWNER: &str = "did:plc:pgrc_owner";
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind("did:plc:pgrc_otheruser")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // (did, generation, threat_score, valid_until_offset_sql, graph_distance)
+    let rows: [(&str, &str, f64, &str, Option<&str>); 6] = [
+        // Included:
+        (
+            "did:plc:pgrc_high-expiring",
+            rev,
+            60.0,
+            "NOW() + make_interval(days => 1)",
+            Some("Stranger"),
+        ),
+        (
+            "did:plc:pgrc_high-expired",
+            rev,
+            40.0,
+            "NOW() - make_interval(days => 3)",
+            Some("Follows you"),
+        ),
+        (
+            "did:plc:pgrc_elevated-legacy",
+            "legacy",
+            20.0,
+            "NOW() + make_interval(days => 10)",
+            None,
+        ),
+        (
+            "did:plc:pgrc_elevated-floor",
+            rev,
+            15.0,
+            "NOW() + make_interval(days => 1)",
+            None,
+        ),
+        // Excluded:
+        (
+            "did:plc:pgrc_high-fresh",
+            rev,
+            50.0,
+            "NOW() + make_interval(days => 10)",
+            None,
+        ),
+        (
+            "did:plc:pgrc_watch-legacy",
+            "legacy",
+            14.99,
+            "NOW() + make_interval(days => 1)",
+            None,
+        ),
+    ];
+    for (did, generation, score, valid_until_sql, graph) in rows {
+        sqlx_core::query::query(&format!(
+            "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until, graph_distance)
+             VALUES ($1, $2, $3, $4, 'x', $5, {valid_until_sql}, $6)"
+        ))
+        .bind(OWNER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(score)
+        .bind(generation)
+        .bind(graph)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // A different user's High row must never leak into OWNER's candidates.
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until)
+         VALUES ($1, 'did:plc:pgrc_high-other', 'high-other.handle', 60.0, 'x', $2, NOW() + make_interval(days => 1))",
+    )
+    .bind("did:plc:pgrc_otheruser")
+    .bind(rev)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // A NotAssessed row: threat_score IS NULL, expired, old generation — due
+    // on every other count, so only the score floor can exclude it. Pinned
+    // here and not just on SQLite because `NULL >= $2` is SQL-unknown, and
+    // three-valued logic is exactly the kind of thing that can differ between
+    // engines; this is the backend production runs on.
+    sqlx_core::query::query(
+        "INSERT INTO account_scores (user_did, did, handle, threat_tier, scoring_generation, valid_until)
+         VALUES ($1, 'did:plc:pgrc_na', 'na.handle', 'NotAssessed', 'legacy', NOW() - make_interval(days => 1))",
+    )
+    .bind(OWNER)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let candidates = db.list_refresh_candidates(OWNER, 2).await.unwrap();
+    let dids: Vec<&str> = candidates.iter().map(|c| c.did.as_str()).collect();
+    assert_eq!(
+        dids,
+        [
+            "did:plc:pgrc_high-expiring",
+            "did:plc:pgrc_high-expired",
+            "did:plc:pgrc_elevated-legacy",
+            "did:plc:pgrc_elevated-floor",
+        ],
+        "most dangerous first; Watch-tier and fresh High/Elevated rows are excluded"
+    );
+    assert!(
+        !dids.contains(&"did:plc:pgrc_na"),
+        "a NULL threat_score never clears the floor: {dids:?}"
+    );
+    assert_eq!(candidates[0].graph_distance.as_deref(), Some("Stranger"));
+    assert_eq!(candidates[1].graph_distance.as_deref(), Some("Follows you"));
+
+    // Cleanup.
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind("did:plc:pgrc_otheruser")
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// #344 Task 7 Postgres twin of `negative_horizon_narrows_the_candidate_set`
+/// (`tests/unit_refresh_candidates.rs`), seeded with the same four rows so
+/// the two backends can be compared directly. Postgres always narrowed
+/// correctly (`make_interval(days => -1)`); SQLite used to fail open and
+/// return every High/Elevated row, so this test is what the SQLite fix is
+/// measured against — the DID suffixes and the expected sets match there
+/// exactly.
+#[tokio::test]
+async fn test_pg_list_refresh_candidates_negative_horizon_narrows() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    // A dedicated owner for the same reason as the twin above: this test
+    // asserts an exact ordered row set.
+    const OWNER: &str = "did:plc:pgrcneg_owner";
+    let rev = charcoal::scoring::generation::scoring_revision();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // (did, generation, threat_score, valid_until SQL)
+    let rows: [(&str, &str, f64, &str); 4] = [
+        // Expired two days ago: due at horizon 0 AND at horizon -1.
+        (
+            "did:plc:pgrcneg_gone-2d",
+            rev,
+            60.0,
+            "NOW() - make_interval(days => 2)",
+        ),
+        // Expired two hours ago: due at horizon 0, NOT at horizon -1.
+        (
+            "did:plc:pgrcneg_gone-2h",
+            rev,
+            50.0,
+            "NOW() - make_interval(hours => 2)",
+        ),
+        // Fresh and current: due at neither horizon.
+        (
+            "did:plc:pgrcneg_fresh",
+            rev,
+            40.0,
+            "NOW() + make_interval(days => 10)",
+        ),
+        // Old generation: due at every horizon — that branch is time-independent.
+        (
+            "did:plc:pgrcneg_legacy",
+            "legacy",
+            30.0,
+            "NOW() + make_interval(days => 10)",
+        ),
+    ];
+    for (did, generation, score, valid_until_sql) in rows {
+        sqlx_core::query::query(&format!(
+            "INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until)
+             VALUES ($1, $2, $3, $4, 'x', $5, {valid_until_sql})"
+        ))
+        .bind(OWNER)
+        .bind(did)
+        .bind(format!("{did}.handle"))
+        .bind(score)
+        .bind(generation)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let at_zero: Vec<String> = db
+        .list_refresh_candidates(OWNER, 0)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.did)
+        .collect();
+    let at_minus_one: Vec<String> = db
+        .list_refresh_candidates(OWNER, -1)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.did)
+        .collect();
+
+    assert_eq!(
+        at_zero,
+        [
+            "did:plc:pgrcneg_gone-2d",
+            "did:plc:pgrcneg_gone-2h",
+            "did:plc:pgrcneg_legacy"
+        ],
+        "horizon 0: everything already expired, plus the legacy row"
+    );
+    assert_eq!(
+        at_minus_one,
+        ["did:plc:pgrcneg_gone-2d", "did:plc:pgrcneg_legacy"],
+        "horizon -1: only rows expired more than a day ago, plus the legacy row"
+    );
+    assert!(
+        at_minus_one.len() < at_zero.len(),
+        "a negative horizon narrows; it must never fail open and widen. \
+         at_minus_one={at_minus_one:?} at_zero={at_zero:?}"
+    );
+
+    // Cleanup.
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
 }

@@ -14,13 +14,15 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::cache_retention::CacheEviction;
 use super::models::{
-    AccountScore, AccuracyMetrics, AmplificationEvent, InferredPair, NewAmplificationEvent,
-    ThreatTier, ToxicPost, UserLabel, UserRow,
+    AccountScore, AccuracyMetrics, AmplificationEvent, ExportedExpiry, InferredPair,
+    NewAmplificationEvent, ScoringConfidence, StoredScore, ThreatTier, ToxicPost, UserLabel,
+    UserRow,
 };
 use super::traits::{
-    ClassifierVerdictRow, FeedSnapshot, OnnxScoreRow, ScanClaim, ScanQueueDepth, ScanQueueEntry,
-    ScanQueueRow, ScanSkip,
+    ClassifierVerdictRow, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow,
+    RefreshCandidate, ScanClaim, ScanKind, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
 };
+use crate::scoring::generation::scoring_revision;
 
 // --- Users ---
 
@@ -76,6 +78,149 @@ pub fn set_scan_state(conn: &Connection, user_did: &str, key: &str, value: &str)
          ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
         params![user_did, key, value],
     )?;
+    Ok(())
+}
+
+/// Remove one scan state key. Absent is not an error — the callers use a
+/// key's presence as the signal, so "already gone" is the state they wanted.
+pub fn delete_scan_state(conn: &Connection, user_did: &str, key: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+        params![user_did, key],
+    )?;
+    Ok(())
+}
+
+/// The cooldown anchor, the ETA sample and the carried drain outcome,
+/// together (#344 V7-02, F1).
+///
+/// One transaction, because the three are a single fact: "this full scan was
+/// carried out, it took this long, and whatever drain it performed along the
+/// way is accounted for". Written separately, a crash between them either
+/// starts a cooldown for a run still owed, or leaves a drain outcome behind to
+/// taint an unrelated later scan.
+pub fn finish_full_scan_state(
+    conn: &Connection,
+    user_did: &str,
+    finished_at_rfc3339: &str,
+    carried_key: &str,
+    claim_id: &str,
+) -> Result<()> {
+    finish_full_scan_state_inner(
+        conn,
+        user_did,
+        finished_at_rfc3339,
+        carried_key,
+        claim_id,
+        false,
+    )
+}
+
+/// Test seam for the atomicity of [`finish_full_scan_state`] (#344 F2).
+///
+/// Runs the identical statements inside the identical transaction and then
+/// fails, so a test can assert that NOTHING the transaction wrote survives.
+/// `#[doc(hidden)]`, never called in production: the real function has no
+/// statement a caller can make fail from outside, and "the source says BEGIN"
+/// is not evidence that the rollback works.
+#[doc(hidden)]
+pub fn finish_full_scan_state_failing_for_test(
+    conn: &Connection,
+    user_did: &str,
+    finished_at_rfc3339: &str,
+    carried_key: &str,
+    claim_id: &str,
+) -> Result<()> {
+    finish_full_scan_state_inner(
+        conn,
+        user_did,
+        finished_at_rfc3339,
+        carried_key,
+        claim_id,
+        true,
+    )
+}
+
+fn finish_full_scan_state_inner(
+    conn: &Connection,
+    user_did: &str,
+    finished_at_rfc3339: &str,
+    carried_key: &str,
+    claim_id: &str,
+    fail_before_commit: bool,
+) -> Result<()> {
+    // Immediate rather than the default Deferred (#344 F5): this is a
+    // read-then-write — the fence below decides from `claim_id` and the ETA
+    // sample from `started_at` — and a Deferred transaction takes no write
+    // lock until its first INSERT, so another writer can land between the read
+    // and the writes it authorises. `claim_next_scan` takes Immediate for the
+    // same reason; the Postgres twin gets the same guarantee from `FOR UPDATE`.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    // Fenced by the claim (#344 N2). Everything below is derived from — or
+    // describes — the attempt that holds this row: the ETA sample comes from
+    // the row's own `started_at`, and the cooldown anchor says "this worker
+    // carried the request out". A worker whose lease lapsed no longer owns
+    // either fact, and writing them would sample a successor's clock and
+    // start a cooldown the successor has not earned.
+    let owner: Option<(Option<String>, Option<String>)> = tx
+        .query_row(
+            "SELECT started_at, claim_id FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let started_at = match owner {
+        Some((started_at, Some(owner_claim))) if owner_claim == claim_id => started_at,
+        _ => {
+            // Not an error: the scan really did finish, it simply no longer
+            // owns the row. Loud, because a cooldown that never anchors would
+            // otherwise be invisible.
+            tracing::warn!(
+                user_did,
+                "full scan finished but its claim no longer owns the queue row — no \
+                 cooldown anchor, no ETA sample, no carried-outcome retirement"
+            );
+            return Ok(());
+        }
+    };
+    tx.execute(
+        "INSERT INTO scan_state (user_did, key, value, updated_at)
+         VALUES (?1, 'last_full_scan_finished_at', ?2, datetime('now'))
+         ON CONFLICT(user_did, key) DO UPDATE SET value = ?2, updated_at = datetime('now')",
+        params![user_did, finished_at_rfc3339],
+    )?;
+    // The ETA sample (F1). Read from the row's own `started_at` inside this
+    // transaction: at this moment the queue row still describes the attempt
+    // being fulfilled, and by the time a refresh reuses the row it will not.
+    if let Some(secs) =
+        super::traits::full_scan_duration_secs(started_at.as_deref(), finished_at_rfc3339)
+    {
+        tx.execute(
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
+            params![
+                user_did,
+                super::traits::LAST_FULL_SCAN_DURATION_KEY,
+                secs.to_string()
+            ],
+        )?;
+    }
+    tx.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+        params![user_did, carried_key],
+    )?;
+    if fail_before_commit {
+        // Valid SQL that cannot succeed — `scan_state.value` is NOT NULL — so
+        // the failure happens INSIDE the transaction exactly as a real error
+        // would, and `?` returns without ever reaching the commit.
+        tx.execute(
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES (?1, 'injected_failure_for_test', NULL, datetime('now'))",
+            params![user_did],
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -158,18 +303,20 @@ pub fn save_fingerprint_bundle(
     fingerprint_json: &str,
     post_count: u32,
     embedding: Option<&str>, // pre-serialized JSON array, like save_embedding
+    embedding_model_id: Option<&str>,
     clusters: &[crate::db::models::ClusterCentroid],
 ) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
-        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, updated_at)
-         VALUES (?1, ?2, ?3, ?4, datetime('now'))
+        "INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector, embedding_model_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
          ON CONFLICT(user_did) DO UPDATE SET
             fingerprint_json = ?2,
             post_count = ?3,
             embedding_vector = ?4,
+            embedding_model_id = ?5,
             updated_at = datetime('now')",
-        params![user_did, fingerprint_json, post_count, embedding],
+        params![user_did, fingerprint_json, post_count, embedding, embedding_model_id],
     )?;
     tx.execute(
         "DELETE FROM topic_clusters WHERE user_did = ?1",
@@ -210,14 +357,33 @@ pub fn get_topic_centroids(
     Ok(out)
 }
 
+/// The stored embedding model id for a user's fingerprint (#344). `None` for
+/// a keyword-only fingerprint or a pre-v18 row that predates the column.
+pub fn fingerprint_embedding_model(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    let model_id: Option<Option<String>> = conn
+        .query_row(
+            "SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = ?1",
+            params![user_did],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(model_id.flatten())
+}
+
 // --- Account scores ---
 
-/// Save or update an account's scores for a specific user.
+/// Save or update an account's scores for a specific user. Stamps both
+/// `scoring_generation` (the current `scoring_revision()`) and `valid_until`
+/// (now + 3/7/14 d by confidence tier, #344) — this IS the scoring write
+/// path, so it always stamps from the clock. `import_score` is the only
+/// other writer of these columns, and it never does.
 pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountScore) -> Result<()> {
     let top_posts_json = serde_json::to_string(&score.top_toxic_posts)?;
+    let staleness_days =
+        ScoringConfidence::staleness_days_for_label(score.scoring_confidence.as_deref());
     conn.execute(
-        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence, overlap_legacy)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14, ?15)
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier, posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance, fingerprint_quality, scoring_confidence, overlap_legacy, scoring_generation, valid_until)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), ?10, ?11, ?12, ?13, ?14, ?15, ?16, datetime('now', ?17))
          ON CONFLICT(user_did, did) DO UPDATE SET
             handle = ?3,
             toxicity_score = ?4,
@@ -232,7 +398,9 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             graph_distance = ?12,
             fingerprint_quality = ?13,
             scoring_confidence = ?14,
-            overlap_legacy = ?15",
+            overlap_legacy = ?15,
+            scoring_generation = ?16,
+            valid_until = datetime('now', ?17)",
         params![
             user_did,
             score.did,
@@ -249,31 +417,54 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             score.fingerprint_quality,
             score.scoring_confidence,
             score.overlap_legacy,
+            scoring_revision(),
+            format!("+{staleness_days} days"),
         ],
     )?;
     Ok(())
 }
 
-/// Get all scored accounts for a specific user, ranked by threat score descending.
+/// The fresh predicate, SQLite spelling (#344 R11). Boolean-explicit:
+/// `datetime(NULL)` and `datetime('garbage')` are both NULL, so without
+/// COALESCE the comparison is SQL-unknown and `NOT (...)` stays unknown —
+/// a hidden row that is never counted. COALESCE(…, 0) makes NULL and
+/// malformed values read as "not fresh" in every consumer. Interpolated by
+/// `format!` as a constant, never with user input; values still bind.
+const FRESH_SQL: &str =
+    "scoring_generation = {gen} AND COALESCE(datetime(valid_until) > datetime('now'), 0)";
+
+fn fresh_sql(gen_param: &str) -> String {
+    FRESH_SQL.replace("{gen}", gen_param)
+}
+
+/// Get all scored accounts for a specific user, ranked by threat score
+/// descending, fresh-only (#344 R06/R11) — `did` tie-breaks so paging is
+/// deterministic (#356).
 pub fn get_ranked_threats(
     conn: &Connection,
     user_did: &str,
     min_score: f64,
 ) -> Result<Vec<AccountScore>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
                 posts_analyzed, top_toxic_posts, scored_at, behavioral_signals,
                 graph_distance, fingerprint_quality, scoring_confidence, context_score,
                 overlap_legacy
          FROM account_scores
-         WHERE user_did = ?1 AND threat_score >= ?2
-         ORDER BY threat_score DESC",
-    )?;
+         WHERE user_did = ?1 AND threat_score >= ?2 AND {}
+         ORDER BY threat_score DESC, did",
+        fresh_sql("?3")
+    ))?;
 
-    let rows = stmt.query_map(params![user_did, min_score], |row| {
-        let top_posts_json: String = row.get(7)?;
-        let top_toxic_posts: Vec<ToxicPost> =
-            serde_json::from_str(&top_posts_json).unwrap_or_default();
+    let rows = stmt.query_map(params![user_did, min_score, scoring_revision()], |row| {
+        // NULL (never written by the app's own upsert, but reachable from a
+        // raw INSERT — test fixtures, a hand-patched row) and corrupted JSON
+        // both present as empty (#364) rather than erroring the whole read.
+        let top_posts_json: Option<String> = row.get(7)?;
+        let top_toxic_posts: Vec<ToxicPost> = top_posts_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
         // Recalculate tier from stored score so threshold changes
         // take effect without rescanning.
         let threat_score: Option<f64> = row.get(4)?;
@@ -311,56 +502,202 @@ pub fn get_ranked_threats(
     Ok(accounts)
 }
 
-/// Check if an account's score is stale (older than the given number of days) for a specific user.
-pub fn is_score_stale(
-    conn: &Connection,
-    user_did: &str,
-    did: &str,
-    max_age_days: i64,
-) -> Result<bool> {
-    let mut stmt =
-        conn.prepare("SELECT scored_at FROM account_scores WHERE user_did = ?1 AND did = ?2")?;
-    let result: Option<String> = stmt
-        .query_row(params![user_did, did], |row| row.get(0))
-        .optional()?;
-
-    match result {
-        None => Ok(true), // No score exists — treat as stale
-        Some(scored_at) => {
-            // Compare against current time minus max_age_days
-            let stale: bool = conn.query_row(
-                "SELECT datetime(?1) < datetime('now', ?2)",
-                params![scored_at, format!("-{max_age_days} days")],
-                |row| row.get(0),
-            )?;
-            Ok(stale)
-        }
-    }
+/// Check if an account's score is stale for a specific user (#344): NOT
+/// (`scoring_generation` current AND `valid_until` in the future). A missing
+/// row is stale.
+pub fn is_score_stale(conn: &Connection, user_did: &str, did: &str) -> Result<bool> {
+    let fresh_rows: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND did = ?2 AND {}",
+            fresh_sql("?3")
+        ),
+        params![user_did, did, scoring_revision()],
+        |row| row.get(0),
+    )?;
+    Ok(fresh_rows == 0)
 }
 
-/// Return the DIDs the user has scored within the last `max_age_days` — i.e.
-/// the accounts a per-candidate `is_score_stale` check would call *fresh*
-/// (row exists AND `scored_at >= now - max_age_days`).
+/// Return the DIDs the user has a FRESH score for (#344) — the complement of
+/// `is_score_stale` over a whole user's scores, in one query.
 ///
 /// Discovery loops fetch this set once and test membership in memory instead
-/// of issuing one `is_score_stale` round-trip per candidate (#213). The cutoff
-/// MUST match `is_score_stale` exactly, or candidates get silently re-scored or
-/// skipped; `fresh_set_is_exactly_the_non_stale_dids` guards that.
-pub fn get_fresh_scored_dids(
-    conn: &Connection,
-    user_did: &str,
-    max_age_days: i64,
-) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT did FROM account_scores
-         WHERE user_did = ?1 AND datetime(scored_at) >= datetime('now', ?2)",
-    )?;
+/// of issuing one `is_score_stale` round-trip per candidate (#213). The
+/// predicate MUST match `is_score_stale` exactly, or candidates get silently
+/// re-scored or skipped; `fresh_set_is_exactly_the_non_stale_dids_including_null_and_malformed_expiry`
+/// guards that.
+pub fn get_fresh_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT did FROM account_scores WHERE user_did = ?1 AND {}",
+        fresh_sql("?2")
+    ))?;
     let dids = stmt
-        .query_map(params![user_did, format!("-{max_age_days} days")], |row| {
+        .query_map(params![user_did, scoring_revision()], |row| {
             row.get::<_, String>(0)
         })?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     Ok(dids)
+}
+
+/// Count rows that are NOT fresh for a user (#344) — hidden from
+/// `get_ranked_threats` but never deleted. `NOT (...)` around the
+/// boolean-explicit predicate correctly counts NULL and malformed
+/// `valid_until` as expired (R11): without the inner COALESCE, `NOT
+/// (unknown)` would still be unknown and the row would vanish from both the
+/// fresh AND the expired count.
+pub fn count_expired(conn: &Connection, user_did: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND NOT ({})",
+            fresh_sql("?2")
+        ),
+        params![user_did, scoring_revision()],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Every `account_scores` row for the user, verbatim, RFC3339 timestamps
+/// (#344 R01). See `Database::export_scores`.
+pub fn export_scores(conn: &Connection, user_did: &str) -> Result<Vec<StoredScore>> {
+    let mut stmt = conn.prepare(
+        "SELECT did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+                posts_analyzed, top_toxic_posts, behavioral_signals, graph_distance,
+                fingerprint_quality, scoring_confidence, context_score, overlap_legacy,
+                strftime('%Y-%m-%dT%H:%M:%f+00:00', scored_at),
+                scoring_generation,
+                strftime('%Y-%m-%dT%H:%M:%f+00:00', valid_until),
+                valid_until
+         FROM account_scores WHERE user_did = ?1 ORDER BY did",
+    )?;
+    let rows = stmt
+        .query_map(params![user_did], |row| {
+            // NULL/corrupted top_toxic_posts presents as empty (#364) — same
+            // contract as get_ranked_threats, not a reason to fail the export.
+            let top_posts_json: Option<String> = row.get(7)?;
+            let stored_tier: Option<String> = row.get(5)?;
+            Ok(StoredScore {
+                score: AccountScore {
+                    did: row.get(0)?,
+                    handle: row.get(1)?,
+                    toxicity_score: row.get(2)?,
+                    topic_overlap: row.get(3)?,
+                    threat_score: row.get(4)?,
+                    // Stored tier verbatim — export does not recompute (that is
+                    // the presentation layer's job).
+                    threat_tier: stored_tier,
+                    posts_analyzed: row.get(6)?,
+                    top_toxic_posts: top_posts_json
+                        .as_deref()
+                        .and_then(|j| serde_json::from_str(j).ok())
+                        .unwrap_or_default(),
+                    scored_at: String::new(),
+                    behavioral_signals: row.get(8)?,
+                    graph_distance: row.get(9)?,
+                    fingerprint_quality: row.get(10)?,
+                    scoring_confidence: row.get(11)?,
+                    context_score: row.get(12)?,
+                    overlap_legacy: row.get(13)?,
+                },
+                scored_at: row.get(14)?,
+                scoring_generation: row.get(15)?,
+                // strftime() of NULL is NULL; of unparseable text is NULL too —
+                // the raw column (17) tells the two apart (V2-06).
+                valid_until: match (
+                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, Option<String>>(17)?,
+                ) {
+                    (Some(t), _) => ExportedExpiry::At(t),
+                    (None, None) => ExportedExpiry::Missing,
+                    (None, Some(raw)) => ExportedExpiry::Invalid(raw),
+                },
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Write an exported row back. `datetime(?)` normalises the RFC3339 text to
+/// this backend's `YYYY-MM-DD HH:MM:SS` form (whole seconds — SQLite's
+/// column form; a Postgres source's microseconds are truncated here, and
+/// only here). A `Missing`/`Invalid` expiry becomes `scored_at`: expired the
+/// instant it was scored, never renewed, never dropped (V2-06). Idempotent.
+pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Result<()> {
+    let s = &row.score;
+    let top_posts_json = serde_json::to_string(&s.top_toxic_posts)?;
+    let valid_until = match &row.valid_until {
+        ExportedExpiry::At(t) => t.clone(),
+        ExportedExpiry::Missing => row.scored_at.clone(),
+        ExportedExpiry::Invalid(raw) => {
+            tracing::warn!(did = %s.did, raw, "invalid expiry on export — importing as expired-when-scored");
+            row.scored_at.clone()
+        }
+    };
+    conn.execute(
+        "INSERT INTO account_scores (user_did, did, handle, toxicity_score, topic_overlap, threat_score, threat_tier,
+             posts_analyzed, top_toxic_posts, scored_at, behavioral_signals, context_score, graph_distance,
+             fingerprint_quality, scoring_confidence, overlap_legacy, scoring_generation, valid_until)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime(?10), ?11, ?12, ?13, ?14, ?15, ?16, ?17, datetime(?18))
+         ON CONFLICT(user_did, did) DO UPDATE SET
+             handle = ?3, toxicity_score = ?4, topic_overlap = ?5, threat_score = ?6, threat_tier = ?7,
+             posts_analyzed = ?8, top_toxic_posts = ?9, scored_at = datetime(?10), behavioral_signals = ?11,
+             context_score = ?12, graph_distance = ?13, fingerprint_quality = ?14, scoring_confidence = ?15,
+             overlap_legacy = ?16, scoring_generation = ?17, valid_until = datetime(?18)",
+        params![
+            user_did, s.did, s.handle, s.toxicity_score, s.topic_overlap, s.threat_score, s.threat_tier,
+            s.posts_analyzed, top_posts_json, row.scored_at, s.behavioral_signals, s.context_score,
+            s.graph_distance, s.fingerprint_quality, s.scoring_confidence, s.overlap_legacy,
+            row.scoring_generation, valid_until,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Public so the index test can EXPLAIN exactly this statement (R12).
+/// Params: ?1 user_did, ?2 ThreatTier::ELEVATED_MIN, ?3 a signed SQLite date
+/// modifier ("+2 days", "-1 days"), ?4 scoring_revision().
+/// COALESCE(…, 1): a NULL or malformed valid_until is expired, hence eligible
+/// — the mirror of FRESH_SQL's COALESCE(…, 0) (R11).
+pub const REFRESH_CANDIDATES_SQL: &str = "SELECT did, handle, graph_distance FROM account_scores
+     WHERE user_did = ?1
+       AND threat_score >= ?2
+       AND (scoring_generation != ?4
+            OR COALESCE(datetime(valid_until) <= datetime('now', ?3), 1))
+     ORDER BY threat_score DESC, did";
+
+/// The nightly refresh job's candidate source (#344 Task 7) — see
+/// `Database::list_refresh_candidates` for the eligibility rule.
+pub fn list_refresh_candidates(
+    conn: &Connection,
+    user_did: &str,
+    horizon_days: i64,
+) -> Result<Vec<RefreshCandidate>> {
+    let mut stmt = conn.prepare(REFRESH_CANDIDATES_SQL)?;
+    let rows = stmt
+        .query_map(
+            params![
+                user_did,
+                ThreatTier::ELEVATED_MIN,
+                // `{:+}`, not a literal "+": `format!("+{horizon_days} days")`
+                // renders -1 as "+-1 days", which SQLite cannot parse. The
+                // modifier then evaluates to NULL, COALESCE(…, 1) returns 1
+                // for every row, and BOTH the expiry and generation filters
+                // vanish — a negative horizon would select every High/Elevated
+                // row instead of a narrower set. Postgres's
+                // `make_interval(days => -1)` narrows correctly, so the old
+                // spelling also made the two backends disagree.
+                format!("{horizon_days:+} days"),
+                scoring_revision()
+            ],
+            |r| {
+                Ok(RefreshCandidate {
+                    did: r.get(0)?,
+                    handle: r.get(1)?,
+                    graph_distance: r.get(2)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 // --- Amplification events ---
@@ -1402,15 +1739,20 @@ pub fn count_scan_skips(conn: &Connection, user_did: &str) -> Result<i64> {
     Ok(count)
 }
 
-/// Count accounts whose `threat_tier` is `'NotAssessed'` for a user (#222).
+/// Count accounts whose `threat_tier` is `'NotAssessed'` for a user (#222),
+/// fresh-only (#344 R06) — matches `get_ranked_threats`'s freshness gate so
+/// the two counts stay consistent for the same set of visible rows.
 ///
 /// `get_ranked_threats` filters on `threat_score >= ?`, which always excludes
 /// NULL-score NotAssessed rows, so this can't be derived from that result
 /// set — it needs its own query.
 pub fn count_not_assessed(conn: &Connection, user_did: &str) -> Result<i64> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed'",
-        params![user_did],
+        &format!(
+            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND threat_tier = 'NotAssessed' AND {}",
+            fresh_sql("?2")
+        ),
+        params![user_did, scoring_revision()],
         |row| row.get(0),
     )?;
     Ok(count)
@@ -1460,23 +1802,333 @@ pub fn clear_scan_skips(conn: &Connection, user_did: &str) -> Result<()> {
 // over-admit, so the transaction below is BEGIN IMMEDIATE: the second admitter
 // gets SQLITE_BUSY — a loud error — instead of quietly admitting past the cap.
 
-/// Add a user to the scan queue. Idempotent — a second call while queued or
-/// running is a no-op; a finished ('done'/'failed') row is reset so the user
-/// can scan again. Mirrors PgDatabase::enqueue_scan.
-pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<()> {
+/// Re-queue a finished row for the refresh job and for the scheduling tick
+/// (#344 R04/V3-03).
+///
+/// Owed full work is re-queued as **full**, not as a refresh: a user whose
+/// full scan was interrupted is still owed that full scan, and a nightly tick
+/// must not quietly downgrade it to a partial re-score. Queued and running
+/// rows are excluded at the write itself, so a manual enqueue or an admission
+/// landing between a caller's read and this statement survives untouched
+/// (V2-02).
+///
+/// `?1` = user_did, `?2` = now (RFC3339). Task 6's tick binds the same two.
+pub const REFRESH_ENQUEUE_SQL: &str = "INSERT INTO scan_queue (user_did, status, kind, enqueued_at)
+     VALUES (?1, 'queued', 'refresh', ?2)
+     ON CONFLICT(user_did) DO UPDATE SET
+         status = 'queued',
+         kind = CASE WHEN scan_queue.full_requested_at IS NOT NULL THEN 'full' ELSE 'refresh' END,
+         enqueued_at = ?2,
+         started_at = NULL, finished_at = NULL,
+         lease_expires = NULL, last_error = NULL,
+         claim_id = NULL, completion = NULL
+     WHERE scan_queue.status IN ('done', 'failed')";
+
+/// Add a user to the scan queue as a FULL scan. Idempotent — a second call
+/// while queued or running changes no position; a finished ('done'/'failed')
+/// row is reset so the user can scan again. Mirrors PgDatabase::enqueue_scan.
+pub fn enqueue_scan(conn: &Connection, user_did: &str) -> Result<EnqueueOutcome> {
+    // Immediate, so the state read and the write it decides cannot straddle
+    // another writer: the outcome this returns is what the handler tells the
+    // user, and a stale read would name the wrong one.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     let now = chrono::Utc::now().to_rfc3339();
+    let current: Option<(String, String)> = tx
+        .query_row(
+            "SELECT status, kind FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    // Every branch records the obligation (V3-03): the user asked for a full
+    // scan, and only a full scan that COMPLETES may clear this.
+    let outcome = match current.as_ref().map(|(s, k)| (s.as_str(), k.as_str())) {
+        None | Some(("done", _)) | Some(("failed", _)) => {
+            tx.execute(
+                "INSERT INTO scan_queue (user_did, status, kind, enqueued_at, full_requested_at)
+                 VALUES (?1, 'queued', 'full', ?2, ?2)
+                 ON CONFLICT(user_did) DO UPDATE SET
+                     status = 'queued', kind = 'full', enqueued_at = ?2,
+                     started_at = NULL, finished_at = NULL, lease_expires = NULL,
+                     last_error = NULL, claim_id = NULL, completion = NULL,
+                     full_requested_at = COALESCE(scan_queue.full_requested_at, ?2)",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::Queued
+        }
+        Some(("queued", "refresh")) => {
+            // In place: the user keeps the position the refresh already held.
+            tx.execute(
+                "UPDATE scan_queue
+                 SET kind = 'full', full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::Queued
+        }
+        Some(("queued", _)) => {
+            tx.execute(
+                "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::AlreadyQueued
+        }
+        Some(("running", "refresh")) => {
+            // Honoured when the refresh finishes (finish_queued_scan). The
+            // first request's time wins so repeated clicks do not move it.
+            tx.execute(
+                "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::QueuedAfterRefresh
+        }
+        Some(("running", _)) => {
+            tx.execute(
+                "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+                 WHERE user_did = ?1",
+                params![user_did, now],
+            )?;
+            EnqueueOutcome::AlreadyRunning
+        }
+        Some((other, _)) => anyhow::bail!("scan_queue.status holds an unknown value {other:?}"),
+    };
+    tx.commit()?;
+    Ok(outcome)
+}
+
+/// `Database::request_full_after_refresh` — see the trait for the contract.
+pub fn request_full_after_refresh(
+    conn: &Connection,
+    user_did: &str,
+    claim_id: &str,
+) -> Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = conn.execute(
+        "UPDATE scan_queue SET full_requested_at = COALESCE(full_requested_at, ?2)
+         WHERE user_did = ?1 AND status = 'running' AND kind = 'refresh' AND claim_id = ?3",
+        params![user_did, now, claim_id],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Same statement the tick uses (`REFRESH_ENQUEUE_SQL`, Task 6): owed full
+/// work is re-queued as full, otherwise a refresh; queued/running rows are
+/// never touched.
+pub fn enqueue_refresh_scan(conn: &Connection, user_did: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(REFRESH_ENQUEUE_SQL, params![user_did, now])?;
+    Ok(())
+}
+
+// --- Refresh schedule (#343 §4.4, #344) ---
+
+/// When the refresh tick may next consider this user.
+pub fn next_refresh_at(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT next_refresh_at FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// The revision a completed run has proven for this user.
+pub fn refreshed_generation(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT refreshed_generation FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// The revision an attempt has already been scheduled for.
+pub fn refresh_attempted_generation(conn: &Connection, user_did: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT refresh_attempted_generation FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+pub fn schedule_refresh(conn: &Connection, user_did: &str, at_rfc3339: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO scan_queue (user_did, status, enqueued_at)
-         VALUES (?1, 'queued', ?2)
-         ON CONFLICT(user_did) DO UPDATE SET
-             status = 'queued', enqueued_at = ?2,
-             started_at = NULL, finished_at = NULL,
-             lease_expires = NULL, last_error = NULL,
-             claim_id = NULL
-         WHERE status IN ('done', 'failed')",
-        params![user_did, now],
+        "UPDATE users SET next_refresh_at = ?2 WHERE did = ?1",
+        params![user_did, at_rfc3339],
     )?;
     Ok(())
+}
+
+/// One statement for both facts (V4-01): the deadline and "an attempt for
+/// this revision has happened". Split, the tick could claim the user between
+/// the two writes and undo the backoff it was told to respect.
+pub fn schedule_retry_at(
+    conn: &Connection,
+    user_did: &str,
+    at_rfc3339: &str,
+    attempted_generation: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+        params![user_did, at_rfc3339, attempted_generation],
+    )?;
+    Ok(())
+}
+
+/// `Database::apply_refresh_schedule` — see the trait for the contract.
+pub fn apply_refresh_schedule(
+    conn: &Connection,
+    user_did: &str,
+    claim_id: &str,
+    write: super::traits::RefreshScheduleWrite<'_>,
+) -> Result<bool> {
+    use super::traits::RefreshScheduleWrite;
+    // Immediate, as in `finish_full_scan_state`: this reads ownership and then
+    // writes on its strength, and a Deferred transaction would take no write
+    // lock until its first UPDATE, leaving room for a reclaim in between.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let owner: Option<Option<String>> = tx
+        .query_row(
+            "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if !matches!(owner, Some(Some(ref owner)) if owner == claim_id) {
+        // Dropping the transaction rolls it back; nothing was written.
+        return Ok(false);
+    }
+    match write {
+        RefreshScheduleWrite::Success {
+            next_at_rfc3339,
+            generation,
+        } => {
+            // Deadline and proof together: a proof without a deadline would
+            // hide the user from the tick's revision clause with nothing
+            // scheduled to bring them back.
+            tx.execute(
+                "UPDATE users
+                    SET next_refresh_at = ?2,
+                        refreshed_generation = ?3,
+                        refresh_attempted_generation = ?3
+                  WHERE did = ?1",
+                params![user_did, next_at_rfc3339, generation],
+            )?;
+        }
+        RefreshScheduleWrite::Retry {
+            at_rfc3339,
+            attempted_generation,
+        } => {
+            tx.execute(
+                "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+                params![user_did, at_rfc3339, attempted_generation],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
+/// Proof. Sets BOTH columns (V3-04): a proven revision is also an attempted
+/// one, so the tick's revision clause stays quiet after a manual full scan.
+pub fn mark_refreshed_generation(
+    conn: &Connection,
+    user_did: &str,
+    generation: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET refreshed_generation = ?2, refresh_attempted_generation = ?2 WHERE did = ?1",
+        params![user_did, generation],
+    )?;
+    Ok(())
+}
+
+/// Attempt only (used by `migrate` to copy a pending attempt verbatim).
+pub fn mark_refresh_attempted_generation(
+    conn: &Connection,
+    user_did: &str,
+    generation: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET refresh_attempted_generation = ?2 WHERE did = ?1",
+        params![user_did, generation],
+    )?;
+    Ok(())
+}
+
+/// The tick's SELECT. Params: `?1` now (RFC3339), `?2` current revision,
+/// `?3` limit.
+///
+/// Eligibility (V4-01): score rows OR an owed full scan. A first scan that
+/// failed before its first write has no scores but does have
+/// `full_requested_at` on its finished row — it must be retried. Users with
+/// neither are never selected. Timing is unchanged: `schedule_retry` stamps
+/// `refresh_attempted_generation`, so the revision clause is quiet until the
+/// deadline for retries of either kind.
+///
+/// The `NOT EXISTS` is an optimisation — it keeps the batch from being spent
+/// on users who are already working. The guarantee is
+/// [`REFRESH_ENQUEUE_SQL`]'s `WHERE`, evaluated at the write.
+pub const REFRESH_DUE_SQL: &str = "SELECT u.did FROM users u
+     WHERE (EXISTS (SELECT 1 FROM account_scores s WHERE s.user_did = u.did)
+            OR EXISTS (SELECT 1 FROM scan_queue o
+                       WHERE o.user_did = u.did AND o.full_requested_at IS NOT NULL))
+       AND NOT EXISTS (SELECT 1 FROM scan_queue q
+                       WHERE q.user_did = u.did AND q.status IN ('queued', 'running'))
+       AND ((u.next_refresh_at IS NOT NULL AND u.next_refresh_at <= ?1)
+            OR u.refresh_attempted_generation IS NULL
+            OR u.refresh_attempted_generation != ?2)
+     ORDER BY u.next_refresh_at, u.did
+     LIMIT ?3";
+
+/// See [`crate::db::Database::claim_and_enqueue_due_refreshes`].
+///
+/// Immediate transaction: the write lock is taken before the select, so two
+/// ticks in one process (or the CLI and the web) serialise here rather than
+/// both deciding from the same snapshot.
+pub fn claim_and_enqueue_due_refreshes(
+    conn: &Connection,
+    now_rfc3339: &str,
+    next_rfc3339: &str,
+    current_generation: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let due: Vec<String> = {
+        let mut stmt = tx.prepare(REFRESH_DUE_SQL)?;
+        let dids = stmt
+            .query_map(
+                params![now_rfc3339, current_generation, limit as i64],
+                |r| r.get::<_, String>(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        dids
+    };
+    let mut delivered = Vec::with_capacity(due.len());
+    for did in due {
+        let affected = tx.execute(REFRESH_ENQUEUE_SQL, params![did, now_rfc3339])?;
+        if affected == 0 {
+            // The row changed under us (queued/running now). Leave the
+            // schedule alone: whatever is running reschedules on completion.
+            continue;
+        }
+        tx.execute(
+            "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
+            params![did, next_rfc3339, current_generation],
+        )?;
+        delivered.push(did);
+    }
+    tx.commit()?;
+    Ok(delivered)
 }
 
 /// Claim the oldest queued scan if fewer than `limit` are running.
@@ -1506,21 +2158,26 @@ pub fn claim_next_scan(
     // a bare `ORDER BY enqueued_at` falls back to rowid — so the row admitted
     // here would not be the row `list_scan_queue` displays as next. One total
     // order for display, position, and admission (#271).
-    let did: Option<String> = tx
+    // No `kind` in the ORDER BY: the queue is FIFO ACROSS kinds (#271), so an
+    // older refresh is admitted before a newer full scan. A user who wants to
+    // jump that queue upgrades their own row, which keeps its place.
+    let next: Option<(String, String)> = tx
         .query_row(
-            "SELECT user_did FROM scan_queue
+            "SELECT user_did, kind FROM scan_queue
              WHERE status = 'queued'
              ORDER BY enqueued_at, user_did
              LIMIT 1",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
 
-    let Some(did) = did else {
+    let Some((did, kind)) = next else {
         tx.commit()?;
         return Ok(None);
     };
+    let kind = ScanKind::from_str(&kind)
+        .with_context(|| format!("scan_queue.kind holds an unknown value {kind:?}"))?;
 
     let started_at = chrono::Utc::now();
     let lease_expires = started_at + chrono::Duration::seconds(lease_secs);
@@ -1540,11 +2197,25 @@ pub fn claim_next_scan(
     Ok(Some(ScanClaim {
         user_did: did,
         claim_id,
+        kind,
     }))
 }
 
 /// Extend a running scan's lease, only if `claim_id` still owns the row.
 /// Returns false when it does not. Mirrors PgDatabase::heartbeat_scan.
+/// See [`crate::db::Database::scan_claim_is_current`]. Read-only, so no
+/// transaction: a single statement is already atomic on SQLite.
+pub fn scan_claim_is_current(conn: &Connection, user_did: &str, claim_id: &str) -> Result<bool> {
+    let owner: Option<Option<String>> = conn
+        .query_row(
+            "SELECT claim_id FROM scan_queue WHERE user_did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(matches!(owner, Some(Some(owner)) if owner == claim_id))
+}
+
 pub fn heartbeat_scan(
     conn: &Connection,
     user_did: &str,
@@ -1568,15 +2239,41 @@ pub fn finish_queued_scan(
     conn: &Connection,
     user_did: &str,
     claim_id: &str,
+    completion: FinishCompletion,
     error: Option<&str>,
 ) -> Result<bool> {
     let now = chrono::Utc::now().to_rfc3339();
     let status = if error.is_none() { "done" } else { "failed" };
+    // Fulfilled = the user's request was carried out, verified or not (V6-01).
+    let fulfilled = completion.fulfils_full_request();
+    // One statement, one WHERE (status='running' AND claim_id) — the fencing
+    // rule is unchanged. Three shapes, all decided from the row's PRE-update
+    // values (SQLite evaluates every CASE against them):
+    //   refresh + owed full  → hand over: queued full, obligation kept (R09)
+    //   full + fulfilled     → done, obligation cleared (V3-03)
+    //   anything else        → done/failed, obligation kept
     let changed = conn.execute(
         "UPDATE scan_queue
-         SET status = ?3, finished_at = ?4, lease_expires = NULL, last_error = ?5
+         SET status = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN 'queued' ELSE ?3 END,
+             kind = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN 'full' ELSE kind END,
+             enqueued_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN full_requested_at ELSE enqueued_at END,
+             started_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE started_at END,
+             finished_at = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE ?4 END,
+             claim_id = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE claim_id END,
+             completion = CASE WHEN kind = 'refresh' AND full_requested_at IS NOT NULL THEN NULL ELSE ?6 END,
+             full_requested_at = CASE WHEN kind = 'full' AND ?7 THEN NULL ELSE full_requested_at END,
+             lease_expires = NULL,
+             last_error = ?5
          WHERE user_did = ?1 AND status = 'running' AND claim_id = ?2",
-        params![user_did, claim_id, status, now, error],
+        params![
+            user_did,
+            claim_id,
+            status,
+            now,
+            error,
+            completion.as_str(),
+            fulfilled
+        ],
     )?;
     Ok(changed > 0)
 }
@@ -1636,29 +2333,52 @@ pub fn list_scan_queue(conn: &Connection) -> Result<Vec<ScanQueueRow>> {
         "SELECT user_did, status, enqueued_at, started_at, finished_at, last_error,
                 (SELECT COUNT(*) FROM scan_queue q2
                   WHERE q2.status = 'queued'
-                    AND (q2.enqueued_at, q2.user_did) <= (q.enqueued_at, q.user_did))
+                    AND (q2.enqueued_at, q2.user_did) <= (q.enqueued_at, q.user_did)),
+                kind, full_requested_at, completion
          FROM scan_queue q
          ORDER BY q.enqueued_at ASC, q.user_did ASC",
     )?;
     let rows = stmt.query_map([], |row| {
         let status: String = row.get(1)?;
         let raw_position: i64 = row.get(6)?;
-        Ok(ScanQueueRow {
-            user_did: row.get(0)?,
-            position: if status == "queued" { raw_position } else { 0 },
-            status,
-            enqueued_at: row.get(2)?,
-            started_at: row.get(3)?,
-            finished_at: row.get(4)?,
-            last_error: row.get(5)?,
-        })
+        Ok((
+            ScanQueueRow {
+                user_did: row.get(0)?,
+                position: if status == "queued" { raw_position } else { 0 },
+                status,
+                enqueued_at: row.get(2)?,
+                started_at: row.get(3)?,
+                finished_at: row.get(4)?,
+                last_error: row.get(5)?,
+                // Placeholders: `kind` and `completion` are validated outside
+                // the rusqlite closure, whose error type cannot carry an
+                // anyhow context string.
+                kind: ScanKind::Full,
+                full_requested_at: row.get(8)?,
+                completion: None,
+            },
+            row.get::<_, String>(7)?,
+            row.get::<_, Option<String>>(9)?,
+        ))
     })?;
     // Collected with `?` rather than `filter_map(ok)`: a row that fails to map
     // would otherwise vanish from an operator's view of the queue, which is
-    // the exact blindness #288 is removing.
+    // the exact blindness #288 is removing. An unrecognised `kind` or
+    // `completion` is an error for the same reason — rendering it as an
+    // ordinary full scan would hide the row this binary cannot interpret.
     let mut out = Vec::new();
     for row in rows {
-        out.push(row?);
+        let (mut row, kind, completion) = row?;
+        row.kind = ScanKind::from_str(&kind)
+            .with_context(|| format!("scan_queue.kind holds an unknown value {kind:?}"))?;
+        row.completion =
+            match completion {
+                None => None,
+                Some(c) => Some(FinishCompletion::from_str(&c).with_context(|| {
+                    format!("scan_queue.completion holds an unknown value {c:?}")
+                })?),
+            };
+        out.push(row);
     }
     Ok(out)
 }
@@ -1689,56 +2409,34 @@ pub fn scan_queue_entry(
     };
     let position = if status == "queued" { raw_position } else { 0 };
 
-    // Rolling median over the last 20 completed scans. None until any finish,
-    // so ETA is absent rather than fabricated on a fresh install.
+    // Rolling median over the 20 most recently recorded full-scan durations.
+    // None until any full scan is fulfilled, so ETA is absent rather than
+    // fabricated on a fresh install.
     //
-    // Seconds are kept FRACTIONAL, matching the Postgres backend's
-    // `EXTRACT(EPOCH FROM (finished_at - started_at))`. This used to be
-    // `num_seconds()`, which truncates, so the same scan history quoted a
-    // different ETA either side of a backend switch. Truncating is not a
-    // harmless rounding difference once `eta_seconds` multiplies the median by
-    // the batch count: a 90.6s median eight batches out is 724s here and 720s
-    // there. Rounding both would have to throw away precision Postgres already
-    // has, so the SQLite side gains it instead.
+    // The sample comes from `scan_state`, NOT from `scan_queue` (#344 F1).
+    // There is one queue row per user and a refresh enqueue resets its
+    // `started_at`/`finished_at` and sets `kind = 'refresh'`, so a median read
+    // from the queue would go permanently empty the first night the refresh
+    // job runs. `finish_full_scan_state` writes one durable sample per user
+    // instead, for every full scan the user's request was fulfilled by —
+    // never for a refresh and never for a resumable attempt, whose duration is
+    // only the time until it gave up.
     //
-    // Errors propagate with `?` rather than being dropped by `filter_map(ok)`:
-    // a corrupt row or an unparseable timestamp would otherwise silently shrink
-    // the sample and skew the median instead of surfacing.
-    let mut durations: Vec<f64> = Vec::new();
+    // `updated_at DESC` is the "most recent 20" the queue's `finished_at DESC`
+    // used to express; `user_did` breaks the tie so the window is stable
+    // within SQLite's one-second `datetime('now')` resolution.
+    let mut values: Vec<String> = Vec::new();
     let mut stmt = conn.prepare(
-        "SELECT started_at, finished_at FROM scan_queue
-         WHERE status = 'done' AND started_at IS NOT NULL
-         ORDER BY finished_at DESC LIMIT 20",
+        "SELECT value FROM scan_state WHERE key = ?1
+         ORDER BY updated_at DESC, user_did DESC LIMIT 20",
     )?;
-    let rows = stmt.query_map([], |row| {
-        let started_at: String = row.get(0)?;
-        let finished_at: String = row.get(1)?;
-        Ok((started_at, finished_at))
+    let rows = stmt.query_map(params![super::traits::LAST_FULL_SCAN_DURATION_KEY], |row| {
+        row.get::<_, String>(0)
     })?;
     for row in rows {
-        let (s, f) = row?;
-        let s = chrono::DateTime::parse_from_rfc3339(&s)
-            .with_context(|| format!("scan_queue.started_at is not RFC3339: {s}"))?;
-        let f = chrono::DateTime::parse_from_rfc3339(&f)
-            .with_context(|| format!("scan_queue.finished_at is not RFC3339: {f}"))?;
-        durations.push((f - s).as_seconds_f64());
+        values.push(row?);
     }
-
-    let median = if durations.is_empty() {
-        None
-    } else {
-        // `total_cmp`, not `partial_cmp().unwrap()`: durations are finite by
-        // construction, but a total order needs no unwrap to say so.
-        durations.sort_by(f64::total_cmp);
-        let mid = durations.len() / 2;
-        // Averaging the two middle values on an even sample is what
-        // PERCENTILE_CONT(0.5) does, so the backends agree here too.
-        Some(if durations.len().is_multiple_of(2) {
-            (durations[mid - 1] + durations[mid]) / 2.0
-        } else {
-            durations[mid]
-        })
-    };
+    let median = super::traits::median_scan_duration_secs(values);
 
     let eta_seconds = super::traits::eta_seconds(&status, position, concurrency_limit, median);
 
@@ -2705,7 +3403,7 @@ mod tests {
         let conn = test_db();
 
         // No score — should be stale
-        assert!(is_score_stale(&conn, TEST_USER, "did:plc:abc", 7).unwrap());
+        assert!(is_score_stale(&conn, TEST_USER, "did:plc:abc").unwrap());
 
         let score = AccountScore {
             did: "did:plc:abc".to_string(),
@@ -2727,7 +3425,7 @@ mod tests {
         upsert_account_score(&conn, TEST_USER, &score).unwrap();
 
         // Just scored — should not be stale
-        assert!(!is_score_stale(&conn, TEST_USER, "did:plc:abc", 7).unwrap());
+        assert!(!is_score_stale(&conn, TEST_USER, "did:plc:abc").unwrap());
     }
 
     #[test]
@@ -2882,7 +3580,14 @@ mod tests {
             "a stale claim must not extend the new owner's lease"
         );
         assert!(
-            !finish_queued_scan(&conn, QUEUE_USER_A, &a.claim_id, None).unwrap(),
+            !finish_queued_scan(
+                &conn,
+                QUEUE_USER_A,
+                &a.claim_id,
+                FinishCompletion::Complete,
+                None
+            )
+            .unwrap(),
             "a stale claim must not finish the new owner's scan"
         );
         assert_eq!(
@@ -2896,7 +3601,14 @@ mod tests {
 
         // B, holding the live token, succeeds on both surfaces.
         assert!(heartbeat_scan(&conn, QUEUE_USER_A, &b.claim_id, 120).unwrap());
-        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &b.claim_id, None).unwrap());
+        assert!(finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &b.claim_id,
+            FinishCompletion::Complete,
+            None
+        )
+        .unwrap());
     }
 
     /// The admitter's only way to tell an idle queue from a wedged one —
@@ -2935,7 +3647,14 @@ mod tests {
         );
 
         // Finished rows are neither waiting nor holding a slot.
-        finish_queued_scan(&conn, &claim.user_did, &claim.claim_id, None).unwrap();
+        finish_queued_scan(
+            &conn,
+            &claim.user_did,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
         assert_eq!(
             scan_queue_depth(&conn).unwrap(),
             ScanQueueDepth {
@@ -2951,9 +3670,23 @@ mod tests {
         let conn = test_db();
         enqueue_scan(&conn, QUEUE_USER_A).unwrap();
         let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        assert!(finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap());
+        assert!(finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None
+        )
+        .unwrap());
         assert!(
-            !finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap(),
+            !finish_queued_scan(
+                &conn,
+                QUEUE_USER_A,
+                &claim.claim_id,
+                FinishCompletion::Complete,
+                None
+            )
+            .unwrap(),
             "the row is no longer running, so a second finish must be a no-op"
         );
     }
@@ -2963,7 +3696,14 @@ mod tests {
         let conn = test_db();
         enqueue_scan(&conn, QUEUE_USER_A).unwrap();
         let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+        finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            &claim.claim_id,
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
         let done_at = scan_queue_entry(&conn, QUEUE_USER_A, 1)
             .unwrap()
             .unwrap()
@@ -3106,10 +3846,8 @@ mod tests {
     fn eta_is_none_for_non_queued_status_even_with_a_median_available() {
         let conn = test_db();
 
-        // Seed a finished scan so a median exists.
-        enqueue_scan(&conn, QUEUE_USER_A).unwrap();
-        let claim = claim_next_scan(&conn, 1, 120).unwrap().unwrap();
-        finish_queued_scan(&conn, QUEUE_USER_A, &claim.claim_id, None).unwrap();
+        // Seed a full-scan duration sample so a median exists.
+        seed_completed_scan(&conn, "did:plc:done000000000000000", 600.0);
 
         // A running row, with the median now available, must still report
         // no ETA — a running scan's remaining time is unknown.
@@ -3135,10 +3873,11 @@ mod tests {
         );
     }
 
-    /// Fractional seconds in the completed-scan history must survive into the
-    /// median, because the Postgres backend's `EXTRACT(EPOCH FROM ...)` keeps
-    /// them. `num_seconds()` truncated, so the same history quoted a different
-    /// ETA either side of a backend switch.
+    /// Fractional seconds in the recorded duration history must survive into
+    /// the median. Both backends parse the stored `scan_state` value as `f64`
+    /// and average the two middle values on an even sample, so truncating
+    /// anywhere — as the old SQLite `num_seconds()` did — makes the same
+    /// history quote a different ETA either side of a backend switch.
     ///
     /// The position is deliberately 2, not 1: at one batch the multiplication
     /// hides the difference (90.5 and 90.0 both truncate to 90). At two
@@ -3167,20 +3906,177 @@ mod tests {
         );
     }
 
-    /// Insert a finished `scan_queue` row whose duration is exactly
-    /// `duration_secs`. Written directly rather than via
-    /// `claim_next_scan`/`finish_queued_scan` because those stamp wall-clock
-    /// times, and this needs a sub-second duration it can name.
+    /// Record a full-scan duration sample of exactly `duration_secs`, the way
+    /// `finish_full_scan_state` does.
+    ///
+    /// Written straight into `scan_state` rather than by running a scan,
+    /// because a real one stamps wall-clock times and these tests need a
+    /// duration they can name — including a sub-second one, which the writer
+    /// itself rounds to whole seconds but the reader parses as `f64`.
+    ///
+    /// Since #344 F1 this is the ONLY population the ETA median is drawn from:
+    /// seeding a `done` `scan_queue` row is invisible to it.
     fn seed_completed_scan(conn: &Connection, user_did: &str, duration_secs: f64) {
-        let started = chrono::DateTime::parse_from_rfc3339("2026-08-06T00:00:00+00:00").unwrap();
-        let finished =
-            started + chrono::TimeDelta::nanoseconds((duration_secs * 1e9).round() as i64);
         conn.execute(
-            "INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
-             VALUES (?1, 'done', ?2, ?2, ?3)",
-            params![user_did, started.to_rfc3339(), finished.to_rfc3339()],
+            "INSERT INTO scan_state (user_did, key, value, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))",
+            params![
+                user_did,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY,
+                duration_secs.to_string()
+            ],
         )
         .unwrap();
+    }
+
+    /// #344 F1: a fulfilled full scan records its own duration, derived inside
+    /// the marker transaction from the queue row's `started_at` — the last
+    /// moment that value still describes this attempt.
+    #[test]
+    fn a_fulfilled_full_scan_records_its_duration_for_the_eta_median() {
+        let conn = test_db();
+        // A running row with a chosen start, so the derived duration is a
+        // number this test can name rather than a wall-clock near-zero.
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+             VALUES (?1, 'running', 'full', 'claim-1', ?2, ?2)",
+            params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
+        )
+        .unwrap();
+
+        // Production order: the marker is written while the row is still
+        // running, then the row is finished.
+        finish_full_scan_state(
+            &conn,
+            QUEUE_USER_A,
+            "2026-09-10T01:00:00+00:00",
+            "full_carried_completion",
+            "claim-1",
+        )
+        .unwrap();
+        assert_eq!(
+            get_scan_state(
+                &conn,
+                QUEUE_USER_A,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .unwrap()
+            .as_deref(),
+            Some("3600"),
+            "one hour of full scan, in whole seconds"
+        );
+        finish_queued_scan(
+            &conn,
+            QUEUE_USER_A,
+            "claim-1",
+            FinishCompletion::Complete,
+            None,
+        )
+        .unwrap();
+
+        enqueue_scan(&conn, QUEUE_USER_B).unwrap();
+        let entry = scan_queue_entry(&conn, QUEUE_USER_B, 1).unwrap().unwrap();
+        assert_eq!(
+            entry.eta_seconds,
+            Some(3600),
+            "the median is the recorded sample"
+        );
+    }
+
+    /// #344 F1: with no `started_at` there is nothing to measure, and a made-up
+    /// sample would skew every queued user's ETA. The marker is still written.
+    #[test]
+    fn a_full_scan_with_no_start_time_records_no_duration() {
+        let conn = test_db();
+        // Running under this worker's claim — the fence below requires
+        // ownership — but with no `started_at` to measure.
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at)
+             VALUES (?1, 'running', 'full', 'claim-1', ?2)",
+            params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
+        )
+        .unwrap();
+
+        finish_full_scan_state(
+            &conn,
+            QUEUE_USER_A,
+            "2026-09-10T01:00:00+00:00",
+            "full_carried_completion",
+            "claim-1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            get_scan_state(
+                &conn,
+                QUEUE_USER_A,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .unwrap(),
+            None
+        );
+        assert!(
+            get_scan_state(&conn, QUEUE_USER_A, "last_full_scan_finished_at")
+                .unwrap()
+                .is_some(),
+            "the cooldown anchor does not depend on the sample"
+        );
+    }
+
+    /// #344 F2: `finish_full_scan_state` is ONE transaction. With a failure
+    /// injected before the commit, neither the cooldown anchor nor the
+    /// duration sample may survive, and the carried key must still be there.
+    ///
+    /// Without the transaction (or with a commit between the statements) the
+    /// marker is already on disk when the failure lands, and this goes red —
+    /// which is the whole point: the happy-path test cannot tell a
+    /// transaction from three independent writes.
+    #[test]
+    fn a_failure_inside_finish_full_scan_state_rolls_back_every_write() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO scan_queue (user_did, status, kind, claim_id, enqueued_at, started_at)
+             VALUES (?1, 'running', 'full', 'claim-1', ?2, ?2)",
+            params![QUEUE_USER_A, "2026-09-10T00:00:00+00:00"],
+        )
+        .unwrap();
+        set_scan_state(&conn, QUEUE_USER_A, "full_carried_completion", "whatever").unwrap();
+
+        let err = finish_full_scan_state_failing_for_test(
+            &conn,
+            QUEUE_USER_A,
+            "2026-09-10T01:00:00+00:00",
+            "full_carried_completion",
+            "claim-1",
+        )
+        .expect_err("the injected statement must fail");
+        assert!(
+            format!("{err:#}").contains("NOT NULL"),
+            "the failure must be the injected one, not something else: {err:#}"
+        );
+
+        assert_eq!(
+            get_scan_state(&conn, QUEUE_USER_A, "last_full_scan_finished_at").unwrap(),
+            None,
+            "the cooldown anchor must not survive a failed transaction"
+        );
+        assert_eq!(
+            get_scan_state(
+                &conn,
+                QUEUE_USER_A,
+                crate::db::traits::LAST_FULL_SCAN_DURATION_KEY
+            )
+            .unwrap(),
+            None,
+            "nor may the ETA sample"
+        );
+        assert_eq!(
+            get_scan_state(&conn, QUEUE_USER_A, "full_carried_completion")
+                .unwrap()
+                .as_deref(),
+            Some("whatever"),
+            "and the carried drain outcome is still owed"
+        );
     }
 
     #[test]
@@ -3390,6 +4286,7 @@ mod tests {
             &conn,
             QUEUE_USER_A,
             &claim.claim_id,
+            FinishCompletion::Failed,
             Some("gather exploded"),
         )
         .unwrap();

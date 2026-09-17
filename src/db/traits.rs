@@ -13,9 +13,22 @@ use async_trait::async_trait;
 
 use super::models::{
     AccountScore, AccuracyMetrics, AmplificationEvent, ClusterCentroid, InferredPair,
-    NewAmplificationEvent, UserLabel, UserRow,
+    NewAmplificationEvent, StoredScore, UserLabel, UserRow,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
+
+/// One user's candidate for the nightly refresh job (#344 Task 7) — a
+/// High/Elevated account whose score is expiring, already expired, or
+/// stamped with a superseded `scoring_generation`. `graph_distance` rides
+/// along because the refresh runner needs it for the same reasons
+/// `get_ranked_threats` does (display, prioritization) without a second
+/// round-trip per candidate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshCandidate {
+    pub did: String,
+    pub handle: String,
+    pub graph_distance: Option<String>,
+}
 
 /// One account dropped from a scan, with the reason (#226).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,8 +54,75 @@ pub struct ScanQueueEntry {
     /// by up to the cap factor. None while the status is anything but
     /// "queued" (a running scan's remaining time is unknown, not zero) and
     /// None until enough scans have finished to have a median.
+    ///
+    /// The median is sampled from the per-user `scan_state` key
+    /// [`LAST_FULL_SCAN_DURATION_KEY`], written by `finish_full_scan_state`
+    /// when a full scan is fulfilled — **not** from `scan_queue`. There is one
+    /// queue row per user and a refresh enqueue rewrites its `kind`,
+    /// `started_at` and `finished_at`, so a median read from the queue would
+    /// lose every user's full-scan sample the first night the refresh job runs
+    /// and stay empty forever after (#344 F1). `scan_state` rows are only ever
+    /// added to, so the sample survives the refresh.
     pub eta_seconds: Option<i64>,
     pub enqueued_at: String,
+}
+
+/// Per-user `scan_state` key holding the whole-second duration of that user's
+/// most recent fulfilled full scan. The population the ETA median is drawn
+/// from; see [`ScanQueueEntry::eta_seconds`].
+pub const LAST_FULL_SCAN_DURATION_KEY: &str = "last_full_scan_duration_secs";
+
+/// Whole seconds between a claimed full scan's `started_at` and the instant it
+/// fulfilled, or `None` when there is no trustworthy sample to record.
+///
+/// `None` for an absent `started_at` (nothing to measure from), for timestamps
+/// that do not parse, and for a negative span (clock skew across a restart).
+/// A fabricated sample would skew the ETA every queued user is quoted, whereas
+/// no sample merely means this attempt taught the median nothing.
+///
+/// Shared by both backends so they cannot disagree about what a duration is.
+pub(crate) fn full_scan_duration_secs(started_at: Option<&str>, finished_at: &str) -> Option<i64> {
+    let started = chrono::DateTime::parse_from_rfc3339(started_at?).ok()?;
+    let finished = chrono::DateTime::parse_from_rfc3339(finished_at).ok()?;
+    let secs = (finished - started).num_seconds();
+    (secs >= 0).then_some(secs)
+}
+
+/// Median of the raw `scan_state` duration values both backends hand in.
+///
+/// Lives here, like [`eta_seconds`], so the two cannot drift: averaging the
+/// two middle values on an even sample is what Postgres's
+/// `PERCENTILE_CONT(0.5)` did while the median was computed in SQL, and what
+/// the SQLite side has always done in Rust.
+///
+/// An unparseable value is warned about and skipped rather than failing the
+/// read: an ETA is an estimate shown next to a queue position, and one corrupt
+/// row must not take the page down. `None` on an empty sample, so a fresh
+/// install reports no ETA instead of fabricating one.
+pub(crate) fn median_scan_duration_secs<I: IntoIterator<Item = String>>(values: I) -> Option<f64> {
+    let mut durations: Vec<f64> = Vec::new();
+    for raw in values {
+        match raw.parse::<f64>() {
+            Ok(v) if v.is_finite() => durations.push(v),
+            _ => tracing::warn!(
+                value = %raw,
+                key = LAST_FULL_SCAN_DURATION_KEY,
+                "scan_state holds an unparseable full-scan duration — ignoring it"
+            ),
+        }
+    }
+    if durations.is_empty() {
+        return None;
+    }
+    // `total_cmp`, not `partial_cmp().unwrap()`: the values are finite by the
+    // filter above, and a total order needs no unwrap to say so.
+    durations.sort_by(f64::total_cmp);
+    let mid = durations.len() / 2;
+    Some(if durations.len().is_multiple_of(2) {
+        (durations[mid - 1] + durations[mid]) / 2.0
+    } else {
+        durations[mid]
+    })
 }
 
 /// Shared ETA formula for `ScanQueueEntry::eta_seconds` (#257).
@@ -107,6 +187,126 @@ mod eta_tests {
     }
 }
 
+/// What a `scan_queue` row asks the admitter to run (#343 §4.4).
+///
+/// `Full` is the scan the user triggers. `Refresh` re-scores only this
+/// user's High/Elevated rows that are about to expire or predate the current
+/// scoring generation — candidates come from `account_scores`, never from
+/// the network. Both run under the same claim/lease/fencing machinery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanKind {
+    Full,
+    Refresh,
+}
+
+impl ScanKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ScanKind::Full => "full",
+            ScanKind::Refresh => "refresh",
+        }
+    }
+
+    /// Not `std::str::FromStr`: the callers want `Option` so they can attach
+    /// the offending value with `.with_context(...)`, and `FromStr::Err` would
+    /// force an error type that carries nothing useful here. Paired with
+    /// [`ScanKind::as_str`] as a round-trip, which is the only contract the
+    /// database columns need.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "full" => Some(ScanKind::Full),
+            "refresh" => Some(ScanKind::Refresh),
+            _ => None,
+        }
+    }
+}
+
+/// What `enqueue_scan` did, so the handler can tell the user the truth
+/// (#344 R09): a request made while a refresh is running is not dropped —
+/// it is recorded on the row and runs when the refresh finishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnqueueOutcome {
+    /// A new queued full row, or a queued refresh upgraded in place.
+    Queued,
+    /// A full row was already queued; nothing changed.
+    AlreadyQueued,
+    /// A full scan is running; nothing changed.
+    AlreadyRunning,
+    /// A refresh is running; `full_requested_at` recorded (or already was).
+    QueuedAfterRefresh,
+}
+
+/// How a scan ended, recorded durably on the queue row (#344 V2-05).
+///
+/// `status` alone cannot carry this: an interrupted full scan and a clean one
+/// both finish `done`, and the cooldown, the ETA median and the full-scan
+/// obligation each need to tell them apart. The first three variants are
+/// *fulfilment* — the user's request was carried out, verified or not — and
+/// only [`FinishCompletion::Complete`] is clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinishCompletion {
+    Complete,
+    CompleteWithSkips,
+    CompleteUnverified,
+    Resumable,
+    Failed,
+}
+
+impl FinishCompletion {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FinishCompletion::Complete => "complete",
+            FinishCompletion::CompleteWithSkips => "complete_with_skips",
+            FinishCompletion::CompleteUnverified => "complete_unverified",
+            FinishCompletion::Resumable => "resumable",
+            FinishCompletion::Failed => "failed",
+        }
+    }
+
+    /// `Option` rather than `std::str::FromStr` — see [`ScanKind::from_str`].
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "complete" => Some(FinishCompletion::Complete),
+            "complete_with_skips" => Some(FinishCompletion::CompleteWithSkips),
+            "complete_unverified" => Some(FinishCompletion::CompleteUnverified),
+            "resumable" => Some(FinishCompletion::Resumable),
+            "failed" => Some(FinishCompletion::Failed),
+            _ => None,
+        }
+    }
+
+    /// The user's full-scan request was carried out (V6-01). Clears
+    /// `full_requested_at`; the other two leave the work owed.
+    pub fn fulfils_full_request(&self) -> bool {
+        matches!(
+            self,
+            FinishCompletion::Complete
+                | FinishCompletion::CompleteWithSkips
+                | FinishCompletion::CompleteUnverified
+        )
+    }
+}
+
+/// A claim-fenced refresh schedule write (see
+/// [`Database::apply_refresh_schedule`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshScheduleWrite<'a> {
+    /// A completed run: the next deadline plus the proof — `refreshed_generation`
+    /// and `refresh_attempted_generation` both set to `generation` (V3-04).
+    Success {
+        next_at_rfc3339: &'a str,
+        generation: &'a str,
+    },
+    /// A failed or deferred attempt: the backoff deadline plus
+    /// `refresh_attempted_generation` (V4-01).
+    Retry {
+        at_rfc3339: &'a str,
+        attempted_generation: &'a str,
+    },
+}
+
 /// A successful claim on a queued scan (#257).
 ///
 /// `claim_id` is a fencing token minted by the claim. `heartbeat_scan` and
@@ -117,6 +317,11 @@ mod eta_tests {
 pub struct ScanClaim {
     pub user_did: String,
     pub claim_id: String,
+    /// Which pipeline the claimant must run (#344). Carried on the claim
+    /// rather than re-read afterwards: between the claim and a second read
+    /// the row can be upgraded, and the worker must run the kind it was
+    /// admitted as.
+    pub kind: ScanKind,
 }
 
 /// One `scan_queue` row, as the admin dashboard needs to display it (#288).
@@ -137,6 +342,16 @@ pub struct ScanQueueRow {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub last_error: Option<String>,
+    /// Which pipeline this row runs (#344). Legacy rows read `Full`, which is
+    /// what the v18 column default backfilled them to.
+    pub kind: ScanKind,
+    /// RFC3339 instant a full scan was first asked for and not yet delivered,
+    /// or None when nothing is owed (#344 R09). Survives a refresh handover,
+    /// a resumable attempt and a process restart.
+    pub full_requested_at: Option<String>,
+    /// How the last attempt ended. None on a row that has never finished, and
+    /// on rows written before v18.
+    pub completion: Option<FinishCompletion>,
 }
 
 /// How many rows are waiting versus occupying a slot (#257).
@@ -294,6 +509,37 @@ pub trait Database: Send + Sync {
     /// Set a scan state value (upsert) for a specific user.
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
 
+    /// Remove a single scan state key. Absent keys are not an error — the
+    /// callers use this to retract a marker whose presence is the signal, and
+    /// "already gone" is the state they wanted.
+    async fn delete_scan_state(&self, user_did: &str, key: &str) -> Result<()>;
+
+    /// Record that a full scan was carried out, in ONE transaction (#344
+    /// V7-02): write `last_full_scan_finished_at` (the cooldown anchor), write
+    /// [`LAST_FULL_SCAN_DURATION_KEY`] (the ETA sample, derived in the same
+    /// transaction from the queue row's own `started_at` — omitted when there
+    /// is none), and delete `carried_key` (the drain outcome this run has now
+    /// consumed).
+    ///
+    /// Two calls would leave a window where the cooldown has started but the
+    /// carried outcome is still there to taint an unrelated later scan — or,
+    /// the other way round, the evidence is gone while the run is still owed.
+    ///
+    /// Fenced by `claim_id` (#344 N2): all three writes describe the attempt
+    /// that holds the row, so a worker whose lease lapsed writes **nothing** —
+    /// it must not sample a successor's `started_at`, start a cooldown the
+    /// successor has not earned, or retire a drain outcome the successor still
+    /// owes. A row that is absent, unclaimed, or claimed by someone else is
+    /// logged and skipped; it is not an error, because the scan itself really
+    /// did finish.
+    async fn finish_full_scan_state(
+        &self,
+        user_did: &str,
+        finished_at_rfc3339: &str,
+        carried_key: &str,
+        claim_id: &str,
+    ) -> Result<()>;
+
     /// Get all scan state key-value pairs for a specific user. Used by the
     /// migration command to transfer all keys without a hardcoded list.
     async fn get_all_scan_state(&self, user_did: &str) -> Result<Vec<(String, String)>>;
@@ -321,18 +567,29 @@ pub trait Database: Send + Sync {
     /// embedding, and per-topic centroid rows in ONE transaction, bumping
     /// updated_at exactly once. `embedding: None` with empty `clusters` is the
     /// legal keyword-only bundle (embedder unavailable). (#302)
+    ///
+    /// `embedding_model_id` (#344) records which model produced `embedding` —
+    /// callers pass `Some(EMBEDDING_MODEL_ID)` when `embedding.is_some()`,
+    /// else `None` (keyword-only fingerprint). Read back by
+    /// `fingerprint_embedding_model` to gate input compatibility (R03).
     async fn save_fingerprint_bundle(
         &self,
         user_did: &str,
         fingerprint_json: &str,
         post_count: u32,
         embedding: Option<&[f64]>,
+        embedding_model_id: Option<&str>,
         clusters: &[ClusterCentroid],
     ) -> Result<()>;
 
     /// Load stored topic centroids ordered by cluster_index. Empty = legacy
     /// (pre-#297) or keyword-only fingerprint.
     async fn get_topic_centroids(&self, user_did: &str) -> Result<Vec<ClusterCentroid>>;
+
+    /// The stored embedding model id for a user's fingerprint (#344). `None`
+    /// means a keyword-only fingerprint, or a pre-v18 row that predates the
+    /// column — either way, no vector to compare against `EMBEDDING_MODEL_ID`.
+    async fn fingerprint_embedding_model(&self, user_did: &str) -> Result<Option<String>>;
 
     // --- Account scores ---
 
@@ -343,15 +600,51 @@ pub trait Database: Send + Sync {
     async fn get_ranked_threats(&self, user_did: &str, min_score: f64)
         -> Result<Vec<AccountScore>>;
 
-    /// Check if an account's score is stale for a user (older than the given number of days).
-    async fn is_score_stale(&self, user_did: &str, did: &str, max_age_days: i64) -> Result<bool>;
+    /// Check if an account's score is fresh for a user (#344). Freshness is
+    /// `scoring_generation == scoring_revision() AND valid_until > now` — NOT
+    /// a simple age check any more. A missing row is stale. This read is a
+    /// hard error for callers (spec §4.4): a DB blip must not silently widen
+    /// the re-score set or, worse, silently narrow it.
+    async fn is_score_stale(&self, user_did: &str, did: &str) -> Result<bool>;
 
-    /// Return the DIDs scored within the last `max_age_days` — the complement
-    /// of `is_score_stale` over a whole user's scores, in one query. Discovery
-    /// loops fetch this once and test membership in memory instead of one
-    /// `is_score_stale` round-trip per candidate (#213).
-    async fn get_fresh_scored_dids(&self, user_did: &str, max_age_days: i64)
-        -> Result<Vec<String>>;
+    /// Return the DIDs whose score is fresh (see `is_score_stale`) — the
+    /// complement of `is_score_stale` over a whole user's scores, in one
+    /// query. Discovery loops fetch this once and test membership in memory
+    /// instead of one `is_score_stale` round-trip per candidate (#213).
+    async fn get_fresh_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
+
+    /// Count rows that are NOT fresh for a user (#344) — hidden from
+    /// `get_ranked_threats` but never deleted. Includes legacy, expired,
+    /// NULL and malformed `valid_until` rows.
+    async fn count_expired(&self, user_did: &str) -> Result<i64>;
+
+    /// Every `account_scores` row for the user, verbatim — never filtered by
+    /// freshness (#344 R01). For `charcoal migrate` and any future export
+    /// path; the presentation queries (`get_ranked_threats`, counts) are the
+    /// wrong tool for this because they hide expired/legacy rows.
+    async fn export_scores(&self, user_did: &str) -> Result<Vec<StoredScore>>;
+
+    /// Write a row exactly as `export_scores` produced it: `scored_at`,
+    /// `scoring_generation` and `valid_until` are taken from `row`, never
+    /// from the clock — unlike `upsert_account_score`, which is the live
+    /// scoring path and always stamps from now. Idempotent.
+    async fn import_score(&self, user_did: &str, row: &StoredScore) -> Result<()>;
+
+    /// The nightly refresh job's candidate source (#344 Task 7). A row
+    /// qualifies when it clears the score floor (`threat_score >=`
+    /// [`ThreatTier::ELEVATED_MIN`]) **and** is due: expiring within
+    /// `horizon_days`, already expired, carrying a NULL or malformed
+    /// `valid_until` (SQLite only — the Postgres column is NOT NULL), or
+    /// stamped with an old `scoring_generation`. Both halves must hold; the
+    /// due half is the complement of the fresh predicate, not a copy of it.
+    /// NULL-score rows never qualify: `NULL >= ?` is SQL-unknown, which the
+    /// `WHERE` clause treats as not-matching. Most dangerous first:
+    /// `threat_score DESC, did`.
+    async fn list_refresh_candidates(
+        &self,
+        user_did: &str,
+        horizon_days: i64,
+    ) -> Result<Vec<RefreshCandidate>>;
 
     // --- Amplification events ---
 
@@ -500,7 +793,13 @@ pub trait Database: Send + Sync {
     /// Update last_login_at timestamp for a user.
     async fn update_last_login(&self, did: &str) -> Result<()>;
 
-    /// Get all DIDs that have been scored for a user (for deduplication during discovery).
+    /// Get all DIDs that have ever been scored for a user, fresh or not.
+    ///
+    /// Not a scoring-eligibility gate (#344 R06) — `run_topic_first`'s
+    /// discovery dedup uses `get_fresh_scored_dids` instead, so a legacy or
+    /// expired row no longer suppresses re-discovery of an account. This
+    /// method has no remaining production caller; kept for history/export
+    /// uses where "was this DID ever scored" is the actual question.
     async fn get_all_scored_dids(&self, user_did: &str) -> Result<Vec<String>>;
 
     // --- Classification staging (#208) ---
@@ -614,9 +913,33 @@ pub trait Database: Send + Sync {
 
     // --- Scan admission queue (#257) ---
 
-    /// Add a user to the scan queue. Idempotent — a second call while queued or
-    /// running is a no-op, so a double-click cannot double-book.
-    async fn enqueue_scan(&self, user_did: &str) -> Result<()>;
+    /// Queue a full scan. Re-queues `done`/`failed` rows; upgrades a queued
+    /// `refresh` in place (keeps `enqueued_at`); records `full_requested_at`
+    /// on a running `refresh` so it runs afterwards; no-op on queued/running
+    /// `full`. Idempotent. See `EnqueueOutcome`.
+    async fn enqueue_scan(&self, user_did: &str) -> Result<EnqueueOutcome>;
+
+    /// Queue a refresh (#343 §4.4). Re-queues `done`/`failed` rows as
+    /// `refresh`; never touches a queued or running row of either kind.
+    async fn enqueue_refresh_scan(&self, user_did: &str) -> Result<()>;
+
+    /// Record that the RUNNING refresh owes a follow-up full scan (#344).
+    ///
+    /// Written by a refresh that deferred because the user has no fingerprint,
+    /// or one built by another embedding model: a refresh never rebuilds a
+    /// fingerprint, so the only way out is a full scan, and asking for one has
+    /// to survive the worker (R09/V2-04). `finish_queued_scan` then hands the
+    /// row over to a queued `full` row dated from the request.
+    ///
+    /// Scoped to `status = 'running' AND kind = 'refresh' AND claim_id` so it
+    /// can only ever annotate the refresh that is asking — never a queued full
+    /// scan, and never a successor that reclaimed the row after this worker's
+    /// lease lapsed. The claim is matched in the same statement as the write,
+    /// so there is no gap between checking ownership and writing. Returns
+    /// whether a row was annotated. `COALESCE` keeps the first request's
+    /// instant, exactly as a user click does, so the queue position is not
+    /// pushed back by a second deferral.
+    async fn request_full_after_refresh(&self, user_did: &str, claim_id: &str) -> Result<bool>;
 
     /// Claim the oldest queued scan if fewer than `limit` are running.
     /// Returns the claim (user_did plus fencing token), or None when at
@@ -630,13 +953,31 @@ pub trait Database: Send + Sync {
     async fn heartbeat_scan(&self, user_did: &str, claim_id: &str, lease_secs: i64)
         -> Result<bool>;
 
+    /// Does `claim_id` still own this user's queue row? (#344 F2)
+    ///
+    /// A read-only ownership probe for bookkeeping that writes OUTSIDE
+    /// `scan_queue` — the refresh schedule lives on `users`, so it cannot be
+    /// fenced by a `WHERE claim_id = ?` the way `finish_queued_scan` is. False
+    /// for an absent row, an unclaimed row and a row claimed by someone else,
+    /// matching the fence inside `finish_full_scan_state`. Unlike
+    /// `heartbeat_scan` it writes nothing and does not care about `status`:
+    /// the caller is finishing, not running.
+    async fn scan_claim_is_current(&self, user_did: &str, claim_id: &str) -> Result<bool>;
+
     /// Mark a scan done (error None) or failed (error Some), releasing its slot.
     /// Returns false when the row is not running under `claim_id`, in which
     /// case nothing was changed.
+    ///
+    /// Writes `completion`. A `refresh` row with `full_requested_at` set
+    /// becomes a queued `full` row dated from the request, obligation kept. A
+    /// `full` row finishing `Complete`/`CompleteWithSkips`/`CompleteUnverified`
+    /// clears `full_requested_at`; `Resumable`/`Failed` keep it (V3-03). The
+    /// refresh's own outcome is recorded in `scan_state` by `run_refresh`.
     async fn finish_queued_scan(
         &self,
         user_did: &str,
         claim_id: &str,
+        completion: FinishCompletion,
         error: Option<&str>,
     ) -> Result<bool>;
 
@@ -673,6 +1014,100 @@ pub trait Database: Send + Sync {
     /// A second, narrower method would be a second snapshot of a table that
     /// changes under it.
     async fn list_scan_queue(&self) -> Result<Vec<ScanQueueRow>>;
+
+    // --- Refresh schedule (#343 §4.4, #344) ---
+    //
+    // Three columns on `users`, two different facts (V2-03):
+    //
+    // * `next_refresh_at` — when this user may be attempted again.
+    // * `refresh_attempted_generation` — the revision an attempt has already
+    //   been *scheduled* for. Written by the tick (in its claiming
+    //   transaction) and by `schedule_retry_at`, so a failed, deferred or
+    //   resumable attempt does not become due again by revision; only its
+    //   deadline brings it back.
+    // * `refreshed_generation` — the revision a *completed* run has proven.
+    //   Observability, never a scheduling input.
+
+    /// When the refresh tick may next consider this user. `None` for a user
+    /// who has never been scheduled (the v18-migrated shape) — which makes
+    /// them due, because the revision clause fires instead.
+    async fn next_refresh_at(&self, user_did: &str) -> Result<Option<String>>;
+
+    /// The scoring revision a completed refresh or full scan has proven for
+    /// this user. Read by the runbook, never by the scheduler.
+    async fn refreshed_generation(&self, user_did: &str) -> Result<Option<String>>;
+
+    /// The scoring revision an attempt has already been scheduled for.
+    async fn refresh_attempted_generation(&self, user_did: &str) -> Result<Option<String>>;
+
+    /// Set `next_refresh_at` alone. Used after a success and by `migrate`.
+    async fn schedule_refresh(&self, user_did: &str, at_rfc3339: &str) -> Result<()>;
+
+    /// Retry: sets `next_refresh_at` AND `refresh_attempted_generation` in one
+    /// statement (V4-01). Two statements would leave a window in which the
+    /// deadline is set but the revision clause still fires, and the tick would
+    /// claim the user it just backed off.
+    async fn schedule_retry_at(
+        &self,
+        user_did: &str,
+        at_rfc3339: &str,
+        attempted_generation: &str,
+    ) -> Result<()>;
+
+    /// Write a refresh schedule only while `claim_id` still owns the user's
+    /// queue row, checked and written in ONE transaction.
+    ///
+    /// A worker checks ownership once before its bookkeeping, but a lease can
+    /// lapse and a successor reclaim the row between that check and a plain
+    /// write, and the stale worker would then move the successor's deadline
+    /// and generation markers. Here the ownership read locks the queue row
+    /// (`FOR UPDATE` on Postgres, an Immediate transaction on SQLite, the same
+    /// guarantee `finish_full_scan_state` relies on), so a reclaim waits for
+    /// the write or the write sees the new owner. Returns `Ok(false)`, having
+    /// written nothing, when the claim no longer owns the row.
+    async fn apply_refresh_schedule(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        write: RefreshScheduleWrite<'_>,
+    ) -> Result<bool>;
+
+    /// Proof: sets BOTH `refreshed_generation` and
+    /// `refresh_attempted_generation` (V3-04) — a proven revision is also an
+    /// attempted one, so the tick stays quiet after a manual full scan.
+    async fn mark_refreshed_generation(&self, user_did: &str, generation: &str) -> Result<()>;
+
+    /// Attempt only. Used solely by `charcoal migrate`, to copy a pending
+    /// attempt from the source database verbatim; production code reaches
+    /// this column through `schedule_retry_at` or the tick.
+    async fn mark_refresh_attempted_generation(
+        &self,
+        user_did: &str,
+        generation: &str,
+    ) -> Result<()>;
+
+    /// ONE transaction: select up to `limit` due users, then for each
+    /// CONDITIONALLY write the refresh queue row (`ON CONFLICT … WHERE
+    /// status IN ('done','failed')`) and, only if that write affected a row,
+    /// set `next_refresh_at = next_rfc3339` and
+    /// `refresh_attempted_generation = current_generation`.
+    ///
+    /// A user is due when they have at least one score row **or** a finished
+    /// queue row that still owes a full scan (V4-01), have no queued or
+    /// running row of either kind, and either their deadline has passed or
+    /// `refresh_attempted_generation` is not `current_generation`.
+    ///
+    /// Returns the DIDs actually delivered — a user whose row turned out to be
+    /// queued or running at write time is left entirely alone (schedule
+    /// included) and reconsidered next tick (V2-02). A failure rolls back
+    /// everything, so nothing is half-scheduled (R04).
+    async fn claim_and_enqueue_due_refreshes(
+        &self,
+        now_rfc3339: &str,
+        next_rfc3339: &str,
+        current_generation: &str,
+        limit: usize,
+    ) -> Result<Vec<String>>;
 
     // --- Access requests (#309) ---
 
@@ -849,6 +1284,14 @@ pub trait Database: Send + Sync {
         feed_cutoff: &str,
         score_cutoff: &str,
     ) -> Result<crate::db::cache_retention::CacheEviction>;
+
+    /// Downcast escape hatch for test support (#344). The trait deliberately
+    /// exposes no raw SQL — production code has no business reaching past it
+    /// — but some test fixtures (aging a row out of its scoring generation,
+    /// e.g. `web::test_helpers::expire_all_scores`) need to shape rows the
+    /// trait cannot express without widening it for everyone. Implemented as
+    /// `{ self }` on both backends.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Reject bundles that would poison future cosines: every stored float must

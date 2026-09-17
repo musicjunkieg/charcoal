@@ -17,7 +17,7 @@
 // `run_topic_first`) are preserved exactly, so the produced `AccountScore`s
 // are identical to the pre-rewire behaviour.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::StreamExt;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -33,7 +33,8 @@ use crate::pipeline::scan_phases::burst;
 use crate::observability::cache_stats::{record_cache_stats, CacheStats};
 use crate::pipeline::scan_phases::feed_cache::CachedPostFetcher;
 use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
-use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
+use crate::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
+use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps, RunIdentity};
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
@@ -128,14 +129,14 @@ pub async fn run(
     );
 
     // Step 3: Filter to accounts with stale or missing scores (candidate set).
-    // Same staleness gate as before, but one bulk query instead of an
-    // is_score_stale round-trip per candidate (#213). On error, fall back to an
-    // empty fresh set so everything is treated stale — byte-identical to the old
-    // per-call `.unwrap_or(true)`.
+    // One bulk query instead of an is_score_stale round-trip per candidate
+    // (#213). This is now a hard error (#344 spec §4.4): a DB blip must not
+    // silently widen the re-score set to "everything" (old `.unwrap_or(true)`
+    // behavior) or, worse, silently narrow it to "nothing".
     let fresh: HashSet<String> = db
-        .get_fresh_scored_dids(user_did, 7)
+        .get_fresh_scored_dids(user_did)
         .await
-        .unwrap_or_default()
+        .context("reading fresh-score set for second-degree candidate filtering")?
         .into_iter()
         .collect();
     let mut stale = Vec::new();
@@ -216,15 +217,20 @@ pub async fn run_topic_first(
     keywords_per_cycle: usize,
     results_per_keyword: usize,
 ) -> Result<(usize, usize, bool)> {
-    // Step 1: Get already-scored DIDs for deduplication (candidate filter).
+    // Step 1: Get FRESH-scored DIDs for deduplication (candidate filter,
+    // #344 R06). A legacy or expired row must not suppress re-discovery — a
+    // stale score is exactly the case discovery should be finding again, not
+    // treating as "already handled". Hard error: a DB blip must not silently
+    // widen or narrow the discovery set.
     let scored_dids: HashSet<String> = db
-        .get_all_scored_dids(user_did)
-        .await?
+        .get_fresh_scored_dids(user_did)
+        .await
+        .context("reading fresh-score set for topic-first discovery dedup")?
         .into_iter()
         .collect();
 
     crate::progress!(
-        "  {} accounts already scored, searching for new discoveries...",
+        "  {} accounts have fresh scores, searching for new discoveries…",
         scored_dids.len()
     );
 
@@ -350,9 +356,20 @@ async fn run_sweep_phased(
         gather_concurrency: concurrency,
         burst_concurrency: burst::burst_concurrency(),
         burst_batch: burst::burst_batch(),
+        // Only this binary's own producers count as evidence (R03, V2-01).
+        evidence: EvidenceContract {
+            onnx_model_id: crate::toxicity::onnx::ONNX_MODEL_ID,
+            classifier: ClassifierIdentity {
+                model_id: classifier.model_id(),
+                policy_version: classifier.policy_version(),
+            },
+        },
+        skip_counter: None,
     };
 
-    let summary = run_phased_scan(db, user_did, candidates, &deps).await?;
+    // The sweep is full-scan work: it discovers and scores under the user's own
+    // full-scan identity, and must not resume or consume a refresh's staging.
+    let summary = run_phased_scan(db, user_did, candidates, &deps, RunIdentity::full()).await?;
     if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
         warn!(error = %e, "could not record feed cache stats");
     }

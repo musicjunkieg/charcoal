@@ -516,6 +516,7 @@ pub async fn gather_account(
     // leave orphaned pending rows on a stash failure.)
     let blob = AccountInput {
         schema_version: ACCOUNT_INPUT_SCHEMA_VERSION,
+        scoring_generation: crate::scoring::generation::scoring_revision().to_string(),
         account_handle: inputs.account_handle.to_string(),
         sample,
         parent_texts,
@@ -563,16 +564,20 @@ fn survivor_row(
     }
 }
 
-/// Mark a row as ONNX-cleared: `done`, non-toxic, no classifier provenance.
+/// Mark a row as ONNX-cleared: `done`, non-toxic, settled by the clean pass.
 ///
-/// The classifier never ran for clean rows, so `confidence`/`model_id`/
-/// `policy_version` stay `None` — only `toxic_token` is set to `Some(false)`.
+/// The classifier never ran, so `confidence` stays `None` — but the row still
+/// names its producer (#344 V3-01). It used to carry `None`/`None`, which
+/// finalize could not tell apart from a corrupt row or from an old binary's
+/// unlabelled staging, so a clean row was either trusted blindly or rejected
+/// wholesale. The ONNX model id + [`CLEAN_PASS_POLICY`] say exactly what
+/// settled it, and finalize validates that against the ONNX identity it runs.
 fn mark_clean(row: &mut QueueRow) {
     row.status = "done".to_string();
     row.toxic_token = Some(false);
     row.confidence = None;
-    row.model_id = None;
-    row.policy_version = None;
+    row.model_id = Some(crate::toxicity::onnx::ONNX_MODEL_ID.to_string());
+    row.policy_version = Some(crate::pipeline::scan_phases::staging::CLEAN_PASS_POLICY.to_string());
 }
 
 /// Counts of (originals, replies+quotes) inferred from the staged rows, used to

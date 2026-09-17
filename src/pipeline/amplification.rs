@@ -8,7 +8,7 @@
 // 4. Scores each follower for toxicity and topic overlap
 // 5. Stores the results for the threat report
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use futures::StreamExt;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -30,7 +30,10 @@ use crate::scoring::language::{assess_language, Assessability};
 use crate::observability::cache_stats::{record_cache_stats, CacheStats};
 use crate::pipeline::scan_phases::feed_cache::CachedPostFetcher;
 use crate::pipeline::scan_phases::gather::{AtpPostFetcher, CleanPassScorer};
-use crate::pipeline::scan_phases::{run_phased_scan, CandidateInput, PhasedScanDeps};
+use crate::pipeline::scan_phases::staging::{ClassifierIdentity, EvidenceContract};
+use crate::pipeline::scan_phases::{
+    run_phased_scan, CandidateInput, PhasedScanDeps, RunIdentity, ScanSummary,
+};
 use crate::scoring::nli::NliScorer;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -54,6 +57,75 @@ fn tox_suffix(quote_toxicity: Option<f64>, assessable: bool) -> String {
         (None, true) => String::new(),
         (None, false) => " [tox: n/a — language]".to_string(),
     }
+}
+
+/// Deduplicated (original, amplifier) text pairs from this user's stored
+/// events for `amplifier_did`.
+///
+/// `Ok(empty)` = the lookup succeeded and there are no usable pairs; `Err` =
+/// the lookup failed. Keeping those two answers distinct is the whole point
+/// (#344 R05): the full scan below chooses to degrade on `Err` — the account
+/// still scores on the follower path — but the nightly refresh must not,
+/// because a score written from silently-missing context would be stamped
+/// current and hide the real state until it expired.
+pub async fn direct_pairs_for(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<Vec<(String, String)>> {
+    let (_had_events, pairs) = load_amplifier_pairs(db, user_did, amplifier_did).await?;
+    Ok(pairs)
+}
+
+/// Like [`direct_pairs_for`], but keeps "is this an amplifier at all" separate
+/// from "did its events yield any usable pairs".
+///
+/// - `Ok(None)` — no stored events: a follower.
+/// - `Ok(Some(pairs))` — an amplifier. `pairs` may be EMPTY: a like or repost,
+///   or an event with no usable text, is still amplification.
+///
+/// Finalize reads `CandidateInput::direct_pairs.is_some()` as "amplifier", and
+/// an amplifier with nothing to compare skips NLI. The full scan always stages
+/// its amplifiers as `Some(pairs)`, empty or not. A refresh that collapsed an
+/// empty result to `None` would re-score such an account on the FOLLOWER path
+/// and overwrite the full scan's score with a differently computed one (#344
+/// Codex review P2). This is the answer a refresh needs; the full scan already
+/// knows every account it iterates is an amplifier, so it keeps
+/// [`direct_pairs_for`].
+pub async fn amplifier_pairs_for(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<Option<Vec<(String, String)>>> {
+    let (had_events, pairs) = load_amplifier_pairs(db, user_did, amplifier_did).await?;
+    Ok(had_events.then_some(pairs))
+}
+
+/// The shared load behind both helpers: whether any events exist for this
+/// amplifier, and the deduplicated usable pairs among them.
+async fn load_amplifier_pairs(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    amplifier_did: &str,
+) -> Result<(bool, Vec<(String, String)>)> {
+    let db_events = db
+        .get_events_by_amplifier(user_did, amplifier_did)
+        .await
+        .with_context(|| format!("loading stored events for amplifier {amplifier_did}"))?;
+    let had_events = !db_events.is_empty();
+    // The same event can be recorded by more than one scan, so deduplicate
+    // across them rather than scoring the same pair twice.
+    let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for ev in db_events {
+        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text) {
+            if !orig.is_empty() && !amp.is_empty() && seen_pairs.insert((orig.clone(), amp.clone()))
+            {
+                pairs.push((orig, amp));
+            }
+        }
+    }
+    Ok((had_events, pairs))
 }
 
 /// Run the amplification detection pipeline.
@@ -308,12 +380,13 @@ pub async fn run(
     // Fetch the fresh-scored DID set ONCE for both the amplifier and follower
     // staleness gates below, instead of an is_score_stale round-trip per
     // candidate (#213). Scores aren't written until Phase C, so the set is
-    // stable across both loops. Empty-on-error → everything treated stale,
-    // matching the old per-call `.unwrap_or(true)`.
+    // stable across both loops. Hard error (#344 spec §4.4): a DB blip must
+    // not silently widen the re-score set to "everything" (old
+    // `.unwrap_or(true)` behavior) or, worse, silently narrow it to "nothing".
     let fresh_scored: HashSet<String> = db
-        .get_fresh_scored_dids(user_did, 7)
+        .get_fresh_scored_dids(user_did)
         .await
-        .unwrap_or_default()
+        .context("reading fresh-score set for amplifier/follower candidate filtering")?
         .into_iter()
         .collect();
 
@@ -339,34 +412,21 @@ pub async fn run(
                 continue;
             }
 
-            // Gather direct text pairs from stored events, deduplicating
-            // across scans (the same event can be recorded multiple times)
-            let mut seen_pairs: HashSet<(String, String)> = HashSet::new();
-            let mut pairs: Vec<(String, String)> = Vec::new();
-            match db.get_events_by_amplifier(user_did, did).await {
-                Ok(db_events) => {
-                    for ev in db_events {
-                        if let (Some(orig), Some(amp)) = (ev.original_post_text, ev.amplifier_text)
-                        {
-                            if !orig.is_empty()
-                                && !amp.is_empty()
-                                && seen_pairs.insert((orig.clone(), amp.clone()))
-                            {
-                                pairs.push((orig, amp));
-                            }
-                        }
-                    }
-                }
-                // Continue on error (matching prior behaviour) but make the
-                // dropped pairs visible instead of swallowing the failure.
+            // A full scan degrades here on purpose (unchanged behaviour): the
+            // account still scores on the follower path. The refresh job
+            // (`web::refresh_scan`, via `RefreshContextSource::direct_pairs`)
+            // does NOT — see R05 and `direct_pairs_for`.
+            let pairs = match direct_pairs_for(db, user_did, did).await {
+                Ok(p) => p,
                 Err(e) => {
                     warn!(
                         amplifier_did = %did,
-                        error = %e,
-                        "Failed to load stored events for amplifier; direct NLI pairs dropped"
+                        error = %format!("{e:#}"),
+                        "direct NLI pairs dropped for this scan"
                     );
+                    Vec::new()
                 }
-            }
+            };
 
             if seen_dids.insert(did.clone()) {
                 candidates.push(CandidateInput {
@@ -513,7 +573,12 @@ pub async fn run(
         // on every `build_profile`, so no accounts were ever scored. Preserve
         // that by skipping the phased scan entirely.
         None => (0, false),
-        Some(_) if candidates.is_empty() => (0, false),
+        // An empty candidate list is NOT a reason to skip the pipeline (V4-02).
+        // A fresh start with no candidates is a no-op gather → empty burst →
+        // empty finalize → `Done`, which costs almost nothing; a resumable
+        // marker is resumed (own kind) or surfaces `OwnedByOtherKind` so the
+        // caller can drain it. Returning early here is how staged work used to
+        // get stranded behind a scan that found nothing new to score.
         Some(scorer) => {
             // Record how many accounts are queued for scoring so GET
             // /api/status can show a denominator while the phased scan runs.
@@ -522,43 +587,110 @@ pub async fn run(
             db.set_scan_state(user_did, "candidates_total", &candidates.len().to_string())
                 .await?;
 
-            let source = AtpPostFetcher { client };
-            let feed_stats = Arc::new(CacheStats::default());
-            let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
-            let classifier = scorer.classifier();
-
-            let deps = PhasedScanDeps {
-                fetcher: &fetcher,
-                scorer: scorer as &dyn ToxicityScorer,
-                clean_pass: scorer as &dyn CleanPassScorer,
-                classifier: &classifier,
+            let summary = run_candidates(
+                client,
+                scorer,
+                db,
+                user_did,
+                &candidates,
                 protected_fingerprint,
                 weights,
                 embedder,
                 protected_embedding,
                 protected_topic_centroids,
-                // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
-                // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
-                // the NLI scorer and protected-post embeddings are threaded through
-                // for the follower path.
                 nli_scorer,
                 protected_posts_with_embeddings,
                 data_dir,
                 median_engagement,
-                gather_concurrency: concurrency,
-                burst_concurrency: burst::burst_concurrency(),
-                burst_batch: burst::burst_batch(),
-            };
-
-            let summary = run_phased_scan(db, user_did, &candidates, &deps).await?;
-            if let Err(e) = record_cache_stats(db.as_ref(), user_did, "feed", &feed_stats).await {
-                warn!(error = %e, "could not record feed cache stats");
-            }
+                concurrency,
+                RunIdentity::full(),
+                "feed",
+            )
+            .await?;
             (summary.accounts_scored, summary.degraded)
         }
     };
 
     Ok((events.len(), accounts_scored, degraded))
+}
+
+/// Build the full scan's `PhasedScanDeps` and run one phased pass over
+/// `candidates` under `identity`.
+///
+/// Extracted from [`run`] because a full scan has two reasons to enter the
+/// pipeline: its own gather (`RunIdentity::full()`) and the **drain** of a
+/// refresh's leftover staging (`RunIdentity::refresh()`, with the refresh's
+/// re-derived candidates) that `web::scan_job::drain_then_run` performs before
+/// the full scan may gather. Both must use the same models, the same evidence
+/// contract and the same concurrency, so they share one construction site
+/// rather than two that can drift.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_candidates(
+    client: &PublicAtpClient,
+    scorer: &TwoStageToxicityScorer,
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    candidates: &[CandidateInput],
+    protected_fingerprint: &TopicFingerprint,
+    weights: &ThreatWeights,
+    embedder: Option<&SentenceEmbedder>,
+    protected_embedding: Option<&[f64]>,
+    protected_topic_centroids: Option<&[Vec<f64>]>,
+    nli_scorer: Option<&NliScorer>,
+    protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
+    data_dir: Option<&std::path::Path>,
+    median_engagement: f64,
+    concurrency: usize,
+    identity: RunIdentity,
+    // `scan_state` prefix for the feed-cache counters, one per RUN and not per
+    // identity: `feed` for a full scan, `refresh_feed` for the nightly refresh
+    // (so its per-run hit rate is readable on its own — R08), and `drain_feed`
+    // for a full scan draining a dead refresh's staging, which borrows the
+    // refresh IDENTITY but is a different run (#344 F7).
+    cache_prefix: &str,
+) -> Result<ScanSummary> {
+    let source = AtpPostFetcher { client };
+    let feed_stats = Arc::new(CacheStats::default());
+    let fetcher = CachedPostFetcher::new(&source, Arc::clone(db), Arc::clone(&feed_stats));
+    let classifier = scorer.classifier();
+
+    let deps = PhasedScanDeps {
+        fetcher: &fetcher,
+        scorer: scorer as &dyn ToxicityScorer,
+        clean_pass: scorer as &dyn CleanPassScorer,
+        classifier: &classifier,
+        protected_fingerprint,
+        weights,
+        embedder,
+        protected_embedding,
+        protected_topic_centroids,
+        // Amplifiers use direct_pairs (Mode-A precedence in finalize), so
+        // they ignore ppwe; followers gate on raw>=8.0 and use ppwe. Both
+        // the NLI scorer and protected-post embeddings are threaded through
+        // for the follower path.
+        nli_scorer,
+        protected_posts_with_embeddings,
+        data_dir,
+        median_engagement,
+        gather_concurrency: concurrency,
+        burst_concurrency: burst::burst_concurrency(),
+        burst_batch: burst::burst_batch(),
+        // Only this binary's own producers count as evidence (R03, V2-01).
+        evidence: EvidenceContract {
+            onnx_model_id: crate::toxicity::onnx::ONNX_MODEL_ID,
+            classifier: ClassifierIdentity {
+                model_id: classifier.model_id(),
+                policy_version: classifier.policy_version(),
+            },
+        },
+        skip_counter: None,
+    };
+
+    let summary = run_phased_scan(db, user_did, candidates, &deps, identity).await?;
+    if let Err(e) = record_cache_stats(db.as_ref(), user_did, cache_prefix, &feed_stats).await {
+        warn!(error = %e, "could not record feed cache stats");
+    }
+    Ok(summary)
 }
 
 #[cfg(test)]

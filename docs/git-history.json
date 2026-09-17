@@ -1,5 +1,45 @@
 [
   {
+    "hash": "39e20fe8d4098abe3e4921fc73271fa76e29c486",
+    "short_hash": "39e20fe",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T17:45:03-07:00",
+    "message": "test(344): finish the queue row after scheduling in the tick-off test\n\nWith the schedule now claim-fenced the test holds a real claim, and a\nstill-running queue row keeps the tick from enqueuing the user for the\nwrong reason. Finish the row after scheduling, as production does.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
+    "hash": "9e253fac511ebf542af26f0b3face2b1630d0a32",
+    "short_hash": "9e253fa",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:39:49-07:00",
+    "message": "fix(344): claim-fence the refresh schedule writes atomically\n\nCodeRabbit on PR #124: the refresh and full-scan bookkeeping checked\nowns_claim once, then wrote next_refresh_at, the generation markers and\nfull_requested_at without the claim. A lease that lapsed between the\ncheck and the writes let a stale worker move a successor schedule.\n\n- Database::apply_refresh_schedule(user, claim_id, Success|Retry)\n  reads the queue row owner and writes the schedule in one transaction\n  (Immediate on SQLite, FOR UPDATE on Postgres) and reports whether it\n  wrote. The success deadline and proof are now one statement.\n- request_full_after_refresh matches claim_id in its UPDATE and\n  returns whether it annotated a row.\n- Both bookkeeping traits pass claim_id through; the scheduling helpers\n  use the fenced write.\n- Tests on both backends reclaim a real expired lease and assert the\n  stale claim writes nothing while the successor writes land. The\n  SQLite test fails with the ownership check disabled.\n\nAlso fixes a Postgres bug the new test exposed: request_full bound RFC\n3339 text into COALESCE with a timestamptz column, which errors, so on\nPostgres a deferred refresh never recorded its follow-up full scan.\n\nTests that scheduled without a claim now hold one, in production order\n(schedule, then finish the queue row). Supersedes the deferral to #378.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 12
+  },
+  {
+    "hash": "5749eb34fe9593b1f0253ec5b65d1a5f7deb5e2c",
+    "short_hash": "5749eb3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:13:25-07:00",
+    "message": "fix(344): address CodeRabbit review of PR #124\n\n- classify_refresh takes has_own_resumable_staging. A refresh with no\n  fresh candidates that resumed and scored its own staging is Completed,\n  not NothingDue; NothingDue had recorded nothing_due and a scored count\n  of zero.\n- The admin cooldown-bypass test writes the cooldown anchor the way\n  production does and first proves the user route answers 429, so the\n  202 assertion can actually detect cooldown enforcement.\n- .env.example, CHANGELOG and the runbook no longer say every scan\n  probes the Stage-2 endpoint: web scans and refreshes with work do; the\n  CLI scan and sweep commands do not.\n\nThe two claim-fence findings (schedule/request_full are check-then-write)\nare deferred to #378 with the reasoning on the threads.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 8
+  },
+  {
+    "hash": "55bc065e3ea36f5842fdc6cecd7162fc2d03b38f",
+    "short_hash": "55bc065",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:11:14-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into feat/343-phase2-expiry-refresh",
+    "files_changed": 0
+  },
+  {
+    "hash": "a4b3d9240eaee4209b609c334d6f6d2026715cf4",
+    "short_hash": "a4b3d92",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:42:49-07:00",
+    "message": "fix(377): download models in the Postgres CI job without the web build\n\nThe Postgres job ran `cargo run --features web -- download-model`, but\nit never builds the frontend, and the web build cannot compile without\nweb/build (include_dir!). A model-cache hit skips the step, so this\npassed on PR #125 and staging and failed on the first cache miss.\nDownload with --features postgres, which the migration step compiles\nanyway.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
     "hash": "f2bce2fdfaa6ad4a0429ca3b9c4acb4268dfc777",
     "short_hash": "f2bce2f",
     "author": "Bryan Guffey",

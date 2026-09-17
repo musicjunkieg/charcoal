@@ -1136,16 +1136,22 @@ async fn main() -> Result<()> {
             sqlite_db.upsert_user(&did, &config.bluesky_handle).await?;
             pg_db.upsert_user(&did, &config.bluesky_handle).await?;
 
-            // 1. Migrate fingerprint + embedding + clusters
+            // 1. Migrate fingerprint + embedding + clusters. embedding_model_id
+            // (#344) is copied verbatim from the source rather than assumed —
+            // a keyword-only fingerprint (no embedding) must migrate with
+            // None, and the source is the only place that knows which model
+            // actually produced a stored vector.
             if let Some((json, post_count, _)) = sqlite_db.get_fingerprint(&did).await? {
                 let embedding = sqlite_db.get_embedding(&did).await?;
                 let clusters = sqlite_db.get_topic_centroids(&did).await?;
+                let embedding_model_id = sqlite_db.fingerprint_embedding_model(&did).await?;
                 pg_db
                     .save_fingerprint_bundle(
                         &did,
                         &json,
                         post_count,
                         embedding.as_deref(),
+                        embedding_model_id.as_deref(),
                         &clusters,
                     )
                     .await?;
@@ -1166,12 +1172,19 @@ async fn main() -> Result<()> {
                 println!("  {} No fingerprint to migrate", "-".dimmed());
             }
 
-            // 2. Migrate account scores
-            let scores = sqlite_db.get_ranked_threats(&did, 0.0).await?;
-            for score in &scores {
-                pg_db.upsert_account_score(&did, score).await?;
+            // 2. Migrate account scores — LOSSLESS (#344 R01). The presentation
+            // query hides expired/legacy rows and the scoring upsert would
+            // re-stamp what it copies as freshly scored; export/import carry
+            // every row with its own scored_at, generation and expiry.
+            let scores = sqlite_db.export_scores(&did).await?;
+            for row in &scores {
+                pg_db.import_score(&did, row).await?;
             }
-            println!("  {} {} account scores migrated", "✓".green(), scores.len());
+            println!(
+                "  {} {} account scores migrated (all rows, provenance preserved)",
+                "✓".green(),
+                scores.len()
+            );
 
             // 3. Migrate amplification events — preserve original detected_at
             // timestamps so pile-on detection works correctly after migration.
@@ -1200,6 +1213,24 @@ async fn main() -> Result<()> {
                     "✓".green()
                 );
             }
+
+            // 5. Refresh schedule (#344): copy what the source knew, so a
+            // migrated user is neither refreshed twice nor forgotten. A NULL
+            // refreshed_generation on the destination makes the next tick
+            // refresh them — the right default for a freshly migrated user.
+            if let Some(at) = sqlite_db.next_refresh_at(&did).await? {
+                pg_db.schedule_refresh(&did, &at).await?;
+            }
+            if let Some(g) = sqlite_db.refreshed_generation(&did).await? {
+                pg_db.mark_refreshed_generation(&did, &g).await?;
+            }
+            // mark_refreshed_generation sets attempted = refreshed; if the
+            // source had an attempt pending under a different revision, copy
+            // that too so the destination does not re-attempt at once.
+            if let Some(a) = sqlite_db.refresh_attempted_generation(&did).await? {
+                pg_db.mark_refresh_attempted_generation(&did, &a).await?;
+            }
+            println!("  {} Refresh schedule migrated", "✓".green());
 
             println!("\n{}", "Migration complete!".green().bold());
             println!(

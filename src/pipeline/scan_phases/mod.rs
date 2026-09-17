@@ -9,6 +9,7 @@ pub mod feed_cache;
 pub mod finalize;
 pub mod gather;
 pub mod staging;
+pub mod test_support;
 
 // ── run_phased_scan: the orchestrating state machine ───────────────────────────
 //
@@ -32,7 +33,7 @@ use futures::StreamExt;
 use tracing::{info, warn};
 
 use crate::bluesky::relationships::GraphDistance;
-use crate::db::Database;
+use crate::db::{Database, ScanKind};
 use crate::scoring::nli::NliScorer;
 use crate::scoring::threat::ThreatWeights;
 use crate::topics::embeddings::SentenceEmbedder;
@@ -45,7 +46,117 @@ use finalize::{finalize_account, FinalizeOutcome};
 use gather::{
     gather_account, CleanPassScorer, GatherInputs, GatherOutcome, GatherTiming, PostFetcher,
 };
-use staging::ScanPhase;
+use staging::{EvidenceContract, ScanPhase};
+
+/// `scan_state` key naming which kind of run owns whatever is staged (R02).
+pub const RUN_KIND_KEY: &str = "scan_run_kind";
+/// `scan_state` key naming the scoring revision that staged it (R03).
+pub const RUN_GENERATION_KEY: &str = "scan_run_generation";
+
+/// Who is running this scan, and under which scoring revision (#344 R02/R03).
+///
+/// Written next to `scan_phase` at a fresh start and read on every resume, so
+/// a refresh never resumes a full scan's staging (or vice versa) and no run
+/// ever finalizes blobs another binary staged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunIdentity {
+    pub kind: ScanKind,
+    pub generation: &'static str,
+}
+
+impl RunIdentity {
+    pub fn full() -> Self {
+        Self {
+            kind: ScanKind::Full,
+            generation: crate::scoring::generation::scoring_revision(),
+        }
+    }
+
+    pub fn refresh() -> Self {
+        Self {
+            kind: ScanKind::Refresh,
+            generation: crate::scoring::generation::scoring_revision(),
+        }
+    }
+}
+
+/// Read-only: does `user_did` have staging of THIS identity's own kind and
+/// generation sitting at a resumable phase (burst/finalize)?
+///
+/// Answers exactly one question: is there resumable staging whose recorded
+/// owner is *this* identity, kind and generation both? Added for #344 F6: a
+/// refresh with zero fresh candidates still has to resume and burst its OWN
+/// leftover staging, so the caller needs this answer before deciding whether
+/// the classifier identity probe is worth paying for.
+///
+/// This is deliberately NOT a general mirror of the ownership read
+/// `run_phased_scan` performs on entry, and two arms diverge — both in the
+/// conservative direction (this says `false` where the entry read would act):
+///
+/// - **Half-written ownership.** Resumable staging carrying a current
+///   generation but NO `scan_run_kind` is attributed to `Full` by
+///   `run_phased_scan`, which then resumes and bursts it. This returns
+///   `false` for `RunIdentity::full()`, because the recorded kind is absent
+///   rather than `Full`.
+/// - **An unrecognised phase marker.** `run_phased_scan` bails rather than
+///   risk wiping staging it cannot interpret; this reads it as "no resumable
+///   staging" and returns `false`.
+///
+/// Both are harmless for the refresh caller — a refusal reaches
+/// `OwnedByOtherKind` or the bail before any classifier call, so a skipped
+/// probe never precedes classification. A future caller passing
+/// `RunIdentity::full()` would need the first arm fixed, or it could skip a
+/// probe and then classify the staging it just disclaimed.
+pub async fn has_own_resumable_staging(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    identity: RunIdentity,
+) -> Result<bool> {
+    let raw_phase = db.get_scan_state(user_did, "scan_phase").await?;
+    let phase = raw_phase.as_deref().and_then(ScanPhase::from_value);
+    if !matches!(phase, Some(ScanPhase::Burst) | Some(ScanPhase::Finalize)) {
+        return Ok(false);
+    }
+    let owner_kind = db
+        .get_scan_state(user_did, RUN_KIND_KEY)
+        .await?
+        .and_then(|k| ScanKind::from_str(&k));
+    let owner_generation = db.get_scan_state(user_did, RUN_GENERATION_KEY).await?;
+    Ok(owner_kind == Some(identity.kind)
+        && owner_generation.as_deref() == Some(identity.generation))
+}
+
+/// Typed failures the callers of [`run_phased_scan`] match on.
+///
+/// A typed error rather than a bare string because both callers *act* on it:
+/// a refresh defers, a full scan drains. Matching on message text would make
+/// that dispatch a spelling contract.
+///
+/// The message still has to carry a remedy, because there is a third caller
+/// that acts on neither: `charcoal scan` / `charcoal sweep` propagate this
+/// straight to the terminal (#344 F1). The web tier never reads it — it
+/// downcasts to the variant — so the text is free to address the operator.
+#[derive(Debug, thiserror::Error)]
+pub enum PhasedScanError {
+    /// Resumable staging belongs to the other scan kind. Never resumed blindly.
+    #[error(
+        "resumable staging is owned by a {0:?} run — this scan will not adopt it. \
+         Let the owner finish it: a queued full scan (the web dashboard's \"Scan now\", \
+         or `charcoal serve` with a queued row) drains refresh-owned staging before it \
+         gathers, and the nightly refresh resumes its own. Re-run this command afterwards."
+    )]
+    OwnedByOtherKind(ScanKind),
+}
+
+/// The skip-count read, behind a trait so a test can fail exactly one of them
+/// (V7-03) while every other database operation still works.
+///
+/// The production case is `None` on [`PhasedScanDeps::skip_counter`], which
+/// reads `Database::count_scan_skips` directly.
+#[async_trait::async_trait]
+pub trait SkipCounter: Send + Sync {
+    async fn count(&self, user_did: &str) -> Result<i64>;
+}
 
 /// One candidate account to scan, with the per-account inputs the orchestrator
 /// owns (the scan-global shared refs live in [`PhasedScanDeps`]).
@@ -107,10 +218,20 @@ pub struct PhasedScanDeps<'a> {
     pub burst_concurrency: usize,
     /// Batch size for Phase B burst (`run_burst` fetch limit).
     pub burst_batch: i64,
+    /// What finalize accepts as verdict evidence for this run (R03, V2-01).
+    /// Built from `ONNX_MODEL_ID` and the classifier's advertised identity.
+    pub evidence: EvidenceContract<'a>,
+    /// Override for the skip-count read (V7-03). `None` — the production case
+    /// — reads `count_scan_skips` straight off the database.
+    pub skip_counter: Option<&'a dyn SkipCounter>,
 }
 
 /// Summary of a completed (or cost-capped) `run_phased_scan` call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// Not `Copy`: `final_phase` owns its string. The two persisted-state fields
+/// exist because `degraded` describes ONE invocation while completion is
+/// classified from what actually survived in the database (V5-01).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScanSummary {
     /// Number of accounts that reached `FinalizeOutcome::Scored` in this call.
     pub accounts_scored: usize,
@@ -118,6 +239,13 @@ pub struct ScanSummary {
     pub regathered: usize,
     /// True when a `CostCapped` burst left the scan incomplete/resumable.
     pub degraded: bool,
+    /// The `scan_phase` marker as this call returned — the authority on
+    /// whether the staging actually drained. `None` when it could not be read,
+    /// which is never proof of completion.
+    pub final_phase: Option<String>,
+    /// Persisted skip count at return. `None` means "could not be read" —
+    /// a distinct answer from zero, and never `-1` (V5-01).
+    pub skipped: Option<i64>,
 }
 
 /// Build a per-account [`GatherInputs`] by pairing a candidate with shared deps.
@@ -151,6 +279,7 @@ pub async fn run_phased_scan(
     user_did: &str,
     candidates: &[CandidateInput],
     deps: &PhasedScanDeps<'_>,
+    identity: RunIdentity,
 ) -> Result<ScanSummary> {
     // Read the resume point. Distinguish three cases:
     //   - missing marker (`None`)            ⇒ fresh start (Gather).
@@ -172,6 +301,55 @@ pub async fn run_phased_scan(
         },
     };
 
+    // #344 R02/R03: who owns whatever is staged, and under which revision.
+    //
+    // Only a RESUMABLE marker (burst/finalize) carries an ownership claim —
+    // `gather`/`done`/absent all fresh-start anyway, so there is nothing to
+    // take from anyone.
+    let owner_kind = db
+        .get_scan_state(user_did, RUN_KIND_KEY)
+        .await?
+        .and_then(|k| ScanKind::from_str(&k));
+    let owner_generation = db.get_scan_state(user_did, RUN_GENERATION_KEY).await?;
+    let resumable = matches!(phase, Some(ScanPhase::Burst) | Some(ScanPhase::Finalize));
+    let phase = if resumable && owner_generation.as_deref() != Some(identity.generation) {
+        // Left by another binary. Its blobs would fail the generation check one
+        // by one in finalize; clearing here is the same decision made once, up
+        // front, without a re-gather per account.
+        warn!(
+            user_did,
+            ?owner_generation,
+            "resumable staging from another generation — discarding"
+        );
+        db.clear_scan_staging(user_did).await?;
+        db.delete_scan_state(user_did, RUN_KIND_KEY).await?;
+        db.delete_scan_state(user_did, RUN_GENERATION_KEY).await?;
+        None
+    } else if resumable && owner_kind.is_some() && owner_kind != Some(identity.kind) {
+        // Never resume another kind's staging blindly: a refresh defers and a
+        // full scan drains, and both decisions belong to the caller.
+        return Err(PhasedScanError::OwnedByOtherKind(owner_kind.expect("checked is_some")).into());
+    } else {
+        // A resumable marker whose generation IS current but whose kind is
+        // missing: a HALF-WRITTEN ownership record. The two markers are written
+        // one after the other, so a crash between them leaves exactly this.
+        //
+        // Note what this arm is *not*: genuinely pre-v18 staging carries
+        // neither key, so `owner_generation` is `None`, the generation branch
+        // above fires first, and the staging is discarded — it never reaches
+        // here. Reasoning from "this is the pre-v18 case" would be reasoning
+        // from a premise that cannot hold.
+        //
+        // A partial record is attributed to Full, the kind that writes staging
+        // on every deployment: that leaves `phase` unchanged for a full caller
+        // (it resumes its own work) and refuses a refresh caller, which the
+        // `owner_kind.is_some()` guard above would otherwise have let through.
+        if resumable && owner_kind.is_none() && identity.kind != ScanKind::Full {
+            return Err(PhasedScanError::OwnedByOtherKind(ScanKind::Full).into());
+        }
+        phase
+    };
+
     let mut summary = ScanSummary::default();
 
     // ── Phase: Gather (also the fresh-start entry) ──
@@ -188,6 +366,13 @@ pub async fn run_phased_scan(
         // a stale marker and fresh-started; a "gather" marker re-enters this
         // same block (staging is cleared either way).
         db.set_scan_state(user_did, "scan_phase", ScanPhase::Gather.as_str())
+            .await?;
+        // Stamp ownership with the phase, not after it: a crash between the two
+        // would leave staging nobody claims, which the branch above would read
+        // as pre-v18 Full-owned work (R02/R03).
+        db.set_scan_state(user_did, RUN_KIND_KEY, identity.kind.as_str())
+            .await?;
+        db.set_scan_state(user_did, RUN_GENERATION_KEY, identity.generation)
             .await?;
         db.clear_scan_staging(user_did).await?;
         // Drop the previous run's skips so the count describes THIS scan rather
@@ -239,7 +424,7 @@ pub async fn run_phased_scan(
                     "burst cost-capped — scan resumable"
                 );
                 summary.degraded = true;
-                return Ok(summary);
+                return finish_summary(db, user_did, deps, summary).await;
             }
             BurstOutcome::Interrupted => {
                 // A transient classifier failure (e.g. a RunPod blip with the
@@ -254,7 +439,7 @@ pub async fn run_phased_scan(
                     "burst interrupted by transient classifier failure — scan resumable"
                 );
                 summary.degraded = true;
-                return Ok(summary);
+                return finish_summary(db, user_did, deps, summary).await;
             }
             BurstOutcome::Complete { errored } => {
                 if errored > 0 {
@@ -293,33 +478,57 @@ pub async fn run_phased_scan(
 
     // ── Phase: Done — clear both staging tables (leaves scan_phase intact) ──
     db.clear_scan_staging(user_did).await?;
+    // The run is over: nobody owns the drained staging any more. Deleting the
+    // markers (rather than leaving them on a `done` phase) is what lets the
+    // NEXT run of either kind fresh-start without inheriting this one's claim.
+    db.delete_scan_state(user_did, RUN_KIND_KEY).await?;
+    db.delete_scan_state(user_did, RUN_GENERATION_KEY).await?;
 
-    // Report the skip COUNT alongside the flag (#226). `degraded=true` on its
-    // own is a bare bool with no magnitude — it reads identically whether one
-    // account was dropped or six hundred, which is precisely what turned #220
-    // into a multi-hour log dig. A count on this line answers "how bad" without
-    // any log spelunking, and `scan_skips` answers "which ones, and why".
-    // Non-fatal: a failed count must not sink a completed scan. But it must not
-    // be silent either — an unexplained -1 in the logs is the same
-    // swallowed-cause problem #220 spent hours on.
-    let skipped = match db.count_scan_skips(user_did).await {
-        Ok(n) => n,
+    finish_summary(db, user_did, deps, summary).await
+}
+
+/// Fill in the persisted-state half of the summary and log the run.
+///
+/// Called on EVERY return path that produced a summary, exactly once, so the
+/// skip count is read once per invocation — which is what makes the
+/// injected [`SkipCounter`] a usable seam (V7-03).
+///
+/// Report the skip COUNT alongside the flag (#226). `degraded=true` on its own
+/// is a bare bool with no magnitude — it reads identically whether one account
+/// was dropped or six hundred, which is precisely what turned #220 into a
+/// multi-hour log dig. A count on this line answers "how bad" without any log
+/// spelunking, and `scan_skips` answers "which ones, and why". Non-fatal: a
+/// failed count must not sink a completed scan. It is reported as `None`
+/// rather than `-1` (V5-01) — "could not be read" is a different answer from
+/// "zero", and the completion classifier keeps them apart.
+async fn finish_summary(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    deps: &PhasedScanDeps<'_>,
+    mut summary: ScanSummary,
+) -> Result<ScanSummary> {
+    summary.final_phase = db.get_scan_state(user_did, "scan_phase").await?;
+    let counted = match deps.skip_counter {
+        Some(counter) => counter.count(user_did).await,
+        None => db.count_scan_skips(user_did).await,
+    };
+    summary.skipped = match counted {
+        Ok(n) => Some(n),
         Err(e) => {
             warn!(
                 error = %format!("{e:#}"),
-                "could not read the scan skip count — reporting -1"
+                "could not read the scan skip count — reporting it as unverified"
             );
-            -1
+            None
         }
     };
     info!(
-        phase = "done",
+        phase = summary.final_phase.as_deref().unwrap_or("unknown"),
         accounts_scored = summary.accounts_scored,
         degraded = summary.degraded,
-        accounts_skipped = skipped,
-        "phased scan complete"
+        accounts_skipped = summary.skipped,
+        "phased scan call finished"
     );
-
     Ok(summary)
 }
 
@@ -678,6 +887,7 @@ async fn finalize_one(
         deps.nli_scorer,
         deps.protected_posts_with_embeddings,
         deps.data_dir,
+        &deps.evidence,
     )
     .await
 }

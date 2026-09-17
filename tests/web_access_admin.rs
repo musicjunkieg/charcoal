@@ -3,7 +3,9 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use charcoal::db::FinishCompletion;
 use charcoal::web::auth::{create_token, COOKIE_NAME};
+use charcoal::web::scan_job::{record_full_scan_completion, ScanCompletion};
 use charcoal::web::test_helpers::{build_admin_test_app_with_db, TEST_DID, TEST_SECRET};
 use serde_json::Value;
 use tower::ServiceExt;
@@ -212,9 +214,33 @@ async fn admin_trigger_bypasses_the_cooldown() {
         .await
         .expect("claim")
         .expect("claimed");
-    db.finish_queued_scan(COOLDOWN_USER, &claim.claim_id, None)
-        .await
-        .expect("finish");
+    // Production completion order: the cooldown anchor
+    // (`last_full_scan_finished_at`) is written while the claim is still held,
+    // then the queue row is finished. Finishing the row alone writes no anchor,
+    // and without one this test could not tell a bypass from no cooldown.
+    record_full_scan_completion(
+        db.as_ref(),
+        COOLDOWN_USER,
+        &claim.claim_id,
+        ScanCompletion::Complete,
+    )
+    .await;
+    db.finish_queued_scan(
+        COOLDOWN_USER,
+        &claim.claim_id,
+        FinishCompletion::Complete,
+        None,
+    )
+    .await
+    .expect("finish");
+
+    // The fixture really is in cooldown: the user's own retry is refused.
+    let (own_status, own_body) = call(&app, "POST", "/api/scan", COOLDOWN_USER).await;
+    assert_eq!(
+        own_status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "fixture must put the user in cooldown: {own_body}"
+    );
 
     let uri = format!("/api/admin/users/{COOLDOWN_USER}/scan");
     let (status, body) = call(&app, "POST", &uri, TEST_DID).await;

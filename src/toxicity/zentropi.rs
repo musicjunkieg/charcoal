@@ -73,6 +73,59 @@ pub struct ZentropiClient {
     api_key: String,
     labeler_id: String,
     labeler_version_id: Option<String>,
+    /// The endpoint to POST to. A field rather than the module const so the
+    /// trait's policy-identity contract can be exercised against a local mock
+    /// (V3-01) — the production constructor always passes [`ZENTROPI_API_URL`].
+    api_url: String,
+    /// This client's policy identity, resolved ONCE at construction (V3-01).
+    ///
+    /// `ToxicityClassifier::policy_version` returns `&'static str`, and the
+    /// configured labeler version is only known at runtime, so the resolved
+    /// string is leaked — once per DISTINCT value, via [`intern_policy`]. (It
+    /// is not bounded by construction count: the client is rebuilt for every
+    /// full scan and every nightly refresh.) This is the same
+    /// string `classify` writes onto its verdicts, which is the whole point:
+    /// finalize validates a row's recorded policy against what the classifier
+    /// advertises, and before this they could differ.
+    policy_version: &'static str,
+}
+
+/// The banner used when no concrete labeler version is configured.
+const ZENTROPI_DEFAULT_POLICY: &str = "zentropi-labeler";
+
+/// Hand a runtime policy string to the `&'static str` that
+/// `ToxicityClassifier::policy_version` requires, leaking each DISTINCT value
+/// at most once for the life of the process.
+///
+/// A leak is the only way to turn a runtime `String` into `&'static str`, so
+/// the question is only how many. `ZentropiClient` is rebuilt for every full
+/// scan and every nightly refresh (`build_scan_scorers` calls
+/// `build_from_env`), so leaking in the constructor grew memory without bound
+/// — one allocation per scan (#344 Codex review P2). Interning bounds it to the
+/// number of distinct configured values, which in a deployment is one.
+///
+/// Not a single `LazyLock` over the environment, as the RunPod client uses:
+/// [`ZentropiClient::with_api_url`] takes the version as a parameter so tests
+/// can construct clients with different values, and those must not collapse
+/// into whichever value happened to be read first.
+fn intern_policy(value: &str) -> &'static str {
+    use std::collections::HashSet;
+    use std::sync::{LazyLock, Mutex};
+
+    static INTERNED: LazyLock<Mutex<HashSet<&'static str>>> =
+        LazyLock::new(|| Mutex::new(HashSet::new()));
+
+    // A poisoned lock only means another thread panicked mid-insert; the set
+    // itself is still a valid set of leaked strings, so keep using it.
+    let mut set = INTERNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(existing) = set.get(value) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(value.to_string().into_boxed_str());
+    set.insert(leaked);
+    leaked
 }
 
 impl ZentropiClient {
@@ -82,6 +135,26 @@ impl ZentropiClient {
         api_key: String,
         labeler_id: String,
         labeler_version_id: Option<String>,
+    ) -> Result<Self> {
+        Self::with_api_url(
+            api_key,
+            labeler_id,
+            labeler_version_id,
+            ZENTROPI_API_URL.to_string(),
+        )
+    }
+
+    /// [`ZentropiClient::new`] with the endpoint injected.
+    ///
+    /// `pub` rather than `#[cfg(test)]`: `tests/unit_classifier.rs` is a
+    /// separate crate and cannot see a test-only constructor, and the property
+    /// it checks — advertised policy == written policy, on a cache miss and on
+    /// a cache hit — needs a real request/response round trip.
+    pub fn with_api_url(
+        api_key: String,
+        labeler_id: String,
+        labeler_version_id: Option<String>,
+        api_url: String,
     ) -> Result<Self> {
         if api_key.is_empty() {
             anyhow::bail!("ZENTROPI_API_KEY is empty");
@@ -95,11 +168,18 @@ impl ZentropiClient {
             .build()
             .context("Failed to build reqwest client for Zentropi")?;
 
+        let policy_version: &'static str = match labeler_version_id.as_deref() {
+            Some(v) => intern_policy(v),
+            None => ZENTROPI_DEFAULT_POLICY,
+        };
+
         Ok(Self {
             client,
             api_key,
             labeler_id,
             labeler_version_id,
+            api_url,
+            policy_version,
         })
     }
 
@@ -155,7 +235,7 @@ impl ZentropiClient {
     async fn send_once(&self, request: &ZentropiLabelerRequest) -> Result<ZentropiResponse> {
         let response = self
             .client
-            .post(ZENTROPI_API_URL)
+            .post(&self.api_url)
             .bearer_auth(&self.api_key)
             .json(request)
             .send()
@@ -376,13 +456,13 @@ impl ToxicityClassifier for ZentropiClient {
             confidence: resp.confidence as f32,
             latency_ms,
             model_id: self.model_id().to_string(),
-            // Prefer the concrete hosted labeler version (ZENTROPI_LABELER_VERSION_ID)
-            // so audit/classifier records identify the exact policy that produced
-            // the verdict; fall back to the static banner only when unset.
-            policy_version: self
-                .labeler_version_id
-                .clone()
-                .unwrap_or_else(|| self.policy_version().to_string()),
+            // ONE identity on every path (V3-01): what this classifier
+            // advertises is exactly what it writes. It used to prefer
+            // `labeler_version_id` here while `policy_version()` returned a
+            // static banner, so a configured deployment wrote rows that
+            // finalize's evidence check — which compares against the
+            // advertised value — would have rejected.
+            policy_version: self.policy_version().to_string(),
         };
         crate::observability::classifier_metrics::record_request(
             self.name(),
@@ -400,11 +480,9 @@ impl ToxicityClassifier for ZentropiClient {
         "cope-a-9b" // bumped to cope-b in Chunk 6 if hosted CoPE-B lands
     }
     fn policy_version(&self) -> &'static str {
-        // The hosted labeler version is identified by ZENTROPI_LABELER_VERSION_ID
-        // at construction; this static accessor is a placeholder until the
-        // version ID is plumbed through (deferred to Chunk 6 alongside hosted
-        // CoPE-B research).
-        "zentropi-labeler"
+        // Resolved at construction from ZENTROPI_LABELER_VERSION_ID, and the
+        // same string `classify` stamps on every verdict (V3-01).
+        self.policy_version
     }
     fn threshold(&self) -> f32 {
         ZENTROPI_THRESHOLD
@@ -414,6 +492,43 @@ impl ToxicityClassifier for ZentropiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #344 Codex review P2: the client is rebuilt for every full scan and
+    /// every nightly refresh, so leaking the policy string per construction
+    /// grew memory without bound. Pointer identity is the observable proof
+    /// that repeat constructions reuse ONE leaked allocation.
+    ///
+    /// The value is unique to this test so a parallel test interning the same
+    /// string cannot make the first construction a hit and mask a regression.
+    #[test]
+    fn a_repeated_policy_is_leaked_once_not_per_construction() {
+        let policy = "intern-test-policy-a3f9";
+        let build = |version: &str| {
+            ZentropiClient::new(
+                "key".to_string(),
+                "labeler".to_string(),
+                Some(version.to_string()),
+            )
+            .expect("valid client")
+        };
+
+        let first = build(policy);
+        let second = build(policy);
+        assert!(
+            std::ptr::eq(first.policy_version(), second.policy_version()),
+            "the same policy must reuse one allocation, not leak a new one per scan"
+        );
+        assert_eq!(first.policy_version(), policy);
+
+        // Distinct values must stay distinct — interning must not collapse
+        // different configured policies into one.
+        let other = build("intern-test-policy-b7c2");
+        assert_eq!(other.policy_version(), "intern-test-policy-b7c2");
+        assert!(!std::ptr::eq(
+            first.policy_version(),
+            other.policy_version()
+        ));
+    }
 
     #[test]
     fn response_is_toxic_returns_true_for_label_1() {
