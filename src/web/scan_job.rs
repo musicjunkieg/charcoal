@@ -409,7 +409,17 @@ impl CarriedCompletion {
             "draining" if rest == current => CarriedCompletion::Draining,
             "unverified" if rest == current => CarriedCompletion::Unverified,
             "skips" => {
-                let (n, rev) = rest.split_once('|')?;
+                // A count with its revision cut off is still a claim that a
+                // drain with skips happened. Absence here would delete the key
+                // and let the run be reported `Complete` (same rule as above).
+                let Some((n, rev)) = rest.split_once('|') else {
+                    warn!(
+                        value,
+                        "carried completion lost its revision separator — \
+                         treating the drain as unverified"
+                    );
+                    return Some(CarriedCompletion::Draining);
+                };
                 if rev != current {
                     return None;
                 }
@@ -4196,6 +4206,13 @@ mod carried_completion_tests {
             CarriedCompletion::parse("draining"),
             Some(CarriedCompletion::Draining),
             "a sentinel truncated at the separator still taints the run"
+        );
+        // The same holds for a skip count cut off before its revision: the
+        // count survived, so a drain with skips certainly happened.
+        assert_eq!(
+            CarriedCompletion::parse("skips|2"),
+            Some(CarriedCompletion::Draining),
+            "a skips value truncated past its separator still taints the run"
         );
         assert_eq!(
             ScanCompletion::from(

@@ -74,17 +74,21 @@ pub struct ClusterCentroid {
     pub post_count: u32,
 }
 
-/// Confidence level of a scoring result based on data volume.
+/// Confidence level of a scoring result.
 ///
-/// Used to prioritize re-scoring: Low confidence accounts are re-scored
-/// sooner (3 days) than High confidence accounts (14 days).
+/// Set by `scoring::profile`, not by a post count: `Low` when Stage 1 exits
+/// early, otherwise `High` or `Standard` by the topic fingerprint's quality
+/// (`FingerprintQuality`). Drives expiry: Low confidence scores expire sooner
+/// (3 days) than High confidence scores (14 days).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScoringConfidence {
-    /// < 25 posts analyzed, early exit
+    /// Stage 1 early exit: every sampled post was clean and the topic overlap
+    /// was below the gate, so the account was never fully scored.
     Low,
-    /// 25-50 posts, standard sampling
+    /// Fully scored, but the fingerprint was `Degraded` or `Unreliable`
+    /// (fewer than 15 original posts).
     Standard,
-    /// 50+ posts, full analysis with context pairs
+    /// Fully scored with a `Normal` fingerprint (at least 15 original posts).
     High,
 }
 

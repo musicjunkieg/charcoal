@@ -180,7 +180,12 @@ backfills `valid_until` on every row, then runs `SET NOT NULL` (which makes
 Postgres verify every row), and creates `idx_account_scores_user_score`
 **non-concurrently** (which takes a write lock on the table for the duration).
 
-At current row counts this is **seconds**. It is worth knowing anyway, for two
+At current row counts this is **under a second**. Measured 2026-09-17:
+`account_scores` holds 5,427 rows (5 MB) in production and 61,330 rows (55 MB)
+on staging, and the v18 statements run as one transaction on a local
+61,330-row table padded to 101 MB took 499 ms end to end. The lock is taken
+by the first `ALTER TABLE … ADD COLUMN`, not only by the index build, so moving
+just the index to `CONCURRENTLY` would not shorten it. It is worth knowing anyway, for two
 reasons: if the deploy appears to hang at boot, this is the first thing to look
 at; and the moment `account_scores` is large (tens of millions of rows) this
 step becomes a maintenance window, not a deploy step — at which point the

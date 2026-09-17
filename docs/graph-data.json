@@ -10614,6 +10614,28 @@
       "created_at": "2026-09-16T16:40:17.975492-07:00",
       "updated_at": "2026-09-16T16:40:17.975492-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 975,
+      "change_id": "ae03466c-3bc1-415d-b1a2-c8c9acb6ac18",
+      "node_type": "outcome",
+      "title": "PR #124 claim-fence round landed at 39e20fe (9e253fa fence + test fix). Full local web suite 60 binaries 1122 passed 0 failed 0 SKIP; hook 30 binaries 871 passed; Postgres fence test passes locally. Threads updated to fixed, #378 closed. Awaiting CI + CodeRabbit re-review.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T17:52:21.870161-07:00",
+      "updated_at": "2026-09-16T17:52:21.870161-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"39e20fe\",\"confidence\":90}"
+    },
+    {
+      "id": 976,
+      "change_id": "66e87dcc-a710-49b9-a364-a1c2c48334a9",
+      "node_type": "observation",
+      "title": "CodeRabbit round on 39e20fe (4 findings). (1) v18 migration lock: REFUTED with evidence — prod account_scores 5,427 rows/5 MB, staging 61,330/55 MB; the v18 transaction on a local 101 MB 61k-row table took 499 ms; lock starts at ADD COLUMN so CONCURRENTLY index alone would not help; runbook updated with numbers. (2) README confidence table wrong — confidence is Stage-1 early exit (Low) vs FingerprintQuality Normal (High, >=15 originals) / Degraded|Unreliable (Standard), not post counts; also the ScoringConfidence doc comments: FIXED. (3) staging mutations not claim-fenced: VALID but pre-existing on main (clear_scan_staging/enqueue_classifications/stash_account_input/set_scan_state), not introduced here -> out of scope, widened #348. (4) CarriedCompletion::parse('skips|2') returned None: FIXED with red-then-green test.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T18:09:08.393204-07:00",
+      "updated_at": "2026-09-16T18:09:08.393204-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -21847,6 +21869,28 @@
       "weight": 1.0,
       "rationale": "Correction",
       "created_at": "2026-09-16T16:40:17.994864-07:00"
+    },
+    {
+      "id": 1032,
+      "from_node_id": 973,
+      "to_node_id": 975,
+      "from_change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "to_change_id": "ae03466c-3bc1-415d-b1a2-c8c9acb6ac18",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-09-16T17:52:21.888197-07:00"
+    },
+    {
+      "id": 1033,
+      "from_node_id": 975,
+      "to_node_id": 976,
+      "from_change_id": "ae03466c-3bc1-415d-b1a2-c8c9acb6ac18",
+      "to_change_id": "66e87dcc-a710-49b9-a364-a1c2c48334a9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next CodeRabbit round",
+      "created_at": "2026-09-16T18:09:08.408808-07:00"
     }
   ],
   "documents": [

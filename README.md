@@ -178,9 +178,13 @@ confident it was and stamps an expiry on the row:
 
 | Scoring confidence | What it means | Valid for |
 |---|---|---|
-| High | 50+ posts analysed, full pipeline including context pairs | 14 days |
-| Standard | 25–50 posts, standard sampling | 7 days |
-| Low | fewer than 25 posts, the scorer exited early | 3 days |
+| High | Fully scored, and the account had at least 15 original posts to build its topic fingerprint from | 14 days |
+| Standard | Fully scored, but with fewer than 15 original posts, so the fingerprint leaned on replies and quotes or was unreliable | 7 days |
+| Low | Not fully scored: the first pass found only clean posts on unrelated topics and stopped early | 3 days |
+
+Confidence is not a post count. It comes from the fingerprint's quality and
+whether the scorer stopped early, so two accounts with the same number of posts
+can land in different rows.
 
 The less Charcoal had to look at, the sooner it wants to look again.
 

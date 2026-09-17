@@ -1,5 +1,13 @@
 [
   {
+    "hash": "39e20fe8d4098abe3e4921fc73271fa76e29c486",
+    "short_hash": "39e20fe",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T17:45:03-07:00",
+    "message": "test(344): finish the queue row after scheduling in the tick-off test\n\nWith the schedule now claim-fenced the test holds a real claim, and a\nstill-running queue row keeps the tick from enqueuing the user for the\nwrong reason. Finish the row after scheduling, as production does.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
     "hash": "9e253fac511ebf542af26f0b3face2b1630d0a32",
     "short_hash": "9e253fa",
     "author": "Bryan Guffey",
