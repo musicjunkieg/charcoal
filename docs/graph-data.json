@@ -10592,6 +10592,28 @@
       "created_at": "2026-09-16T16:20:36.599928-07:00",
       "updated_at": "2026-09-16T16:20:36.599928-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"5749eb3\",\"confidence\":90}"
+    },
+    {
+      "id": 973,
+      "change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "node_type": "observation",
+      "title": "Correction: deferring the two claim-fence findings to #378 broke Bryan's standing rule (implement every finding that holds; defer only out-of-scope or refuted). Implemented instead as 9e253fa: Database::apply_refresh_schedule (ownership read + write in one tx, Immediate/FOR UPDATE) and claim-matched request_full_after_refresh; mutation check confirmed the SQLite test fails without the fence. The new Postgres test exposed a pre-existing prod bug: request_full_after_refresh COALESCE(timestamptz, text) errored on every call, so on Postgres a deferred refresh never recorded its follow-up full scan; fixed with ::timestamptz.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:40:11.419484-07:00",
+      "updated_at": "2026-09-16T16:40:11.419484-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"9e253fa\",\"confidence\":95}"
+    },
+    {
+      "id": 974,
+      "change_id": "8671063c-21a7-4e35-8938-936993b232ea",
+      "node_type": "observation",
+      "title": "CORRECTION to 973: the request_full_after_refresh COALESCE bug was NOT a prod bug. The method was added on this branch (6495191, #344) and has never reached staging or main; it would have shipped with PR #124 and is fixed before merge.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T16:40:17.975492-07:00",
+      "updated_at": "2026-09-16T16:40:17.975492-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -21803,6 +21825,28 @@
       "weight": 1.0,
       "rationale": "Result",
       "created_at": "2026-09-16T16:20:36.623897-07:00"
+    },
+    {
+      "id": 1030,
+      "from_node_id": 971,
+      "to_node_id": 973,
+      "from_change_id": "8cdf6112-f0b5-4657-9114-874b63576efe",
+      "to_change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Correction and fix",
+      "created_at": "2026-09-16T16:40:11.438590-07:00"
+    },
+    {
+      "id": 1031,
+      "from_node_id": 973,
+      "to_node_id": 974,
+      "from_change_id": "a46dafca-6f9b-44f3-9266-b3efa9f9c7ce",
+      "to_change_id": "8671063c-21a7-4e35-8938-936993b232ea",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Correction",
+      "created_at": "2026-09-16T16:40:17.994864-07:00"
     }
   ],
   "documents": [

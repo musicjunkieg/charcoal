@@ -321,6 +321,16 @@ mod tests {
             deadline_interval(None),
         )
         .await;
+        // Production order: the scan finishes its queue row after scheduling.
+        // A still-running row would keep the tick away for the wrong reason.
+        db.finish_queued_scan(
+            "did:plc:parked",
+            &claim,
+            crate::db::FinishCompletion::Complete,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             db.next_refresh_at("did:plc:parked").await.unwrap(),
             Some((now + ChronoDuration::hours(DEFAULT_REFRESH_INTERVAL_HOURS as i64)).to_rfc3339()),

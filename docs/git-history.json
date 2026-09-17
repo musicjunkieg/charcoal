@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9e253fac511ebf542af26f0b3face2b1630d0a32",
+    "short_hash": "9e253fa",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:39:49-07:00",
+    "message": "fix(344): claim-fence the refresh schedule writes atomically\n\nCodeRabbit on PR #124: the refresh and full-scan bookkeeping checked\nowns_claim once, then wrote next_refresh_at, the generation markers and\nfull_requested_at without the claim. A lease that lapsed between the\ncheck and the writes let a stale worker move a successor schedule.\n\n- Database::apply_refresh_schedule(user, claim_id, Success|Retry)\n  reads the queue row owner and writes the schedule in one transaction\n  (Immediate on SQLite, FOR UPDATE on Postgres) and reports whether it\n  wrote. The success deadline and proof are now one statement.\n- request_full_after_refresh matches claim_id in its UPDATE and\n  returns whether it annotated a row.\n- Both bookkeeping traits pass claim_id through; the scheduling helpers\n  use the fenced write.\n- Tests on both backends reclaim a real expired lease and assert the\n  stale claim writes nothing while the successor writes land. The\n  SQLite test fails with the ownership check disabled.\n\nAlso fixes a Postgres bug the new test exposed: request_full bound RFC\n3339 text into COALESCE with a timestamptz column, which errors, so on\nPostgres a deferred refresh never recorded its follow-up full scan.\n\nTests that scheduled without a claim now hold one, in production order\n(schedule, then finish the queue row). Supersedes the deferral to #378.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 12
+  },
+  {
     "hash": "5749eb34fe9593b1f0253ec5b65d1a5f7deb5e2c",
     "short_hash": "5749eb3",
     "author": "Bryan Guffey",
