@@ -262,6 +262,14 @@ def _shell_tokenize(cmd):
     """
     try:
         lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        # shlex strips "#..." as a comment by default, but bash only treats
+        # "#" as a comment at the start of a word — "status#x" is one word.
+        # Left enabled, the tokenizer sees a truncated command while bash
+        # would execute the full line ("git status#x || rm -rf target"
+        # reduces to "git status" and sails through the allowlist). Parse
+        # "#" as ordinary text; any resulting mismatch fails conservative
+        # (refuse to auto-allow) instead of permissive.
+        lex.commenters = ""
         lex.whitespace_split = True
         return list(lex)
     except ValueError:
