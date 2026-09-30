@@ -32,18 +32,29 @@ a toxic or bad-faith manner, and surfaces them **before** that engagement
 happens. Success is a user seeing a credible, evidence-backed picture of who is
 likely to come at them, early enough to act.
 
-**The outcome that purpose serves is a good time online.** The user's feed stops
-being a place they brace themselves for. People who came to provoke them are
-gone before they arrive, so what is left is the part of social media the user
-actually wanted. Harm avoided is the mechanism; an enjoyable timeline is the
-result, and the result is what the product leads with. This is a change of
-emphasis, not of function: nothing about what Charcoal detects or how it scores
-changes here.
+**The outcome that purpose serves is joy.** The user's feed stops being a place
+they brace themselves for. People who came to provoke them are gone before they
+arrive, so what is left is the part of social media the user actually wanted.
+Harm avoided is the mechanism; a joyful timeline is the result, and the result
+is what the product leads with. This is a change of emphasis, not of function:
+nothing about what Charcoal detects or how it scores changes here.
+
+**Joy, not comfort, and not "enjoyable"** (confirmed 2026-09-30). Joy is active
+and it is available while doing hard things — you can organise, argue, grieve
+and fight in public and still engage joyfully. The word is drawn from Black
+liberationary framing, where joy is practised under conditions that are not
+safe and is itself a form of refusal. That makes it the accurate word for this
+product: Charcoal does not promise a frictionless feed or ask anyone to stop
+doing hard work in public. It removes the people who came only to make that
+work miserable. "Enjoyable" describes a mood that good conditions hand you;
+joy is something the user keeps doing, and Charcoal protects their ability to
+keep doing it.
 
 ## Positioning
 
-**The headline claim: Charcoal gives you social media that is enjoyable again,
-by making the people who came to upset you disappear before they reach you.**
+**The headline claim: Charcoal gives you social media you can be joyful in
+again, by making the people who came to upset you disappear before they reach
+you.**
 Confirmed 2026-09-30 as the story the product leads with, replacing a
 protection-from-harm framing that led with the threat. It describes the shipped
 product: Charcoal finds those accounts before they engage, and the user removes
@@ -137,8 +148,9 @@ Constraints and open decisions:
 
 - Name: **Charcoal**. Domain: charcoal.watch.
 - **Voice splits by surface** (confirmed 2026-09-30). Outward-facing surfaces
-  lead with the outcome — an enjoyable timeline, the provocateurs gone — and
-  never open on fear. The app's judgement surfaces stay plain and specific;
+  lead with the outcome — a joyful timeline, the provocateurs gone — and never
+  open on fear. Use "joy", not "enjoyable" or "comfortable": see Product
+  Purpose for why the distinction is load-bearing. The app's judgement surfaces stay plain and specific;
   see Positioning for why the two differ.
 - A companion publication exists at https://charcoal.leaflet.pub, linked from
   the landing page.
