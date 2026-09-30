@@ -10636,6 +10636,61 @@
       "created_at": "2026-09-16T18:09:08.393204-07:00",
       "updated_at": "2026-09-16T18:09:08.393204-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":90}"
+    },
+    {
+      "id": 977,
+      "change_id": "720e13ed-201f-4792-8b86-150959fa84c0",
+      "node_type": "outcome",
+      "title": "PR #124 f3f750d: CI green (db_postgres 73/73); CodeRabbit's pass on f3f750d posted no new findings; 7 of 8 threads resolved, the refuted v18-lock thread awaits its reply. CodeRabbit auto-review is PAUSED on #124 and reviewDecision is still CHANGES_REQUESTED from the 39e20fe review; approval needs a fresh full review, which only Bryan can trigger (standing rule: never tag CodeRabbit).",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T18:37:38.240971-07:00",
+      "updated_at": "2026-09-16T18:37:38.240971-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f3f750d\",\"confidence\":90}"
+    },
+    {
+      "id": 978,
+      "change_id": "744529c9-2b22-4000-a109-4ce335acc953",
+      "node_type": "outcome",
+      "title": "PR #124 APPROVED by CodeRabbit at 01:40:45Z on f3f750d; 0 unresolved threads; mergeable; CI green. Ready for Bryan to merge. Remaining after merge: Task 10 runbook on staging, CHARCOAL_COPE_B_POLICY_VERSION check before prod deploy, then close #344 --no-changelog.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-16T19:14:10.882995-07:00",
+      "updated_at": "2026-09-16T19:14:10.882995-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"commit\":\"f3f750d\",\"confidence\":95}"
+    },
+    {
+      "id": 979,
+      "change_id": "c15168ee-06bf-4a07-9674-a33cf10529cc",
+      "node_type": "observation",
+      "title": "RunPod IMAGE_AUTH_ERROR on endpoint f39lf61pc762a8 (repeat, 2026-09-19): 'denied: denied' pulling ghcr.io/musicjunkieg/charcoal-cope-b:ddac4681. Image is NOT the cause — anonymous GHCR manifest HEAD returns 200 (public package, tag present). The endpoint still carried registry auth charcoal-ghcr; GHCR rejects an expired/revoked token even for a public image.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-19T22:19:31.235901-07:00",
+      "updated_at": "2026-09-19T22:19:31.235901-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 980,
+      "change_id": "6b461c74-2988-4d0b-b88d-44af1d53e4a3",
+      "node_type": "action",
+      "title": "Detach the registry credential from the RunPod endpoint (update-endpoint containerRegistryAuthId=\"\"), leaving the saved credential undeleted, then force a cold start (workersMax 0 -> drain -> 10 -> runsync job) to prove a credential-free pull",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-19T22:19:31.263722-07:00",
+      "updated_at": "2026-09-19T22:19:31.263722-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":90}"
+    },
+    {
+      "id": 981,
+      "change_id": "5018990a-652f-4d7c-965b-f3e41f02ba0a",
+      "node_type": "outcome",
+      "title": "Verified: three fresh workers pulled the image with no credentials, zero unhealthy, and the cold-start job returned policy-ddac468-2026-07-03 (delay 132 s, execute 113 s; warm path 151 ms). Endpoint otherwise unchanged (image, 0-10 workers, volume, GPU pools). CHARCOAL_COPE_B_POLICY_VERSION for the #344 deploy = policy-ddac468-2026-07-03.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-09-19T22:19:31.290497-07:00",
+      "updated_at": "2026-09-19T22:19:31.290497-07:00",
+      "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -21891,6 +21946,50 @@
       "weight": 1.0,
       "rationale": "Next CodeRabbit round",
       "created_at": "2026-09-16T18:09:08.408808-07:00"
+    },
+    {
+      "id": 1034,
+      "from_node_id": 976,
+      "to_node_id": 977,
+      "from_change_id": "66e87dcc-a710-49b9-a364-a1c2c48334a9",
+      "to_change_id": "720e13ed-201f-4792-8b86-150959fa84c0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Round result",
+      "created_at": "2026-09-16T18:37:38.263765-07:00"
+    },
+    {
+      "id": 1035,
+      "from_node_id": 977,
+      "to_node_id": 978,
+      "from_change_id": "720e13ed-201f-4792-8b86-150959fa84c0",
+      "to_change_id": "744529c9-2b22-4000-a109-4ce335acc953",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Approved",
+      "created_at": "2026-09-16T19:14:10.905537-07:00"
+    },
+    {
+      "id": 1036,
+      "from_node_id": 979,
+      "to_node_id": 980,
+      "from_change_id": "c15168ee-06bf-4a07-9674-a33cf10529cc",
+      "to_change_id": "6b461c74-2988-4d0b-b88d-44af1d53e4a3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix for the pull failure",
+      "created_at": "2026-09-19T22:19:31.280705-07:00"
+    },
+    {
+      "id": 1037,
+      "from_node_id": 980,
+      "to_node_id": 981,
+      "from_change_id": "6b461c74-2988-4d0b-b88d-44af1d53e4a3",
+      "to_change_id": "5018990a-652f-4d7c-965b-f3e41f02ba0a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verification",
+      "created_at": "2026-09-19T22:19:31.307369-07:00"
     }
   ],
   "documents": [

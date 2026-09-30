@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f3f750d7a51655e2e59e0a18dae24805b991c818",
+    "short_hash": "f3f750d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T18:09:15-07:00",
+    "message": "fix(344): address CodeRabbit review of 39e20fe\n\n- CarriedCompletion::parse treats a skips value cut off before its\n  revision (\"skips|2\") as Draining, not absence, matching the rule for\n  the other truncated values. Absence deleted the key and let the run\n  report Complete.\n- README and the ScoringConfidence docs described confidence as post\n  counts (50+/25-50/<25). It is actually a Stage-1 early exit (Low) or\n  the fingerprint quality: Normal, at least 15 originals, is High;\n  Degraded or Unreliable is Standard.\n- The runbook records measured v18 lock times: production 5,427 rows,\n  staging 61,330, and the whole v18 transaction on a 101 MB local copy\n  took 499 ms.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 6
+  },
+  {
     "hash": "39e20fe8d4098abe3e4921fc73271fa76e29c486",
     "short_hash": "39e20fe",
     "author": "Bryan Guffey",
