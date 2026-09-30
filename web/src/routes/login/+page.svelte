@@ -299,7 +299,7 @@
 
 	.orb {
 		position: absolute;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		filter: blur(80px);
 		animation: drift 25s ease-in-out infinite;
 	}
@@ -331,7 +331,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 2rem;
+		padding: var(--space-32);
 	}
 
 	.content {
@@ -345,14 +345,14 @@
 		to { opacity: 1; transform: translateY(0); }
 	}
 
-	.header { text-align: center; margin-bottom: 2.5rem; }
+	.header { text-align: center; margin-bottom: var(--space-40); }
 
 	.logo {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		width: 72px; height: 72px;
-		margin-bottom: 1.25rem;
+		margin-bottom: var(--space-20);
 		color: var(--copper);
 		animation: emerge 1s var(--ease-out-expo) 0.1s backwards;
 	}
@@ -377,16 +377,16 @@
 
 	.title {
 		font-family: var(--font-display);
-		font-size: 2.25rem;
+		font-size: var(--text-display-sm);
 		font-weight: 400;
 		letter-spacing: -0.01em;
 		color: var(--cream-50);
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-8);
 		animation: emerge 1s var(--ease-out-expo) 0.15s backwards;
 	}
 
 	.tagline {
-		font-size: 1.0625rem;
+		font-size: var(--text-lead);
 		font-weight: 300;
 		color: var(--charcoal-400);
 		letter-spacing: 0.02em;
@@ -397,7 +397,7 @@
 		position: relative;
 		background: linear-gradient(145deg, rgba(41, 37, 36, 0.8) 0%, rgba(28, 25, 23, 0.9) 100%);
 		backdrop-filter: blur(20px);
-		border-radius: 20px;
+		border-radius: var(--radius-20);
 		border: 1px solid rgba(168, 162, 158, 0.1);
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 20px 50px -10px rgba(0, 0, 0, 0.5), 0 0 80px -20px var(--copper-glow);
 		transition: all 0.5s var(--ease-out-expo);
@@ -409,19 +409,19 @@
 		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 25px 60px -10px rgba(0, 0, 0, 0.6), 0 0 100px -20px var(--copper-glow);
 	}
 
-	.card-inner { padding: 2rem; }
+	.card-inner { padding: var(--space-32); }
 
 	.description {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		line-height: 1.7;
 		color: var(--charcoal-300);
 		text-align: center;
-		margin-bottom: 2rem;
+		margin-bottom: var(--space-32);
 		font-weight: 300;
 	}
 
 	.field {
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-24);
 		/* Positioning context so the suggestion list overlays the content below
 		   instead of pushing the sign-in button down as you type. */
 		position: relative;
@@ -434,24 +434,24 @@
 		left: 0;
 		right: 0;
 		margin: 0;
-		padding: 0.25rem;
+		padding: var(--space-4);
 		list-style: none;
 		max-height: 16rem;
 		overflow-y: auto;
 		background: rgba(12, 10, 9, 0.97);
 		border: 1px solid rgba(168, 162, 158, 0.18);
-		border-radius: 12px;
+		border-radius: var(--radius-12);
 		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 	}
 
 	.suggestion button {
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		gap: var(--space-10);
 		width: 100%;
-		padding: 0.5rem 0.625rem;
+		padding: var(--space-8) var(--space-10);
 		border: 0;
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		background: transparent;
 		color: inherit;
 		font: inherit;
@@ -467,7 +467,7 @@
 	.suggestion-avatar {
 		width: 24px;
 		height: 24px;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		flex-shrink: 0;
 		object-fit: cover;
 	}
@@ -483,7 +483,7 @@
 	}
 
 	.suggestion-handle {
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		color: var(--charcoal-100, #e7e5e4);
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -491,7 +491,7 @@
 	}
 
 	.suggestion-name {
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		color: var(--charcoal-300, #a8a29e);
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -500,10 +500,10 @@
 
 	.label {
 		display: block;
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		font-weight: 500;
 		color: var(--charcoal-300);
-		margin-bottom: 0.625rem;
+		margin-bottom: var(--space-10);
 		letter-spacing: 0.03em;
 		text-transform: uppercase;
 	}
@@ -513,8 +513,8 @@
 		align-items: center;
 		background: rgba(12, 10, 9, 0.6);
 		border: 1px solid rgba(168, 162, 158, 0.15);
-		border-radius: 12px;
-		padding: 0 1rem;
+		border-radius: var(--radius-12);
+		padding: 0 var(--space-16);
 		transition: all 0.3s var(--ease-in-out);
 	}
 
@@ -528,8 +528,8 @@
 		flex: 1;
 		border: none;
 		background: transparent;
-		padding: 1rem 0;
-		font-size: 1rem;
+		padding: var(--space-16) 0;
+		font-size: var(--text-body);
 		font-family: var(--font-body);
 		font-weight: 400;
 		color: var(--cream-100);
@@ -541,17 +541,17 @@
 	.input-container input:disabled { opacity: 0.5; }
 
 	.hint {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
-		margin-top: 0.75rem;
+		margin-top: var(--space-12);
 		text-align: center;
 		font-weight: 300;
 	}
 
 	.error {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: #f87171;
-		margin-top: 0.75rem;
+		margin-top: var(--space-12);
 		text-align: center;
 		font-weight: 400;
 	}
@@ -561,15 +561,15 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.625rem;
-		padding: 1rem 1.5rem;
-		font-size: 1rem;
+		gap: var(--space-10);
+		padding: var(--space-16) var(--space-24);
+		font-size: var(--text-body);
 		font-weight: 500;
 		font-family: var(--font-body);
 		color: var(--charcoal-950);
 		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
 		border: none;
-		border-radius: 12px;
+		border-radius: var(--radius-12);
 		cursor: pointer;
 		transition: all 0.3s var(--ease-out-expo);
 		box-shadow: 0 4px 15px -3px rgba(245, 158, 11, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
@@ -593,7 +593,7 @@
 	.loading-pulse {
 		width: 16px; height: 16px;
 		background: var(--charcoal-950);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: pulse 1.2s ease-in-out infinite;
 	}
 
@@ -603,23 +603,23 @@
 	}
 
 	.footer {
-		margin-top: 2rem;
+		margin-top: var(--space-32);
 		text-align: center;
 		animation: emerge 1s var(--ease-out-expo) 0.35s backwards;
 	}
 
 	.footer p {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
 		line-height: 1.6;
 		font-weight: 300;
 	}
 
 	@media (max-width: 480px) {
-		.container { padding: 1.5rem; }
-		.title { font-size: 1.875rem; }
+		.container { padding: var(--space-24); }
+		.title { font-size: var(--text-stat); }
 		.logo { width: 64px; height: 64px; }
-		.card-inner { padding: 1.5rem; }
+		.card-inner { padding: var(--space-24); }
 	}
 
 	@media (prefers-reduced-motion: reduce) {

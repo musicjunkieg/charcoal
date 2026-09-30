@@ -161,20 +161,22 @@
 <style>
 	.backdrop { position: fixed; inset: 0; background: rgb(var(--charcoal-950-rgb) / 0.4); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
 	@media (min-width: 40rem) { .backdrop { align-items: center; } }
-	.sheet { width: 100%; max-width: 26rem; background: var(--charcoal-900); color: var(--cream-50); border-radius: 16px 16px 0 0; padding: 1.25rem 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
-	@media (min-width: 40rem) { .sheet { border-radius: 16px; } }
-	h2 { font-family: 'Outfit', system-ui, sans-serif; font-size: 1.125rem; margin: 0; }
+	.sheet { width: 100%; max-width: 26rem; background: var(--charcoal-900); color: var(--cream-50); border-radius: var(--radius-16) var(--radius-16) 0 0; padding: var(--space-20) var(--space-20) var(--space-24); display: flex; flex-direction: column; gap: var(--space-12); }
+	@media (min-width: 40rem) { .sheet { border-radius: var(--radius-16); } }
+	h2 { font-family: 'Outfit', system-ui, sans-serif; font-size: var(--text-subtitle); margin: 0; }
 	.body { margin: 0; line-height: 1.5; }
-	.rows { list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.25rem; border-top: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); padding: 0.5rem 0; }
-	.row label { display: grid; grid-template-columns: auto auto auto 1fr; align-items: center; gap: 0.5rem; font-size: 0.8125rem; cursor: pointer; }
+	.rows { list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); border-top: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); padding: var(--space-8) 0; }
+	.row label { display: grid; grid-template-columns: auto auto auto 1fr; align-items: center; gap: var(--space-8); font-size: var(--text-label); cursor: pointer; }
 	.row.done { opacity: 0.5; }
 	.row.done label { cursor: default; }
 	.handle { font-weight: 500; }
 	.signal { color: var(--charcoal-400); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.already { margin: 0; font-size: 0.8125rem; color: var(--charcoal-500); }
-	.consent { margin: 0; font-size: 0.875rem; line-height: 1.5; color: var(--charcoal-400); border-left: 2px solid rgb(var(--charcoal-400-rgb) / 0.3); padding-left: 0.75rem; }
-	.footer { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
-	.footer button { padding: 0.5rem 0.9rem; font: inherit; font-size: 0.875rem; border-radius: 8px; cursor: pointer; }
+	.already { margin: 0; font-size: var(--text-label); color: var(--charcoal-500); }
+	.consent { margin: 0; font-size: var(--text-small); line-height: 1.5; color: var(--charcoal-400); border-left: 2px solid rgb(var(--charcoal-400-rgb) / 0.3); padding-left: var(--space-12); }
+	.footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: var(--space-8); }
+	/* 0.9rem is the one off-grid value in the app (14.4px, beside --space-14
+	   at 14px). Left exact rather than snapped: this pass changes no pixels. */
+	.footer button { padding: var(--space-8) 0.9rem; font: inherit; font-size: var(--text-small); border-radius: var(--radius-8); cursor: pointer; }
 	.cancel { background: transparent; color: inherit; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.25); }
 	.confirm { background: var(--cream-50); color: var(--charcoal-900); border: 0; }
 	.confirm[data-kind='block'] { background: var(--tier-high); color: white; }

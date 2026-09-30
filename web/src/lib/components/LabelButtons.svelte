@@ -77,23 +77,23 @@
 	.label-group {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--space-8);
 	}
 
 	.label-buttons {
 		display: flex;
-		gap: 0.375rem;
+		gap: var(--space-6);
 	}
 
 	.label-btn {
-		padding: 0.375rem 0.75rem;
-		font-size: 0.8125rem;
+		padding: var(--space-6) var(--space-12);
+		font-size: var(--text-label);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--tier-color);
 		background: transparent;
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		cursor: pointer;
 		transition: all 0.2s;
 	}
@@ -115,7 +115,7 @@
 	}
 
 	.discrepancy {
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		color: var(--charcoal-500);
 		line-height: 1.4;
 	}
@@ -126,7 +126,7 @@
 	}
 
 	.label-error {
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		color: var(--status-error);
 	}
 </style>

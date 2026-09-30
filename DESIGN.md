@@ -78,24 +78,42 @@ typography:
     fontWeight: 400
     lineHeight: 1.1
 rounded:
-  xs: "2px"
-  sm: "8px"
-  md: "12px"
-  lg: "16px"
-  xl: "20px"
-  2xl: "24px"
+  radius-2: "2px"
+  radius-3: "3px"
+  radius-6: "6px"
+  radius-8: "8px"
+  radius-10: "10px"
+  radius-12: "12px"
+  radius-14: "14px"
+  radius-16: "16px"
+  radius-20: "20px"
+  radius-24: "24px"
+  radius-circle: "50%"
+  radius-pill: "999px"
 spacing:
-  xs: "0.625rem"
-  sm: "1rem"
-  md: "1.5rem"
-  lg: "2rem"
-  xl: "3rem"
-  section: "8rem"
+  space-2: "0.125rem"
+  space-4: "0.25rem"
+  space-6: "0.375rem"
+  space-8: "0.5rem"
+  space-10: "0.625rem"
+  space-12: "0.75rem"
+  space-14: "0.875rem"
+  space-16: "1rem"
+  space-20: "1.25rem"
+  space-24: "1.5rem"
+  space-28: "1.75rem"
+  space-32: "2rem"
+  space-40: "2.5rem"
+  space-48: "3rem"
+  space-64: "4rem"
+  space-80: "5rem"
+  space-96: "6rem"
+  space-128: "8rem"
 components:
   button-primary:
     backgroundColor: "{colors.alert-amber}"
     textColor: "{colors.night-ground}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.radius-12}"
     padding: "1rem 2rem"
   button-primary-hover:
     backgroundColor: "{colors.alert-amber}"
@@ -103,7 +121,7 @@ components:
   button-ghost:
     backgroundColor: "transparent"
     textColor: "{colors.body-text-bright}"
-    rounded: "{rounded.sm}"
+    rounded: "{rounded.radius-8}"
     padding: "0.625rem 1.25rem"
   button-ghost-hover:
     backgroundColor: "rgba(201, 149, 108, 0.1)"
@@ -111,17 +129,17 @@ components:
   card-standard:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.instrument-cream}"
-    rounded: "{rounded.lg}"
+    rounded: "{rounded.radius-16}"
     padding: "2rem"
   card-featured:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.instrument-cream}"
-    rounded: "{rounded.2xl}"
+    rounded: "{rounded.radius-24}"
     padding: "3rem"
   input-field:
     backgroundColor: "rgba(12, 10, 9, 0.6)"
     textColor: "{colors.instrument-cream}"
-    rounded: "{rounded.md}"
+    rounded: "{rounded.radius-12}"
     padding: "1rem"
   input-field-focus:
     backgroundColor: "rgba(12, 10, 9, 0.8)"
@@ -321,6 +339,17 @@ Corners are generously rounded and scale with the surface's weight: `8px` for
 ghost buttons and chips, `12px` for primary buttons and input containers, `16px`
 for standard cards, `20px` for pipeline and form cards, `24px` for featured and
 CTA cards. Nothing in the system is square-cornered.
+
+The `rounded` and `spacing` scales above record what the built app uses, not a
+tidier scale it should use. Both are denser than a six-step t-shirt ramp — the
+app ships ten radii plus a circle and a pill, and eighteen spacing steps — and
+every value is reachable as a token (`--radius-10`, `--space-12`) declared in
+`web/src/lib/website/styles/tokens.css`. The names are pixel equivalents at a
+16px root because these are primitives: a name like `md` would have to pick
+between `10px` and `12px` and would hide how close they are. Consolidating the
+ramp is worthwhile and is deliberately NOT what tokenizing did: that pass
+(#292, #293, #380) changed no pixels, so any later collapse of near-duplicates
+is a visual decision reviewed on its own.
 
 Surfaces are defined by a `1px` low-opacity border plus a `145deg` gradient
 fill, never by a hard edge or a drop shadow at rest. The recurring silhouette is

@@ -99,7 +99,7 @@
 
 	.orb {
 		position: absolute;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		filter: blur(80px);
 		animation: drift 28s ease-in-out infinite;
 	}
@@ -135,7 +135,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 2rem;
+		padding: var(--space-32);
 	}
 
 	.content {
@@ -156,7 +156,7 @@
 		justify-content: center;
 		width: 72px;
 		height: 72px;
-		margin-bottom: 1.75rem;
+		margin-bottom: var(--space-28);
 		color: var(--copper);
 		animation: emerge 1s var(--ease-out-expo) 0.1s backwards;
 	}
@@ -184,43 +184,43 @@
 
 	.title {
 		font-family: var(--font-display);
-		font-size: clamp(1.75rem, 4vw, 2.5rem);
+		font-size: var(--text-headline);
 		font-weight: 400;
 		line-height: 1.2;
 		letter-spacing: -0.01em;
 		color: var(--cream-50);
-		margin-bottom: 1.25rem;
+		margin-bottom: var(--space-20);
 		animation: emerge 1s var(--ease-out-expo) 0.15s backwards;
 	}
 
 	.body-copy {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		font-weight: 300;
 		line-height: 1.7;
 		color: var(--charcoal-300);
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-16);
 		animation: emerge 1s var(--ease-out-expo) 0.2s backwards;
 	}
 
 	.reassure {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		font-weight: 400;
 		color: var(--charcoal-400);
-		margin-bottom: 2.5rem;
+		margin-bottom: var(--space-40);
 		animation: emerge 1s var(--ease-out-expo) 0.25s backwards;
 	}
 
 	.home-link {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
-		padding: 0.625rem 1.25rem;
-		font-size: 1rem;
+		gap: var(--space-8);
+		padding: var(--space-10) var(--space-20);
+		font-size: var(--text-body);
 		font-weight: 500;
 		color: var(--charcoal-300);
 		text-decoration: none;
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.2);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		transition: color 0.3s var(--ease-in-out), border-color 0.3s var(--ease-in-out),
 			background 0.3s var(--ease-in-out);
 		animation: emerge 1s var(--ease-out-expo) 0.3s backwards;
@@ -249,8 +249,8 @@
 	}
 
 	@media (max-width: 480px) {
-		.container { padding: 1.5rem; }
-		.title { font-size: 1.75rem; }
+		.container { padding: var(--space-24); }
+		.title { font-size: var(--text-page-title); }
 		.logo { width: 64px; height: 64px; }
 	}
 
