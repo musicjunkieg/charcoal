@@ -152,6 +152,14 @@ Constraints and open decisions:
   open on fear. Use "joy", not "enjoyable" or "comfortable": see Product
   Purpose for why the distinction is load-bearing. The app's judgement surfaces stay plain and specific;
   see Positioning for why the two differ.
+- **The name carries the argument** (confirmed 2026-09-30). Charcoal is carbon
+  under pressure; so is a diamond. The pressure does not go away and is not
+  what the product removes — the user still does hard things in public. What
+  Charcoal removes is the people who came only to make that miserable, so the
+  pressure can produce something brilliant instead of grinding someone down.
+  It pairs with the joy framing in Product Purpose: joy practised under
+  pressure, not pressure lifted. Outward copy may use the metaphor; it is not
+  required to, and it should never imply Charcoal makes the pressure stop.
 - A companion publication exists at https://charcoal.leaflet.pub, linked from
   the landing page.
 - No logo, wordmark, color palette, or typographic system was volunteered during
