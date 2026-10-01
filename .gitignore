@@ -8,11 +8,17 @@
 
 # ── Per-project ignore extensions ──────────────────────────────────
 # `.gitignore.local` is the extension point for project-specific ignore
-# patterns that don't belong in the template. The template ignores it
-# so it never lands in git, and git respects its patterns locally like
-# a normal .gitignore. This lets `update-project-from-template` overwrite
-# .gitignore freely without clobbering project-only entries. See the
-# CLAUDE.md convention block for the migration pattern.
+# patterns that don't belong in the template. Git does NOT read this
+# file by itself — `scripts/install-hooks.sh` wires it in by symlinking
+# the per-clone `.git/info/exclude` to it. The script only links when
+# `.gitignore.local` exists and info/exclude is still Git's default
+# stub (custom excludes are preserved, and linked worktrees are skipped
+# since they share info/exclude) — so if you create `.gitignore.local`
+# later, rerun the script from the primary checkout. The template
+# ignores the file so it never lands in git. This
+# lets `update-project-from-template` overwrite .gitignore freely
+# without clobbering project-only entries. See the CLAUDE.md convention
+# block for the migration pattern.
 .gitignore.local
 
 # ── macOS ──────────────────────────────────────────────────────────

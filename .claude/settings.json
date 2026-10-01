@@ -12,7 +12,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/pre-web-check.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-web-check.py\"",
             "timeout": 5
           }
         ]
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/work-check.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/work-check.py\"",
             "timeout": 3
           }
         ]
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/prompt-guard.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/prompt-guard.py\"",
             "timeout": 5
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/post-edit-check.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-edit-check.py\"",
             "timeout": 5
           }
         ]
@@ -57,19 +57,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/session-start.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.py\"",
             "timeout": 10
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/chainlink-uncommitted.sh"
           }
         ]
       }
