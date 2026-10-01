@@ -128,22 +128,22 @@
 
 <style>
 	.scan-progress {
-		padding: 1.25rem 1.5rem;
+		padding: var(--space-20) var(--space-24);
 		background: rgb(var(--charcoal-900-rgb) / 0.6);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 14px;
-		margin-bottom: 2rem;
+		border-radius: var(--radius-14);
+		margin-bottom: var(--space-32);
 	}
 
 	.progress-header {
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-16);
 	}
 
 	.progress-title {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		font-weight: 500;
 		color: var(--copper-light);
 		letter-spacing: 0.01em;
@@ -152,7 +152,7 @@
 	/* Contrast (#249): was --charcoal-500, which lands at 3.6:1 on this panel
 	   and fails AA for body text. --charcoal-400 is 6.9:1. */
 	.progress-elapsed {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 		font-variant-numeric: tabular-nums;
 	}
@@ -160,10 +160,10 @@
 	.steps {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem 1.5rem;
+		gap: var(--space-8) var(--space-24);
 		list-style: none;
 		padding: 0;
-		margin: 0 0 1rem 0;
+		margin: 0 0 var(--space-16) 0;
 	}
 
 	/* All three step states carry readable text (#249); the state is conveyed
@@ -171,8 +171,8 @@
 	.step {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.875rem;
+		gap: var(--space-8);
+		font-size: var(--text-small);
 		color: var(--charcoal-400);
 	}
 
@@ -195,21 +195,21 @@
 
 	.step-check {
 		color: var(--status-ok);
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 	}
 
 	.step-dot::before {
 		content: '';
 		width: 6px;
 		height: 6px;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		background: var(--charcoal-700);
 	}
 
 	.step-spinner {
 		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 
@@ -222,20 +222,20 @@
 	.progress-detail {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--space-8);
 	}
 
 	.bar-row {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
+		gap: var(--space-12);
 	}
 
 	.bar-track {
 		flex: 1;
 		height: 6px;
 		background: rgb(var(--charcoal-950-rgb) / 0.6);
-		border-radius: 3px;
+		border-radius: var(--radius-3);
 		overflow: hidden;
 	}
 
@@ -249,13 +249,13 @@
 		width: 100%;
 		height: 100%;
 		background: linear-gradient(90deg, var(--amber-500) 0%, var(--copper) 100%);
-		border-radius: 3px;
+		border-radius: var(--radius-3);
 		transform-origin: left;
 		transition: transform 0.5s ease;
 	}
 
 	.bar-text {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--copper);
 		white-space: nowrap;
 		font-variant-numeric: tabular-nums;
@@ -264,26 +264,26 @@
 	.counters {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.375rem 1.25rem;
+		gap: var(--space-6) var(--space-20);
 	}
 
 	.counter {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 		font-variant-numeric: tabular-nums;
 	}
 
 	/* Both were below AA on this background before (#249). */
 	.progress-message {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 	}
 
 	.expectation {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 		line-height: 1.5;
-		margin-top: 0.25rem;
+		margin-top: var(--space-4);
 	}
 
 	/* Waiting state (#257). Quiet by design: this is the system working, not a
@@ -291,9 +291,9 @@
 	.queue-position {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--space-8);
 		/* typography.body / colors.body-text-bright from DESIGN.md. */
-		font-size: 1rem;
+		font-size: var(--text-body);
 		color: var(--charcoal-300);
 	}
 
@@ -302,13 +302,13 @@
 	.queue-dot {
 		width: 8px;
 		height: 8px;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		background: var(--charcoal-400);
 		flex-shrink: 0;
 	}
 
 	.queue-note {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 		line-height: 1.5;
 	}

@@ -146,42 +146,42 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 2rem;
+		gap: var(--space-16);
+		margin-bottom: var(--space-32);
 	}
 
 	.page-title {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.75rem;
+		font-size: var(--text-page-title);
 		font-weight: 400;
 		color: var(--cream-50);
 		letter-spacing: -0.01em;
 	}
 
 	.page-subtitle {
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		color: var(--charcoal-500);
-		margin-top: 0.25rem;
+		margin-top: var(--space-4);
 	}
 
 	.progress-badge {
-		padding: 0.375rem 0.875rem;
-		font-size: 0.8125rem;
+		padding: var(--space-6) var(--space-14);
+		font-size: var(--text-label);
 		font-weight: 500;
 		color: var(--copper);
 		background: rgb(var(--copper-rgb) / 0.1);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		white-space: nowrap;
 	}
 
-	.loading-state { display: flex; justify-content: center; padding: 4rem 0; }
+	.loading-state { display: flex; justify-content: center; padding: var(--space-64) 0; }
 
 	.spinner {
 		width: 32px; height: 32px;
 		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 
@@ -192,21 +192,21 @@
 		flex-direction: column;
 		align-items: center;
 		text-align: center;
-		padding: 4rem 2rem;
+		padding: var(--space-64) var(--space-32);
 		color: var(--charcoal-500);
 	}
 
 	.empty-state h2 {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.25rem;
+		font-size: var(--text-title);
 		font-weight: 400;
 		color: var(--charcoal-300);
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-8);
 	}
 
 	.empty-state p {
-		font-size: 0.9375rem;
-		margin-bottom: 1.5rem;
+		font-size: var(--text-body-sm);
+		margin-bottom: var(--space-24);
 	}
 
 	.done-icon {
@@ -215,23 +215,23 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 1.5rem;
+		font-size: var(--text-section-title);
 		color: var(--status-ok);
 		background: rgb(var(--status-ok-rgb) / 0.1);
 		border: 1px solid rgb(var(--status-ok-rgb) / 0.2);
-		border-radius: 50%;
-		margin-bottom: 1rem;
+		border-radius: var(--radius-circle);
+		margin-bottom: var(--space-16);
 	}
 
 	.back-btn {
-		padding: 0.5rem 1.25rem;
-		font-size: 0.875rem;
+		padding: var(--space-8) var(--space-20);
+		font-size: var(--text-small);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--copper);
 		background: rgb(var(--copper-rgb) / 0.1);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		text-decoration: none;
 		transition: background 0.2s;
 	}
@@ -241,14 +241,14 @@
 	.review-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--space-12);
 	}
 
 	.review-card {
-		padding: 1.25rem;
+		padding: var(--space-20);
 		background: rgb(var(--charcoal-900-rgb) / 0.6);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
-		border-radius: 14px;
+		border-radius: var(--radius-14);
 		transition: border-color 0.2s;
 	}
 
@@ -260,20 +260,20 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.75rem;
-		margin-bottom: 0.875rem;
+		gap: var(--space-12);
+		margin-bottom: var(--space-14);
 	}
 
 	.card-identity {
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		gap: var(--space-10);
 		min-width: 0;
 	}
 
 	.card-handle {
 		font-weight: 500;
-		font-size: 1rem;
+		font-size: var(--text-body);
 		color: var(--copper);
 		text-decoration: none;
 		overflow: hidden;
@@ -284,7 +284,7 @@
 	.card-handle:hover { color: var(--copper-light); }
 
 	.card-tier {
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		font-weight: 600;
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
@@ -292,7 +292,7 @@
 	}
 
 	.bsky-link {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
 		text-decoration: none;
 		flex-shrink: 0;
@@ -302,23 +302,23 @@
 
 	.card-scores {
 		display: flex;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
+		gap: var(--space-8);
+		margin-bottom: var(--space-16);
 		flex-wrap: wrap;
 	}
 
 	.score-pill {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		padding: 0.25rem 0.625rem;
+		gap: var(--space-6);
+		padding: var(--space-4) var(--space-10);
 		background: rgb(var(--charcoal-950-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.08);
-		border-radius: 6px;
+		border-radius: var(--radius-6);
 	}
 
 	.score-name {
-		font-size: 0.6875rem;
+		font-size: var(--text-micro);
 		font-weight: 500;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -326,14 +326,14 @@
 	}
 
 	.score-num {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-300);
 		font-variant-numeric: tabular-nums;
 	}
 
 	.card-actions {
 		border-top: 1px solid rgb(var(--charcoal-400-rgb) / 0.07);
-		padding-top: 0.875rem;
+		padding-top: var(--space-14);
 	}
 
 	@media (max-width: 640px) {

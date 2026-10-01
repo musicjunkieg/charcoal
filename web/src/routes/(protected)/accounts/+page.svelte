@@ -317,52 +317,52 @@
 	.page-header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-16);
+		margin-bottom: var(--space-24);
 	}
 
 	.page-title {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.75rem;
+		font-size: var(--text-page-title);
 		font-weight: 400;
 		color: var(--cream-50);
 	}
 
 	.total-badge {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
 		background: rgb(var(--charcoal-400-rgb) / 0.08);
-		padding: 0.25rem 0.625rem;
-		border-radius: 999px;
+		padding: var(--space-4) var(--space-10);
+		border-radius: var(--radius-pill);
 	}
 
 	.filters {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		margin-bottom: 1.5rem;
+		gap: var(--space-16);
+		margin-bottom: var(--space-24);
 		flex-wrap: wrap;
 	}
 
-	.bulk-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.625rem 0.875rem; margin-bottom: 1rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 10px; font-size: 0.875rem; }
+	.bulk-bar { display: flex; align-items: center; gap: var(--space-12); flex-wrap: wrap; padding: var(--space-10) var(--space-14); margin-bottom: var(--space-16); border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: var(--radius-10); font-size: var(--text-small); }
 	.bulk-count { color: var(--charcoal-400); }
-	.bulk-buttons { display: flex; gap: 0.375rem; margin-left: auto; }
-	.bulk-btn { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
+	.bulk-buttons { display: flex; gap: var(--space-6); margin-left: auto; }
+	.bulk-btn { padding: var(--space-6) var(--space-12); font: inherit; font-size: var(--text-label); border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: var(--radius-8); background: transparent; color: var(--charcoal-400); cursor: pointer; }
 	.bulk-btn.block { color: var(--tier-high); }
 	.bulk-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-	.bulk-error { width: 100%; margin: 0; font-size: 0.75rem; color: var(--status-error); }
+	.bulk-error { width: 100%; margin: 0; font-size: var(--text-caption); color: var(--status-error); }
 
-	.tier-pills { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+	.tier-pills { display: flex; gap: var(--space-6); flex-wrap: wrap; }
 
 	.pill {
-		padding: 0.375rem 0.875rem;
-		font-size: 0.875rem;
+		padding: var(--space-6) var(--space-14);
+		font-size: var(--text-small);
 		font-weight: 400;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--charcoal-500);
 		background: rgb(var(--charcoal-900-rgb) / 0.6);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.12);
-		border-radius: 999px;
+		border-radius: var(--radius-pill);
 		cursor: pointer;
 		transition: all 0.2s;
 	}
@@ -394,8 +394,8 @@
 		align-items: center;
 		background: rgb(var(--charcoal-950-rgb) / 0.6);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.12);
-		border-radius: 10px;
-		padding: 0 0.875rem;
+		border-radius: var(--radius-10);
+		padding: 0 var(--space-14);
 	}
 
 	.search-box:focus-within {
@@ -403,14 +403,14 @@
 		box-shadow: 0 0 0 2px rgb(var(--copper-rgb) / 0.1);
 	}
 
-	.search-at { color: var(--charcoal-700); font-size: 0.9375rem; margin-right: 0.25rem; }
+	.search-at { color: var(--charcoal-700); font-size: var(--text-body-sm); margin-right: var(--space-4); }
 
 	.search-input {
 		flex: 1;
 		border: none;
 		background: transparent;
-		padding: 0.625rem 0;
-		font-size: 0.875rem;
+		padding: var(--space-10) 0;
+		font-size: var(--text-small);
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--cream-100);
 		outline: none;
@@ -419,8 +419,8 @@
 	.search-input::placeholder { color: var(--charcoal-700); }
 
 	.search-btn {
-		padding: 0.375rem 0.75rem;
-		font-size: 0.8125rem;
+		padding: var(--space-6) var(--space-12);
+		font-size: var(--text-label);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--copper);
@@ -431,32 +431,32 @@
 
 	.search-btn:hover { color: var(--copper-light); }
 
-	.loading-state { display: flex; justify-content: center; padding: 4rem 0; }
+	.loading-state { display: flex; justify-content: center; padding: var(--space-64) 0; }
 
 	.spinner {
 		width: 32px; height: 32px;
 		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 
 	@keyframes spin { to { transform: rotate(360deg); } }
 
-	.empty-state { padding: 3rem 0; text-align: center; color: var(--charcoal-600); font-size: 0.9375rem; }
+	.empty-state { padding: var(--space-48) 0; text-align: center; color: var(--charcoal-600); font-size: var(--text-body-sm); }
 
 	.table-wrap { overflow-x: auto; }
 
 	.table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 	}
 
 	.table th {
 		text-align: left;
-		padding: 0.5rem 0.75rem;
-		font-size: 0.75rem;
+		padding: var(--space-8) var(--space-12);
+		font-size: var(--text-caption);
 		font-weight: 500;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
@@ -465,7 +465,7 @@
 	}
 
 	.table td {
-		padding: 0.75rem 0.75rem;
+		padding: var(--space-12) var(--space-12);
 		border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.05);
 		color: var(--charcoal-300);
 	}
@@ -479,7 +479,7 @@
 
 	.handle-text { color: var(--copper); font-weight: 500; }
 
-	.tier-badge { font-weight: 500; font-size: 0.875rem; }
+	.tier-badge { font-weight: 500; font-size: var(--text-small); }
 
 	.muted { color: var(--charcoal-500); }
 
@@ -494,18 +494,18 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 1.5rem;
-		padding: 1.5rem 0;
+		gap: var(--space-24);
+		padding: var(--space-24) 0;
 	}
 
 	.page-btn {
-		padding: 0.5rem 1rem;
-		font-size: 0.875rem;
+		padding: var(--space-8) var(--space-16);
+		font-size: var(--text-small);
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--copper);
 		background: rgb(var(--copper-rgb) / 0.1);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		cursor: pointer;
 		transition: background 0.2s;
 	}
@@ -513,5 +513,5 @@
 	.page-btn:hover:not(:disabled) { background: rgb(var(--copper-rgb) / 0.18); }
 	.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-	.page-info { font-size: 0.875rem; color: var(--charcoal-500); }
+	.page-info { font-size: var(--text-small); color: var(--charcoal-500); }
 </style>

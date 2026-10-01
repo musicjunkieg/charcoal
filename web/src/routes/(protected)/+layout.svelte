@@ -129,7 +129,7 @@
 		height: 32px;
 		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 
@@ -150,7 +150,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0 2rem;
+		padding: 0 var(--space-32);
 		height: 56px;
 		background: rgb(var(--charcoal-950-rgb) / 0.9);
 		backdrop-filter: blur(12px);
@@ -160,7 +160,7 @@
 	.nav-brand {
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		gap: var(--space-10);
 		text-decoration: none;
 		color: var(--cream-100);
 	}
@@ -173,7 +173,7 @@
 
 	.nav-title {
 		font-family: var(--font-display);
-		font-size: 1.125rem;
+		font-size: var(--text-subtitle);
 		font-weight: 400;
 		letter-spacing: -0.01em;
 	}
@@ -181,16 +181,16 @@
 	.nav-links {
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-4);
 	}
 
 	.nav-link {
-		padding: 0.375rem 0.875rem;
-		font-size: 0.875rem;
+		padding: var(--space-6) var(--space-14);
+		font-size: var(--text-small);
 		font-weight: 400;
 		color: var(--charcoal-400);
 		text-decoration: none;
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		transition: color 0.2s, background 0.2s;
 	}
 
@@ -198,13 +198,13 @@
 	.nav-link.active { color: var(--cream-100); background: rgb(var(--copper-rgb) / 0.12); }
 
 	.nav-logout {
-		padding: 0.375rem 0.875rem;
-		font-size: 0.875rem;
+		padding: var(--space-6) var(--space-14);
+		font-size: var(--text-small);
 		font-weight: 400;
 		color: var(--charcoal-500);
 		background: none;
 		border: none;
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		cursor: pointer;
 		font-family: var(--font-body);
 		transition: color 0.2s;
@@ -215,21 +215,21 @@
 	.impersonation-banner {
 		background: rgb(var(--amber-500-rgb) / 0.15);
 		border-bottom: 1px solid rgb(var(--amber-500-rgb) / 0.4);
-		padding: 0.5rem 2rem;
+		padding: var(--space-8) var(--space-32);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		color: var(--amber-500);
 	}
 
 	.impersonation-exit {
-		padding: 0.25rem 0.75rem;
-		font-size: 0.75rem;
+		padding: var(--space-4) var(--space-12);
+		font-size: var(--text-caption);
 		background: rgb(var(--amber-500-rgb) / 0.2);
 		border: 1px solid rgb(var(--amber-500-rgb) / 0.4);
 		color: var(--amber-500);
-		border-radius: 6px;
+		border-radius: var(--radius-6);
 		cursor: pointer;
 		font-family: var(--font-body);
 	}
@@ -239,12 +239,12 @@
 	.main {
 		max-width: 1200px;
 		margin: 0 auto;
-		padding: 2rem 2rem;
+		padding: var(--space-32) var(--space-32);
 	}
 
 	@media (max-width: 640px) {
-		.nav { padding: 0 1rem; }
-		.main { padding: 1.5rem 1rem; }
+		.nav { padding: 0 var(--space-16); }
+		.main { padding: var(--space-24) var(--space-16); }
 		.nav-title { display: none; }
 	}
 </style>
