@@ -32,10 +32,46 @@ a toxic or bad-faith manner, and surfaces them **before** that engagement
 happens. Success is a user seeing a credible, evidence-backed picture of who is
 likely to come at them, early enough to act.
 
+**The outcome that purpose serves is joy.** The user's feed stops being a place
+they brace themselves for. People who came to provoke them are gone before they
+arrive, so what is left is the part of social media the user actually wanted.
+Harm avoided is the mechanism; a joyful timeline is the result, and the result
+is what the product leads with. This is a change of emphasis, not of function:
+nothing about what Charcoal detects or how it scores changes here.
+
+**Joy, not comfort, and not "enjoyable"** (confirmed 2026-09-30). Joy is active
+and it is available while doing hard things — you can organise, argue, grieve
+and fight in public and still engage joyfully. The word is drawn from Black
+liberationary framing, where joy is practised under conditions that are not
+safe and is itself a form of refusal. That makes it the accurate word for this
+product: Charcoal does not promise a frictionless feed or ask anyone to stop
+doing hard work in public. It removes the people who came only to make that
+work miserable. "Enjoyable" describes a mood that good conditions hand you;
+joy is something the user keeps doing, and Charcoal protects their ability to
+keep doing it.
+
 ## Positioning
 
-Four claims a neighboring tool (blocklist, moderation labeler, mute list) could
-not truthfully make. All four were confirmed as load-bearing:
+**The headline claim: Charcoal gives you social media you can be joyful in
+again, by making the people who came to upset you disappear before they reach
+you.**
+Confirmed 2026-09-30 as the story the product leads with, replacing a
+protection-from-harm framing that led with the threat. It describes the shipped
+product: Charcoal finds those accounts before they engage, and the user removes
+them from their own experience in one move. It is not a claim of automatic,
+hands-off removal — automated actions remain planned, not built (see
+Capabilities and Constraints), and no surface may promise them as shipped.
+
+**Scope: this framing is marketing-facing.** Inside the app, tiers, scores,
+evidence and the triage queue keep their plain, blunt vocabulary. Those screens
+name real people as likely harassers, which is exactly where accusation-grade
+care outranks a pleasant tone. Softening the judgement surfaces would make them
+worse at the one job they have.
+
+The four claims below are unchanged and still load-bearing; under the new story
+they are the **proof** that the headline is achievable — the mechanism a
+neighboring tool (blocklist, moderation labeler, mute list) could not truthfully
+copy:
 
 - **Predictive, not reactive.** Blocklists and reports act after harm. Charcoal
   scores accounts that have not engaged with the user at all yet.
@@ -88,6 +124,13 @@ Confirmed and shipped:
   which distinguishes mockery and contempt from good-faith disagreement.
 - Per-account evidence: the amplification events, the signals that fired, and
   graph distance.
+- **Acting on a result ships today**, and it is what makes the headline claim
+  true: muting or blocking an account from its detail page, or every account in
+  a tier at once from the account list when that tier is filtered. Either
+  finishes where the user already is, with `Undo` and a link to the result
+  (CHANGELOG #332). The triage queue is for labelling and review; it carries no
+  mute or block control of its own. What remains unbuilt is Charcoal deciding
+  *by itself* — the user still chooses.
 - Surfaces today: marketing landing, login, dashboard, account list, account
   detail, triage queue, admin.
 
@@ -106,6 +149,19 @@ Constraints and open decisions:
 ## Brand Commitments
 
 - Name: **Charcoal**. Domain: charcoal.watch.
+- **Voice splits by surface** (confirmed 2026-09-30). Outward-facing surfaces
+  lead with the outcome — a joyful timeline, the provocateurs gone — and never
+  open on fear. Use "joy", not "enjoyable" or "comfortable": see Product
+  Purpose for why the distinction is load-bearing. The app's judgement surfaces stay plain and specific;
+  see Positioning for why the two differ.
+- **The name carries the argument** (confirmed 2026-09-30). Charcoal is carbon
+  under pressure; so is a diamond. The pressure does not go away and is not
+  what the product removes — the user still does hard things in public. What
+  Charcoal removes is the people who came only to make that miserable, so the
+  pressure can produce something brilliant instead of grinding someone down.
+  It pairs with the joy framing in Product Purpose: joy practised under
+  pressure, not pressure lifted. Outward copy may use the metaphor; it is not
+  required to, and it should never imply Charcoal makes the pressure stop.
 - A companion publication exists at https://charcoal.leaflet.pub, linked from
   the landing page.
 - No logo, wordmark, color palette, or typographic system was volunteered during
