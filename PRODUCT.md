@@ -125,10 +125,12 @@ Confirmed and shipped:
 - Per-account evidence: the amplification events, the signals that fired, and
   graph distance.
 - **Acting on a result ships today**, and it is what makes the headline claim
-  true: muting or blocking an account from the triage queue or account detail,
-  in bulk from a selection, finishing where the user already is, with `Undo`
-  and a link to the result (CHANGELOG #332). What remains unbuilt is Charcoal
-  deciding *by itself* — the user still chooses.
+  true: muting or blocking an account from its detail page, or every account in
+  a tier at once from the account list when that tier is filtered. Either
+  finishes where the user already is, with `Undo` and a link to the result
+  (CHANGELOG #332). The triage queue is for labelling and review; it carries no
+  mute or block control of its own. What remains unbuilt is Charcoal deciding
+  *by itself* — the user still chooses.
 - Surfaces today: marketing landing, login, dashboard, account list, account
   detail, triage queue, admin.
 
