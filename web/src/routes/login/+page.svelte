@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { initiateAuth, suggestHandles, type HandleSuggestion } from '$lib/api.js';
+	// Scale tokens; this page's local :root carries only palette (#292/#293/#380).
+	import '$lib/website/styles/tokens.css';
 
 	let handle = $state('');
 	let isSubmitting = $state(false);

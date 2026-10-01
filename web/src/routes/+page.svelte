@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	// The scale tokens (--text-*, --space-*, --radius-*) live here, and this
+	// page's local :root carries only palette, so without this import every
+	// size and gap below falls back to the browser default (#292/#293/#380).
+	import '$lib/website/styles/tokens.css';
 
 	// Leaflet publication URL - update this when you create your publication
 	const LEAFLET_URL = 'https://charcoal.leaflet.pub';

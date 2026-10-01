@@ -88,10 +88,13 @@ describe('no literal type, spacing or radius values', () => {
 			for (const file of SOURCES) {
 				const css = readFileSync(file, 'utf8');
 				for (const m of css.matchAll(re)) {
-					for (const atom of m[1].match(/(?<![\w.-])\d*\.?\d+(?:rem|em|px)|50%/g) ?? []) {
+					// The sign is part of the atom: `margin-top: -0.5rem` is a literal too,
+					// and the token form is calc(var(--space-8) * -1).
+					for (const atom of m[1].match(/(?<![\w.])-?\d*\.?\d+(?:rem|em|px)|50%/g) ?? []) {
 						if (atom === '0' || ALLOWED.has(atom)) continue;
-						// 1px hairlines and 0 are not scale steps.
-						if (atom === '1px') continue;
+						// 1px hairlines and 0 are not scale steps; -1px pulls a border
+						// back over its neighbour, which is the same hairline.
+						if (atom === '1px' || atom === '-1px') continue;
 						offenders.push(`${file}: ${m[0].trim()}`);
 					}
 				}
@@ -99,4 +102,26 @@ describe('no literal type, spacing or radius values', () => {
 			expect(offenders).toEqual([]);
 		});
 	}
+});
+
+// A var() for a token the document never loaded is not a fallback, it is a
+// dropped declaration: the browser discards the whole property and the element
+// renders at the UA default. The landing page and /login carry their own :root
+// with the palette only, so tokenizing them silently removed every size and gap
+// until this test existed (caught in review on #129).
+describe('token availability', () => {
+	const USES = /var\(--(?:text|space|radius)-/;
+	const IMPORTS = "styles/tokens.css";
+
+	it('every component that uses a scale token loads tokens.css', () => {
+		const offenders: string[] = [];
+		for (const file of globSync('src/**/*.svelte')) {
+			const src = readFileSync(file, 'utf8');
+			if (!USES.test(src)) continue;
+			// Everything under (protected) inherits the import from its layout.
+			if (file.includes('(protected)')) continue;
+			if (!src.includes(IMPORTS)) offenders.push(file);
+		}
+		expect(offenders).toEqual([]);
+	});
 });
