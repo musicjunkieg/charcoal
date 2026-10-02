@@ -10691,6 +10691,116 @@
       "created_at": "2026-09-19T22:19:31.290497-07:00",
       "updated_at": "2026-09-19T22:19:31.290497-07:00",
       "metadata_json": "{\"branch\":\"feat/343-phase2-expiry-refresh\",\"confidence\":95}"
+    },
+    {
+      "id": 982,
+      "change_id": "e388db2a-9613-4257-8dfc-0020c8095182",
+      "node_type": "observation",
+      "title": "2026-10-02 staging: Phase 2 had been deployed since #124 merged (schema v18 applied, all 61,330 rows legacy), but CHARCOAL_COPE_B_POLICY_VERSION was unset, so the Stage-2 probe refused every refresh for 16 days. Each refusal still woke a RunPod worker that then idled for its 60 s timeout: RunPod billed every day Sep 17 - Oct 2, $193.43 total (~$12/day, ~$363/mo), zero scores produced. Pre-Phase-2 billing was 3 days out of 12.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T11:53:49.695504-07:00",
+      "updated_at": "2026-10-02T11:53:49.695504-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":95}"
+    },
+    {
+      "id": 983,
+      "change_id": "c8b85999-a6be-43df-805f-7b81795ff781",
+      "node_type": "action",
+      "title": "Set CHARCOAL_COPE_B_POLICY_VERSION=policy-ddac468-2026-07-03 on staging (probed from the endpoint, not derived), redeploy charcoal-web so the running container picks it up, then verify the first tick",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T11:53:49.723386-07:00",
+      "updated_at": "2026-10-02T11:53:49.723386-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":95}"
+    },
+    {
+      "id": 984,
+      "change_id": "dc05c380-f79a-455d-a129-a1f2c2e6cd76",
+      "node_type": "outcome",
+      "title": "First good refresh pass 18:25-18:27 UTC: 173 candidates (exactly the pre-deploy baseline), 143 scored, 30 skipped (completed_with_skips), 3 nothing_due, 0 failed. 143 rows now carry the current revision; 61,187 stay legacy (below the Elevated floor, correctly left for a full scan). Classifier cache 11% hits as expected after the policy-version change. Runbook sections 2 and 3 both reconcile against the baseline.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T11:53:49.750559-07:00",
+      "updated_at": "2026-10-02T11:53:49.750559-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":95}"
+    },
+    {
+      "id": 985,
+      "change_id": "d9f6e68a-52e3-4616-88e0-a3bd07d6bead",
+      "node_type": "observation",
+      "title": "Staging GPU leak is NOT closed by the policy-version fix. RunPod hourly billing 2026-10-02: 14:00-17:00 buckets $0.44-0.57 (refusals), 18:00 $1.23 (the good pass), 19:00 $0.46, 20:00 $0.56 - back at the refusal baseline. Cause: 30 scan_skips rows (29 distinct accounts) all getAuthorFeed 400 Profile not found, i.e. deleted accounts. A refresh that ends complete_with_skips is retried in REFRESH_RETRY_HOURS=1, the candidates are still due, refresh_should_probe is true so the probe wakes a worker, gather fails on every one, scored=0, repeat. 7 users on the hourly loop.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:32:49.887728-07:00",
+      "updated_at": "2026-10-02T14:32:49.887728-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":95}"
+    },
+    {
+      "id": 986,
+      "change_id": "8550ad94-f1fd-4d22-9f0d-64008b6de784",
+      "node_type": "action",
+      "title": "Mitigation: set CHARCOAL_REFRESH_INTERVAL_HOURS=0 on staging to stop the hourly GPU wake until gone accounts stop counting as retryable. Staging only, undone by deleting the variable.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:32:49.902445-07:00",
+      "updated_at": "2026-10-02T14:32:49.902445-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"commit\":\"6c9ac1b\",\"confidence\":85}"
+    },
+    {
+      "id": 987,
+      "change_id": "32ee3fb2-d450-4f22-b0b8-c9fbd5af1b1b",
+      "node_type": "goal",
+      "title": "Shape the landing page (#395): sign-in as the one action, the before/after story as proof, and a replacement visual world for landing and app",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:38:53.845382-07:00",
+      "updated_at": "2026-10-02T14:38:53.845382-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":90,\"prompt\":\"Bryan, 2026-10-02, answering the shape interview for the landing page (after \\\"yes\\\" to: merge #131, pull the billing number onto #385, then start the landing page shape).\\n\\nQ: What is the one thing a visitor should do on the landing page?\\nA: Sign in with Bluesky (Recommended)\\n\\nQ: The page shows three invented testimonials, and PRODUCT.md says none exist. They have to go. What real proof should replace them?\\nA: The story as why - what it's like normally for people, and what we think it could be like. THe difference between feeling stressed out and on edge every time you post something, worried about how it's going to be taken by people to being excited to engage with others all because you know you're protected from people who show a pattern of engaging in ways that are toxic - meaning in bad faith, always looking at the most negative possibility, ad hominem, etc.\\n\\nQ: How far may the look change?\\nA: Replace the whole look\\n\\nQ: A newer Impeccable (v4.5.0) is available. Update now?\\nA: Update\"}"
+    },
+    {
+      "id": 988,
+      "change_id": "04bd2c76-109a-4fa5-8a4b-f4e85b9b877c",
+      "node_type": "option",
+      "title": "Visual world A: Community Print Shop - screenprint/riso poster inks, overprint as the two-signal mechanism (first roll, key 346abf3d)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:49:49.812847-07:00",
+      "updated_at": "2026-10-02T14:49:49.812847-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":60}"
+    },
+    {
+      "id": 989,
+      "change_id": "7bd7aadb-6aa3-478d-b2f7-32b7d0fc9058",
+      "node_type": "option",
+      "title": "Visual world B: Carbon Under Pressure - charcoal drawing erased to faceted spectrum light (second roll, key 798d6278)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:49:49.826012-07:00",
+      "updated_at": "2026-10-02T14:49:49.826012-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":60}"
+    },
+    {
+      "id": 990,
+      "change_id": "7f42f3b7-581b-427c-ac68-f16631c3caf7",
+      "node_type": "option",
+      "title": "Visual world C: Afrofuturist sovereignty, Bryan's steer: I want wakanda, I want joyful but grounded and powerful - choosing not to deal with bullshit",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:49:49.838571-07:00",
+      "updated_at": "2026-10-02T14:49:49.838571-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":90}"
+    },
+    {
+      "id": 991,
+      "change_id": "882d32bf-da27-467a-b545-7159f46c48e3",
+      "node_type": "decision",
+      "title": "Visual world: C, pinned by Bryan after two re-rolls. A user-pinned direction beats the roll. Rendered in daylight (earth, royal purple, gold) not neon-on-black; original geometry, no Marvel marks, no lifted sacred symbols. Replaces the Hearth Watch look on landing AND app; landing is the first surface.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:49:49.851045-07:00",
+      "updated_at": "2026-10-02T14:49:49.851045-07:00",
+      "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -21990,6 +22100,116 @@
       "weight": 1.0,
       "rationale": "Verification",
       "created_at": "2026-09-19T22:19:31.307369-07:00"
+    },
+    {
+      "id": 1038,
+      "from_node_id": 982,
+      "to_node_id": 983,
+      "from_change_id": "e388db2a-9613-4257-8dfc-0020c8095182",
+      "to_change_id": "c8b85999-a6be-43df-805f-7b81795ff781",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix for the refusal loop",
+      "created_at": "2026-10-02T11:53:49.741059-07:00"
+    },
+    {
+      "id": 1039,
+      "from_node_id": 983,
+      "to_node_id": 984,
+      "from_change_id": "c8b85999-a6be-43df-805f-7b81795ff781",
+      "to_change_id": "dc05c380-f79a-455d-a129-a1f2c2e6cd76",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Verified against the recorded baseline",
+      "created_at": "2026-10-02T11:53:49.766052-07:00"
+    },
+    {
+      "id": 1040,
+      "from_node_id": 984,
+      "to_node_id": 985,
+      "from_change_id": "dc05c380-f79a-455d-a129-a1f2c2e6cd76",
+      "to_change_id": "d9f6e68a-52e3-4616-88e0-a3bd07d6bead",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "billing read after the good pass shows spend unchanged",
+      "created_at": "2026-10-02T14:32:52.352491-07:00"
+    },
+    {
+      "id": 1041,
+      "from_node_id": 985,
+      "to_node_id": 986,
+      "from_change_id": "d9f6e68a-52e3-4616-88e0-a3bd07d6bead",
+      "to_change_id": "8550ad94-f1fd-4d22-9f0d-64008b6de784",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "stop the spend while the code fix is designed",
+      "created_at": "2026-10-02T14:32:52.359932-07:00"
+    },
+    {
+      "id": 1042,
+      "from_node_id": 987,
+      "to_node_id": 988,
+      "from_change_id": "32ee3fb2-d450-4f22-b0b8-c9fbd5af1b1b",
+      "to_change_id": "04bd2c76-109a-4fa5-8a4b-f4e85b9b877c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "direction candidate for the replacement world",
+      "created_at": "2026-10-02T14:49:49.859796-07:00"
+    },
+    {
+      "id": 1043,
+      "from_node_id": 987,
+      "to_node_id": 989,
+      "from_change_id": "32ee3fb2-d450-4f22-b0b8-c9fbd5af1b1b",
+      "to_change_id": "7bd7aadb-6aa3-478d-b2f7-32b7d0fc9058",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "direction candidate for the replacement world",
+      "created_at": "2026-10-02T14:49:49.867786-07:00"
+    },
+    {
+      "id": 1044,
+      "from_node_id": 987,
+      "to_node_id": 990,
+      "from_change_id": "32ee3fb2-d450-4f22-b0b8-c9fbd5af1b1b",
+      "to_change_id": "7f42f3b7-581b-427c-ac68-f16631c3caf7",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "direction candidate for the replacement world",
+      "created_at": "2026-10-02T14:49:49.875730-07:00"
+    },
+    {
+      "id": 1045,
+      "from_node_id": 988,
+      "to_node_id": 991,
+      "from_change_id": "04bd2c76-109a-4fa5-8a4b-f4e85b9b877c",
+      "to_change_id": "882d32bf-da27-467a-b545-7159f46c48e3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "re-rolled by Bryan, no steer",
+      "created_at": "2026-10-02T14:49:49.882377-07:00"
+    },
+    {
+      "id": 1046,
+      "from_node_id": 989,
+      "to_node_id": 991,
+      "from_change_id": "7bd7aadb-6aa3-478d-b2f7-32b7d0fc9058",
+      "to_change_id": "882d32bf-da27-467a-b545-7159f46c48e3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "re-rolled by Bryan with a steer",
+      "created_at": "2026-10-02T14:49:49.889829-07:00"
+    },
+    {
+      "id": 1047,
+      "from_node_id": 990,
+      "to_node_id": 991,
+      "from_change_id": "7f42f3b7-581b-427c-ac68-f16631c3caf7",
+      "to_change_id": "882d32bf-da27-467a-b545-7159f46c48e3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: pinned by the user",
+      "created_at": "2026-10-02T14:49:49.896536-07:00"
     }
   ],
   "documents": [

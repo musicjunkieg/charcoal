@@ -140,6 +140,13 @@ Constraints and open decisions:
   automatically, and every such action must be **reviewable and reversible**.
   This supersedes SPEC.md's "It does not automate any muting or blocking
   actions" — that line describes the MVP, not the direction.
+  **Launch gate (confirmed 2026-10-02): automated actions ship before public
+  launch**, meaning before the allowlist opens. Automation is therefore a
+  release requirement, not a later phase. It does not change what a surface may
+  say today: until the feature works, nothing promises it. The landing page
+  carries both wordings for its "who decides" section — the manual one shown,
+  the automatic one written and ready — so the change on the day automation
+  ships is one switch, not a rewrite.
 - Non-English and low-signal accounts are surfaced as NotAssessed / Insufficient
   Data rather than scored, so any tier UI must treat "no verdict" as a
   first-class state and not a variant of Low.
