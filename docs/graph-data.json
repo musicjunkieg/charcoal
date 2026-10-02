@@ -10812,6 +10812,17 @@
       "created_at": "2026-10-02T14:56:14.954790-07:00",
       "updated_at": "2026-10-02T14:56:14.954790-07:00",
       "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"commit\":\"2c426f1\",\"confidence\":85,\"files\":[\"PRODUCT.md\",\"web/src/routes/+page.svelte\",\"web/src/lib/website/styles/tokens.css\",\"web/src/lib/landing.test.ts\"]}"
+    },
+    {
+      "id": 993,
+      "change_id": "b14d073e-3557-407c-b494-5b625163ad56",
+      "node_type": "outcome",
+      "title": "Landing page rebuilt in the sovereign-ground world (6b56cfb, c48140a): 150/150 web tests incl. 10 new landing guards, no new type errors, production build carries the direction contract. Inspected at 1440, 390 and 1920 plus reduced motion; one fix batch (rings spilling past the hero, phone button overflow, Ojuju 800 smearing, empty right halves). PRODUCT.md records the automatic-before-launch gate (2c426f1). Independent finish review running. DESIGN.md NOT rewritten: the app still wears the old look.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T15:15:16.112553-07:00",
+      "updated_at": "2026-10-02T15:15:16.112553-07:00",
+      "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"commit\":\"c48140a\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -22232,6 +22243,17 @@
       "weight": 1.0,
       "rationale": "build the chosen world on the landing page",
       "created_at": "2026-10-02T14:56:35.061561-07:00"
+    },
+    {
+      "id": 1049,
+      "from_node_id": 992,
+      "to_node_id": 993,
+      "from_change_id": "bf39a055-4fa1-4ce1-b44a-79217342c796",
+      "to_change_id": "b14d073e-3557-407c-b494-5b625163ad56",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result of the build",
+      "created_at": "2026-10-02T15:15:16.120306-07:00"
     }
   ],
   "documents": [

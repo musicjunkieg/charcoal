@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c48140a669d2e1b64b5a10da322b9cc5992a2bd8",
+    "short_hash": "c48140a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T15:15:01-07:00",
+    "message": "chore(395): keep the screenshot script and the landing surface brief\n\npage-shots.mjs drives headless Chrome over the DevTools Protocol so a full\npage can be captured in viewport-high slices at a true phone width. Plain\n--screenshot cannot scroll and has a 500px minimum window.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "2c426f1d82ebc691ea3ba40178d62d8c9f7c431b",
     "short_hash": "2c426f1",
     "author": "Bryan Guffey",

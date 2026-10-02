@@ -14,7 +14,7 @@ THESIS: You are inside a thriving place whose border you control, and the page i
 OWN-WORLD: Daylight Afrofuturism. Whole fields of sun gold, royal purple, laterite red, leaf green and aubergine ink. Concentric rings built from dashed strokes (bead, block and checker rows), triangle-and-diamond band dividers, Tac One poster capitals, Ojuju headings, Atkinson Hyperlegible text.
 STORY: Posting can be joyful again; the people who came to upset you are stopped at the edge and you decide; sign in.
 FIRST VIEWPORT: Gold field. Four-line poster headline top left, sign-in block under it, a quarter dome of patterned rings rising from the bottom-right corner with posts breaking apart at its outer band.
-FORM: Pinned by the user ("I want wakanda") after rolls 346abf3d and 798d6278.
+FORM: Pinned by the user after two rejected rolls, 346abf3d and 798d6278.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 -->`;
 
@@ -618,6 +618,16 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 	.page a.cta.on-dark {
 		color: var(--ink);
+	}
+
+	/* The ring must contrast with the ground behind the button, not with the
+	   button's own text: bone on gold and ink on ink both disappear. */
+	.page a.cta:focus-visible {
+		outline-color: var(--ink);
+	}
+
+	.page a.cta.on-dark:focus-visible {
+		outline-color: var(--gold);
 	}
 
 	.cta.on-dark:hover {
