@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2c426f1d82ebc691ea3ba40178d62d8c9f7c431b",
+    "short_hash": "2c426f1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T14:56:08-07:00",
+    "message": "docs(395): automated actions are a launch gate, not a later phase\n\nBryan confirmed 2026-10-02 that automatic muting/blocking ships before the\nallowlist opens. Records that, and that no surface promises it until it works.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "6c9ac1b46e56bbc6b623b3b72ba1949107b467e6",
     "short_hash": "6c9ac1b",
     "author": "Bryan Guffey",

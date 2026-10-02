@@ -1,1374 +1,1122 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	// The scale tokens (--text-*, --space-*, --radius-*) live here, and this
-	// page's local :root carries only palette, so without this import every
-	// size and gap below falls back to the browser default (#292/#293/#380).
+	// The scale tokens (--text-*, --space-*, --radius-*) live here. This page
+	// carries its own palette on .page, so without this import every size and
+	// gap below falls back to the browser default (#292/#293/#380).
 	import '$lib/website/styles/tokens.css';
 
-	// Leaflet publication URL - update this when you create your publication
 	const LEAFLET_URL = 'https://charcoal.leaflet.pub';
 
-	// Intersection Observer for scroll animations
-	let sectionsVisible = $state<Record<string, boolean>>({});
+	// The direction contract (#395). Emitted as a real HTML comment through
+	// {@html} because Svelte strips template comments from the production build,
+	// and a contract the build erased is one nobody can audit.
+	const CONTRACT = `<!--
+THESIS: You are inside a thriving place whose border you control, and the page is seen from inside it. Refuses the dark shield-and-radar security hero and the soft wellness page.
+OWN-WORLD: Daylight Afrofuturism. Whole fields of sun gold, royal purple, laterite red, leaf green and aubergine ink. Concentric rings built from dashed strokes (bead, block and checker rows), triangle-and-diamond band dividers, Tac One poster capitals, Ojuju headings, Atkinson Hyperlegible text.
+STORY: Posting can be joyful again; the people who came to upset you are stopped at the edge and you decide; sign in.
+FIRST VIEWPORT: Gold field. Four-line poster headline top left, sign-in block under it, a quarter dome of patterned rings rising from the bottom-right corner with posts breaking apart at its outer band.
+FORM: Pinned by the user ("I want wakanda") after rolls 346abf3d and 798d6278.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+-->`;
 
-	onMount(() => {
-		const observer = new IntersectionObserver(
-			(entries) => {
-				entries.forEach((entry) => {
-					if (entry.isIntersecting) {
-						sectionsVisible[entry.target.id] = true;
-					}
-				});
-			},
-			{ threshold: 0.15, rootMargin: '0px 0px -50px 0px' }
-		);
+	// Who decides. Automated actions are a launch gate (PRODUCT.md, 2026-10-02)
+	// but are not built yet, and no surface may promise them until they work.
+	// Both wordings live here so that the day automation ships, the change is
+	// this one constant. web/src/lib/landing.test.ts holds it at 'manual'.
+	type ActionsMode = 'manual' | 'automatic';
+	const ACTIONS_MODE: ActionsMode = 'manual';
 
-		document.querySelectorAll('[data-animate]').forEach((el) => {
-			observer.observe(el);
-		});
+	const EVIDENCE_POINT = {
+		lead: 'You see who, and you see why.',
+		body: 'Every account comes with its evidence: the posts, the pattern, and how they found you. Never act on a label alone.'
+	};
 
-		return () => observer.disconnect();
-	});
+	const AUTHORITY: Record<
+		ActionsMode,
+		{ title: string; points: { lead: string; body: string }[] }
+	> = {
+		manual: {
+			title: 'You hold the authority.',
+			points: [
+				EVIDENCE_POINT,
+				{
+					lead: 'One move.',
+					body: 'Mute or block one account, or everyone at a risk level at once, without leaving the page you are on.'
+				},
+				{
+					lead: 'Nothing happens unless you say so.',
+					body: 'Charcoal recommends. You decide. Change your mind and undo it.'
+				}
+			]
+		},
+		automatic: {
+			title: 'You set the rule. Charcoal keeps it.',
+			points: [
+				EVIDENCE_POINT,
+				{
+					lead: 'It acts while you are busy living.',
+					body: 'Choose the risk level you want handled, and Charcoal mutes or blocks those accounts automatically, before they reach you.'
+				},
+				{
+					lead: 'Every action can be reviewed and undone.',
+					body: 'Nothing it does is hidden and nothing is permanent. Read what it did, and reverse any of it.'
+				}
+			]
+		}
+	};
+	const authority = AUTHORITY[ACTIONS_MODE];
+
+	// The border: a quarter dome whose centre is the bottom-right corner of a
+	// 600-unit square. Each ring is one stroked circle; the pattern rows are
+	// dashed strokes laid over a solid band, so the geometry is original and
+	// costs nothing to draw.
+	const C = 600;
+	type Ring = { r: number; w: number; color: string; dash?: string; offset?: number; round?: boolean };
+	const RINGS: Ring[] = [
+		{ r: 470, w: 22, color: 'var(--ink)', dash: '3 19', round: true },
+		{ r: 428, w: 40, color: 'var(--earth)' },
+		{ r: 428, w: 14, color: 'var(--gold)', dash: '22 22' },
+		{ r: 372, w: 52, color: 'var(--purple)' },
+		{ r: 385, w: 17, color: 'var(--bone)', dash: '17 17' },
+		{ r: 359, w: 17, color: 'var(--bone)', dash: '17 17', offset: 17 },
+		{ r: 318, w: 28, color: 'var(--leaf)' },
+		{ r: 318, w: 7, color: 'var(--gold)', dash: '1 15', round: true },
+		{ r: 280, w: 28, color: 'var(--ink)' },
+		{ r: 280, w: 12, color: 'var(--earth)', dash: '30 10' }
+	];
+
+	// A post travelling toward the centre stops `stopR` units short of it.
+	function toward(x: number, y: number, stopR: number) {
+		const d = Math.hypot(C - x, C - y);
+		const k = (d - stopR) / d;
+		return { x, y, dx: Math.round((C - x) * k), dy: Math.round((C - y) * k) };
+	}
+	// Turned away at the outer band (radius 481 plus half a post).
+	const TURNED_AWAY = [
+		{ ...toward(30, 110, 540), delay: 0, tilt: -7 },
+		{ ...toward(160, 24, 540), delay: 3, tilt: 5 },
+		{ ...toward(4, 250, 540), delay: 6, tilt: -3 }
+	];
+	// Let through, all the way inside.
+	const LET_IN = [
+		{ ...toward(260, 14, 95), delay: 1.5, tilt: 4 },
+		{ ...toward(14, 410, 200), delay: 5, tilt: -5 }
+	];
+	// Already inside: the timeline that is left.
+	const INSIDE = [{ x: 532, y: 388, tilt: 6 }];
 </script>
 
 <svelte:head>
-	<title>Charcoal - Engage with confidence on Bluesky</title>
+	<title>Charcoal · Hard things, yes. Bullshit, no.</title>
 	<meta
 		name="description"
-		content="Charcoal absorbs harmful engagement so you can focus on good-faith conversations. Join the waitlist for early access."
+		content="Charcoal finds the people who show up only to upset you before they reach you, so posting on Bluesky can be joyful again."
 	/>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
-		href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Outfit:wght@300;400;500;600&display=swap"
+		href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Ojuju:wght@200..800&family=Tac+One&display=swap"
 		rel="stylesheet"
 	/>
 </svelte:head>
 
+{#snippet band(id: string, ground: string, a: string, b: string, c: string)}
+	<svg class="band" width="100%" height="48" aria-hidden="true" focusable="false">
+		<defs>
+			<pattern {id} width="48" height="48" patternUnits="userSpaceOnUse">
+				<rect width="48" height="48" style:fill={ground} />
+				<path d="M0 28 12 4l12 24ZM24 28 36 4l12 24Z" style:fill={a} />
+				<rect y="28" width="48" height="6" style:fill={b} />
+				<path d="m12 34 6 7-6 7-6-7ZM36 34l6 7-6 7-6-7Z" style:fill={c} />
+			</pattern>
+		</defs>
+		<rect width="100%" height="48" fill="url(#{id})" />
+	</svg>
+{/snippet}
+
+{#snippet post(kind: 'hostile' | 'friend' | 'own')}
+	{#if kind === 'own'}
+		<rect class="post-body" x="-66" y="-32" width="132" height="64" rx="8" />
+		<rect class="post-line" x="-50" y="-16" width="100" height="7" rx="3.5" />
+		<rect class="post-line" x="-50" y="-2" width="84" height="7" rx="3.5" />
+		<rect class="post-line" x="-50" y="12" width="58" height="7" rx="3.5" />
+	{:else}
+		<rect class="post-body" x="-48" y="-22" width="96" height="44" rx="8" />
+		<rect class="post-line" x="-34" y="-9" width="68" height="6" rx="3" />
+		<rect class="post-line" x="-34" y="4" width={kind === 'hostile' ? 30 : 46} height="6" rx="3" />
+	{/if}
+{/snippet}
+
 <div class="page">
-	<!-- Background layers -->
-	<div class="bg-base" aria-hidden="true"></div>
-	<div class="bg-warmth" aria-hidden="true"></div>
+	<!-- eslint-disable-next-line svelte/no-at-html-tags -- a constant comment, no user input -->
+	{@html CONTRACT}
 
-	<!-- Ambient orbs -->
-	<div class="ambient-orbs" aria-hidden="true">
-		<div class="orb orb-1"></div>
-		<div class="orb orb-2"></div>
-		<div class="orb orb-3"></div>
-	</div>
-
-	<!-- Navigation -->
-	<nav class="nav">
-		<a href="/" class="nav-logo" aria-label="Charcoal home">
-			<svg viewBox="0 0 64 64" fill="none">
-				<circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
-				<circle cx="32" cy="32" r="22" stroke="currentColor" stroke-width="1.5" opacity="0.5" />
-				<circle cx="32" cy="32" r="14" stroke="currentColor" stroke-width="2" opacity="0.7" />
-				<circle cx="32" cy="32" r="5" fill="currentColor" />
-			</svg>
-		</a>
-		<a href="/login" class="nav-login">Sign in</a>
+	<nav class="nav" aria-label="Main">
+		<a href="/" class="wordmark" aria-label="Charcoal home">Charcoal</a>
+		<a href="/login" class="nav-signin">Sign in</a>
 	</nav>
 
 	<main>
-		<!-- Hero Section -->
 		<section class="hero">
-			<div class="hero-content">
-				<div class="hero-logo" aria-hidden="true">
-					<svg viewBox="0 0 64 64" fill="none" class="logo-svg">
-						<circle
-							cx="32"
-							cy="32"
-							r="30"
-							stroke="currentColor"
-							stroke-width="1"
-							opacity="0.15"
-							class="ring ring-1"
-						/>
-						<circle
-							cx="32"
-							cy="32"
-							r="26"
-							stroke="currentColor"
-							stroke-width="1"
-							opacity="0.25"
-							class="ring ring-2"
-						/>
-						<circle
-							cx="32"
-							cy="32"
-							r="22"
-							stroke="currentColor"
-							stroke-width="1.5"
-							opacity="0.35"
-							class="ring ring-3"
-						/>
-						<circle
-							cx="32"
-							cy="32"
-							r="18"
-							stroke="currentColor"
-							stroke-width="1.5"
-							opacity="0.5"
-							class="ring ring-4"
-						/>
-						<circle
-							cx="32"
-							cy="32"
-							r="14"
-							stroke="currentColor"
-							stroke-width="2"
-							opacity="0.7"
-							class="ring ring-5"
-						/>
-						<circle cx="32" cy="32" r="6" fill="currentColor" class="core" />
-					</svg>
-				</div>
-
-				<p class="hero-eyebrow">For Bluesky</p>
-				<h1 class="hero-title">
-					<span class="title-word">Engage</span>
-					<span class="title-word">with</span>
-					<span class="title-word title-accent">confidence</span>
-				</h1>
-				<p class="hero-subtitle">
-					Charcoal absorbs harmful engagement so you can focus on what matters—authentic
-					conversations and open dialogue.
-				</p>
-
-				<a href="#early-access" class="hero-cta">
-					<span>Join the waitlist</span>
-					<svg viewBox="0 0 20 20" fill="none" class="cta-arrow">
-						<path
-							d="M10 4v12m0 0l-4-4m4 4l4-4"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						/>
-					</svg>
-				</a>
-			</div>
-
-			<div class="scroll-hint" aria-hidden="true">
-				<span class="scroll-line"></span>
-			</div>
-		</section>
-
-		<!-- How It Works Section -->
-		<section id="how-it-works" class="section how-it-works" data-animate class:visible={sectionsVisible['how-it-works']}>
-			<div class="section-inner">
-				<h2 class="section-title">How Charcoal works</h2>
-				<p class="section-subtitle">
-					Like activated charcoal absorbs toxins, we filter out bad-faith engagement while letting
-					authentic interactions through.
-				</p>
-
-				<div class="pipeline">
-					<div class="pipeline-step step-1">
-						<div class="step-icon">
-							<svg viewBox="0 0 48 48" fill="none">
-								<circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
-								<circle cx="24" cy="24" r="12" stroke="currentColor" stroke-width="1.5" opacity="0.5" />
-								<circle cx="24" cy="24" r="4" fill="currentColor" />
-							</svg>
-						</div>
-						<h3 class="step-title">Monitor</h3>
-						<p class="step-desc">
-							Charcoal watches your engagement in the background, tracking interactions as they
-							happen.
-						</p>
-					</div>
-
-					<div class="pipeline-connector" aria-hidden="true">
-						<svg viewBox="0 0 80 24" fill="none">
-							<path
-								d="M0 12h80"
-								stroke="currentColor"
-								stroke-width="1.5"
-								stroke-dasharray="4 4"
-								opacity="0.3"
-							/>
-							<circle cx="40" cy="12" r="3" fill="currentColor" opacity="0.5" />
-						</svg>
-					</div>
-
-					<div class="pipeline-step step-2">
-						<div class="step-icon absorbing">
-							<svg viewBox="0 0 48 48" fill="none">
-								<circle
-									cx="24"
-									cy="24"
-									r="20"
-									stroke="currentColor"
-									stroke-width="1.5"
-									opacity="0.2"
-									class="absorb-ring"
-								/>
-								<circle
-									cx="24"
-									cy="24"
-									r="14"
-									stroke="currentColor"
-									stroke-width="1.5"
-									opacity="0.4"
-									class="absorb-ring"
-								/>
-								<circle
-									cx="24"
-									cy="24"
-									r="8"
-									stroke="currentColor"
-									stroke-width="2"
-									opacity="0.6"
-									class="absorb-ring"
-								/>
-								<circle cx="24" cy="24" r="3" fill="currentColor" />
-							</svg>
-							<!-- Absorbed particles -->
-							<div class="particles" aria-hidden="true">
-								<span class="particle p1"></span>
-								<span class="particle p2"></span>
-								<span class="particle p3"></span>
-							</div>
-						</div>
-						<h3 class="step-title">Absorb</h3>
-						<p class="step-desc">
-							Harmful patterns are identified and absorbed—harassment, bad faith, and toxic
-							behavior.
-						</p>
-					</div>
-
-					<div class="pipeline-connector" aria-hidden="true">
-						<svg viewBox="0 0 80 24" fill="none">
-							<path
-								d="M0 12h80"
-								stroke="currentColor"
-								stroke-width="1.5"
-								stroke-dasharray="4 4"
-								opacity="0.3"
-							/>
-							<circle cx="40" cy="12" r="3" fill="currentColor" opacity="0.5" />
-						</svg>
-					</div>
-
-					<div class="pipeline-step step-3">
-						<div class="step-icon">
-							<svg viewBox="0 0 48 48" fill="none">
-								<circle
-									cx="24"
-									cy="24"
-									r="18"
-									stroke="currentColor"
-									stroke-width="1.5"
-									opacity="0.3"
-								/>
-								<path
-									d="M16 24l6 6 10-12"
-									stroke="currentColor"
-									stroke-width="2.5"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-								/>
-							</svg>
-						</div>
-						<h3 class="step-title">Protect</h3>
-						<p class="step-desc">
-							You decide what happens—auto-mute or block, then review later and receive a digest of flagged
-							accounts.
-						</p>
-					</div>
-				</div>
-			</div>
-		</section>
-
-		<!-- Benefits Section -->
-		<section id="benefits" class="section benefits" data-animate class:visible={sectionsVisible['benefits']}>
-			<div class="section-inner">
-				<div class="benefits-grid">
-					<div class="benefit">
-						<div class="benefit-icon">
-							<svg viewBox="0 0 32 32" fill="none">
-								<circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
-								<path
-									d="M16 8v8l5 3"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-								/>
-							</svg>
-						</div>
-						<h3 class="benefit-title">Less time worrying</h3>
-						<p class="benefit-desc">
-							Stop scanning every notification for potential harm. Charcoal handles the vigilance so
-							you don't have to.
-						</p>
-					</div>
-
-					<div class="benefit">
-						<div class="benefit-icon">
-							<svg viewBox="0 0 32 32" fill="none">
-								<circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
-								<circle cx="16" cy="16" r="6" stroke="currentColor" stroke-width="2" />
-								<circle cx="16" cy="16" r="2" fill="currentColor" />
-							</svg>
-						</div>
-						<h3 class="benefit-title">Stay centered</h3>
-						<p class="benefit-desc">
-							Maintain your calm when engaging online. No more bracing for impact with every reply.
-						</p>
-					</div>
-
-					<div class="benefit">
-						<div class="benefit-icon">
-							<svg viewBox="0 0 32 32" fill="none">
-								<circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
-								<path
-									d="M10 16h12M16 10v12"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-								/>
-							</svg>
-						</div>
-						<h3 class="benefit-title">More authentic connection</h3>
-						<p class="benefit-desc">
-							When the noise is absorbed, what remains is what matters—good-faith conversations and
-							genuine community.
-						</p>
-					</div>
-				</div>
-			</div>
-		</section>
-
-		<!-- Social Proof Section -->
-		<section id="voices" class="section voices" data-animate class:visible={sectionsVisible['voices']}>
-			<div class="section-inner">
-				<h2 class="section-title">Voices from the community</h2>
-
-				<div class="testimonials">
-					<blockquote class="testimonial">
-						<p class="testimonial-text">
-							"I used to dread checking my mentions. Now I actually look forward to engaging again."
-						</p>
-						<footer class="testimonial-author">
-							<span class="author-name">Early tester</span>
-							<span class="author-handle">@community.bsky.social</span>
-						</footer>
-					</blockquote>
-
-					<blockquote class="testimonial">
-						<p class="testimonial-text">
-							"It's like having a thoughtful friend who handles the difficult conversations you'd
-							rather avoid."
-						</p>
-						<footer class="testimonial-author">
-							<span class="author-name">Beta user</span>
-							<span class="author-handle">@earlyaccess.bsky.social</span>
-						</footer>
-					</blockquote>
-
-					<blockquote class="testimonial">
-						<p class="testimonial-text">
-							"Finally, I can focus on the conversations that actually matter to me."
-						</p>
-						<footer class="testimonial-author">
-							<span class="author-name">Waitlist member</span>
-							<span class="author-handle">@waiting.bsky.social</span>
-						</footer>
-					</blockquote>
-				</div>
-			</div>
-		</section>
-
-		<!-- Early Access Section -->
-		<section id="early-access" class="section early-access" data-animate class:visible={sectionsVisible['early-access']}>
-			<div class="section-inner">
-				<div class="cta-card">
-					<div class="cta-logo" aria-hidden="true">
-						<svg viewBox="0 0 64 64" fill="none">
-							<circle
-								cx="32"
-								cy="32"
-								r="28"
-								stroke="currentColor"
-								stroke-width="1"
-								opacity="0.2"
-							/>
-							<circle
-								cx="32"
-								cy="32"
-								r="20"
-								stroke="currentColor"
-								stroke-width="1.5"
-								opacity="0.4"
-							/>
-							<circle
-								cx="32"
-								cy="32"
-								r="12"
-								stroke="currentColor"
-								stroke-width="2"
-								opacity="0.6"
-							/>
-							<circle cx="32" cy="32" r="5" fill="currentColor" />
-						</svg>
-					</div>
-
-					<h2 class="cta-title">Get early access</h2>
-					<p class="cta-subtitle">
-						Be among the first to experience a calmer way to engage on Bluesky. Subscribe to our
-						publication and we'll notify you when Charcoal is ready.
+			<div class="hero-inner">
+				<div class="hero-text">
+					<h1>
+						<span>Hard things,</span>
+						<span class="yes">yes.</span>
+						<span>Bullshit,</span>
+						<span class="no">no.</span>
+					</h1>
+					<p class="hero-lead">
+						Charcoal finds the people who show up only to upset you, before they reach you. You
+						take them out of your timeline in one move. What is left is the Bluesky you came for.
 					</p>
-
-					<a href={LEAFLET_URL} target="_blank" rel="noopener noreferrer" class="subscribe-btn">
-						<svg viewBox="0 0 24 24" fill="none" class="leaflet-icon">
-							<path
-								d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						</svg>
-						<span>Subscribe on Leaflet</span>
-						<svg viewBox="0 0 20 20" fill="none" class="external-icon">
-							<path
-								d="M11 3h6v6M6 14l11-11"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
+					<a href="/login" class="cta">
+						<span>Sign in with Bluesky</span>
+						<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+							<path d="M4 12h15M13 5l7 7-7 7" />
 						</svg>
 					</a>
-					<p class="subscribe-hint">
-						Updates delivered to your Bluesky feed. No email required.
+					<p class="hero-note">
+						No password. We are letting people in a few at a time, so signing in saves your place.
 					</p>
 				</div>
+
+				<figure class="border-figure">
+					<svg
+						viewBox="0 0 600 600"
+						role="img"
+						aria-label="Posts moving toward a patterned border. Some pass through to the inside. Others break apart at the edge."
+					>
+						{#each RINGS as ring, i (i)}
+							<circle
+								cx={C}
+								cy={C}
+								r={ring.r}
+								fill="none"
+								stroke-width={ring.w}
+								stroke-dasharray={ring.dash}
+								stroke-dashoffset={ring.offset}
+								stroke-linecap={ring.round ? 'round' : undefined}
+								style:stroke={ring.color}
+							/>
+						{/each}
+						<circle cx={C} cy={C} r="266" class="inside" />
+
+						{#each INSIDE as p, i (i)}
+							<g transform="translate({p.x} {p.y}) rotate({p.tilt})" class="friend">
+								{@render post('friend')}
+							</g>
+						{/each}
+						<g transform="translate(452 452) rotate(-3)" class="own">
+							{@render post('own')}
+						</g>
+
+						{#each LET_IN as p, i (i)}
+							<g transform="translate({p.x} {p.y})">
+								<g
+									class="travel let-in"
+									style:--dx="{p.dx}px"
+									style:--dy="{p.dy}px"
+									style:--delay="{p.delay}s"
+								>
+									<g transform="rotate({p.tilt})" class="friend">{@render post('friend')}</g>
+								</g>
+							</g>
+						{/each}
+
+						{#each TURNED_AWAY as p, i (i)}
+							<g transform="translate({p.x} {p.y})">
+								<g
+									class="travel turned-away"
+									style:--dx="{p.dx}px"
+									style:--dy="{p.dy}px"
+									style:--delay="{p.delay}s"
+								>
+									<g transform="rotate({p.tilt})" class="hostile">{@render post('hostile')}</g>
+								</g>
+							</g>
+						{/each}
+					</svg>
+					<figcaption>An illustration, not real posts.</figcaption>
+				</figure>
+			</div>
+		</section>
+
+		{@render band('band-now', 'var(--ink)', 'var(--gold)', 'var(--earth)', 'var(--purple-lit)')}
+
+		<section id="now" class="field now">
+			<div class="inner">
+				<h2>You know this feeling.</h2>
+				<div class="now-grid">
+				<p class="voice">
+					You write the post. Then you read it again the way someone who wants to hate it would. You
+					sand off a line. You post it anyway, and spend the afternoon waiting to see who shows up.
+				</p>
+				<div>
+				<p class="voice quiet">
+					Not the people who disagree with you. Those you can handle. The other ones:
+				</p>
+				<ul class="the-ones">
+					<li>The ones arguing in bad faith.</li>
+					<li>The ones who find the worst possible reading, every time.</li>
+					<li>The ones who come for you, not for what you said.</li>
+				</ul>
+				</div>
+				</div>
+			</div>
+		</section>
+
+		{@render band('band-could', 'var(--purple)', 'var(--gold)', 'var(--ink)', 'var(--bone)')}
+
+		<section id="could" class="field could">
+			<div class="inner">
+				<h2>Now picture wanting to see who replied.</h2>
+				<p class="voice">
+					You still say the hard thing. People still push back, and sometimes they are right. The
+					difference is that the ones with a track record of making it miserable were gone before
+					you hit Post.
+				</p>
+				<p class="claim"><span>That is not comfort.</span> <span>It is joy.</span></p>
+				<p class="body">
+					The kind you keep while you organise, argue, grieve and fight in public. Charcoal does not
+					take the pressure away. It takes away the people who came only to make it worse.
+				</p>
+			</div>
+		</section>
+
+		{@render band('band-how', 'var(--earth)', 'var(--bone)', 'var(--ink)', 'var(--gold)')}
+
+		<section id="how" class="field how">
+			<div class="inner">
+				<h2>How the border works.</h2>
+				<p class="body intro">
+					A blocklist acts after someone has already got to you. Charcoal works earlier, in four
+					ways a list cannot.
+				</p>
+				<dl class="claims">
+					<div>
+						<dt>It sees them coming.</dt>
+						<dd>
+							Charcoal scores accounts that have never spoken to you. By the time a blocklist would
+							hear about them, you have already decided what to do.
+						</dd>
+					</div>
+					<div>
+						<dt>It watches the door they use.</dt>
+						<dd>
+							Trouble rarely starts with your followers; they chose to be here. It starts when a
+							quote-post or repost carries your words to people who did not. That audience is the
+							one Charcoal looks at.
+						</dd>
+					</div>
+					<div>
+						<dt>It needs two things, not one.</dt>
+						<dd>
+							Someone who swears a lot may be your ally. Someone who posts about what you post about
+							is probably your community. Charcoal flags only the overlap: in your spaces, with a
+							pattern of hostility.
+						</dd>
+					</div>
+					<div>
+						<dt>It learns your ground from you.</dt>
+						<dd>
+							You never fill in a list of topics. Charcoal reads your own posts and works out what
+							you talk about, including the things you would not think to name.
+						</dd>
+					</div>
+				</dl>
+			</div>
+		</section>
+
+		{@render band('band-authority', 'var(--gold)', 'var(--purple)', 'var(--ink)', 'var(--earth)')}
+
+		<section id="authority" class="field authority">
+			<div class="inner split">
+				<div>
+					<h2>{authority.title}</h2>
+					<p class="body">
+						Charcoal only ever acts on your own timeline. It never publishes a list, a label or a
+						reason about anyone.
+					</p>
+				</div>
+				<ul class="points">
+					{#each authority.points as point (point.lead)}
+						<li>
+							<h3>{point.lead}</h3>
+							<p class="body">{point.body}</p>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		</section>
+
+		{@render band('band-expect', 'var(--leaf)', 'var(--gold)', 'var(--ink)', 'var(--bone)')}
+
+		<section id="expect" class="field expect">
+			<div class="inner">
+				<h2>What to expect.</h2>
+				<ul class="facts">
+					<li>
+						<h3>No password.</h3>
+						<p class="body">You sign in with your Bluesky account. Charcoal never sees your password.</p>
+					</li>
+					<li>
+						<h3>A waitlist, for now.</h3>
+						<p class="body">We are letting people in a few at a time. Signing in saves your place.</p>
+					</li>
+					<li>
+						<h3>A long first scan.</h3>
+						<p class="body">
+							The first one is real work, not an instant answer. A recent scan took about 22 minutes
+							to score 595 accounts, and wider reach takes longer. You can close the tab and come
+							back.
+						</p>
+					</li>
+					<li>
+						<h3>Sometimes, no verdict.</h3>
+						<p class="body">
+							When there is not enough to go on, or Charcoal cannot read the language well, it says
+							so instead of guessing.
+						</p>
+					</li>
+				</ul>
+			</div>
+		</section>
+
+		{@render band('band-close', 'var(--ink)', 'var(--purple-lit)', 'var(--gold)', 'var(--earth)')}
+
+		<section id="close" class="field close">
+			<div class="inner">
+				<h2>Come in.</h2>
+				<p class="voice">Say the hard thing. Look forward to who answers.</p>
+				<a href="/login" class="cta on-dark">
+					<span>Sign in with Bluesky</span>
+					<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+						<path d="M4 12h15M13 5l7 7-7 7" />
+					</svg>
+				</a>
 			</div>
 		</section>
 	</main>
 
-	<!-- Footer -->
 	<footer class="site-footer">
-		<div class="footer-inner">
-			<div class="footer-brand">
-				<svg viewBox="0 0 64 64" fill="none" class="footer-logo">
-					<circle cx="32" cy="32" r="22" stroke="currentColor" stroke-width="1.5" opacity="0.4" />
-					<circle cx="32" cy="32" r="14" stroke="currentColor" stroke-width="2" opacity="0.6" />
-					<circle cx="32" cy="32" r="5" fill="currentColor" />
-				</svg>
-				<span class="footer-name">Charcoal</span>
-			</div>
-
-			<nav class="footer-nav">
+		<div class="inner footer-row">
+			<span class="wordmark">Charcoal</span>
+			<nav class="footer-nav" aria-label="Footer">
 				<a href="/login">Sign in</a>
-				<a href="/privacy">Privacy</a>
-				<a href="/terms">Terms</a>
+				<a href={LEAFLET_URL} target="_blank" rel="noopener noreferrer">Follow the work on Leaflet</a>
 			</nav>
-
-			<p class="footer-copy">&copy; 2024 Charcoal. Engage with confidence.</p>
+			<p class="footer-copy">&copy; 2026 Charcoal</p>
 		</div>
 	</footer>
 </div>
 
 <style>
-	/* ===== Design Tokens ===== */
-	:root {
-		/* Warm charcoal palette */
-		--charcoal-950: #0c0a09;
-		--charcoal-900: #1c1917;
-		--charcoal-800: #292524;
-		--charcoal-700: #44403c;
-		--charcoal-600: #57534e;
-		--charcoal-500: #78716c;
-		--charcoal-400: #a8a29e;
-		--charcoal-300: #d6d3d1;
-
-		/* Warm cream tones */
-		--cream-50: #fffbeb;
-		--cream-100: #fef3c7;
-
-		/* Amber accent */
-		--amber-500: #f59e0b;
-		--amber-600: #d97706;
-
-		/* Copper accent */
-		--copper: #c9956c;
-		--copper-glow: rgba(201, 149, 108, 0.3);
-
-		/* Typography */
-		--font-display: 'Libre Baskerville', Georgia, serif;
-		--font-body: 'Outfit', system-ui, sans-serif;
-
-		/* Easing */
-		--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-		--ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-	}
-
-	/* ===== Reset ===== */
-	* {
-		box-sizing: border-box;
-		margin: 0;
-		padding: 0;
-	}
-
-	/* ===== Page Container ===== */
 	.page {
-		min-height: 100vh;
-		position: relative;
-		font-family: var(--font-body);
-		color: var(--cream-100);
-		-webkit-font-smoothing: antialiased;
-		-moz-osx-font-smoothing: grayscale;
-		overflow-x: hidden;
-	}
+		/* The palette is scoped to this page on purpose. The signed-in app still
+		   wears the earlier look until it is moved over, and a :root declaration
+		   here would follow a visitor into it. */
+		--ink: #1b0b22;
+		--purple: #45189c;
+		--purple-lit: #a98bff;
+		--gold: #f7b41c;
+		--earth: #a53a1a;
+		--leaf: #0c6b4a;
+		--bone: #fff3d6;
 
-	/* ===== Background ===== */
-	.bg-base {
-		position: fixed;
-		inset: 0;
-		background: linear-gradient(
-			165deg,
-			var(--charcoal-900) 0%,
-			var(--charcoal-950) 50%,
-			#0a0705 100%
-		);
-		z-index: -3;
-	}
+		--font-poster: 'Tac One', 'Arial Narrow', sans-serif;
+		--font-head: 'Ojuju', 'Atkinson Hyperlegible Next', sans-serif;
+		--font-text: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
+		--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
-	.bg-warmth {
-		position: fixed;
-		inset: 0;
-		background: radial-gradient(
-				ellipse 100% 80% at 50% 20%,
-				rgba(201, 149, 108, 0.08) 0%,
-				transparent 60%
-			),
-			radial-gradient(ellipse 80% 60% at 20% 80%, rgba(245, 158, 11, 0.05) 0%, transparent 50%),
-			radial-gradient(ellipse 60% 50% at 90% 50%, rgba(217, 119, 6, 0.04) 0%, transparent 40%);
-		z-index: -2;
-		pointer-events: none;
-	}
-
-	/* ===== Ambient Orbs ===== */
-	.ambient-orbs {
-		position: fixed;
-		inset: 0;
-		z-index: -1;
-		pointer-events: none;
-		overflow: hidden;
-	}
-
-	.orb {
-		position: absolute;
-		border-radius: var(--radius-circle);
-		filter: blur(100px);
-		animation: drift 30s ease-in-out infinite;
-	}
-
-	.orb-1 {
-		width: 600px;
-		height: 600px;
-		top: -10%;
-		right: -10%;
-		background: radial-gradient(circle, rgba(201, 149, 108, 0.12) 0%, transparent 70%);
-	}
-
-	.orb-2 {
-		width: 500px;
-		height: 500px;
-		bottom: 20%;
-		left: -15%;
-		background: radial-gradient(circle, rgba(245, 158, 11, 0.08) 0%, transparent 70%);
-		animation-delay: -10s;
-	}
-
-	.orb-3 {
-		width: 400px;
-		height: 400px;
-		top: 50%;
-		right: 20%;
-		background: radial-gradient(circle, rgba(201, 149, 108, 0.06) 0%, transparent 70%);
-		animation-delay: -20s;
-	}
-
-	@keyframes drift {
-		0%,
-		100% {
-			transform: translate(0, 0) scale(1);
-		}
-		33% {
-			transform: translate(40px, -30px) scale(1.05);
-		}
-		66% {
-			transform: translate(-30px, 40px) scale(0.95);
-		}
-	}
-
-	/* ===== Navigation ===== */
-	.nav {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		z-index: 100;
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-24) var(--space-32);
-		background: linear-gradient(to bottom, rgba(12, 10, 9, 0.8) 0%, transparent 100%);
-	}
-
-	.nav-logo {
-		width: 36px;
-		height: 36px;
-		color: var(--copper);
-		transition: opacity 0.3s var(--ease-in-out);
-	}
-
-	.nav-logo:hover {
-		opacity: 0.8;
-	}
-
-	.nav-logo svg {
-		width: 100%;
-		height: 100%;
-	}
-
-	.nav-login {
-		font-size: var(--text-body-sm);
-		font-weight: 500;
-		color: var(--charcoal-300);
-		text-decoration: none;
-		padding: var(--space-10) var(--space-20);
-		border: 1px solid rgba(168, 162, 158, 0.2);
-		border-radius: var(--radius-8);
-		transition: all 0.3s var(--ease-in-out);
-	}
-
-	.nav-login:hover {
-		color: var(--cream-50);
-		border-color: rgba(201, 149, 108, 0.4);
-		background: rgba(201, 149, 108, 0.1);
-	}
-
-	/* ===== Hero Section ===== */
-	.hero {
-		min-height: 100vh;
 		min-height: 100dvh;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		padding: var(--space-96) var(--space-32) var(--space-64);
-		text-align: center;
-		position: relative;
+		overflow-x: clip;
+		background: var(--gold);
+		color: var(--ink);
+		font-family: var(--font-text);
+		font-size: var(--text-subtitle);
+		line-height: 1.55;
 	}
 
-	.hero-content {
-		max-width: 720px;
-		animation: emerge 1.2s var(--ease-out-expo) forwards;
+	/* The landing has no layout of its own to reset the page margin. */
+	:global(body) {
+		margin: 0;
 	}
 
-	@keyframes emerge {
-		from {
-			opacity: 0;
-			transform: translateY(40px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
+	.page :global(::selection) {
+		background: var(--purple);
+		color: var(--bone);
 	}
 
-	.hero-logo {
-		width: 120px;
-		height: 120px;
-		margin: 0 auto var(--space-32);
-		color: var(--copper);
+	.page a {
+		color: inherit;
+		text-underline-offset: 0.2em;
+		text-decoration-thickness: 2px;
 	}
 
-	.logo-svg {
-		width: 100%;
-		height: 100%;
+	.page a:focus-visible {
+		outline: 3px solid currentColor;
+		outline-offset: 4px;
+		border-radius: var(--radius-3);
 	}
 
-	.logo-svg .ring {
-		transform-origin: center;
+	h1,
+	h2,
+	h3,
+	p,
+	ul,
+	dl,
+	dd,
+	figure {
+		margin: 0;
 	}
 
-	.logo-svg .ring-1 {
-		animation: ring-pulse 5s ease-in-out infinite;
-	}
-	.logo-svg .ring-2 {
-		animation: ring-pulse 5s ease-in-out 0.3s infinite;
-	}
-	.logo-svg .ring-3 {
-		animation: ring-pulse 5s ease-in-out 0.6s infinite;
-	}
-	.logo-svg .ring-4 {
-		animation: ring-pulse 5s ease-in-out 0.9s infinite;
-	}
-	.logo-svg .ring-5 {
-		animation: ring-pulse 5s ease-in-out 1.2s infinite;
+	ul {
+		padding: 0;
+		list-style: none;
 	}
 
-	.logo-svg .core {
-		animation: core-breathe 5s ease-in-out infinite;
-	}
-
-	@keyframes ring-pulse {
-		0%,
-		100% {
-			transform: scale(1);
-			opacity: 0.15;
-		}
-		50% {
-			transform: scale(1.03);
-			opacity: 0.35;
-		}
-	}
-
-	@keyframes core-breathe {
-		0%,
-		100% {
-			transform: scale(1);
-		}
-		50% {
-			transform: scale(0.9);
-		}
-	}
-
-	.hero-eyebrow {
-		font-size: var(--text-small);
-		font-weight: 500;
-		letter-spacing: 0.15em;
-		text-transform: uppercase;
-		color: var(--copper);
-		margin-bottom: var(--space-24);
-		animation: emerge 1.2s var(--ease-out-expo) 0.1s backwards;
-	}
-
-	.hero-title {
-		font-family: var(--font-display);
-		font-size: var(--text-display);
-		font-weight: 400;
-		line-height: 1.1;
-		color: var(--cream-50);
-		margin-bottom: var(--space-24);
-	}
-
-	.title-word {
-		display: inline-block;
-		animation: word-emerge 1s var(--ease-out-expo) backwards;
-	}
-
-	.title-word:nth-child(1) {
-		animation-delay: 0.2s;
-	}
-	.title-word:nth-child(2) {
-		animation-delay: 0.3s;
-	}
-	.title-word:nth-child(3) {
-		animation-delay: 0.4s;
-	}
-
-	@keyframes word-emerge {
-		from {
-			opacity: 0;
-			transform: translateY(30px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
-	.title-accent {
-		color: var(--copper);
-		font-style: italic;
-	}
-
-	.hero-subtitle {
-		font-size: var(--text-title);
-		line-height: 1.7;
-		color: var(--charcoal-300);
-		max-width: 560px;
-		margin: 0 auto var(--space-40);
-		font-weight: 300;
-		animation: emerge 1.2s var(--ease-out-expo) 0.5s backwards;
-	}
-
-	.hero-cta {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-12);
-		padding: var(--space-16) var(--space-32);
-		font-size: var(--text-lead);
-		font-weight: 500;
-		color: var(--charcoal-950);
-		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
-		border-radius: var(--radius-12);
-		text-decoration: none;
-		transition: all 0.4s var(--ease-out-expo);
-		box-shadow: 0 4px 20px -4px rgba(245, 158, 11, 0.4);
-		animation: emerge 1.2s var(--ease-out-expo) 0.6s backwards;
-	}
-
-	.hero-cta:hover {
-		transform: translateY(-3px);
-		box-shadow: 0 8px 30px -4px rgba(245, 158, 11, 0.5);
-	}
-
-	.cta-arrow {
-		width: 20px;
-		height: 20px;
-		animation: bounce-arrow 2s ease-in-out infinite;
-	}
-
-	@keyframes bounce-arrow {
-		0%,
-		100% {
-			transform: translateY(0);
-		}
-		50% {
-			transform: translateY(4px);
-		}
-	}
-
-	.scroll-hint {
-		position: absolute;
-		bottom: 2rem;
-		left: 50%;
-		transform: translateX(-50%);
-		animation: emerge 1.2s var(--ease-out-expo) 1s backwards;
-	}
-
-	.scroll-line {
-		display: block;
-		width: 1px;
-		height: 60px;
-		background: linear-gradient(to bottom, var(--copper), transparent);
-		animation: scroll-fade 2s ease-in-out infinite;
-	}
-
-	@keyframes scroll-fade {
-		0%,
-		100% {
-			opacity: 0.3;
-			transform: scaleY(1);
-		}
-		50% {
-			opacity: 0.8;
-			transform: scaleY(1.1);
-		}
-	}
-
-	/* ===== Sections ===== */
-	.section {
-		padding: var(--space-128) var(--space-32);
-		opacity: 0;
-		transform: translateY(60px);
-		transition:
-			opacity 0.8s var(--ease-out-expo),
-			transform 0.8s var(--ease-out-expo);
-	}
-
-	.section.visible {
-		opacity: 1;
-		transform: translateY(0);
-	}
-
-	.section-inner {
-		max-width: 1100px;
+	.inner {
+		max-width: 1160px;
 		margin: 0 auto;
 	}
 
-	.section-title {
-		font-family: var(--font-display);
-		font-size: var(--text-headline);
-		font-weight: 400;
-		color: var(--cream-50);
-		text-align: center;
-		margin-bottom: var(--space-16);
-	}
-
-	.section-subtitle {
-		font-size: var(--text-subtitle);
-		line-height: 1.7;
-		color: var(--charcoal-400);
-		text-align: center;
-		max-width: 600px;
-		margin: 0 auto var(--space-64);
-		font-weight: 300;
-	}
-
-	/* ===== How It Works ===== */
-	.pipeline {
-		display: flex;
-		align-items: flex-start;
-		justify-content: center;
-		gap: var(--space-16);
-		flex-wrap: wrap;
-	}
-
-	.pipeline-step {
-		flex: 1;
-		min-width: 200px;
-		max-width: 280px;
-		text-align: center;
-		padding: var(--space-32) var(--space-24);
-		background: linear-gradient(145deg, rgba(41, 37, 36, 0.5) 0%, rgba(28, 25, 23, 0.6) 100%);
-		border: 1px solid rgba(168, 162, 158, 0.1);
-		border-radius: var(--radius-20);
-		transition: all 0.4s var(--ease-out-expo);
-	}
-
-	.pipeline-step:hover {
-		transform: translateY(-4px);
-		border-color: rgba(201, 149, 108, 0.2);
-		box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.4);
-	}
-
-	.step-icon {
-		width: 64px;
-		height: 64px;
-		margin: 0 auto var(--space-20);
-		color: var(--copper);
-		position: relative;
-	}
-
-	.step-icon svg {
-		width: 100%;
-		height: 100%;
-	}
-
-	.step-icon.absorbing .absorb-ring {
-		animation: absorb 3s ease-in-out infinite;
-	}
-
-	.step-icon.absorbing .absorb-ring:nth-child(1) {
-		animation-delay: 0s;
-	}
-	.step-icon.absorbing .absorb-ring:nth-child(2) {
-		animation-delay: 0.2s;
-	}
-	.step-icon.absorbing .absorb-ring:nth-child(3) {
-		animation-delay: 0.4s;
-	}
-
-	@keyframes absorb {
-		0%,
-		100% {
-			transform: scale(1);
-			opacity: 0.2;
-		}
-		50% {
-			transform: scale(0.95);
-			opacity: 0.5;
-		}
-	}
-
-	.particles {
+	/* ---------- Navigation ---------- */
+	.nav {
 		position: absolute;
-		inset: 0;
-	}
-
-	.particle {
-		position: absolute;
-		width: 6px;
-		height: 6px;
-		background: var(--charcoal-500);
-		border-radius: var(--radius-circle);
-		animation: absorb-particle 3s ease-in-out infinite;
-	}
-
-	.p1 {
-		top: 0;
-		left: 50%;
-		animation-delay: 0s;
-	}
-	.p2 {
-		top: 50%;
-		right: 0;
-		animation-delay: 1s;
-	}
-	.p3 {
-		bottom: 10%;
-		left: 10%;
-		animation-delay: 2s;
-	}
-
-	@keyframes absorb-particle {
-		0% {
-			opacity: 0.8;
-			transform: translate(0, 0) scale(1);
-		}
-		100% {
-			opacity: 0;
-			transform: translate(
-					calc(50% - var(--particle-x, 0px)),
-					calc(50% - var(--particle-y, 0px))
-				)
-				scale(0);
-		}
-	}
-
-	.p1 {
-		--particle-x: 0px;
-		--particle-y: -20px;
-	}
-	.p2 {
-		--particle-x: 20px;
-		--particle-y: 0px;
-	}
-	.p3 {
-		--particle-x: -15px;
-		--particle-y: 15px;
-	}
-
-	.pipeline-connector {
+		inset: 0 0 auto 0;
+		z-index: 2;
 		display: flex;
 		align-items: center;
-		padding-top: var(--space-48);
-		color: var(--copper);
+		justify-content: space-between;
+		padding: var(--space-24) var(--space-32);
 	}
 
-	.pipeline-connector svg {
-		width: 60px;
-		height: 24px;
+	.wordmark {
+		font-family: var(--font-poster);
+		font-size: var(--text-section-title);
+		line-height: 1;
+		text-transform: uppercase;
+		text-decoration: none;
 	}
 
-	.step-title {
-		font-family: var(--font-display);
-		font-size: var(--text-title);
-		font-weight: 400;
-		color: var(--cream-50);
-		margin-bottom: var(--space-12);
+	.nav-signin {
+		padding: var(--space-10) var(--space-20);
+		border: 2px solid var(--ink);
+		border-radius: var(--radius-6);
+		font-weight: 700;
+		text-decoration: none;
+		transition:
+			background-color 0.25s var(--ease-out),
+			color 0.25s var(--ease-out);
 	}
 
-	.step-desc {
-		font-size: var(--text-body-sm);
-		line-height: 1.6;
-		color: var(--charcoal-400);
-		font-weight: 300;
+	.nav-signin:hover {
+		background: var(--ink);
+		color: var(--gold);
 	}
 
-	/* ===== Benefits ===== */
-	.benefits-grid {
+	/* ---------- Hero ---------- */
+	.hero {
+		position: relative;
+		padding: var(--space-128) var(--space-32) 0;
+	}
+
+	.hero-inner {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+		align-items: end;
 		gap: var(--space-32);
+		min-height: calc(100dvh - var(--space-128));
 	}
 
-	.benefit {
-		padding: var(--space-32);
-		background: linear-gradient(145deg, rgba(41, 37, 36, 0.4) 0%, rgba(28, 25, 23, 0.5) 100%);
-		border: 1px solid rgba(168, 162, 158, 0.08);
-		border-radius: var(--radius-16);
-		transition: all 0.4s var(--ease-out-expo);
+	.hero-text {
+		/* On very wide screens, bring the text in line with the 1160px column
+		   the rest of the page uses, while the dome stays on the viewport edge. */
+		position: relative;
+		left: max(0px, calc((100vw - 1224px) / 2));
+		align-self: center;
+		padding-bottom: var(--space-80);
 	}
 
-	.benefit:hover {
-		border-color: rgba(201, 149, 108, 0.15);
+	h1 {
+		font-family: var(--font-poster);
+		font-size: var(--text-poster);
+		font-weight: 400;
+		line-height: 0.92;
+		text-transform: uppercase;
+	}
+
+	h1 span {
+		display: block;
+	}
+
+	h1 .yes {
+		color: var(--purple);
+	}
+
+	/* 3.57:1 on gold: passes for display type, which is the only place it is used. */
+	h1 .no {
+		color: var(--earth);
+	}
+
+	.hero-lead {
+		max-width: 34ch;
+		margin-top: var(--space-32);
+		font-size: var(--text-title);
+		line-height: 1.45;
+	}
+
+	.cta {
+		box-sizing: border-box;
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-14);
+		margin-top: var(--space-32);
+		padding: var(--space-20) var(--space-32);
+		border-radius: var(--radius-6);
+		background: var(--purple);
+		color: var(--bone);
+		font-size: var(--text-title);
+		font-weight: 700;
+		text-decoration: none;
+		transition:
+			background-color 0.3s var(--ease-out),
+			transform 0.3s var(--ease-out);
+	}
+
+	.page a.cta {
+		color: var(--bone);
+	}
+
+	.cta svg {
+		width: 1.4em;
+		height: 1.4em;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 2.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		transition: transform 0.3s var(--ease-out);
+	}
+
+	.cta:hover {
+		background: var(--ink);
 		transform: translateY(-2px);
 	}
 
-	.benefit-icon {
-		width: 48px;
-		height: 48px;
-		color: var(--copper);
-		margin-bottom: var(--space-20);
+	.cta:hover svg {
+		transform: translateX(4px);
 	}
 
-	.benefit-icon svg {
-		width: 100%;
-		height: 100%;
+	.cta:active {
+		transform: translateY(0);
 	}
 
-	.benefit-title {
-		font-family: var(--font-display);
-		font-size: var(--text-subtitle);
-		font-weight: 400;
-		color: var(--cream-50);
-		margin-bottom: var(--space-10);
+	.cta.on-dark {
+		background: var(--gold);
 	}
 
-	.benefit-desc {
-		font-size: var(--text-body-sm);
-		line-height: 1.6;
-		color: var(--charcoal-400);
-		font-weight: 300;
+	.page a.cta.on-dark {
+		color: var(--ink);
 	}
 
-	/* ===== Voices / Testimonials ===== */
-	.testimonials {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-		gap: var(--space-32);
+	.cta.on-dark:hover {
+		background: var(--bone);
 	}
 
-	.testimonial {
-		padding: var(--space-32);
-		background: linear-gradient(145deg, rgba(41, 37, 36, 0.5) 0%, rgba(28, 25, 23, 0.6) 100%);
-		border: 1px solid rgba(168, 162, 158, 0.1);
-		border-radius: var(--radius-16);
-		transition: all 0.4s var(--ease-out-expo);
-	}
-
-	.testimonial:hover {
-		border-color: rgba(201, 149, 108, 0.2);
-	}
-
-	.testimonial-text {
-		font-family: var(--font-display);
-		font-size: var(--text-lead);
-		font-style: italic;
-		line-height: 1.7;
-		color: var(--charcoal-300);
-		margin-bottom: var(--space-24);
-	}
-
-	.testimonial-author {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-	}
-
-	.author-name {
-		font-size: var(--text-body-sm);
-		font-weight: 500;
-		color: var(--cream-50);
-	}
-
-	.author-handle {
-		font-size: var(--text-label);
-		color: var(--charcoal-500);
-	}
-
-	/* ===== Early Access CTA ===== */
-	.cta-card {
-		max-width: 540px;
-		margin: 0 auto;
-		padding: var(--space-48);
-		background: linear-gradient(145deg, rgba(41, 37, 36, 0.7) 0%, rgba(28, 25, 23, 0.8) 100%);
-		border: 1px solid rgba(168, 162, 158, 0.15);
-		border-radius: var(--radius-24);
-		text-align: center;
-		box-shadow:
-			0 0 0 1px rgba(0, 0, 0, 0.2),
-			0 25px 60px -10px rgba(0, 0, 0, 0.5),
-			0 0 100px -30px var(--copper-glow);
-	}
-
-	.cta-logo {
-		width: 72px;
-		height: 72px;
-		margin: 0 auto var(--space-24);
-		color: var(--copper);
-	}
-
-	.cta-logo svg {
-		width: 100%;
-		height: 100%;
-	}
-
-	.cta-title {
-		font-family: var(--font-display);
-		font-size: var(--text-page-title);
-		font-weight: 400;
-		color: var(--cream-50);
-		margin-bottom: var(--space-12);
-	}
-
-	.cta-subtitle {
-		font-size: var(--text-body);
-		line-height: 1.7;
-		color: var(--charcoal-400);
-		margin-bottom: var(--space-32);
-		font-weight: 300;
-	}
-
-	.subscribe-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-12);
-		padding: var(--space-16) var(--space-32);
-		font-size: var(--text-lead);
-		font-weight: 500;
-		font-family: var(--font-body);
-		color: var(--charcoal-950);
-		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
-		border-radius: var(--radius-12);
-		text-decoration: none;
-		transition: all 0.4s var(--ease-out-expo);
-		box-shadow: 0 4px 20px -4px rgba(245, 158, 11, 0.4);
-	}
-
-	.subscribe-btn:hover {
-		transform: translateY(-3px);
-		box-shadow: 0 8px 30px -4px rgba(245, 158, 11, 0.5);
-	}
-
-	.leaflet-icon {
-		width: 20px;
-		height: 20px;
-	}
-
-	.external-icon {
-		width: 16px;
-		height: 16px;
-		opacity: 0.7;
-	}
-
-	.subscribe-hint {
-		font-size: var(--text-small);
-		color: var(--charcoal-500);
+	.hero-note {
+		max-width: 40ch;
 		margin-top: var(--space-20);
-		font-weight: 300;
+		font-size: var(--text-body);
 	}
 
-	/* ===== Footer ===== */
+	/* ---------- The border ---------- */
+	.border-figure {
+		align-self: end;
+		justify-self: end;
+		width: 100%;
+		/* Never taller than the viewport it rises into. */
+		max-width: 92dvh;
+		/* Bleed off the right edge so the dome reads as part of the ground. */
+		margin-right: calc(var(--space-32) * -1);
+		/* The rings are whole circles centred on the corner. Cut them along the
+		   bottom and right, and leave the top and left open for arriving posts. */
+		clip-path: inset(-50vh 0 0 -50vw);
+	}
+
+	.border-figure svg {
+		display: block;
+		width: 100%;
+		height: auto;
+		overflow: visible;
+	}
+
+	.border-figure figcaption {
+		position: absolute;
+		right: var(--space-32);
+		bottom: var(--space-12);
+		padding: var(--space-4) var(--space-10);
+		border-radius: var(--radius-3);
+		background: var(--ink);
+		color: var(--bone);
+		font-size: var(--text-caption);
+	}
+
+	.inside {
+		fill: var(--purple);
+	}
+
+	.friend :global(.post-body) {
+		fill: var(--bone);
+	}
+
+	.friend :global(.post-line) {
+		fill: var(--purple);
+	}
+
+	.own :global(.post-body) {
+		fill: var(--gold);
+	}
+
+	.own :global(.post-line) {
+		fill: var(--ink);
+	}
+
+	.hostile :global(.post-body) {
+		fill: var(--ink);
+		stroke: var(--ink);
+		stroke-width: 3;
+		stroke-dasharray: 300 0;
+	}
+
+	.hostile :global(.post-line) {
+		fill: var(--earth);
+	}
+
+	/* The one authored motion on the page. A post travels to the border; a
+	   friend carries on inside, the other breaks into the same beads the outer
+	   band is made of and is gone. */
+	.travel {
+		animation: 9s linear infinite both;
+		animation-delay: var(--delay);
+	}
+
+	.let-in {
+		animation-name: let-in;
+	}
+
+	.turned-away {
+		animation-name: turned-away;
+	}
+
+	.turned-away :global(.post-body) {
+		animation: break-body 9s linear infinite both;
+		animation-delay: var(--delay);
+	}
+
+	.turned-away :global(.post-line) {
+		animation: break-lines 9s linear infinite both;
+		animation-delay: var(--delay);
+	}
+
+	@keyframes let-in {
+		0% {
+			transform: translate(0, 0);
+			opacity: 0;
+		}
+		6% {
+			opacity: 1;
+		}
+		70% {
+			transform: translate(var(--dx), var(--dy));
+			opacity: 1;
+			animation-timing-function: var(--ease-out);
+		}
+		92% {
+			transform: translate(var(--dx), var(--dy));
+			opacity: 1;
+		}
+		100% {
+			transform: translate(var(--dx), var(--dy));
+			opacity: 0;
+		}
+	}
+
+	@keyframes turned-away {
+		0% {
+			transform: translate(0, 0);
+			opacity: 0;
+		}
+		6% {
+			opacity: 1;
+		}
+		40% {
+			transform: translate(var(--dx), var(--dy));
+			opacity: 1;
+		}
+		68% {
+			transform: translate(var(--dx), var(--dy));
+			opacity: 1;
+		}
+		82%,
+		100% {
+			transform: translate(var(--dx), var(--dy));
+			opacity: 0;
+		}
+	}
+
+	@keyframes break-body {
+		0%,
+		40% {
+			fill-opacity: 1;
+			stroke-dasharray: 300 0;
+		}
+		60%,
+		100% {
+			fill-opacity: 0;
+			stroke-dasharray: 3 12;
+		}
+	}
+
+	@keyframes break-lines {
+		0%,
+		40% {
+			opacity: 1;
+		}
+		55%,
+		100% {
+			opacity: 0;
+		}
+	}
+
+	/* ---------- Bands ---------- */
+	.band {
+		display: block;
+	}
+
+	/* ---------- Fields ---------- */
+	.field {
+		padding: var(--space-96) var(--space-32) var(--space-128);
+	}
+
+	h2 {
+		max-width: 16ch;
+		margin-bottom: var(--space-40);
+		font-family: var(--font-poster);
+		font-size: var(--text-shout);
+		font-weight: 400;
+		line-height: 0.98;
+		text-transform: uppercase;
+		text-wrap: balance;
+	}
+
+	h3 {
+		font-family: var(--font-head);
+		font-size: var(--text-section-title);
+		font-weight: 700;
+		line-height: 1.15;
+	}
+
+	.voice {
+		max-width: 32ch;
+		font-family: var(--font-head);
+		font-size: var(--text-voice);
+		font-weight: 600;
+		line-height: 1.28;
+	}
+
+	.body {
+		max-width: 62ch;
+	}
+
+	/* Now: the braced state. Ink ground, the only section with no bright field. */
+	.now {
+		background: var(--ink);
+		color: var(--bone);
+	}
+
+	.now h2 {
+		color: var(--gold);
+	}
+
+	.now-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: var(--space-64);
+		align-items: start;
+	}
+
+	.voice.quiet {
+		color: var(--purple-lit);
+	}
+
+	.the-ones {
+		display: grid;
+		gap: var(--space-16);
+		margin-top: var(--space-32);
+	}
+
+	.the-ones li {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: baseline;
+		gap: var(--space-20);
+		max-width: 30ch;
+		font-family: var(--font-head);
+		font-size: var(--text-voice);
+		font-weight: 700;
+		line-height: 1.2;
+	}
+
+	/* A diamond from the band, standing where a bullet would. */
+	.the-ones li::before {
+		content: '';
+		width: 0.5em;
+		height: 0.5em;
+		background: var(--earth);
+		transform: translateY(-0.1em) rotate(45deg);
+	}
+
+	/* Could be: the same person, in full colour. */
+	.could {
+		background: var(--purple);
+		color: var(--bone);
+	}
+
+	.could h2 {
+		max-width: 18ch;
+		color: var(--gold);
+	}
+
+	.claim span {
+		display: block;
+	}
+
+	.claim {
+		margin-top: var(--space-64);
+		margin-bottom: var(--space-24);
+		color: var(--gold);
+		font-family: var(--font-poster);
+		font-size: var(--text-poster);
+		line-height: 0.92;
+		text-transform: uppercase;
+		text-wrap: balance;
+	}
+
+	/* How it works: four claims as a ruled list, not four cards. */
+	.how {
+		background: var(--earth);
+		color: var(--bone);
+	}
+
+	.how .intro {
+		font-size: var(--text-title);
+	}
+
+	.claims {
+		margin-top: var(--space-48);
+		border-bottom: 2px solid var(--bone);
+	}
+
+	.claims > div {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+		gap: var(--space-32);
+		padding: var(--space-28) 0;
+		border-top: 2px solid var(--bone);
+	}
+
+	.claims dt {
+		font-family: var(--font-head);
+		font-size: var(--text-page-title);
+		font-weight: 700;
+		line-height: 1.12;
+	}
+
+	.claims dd {
+		max-width: 56ch;
+	}
+
+	/* Authority: back out into the daylight. */
+	.authority {
+		background: var(--gold);
+		color: var(--ink);
+	}
+
+	.split {
+		display: grid;
+		grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+		gap: var(--space-64);
+		align-items: start;
+	}
+
+	.authority h2 {
+		max-width: 12ch;
+	}
+
+	.points {
+		display: grid;
+		gap: var(--space-40);
+	}
+
+	.points h3 {
+		margin-bottom: var(--space-8);
+		color: var(--purple);
+	}
+
+	/* Expect: plain facts, set plainly. */
+	.expect {
+		background: var(--leaf);
+		color: var(--bone);
+	}
+
+	.facts {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: var(--space-48) var(--space-64);
+	}
+
+	.facts h3 {
+		margin-bottom: var(--space-8);
+	}
+
+	/* Close */
+	.close {
+		background: var(--ink);
+		color: var(--bone);
+	}
+
+	.close h2 {
+		margin-bottom: var(--space-24);
+		color: var(--gold);
+		font-size: var(--text-poster);
+		line-height: 0.92;
+	}
+
+	/* ---------- Footer ---------- */
 	.site-footer {
-		padding: var(--space-48) var(--space-32);
-		border-top: 1px solid rgba(168, 162, 158, 0.1);
+		padding: var(--space-32);
+		background: var(--ink);
+		color: var(--bone);
+		border-top: 2px solid var(--purple-lit);
 	}
 
-	.footer-inner {
-		max-width: 1100px;
-		margin: 0 auto;
+	.footer-row {
 		display: flex;
-		flex-direction: column;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: var(--space-24);
+		gap: var(--space-16) var(--space-40);
 	}
 
-	.footer-brand {
-		display: flex;
-		align-items: center;
-		gap: var(--space-12);
-		color: var(--copper);
-	}
-
-	.footer-logo {
-		width: 32px;
-		height: 32px;
-	}
-
-	.footer-name {
-		font-family: var(--font-display);
-		font-size: var(--text-subtitle);
-		color: var(--cream-50);
+	.site-footer .wordmark {
+		color: var(--gold);
 	}
 
 	.footer-nav {
 		display: flex;
-		gap: var(--space-32);
-	}
-
-	.footer-nav a {
-		font-size: var(--text-small);
-		color: var(--charcoal-400);
-		text-decoration: none;
-		transition: color 0.3s var(--ease-in-out);
-	}
-
-	.footer-nav a:hover {
-		color: var(--cream-50);
+		flex-wrap: wrap;
+		gap: var(--space-12) var(--space-28);
+		font-size: var(--text-body);
 	}
 
 	.footer-copy {
-		font-size: var(--text-label);
-		color: var(--charcoal-600);
+		margin-left: auto;
+		font-size: var(--text-small);
 	}
 
-	/* ===== Responsive ===== */
-	@media (max-width: 768px) {
+	/* ---------- Narrow screens ---------- */
+	@media (max-width: 860px) {
 		.nav {
-			padding: var(--space-16) var(--space-24);
+			padding: var(--space-16) var(--space-20);
 		}
 
 		.hero {
-			padding: var(--space-80) var(--space-24) var(--space-48);
+			padding: var(--space-96) var(--space-20) 0;
 		}
 
-		.hero-logo {
-			width: 90px;
-			height: 90px;
+		.hero-inner {
+			grid-template-columns: minmax(0, 1fr);
+			min-height: 0;
 		}
 
-		.hero-subtitle {
-			font-size: var(--text-lead);
+		.hero-text {
+			padding-bottom: 0;
 		}
 
-		.section {
-			padding: var(--space-80) var(--space-24);
+		.border-figure {
+			margin-right: calc(var(--space-20) * -1);
+			margin-left: var(--space-48);
 		}
 
-		.pipeline {
-			flex-direction: column;
-			align-items: center;
+		.border-figure figcaption {
+			right: var(--space-20);
 		}
 
-		.pipeline-connector {
-			transform: rotate(90deg);
-			padding: var(--space-16) 0;
+		.field {
+			padding: var(--space-64) var(--space-20) var(--space-80);
 		}
 
-		.pipeline-step {
-			max-width: 100%;
+		.claims > div,
+		.split,
+		.facts,
+		.now-grid {
+			grid-template-columns: minmax(0, 1fr);
 		}
 
-		.cta-card {
-			padding: var(--space-32) var(--space-24);
+		.now-grid {
+			gap: var(--space-32);
 		}
 
-		.footer-nav {
-			gap: var(--space-24);
+		.border-figure {
+			max-width: none;
+		}
+
+		.claims > div {
+			gap: var(--space-10);
+		}
+
+		.split {
+			gap: var(--space-40);
+		}
+
+		.footer-copy {
+			margin-left: 0;
 		}
 	}
 
 	@media (max-width: 480px) {
-		.hero-cta,
-		.subscribe-btn {
-			width: 100%;
+		.cta {
 			justify-content: center;
+			width: 100%;
 		}
 	}
 
-	/* ===== Reduced Motion ===== */
+	/* The still plate: every post where its journey ends. People reading this
+	   are often upset already, so motion is something they opt into. */
 	@media (prefers-reduced-motion: reduce) {
-		.orb,
-		.hero-content,
-		.section,
-		.logo-svg .ring,
-		.logo-svg .core,
-		.absorb-ring,
-		.particle,
-		.scroll-line,
-		.cta-arrow,
-		.title-word {
+		.travel,
+		.turned-away :global(.post-body),
+		.turned-away :global(.post-line) {
 			animation: none;
 		}
 
-		.section {
-			opacity: 1;
-			transform: none;
+		.travel {
+			transform: translate(var(--dx), var(--dy));
 		}
 
-		.pipeline-step,
-		.benefit,
-		.testimonial,
-		.hero-cta,
-		.nav-login,
-		.subscribe-btn {
+		.turned-away :global(.post-body) {
+			fill-opacity: 0;
+			stroke-dasharray: 3 12;
+		}
+
+		.turned-away :global(.post-line) {
+			opacity: 0.35;
+		}
+
+		.cta,
+		.cta svg,
+		.nav-signin {
 			transition: none;
 		}
 	}
-	#voices {
-	display: none;
-}
 </style>

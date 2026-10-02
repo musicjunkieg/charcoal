@@ -10801,6 +10801,17 @@
       "created_at": "2026-10-02T14:49:49.851045-07:00",
       "updated_at": "2026-10-02T14:49:49.851045-07:00",
       "metadata_json": "{\"branch\":\"docs/382-runbook-policy-version\",\"confidence\":85}"
+    },
+    {
+      "id": 992,
+      "change_id": "bf39a055-4fa1-4ce1-b44a-79217342c796",
+      "node_type": "action",
+      "title": "Record the automatic-before-launch gate in PRODUCT.md, then rebuild web/src/routes/+page.svelte in the Afrofuturist sovereign-ground world: sign-in as the one action, before/after story, four proof claims, manual and automatic wording behind one switch, no testimonials, no dead links",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T14:56:14.954790-07:00",
+      "updated_at": "2026-10-02T14:56:14.954790-07:00",
+      "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"commit\":\"2c426f1\",\"confidence\":85,\"files\":[\"PRODUCT.md\",\"web/src/routes/+page.svelte\",\"web/src/lib/website/styles/tokens.css\",\"web/src/lib/landing.test.ts\"]}"
     }
   ],
   "edges": [
@@ -22210,6 +22221,17 @@
       "weight": 1.0,
       "rationale": "chosen: pinned by the user",
       "created_at": "2026-10-02T14:49:49.896536-07:00"
+    },
+    {
+      "id": 1048,
+      "from_node_id": 991,
+      "to_node_id": 992,
+      "from_change_id": "882d32bf-da27-467a-b545-7159f46c48e3",
+      "to_change_id": "bf39a055-4fa1-4ce1-b44a-79217342c796",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "build the chosen world on the landing page",
+      "created_at": "2026-10-02T14:56:35.061561-07:00"
     }
   ],
   "documents": [
