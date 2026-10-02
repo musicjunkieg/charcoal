@@ -75,17 +75,41 @@ then skipped, no scores are written, and every refresh fails.
 This is loud, not silent — a web-triggered scan, and a refresh with work to do,
 probes the endpoint before it gathers anything and refuses to start, naming both
 values (the CLI `scan`/`sweep` commands do not probe) — but a refused scan is
-still a failed deploy day. **The variable is unset in production today, and nobody on
-this branch knows the endpoint's value.** Read both sides before deploying.
+still a failed deploy day. **The variable is unset in production today.** The endpoint's value was
+established on 2026-09-19 and is quoted below; read both sides before
+deploying anyway, because the endpoint can be repointed at a new image without
+anything in this repository changing.
 
-Read what the endpoint serves (the environment variable on the RunPod endpoint
-itself, in the RunPod console under the endpoint's template, or from its worker
-env):
+Read what the endpoint serves. **It is not an endpoint environment variable, so
+the RunPod console cannot show it** — the endpoint's env carries only
+`MODEL_PATH`. `POLICY_VERSION` is baked into the image at build time
+(`gpu/cope-b-runpod/Dockerfile`: `ARG POLICY_VERSION` → `ENV POLICY_VERSION`),
+and CI sets it from the build's short SHA plus date
+(`.github/workflows/build-cope-b-image.yml`). So the running image is the only
+place the value exists, and the only honest way to read it is to ask the
+endpoint for a verdict:
 
 ```bash
-# RunPod console → Serverless → your CoPE-B endpoint → Template → Environment
-# Variables → POLICY_VERSION.  Copy the value verbatim, including case.
+# Any content works; the verdict carries the identity. Needs RUNPOD_API_KEY.
+curl -s -X POST "https://api.runpod.ai/v2/<endpoint-id>/runsync" \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"input": {"contents": ["hello"]}}' | jq -r '.output.verdicts[0].policy_version'
 ```
+
+Note `contents`, plural — a batch. `content` singular raises
+`KeyError: 'contents'`. If the endpoint has scaled to zero this pays a cold
+start: measured 2026-09-19 at ~2 min 12 s queued plus ~1 min 53 s to load the
+model and answer, against ~150 ms warm.
+
+You can also derive it from the deployed image tag — tag `ddac4681…` was built
+2026-07-03, giving `policy-ddac468-2026-07-03` — but derive it only to check
+the probe agreed, never instead of probing: the tag tells you which commit was
+built, not which image the endpoint is actually running now.
+
+**Value as of 2026-09-19** (endpoint `f39lf61pc762a8`, image tag
+`ddac4681febe6fc6103f11dc3612312faf335f2b`, probed, not derived):
+`policy-ddac468-2026-07-03`, model `cope-b-a4b`. Re-probe rather than trusting
+this line if the endpoint's image has changed since.
 
 Read what Charcoal is told:
 
