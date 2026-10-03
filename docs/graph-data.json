@@ -10856,6 +10856,17 @@
       "created_at": "2026-10-02T18:04:56.669576-07:00",
       "updated_at": "2026-10-02T18:04:56.669576-07:00",
       "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"confidence\":90,\"prompt\":\"It's this color palette for me https://www.cosmos.so/e/1038541147\"}"
+    },
+    {
+      "id": 997,
+      "change_id": "37f3bfcf-5d5d-497c-87e6-22727e75755e",
+      "node_type": "action",
+      "title": "Rebuild the landing in the reference photo's tones: coloured fields (rust, umber, sandstone, placard), pink and dusty blue as accents, film grain, no motifs, Archivo + Atkinson, half the length",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T18:10:48.954537-07:00",
+      "updated_at": "2026-10-02T18:10:48.968383-07:00",
+      "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"commit\":\"af476cc\",\"confidence\":85,\"prompt\":\"Rebuild with the palette but you notice the tones are a little different, and that's key. There's more color, less full darkness\"}"
     }
   ],
   "edges": [
@@ -22331,6 +22342,17 @@
       "weight": 1.0,
       "rationale": "the reference Bryan brought back after rejecting the first build",
       "created_at": "2026-10-02T18:04:56.677414-07:00"
+    },
+    {
+      "id": 1054,
+      "from_node_id": 996,
+      "to_node_id": 997,
+      "from_change_id": "ad208dfc-3fb5-4bc5-80a5-c98e3c79a48e",
+      "to_change_id": "37f3bfcf-5d5d-497c-87e6-22727e75755e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rebuild from the palette Bryan chose",
+      "created_at": "2026-10-02T18:10:48.962043-07:00"
     }
   ],
   "documents": [

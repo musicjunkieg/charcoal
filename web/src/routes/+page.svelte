@@ -60,18 +60,33 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	/>
 </svelte:head>
 
+{#snippet mark(cls: string)}
+	<svg viewBox="0 0 64 64" fill="none" class="mark {cls}" aria-hidden="true" focusable="false">
+		<circle class="ring ring-1" cx="32" cy="32" r="30" stroke="currentColor" stroke-width="1.5" opacity="0.25" />
+		<circle class="ring ring-2" cx="32" cy="32" r="25" stroke="currentColor" stroke-width="1.5" opacity="0.4" />
+		<circle class="ring ring-3" cx="32" cy="32" r="20" stroke="currentColor" stroke-width="2" opacity="0.55" />
+		<circle class="ring ring-4" cx="32" cy="32" r="15" stroke="currentColor" stroke-width="2" opacity="0.75" />
+		<circle class="ring ring-5" cx="32" cy="32" r="10" stroke="currentColor" stroke-width="2.5" opacity="0.9" />
+		<circle class="core" cx="32" cy="32" r="5" fill="currentColor" />
+	</svg>
+{/snippet}
+
 <div class="page">
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- a constant comment, no user input -->
 	{@html CONTRACT}
 	<div class="grain" aria-hidden="true"></div>
 
 	<nav class="nav" aria-label="Main">
-		<a href="/" class="wordmark" aria-label="Charcoal home">Charcoal</a>
+		<a href="/" class="brand" aria-label="Charcoal home">
+			{@render mark('mark-nav')}
+			<span class="wordmark">Charcoal</span>
+		</a>
 		<a href="/login" class="nav-signin">Sign in</a>
 	</nav>
 
 	<main>
 		<section class="hero">
+			<div class="hero-mark">{@render mark('mark-hero')}</div>
 			<div class="inner">
 				<h1>
 					<span>Hard things, <em>yes.</em></span>
@@ -199,7 +214,10 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 	<footer class="site-footer">
 		<div class="inner footer-row">
-			<span class="wordmark">Charcoal</span>
+			<span class="brand">
+				{@render mark('mark-nav')}
+				<span class="wordmark">Charcoal</span>
+			</span>
 			<nav class="footer-nav" aria-label="Footer">
 				<a href="/login">Sign in</a>
 				<a href={LEAFLET_URL} target="_blank" rel="noopener noreferrer">Follow the work on Leaflet</a>
@@ -319,9 +337,22 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		padding: var(--space-24) var(--space-32);
 	}
 
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-12);
+		text-decoration: none;
+	}
+
+	.mark-nav {
+		width: 44px;
+		height: 44px;
+		color: var(--pink);
+	}
+
 	.wordmark {
 		font-family: var(--font-display);
-		font-size: var(--text-title);
+		font-size: var(--text-page-title);
 		font-weight: 800;
 		font-stretch: 75%;
 		letter-spacing: 0.06em;
@@ -354,12 +385,87 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		padding: var(--space-128) var(--space-32) var(--space-80);
 		background:
 			radial-gradient(ellipse 70% 80% at 92% 0%, rgb(182 86 36 / 0.95), transparent 70%),
-			radial-gradient(ellipse 60% 60% at 0% 100%, rgb(59 34 23 / 0.75), transparent 70%),
+			radial-gradient(ellipse 75% 75% at 0% 100%, rgb(42 22 14 / 0.95), transparent 72%),
 			var(--rust);
 	}
 
+	.hero {
+		position: relative;
+	}
+
 	.hero .inner {
+		position: relative;
 		width: 100%;
+	}
+
+	.hero-mark {
+		position: absolute;
+		top: 14%;
+		right: 7%;
+		width: min(30vw, 380px);
+		color: var(--pink);
+	}
+
+	.mark-hero {
+		display: block;
+		width: 100%;
+		height: auto;
+		overflow: visible;
+	}
+
+	.mark .ring,
+	.mark .core {
+		transform-box: fill-box;
+		transform-origin: center;
+	}
+
+	.mark-hero .ring {
+		animation: ring-swell 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+	}
+
+	.mark-hero .ring-2 {
+		animation-delay: 0.12s;
+	}
+
+	.mark-hero .ring-3 {
+		animation-delay: 0.24s;
+	}
+
+	.mark-hero .ring-4 {
+		animation-delay: 0.36s;
+	}
+
+	.mark-hero .ring-5 {
+		animation-delay: 0.48s;
+	}
+
+	.mark-hero .core {
+		animation: core-bounce 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+	}
+
+	@keyframes ring-swell {
+		0%,
+		60%,
+		100% {
+			transform: scale(1);
+		}
+		30% {
+			transform: scale(1.07);
+		}
+	}
+
+	@keyframes core-bounce {
+		0%,
+		60%,
+		100% {
+			transform: scale(1);
+		}
+		22% {
+			transform: scale(0.72);
+		}
+		40% {
+			transform: scale(1.12);
+		}
 	}
 
 	h1 {
@@ -479,6 +585,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	.sun {
 		background:
 			radial-gradient(ellipse 80% 70% at 100% 0%, rgb(215 185 153 / 0.45), transparent 70%),
+			radial-gradient(ellipse 90% 60% at 0% 100%, rgb(113 52 24 / 0.45), transparent 70%),
 			var(--sandstone);
 		color: var(--ink);
 	}
@@ -544,6 +651,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		padding: var(--space-96) var(--space-32);
 		background:
 			radial-gradient(ellipse 60% 70% at 100% 100%, rgb(182 86 36 / 0.8), transparent 70%),
+			radial-gradient(ellipse 70% 80% at 0% 0%, rgb(42 22 14 / 0.85), transparent 70%),
 			var(--rust);
 	}
 
@@ -638,7 +746,20 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		}
 
 		.hero {
+			flex-direction: column;
+			align-items: stretch;
 			padding: var(--space-96) var(--space-20) var(--space-64);
+		}
+
+		.hero-mark {
+			position: static;
+			width: 120px;
+			margin-bottom: var(--space-32);
+		}
+
+		.mark-nav {
+			width: 36px;
+			height: 36px;
 		}
 
 		.hero-foot,
@@ -684,6 +805,11 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	@media (prefers-reduced-motion: reduce) {
+		.mark-hero .ring,
+		.mark-hero .core {
+			animation: none;
+		}
+
 		.cta,
 		.cta svg,
 		.nav-signin {

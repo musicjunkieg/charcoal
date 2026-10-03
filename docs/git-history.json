@@ -1,5 +1,13 @@
 [
   {
+    "hash": "af476cc6f09e5e23bce7a92b7a932ddf5ab282b3",
+    "short_hash": "af476cc",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T18:10:35-07:00",
+    "message": "feat(395): rebuild the landing in the colours of the reference photo\n\nBryan rejected the first build as too bright, too long and too literal: it\ncopied the look of the reference instead of its feeling. He brought back a\nfilm photograph instead, and asked for its tones: more colour, less full\ndarkness.\n\n- palette read from the photo: rust, umber shade, sandstone sun and placard\n  card as whole fields; faded pink and dusty blue as the only cool notes;\n  the darkest field is umber, never black\n- every borrowed motif is gone (rings, beadwork bands, sawtooth trim) along\n  with the fonts chosen for their provenance; Archivo set heavy and narrow\n  for headlines, Atkinson Hyperlegible for reading\n- film grain over the page, as texture rather than pattern\n- half the length: hero, the before/after as one shade-to-sun moment, how\n  it works, and a close that holds who decides plus the sign-in\n\nCopy, the single sign-in action, the ACTIONS_MODE switch and every guard in\nlanding.test.ts are unchanged and still pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "c48140a669d2e1b64b5a10da322b9cc5992a2bd8",
     "short_hash": "c48140a",
     "author": "Bryan Guffey",
