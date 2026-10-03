@@ -4281,8 +4281,8 @@ mod ownership_tests {
     }
 
     /// #344 F6: `has_own_resumable_staging` is the read a refresh consults
-    /// before deciding whether to pay the classifier-identity probe on a
-    /// zero-candidate tick.
+    /// before deciding whether a zero-candidate tick still needs its context
+    /// loaded (the classifier probe no longer depends on it — #394).
     ///
     /// These assertions are on the helper alone — they pin WHICH ownership
     /// states it calls its own, not that `run_phased_scan` would agree. The

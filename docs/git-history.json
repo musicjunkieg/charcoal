@@ -1,5 +1,45 @@
 [
   {
+    "hash": "af476cc6f09e5e23bce7a92b7a932ddf5ab282b3",
+    "short_hash": "af476cc",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T18:10:35-07:00",
+    "message": "feat(395): rebuild the landing in the colours of the reference photo\n\nBryan rejected the first build as too bright, too long and too literal: it\ncopied the look of the reference instead of its feeling. He brought back a\nfilm photograph instead, and asked for its tones: more colour, less full\ndarkness.\n\n- palette read from the photo: rust, umber shade, sandstone sun and placard\n  card as whole fields; faded pink and dusty blue as the only cool notes;\n  the darkest field is umber, never black\n- every borrowed motif is gone (rings, beadwork bands, sawtooth trim) along\n  with the fonts chosen for their provenance; Archivo set heavy and narrow\n  for headlines, Atkinson Hyperlegible for reading\n- film grain over the page, as texture rather than pattern\n- half the length: hero, the before/after as one shade-to-sun moment, how\n  it works, and a close that holds who decides plus the sign-in\n\nCopy, the single sign-in action, the ACTIONS_MODE switch and every guard in\nlanding.test.ts are unchanged and still pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "c48140a669d2e1b64b5a10da322b9cc5992a2bd8",
+    "short_hash": "c48140a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T15:15:01-07:00",
+    "message": "chore(395): keep the screenshot script and the landing surface brief\n\npage-shots.mjs drives headless Chrome over the DevTools Protocol so a full\npage can be captured in viewport-high slices at a true phone width. Plain\n--screenshot cannot scroll and has a 500px minimum window.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "2c426f1d82ebc691ea3ba40178d62d8c9f7c431b",
+    "short_hash": "2c426f1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T14:56:08-07:00",
+    "message": "docs(395): automated actions are a launch gate, not a later phase\n\nBryan confirmed 2026-10-02 that automatic muting/blocking ships before the\nallowlist opens. Records that, and that no surface promises it until it works.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "e48adbac85f20e04b74e179dd9f78fdcf673199c",
+    "short_hash": "e48adba",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T14:31:18-07:00",
+    "message": "Merge pull request #131 from musicjunkieg/docs/382-runbook-policy-version\n\ndocs(382): POLICY_VERSION is baked into the image, not an endpoint variable",
+    "files_changed": 0
+  },
+  {
+    "hash": "6c9ac1b46e56bbc6b623b3b72ba1949107b467e6",
+    "short_hash": "6c9ac1b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T08:49:30-07:00",
+    "message": "docs(382): POLICY_VERSION is baked into the image, not an endpoint variable\n\nThe runbook sent the operator to the RunPod console for a value that\ncannot be there. The endpoint env carries only MODEL_PATH; POLICY_VERSION\nis an ARG/ENV in gpu/cope-b-runpod/Dockerfile, set by CI from the build\nshort SHA plus date. The running image is the only place it exists.\n\n§0.1 now probes the endpoint for a verdict and reads policy_version off\nthe response, notes the batch input shape (contents, plural — content\nraises KeyError), and gives the cold-start cost so nobody mistakes a\n2-minute wait for a hang. The image tag is offered as a cross-check\nonly: it says which commit was built, not which image is serving.\n\nRecords the probed value as of 2026-09-19 — policy-ddac468-2026-07-03,\nmodel cope-b-a4b — while telling the reader to re-probe rather than\ntrust the line, since the endpoint can be repointed with no change here.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 1
+  },
+  {
     "hash": "f3f750d7a51655e2e59e0a18dae24805b991c818",
     "short_hash": "f3f750d",
     "author": "Bryan Guffey",
