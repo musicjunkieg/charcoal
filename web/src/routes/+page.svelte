@@ -405,7 +405,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		position: absolute;
 		top: 14%;
 		right: 7%;
-		width: min(30vw, 380px);
+		width: min(24vw, 300px);
 		color: var(--gold);
 	}
 
@@ -495,9 +495,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
 		gap: var(--space-48);
 		align-items: end;
-		/* Room under the headline so the ring mark has space to move and the
-		   sign-in row sits clear of it. */
-		margin-top: var(--space-128);
+		/* Close enough to read as the headline's explanation. The ring mark is
+		   sized so it clears this row rather than pushing it away. */
+		margin-top: var(--space-64);
 	}
 
 	.lead {
