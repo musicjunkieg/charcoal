@@ -239,6 +239,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		--placard: #d7b999;
 		--headband: #eae6e5;
 		--pink: #e7a1b4;
+		/* The sunlit edge of the sandstone in the reference, pushed brighter so the
+		   ring mark reads as gold on rust (4.9:1). Used for the mark only. */
+		--gold: #e8b04f;
 		--blue: #4d7c92;
 		--blue-deep: #2c4f60;
 		--ink: #24140d;
@@ -345,14 +348,14 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.mark-nav {
-		width: 44px;
-		height: 44px;
-		color: var(--pink);
+		width: 56px;
+		height: 56px;
+		color: var(--gold);
 	}
 
 	.wordmark {
 		font-family: var(--font-display);
-		font-size: var(--text-page-title);
+		font-size: var(--text-display-sm);
 		font-weight: 800;
 		font-stretch: 75%;
 		letter-spacing: 0.06em;
@@ -403,7 +406,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		top: 14%;
 		right: 7%;
 		width: min(30vw, 380px);
-		color: var(--pink);
+		color: var(--gold);
 	}
 
 	.mark-hero {
@@ -758,8 +761,12 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		}
 
 		.mark-nav {
-			width: 36px;
-			height: 36px;
+			width: 40px;
+			height: 40px;
+		}
+
+		.wordmark {
+			font-size: var(--text-page-title);
 		}
 
 		.hero-foot,
