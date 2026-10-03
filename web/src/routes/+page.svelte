@@ -3,6 +3,10 @@
 	// carries its own palette on .page, so without this import every size and
 	// gap below falls back to the browser default (#292/#293/#380).
 	import '$lib/website/styles/tokens.css';
+	// Self-hosted, so a visit does not hand the reader's IP address to a font
+	// CDN. For people who are targets of harassment that is not a nicety.
+	import '@fontsource-variable/archivo/wdth.css';
+	import '@fontsource-variable/atkinson-hyperlegible-next';
 
 	const LEAFLET_URL = 'https://charcoal.leaflet.pub';
 
@@ -51,12 +55,6 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	<meta
 		name="description"
 		content="Charcoal finds the people who show up only to upset you before they reach you, so posting on Bluesky can be joyful again."
-	/>
-	<link rel="preconnect" href="https://fonts.googleapis.com" />
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-	<link
-		href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&display=swap"
-		rel="stylesheet"
 	/>
 </svelte:head>
 
@@ -246,8 +244,8 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		--blue-deep: #2c4f60;
 		--ink: #24140d;
 
-		--font-display: 'Archivo', 'Arial Narrow', sans-serif;
-		--font-text: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
+		--font-display: 'Archivo Variable', 'Arial Narrow', sans-serif;
+		--font-text: 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif;
 		--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
 		position: relative;
@@ -423,7 +421,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.mark-hero .ring {
-		animation: ring-swell 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+		/* Three times, then at rest: motion that never stops needs a pause
+		   control (WCAG 2.2.2), and this one does not need to keep going. */
+		animation: ring-swell 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) 3;
 	}
 
 	.mark-hero .ring-2 {
@@ -443,7 +443,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.mark-hero .core {
-		animation: core-bounce 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+		animation: core-bounce 3.2s cubic-bezier(0.34, 1.56, 0.64, 1) 3;
 	}
 
 	@keyframes ring-swell {
@@ -550,7 +550,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		transform: translateY(0);
 	}
 
-	.page a.cta:focus-visible {
+	.page a.cta:focus-visible,
+	.page a.nav-signin:focus-visible {
+		border-radius: var(--radius-pill);
 		outline-color: var(--headband);
 	}
 
@@ -590,7 +592,6 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	.sun {
 		background:
 			radial-gradient(ellipse 80% 70% at 100% 0%, rgb(215 185 153 / 0.45), transparent 70%),
-			radial-gradient(ellipse 90% 60% at 0% 100%, rgb(113 52 24 / 0.45), transparent 70%),
 			var(--sandstone);
 		color: var(--ink);
 	}
@@ -655,7 +656,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	.close {
 		padding: var(--space-96) var(--space-32);
 		background:
-			radial-gradient(ellipse 60% 70% at 100% 100%, rgb(182 86 36 / 0.8), transparent 70%),
+			radial-gradient(ellipse 45% 55% at 100% 100%, rgb(182 86 36 / 0.35), transparent 70%),
 			radial-gradient(ellipse 70% 80% at 0% 0%, rgb(42 22 14 / 0.85), transparent 70%),
 			var(--rust);
 	}
@@ -706,7 +707,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		display: grid;
 		gap: var(--space-8);
 		margin-top: var(--space-32);
-		color: var(--placard);
+		color: var(--headband);
 		font-size: var(--text-body);
 	}
 
