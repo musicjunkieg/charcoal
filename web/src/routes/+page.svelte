@@ -271,7 +271,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	/* Film grain over the whole page: the texture of the reference, not a
 	   motif. Static, so it costs nothing after first paint. */
 	.grain {
-		position: fixed;
+		/* Absolute over the whole page rather than fixed to the viewport, so a
+		   full-page capture carries the grain everywhere with no seam. */
+		position: absolute;
 		inset: 0;
 		z-index: 5;
 		pointer-events: none;

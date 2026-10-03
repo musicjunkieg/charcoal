@@ -5,9 +5,12 @@
 // Usage (serve the built site first, e.g. npm --prefix web run preview):
 //   node web/scripts/page-shots.mjs <url> <out-dir> <name>:<width>:<height>[:still] ...
 //   node web/scripts/page-shots.mjs http://localhost:4189/ /tmp/shots d:1440:900 m:390:844 still:1440:900:still
-// A trailing :still captures with prefers-reduced-motion set.
+// A trailing :still captures with prefers-reduced-motion set. Each size also
+// writes <name>-full.png, the whole page as one image.
 import { spawn } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const [url, outDir, ...sizes] = process.argv.slice(2);
 const PORT = 9333;
@@ -21,7 +24,9 @@ const chrome = spawn(
 		'--disable-gpu',
 		'--hide-scrollbars',
 		`--remote-debugging-port=${PORT}`,
-		`--user-data-dir=${outDir}/cdp-profile-${Date.now()}`,
+		// A fresh profile per run, outside the output folder: a reused one is
+		// locked by any Chrome that did not exit.
+		`--user-data-dir=${tmpdir()}/page-shots-profile-${Date.now()}`,
 		'about:blank'
 	],
 	{ stdio: 'ignore' }
@@ -75,18 +80,68 @@ try {
 		});
 		await send('Page.navigate', { url });
 		await sleep(4500); // fonts, then far enough into the loop to see posts mid-journey
+		// Scroll to the bottom and back first. Pages that reveal sections as
+		// they scroll into view (the old landing did) otherwise capture as blank.
+		await send('Runtime.evaluate', {
+			awaitPromise: true,
+			expression: `(async () => {
+				for (let y = 0; y < document.documentElement.scrollHeight; y += innerHeight / 2) {
+					scrollTo(0, y);
+					await new Promise((r) => setTimeout(r, 120));
+				}
+				scrollTo(0, 0);
+				await new Promise((r) => setTimeout(r, 1200));
+			})()`
+		});
 		const { cssContentSize } = await send('Page.getLayoutMetrics');
 		const total = Math.ceil(cssContentSize.height);
-		let n = 0;
+		// Each slice is a real scroll position, captured as the visitor sees it.
+		// Rendering past the viewport instead (captureBeyondViewport) draws
+		// position:fixed backgrounds only once at the top, so every later slice
+		// of a page with a fixed backdrop comes out on bare white.
+		const slices = [];
 		for (let y = 0; y < total; y += +h) {
-			const { data } = await send('Page.captureScreenshot', {
-				format: 'png',
-				captureBeyondViewport: true,
-				clip: { x: 0, y, width: +w, height: Math.min(+h, total - y), scale: 1 }
-			});
-			writeFileSync(`${outDir}/${name}-${String(n++).padStart(2, '0')}.png`, Buffer.from(data, 'base64'));
+			const top = Math.max(0, Math.min(y, total - +h));
+			await send('Runtime.evaluate', { expression: `scrollTo(0, ${top})` });
+			if (slices.length === 1) {
+				// A pinned nav would repeat at the top of every slice in the
+				// stitched image. Hide fixed elements that hold controls after
+				// the first slice; fixed backdrops (no links or buttons) stay.
+				await send('Runtime.evaluate', {
+					expression: `for (const el of document.querySelectorAll('body *')) {
+						if (getComputedStyle(el).position === 'fixed' && el.querySelector('a, button')) el.style.visibility = 'hidden';
+					}`
+				});
+			}
+			await sleep(900); // let scroll-triggered reveals finish
+			const { data } = await send('Page.captureScreenshot', { format: 'png' });
+			const file = `${name}-${String(slices.length).padStart(2, '0')}.png`;
+			writeFileSync(`${outDir}/${file}`, Buffer.from(data, 'base64'));
+			// The last slice is clamped to the page end and overlaps the one
+			// before; `skip` is how much of its top the stitched image drops.
+			slices.push({ file, skip: y - top, height: Math.min(+h, total - y) });
 		}
-		console.log(`${name}: ${w}x${total} content (width ${Math.ceil(cssContentSize.width)}), ${n} slices`);
+		// One tall image for sharing, stitched in the browser from the slices.
+		const stitch = `${outDir}/.${name}-stitch.html`;
+		writeFileSync(
+			stitch,
+			`<!doctype html><body style="margin:0">${slices
+				.map(
+					(s) =>
+						`<div style="height:${s.height}px;overflow:hidden"><img src="${s.file}" style="display:block;margin-top:-${s.skip}px"></div>`
+				)
+				.join('')}</body>`
+		);
+		await send('Page.navigate', { url: `file://${resolve(stitch)}` });
+		await sleep(1500);
+		const { data: full } = await send('Page.captureScreenshot', {
+			format: 'png',
+			captureBeyondViewport: true,
+			clip: { x: 0, y: 0, width: +w, height: total, scale: 1 }
+		});
+		writeFileSync(`${outDir}/${name}-full.png`, Buffer.from(full, 'base64'));
+		unlinkSync(stitch);
+		console.log(`${name}: ${w}x${total} content (width ${Math.ceil(cssContentSize.width)}), ${slices.length} slices`);
 	}
 	ws.close();
 } finally {
