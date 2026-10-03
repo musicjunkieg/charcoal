@@ -10823,6 +10823,39 @@
       "created_at": "2026-10-02T15:15:16.112553-07:00",
       "updated_at": "2026-10-02T15:15:16.112553-07:00",
       "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"commit\":\"c48140a\",\"confidence\":85}"
+    },
+    {
+      "id": 994,
+      "change_id": "96566c23-8529-457c-bc9e-220862e0d2fd",
+      "node_type": "revisit",
+      "title": "Bryan rejects the first build of the sovereign-ground landing: too bright, too long, and too literal - a cheap imitation. The reference was meant as a FEELING (joyful, grounded, powerful, sovereign), not a visual vocabulary to copy. Drop the ring, bead and sawtooth motifs and the kente-adjacent palette; shorten the page; consider real photography.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T15:19:51.321375-07:00",
+      "updated_at": "2026-10-02T15:19:51.321375-07:00",
+      "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"confidence\":90,\"prompt\":\"hahah whoa i have feelings about this design / where are the screenshots so I can share them? also, does it help if I ask you to find free imagery you could use? It's too bright, it's so long of a page now. / it's also too african - like a cheap imitation. I wanted teh feeling not the copy\"}"
+    },
+    {
+      "id": 995,
+      "change_id": "ab7b110e-eb23-4122-9034-7e25139c886c",
+      "node_type": "outcome",
+      "title": "Mitigation verified 22:36Z: seven users came due at 22:31-22:32Z and none were queued; scan_queue idle, last enqueue still 21:30:48Z (before the switch). The hourly GPU wake on staging has stopped.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T15:36:26.930917-07:00",
+      "updated_at": "2026-10-02T15:36:26.930917-07:00",
+      "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"confidence\":95}"
+    },
+    {
+      "id": 996,
+      "change_id": "ad208dfc-3fb5-4bc5-80a5-c98e3c79a48e",
+      "node_type": "observation",
+      "title": "Bryan's palette reference (2026-10-02): cosmos.so/e/1038541147, a film photograph by Jonathan (Jojo) Inglis of people at a protest, fists raised, singing and grieving at once. Extracted: shadow #121210 (~29%), umber #281a13, rust #713418, sunlit copper #b65624, sandstone #b37832, placard #d7b999, headband #eae6e5, faded pink #e7a1b4, dusty blue #4d7c92. Mostly deep shadow with heat in the middle and two small cool/soft notes. The photo is the photographer's work; only the palette and the feeling are ours to use.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-02T18:04:56.669576-07:00",
+      "updated_at": "2026-10-02T18:04:56.669576-07:00",
+      "metadata_json": "{\"branch\":\"feat/395-landing-sovereign-ground\",\"confidence\":90,\"prompt\":\"It's this color palette for me https://www.cosmos.so/e/1038541147\"}"
     }
   ],
   "edges": [
@@ -22254,6 +22287,50 @@
       "weight": 1.0,
       "rationale": "result of the build",
       "created_at": "2026-10-02T15:15:16.120306-07:00"
+    },
+    {
+      "id": 1050,
+      "from_node_id": 993,
+      "to_node_id": 994,
+      "from_change_id": "b14d073e-3557-407c-b494-5b625163ad56",
+      "to_change_id": "96566c23-8529-457c-bc9e-220862e0d2fd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "user reaction to the built page",
+      "created_at": "2026-10-02T15:19:51.329341-07:00"
+    },
+    {
+      "id": 1051,
+      "from_node_id": 991,
+      "to_node_id": 994,
+      "from_change_id": "882d32bf-da27-467a-b545-7159f46c48e3",
+      "to_change_id": "96566c23-8529-457c-bc9e-220862e0d2fd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "the direction decision is being reconsidered",
+      "created_at": "2026-10-02T15:19:51.335946-07:00"
+    },
+    {
+      "id": 1052,
+      "from_node_id": 986,
+      "to_node_id": 995,
+      "from_change_id": "8550ad94-f1fd-4d22-9f0d-64008b6de784",
+      "to_change_id": "ab7b110e-eb23-4122-9034-7e25139c886c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result of switching the refresh off",
+      "created_at": "2026-10-02T15:36:26.939116-07:00"
+    },
+    {
+      "id": 1053,
+      "from_node_id": 994,
+      "to_node_id": 996,
+      "from_change_id": "96566c23-8529-457c-bc9e-220862e0d2fd",
+      "to_change_id": "ad208dfc-3fb5-4bc5-80a5-c98e3c79a48e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "the reference Bryan brought back after rejecting the first build",
+      "created_at": "2026-10-02T18:04:56.677414-07:00"
     }
   ],
   "documents": [

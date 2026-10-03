@@ -10,11 +10,11 @@
 	// {@html} because Svelte strips template comments from the production build,
 	// and a contract the build erased is one nobody can audit.
 	const CONTRACT = `<!--
-THESIS: You are inside a thriving place whose border you control, and the page is seen from inside it. Refuses the dark shield-and-radar security hero and the soft wellness page.
-OWN-WORLD: Daylight Afrofuturism. Whole fields of sun gold, royal purple, laterite red, leaf green and aubergine ink. Concentric rings built from dashed strokes (bead, block and checker rows), triangle-and-diamond band dividers, Tac One poster capitals, Ojuju headings, Atkinson Hyperlegible text.
-STORY: Posting can be joyful again; the people who came to upset you are stopped at the edge and you decide; sign in.
-FIRST VIEWPORT: Gold field. Four-line poster headline top left, sign-in block under it, a quarter dome of patterned rings rising from the bottom-right corner with posts breaking apart at its outer band.
-FORM: Pinned by the user after two rejected rolls, 346abf3d and 798d6278.
+THESIS: Joy practised under pressure, in the light of a crowded afternoon: coloured shade turning to sun. Refuses the dark security console, the soft wellness page, and any borrowed cultural motif.
+OWN-WORLD: The tones of Bryan's reference photograph, kept as colour rather than darkness. Rust, umber shade, sandstone sun and placard card as whole fields; faded pink and dusty blue as the only cool notes; film grain over everything. Archivo set heavy and narrow for headlines, Atkinson Hyperlegible for reading.
+STORY: Posting can feel good again; the people who came only to upset you are gone first; you decide; sign in.
+FIRST VIEWPORT: Rust field lit by a copper sun from the top right. A two-line headline across most of the width, the lead and the sign-in button beneath.
+FORM: Pinned by the user from a reference photograph, after the first build was rejected as too literal (rolls 346abf3d and 798d6278 rejected earlier).
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
 -->`;
 
@@ -25,84 +25,25 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	type ActionsMode = 'manual' | 'automatic';
 	const ACTIONS_MODE: ActionsMode = 'manual';
 
-	const EVIDENCE_POINT = {
-		lead: 'You see who, and you see why.',
-		body: 'Every account comes with its evidence: the posts, the pattern, and how they found you. Never act on a label alone.'
-	};
-
-	const AUTHORITY: Record<
-		ActionsMode,
-		{ title: string; points: { lead: string; body: string }[] }
-	> = {
+	const AUTHORITY: Record<ActionsMode, { title: string; points: string[] }> = {
 		manual: {
 			title: 'You hold the authority.',
 			points: [
-				EVIDENCE_POINT,
-				{
-					lead: 'One move.',
-					body: 'Mute or block one account, or everyone at a risk level at once, without leaving the page you are on.'
-				},
-				{
-					lead: 'Nothing happens unless you say so.',
-					body: 'Charcoal recommends. You decide. Change your mind and undo it.'
-				}
+				'Every account comes with its evidence: the posts, the pattern, and how they found you.',
+				'Mute or block one account, or everyone at a risk level at once.',
+				'Nothing happens unless you say so, and anything you do can be undone.'
 			]
 		},
 		automatic: {
 			title: 'You set the rule. Charcoal keeps it.',
 			points: [
-				EVIDENCE_POINT,
-				{
-					lead: 'It acts while you are busy living.',
-					body: 'Choose the risk level you want handled, and Charcoal mutes or blocks those accounts automatically, before they reach you.'
-				},
-				{
-					lead: 'Every action can be reviewed and undone.',
-					body: 'Nothing it does is hidden and nothing is permanent. Read what it did, and reverse any of it.'
-				}
+				'Every account comes with its evidence: the posts, the pattern, and how they found you.',
+				'Choose the risk level you want handled, and Charcoal mutes or blocks those accounts automatically, before they reach you.',
+				'Every action can be reviewed and undone.'
 			]
 		}
 	};
 	const authority = AUTHORITY[ACTIONS_MODE];
-
-	// The border: a quarter dome whose centre is the bottom-right corner of a
-	// 600-unit square. Each ring is one stroked circle; the pattern rows are
-	// dashed strokes laid over a solid band, so the geometry is original and
-	// costs nothing to draw.
-	const C = 600;
-	type Ring = { r: number; w: number; color: string; dash?: string; offset?: number; round?: boolean };
-	const RINGS: Ring[] = [
-		{ r: 470, w: 22, color: 'var(--ink)', dash: '3 19', round: true },
-		{ r: 428, w: 40, color: 'var(--earth)' },
-		{ r: 428, w: 14, color: 'var(--gold)', dash: '22 22' },
-		{ r: 372, w: 52, color: 'var(--purple)' },
-		{ r: 385, w: 17, color: 'var(--bone)', dash: '17 17' },
-		{ r: 359, w: 17, color: 'var(--bone)', dash: '17 17', offset: 17 },
-		{ r: 318, w: 28, color: 'var(--leaf)' },
-		{ r: 318, w: 7, color: 'var(--gold)', dash: '1 15', round: true },
-		{ r: 280, w: 28, color: 'var(--ink)' },
-		{ r: 280, w: 12, color: 'var(--earth)', dash: '30 10' }
-	];
-
-	// A post travelling toward the centre stops `stopR` units short of it.
-	function toward(x: number, y: number, stopR: number) {
-		const d = Math.hypot(C - x, C - y);
-		const k = (d - stopR) / d;
-		return { x, y, dx: Math.round((C - x) * k), dy: Math.round((C - y) * k) };
-	}
-	// Turned away at the outer band (radius 481 plus half a post).
-	const TURNED_AWAY = [
-		{ ...toward(30, 110, 540), delay: 0, tilt: -7 },
-		{ ...toward(160, 24, 540), delay: 3, tilt: 5 },
-		{ ...toward(4, 250, 540), delay: 6, tilt: -3 }
-	];
-	// Let through, all the way inside.
-	const LET_IN = [
-		{ ...toward(260, 14, 95), delay: 1.5, tilt: 4 },
-		{ ...toward(14, 410, 200), delay: 5, tilt: -5 }
-	];
-	// Already inside: the timeline that is left.
-	const INSIDE = [{ x: 532, y: 388, tilt: 6 }];
 </script>
 
 <svelte:head>
@@ -114,41 +55,15 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
-		href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Ojuju:wght@200..800&family=Tac+One&display=swap"
+		href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&display=swap"
 		rel="stylesheet"
 	/>
 </svelte:head>
 
-{#snippet band(id: string, ground: string, a: string, b: string, c: string)}
-	<svg class="band" width="100%" height="48" aria-hidden="true" focusable="false">
-		<defs>
-			<pattern {id} width="48" height="48" patternUnits="userSpaceOnUse">
-				<rect width="48" height="48" style:fill={ground} />
-				<path d="M0 28 12 4l12 24ZM24 28 36 4l12 24Z" style:fill={a} />
-				<rect y="28" width="48" height="6" style:fill={b} />
-				<path d="m12 34 6 7-6 7-6-7ZM36 34l6 7-6 7-6-7Z" style:fill={c} />
-			</pattern>
-		</defs>
-		<rect width="100%" height="48" fill="url(#{id})" />
-	</svg>
-{/snippet}
-
-{#snippet post(kind: 'hostile' | 'friend' | 'own')}
-	{#if kind === 'own'}
-		<rect class="post-body" x="-66" y="-32" width="132" height="64" rx="8" />
-		<rect class="post-line" x="-50" y="-16" width="100" height="7" rx="3.5" />
-		<rect class="post-line" x="-50" y="-2" width="84" height="7" rx="3.5" />
-		<rect class="post-line" x="-50" y="12" width="58" height="7" rx="3.5" />
-	{:else}
-		<rect class="post-body" x="-48" y="-22" width="96" height="44" rx="8" />
-		<rect class="post-line" x="-34" y="-9" width="68" height="6" rx="3" />
-		<rect class="post-line" x="-34" y="4" width={kind === 'hostile' ? 30 : 46} height="6" rx="3" />
-	{/if}
-{/snippet}
-
 <div class="page">
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- a constant comment, no user input -->
 	{@html CONTRACT}
+	<div class="grain" aria-hidden="true"></div>
 
 	<nav class="nav" aria-label="Main">
 		<a href="/" class="wordmark" aria-label="Charcoal home">Charcoal</a>
@@ -157,243 +72,127 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 	<main>
 		<section class="hero">
-			<div class="hero-inner">
-				<div class="hero-text">
-					<h1>
-						<span>Hard things,</span>
-						<span class="yes">yes.</span>
-						<span>Bullshit,</span>
-						<span class="no">no.</span>
-					</h1>
-					<p class="hero-lead">
+			<div class="inner">
+				<h1>
+					<span>Hard things, <em>yes.</em></span>
+					<span>Bullshit, no.</span>
+				</h1>
+				<div class="hero-foot">
+					<p class="lead">
 						Charcoal finds the people who show up only to upset you, before they reach you. You
 						take them out of your timeline in one move. What is left is the Bluesky you came for.
 					</p>
+					<div>
+						<a href="/login" class="cta">
+							<span>Sign in with Bluesky</span>
+							<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+								<path d="M4 12h15M13 5l7 7-7 7" />
+							</svg>
+						</a>
+						<p class="note">
+							No password. We are letting people in a few at a time, so signing in saves your place.
+						</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section class="turn" aria-label="Before and after">
+			<div class="shade">
+				<div class="panel">
+					<h2>You know this feeling.</h2>
+					<p>
+						You write the post, then read it the way someone who wants to hate it would. You sand
+						off a line. You post it anyway and spend the afternoon waiting to see who shows up.
+					</p>
+					<p>
+						Not the people who disagree with you. Those you can handle. The ones arguing in bad
+						faith, finding the worst possible reading every time, coming for you instead of what you
+						said.
+					</p>
+				</div>
+			</div>
+			<div class="sun">
+				<div class="panel">
+					<h2>Now picture wanting to see who replied.</h2>
+					<p>
+						You still say the hard thing, and people still push back. The ones with a track record
+						of making it miserable were gone before you hit Post.
+					</p>
+					<p class="claim">That is not comfort. It is joy.</p>
+					<p class="small">
+						Charcoal does not take the pressure away. It takes away the people who came only to make
+						it worse.
+					</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="how">
+			<div class="inner">
+				<h2>How it works.</h2>
+				<dl class="claims">
+					<div>
+						<dt>It sees them coming.</dt>
+						<dd>It scores accounts that have never spoken to you, before a blocklist would hear of them.</dd>
+					</div>
+					<div>
+						<dt>It watches the door they use.</dt>
+						<dd>
+							Quote-posts and reposts carry your words to people who never chose to see them. That
+							audience is where it looks; your followers chose to be here.
+						</dd>
+					</div>
+					<div>
+						<dt>It needs two things, not one.</dt>
+						<dd>
+							Swearing is not enough, and neither is posting about what you post about. It flags the
+							overlap: your spaces plus a pattern of hostility.
+						</dd>
+					</div>
+					<div>
+						<dt>It learns your ground from you.</dt>
+						<dd>It reads your own posts to work out what you talk about. No checklist to fill in.</dd>
+					</div>
+				</dl>
+			</div>
+		</section>
+
+		<section class="close">
+			<div class="inner close-grid">
+				<div>
+					<h2>{authority.title}</h2>
+					<ul class="points">
+						{#each authority.points as point (point)}
+							<li>{point}</li>
+						{/each}
+					</ul>
+					<p class="small">
+						It only ever acts on your own timeline. It never publishes a list, a label or a reason
+						about anyone.
+					</p>
+				</div>
+				<div class="come-in">
+					<p class="come-in-title">Come in.</p>
 					<a href="/login" class="cta">
 						<span>Sign in with Bluesky</span>
 						<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
 							<path d="M4 12h15M13 5l7 7-7 7" />
 						</svg>
 					</a>
-					<p class="hero-note">
-						No password. We are letting people in a few at a time, so signing in saves your place.
-					</p>
-				</div>
-
-				<figure class="border-figure">
-					<svg
-						viewBox="0 0 600 600"
-						role="img"
-						aria-label="Posts moving toward a patterned border. Some pass through to the inside. Others break apart at the edge."
-					>
-						{#each RINGS as ring, i (i)}
-							<circle
-								cx={C}
-								cy={C}
-								r={ring.r}
-								fill="none"
-								stroke-width={ring.w}
-								stroke-dasharray={ring.dash}
-								stroke-dashoffset={ring.offset}
-								stroke-linecap={ring.round ? 'round' : undefined}
-								style:stroke={ring.color}
-							/>
-						{/each}
-						<circle cx={C} cy={C} r="266" class="inside" />
-
-						{#each INSIDE as p, i (i)}
-							<g transform="translate({p.x} {p.y}) rotate({p.tilt})" class="friend">
-								{@render post('friend')}
-							</g>
-						{/each}
-						<g transform="translate(452 452) rotate(-3)" class="own">
-							{@render post('own')}
-						</g>
-
-						{#each LET_IN as p, i (i)}
-							<g transform="translate({p.x} {p.y})">
-								<g
-									class="travel let-in"
-									style:--dx="{p.dx}px"
-									style:--dy="{p.dy}px"
-									style:--delay="{p.delay}s"
-								>
-									<g transform="rotate({p.tilt})" class="friend">{@render post('friend')}</g>
-								</g>
-							</g>
-						{/each}
-
-						{#each TURNED_AWAY as p, i (i)}
-							<g transform="translate({p.x} {p.y})">
-								<g
-									class="travel turned-away"
-									style:--dx="{p.dx}px"
-									style:--dy="{p.dy}px"
-									style:--delay="{p.delay}s"
-								>
-									<g transform="rotate({p.tilt})" class="hostile">{@render post('hostile')}</g>
-								</g>
-							</g>
-						{/each}
-					</svg>
-					<figcaption>An illustration, not real posts.</figcaption>
-				</figure>
-			</div>
-		</section>
-
-		{@render band('band-now', 'var(--ink)', 'var(--gold)', 'var(--earth)', 'var(--purple-lit)')}
-
-		<section id="now" class="field now">
-			<div class="inner">
-				<h2>You know this feeling.</h2>
-				<div class="now-grid">
-				<p class="voice">
-					You write the post. Then you read it again the way someone who wants to hate it would. You
-					sand off a line. You post it anyway, and spend the afternoon waiting to see who shows up.
-				</p>
-				<div>
-				<p class="voice quiet">
-					Not the people who disagree with you. Those you can handle. The other ones:
-				</p>
-				<ul class="the-ones">
-					<li>The ones arguing in bad faith.</li>
-					<li>The ones who find the worst possible reading, every time.</li>
-					<li>The ones who come for you, not for what you said.</li>
-				</ul>
-				</div>
-				</div>
-			</div>
-		</section>
-
-		{@render band('band-could', 'var(--purple)', 'var(--gold)', 'var(--ink)', 'var(--bone)')}
-
-		<section id="could" class="field could">
-			<div class="inner">
-				<h2>Now picture wanting to see who replied.</h2>
-				<p class="voice">
-					You still say the hard thing. People still push back, and sometimes they are right. The
-					difference is that the ones with a track record of making it miserable were gone before
-					you hit Post.
-				</p>
-				<p class="claim"><span>That is not comfort.</span> <span>It is joy.</span></p>
-				<p class="body">
-					The kind you keep while you organise, argue, grieve and fight in public. Charcoal does not
-					take the pressure away. It takes away the people who came only to make it worse.
-				</p>
-			</div>
-		</section>
-
-		{@render band('band-how', 'var(--earth)', 'var(--bone)', 'var(--ink)', 'var(--gold)')}
-
-		<section id="how" class="field how">
-			<div class="inner">
-				<h2>How the border works.</h2>
-				<p class="body intro">
-					A blocklist acts after someone has already got to you. Charcoal works earlier, in four
-					ways a list cannot.
-				</p>
-				<dl class="claims">
-					<div>
-						<dt>It sees them coming.</dt>
-						<dd>
-							Charcoal scores accounts that have never spoken to you. By the time a blocklist would
-							hear about them, you have already decided what to do.
-						</dd>
-					</div>
-					<div>
-						<dt>It watches the door they use.</dt>
-						<dd>
-							Trouble rarely starts with your followers; they chose to be here. It starts when a
-							quote-post or repost carries your words to people who did not. That audience is the
-							one Charcoal looks at.
-						</dd>
-					</div>
-					<div>
-						<dt>It needs two things, not one.</dt>
-						<dd>
-							Someone who swears a lot may be your ally. Someone who posts about what you post about
-							is probably your community. Charcoal flags only the overlap: in your spaces, with a
-							pattern of hostility.
-						</dd>
-					</div>
-					<div>
-						<dt>It learns your ground from you.</dt>
-						<dd>
-							You never fill in a list of topics. Charcoal reads your own posts and works out what
-							you talk about, including the things you would not think to name.
-						</dd>
-					</div>
-				</dl>
-			</div>
-		</section>
-
-		{@render band('band-authority', 'var(--gold)', 'var(--purple)', 'var(--ink)', 'var(--earth)')}
-
-		<section id="authority" class="field authority">
-			<div class="inner split">
-				<div>
-					<h2>{authority.title}</h2>
-					<p class="body">
-						Charcoal only ever acts on your own timeline. It never publishes a list, a label or a
-						reason about anyone.
-					</p>
-				</div>
-				<ul class="points">
-					{#each authority.points as point (point.lead)}
+					<ul class="expect">
+						<li><strong>No password.</strong> You sign in with your Bluesky account.</li>
+						<li><strong>A waitlist, for now.</strong> Signing in saves your place.</li>
 						<li>
-							<h3>{point.lead}</h3>
-							<p class="body">{point.body}</p>
+							<strong>A long first scan.</strong> A recent one took about 22 minutes for 595 accounts.
+							You can close the tab and come back.
 						</li>
-					{/each}
-				</ul>
-			</div>
-		</section>
-
-		{@render band('band-expect', 'var(--leaf)', 'var(--gold)', 'var(--ink)', 'var(--bone)')}
-
-		<section id="expect" class="field expect">
-			<div class="inner">
-				<h2>What to expect.</h2>
-				<ul class="facts">
-					<li>
-						<h3>No password.</h3>
-						<p class="body">You sign in with your Bluesky account. Charcoal never sees your password.</p>
-					</li>
-					<li>
-						<h3>A waitlist, for now.</h3>
-						<p class="body">We are letting people in a few at a time. Signing in saves your place.</p>
-					</li>
-					<li>
-						<h3>A long first scan.</h3>
-						<p class="body">
-							The first one is real work, not an instant answer. A recent scan took about 22 minutes
-							to score 595 accounts, and wider reach takes longer. You can close the tab and come
-							back.
-						</p>
-					</li>
-					<li>
-						<h3>Sometimes, no verdict.</h3>
-						<p class="body">
-							When there is not enough to go on, or Charcoal cannot read the language well, it says
-							so instead of guessing.
-						</p>
-					</li>
-				</ul>
-			</div>
-		</section>
-
-		{@render band('band-close', 'var(--ink)', 'var(--purple-lit)', 'var(--gold)', 'var(--earth)')}
-
-		<section id="close" class="field close">
-			<div class="inner">
-				<h2>Come in.</h2>
-				<p class="voice">Say the hard thing. Look forward to who answers.</p>
-				<a href="/login" class="cta on-dark">
-					<span>Sign in with Bluesky</span>
-					<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-						<path d="M4 12h15M13 5l7 7-7 7" />
-					</svg>
-				</a>
+						<li>
+							<strong>Sometimes, no verdict.</strong> When there is not enough to go on, it says so
+							instead of guessing.
+						</li>
+					</ul>
+				</div>
 			</div>
 		</section>
 	</main>
@@ -412,26 +211,29 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 <style>
 	.page {
-		/* The palette is scoped to this page on purpose. The signed-in app still
-		   wears the earlier look until it is moved over, and a :root declaration
-		   here would follow a visitor into it. */
-		--ink: #1b0b22;
-		--purple: #45189c;
-		--purple-lit: #a98bff;
-		--gold: #f7b41c;
-		--earth: #a53a1a;
-		--leaf: #0c6b4a;
-		--bone: #fff3d6;
+		/* Read from Bryan's reference photograph (#395) and kept as COLOUR: the
+		   darkest field is umber, never black. Scoped to this page because the
+		   signed-in app still wears the earlier look. */
+		--rust: #713418;
+		--umber: #3b2217;
+		--copper: #b65624;
+		--sandstone: #b37832;
+		--placard: #d7b999;
+		--headband: #eae6e5;
+		--pink: #e7a1b4;
+		--blue: #4d7c92;
+		--blue-deep: #2c4f60;
+		--ink: #24140d;
 
-		--font-poster: 'Tac One', 'Arial Narrow', sans-serif;
-		--font-head: 'Ojuju', 'Atkinson Hyperlegible Next', sans-serif;
+		--font-display: 'Archivo', 'Arial Narrow', sans-serif;
 		--font-text: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
 		--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
+		position: relative;
 		min-height: 100dvh;
 		overflow-x: clip;
-		background: var(--gold);
-		color: var(--ink);
+		background: var(--rust);
+		color: var(--headband);
 		font-family: var(--font-text);
 		font-size: var(--text-subtitle);
 		line-height: 1.55;
@@ -443,8 +245,20 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.page :global(::selection) {
-		background: var(--purple);
-		color: var(--bone);
+		background: var(--pink);
+		color: var(--ink);
+	}
+
+	/* Film grain over the whole page: the texture of the reference, not a
+	   motif. Static, so it costs nothing after first paint. */
+	.grain {
+		position: fixed;
+		inset: 0;
+		z-index: 5;
+		pointer-events: none;
+		opacity: 0.45;
+		mix-blend-mode: soft-light;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 	}
 
 	.page a {
@@ -454,19 +268,17 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.page a:focus-visible {
-		outline: 3px solid currentColor;
+		outline: 3px solid var(--pink);
 		outline-offset: 4px;
 		border-radius: var(--radius-3);
 	}
 
 	h1,
 	h2,
-	h3,
 	p,
 	ul,
 	dl,
-	dd,
-	figure {
+	dd {
 		margin: 0;
 	}
 
@@ -478,6 +290,22 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	.inner {
 		max-width: 1160px;
 		margin: 0 auto;
+	}
+
+	h2 {
+		margin-bottom: var(--space-24);
+		font-family: var(--font-display);
+		font-size: var(--text-shout);
+		font-weight: 800;
+		font-stretch: 75%;
+		line-height: 0.98;
+		letter-spacing: -0.01em;
+		text-wrap: balance;
+	}
+
+	.small {
+		max-width: 46ch;
+		font-size: var(--text-body);
 	}
 
 	/* ---------- Navigation ---------- */
@@ -492,17 +320,19 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.wordmark {
-		font-family: var(--font-poster);
-		font-size: var(--text-section-title);
-		line-height: 1;
+		font-family: var(--font-display);
+		font-size: var(--text-title);
+		font-weight: 800;
+		font-stretch: 75%;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
 		text-decoration: none;
 	}
 
 	.nav-signin {
 		padding: var(--space-10) var(--space-20);
-		border: 2px solid var(--ink);
-		border-radius: var(--radius-6);
+		border: 2px solid var(--headband);
+		border-radius: var(--radius-pill);
 		font-weight: 700;
 		text-decoration: none;
 		transition:
@@ -511,38 +341,34 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.nav-signin:hover {
-		background: var(--ink);
-		color: var(--gold);
+		background: var(--headband);
+		color: var(--rust);
 	}
 
-	/* ---------- Hero ---------- */
+	/* ---------- Hero: rust, lit by a copper sun ---------- */
 	.hero {
-		position: relative;
-		padding: var(--space-128) var(--space-32) 0;
+		display: flex;
+		align-items: center;
+		min-height: 92dvh;
+		box-sizing: border-box;
+		padding: var(--space-128) var(--space-32) var(--space-80);
+		background:
+			radial-gradient(ellipse 70% 80% at 92% 0%, rgb(182 86 36 / 0.95), transparent 70%),
+			radial-gradient(ellipse 60% 60% at 0% 100%, rgb(59 34 23 / 0.75), transparent 70%),
+			var(--rust);
 	}
 
-	.hero-inner {
-		display: grid;
-		grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
-		align-items: end;
-		gap: var(--space-32);
-		min-height: calc(100dvh - var(--space-128));
-	}
-
-	.hero-text {
-		/* On very wide screens, bring the text in line with the 1160px column
-		   the rest of the page uses, while the dome stays on the viewport edge. */
-		position: relative;
-		left: max(0px, calc((100vw - 1224px) / 2));
-		align-self: center;
-		padding-bottom: var(--space-80);
+	.hero .inner {
+		width: 100%;
 	}
 
 	h1 {
-		font-family: var(--font-poster);
+		font-family: var(--font-display);
 		font-size: var(--text-poster);
-		font-weight: 400;
+		font-weight: 900;
+		font-stretch: 70%;
 		line-height: 0.92;
+		letter-spacing: -0.015em;
 		text-transform: uppercase;
 	}
 
@@ -550,18 +376,21 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		display: block;
 	}
 
-	h1 .yes {
-		color: var(--purple);
+	h1 em {
+		font-style: normal;
+		color: var(--pink);
 	}
 
-	/* 3.57:1 on gold: passes for display type, which is the only place it is used. */
-	h1 .no {
-		color: var(--earth);
+	.hero-foot {
+		display: grid;
+		grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+		gap: var(--space-48);
+		align-items: end;
+		margin-top: var(--space-48);
 	}
 
-	.hero-lead {
-		max-width: 34ch;
-		margin-top: var(--space-32);
+	.lead {
+		max-width: 38ch;
 		font-size: var(--text-title);
 		line-height: 1.45;
 	}
@@ -571,11 +400,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		display: inline-flex;
 		align-items: center;
 		gap: var(--space-14);
-		margin-top: var(--space-32);
 		padding: var(--space-20) var(--space-32);
-		border-radius: var(--radius-6);
-		background: var(--purple);
-		color: var(--bone);
+		border-radius: var(--radius-pill);
+		background: var(--pink);
 		font-size: var(--text-title);
 		font-weight: 700;
 		text-decoration: none;
@@ -585,7 +412,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.page a.cta {
-		color: var(--bone);
+		color: var(--ink);
 	}
 
 	.cta svg {
@@ -600,7 +427,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.cta:hover {
-		background: var(--ink);
+		background: var(--headband);
 		transform: translateY(-2px);
 	}
 
@@ -612,403 +439,173 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		transform: translateY(0);
 	}
 
-	.cta.on-dark {
-		background: var(--gold);
-	}
-
-	.page a.cta.on-dark {
-		color: var(--ink);
-	}
-
-	/* The ring must contrast with the ground behind the button, not with the
-	   button's own text: bone on gold and ink on ink both disappear. */
 	.page a.cta:focus-visible {
-		outline-color: var(--ink);
+		outline-color: var(--headband);
 	}
 
-	.page a.cta.on-dark:focus-visible {
-		outline-color: var(--gold);
-	}
-
-	.cta.on-dark:hover {
-		background: var(--bone);
-	}
-
-	.hero-note {
+	.note {
 		max-width: 40ch;
-		margin-top: var(--space-20);
+		margin-top: var(--space-16);
+		color: var(--placard);
 		font-size: var(--text-body);
 	}
 
-	/* ---------- The border ---------- */
-	.border-figure {
-		align-self: end;
-		justify-self: end;
-		width: 100%;
-		/* Never taller than the viewport it rises into. */
-		max-width: 92dvh;
-		/* Bleed off the right edge so the dome reads as part of the ground. */
-		margin-right: calc(var(--space-32) * -1);
-		/* The rings are whole circles centred on the corner. Cut them along the
-		   bottom and right, and leave the top and left open for arriving posts. */
-		clip-path: inset(-50vh 0 0 -50vw);
+	/* ---------- The turn: shade, then sun ---------- */
+	.turn {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.border-figure svg {
-		display: block;
-		width: 100%;
-		height: auto;
-		overflow: visible;
+	.shade,
+	.sun {
+		display: flex;
+		padding: var(--space-96) var(--space-48);
 	}
 
-	.border-figure figcaption {
-		position: absolute;
-		right: var(--space-32);
-		bottom: var(--space-12);
-		padding: var(--space-4) var(--space-10);
-		border-radius: var(--radius-3);
-		background: var(--ink);
-		color: var(--bone);
-		font-size: var(--text-caption);
+	.panel {
+		max-width: 34rem;
 	}
 
-	.inside {
-		fill: var(--purple);
+	.shade {
+		justify-content: flex-end;
+		background: var(--umber);
+		color: var(--placard);
 	}
 
-	.friend :global(.post-body) {
-		fill: var(--bone);
+	.shade h2 {
+		color: var(--headband);
 	}
 
-	.friend :global(.post-line) {
-		fill: var(--purple);
+	.sun {
+		background:
+			radial-gradient(ellipse 80% 70% at 100% 0%, rgb(215 185 153 / 0.45), transparent 70%),
+			var(--sandstone);
+		color: var(--ink);
 	}
 
-	.own :global(.post-body) {
-		fill: var(--gold);
+	.shade p + p,
+	.sun p + p {
+		margin-top: var(--space-20);
 	}
 
-	.own :global(.post-line) {
-		fill: var(--ink);
-	}
-
-	.hostile :global(.post-body) {
-		fill: var(--ink);
-		stroke: var(--ink);
-		stroke-width: 3;
-		stroke-dasharray: 300 0;
-	}
-
-	.hostile :global(.post-line) {
-		fill: var(--earth);
-	}
-
-	/* The one authored motion on the page. A post travels to the border; a
-	   friend carries on inside, the other breaks into the same beads the outer
-	   band is made of and is gone. */
-	.travel {
-		animation: 9s linear infinite both;
-		animation-delay: var(--delay);
-	}
-
-	.let-in {
-		animation-name: let-in;
-	}
-
-	.turned-away {
-		animation-name: turned-away;
-	}
-
-	.turned-away :global(.post-body) {
-		animation: break-body 9s linear infinite both;
-		animation-delay: var(--delay);
-	}
-
-	.turned-away :global(.post-line) {
-		animation: break-lines 9s linear infinite both;
-		animation-delay: var(--delay);
-	}
-
-	@keyframes let-in {
-		0% {
-			transform: translate(0, 0);
-			opacity: 0;
-		}
-		6% {
-			opacity: 1;
-		}
-		70% {
-			transform: translate(var(--dx), var(--dy));
-			opacity: 1;
-			animation-timing-function: var(--ease-out);
-		}
-		92% {
-			transform: translate(var(--dx), var(--dy));
-			opacity: 1;
-		}
-		100% {
-			transform: translate(var(--dx), var(--dy));
-			opacity: 0;
-		}
-	}
-
-	@keyframes turned-away {
-		0% {
-			transform: translate(0, 0);
-			opacity: 0;
-		}
-		6% {
-			opacity: 1;
-		}
-		40% {
-			transform: translate(var(--dx), var(--dy));
-			opacity: 1;
-		}
-		68% {
-			transform: translate(var(--dx), var(--dy));
-			opacity: 1;
-		}
-		82%,
-		100% {
-			transform: translate(var(--dx), var(--dy));
-			opacity: 0;
-		}
-	}
-
-	@keyframes break-body {
-		0%,
-		40% {
-			fill-opacity: 1;
-			stroke-dasharray: 300 0;
-		}
-		60%,
-		100% {
-			fill-opacity: 0;
-			stroke-dasharray: 3 12;
-		}
-	}
-
-	@keyframes break-lines {
-		0%,
-		40% {
-			opacity: 1;
-		}
-		55%,
-		100% {
-			opacity: 0;
-		}
-	}
-
-	/* ---------- Bands ---------- */
-	.band {
-		display: block;
-	}
-
-	/* ---------- Fields ---------- */
-	.field {
-		padding: var(--space-96) var(--space-32) var(--space-128);
-	}
-
-	h2 {
-		max-width: 16ch;
-		margin-bottom: var(--space-40);
-		font-family: var(--font-poster);
+	.claim {
+		font-family: var(--font-display);
 		font-size: var(--text-shout);
-		font-weight: 400;
+		font-weight: 900;
+		font-stretch: 70%;
 		line-height: 0.98;
 		text-transform: uppercase;
 		text-wrap: balance;
 	}
 
-	h3 {
-		font-family: var(--font-head);
-		font-size: var(--text-section-title);
-		font-weight: 700;
-		line-height: 1.15;
+	.sun p.claim {
+		margin-top: var(--space-40);
 	}
 
-	.voice {
-		max-width: 32ch;
-		font-family: var(--font-head);
-		font-size: var(--text-voice);
-		font-weight: 600;
-		line-height: 1.28;
-	}
-
-	.body {
-		max-width: 62ch;
-	}
-
-	/* Now: the braced state. Ink ground, the only section with no bright field. */
-	.now {
-		background: var(--ink);
-		color: var(--bone);
-	}
-
-	.now h2 {
-		color: var(--gold);
-	}
-
-	.now-grid {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: var(--space-64);
-		align-items: start;
-	}
-
-	.voice.quiet {
-		color: var(--purple-lit);
-	}
-
-	.the-ones {
-		display: grid;
-		gap: var(--space-16);
-		margin-top: var(--space-32);
-	}
-
-	.the-ones li {
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
-		align-items: baseline;
-		gap: var(--space-20);
-		max-width: 30ch;
-		font-family: var(--font-head);
-		font-size: var(--text-voice);
-		font-weight: 700;
-		line-height: 1.2;
-	}
-
-	/* A diamond from the band, standing where a bullet would. */
-	.the-ones li::before {
-		content: '';
-		width: 0.5em;
-		height: 0.5em;
-		background: var(--earth);
-		transform: translateY(-0.1em) rotate(45deg);
-	}
-
-	/* Could be: the same person, in full colour. */
-	.could {
-		background: var(--purple);
-		color: var(--bone);
-	}
-
-	.could h2 {
-		max-width: 18ch;
-		color: var(--gold);
-	}
-
-	.claim span {
-		display: block;
-	}
-
-	.claim {
-		margin-top: var(--space-64);
-		margin-bottom: var(--space-24);
-		color: var(--gold);
-		font-family: var(--font-poster);
-		font-size: var(--text-poster);
-		line-height: 0.92;
-		text-transform: uppercase;
-		text-wrap: balance;
-	}
-
-	/* How it works: four claims as a ruled list, not four cards. */
+	/* ---------- How it works: placard card ---------- */
 	.how {
-		background: var(--earth);
-		color: var(--bone);
-	}
-
-	.how .intro {
-		font-size: var(--text-title);
-	}
-
-	.claims {
-		margin-top: var(--space-48);
-		border-bottom: 2px solid var(--bone);
-	}
-
-	.claims > div {
-		display: grid;
-		grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-		gap: var(--space-32);
-		padding: var(--space-28) 0;
-		border-top: 2px solid var(--bone);
-	}
-
-	.claims dt {
-		font-family: var(--font-head);
-		font-size: var(--text-page-title);
-		font-weight: 700;
-		line-height: 1.12;
-	}
-
-	.claims dd {
-		max-width: 56ch;
-	}
-
-	/* Authority: back out into the daylight. */
-	.authority {
-		background: var(--gold);
+		padding: var(--space-96) var(--space-32);
+		background: var(--placard);
 		color: var(--ink);
 	}
 
-	.split {
-		display: grid;
-		grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-		gap: var(--space-64);
-		align-items: start;
+	.how h2 {
+		color: var(--rust);
 	}
 
-	.authority h2 {
-		max-width: 12ch;
+	.claims {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: var(--space-40) var(--space-64);
+	}
+
+	.claims > div {
+		padding-top: var(--space-16);
+		border-top: 3px solid var(--blue-deep);
+	}
+
+	.claims dt {
+		margin-bottom: var(--space-6);
+		font-family: var(--font-display);
+		font-size: var(--text-section-title);
+		font-weight: 800;
+		font-stretch: 80%;
+		line-height: 1.15;
+		color: var(--blue-deep);
+		text-wrap: balance;
+	}
+
+	.claims dd {
+		max-width: 46ch;
+	}
+
+	/* ---------- Close: authority and the door ---------- */
+	.close {
+		padding: var(--space-96) var(--space-32);
+		background:
+			radial-gradient(ellipse 60% 70% at 100% 100%, rgb(182 86 36 / 0.8), transparent 70%),
+			var(--rust);
+	}
+
+	.close-grid {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: var(--space-64);
 	}
 
 	.points {
 		display: grid;
-		gap: var(--space-40);
-	}
-
-	.points h3 {
-		margin-bottom: var(--space-8);
-		color: var(--purple);
-	}
-
-	/* Expect: plain facts, set plainly. */
-	.expect {
-		background: var(--leaf);
-		color: var(--bone);
-	}
-
-	.facts {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: var(--space-48) var(--space-64);
-	}
-
-	.facts h3 {
-		margin-bottom: var(--space-8);
-	}
-
-	/* Close */
-	.close {
-		background: var(--ink);
-		color: var(--bone);
-	}
-
-	.close h2 {
+		gap: var(--space-12);
 		margin-bottom: var(--space-24);
-		color: var(--gold);
+	}
+
+	.points li {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		gap: var(--space-14);
+		max-width: 44ch;
+	}
+
+	.points li::before {
+		content: '';
+		width: 0.55em;
+		height: 0.55em;
+		translate: 0 0.45em;
+		border-radius: var(--radius-circle);
+		background: var(--pink);
+	}
+
+	.close .small {
+		color: var(--placard);
+	}
+
+	.come-in-title {
+		margin-bottom: var(--space-24);
+		font-family: var(--font-display);
 		font-size: var(--text-poster);
+		font-weight: 900;
+		font-stretch: 70%;
 		line-height: 0.92;
+		text-transform: uppercase;
+	}
+
+	.expect {
+		display: grid;
+		gap: var(--space-8);
+		margin-top: var(--space-32);
+		color: var(--placard);
+		font-size: var(--text-body);
+	}
+
+	.expect strong {
+		color: var(--headband);
 	}
 
 	/* ---------- Footer ---------- */
 	.site-footer {
 		padding: var(--space-32);
-		background: var(--ink);
-		color: var(--bone);
-		border-top: 2px solid var(--purple-lit);
+		background: var(--umber);
+		color: var(--placard);
 	}
 
 	.footer-row {
@@ -1019,7 +616,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	}
 
 	.site-footer .wordmark {
-		color: var(--gold);
+		color: var(--headband);
 	}
 
 	.footer-nav {
@@ -1041,52 +638,37 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		}
 
 		.hero {
-			padding: var(--space-96) var(--space-20) 0;
+			padding: var(--space-96) var(--space-20) var(--space-64);
 		}
 
-		.hero-inner {
-			grid-template-columns: minmax(0, 1fr);
-			min-height: 0;
-		}
-
-		.hero-text {
-			padding-bottom: 0;
-		}
-
-		.border-figure {
-			margin-right: calc(var(--space-20) * -1);
-			margin-left: var(--space-48);
-		}
-
-		.border-figure figcaption {
-			right: var(--space-20);
-		}
-
-		.field {
-			padding: var(--space-64) var(--space-20) var(--space-80);
-		}
-
-		.claims > div,
-		.split,
-		.facts,
-		.now-grid {
+		.hero-foot,
+		.turn,
+		.claims,
+		.close-grid {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
-		.now-grid {
+		.hero-foot {
 			gap: var(--space-32);
 		}
 
-		.border-figure {
-			max-width: none;
+		.shade,
+		.sun {
+			justify-content: flex-start;
+			padding: var(--space-64) var(--space-20);
 		}
 
-		.claims > div {
-			gap: var(--space-10);
+		.how,
+		.close {
+			padding: var(--space-64) var(--space-20);
 		}
 
-		.split {
-			gap: var(--space-40);
+		.close-grid {
+			gap: var(--space-48);
+		}
+
+		.site-footer {
+			padding: var(--space-28) var(--space-20);
 		}
 
 		.footer-copy {
@@ -1101,28 +683,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		}
 	}
 
-	/* The still plate: every post where its journey ends. People reading this
-	   are often upset already, so motion is something they opt into. */
 	@media (prefers-reduced-motion: reduce) {
-		.travel,
-		.turned-away :global(.post-body),
-		.turned-away :global(.post-line) {
-			animation: none;
-		}
-
-		.travel {
-			transform: translate(var(--dx), var(--dy));
-		}
-
-		.turned-away :global(.post-body) {
-			fill-opacity: 0;
-			stroke-dasharray: 3 12;
-		}
-
-		.turned-away :global(.post-line) {
-			opacity: 0.35;
-		}
-
 		.cta,
 		.cta svg,
 		.nav-signin {
