@@ -84,8 +84,8 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 	<main>
 		<section class="hero">
-			<div class="hero-mark">{@render mark('mark-hero')}</div>
 			<div class="inner">
+				<div class="hero-mark">{@render mark('mark-hero')}</div>
 				<h1>
 					<span>Hard things, <em>yes.</em></span>
 					<span>Bullshit, no.</span>
@@ -379,11 +379,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 	/* ---------- Hero: rust, lit by a copper sun ---------- */
 	.hero {
-		display: flex;
-		align-items: center;
-		min-height: 100dvh;
-		box-sizing: border-box;
-		padding: var(--space-128) var(--space-32) var(--space-80);
+		padding: calc(var(--space-128) * 2.25) var(--space-32) var(--space-96);
 		background:
 			radial-gradient(ellipse 70% 80% at 92% 0%, rgb(182 86 36 / 0.95), transparent 70%),
 			radial-gradient(ellipse 75% 75% at 0% 100%, rgb(42 22 14 / 0.95), transparent 72%),
@@ -399,11 +395,14 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		width: 100%;
 	}
 
+	/* Anchored to the column's right edge and lifted so most of it sits above
+	   the headline, clear of the sign-in row below. */
 	.hero-mark {
 		position: absolute;
-		top: 14%;
-		right: 7%;
+		top: 0;
+		right: 0;
 		width: min(24vw, 300px);
+		transform: translateY(-55%);
 		color: var(--gold);
 	}
 
@@ -752,8 +751,6 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		}
 
 		.hero {
-			flex-direction: column;
-			align-items: stretch;
 			padding: var(--space-96) var(--space-20) var(--space-64);
 		}
 
@@ -761,6 +758,11 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 			position: static;
 			width: 120px;
 			margin-bottom: var(--space-32);
+			transform: none;
+		}
+
+		.nav .mark-nav {
+			display: none;
 		}
 
 		.mark-nav {
