@@ -383,7 +383,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 	.hero {
 		display: flex;
 		align-items: center;
-		min-height: 92dvh;
+		min-height: 100dvh;
 		box-sizing: border-box;
 		padding: var(--space-128) var(--space-32) var(--space-80);
 		background:
@@ -495,7 +495,9 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 		grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
 		gap: var(--space-48);
 		align-items: end;
-		margin-top: var(--space-48);
+		/* Room under the headline so the ring mark has space to move and the
+		   sign-in row sits clear of it. */
+		margin-top: var(--space-128);
 	}
 
 	.lead {
