@@ -10955,6 +10955,28 @@
       "created_at": "2026-10-03T16:36:10.714006-07:00",
       "updated_at": "2026-10-03T16:36:10.714006-07:00",
       "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"e48adba\",\"confidence\":85,\"files\":[\"src/toxicity/cached_classifier.rs\",\"tests/unit_cached_classifier.rs\",\"src/web/refresh_scan.rs\"]}"
+    },
+    {
+      "id": 1006,
+      "change_id": "d567d60e-9791-46be-b92e-93158de6e397",
+      "node_type": "outcome",
+      "title": "C done: probe paid lazily in CachedClassifier, once per run; refresh up-front probe removed; 12/12 cached-classifier + 37 refresh unit tests pass, clippy clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-03T16:47:57.210591-07:00",
+      "updated_at": "2026-10-03T16:47:57.210591-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"2c34a98\",\"confidence\":90}"
+    },
+    {
+      "id": 1007,
+      "change_id": "7832a55b-0c2c-455a-b933-d32a5cc08ae9",
+      "node_type": "action",
+      "title": "A: typed XRPC error; account-gone 400s stamp account_scores.gone_at (v19), excluded from refresh candidates, not counted as scan skips",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-03T16:47:57.231780-07:00",
+      "updated_at": "2026-10-03T16:47:57.231780-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"2c34a98\",\"confidence\":80,\"files\":[\"src/bluesky/client.rs\",\"src/db/schema.rs\",\"src/db/queries.rs\",\"src/db/postgres.rs\",\"src/db/traits.rs\",\"src/pipeline/scan_phases/mod.rs\",\"migrations/postgres/0019_account_gone.sql\"]}"
     }
   ],
   "edges": [
@@ -22551,6 +22573,28 @@
       "weight": 1.0,
       "rationale": "implementing part C",
       "created_at": "2026-10-03T16:36:10.721873-07:00"
+    },
+    {
+      "id": 1065,
+      "from_node_id": 1005,
+      "to_node_id": 1006,
+      "from_change_id": "45473597-9647-4773-9dec-d08170798f4e",
+      "to_change_id": "d567d60e-9791-46be-b92e-93158de6e397",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-10-03T16:47:57.217340-07:00"
+    },
+    {
+      "id": 1066,
+      "from_node_id": 1004,
+      "to_node_id": 1007,
+      "from_change_id": "bc9fbf3a-5da3-433c-ab17-4873125ca096",
+      "to_change_id": "7832a55b-0c2c-455a-b933-d32a5cc08ae9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementing part A (B follows from it)",
+      "created_at": "2026-10-03T16:47:57.238358-07:00"
     }
   ],
   "documents": [

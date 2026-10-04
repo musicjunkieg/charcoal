@@ -294,7 +294,7 @@ impl PgDatabase {
 /// boot-time `run_migrations` (always plays through the latest version) and
 /// `migrate_postgres_through` (test support for an authentic older-schema
 /// fixture — V2-07) so the two paths can never drift apart.
-fn all_migrations() -> [(i64, &'static str); 18] {
+fn all_migrations() -> [(i64, &'static str); 19] {
     [
         (
             1,
@@ -367,6 +367,10 @@ fn all_migrations() -> [(i64, &'static str); 18] {
         (
             18,
             include_str!("../../migrations/postgres/0018_score_expiry.sql"),
+        ),
+        (
+            19,
+            include_str!("../../migrations/postgres/0019_account_gone.sql"),
         ),
     ]
 }
@@ -759,7 +763,9 @@ impl Database for PgDatabase {
                 scoring_confidence = $14,
                 overlap_legacy = $15,
                 scoring_generation = $16,
-                valid_until = NOW() + make_interval(days => $17)",
+                valid_until = NOW() + make_interval(days => $17),
+                gone_at = NULL,
+                gone_reason = NULL",
         )
         .bind(user_did)
         .bind(&score.did)
@@ -1009,6 +1015,7 @@ impl Database for PgDatabase {
             "SELECT did, handle, graph_distance FROM account_scores
              WHERE user_did = $1
                AND threat_score >= $2
+               AND gone_at IS NULL
                AND (scoring_generation <> $4
                     OR valid_until <= NOW() + make_interval(days => $3))
              ORDER BY threat_score DESC, did",
@@ -1027,6 +1034,24 @@ impl Database for PgDatabase {
                 graph_distance: r.get(2),
             })
             .collect())
+    }
+
+    async fn mark_account_gone(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let result = sqlx_core::query::query(
+            "UPDATE account_scores SET gone_at = NOW(), gone_reason = $3
+             WHERE user_did = $1 AND did = $2",
+        )
+        .bind(user_did)
+        .bind(account_did)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn insert_amplification_event(

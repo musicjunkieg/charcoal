@@ -646,6 +646,23 @@ pub trait Database: Send + Sync {
         horizon_days: i64,
     ) -> Result<Vec<RefreshCandidate>>;
 
+    /// Retire an account whose feed fetch answered "this account is gone" —
+    /// deleted, deactivated, suspended or taken down (#394). Stamps
+    /// `gone_at`/`gone_reason` on THIS user's score row, which takes it out of
+    /// [`list_refresh_candidates`](Self::list_refresh_candidates); a later
+    /// `upsert_account_score` for the account clears both. `Ok(false)` when the
+    /// user has no score row for it — nothing to retire, not an error.
+    ///
+    /// A gone row is neither fresh nor a candidate: it sits outside the
+    /// fresh/candidate partition on purpose, because there is nothing left to
+    /// refresh.
+    async fn mark_account_gone(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        reason: &str,
+    ) -> Result<bool>;
+
     // --- Amplification events ---
 
     /// Record a new amplification event for a user and return its ID.

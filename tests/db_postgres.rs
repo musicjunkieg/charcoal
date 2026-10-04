@@ -5820,3 +5820,67 @@ async fn test_pg_list_refresh_candidates_negative_horizon_narrows() {
         .await
         .unwrap();
 }
+
+/// #394, Postgres twin of the SQLite gone-account tests: `mark_account_gone`
+/// retires one user's row from the refresh candidates, leaves another user's
+/// row for the same account alone, is a no-op without a row, and a fresh
+/// score clears the stamp.
+#[tokio::test]
+async fn test_pg_mark_account_gone_retires_and_rescoring_restores() {
+    use sqlx_core::pool::Pool;
+    use sqlx_core::row::Row;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    // Dedicated DIDs: the assertions are on exact candidate sets.
+    const OWNER: &str = "did:plc:pggone_owner";
+    const OTHER: &str = "did:plc:pggone_other";
+    const ACCT: &str = "did:plc:pggone_acct";
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    for user in [OWNER, OTHER] {
+        sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+            .bind(user)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let mut score = AccountScore::default_for_test(ACCT);
+    score.threat_score = Some(60.0);
+    score.threat_tier = Some("High".to_string());
+    for user in [OWNER, OTHER] {
+        db.upsert_account_score(user, &score).await.unwrap();
+    }
+    let due = |user: &'static str| {
+        let db = &db;
+        async move { db.list_refresh_candidates(user, 365).await.unwrap().len() }
+    };
+    assert_eq!((due(OWNER).await, due(OTHER).await), (1, 1));
+
+    assert!(db
+        .mark_account_gone(OWNER, ACCT, "Profile not found")
+        .await
+        .unwrap());
+    assert_eq!(due(OWNER).await, 0, "retired from this user's refresh");
+    assert_eq!(due(OTHER).await, 1, "the other user's row is untouched");
+    let reason: Option<String> = sqlx_core::query::query(
+        "SELECT gone_reason FROM account_scores WHERE user_did = $1 AND did = $2 AND gone_at IS NOT NULL",
+    )
+    .bind(OWNER)
+    .bind(ACCT)
+    .fetch_one(&pool)
+    .await
+    .unwrap()
+    .get(0);
+    assert_eq!(reason.as_deref(), Some("Profile not found"));
+
+    assert!(!db
+        .mark_account_gone(OWNER, "did:plc:pggone_never", "Profile not found")
+        .await
+        .unwrap());
+
+    db.upsert_account_score(OWNER, &score).await.unwrap();
+    assert_eq!(due(OWNER).await, 1, "scored again: the account is back");
+}

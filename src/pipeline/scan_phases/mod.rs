@@ -542,6 +542,10 @@ struct GatherSweep {
     /// True if at least one account's gather failed and was skipped — the scan
     /// is then incomplete and the caller should mark the summary `degraded`.
     skipped: bool,
+    /// Accounts whose feed said they are gone (deleted, deactivated, taken
+    /// down) and that were retired rather than skipped (#394). Logged only:
+    /// they are neither scored nor a hole in the scan's coverage.
+    gone: usize,
     /// Aggregate fetch-vs-clean-pass split across every account gathered in
     /// this sweep (#264). Accounts that errored contribute nothing — their
     /// timing was never returned.
@@ -641,6 +645,13 @@ async fn run_gather(
             Ok((GatherOutcome::Enqueued, timing)) => {
                 sweep.timing.add(&timing);
             }
+            Err(e) if retire_if_gone(db, user_did, &account_did, &e).await => {
+                // Deleted, deactivated or taken down (#394): there is nothing to
+                // score and never will be, so it is not a coverage hole — no
+                // skip, no degraded flag, no one-hour retry. It is stamped out
+                // of the refresh candidates instead of being fetched forever.
+                sweep.gone += 1;
+            }
             Err(e) => {
                 sweep.skipped = true;
                 // `{e:#}` (alternate Display) walks the anyhow source chain; plain
@@ -674,6 +685,7 @@ async fn run_gather(
 
     info!(
         phase = "gather",
+        gone = sweep.gone,
         fetch_ms = sweep.timing.fetch_ms,
         clean_pass_ms = sweep.timing.clean_pass_ms,
         stage1_onnx_ms = sweep.timing.stage1_onnx_ms,
@@ -683,6 +695,46 @@ async fn run_gather(
     );
 
     Ok(sweep)
+}
+
+/// If `err` says the account is permanently gone, stamp it out of the refresh
+/// candidates and return `true` — the caller then counts it as retired, not
+/// skipped (#394).
+///
+/// Returns `false` for every other failure, AND when the stamp itself cannot
+/// be written: an account we failed to retire must stay an ordinary skip, so
+/// the next run tries again instead of the gap going unrecorded. Erring that
+/// way costs one more fetch; erring the other way would lose the account's
+/// absence silently.
+async fn retire_if_gone(
+    db: &Arc<dyn Database>,
+    user_did: &str,
+    account_did: &str,
+    err: &anyhow::Error,
+) -> bool {
+    let Some(reason) = crate::bluesky::client::account_gone_reason(err) else {
+        return false;
+    };
+    match db.mark_account_gone(user_did, account_did, reason).await {
+        Ok(had_score) => {
+            info!(
+                account_did,
+                reason,
+                had_score,
+                "account is gone — retired from the refresh, not counted as a skip"
+            );
+            true
+        }
+        Err(e) => {
+            warn!(
+                account_did,
+                reason,
+                error = %format!("{e:#}"),
+                "account is gone but could not be retired — recording it as a skip so the next run retries"
+            );
+            false
+        }
+    }
 }
 
 /// Gather a single candidate. Extracted into a named async fn (rather than an

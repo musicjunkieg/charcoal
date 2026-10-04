@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2c34a98f424eb61c47e5435771976542408e79c3",
+    "short_hash": "2c34a98",
+    "author": "Bryan Guffey",
+    "date": "2026-10-03T16:47:46-07:00",
+    "message": "fix(394): pay the classifier probe lazily, once per run\n\nThe refresh probed the RunPod endpoint before gathering anything, so a\nrefresh whose candidates were all deleted accounts woke the GPU every\nhour to classify nothing. The probe now lives in CachedClassifier: it\nruns at most once per instance (one per run), and only when a cache miss\nis about to reach the endpoint. A run that classifies nothing, or finds\nevery verdict cached, never contacts it. A refused probe is not\nmemoised. The full scan keeps its explicit fail-fast probe at start,\nwhich counts as the run's one probe.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
     "hash": "af476cc6f09e5e23bce7a92b7a932ddf5ab282b3",
     "short_hash": "af476cc",
     "author": "Bryan Guffey",

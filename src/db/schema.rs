@@ -663,6 +663,24 @@ pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> 
         )
     })?;
 
+    // v19 (#394): a deleted/deactivated account is retired from the refresh.
+    //
+    // gone_at / gone_reason are stamped when a feed fetch answers with a
+    // permanent "this account is gone" 400. The refresh-candidate query
+    // excludes stamped rows; without that, every refresh re-fetched them,
+    // failed, rescheduled itself an hour later, and woke the GPU each time.
+    // Both NULL for every existing row: nothing is known to be gone yet, and
+    // the first refresh after the deploy finds out. Scoring the account again
+    // clears both (it came back), so the stamp is reversible by construction.
+    run_migration(conn, 19, max_version, |c| {
+        c.execute_batch(
+            "BEGIN;
+             ALTER TABLE account_scores ADD COLUMN gone_at TEXT;
+             ALTER TABLE account_scores ADD COLUMN gone_reason TEXT;
+             COMMIT;",
+        )
+    })?;
+
     Ok(())
 }
 
@@ -792,7 +810,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v18
+        // Verify schema_version has all versions through v19
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -800,7 +818,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=18).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<i64>>());
     }
 
     #[test]
@@ -907,7 +925,7 @@ mod tests {
         // onnx_scores, classifier_verdicts = 20 tables (v16)
         assert_eq!(count, 20i64);
 
-        // Verify schema_version includes v4 through v18
+        // Verify schema_version includes v4 through v19
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -915,7 +933,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=18).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<i64>>());
     }
 
     /// Does `scan_queue` currently have a `claim_id` column?
@@ -1143,7 +1161,7 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(
-            max, 18,
+            max, 19,
             "create_tables always advances to the latest version"
         );
         assert_eq!(cache_index_names(&conn), CACHE_INDEXES);
@@ -1379,6 +1397,43 @@ mod tests {
         let max: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(max, 18);
+        assert_eq!(max, 19, "create_tables runs on to the latest version");
+    }
+
+    /// v19 (#394): an AUTHENTIC v18 database with a live score row gains
+    /// `gone_at`/`gone_reason`, both NULL — nothing is known to be gone until
+    /// a refresh finds out — and the score itself is untouched.
+    #[test]
+    fn test_migration_v19_adds_gone_columns_to_a_v18_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables_through(&conn, 18).unwrap();
+        assert!(!has_column(&conn, "account_scores", "gone_at"));
+        conn.execute_batch(
+            "INSERT INTO users (did, handle) VALUES ('did:plc:u', 'u.test');
+             INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier,
+                                         scoring_generation, valid_until)
+                 VALUES ('did:plc:u', 'did:plc:a', 'a.test', 50.0, 'High', 'legacy',
+                         datetime('now'));",
+        )
+        .unwrap();
+
+        create_tables(&conn).unwrap();
+
+        let (score, gone_at, reason): (f64, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT threat_score, gone_at, gone_reason FROM account_scores WHERE did = 'did:plc:a'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((score, gone_at, reason), (50.0, None, None));
+        let recorded: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM schema_version WHERE version = 19",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(recorded);
     }
 }

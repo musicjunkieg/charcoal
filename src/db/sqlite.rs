@@ -210,6 +210,16 @@ impl Database for SqliteDatabase {
         super::queries::list_refresh_candidates(&conn, user_did, horizon_days)
     }
 
+    async fn mark_account_gone(
+        &self,
+        user_did: &str,
+        account_did: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().await;
+        super::queries::mark_account_gone(&conn, user_did, account_did, reason)
+    }
+
     async fn insert_amplification_event(
         &self,
         user_did: &str,
