@@ -228,8 +228,11 @@ pub(crate) fn build_scan_scorers(
 /// deployment declared, BEFORE the scan gathers anything (#344 F5).
 ///
 /// Separate from `build_scan_scorers` because it is the only part of setup
-/// that does I/O, and both scan kinds have to await it at their own first
-/// async point. A hard error on purpose: a mismatched policy means every
+/// that does I/O. Only the full scan calls it up front, as a fail-fast check
+/// before a long user-requested gather; the refresh relies on the lazy probe
+/// `CachedClassifier` pays on its first cache miss (#394), and this call
+/// counts as that probe, so a full scan still pays one round trip, not two.
+/// A hard error on purpose: a mismatched policy means every
 /// verdict this scan produces is foreign evidence, so the accounts are
 /// re-gathered and then skipped — hours of work for nothing. Refusing the
 /// start costs one round trip and names the variable to fix.

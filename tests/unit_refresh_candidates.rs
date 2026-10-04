@@ -454,3 +454,142 @@ fn fresh_and_candidate_predicates_partition_the_high_elevated_rows() {
     assert_eq!(fresh_high_elevated.len(), 2, "fresh half");
     assert_eq!(candidates.len(), 6, "candidate half");
 }
+
+// ── #394 A: a deleted account stops being a refresh candidate ───────────────
+//
+// A deleted or deactivated account answers every feed fetch with a permanent
+// 400. While it stayed a candidate, every refresh re-fetched it, failed, and
+// was rescheduled for an hour later — waking the GPU each time. Marking it
+// gone takes it out of the candidate set; scoring it again (it came back and
+// engaged) puts it back.
+
+fn candidate_dids(conn: &Connection) -> Vec<String> {
+    list_refresh_candidates(conn, USER, 0)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.did)
+        .collect()
+}
+
+#[test]
+fn a_gone_account_is_not_a_refresh_candidate() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    insert(
+        &conn,
+        USER,
+        "did:plc:gone",
+        60.0,
+        &days(-1),
+        scoring_revision(),
+        None,
+    );
+    insert(
+        &conn,
+        USER,
+        "did:plc:alive",
+        50.0,
+        &days(-1),
+        scoring_revision(),
+        None,
+    );
+    assert_eq!(candidate_dids(&conn), vec!["did:plc:gone", "did:plc:alive"]);
+
+    let marked =
+        charcoal::db::queries::mark_account_gone(&conn, USER, "did:plc:gone", "Profile not found")
+            .unwrap();
+
+    assert!(marked, "an existing score row was stamped");
+    assert_eq!(candidate_dids(&conn), vec!["did:plc:alive"]);
+    let (gone_at, reason): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT gone_at, gone_reason FROM account_scores WHERE user_did = ?1 AND did = ?2",
+            params![USER, "did:plc:gone"],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(gone_at.is_some(), "the stamp records when");
+    assert_eq!(reason.as_deref(), Some("Profile not found"));
+}
+
+/// Gone is per protected user, like every other score column: another user
+/// watching the same account is untouched until their own refresh finds it.
+#[test]
+fn marking_gone_touches_only_that_users_row() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    let other = "did:plc:otheruser000000000000000";
+    insert(
+        &conn,
+        USER,
+        "did:plc:gone",
+        60.0,
+        &days(-1),
+        scoring_revision(),
+        None,
+    );
+    insert(
+        &conn,
+        other,
+        "did:plc:gone",
+        60.0,
+        &days(-1),
+        scoring_revision(),
+        None,
+    );
+
+    charcoal::db::queries::mark_account_gone(&conn, USER, "did:plc:gone", "AccountDeactivated")
+        .unwrap();
+
+    assert!(candidate_dids(&conn).is_empty());
+    assert_eq!(
+        list_refresh_candidates(&conn, other, 0).unwrap().len(),
+        1,
+        "the other user's row is not theirs to retire"
+    );
+}
+
+/// No score row (a full-scan candidate seen for the first time) — nothing to
+/// stamp, and that is not an error.
+#[test]
+fn marking_an_unscored_account_gone_is_a_no_op() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    let marked =
+        charcoal::db::queries::mark_account_gone(&conn, USER, "did:plc:never", "Profile not found")
+            .unwrap();
+    assert!(!marked);
+}
+
+/// Reversible: a fresh score for the account (it came back) clears the stamp,
+/// so it is a refresh candidate again once that score expires.
+#[test]
+fn rescoring_a_gone_account_clears_the_stamp() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    insert(
+        &conn,
+        USER,
+        "did:plc:back",
+        60.0,
+        &days(-1),
+        scoring_revision(),
+        None,
+    );
+    charcoal::db::queries::mark_account_gone(&conn, USER, "did:plc:back", "Profile not found")
+        .unwrap();
+
+    let mut score = charcoal::db::models::AccountScore::default_for_test("did:plc:back");
+    score.threat_score = Some(60.0);
+    score.threat_tier = Some("High".to_string());
+    charcoal::db::queries::upsert_account_score(&conn, USER, &score).unwrap();
+
+    let gone: (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT gone_at, gone_reason FROM account_scores WHERE user_did = ?1 AND did = ?2",
+            params![USER, "did:plc:back"],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(gone, (None, None), "a new score means the account is back");
+}

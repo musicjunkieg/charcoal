@@ -682,20 +682,6 @@ pub fn classify_refresh(
     }
 }
 
-/// Pure: should this refresh pay the classifier-identity probe round trip?
-///
-/// It must when there is anything fresh to gather (`candidates > 0`) OR when
-/// a prior attempt left this refresh's OWN staging behind at a resumable
-/// phase — that staging still bursts through the classifier below even
-/// though nothing new was gathered this tick. A genuinely empty tick
-/// (`NothingDue`: no candidates, no owned staging) skips the probe entirely,
-/// since nothing downstream will call the classifier — a `RunPod` `warm_up`
-/// round trip is otherwise paid every night for a run that scores nothing
-/// (#344 F6).
-pub(crate) fn refresh_should_probe(candidates: usize, has_own_resumable_staging: bool) -> bool {
-    candidates > 0 || has_own_resumable_staging
-}
-
 /// The refresh's candidate list, re-derived from stored state alone.
 ///
 /// Used by the full scan's drain (`scan_job::drain_then_run`): the refresh
@@ -843,24 +829,13 @@ pub(crate) async fn run_refresh(
         });
         let pipeline = move |plan: RefreshPlan| async move {
             let candidates = plan.candidates.len();
-            // #344 F5/F6: probe the Stage-2 classifier identity before this
-            // refresh gathers anything — but only when something will
-            // actually call it. A `NothingDue` tick (no fresh candidates AND
-            // nothing of this refresh's own left staged) makes zero
-            // classifier calls, so paying a RunPod `warm_up` round trip for
-            // it every night is pure waste; a zero-candidate tick that still
-            // owns resumable staging (a prior attempt cut off mid-burst)
-            // bursts below regardless, so it still needs the probe.
-            // The ownership answer comes from the plan: `prepare_refresh` read
-            // it once and used it to decide whether to load context at all, so
-            // the probe and the context load are decided from the same answer.
-            let has_staging = plan.has_own_resumable_staging;
-            if refresh_should_probe(candidates, has_staging) {
-                // A mismatched Stage-2 policy fails the run (retry in an
-                // hour, no score written) instead of re-gathering every due
-                // account and then skipping it.
-                crate::web::scan_setup::probe_classifier_identity(&scorers).await?;
-            }
+            // No up-front classifier probe (#394). The probe is paid lazily
+            // inside `CachedClassifier`, once, on the first verdict that has to
+            // be computed. A refresh that gathers nothing classifiable — every
+            // candidate deleted, or nothing due — never wakes the GPU; one that
+            // does classify still refuses a mismatched Stage-2 policy before
+            // its first batch is sent (#344 F5), now after gather rather than
+            // before it. Gather is Bluesky I/O; the GPU is what costs money.
             db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
                 .await?;
             // Minor 5: `candidates_total` is the denominator GET /api/status
@@ -1007,27 +982,6 @@ mod tests {
 
         // An unparseable stored distance is `None`, not a guess.
         assert_eq!(follower.graph_distance, None);
-    }
-
-    /// #344 F6: a nothing-due tick (no candidates, nothing of its own left
-    /// staged) is the ONLY case that skips the probe — every other
-    /// combination pays it, including the zero-candidate-but-own-staging
-    /// case that still bursts below.
-    #[test]
-    fn probe_is_skipped_only_when_nothing_is_due() {
-        assert!(
-            !refresh_should_probe(0, false),
-            "nothing due: no candidates, no owned staging — no classifier call is coming"
-        );
-        assert!(
-            refresh_should_probe(1, false),
-            "candidates present: the burst below will call the classifier"
-        );
-        assert!(
-            refresh_should_probe(0, true),
-            "own leftover staging still bursts even with zero fresh candidates"
-        );
-        assert!(refresh_should_probe(3, true));
     }
 
     #[test]

@@ -3913,6 +3913,179 @@ mod orchestration_tests {
             .unwrap()
             .is_none());
     }
+
+    // ── #394 A: a deleted account is retired, not skipped ──────────────────
+
+    /// Answers every feed fetch with the failure `xrpc_get` produces for the
+    /// given status and body, wrapped in context exactly as `posts.rs` wraps it.
+    struct StatusFetcher {
+        status: reqwest::StatusCode,
+        body: &'static str,
+    }
+
+    #[async_trait]
+    impl PostFetcher for StatusFetcher {
+        async fn fetch_sample(
+            &self,
+            _did: &str,
+            handle: &str,
+            _limit: usize,
+        ) -> Result<PostSample> {
+            Err(
+                anyhow::Error::new(charcoal::bluesky::client::XrpcStatusError::new(
+                    "app.bsky.feed.getAuthorFeed",
+                    self.status,
+                    self.body.to_string(),
+                ))
+                .context(format!("Failed to fetch feed for @{handle}")),
+            )
+        }
+        async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
+            Ok(HashMap::new())
+        }
+    }
+
+    /// Counts every contact with the (pretend) GPU endpoint — classify AND
+    /// probe — so "the GPU was never woken" is a number, not an inference.
+    #[derive(Default)]
+    struct ContactCounter {
+        contacts: Mutex<usize>,
+    }
+
+    #[async_trait]
+    impl ToxicityClassifier for ContactCounter {
+        async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+            *self.contacts.lock().unwrap() += 1;
+            Ok(ok_verdict())
+        }
+        async fn probe_identity(&self) -> Result<()> {
+            *self.contacts.lock().unwrap() += 1;
+            Ok(())
+        }
+        fn name(&self) -> &'static str {
+            "contact-counter"
+        }
+        fn model_id(&self) -> &'static str {
+            "stub"
+        }
+        fn policy_version(&self) -> &'static str {
+            "stub"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+
+    const GONE_BODY: &str = r#"{"error":"InvalidRequest","message":"Profile not found"}"#;
+
+    async fn seed_high_score(db: &Arc<dyn Database>, did: &str) {
+        let mut score = charcoal::db::models::AccountScore::default_for_test(did);
+        score.threat_score = Some(60.0);
+        score.threat_tier = Some("High".to_string());
+        db.upsert_account_score(ORCH_USER, &score).await.unwrap();
+    }
+
+    async fn candidate_count(db: &Arc<dyn Database>) -> usize {
+        // A horizon wide enough that a freshly written score is "due".
+        db.list_refresh_candidates(ORCH_USER, 365)
+            .await
+            .unwrap()
+            .len()
+    }
+
+    /// #394 acceptance: a refresh whose only candidates are deleted accounts
+    /// makes ZERO contacts with the GPU endpoint, completes clean (no skips, so
+    /// no one-hour retry), and leaves nothing for the next refresh to fetch.
+    ///
+    /// The classifier is wrapped in the production `CachedClassifier`, which
+    /// is where the lazy probe lives — the count covers the probe too.
+    #[tokio::test]
+    async fn a_refresh_of_only_gone_accounts_never_wakes_the_gpu() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let gone = [
+            "did:plc:gone0000000000000000001",
+            "did:plc:gone0000000000000000002",
+        ];
+        for did in gone {
+            seed_high_score(&db, did).await;
+        }
+        assert_eq!(candidate_count(&db).await, 2, "both are due before the run");
+
+        let fetcher = StatusFetcher {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            body: GONE_BODY,
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let counter = Arc::new(ContactCounter::default());
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(
+            charcoal::toxicity::cached_classifier::CachedClassifier::new(
+                Arc::clone(&counter) as Arc<dyn ToxicityClassifier>,
+                Arc::clone(&db),
+                Arc::new(charcoal::observability::cache_stats::CacheStats::default()),
+            ),
+        );
+        let candidates: Vec<_> = gone.iter().map(|d| candidate(d, "gone.test")).collect();
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &candidates,
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::refresh(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *counter.contacts.lock().unwrap(),
+            0,
+            "the GPU was never contacted"
+        );
+        assert!(!summary.degraded, "a gone account is not a coverage hole");
+        assert_eq!(summary.skipped, Some(0), "a gone account is not a skip");
+        assert_eq!(summary.final_phase.as_deref(), Some("done"));
+        assert_eq!(
+            candidate_count(&db).await,
+            0,
+            "the next refresh has nothing to fetch"
+        );
+    }
+
+    /// The other side of the line: a transient failure (5xx) carrying the
+    /// very same body is still an ordinary skip — retried, not retired.
+    #[tokio::test]
+    async fn a_server_error_is_still_a_skip_not_a_retirement() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:flaky000000000000000000001";
+        seed_high_score(&db, acct).await;
+
+        let fetcher = StatusFetcher {
+            status: reqwest::StatusCode::BAD_GATEWAY,
+            body: GONE_BODY,
+        };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &[candidate(acct, "flaky.test")],
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::refresh(),
+        )
+        .await
+        .unwrap();
+
+        assert!(summary.degraded);
+        assert_eq!(summary.skipped, Some(1));
+        assert_eq!(candidate_count(&db).await, 1, "still a candidate next time");
+    }
 }
 
 // ── Evidence provenance (#344 R03, V2-01, V3-01) ──────────────────────────────
@@ -4281,8 +4454,8 @@ mod ownership_tests {
     }
 
     /// #344 F6: `has_own_resumable_staging` is the read a refresh consults
-    /// before deciding whether to pay the classifier-identity probe on a
-    /// zero-candidate tick.
+    /// before deciding whether a zero-candidate tick still needs its context
+    /// loaded (the classifier probe no longer depends on it — #394).
     ///
     /// These assertions are on the helper alone — they pin WHICH ownership
     /// states it calls its own, not that `run_phased_scan` would agree. The

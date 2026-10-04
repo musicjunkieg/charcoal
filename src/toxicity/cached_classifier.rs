@@ -6,12 +6,22 @@
 //! `ItemOutcome::Error` slot or a request-level `Err` is handed back exactly
 //! as the inner classifier produced it, so the burst phase's downcasts on
 //! `CostCeilingExceeded` / `ClassifierTransientError` keep working.
+//!
+//! It is also where the identity probe is paid, lazily (#394). The probe is a
+//! real round trip to the GPU endpoint, and on RunPod serverless every round
+//! trip bills a worker's idle tail. Paying it up front, before anything was
+//! gathered, meant a refresh whose candidates were all deleted accounts woke
+//! the GPU every hour to classify nothing. Here it is paid at most once per
+//! instance — one instance per run — and only when a cache MISS is about to
+//! reach the endpoint. A run that classifies nothing, or finds every verdict
+//! cached, never contacts it at all.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use tokio::sync::OnceCell;
 
 use crate::db::{ClassifierVerdictRow, Database};
 use crate::observability::cache_stats::CacheStats;
@@ -23,6 +33,11 @@ pub struct CachedClassifier {
     inner: Arc<dyn ToxicityClassifier>,
     db: Arc<dyn Database>,
     stats: Arc<CacheStats>,
+    /// Set once the endpoint has confirmed its identity for this run. Only a
+    /// SUCCESS is remembered: `get_or_try_init` leaves the cell empty on an
+    /// error, so a refused or failed probe is asked again next time rather
+    /// than replayed.
+    probed: OnceCell<()>,
 }
 
 impl CachedClassifier {
@@ -31,7 +46,21 @@ impl CachedClassifier {
         db: Arc<dyn Database>,
         stats: Arc<CacheStats>,
     ) -> Self {
-        Self { inner, db, stats }
+        Self {
+            inner,
+            db,
+            stats,
+            probed: OnceCell::new(),
+        }
+    }
+
+    /// Probe the endpoint unless this run already has. Concurrent burst
+    /// batches share one in-flight probe instead of each paying their own.
+    async fn ensure_probed(&self) -> Result<()> {
+        self.probed
+            .get_or_try_init(|| self.inner.probe_identity())
+            .await?;
+        Ok(())
     }
 
     /// A cached row rebuilt as a verdict. `latency_ms` is 0: nothing was
@@ -91,6 +120,9 @@ impl ToxicityClassifier for CachedClassifier {
         let fresh = if miss_texts.is_empty() {
             Vec::new()
         } else {
+            // The first miss of the run is the first moment the endpoint is
+            // actually needed, so it is the moment to confirm its identity.
+            self.ensure_probed().await?;
             self.inner.classify_batch(&miss_texts).await?
         };
         if fresh.len() != miss_texts.len() {
@@ -143,10 +175,12 @@ impl ToxicityClassifier for CachedClassifier {
     fn max_batch_size(&self) -> usize {
         self.inner.max_batch_size()
     }
-    /// Delegated, never cached: the probe exists to contact the live endpoint,
-    /// and a cached answer is exactly the stale identity it is checking for.
+    /// Contacts the live endpoint — never answered from the verdict cache,
+    /// whose rows are exactly the stale identity the probe checks for — but
+    /// at most once per run: the full scan's explicit fail-fast probe at start
+    /// IS the run's probe, so the first miss afterwards does not pay another.
     async fn probe_identity(&self) -> anyhow::Result<()> {
-        self.inner.probe_identity().await
+        self.ensure_probed().await
     }
     fn name(&self) -> &'static str {
         self.inner.name()

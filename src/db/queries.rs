@@ -400,7 +400,9 @@ pub fn upsert_account_score(conn: &Connection, user_did: &str, score: &AccountSc
             scoring_confidence = ?14,
             overlap_legacy = ?15,
             scoring_generation = ?16,
-            valid_until = datetime('now', ?17)",
+            valid_until = datetime('now', ?17),
+            gone_at = NULL,
+            gone_reason = NULL",
         params![
             user_did,
             score.did,
@@ -660,9 +662,27 @@ pub fn import_score(conn: &Connection, user_did: &str, row: &StoredScore) -> Res
 pub const REFRESH_CANDIDATES_SQL: &str = "SELECT did, handle, graph_distance FROM account_scores
      WHERE user_did = ?1
        AND threat_score >= ?2
+       AND gone_at IS NULL
        AND (scoring_generation != ?4
             OR COALESCE(datetime(valid_until) <= datetime('now', ?3), 1))
      ORDER BY threat_score DESC, did";
+
+/// Retire an account whose feed answered "this account is gone" (#394) — see
+/// `Database::mark_account_gone`. `Ok(false)` when this user has no score row
+/// for it, which is not an error: there was nothing to refresh anyway.
+pub fn mark_account_gone(
+    conn: &Connection,
+    user_did: &str,
+    account_did: &str,
+    reason: &str,
+) -> Result<bool> {
+    let n = conn.execute(
+        "UPDATE account_scores SET gone_at = datetime('now'), gone_reason = ?3
+         WHERE user_did = ?1 AND did = ?2",
+        params![user_did, account_did, reason],
+    )?;
+    Ok(n > 0)
+}
 
 /// The nightly refresh job's candidate source (#344 Task 7) — see
 /// `Database::list_refresh_candidates` for the eligibility rule.

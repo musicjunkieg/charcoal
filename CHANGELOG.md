@@ -99,6 +99,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #394 — deleted accounts no longer keep a user on an hourly refresh that
+  wakes the GPU forever. Measured on staging 2026-10-02: 29 deleted accounts
+  across 7 users cost ~$0.45–0.57 an hour while scoring nothing. Three causes,
+  three fixes. (A) A feed fetch that answers HTTP 400 with "Profile not found",
+  `AccountDeactivated`, `AccountTakedown` or one of the `Repo*` gone codes now
+  stamps that user's score row `gone_at`/`gone_reason` (migration v19) and
+  leaves the refresh candidates; scoring the account again clears it. A 5xx,
+  a timeout, or any other 400 is still an ordinary skip. (B) A gone account
+  is not a skip, so a refresh whose only failures were gone accounts
+  completes and takes the nightly cadence instead of the one-hour retry.
+  (C) The classifier identity probe is no longer paid before gathering: it
+  runs inside `CachedClassifier`, at most once per run, only when a cache
+  miss is about to reach the endpoint. A run that classifies nothing, or
+  finds every verdict cached, never contacts the GPU. The full scan keeps its
+  fail-fast probe at start, which now counts as the run's only probe.
 - Review fixes from the staging→main promotion PR (#345, PR #115). The DPoP
   nonce retry re-signed the *same* proof with the new nonce, so the retry
   carried the jti the server had already seen — RFC 9449 makes `jti` a

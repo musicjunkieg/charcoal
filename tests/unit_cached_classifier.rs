@@ -24,6 +24,11 @@ struct FakeClassifier {
     policy: &'static str,
     batches: Mutex<Vec<Vec<String>>>,
     calls: AtomicUsize,
+    /// Every endpoint contact in order — `"probe"` or `"classify"` — so a test
+    /// can assert not just how many round trips happened but which came first.
+    contacts: Mutex<Vec<&'static str>>,
+    /// When set, `probe_identity` refuses, as a mismatched policy does.
+    probe_fails: bool,
 }
 
 impl FakeClassifier {
@@ -32,7 +37,18 @@ impl FakeClassifier {
             policy,
             batches: Mutex::new(Vec::new()),
             calls: AtomicUsize::new(0),
+            contacts: Mutex::new(Vec::new()),
+            probe_fails: false,
         }
+    }
+
+    fn probes(&self) -> usize {
+        self.contacts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| **c == "probe")
+            .count()
     }
 
     fn verdict(&self, toxic: bool) -> ClassifierVerdict {
@@ -61,6 +77,7 @@ impl ToxicityClassifier for FakeClassifier {
 
     async fn classify_batch(&self, contents: &[String]) -> anyhow::Result<Vec<ItemOutcome>> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.contacts.lock().unwrap().push("classify");
         self.batches.lock().unwrap().push(contents.to_vec());
         if contents.iter().any(|c| c.contains("boom")) {
             anyhow::bail!("request failed");
@@ -75,6 +92,14 @@ impl ToxicityClassifier for FakeClassifier {
                 }
             })
             .collect())
+    }
+
+    async fn probe_identity(&self) -> anyhow::Result<()> {
+        self.contacts.lock().unwrap().push("probe");
+        if self.probe_fails {
+            anyhow::bail!("endpoint serves another policy");
+        }
+        Ok(())
     }
 
     fn max_batch_size(&self) -> usize {
@@ -360,4 +385,89 @@ async fn a_foreign_verdict_is_never_cached_under_the_advertised_identity() {
         v2.policy_version, "policy-foreign",
         "a replay must never relabel a foreign verdict as the advertised policy"
     );
+}
+
+// ── #394 C: the identity probe is paid lazily, once per run ─────────────────
+//
+// The probe is a real round trip to the GPU endpoint, and on RunPod serverless
+// every round trip bills a worker's idle tail. #394: a refresh whose candidates
+// were all deleted accounts paid that probe hourly while classifying nothing.
+// So the probe now happens only when a verdict must actually be computed — the
+// first cache MISS — and at most once per classifier instance (one per run).
+
+/// A run whose every verdict is already cached never contacts the endpoint —
+/// not to classify, and not to probe either.
+#[tokio::test]
+async fn an_all_hit_run_never_probes_the_endpoint() {
+    let db = setup_db();
+    // Prime the cache with an earlier run.
+    let (earlier, _) = cached(&db, Arc::new(FakeClassifier::new("v1")));
+    earlier.classify_batch(&texts(&["a", "b"])).await.unwrap();
+
+    let inner = Arc::new(FakeClassifier::new("v1"));
+    let (c, _) = cached(&db, Arc::clone(&inner));
+    c.classify_batch(&texts(&["b", "a"])).await.unwrap();
+
+    assert_eq!(
+        *inner.contacts.lock().unwrap(),
+        Vec::<&str>::new(),
+        "an all-hit run must not wake the endpoint at all"
+    );
+}
+
+/// The first miss probes, BEFORE it classifies; later misses do not re-probe.
+#[tokio::test]
+async fn the_first_miss_probes_once_before_classifying() {
+    let db = setup_db();
+    let inner = Arc::new(FakeClassifier::new("v1"));
+    let (c, _) = cached(&db, Arc::clone(&inner));
+
+    c.classify_batch(&texts(&["one"])).await.unwrap();
+    c.classify_batch(&texts(&["two"])).await.unwrap();
+
+    assert_eq!(
+        *inner.contacts.lock().unwrap(),
+        vec!["probe", "classify", "classify"]
+    );
+}
+
+/// An explicit probe (the full scan's fail-fast check at start) counts as the
+/// run's probe: the first miss afterwards does not pay a second one.
+#[tokio::test]
+async fn an_explicit_probe_is_not_repeated_by_the_first_miss() {
+    let db = setup_db();
+    let inner = Arc::new(FakeClassifier::new("v1"));
+    let (c, _) = cached(&db, Arc::clone(&inner));
+
+    c.probe_identity().await.unwrap();
+    c.classify_batch(&texts(&["one"])).await.unwrap();
+
+    assert_eq!(*inner.contacts.lock().unwrap(), vec!["probe", "classify"]);
+}
+
+/// A refused probe fails the batch without classifying anything, and is NOT
+/// remembered: the next attempt asks the endpoint again rather than replaying
+/// a stale refusal (or, worse, a stale success).
+#[tokio::test]
+async fn a_refused_probe_fails_the_batch_and_is_not_memoised() {
+    let db = setup_db();
+    let mut fake = FakeClassifier::new("v1");
+    fake.probe_fails = true;
+    let inner = Arc::new(fake);
+    let (c, _) = cached(&db, Arc::clone(&inner));
+
+    let err = c.classify_batch(&texts(&["one"])).await.unwrap_err();
+    assert!(
+        format!("{err:#}").contains("another policy"),
+        "the refusal must surface as the batch's error, got {err:#}"
+    );
+    assert_eq!(inner.calls.load(Ordering::SeqCst), 0, "never classified");
+    assert!(db
+        .get_classifier_verdicts("fake-model", "v1", &[text_sha256("one")])
+        .await
+        .unwrap()
+        .is_empty());
+
+    c.classify_batch(&texts(&["one"])).await.unwrap_err();
+    assert_eq!(inner.probes(), 2, "a failed probe is retried, not cached");
 }
