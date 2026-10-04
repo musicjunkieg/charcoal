@@ -10885,9 +10885,9 @@
       "node_type": "goal",
       "title": "Fix #394: gone accounts keep refresh on hourly GPU-waking loop",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-03T16:15:16.427130-07:00",
-      "updated_at": "2026-10-03T16:15:16.427130-07:00",
+      "updated_at": "2026-10-04T11:36:48.828910-07:00",
       "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":90,\"prompt\":\"okay, let's pick up with our GPU bug\"}"
     },
     {
@@ -10977,6 +10977,94 @@
       "created_at": "2026-10-03T16:47:57.231780-07:00",
       "updated_at": "2026-10-03T16:47:57.231780-07:00",
       "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"2c34a98\",\"confidence\":80,\"files\":[\"src/bluesky/client.rs\",\"src/db/schema.rs\",\"src/db/queries.rs\",\"src/db/postgres.rs\",\"src/db/traits.rs\",\"src/pipeline/scan_phases/mod.rs\",\"migrations/postgres/0019_account_gone.sql\"]}"
+    },
+    {
+      "id": 1008,
+      "change_id": "558ee4c7-8744-4ad1-a8af-ae21c898e293",
+      "node_type": "outcome",
+      "title": "A+B done: gone accounts stamped gone_at (v19), excluded from candidates, not skips; acceptance test zero GPU contacts; 1138 web tests pass, 0 SKIP, clippy clean x4",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-03T18:13:47.954724-07:00",
+      "updated_at": "2026-10-03T18:13:47.954724-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"c5a8d3f\",\"confidence\":90}"
+    },
+    {
+      "id": 1009,
+      "change_id": "0da24382-23dd-4378-81f3-8bc1e144b804",
+      "node_type": "observation",
+      "title": "Ran full web + Postgres suites locally by hand, ignoring the #367 decision (pre-push = affected tests, CI = full suite); cost ~1h of Bryan's time. Stopped the local Postgres run; CI covers it. PR #132 opened.",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-03T19:09:48.536020-07:00",
+      "updated_at": "2026-10-03T19:09:48.536020-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":90}"
+    },
+    {
+      "id": 1010,
+      "change_id": "d49b5890-acd7-46ea-857e-823d508b1d58",
+      "node_type": "action",
+      "title": "Merged PR #132 to staging (98c416d, deploy SUCCESS, schema v19 confirmed); deleted CHARCOAL_REFRESH_INTERVAL_HOURS on staging 02:59:56Z to re-enable the refresh",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-03T20:00:03.594992-07:00",
+      "updated_at": "2026-10-03T20:00:03.594992-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"c5a8d3f\",\"confidence\":85}"
+    },
+    {
+      "id": 1011,
+      "change_id": "de118a93-6087-452c-8d19-19fbd9dc726b",
+      "node_type": "outcome",
+      "title": "Verified on staging: 10/13 refreshes completed or nothing_due at 24h cadence, 21 gone accounts stamped, skips 33->7, no RunPod worker woke; Railway CLI var delete needed a manual redeploy",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-03T20:26:32.367151-07:00",
+      "updated_at": "2026-10-03T20:26:32.367151-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"commit\":\"c5a8d3f\",\"confidence\":85}"
+    },
+    {
+      "id": 1012,
+      "change_id": "5b2b79f7-74f8-4fc7-896e-e27f48a31a91",
+      "node_type": "outcome",
+      "title": "#394 closed: Oct 4 RunPod $0.00 through 18:36Z incl. the 03:10 refresh; 13/13 refreshes completed/nothing_due at 24h; 29 gone accounts stamped; skips 0",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T11:36:48.814378-07:00",
+      "updated_at": "2026-10-04T11:36:48.814378-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":95}"
+    },
+    {
+      "id": 1013,
+      "change_id": "16ebeb2e-8b3d-4b29-b8b7-d55a42e0b830",
+      "node_type": "action",
+      "title": "Opened promotion PR #133 staging->main; found prod lacks CHARCOAL_COPE_B_POLICY_VERSION (every scan would be refused); flagged set-var + backup as pre-merge blockers",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T16:04:11.905377-07:00",
+      "updated_at": "2026-10-04T16:04:11.905377-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":90}"
+    },
+    {
+      "id": 1014,
+      "change_id": "4f6b6649-a399-4523-9d44-5d3fd10d62da",
+      "node_type": "action",
+      "title": "Set CHARCOAL_COPE_B_POLICY_VERSION=policy-ddac468-2026-07-03 on prod (skip-deploys); brew install postgresql@18 blocked by sandbox, Bryan to install",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T16:08:38.068956-07:00",
+      "updated_at": "2026-10-04T16:08:38.068956-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":90}"
+    },
+    {
+      "id": 1015,
+      "change_id": "b7aa4228-5225-4fe4-8ff6-e14c993f3bb2",
+      "node_type": "action",
+      "title": "Prod backup taken with pg_dump 18.6: backups/charcoal-prod-pre-promote133-20261004T231337Z.dump (1.3M); restore-verified locally (schema 15, 6 users, 5427 scores, 2970 events)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T16:14:12.092990-07:00",
+      "updated_at": "2026-10-04T16:14:12.092990-07:00",
+      "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -22595,6 +22683,94 @@
       "weight": 1.0,
       "rationale": "implementing part A (B follows from it)",
       "created_at": "2026-10-03T16:47:57.238358-07:00"
+    },
+    {
+      "id": 1067,
+      "from_node_id": 1007,
+      "to_node_id": 1008,
+      "from_change_id": "7832a55b-0c2c-455a-b933-d32a5cc08ae9",
+      "to_change_id": "558ee4c7-8744-4ad1-a8af-ae21c898e293",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-10-03T18:13:47.962377-07:00"
+    },
+    {
+      "id": 1068,
+      "from_node_id": 999,
+      "to_node_id": 1009,
+      "from_change_id": "b62b7311-1ba1-4a14-b605-8edd2a26e059",
+      "to_change_id": "0da24382-23dd-4378-81f3-8bc1e144b804",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "process lesson",
+      "created_at": "2026-10-03T19:09:48.543774-07:00"
+    },
+    {
+      "id": 1069,
+      "from_node_id": 1008,
+      "to_node_id": 1010,
+      "from_change_id": "558ee4c7-8744-4ad1-a8af-ae21c898e293",
+      "to_change_id": "d49b5890-acd7-46ea-857e-823d508b1d58",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "deploy and re-enable",
+      "created_at": "2026-10-03T20:00:03.617797-07:00"
+    },
+    {
+      "id": 1070,
+      "from_node_id": 1010,
+      "to_node_id": 1011,
+      "from_change_id": "d49b5890-acd7-46ea-857e-823d508b1d58",
+      "to_change_id": "de118a93-6087-452c-8d19-19fbd9dc726b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "verification",
+      "created_at": "2026-10-03T20:26:32.373771-07:00"
+    },
+    {
+      "id": 1071,
+      "from_node_id": 1011,
+      "to_node_id": 1012,
+      "from_change_id": "de118a93-6087-452c-8d19-19fbd9dc726b",
+      "to_change_id": "5b2b79f7-74f8-4fc7-896e-e27f48a31a91",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "steady state",
+      "created_at": "2026-10-04T11:36:48.822107-07:00"
+    },
+    {
+      "id": 1072,
+      "from_node_id": 1012,
+      "to_node_id": 1013,
+      "from_change_id": "5b2b79f7-74f8-4fc7-896e-e27f48a31a91",
+      "to_change_id": "16ebeb2e-8b3d-4b29-b8b7-d55a42e0b830",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "next step: promote",
+      "created_at": "2026-10-04T16:04:11.929129-07:00"
+    },
+    {
+      "id": 1073,
+      "from_node_id": 1013,
+      "to_node_id": 1014,
+      "from_change_id": "16ebeb2e-8b3d-4b29-b8b7-d55a42e0b830",
+      "to_change_id": "4f6b6649-a399-4523-9d44-5d3fd10d62da",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "pre-merge step",
+      "created_at": "2026-10-04T16:08:38.075547-07:00"
+    },
+    {
+      "id": 1074,
+      "from_node_id": 1014,
+      "to_node_id": 1015,
+      "from_change_id": "4f6b6649-a399-4523-9d44-5d3fd10d62da",
+      "to_change_id": "b7aa4228-5225-4fe4-8ff6-e14c993f3bb2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "pre-merge backup",
+      "created_at": "2026-10-04T16:14:12.105445-07:00"
     }
   ],
   "documents": [

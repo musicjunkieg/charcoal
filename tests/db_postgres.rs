@@ -5884,3 +5884,64 @@ async fn test_pg_mark_account_gone_retires_and_rescoring_restores() {
     db.upsert_account_score(OWNER, &score).await.unwrap();
     assert_eq!(due(OWNER).await, 1, "scored again: the account is back");
 }
+
+/// #394 follow-up, Postgres twin: a gone row is not counted as expired.
+#[tokio::test]
+async fn test_pg_count_expired_excludes_gone_accounts() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    const OWNER: &str = "did:plc:pggone_expired_owner";
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for did in ["did:plc:pgexp_alive", "did:plc:pgexp_gone"] {
+        sqlx_core::query::query(
+            "INSERT INTO account_scores
+                 (user_did, did, handle, threat_score, threat_tier, scoring_generation, valid_until)
+             VALUES ($1, $2, $2, 20.0, 'Elevated', $3, NOW() - INTERVAL '1 day')",
+        )
+        .bind(OWNER)
+        .bind(did)
+        .bind(charcoal::scoring::generation::scoring_revision())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    assert_eq!(db.count_expired(OWNER).await.unwrap(), 2);
+
+    db.mark_account_gone(OWNER, "did:plc:pgexp_gone", "Profile not found")
+        .await
+        .unwrap();
+
+    assert_eq!(db.count_expired(OWNER).await.unwrap(), 1);
+}
+
+/// CodeRabbit, PR #133: the `_migrations` guard on the table-dropping fixture
+/// must read the database name from the URL's PATH. A `/` inside the query
+/// string used to become the split point, so this URL — whose database is
+/// `charcoal` — passed the guard as `b_migrations`.
+#[test]
+fn migrations_guard_reads_the_database_name_from_the_path() {
+    use charcoal::db::postgres::database_name_from_url as name;
+    assert_eq!(
+        name("postgres://h/charcoal?application_name=a/b_migrations"),
+        "charcoal"
+    );
+    assert_eq!(name("postgres://h/charcoal#x/y_migrations"), "charcoal");
+    assert_eq!(
+        name("postgres://u@h:5432/charcoal_migrations?sslmode=disable"),
+        "charcoal_migrations"
+    );
+    assert_eq!(
+        name("postgres://h/charcoal_migrations"),
+        "charcoal_migrations"
+    );
+}

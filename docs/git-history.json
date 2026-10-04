@@ -1,5 +1,13 @@
 [
   {
+    "hash": "c5a8d3f8d808e3b6b34c34c4fb8ad0342bf8adb7",
+    "short_hash": "c5a8d3f",
+    "author": "Bryan Guffey",
+    "date": "2026-10-03T18:13:34-07:00",
+    "message": "fix(394): retire deleted accounts instead of skipping them hourly\n\nA feed fetch that answers HTTP 400 with \"Profile not found\",\nAccountDeactivated, AccountTakedown or a Repo* gone code now stamps the\nuser's score row gone_at/gone_reason (schema v19, both backends) and the\nrefresh-candidate query excludes it. Scoring the account again clears\nthe stamp. A 5xx, a timeout or any other 400 stays an ordinary skip, and\na stamp that cannot be written falls back to a skip so the next run\nretries.\n\nA gone account is not a skip, so a refresh whose only failures were\ngone accounts completes and takes the nightly cadence instead of the\none-hour retry (#394 part B).\n\nXRPC failures are now a typed XrpcStatusError with the same Display\ntext, so scan_skips rows and logs read as before.\n\nAcceptance test: a refresh of only gone accounts makes zero classifier\ncontacts (probe included), records no skips, and leaves no candidates.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 15
+  },
+  {
     "hash": "2c34a98f424eb61c47e5435771976542408e79c3",
     "short_hash": "2c34a98",
     "author": "Bryan Guffey",

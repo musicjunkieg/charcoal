@@ -202,3 +202,25 @@ fn staleness_days_are_three_seven_fourteen() {
     assert_eq!(ScoringConfidence::Standard.staleness_days(), 7);
     assert_eq!(ScoringConfidence::High.staleness_days(), 14);
 }
+
+/// #394 follow-up (CodeRabbit, PR #133): a retired ("gone") account is not
+/// waiting to be re-scored — the refresh skips it — so it must not sit in the
+/// dashboard's "Expired — hidden until re-scored" count forever.
+#[test]
+fn a_gone_account_is_not_counted_as_expired() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    insert_score(&conn, "did:plc:expired-alive", -1, scoring_revision());
+    insert_score(&conn, "did:plc:expired-gone", -1, scoring_revision());
+    assert_eq!(count_expired(&conn, USER).unwrap(), 2);
+
+    charcoal::db::queries::mark_account_gone(
+        &conn,
+        USER,
+        "did:plc:expired-gone",
+        "Profile not found",
+    )
+    .unwrap();
+
+    assert_eq!(count_expired(&conn, USER).unwrap(), 1);
+}

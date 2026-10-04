@@ -615,7 +615,9 @@ pub trait Database: Send + Sync {
 
     /// Count rows that are NOT fresh for a user (#344) — hidden from
     /// `get_ranked_threats` but never deleted. Includes legacy, expired,
-    /// NULL and malformed `valid_until` rows.
+    /// NULL and malformed `valid_until` rows. Excludes rows retired as gone
+    /// (`gone_at` set, #394): the dashboard labels this count "hidden until
+    /// re-scored", and the refresh never re-scores a gone account.
     async fn count_expired(&self, user_did: &str) -> Result<i64>;
 
     /// Every `account_scores` row for the user, verbatim — never filtered by
