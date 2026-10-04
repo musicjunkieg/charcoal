@@ -425,6 +425,17 @@ async fn apply_migrations_up_to(pool: &PgPool, max_version: i64) -> Result<()> {
     Ok(())
 }
 
+/// The database name in a Postgres URL — the last segment of its path.
+/// Public so the `_migrations` guard below can be tested without a database.
+///
+/// The query string and fragment are stripped FIRST: a `/` inside a query
+/// parameter (`?application_name=a/b_migrations`) would otherwise become the
+/// split point and hand the guard a name the URL never connects to.
+pub fn database_name_from_url(url: &str) -> &str {
+    let path = url.split(['?', '#']).next().unwrap_or("");
+    path.rsplit('/').next().unwrap_or("")
+}
+
 /// Test support (V2-07): reset a dedicated Postgres database and replay
 /// migrations up to `max_version`, producing an AUTHENTIC older-schema
 /// fixture rather than one built by dropping columns off a current database
@@ -436,13 +447,7 @@ async fn apply_migrations_up_to(pool: &PgPool, max_version: i64) -> Result<()> {
 /// in `_migrations` (V3-06): this drops every table it finds, and the
 /// ordinary test suite's fixtures live in a database this must never touch.
 pub async fn migrate_postgres_through(url: &str, max_version: i64) -> Result<()> {
-    let db_name = url
-        .rsplit('/')
-        .next()
-        .unwrap_or("")
-        .split(['?', '#'])
-        .next()
-        .unwrap_or("");
+    let db_name = database_name_from_url(url);
     if !db_name.ends_with("_migrations") {
         anyhow::bail!(
             "migrate_postgres_through refuses to run against database {db_name:?} — \
@@ -887,7 +892,8 @@ impl Database for PgDatabase {
         // is needed — the comparison is never SQL-unknown here.
         let row = sqlx_core::query::query(
             "SELECT COUNT(*) FROM account_scores
-             WHERE user_did = $1 AND NOT (scoring_generation = $2 AND valid_until > NOW())",
+             WHERE user_did = $1 AND gone_at IS NULL
+               AND NOT (scoring_generation = $2 AND valid_until > NOW())",
         )
         .bind(user_did)
         .bind(scoring_revision())

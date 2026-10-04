@@ -549,7 +549,8 @@ pub fn get_fresh_scored_dids(conn: &Connection, user_did: &str) -> Result<Vec<St
 pub fn count_expired(conn: &Connection, user_did: &str) -> Result<i64> {
     let count: i64 = conn.query_row(
         &format!(
-            "SELECT COUNT(*) FROM account_scores WHERE user_did = ?1 AND NOT ({})",
+            "SELECT COUNT(*) FROM account_scores
+             WHERE user_did = ?1 AND gone_at IS NULL AND NOT ({})",
             fresh_sql("?2")
         ),
         params![user_did, scoring_revision()],
