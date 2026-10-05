@@ -99,6 +99,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #236 — one post the ONNX clean pass can never score no longer costs the
+  whole account. #221 stopped such a post failing the batch, but Phase A
+  still stashed the *unfiltered* sample in the account's blob while
+  enqueuing rows only for the posts it could score. Finalize walks the blob,
+  found no row for the dropped post, and asked for a re-gather; the
+  re-gather dropped the same post again, and the account was skipped. Phase
+  A now removes the unscoreable posts from the stashed sample too, so the
+  blob and the queue rows list the same posts, and the account is scored on
+  the rest with `posts_analyzed` counting only the posts actually read.
+  Finalize's rule that a missing row means re-gather is unchanged — it is
+  what catches lost or foreign evidence (#344). Accounts with no dropped
+  posts are untouched. The old test only checked the account was enqueued;
+  it and a new end-to-end test now require a persisted score.
 - #394 — deleted accounts no longer keep a user on an hourly refresh that
   wakes the GPU forever. Measured on staging 2026-10-02: 29 deleted accounts
   across 7 users cost ~$0.45–0.57 an hour while scoring nothing. Three causes,
