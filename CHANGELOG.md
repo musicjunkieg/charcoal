@@ -118,7 +118,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   0 was right and every later row was read out of its neighbours' logits.
   Stage 1 and the Stage-2 clean pass both batch an account's posts, so a
   hostile post anywhere but first could score as clean (one hostile sentence:
-  0.999 alone, 0.110 in second place) and either let the account exit Low or
+  0.999 alone, 0.003 at batch position 3 — under the 0.10 clean threshold)
+  and either let the account exit Low or
   keep the post from ever reaching the classifier. Live since the ONNX scorer
   landed (7ebfc46, 2026-02-09). The row width now comes from the model's own
   output. `ONNX_MODEL_ID` is bumped to `-r2`, which invalidates every cached
