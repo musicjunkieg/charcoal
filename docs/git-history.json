@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9bbc1737f7049ce1834e34a664964cb5a393f972",
+    "short_hash": "9bbc173",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:24:17-07:00",
+    "message": "fix(400): read batched toxicity logits at the model's real row width\n\nThe Detoxify unbiased export returns logits[batch, 16]: the 7 toxicity\nheads Charcoal uses, then 9 identity heads. score_batch stepped through\nthe flat buffer 7 values per row, so row 0 was correct and every later\nrow was read out of its neighbours' logits. Stage 1 and the Stage-2\nclean pass both batch an account's posts, so a hostile post anywhere but\nfirst could score as clean. Live since 7ebfc46 (2026-02-09).\n\nThe row width now comes from the output buffer (len / batch), checked to\ndivide evenly and to hold at least the 7 labels we read.\n\nONNX_MODEL_ID -> \"...-quantized-r2\": it keys the shared onnx_scores cache\nand is composed into scoring_revision(), so the bump retires every cached\nscore and re-expires every stored score in one move.\n\nNew regression test compares every batch position with the same text\nscored alone (none existed; the session-pool test compared batch to\nbatch). Toxicity must match to 1e-3; attribute heads to 0.1, because the\nraw quantized model itself moves one attribute head by up to 0.078 for a\npadded row (measured with python onnxruntime on the same file).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "cc9508385efc0ca41ebd8579be0e735e1b42d8d4",
     "short_hash": "cc95083",
     "author": "Bryan Guffey",

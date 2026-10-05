@@ -99,6 +99,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #358 — a hostile REPLY now blocks the Stage-1 early exit. Stage 1 scored
+  replies with ONNX and then left them out of the clean-pass gate, so an
+  account with 15 benign off-topic originals and plainly hostile replies
+  exited Terminal "Low" and its replies never reached the classifier — the
+  reply harassment Charcoal exists to catch. Any reply scoring at or above
+  the 0.10 clean threshold now vetoes the exit (option (a), chosen by the
+  maintainer). The "at least 5 first-person posts" guard still counts
+  originals and quotes only, so friendly replies cannot clear it by volume.
+  Remaining gaps, by decision: a reply hostile only in context ("Exactly."
+  under a cruel post) still scores clean on its own, and replies dropped by
+  the language gate (#222) are never scored (#232). Measured cost on 515 real
+  accounts: about 6% more posts reach the classifier. Ships with #400 under
+  the same scoring-revision change.
 - #400 — batched toxicity scores were wrong for every post after the first.
   The Detoxify model returns 16 logits per post (7 toxicity heads, then 9
   identity heads), but `score_batch` stepped through them 7 at a time, so row

@@ -11252,6 +11252,17 @@
       "created_at": "2026-10-04T20:22:18.800525-07:00",
       "updated_at": "2026-10-04T20:22:18.800525-07:00",
       "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"cc95083\",\"confidence\":90,\"files\":[\"src/toxicity/onnx.rs\",\"tests/regression_onnx_batch_stride.rs\"]}"
+    },
+    {
+      "id": 1033,
+      "change_id": "59e4163a-bbf5-4cda-bbca-7b60a8935355",
+      "node_type": "outcome",
+      "title": "#400 fixed in 9bbc173: stride from output buffer; ONNX_MODEL_ID -r2; batch-vs-solo test red->green; 568 affected tests pass, 0 SKIP",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:24:30.858845-07:00",
+      "updated_at": "2026-10-04T20:24:30.858845-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"9bbc173\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -23079,6 +23090,17 @@
       "weight": 1.0,
       "rationale": "#400 fix (scoring round)",
       "created_at": "2026-10-04T20:22:18.825018-07:00"
+    },
+    {
+      "id": 1086,
+      "from_node_id": 1032,
+      "to_node_id": 1033,
+      "from_change_id": "5df48ee6-a5d2-4206-98f0-652daffd7208",
+      "to_change_id": "59e4163a-bbf5-4cda-bbca-7b60a8935355",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-10-04T20:24:30.878990-07:00"
     }
   ],
   "documents": [

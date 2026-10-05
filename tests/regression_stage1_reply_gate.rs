@@ -1,23 +1,22 @@
-//! #358 phase 1 — evidence, not a fix.
+//! #358 — the Stage-1 reply veto.
 //!
-//! Stage 1 (`stage1_outcome`) ONNX-scores originals, replies AND quotes, but the
-//! clean-pass gate that authorizes the early exit only looks at originals and
-//! quotes. So an account that posts 15+ benign, off-topic originals and is
-//! hostile only in its REPLIES exits as Terminal "Low" and its replies never
-//! reach the Stage-2 classifier. Replies are one of the two harassment vectors
-//! Charcoal exists to catch, so whether that shortcut is acceptable is a policy
-//! decision for the maintainer — these tests only pin what the code does TODAY.
+//! Stage 1 (`stage1_outcome`) ONNX-scores originals, replies AND quotes. The
+//! clean-pass gate that authorizes the early exit used to look only at
+//! originals and quotes, so an account that posts 15+ benign, off-topic
+//! originals and is hostile only in its REPLIES exited as Terminal "Low" and
+//! its replies never reached the Stage-2 classifier.
 //!
-//! Every fixture is driven through the real `stage1_outcome` (no
-//! reimplementation of the gate). Tests whose name starts with
-//! `current_false_negative_` document the bug: they PASS because the code is
-//! wrong, and they are expected to flip (and be rewritten) if option (a) or (b)
-//! from #358 is adopted.
+//! The maintainer chose option (a) (2026-10-05): any reply scoring at or above
+//! `ONNX_CLEAN_THRESHOLD` vetoes the early exit (`replies_all_clean`). Every
+//! fixture is driven through the real `stage1_outcome` (no reimplementation
+//! of the gate). Tests whose name starts with `current_false_negative_` pin
+//! the gaps that REMAIN by decision — they pass because those cases still
+//! exit Low, and should be rewritten if option (b) or a language fix lands.
 //!
-//! The three options from #358 are also evaluated per fixture, but those are
-//! HYPOTHETICAL predicates defined in this file (`option_a_would_exit`,
-//! `option_b_would_exit`) — they are not production code and exist only to make
-//! the "what would each option do" table reproducible:
+//! The three options from #358 are still evaluated per fixture as predicates
+//! defined in this file (`option_a`, `option_b`), so the "what would each
+//! option do" table stays reproducible. Since (a) is now production
+//! behaviour, the table asserts `current == (a)` on every row:
 //!
 //! - (a) any assessable reply with ONNX >= ONNX_CLEAN_THRESHOLD blocks the exit
 //! - (b) an account whose Stage-1 sample has >= `OPTION_B_MIN_REPLIES`
@@ -428,7 +427,7 @@ fn row<'a>(rows: &'a [Row], prefix: &str) -> &'a Row {
 /// The expected table, shared by the scripted and real-ONNX layers so the two
 /// must agree. Columns: current, (a), (b).
 const EXPECTED: [(&str, Gate, Gate, Gate); 7] = [
-    ("F1", Gate::ExitLow, Gate::Proceed, Gate::Proceed),
+    ("F1", Gate::Proceed, Gate::Proceed, Gate::Proceed),
     ("F2", Gate::ExitLow, Gate::ExitLow, Gate::Proceed),
     ("F3", Gate::ExitLow, Gate::ExitLow, Gate::Proceed),
     ("F4", Gate::ExitLow, Gate::ExitLow, Gate::ExitLow),
@@ -445,6 +444,8 @@ const EXPECTED: [(&str, Gate, Gate, Gate); 7] = [
 fn assert_table(rows: &[Row]) {
     for (prefix, cur, a, b) in EXPECTED {
         let r = row(rows, prefix);
+        // Option (a) IS production behaviour now.
+        assert_eq!(r.current, r.a, "{}: current must equal option (a)", r.name);
         assert_eq!(r.current, cur, "{}: current behaviour", r.name);
         assert_eq!(r.a, a, "{}: option (a)", r.name);
         assert_eq!(r.b, b, "{}: option (b)", r.name);
@@ -455,16 +456,17 @@ fn assert_table(rows: &[Row]) {
 // Layer 1 — deterministic (always runs)
 // ============================================================
 
-/// THE BUG. Six replies that a solo ONNX pass scores as hostile (0.9 here) are
-/// computed in Stage 1 and then thrown away by the gate: the account exits
-/// Terminal "Low" with threat 0.0 and none of those replies reaches Stage 2.
+/// THE FIX. Six replies that a solo ONNX pass scores as hostile (0.9 here)
+/// used to be computed in Stage 1 and then thrown away by the gate, so the
+/// account exited Terminal "Low" with threat 0.0. They now veto the exit and
+/// the account proceeds to Stage 2, where its replies meet the classifier.
 #[tokio::test]
-async fn current_false_negative_hostile_replies_exit_low() {
+async fn hostile_replies_block_the_early_exit() {
     let scorer = ScriptedScorer::new();
     let s = sample(&BENIGN_ORIGINALS, en_replies(&HOSTILE_REPLIES));
 
     // Precondition: the replies really are scored hostile by the same scorer
-    // the gate uses — otherwise "exit Low" would be correct, not a bug.
+    // the gate uses — otherwise "exit Low" would be correct.
     let reply_scores = assessable_reply_scores(&s, &scorer).await;
     assert_eq!(reply_scores.len(), HOSTILE_REPLIES.len());
     assert!(reply_scores.iter().all(|&x| x >= ONNX_CLEAN_THRESHOLD));
@@ -481,22 +483,29 @@ async fn current_false_negative_hostile_replies_exit_low() {
     .await
     .unwrap();
     match outcome {
-        Stage1Outcome::Terminal(score) => {
-            assert_eq!(score.threat_tier.as_deref(), Some("Low"));
-            assert_eq!(score.threat_score, Some(0.0));
-            assert_eq!(score.toxicity_score, Some(0.0));
-            assert_eq!(score.scoring_confidence.as_deref(), Some("low"));
-            assert!(score.top_toxic_posts.is_empty(), "no evidence recorded");
-        }
-        Stage1Outcome::Proceed { .. } => panic!(
-            "#358 appears FIXED: hostile replies now block the Stage-1 early exit. \
-             Rewrite this test to assert Proceed."
+        Stage1Outcome::Proceed { .. } => {}
+        Stage1Outcome::Terminal(score) => panic!(
+            "#358 regressed: hostile replies no longer block the Stage-1 early exit \
+             (exited {:?} with threat {:?})",
+            score.threat_tier, score.threat_score
         ),
     }
 }
 
-/// Control for the test above: the SAME scores on an original (instead of a
-/// reply) do block the exit. The asymmetry is the bug.
+/// The reply veto must not loosen the first-person guard. Only originals and
+/// quotes count towards `MIN_FIRST_PERSON_POSTS_FOR_EARLY_EXIT`: 3 benign
+/// originals + 15 benign replies is a `Degraded` fingerprint (so quality does
+/// not block it) with only 3 first-person posts, and must NOT early-exit.
+/// Feeding reply scores into that count would let it exit on volume.
+#[tokio::test]
+async fn friendly_replies_do_not_count_towards_the_first_person_guard() {
+    let replies: Vec<&str> = BENIGN_REPLIES.iter().cycle().take(15).copied().collect();
+    let s = sample(&BENIGN_ORIGINALS[..3], en_replies(&replies));
+    assert_ne!(current(&s, &ScriptedScorer::new()).await, Gate::ExitLow);
+}
+
+/// Control: the SAME scores on an original (instead of a reply) block the
+/// exit too — originals and replies are now treated alike.
 #[tokio::test]
 async fn control_hostile_original_blocks_early_exit() {
     let mut originals = BENIGN_ORIGINALS.to_vec();
@@ -505,8 +514,10 @@ async fn control_hostile_original_blocks_early_exit() {
     assert_eq!(current(&s, &ScriptedScorer::new()).await, Gate::Proceed);
 }
 
-/// Second false-negative class, which NO solo-score fix can catch: replies
-/// whose hostility is in the parent. Today they exit Low; option (a) would too.
+/// Remaining gap, by decision: replies whose hostility is in the parent score
+/// clean on their own, so option (a) cannot see them and they still exit Low.
+/// Only option (b) — sending reply-heavy accounts to Stage 2 regardless —
+/// would catch them.
 #[tokio::test]
 async fn current_false_negative_context_dependent_replies_exit_low() {
     let s = sample(&BENIGN_ORIGINALS, en_replies(&CONTEXT_DEPENDENT_REPLIES));
@@ -549,34 +560,9 @@ fn model_dir() -> Option<PathBuf> {
     charcoal::toxicity::download::model_files_present(&base).then_some(base)
 }
 
-/// Wraps the real model so every text is scored in its OWN forward pass.
-///
-/// Why: on the dev machine (macOS arm64) `OnnxToxicityScorer::score_batch`
-/// only scores ROW 0 of a batch correctly — "I hope you die, you stupid bitch"
-/// scores 0.999 alone and 0.003 at batch index 3. That is a separate, serious
-/// bug (filed alongside #358; see the #358 comment). Stage 1 batches every
-/// account's posts, so through the raw scorer the "current" column would be
-/// measuring the batch bug, not the reply gate, and would differ by platform.
-/// Scoring solo isolates the question #358 asks: what does the gate do with
-/// CORRECT real-model scores?
-struct SoloScorer(charcoal::toxicity::onnx::OnnxToxicityScorer);
-
-#[async_trait]
-impl ToxicityScorer for SoloScorer {
-    async fn score_text(&self, text: &str) -> Result<ToxicityResult> {
-        self.0.score_text(text).await
-    }
-    async fn score_batch(&self, texts: &[String]) -> Result<Vec<ToxicityResult>> {
-        let mut out = Vec::with_capacity(texts.len());
-        for t in texts {
-            out.push(self.0.score_text(t).await?);
-        }
-        Ok(out)
-    }
-}
-
-/// Same table through the real model (scored one text per forward pass, see
-/// `SoloScorer`). This is what makes the scripted scores honest: the real
+/// Same table through the real model, batched exactly as production scores
+/// it (#400 made batched scores trustworthy). This is what makes the scripted
+/// scores honest: the real
 /// model must score the solo-hostile replies >= 0.10 (else option (a) would
 /// catch nothing) and the benign / context-dependent replies < 0.10 (else they
 /// would not be a clean-looking false negative).
@@ -586,10 +572,8 @@ async fn real_onnx_fixture_table_matches_scripted() {
         eprintln!("SKIP: real_onnx_fixture_table — toxicity model not present; THIS TEST ASSERTED NOTHING");
         return;
     };
-    let scorer = SoloScorer(
-        charcoal::toxicity::onnx::OnnxToxicityScorer::load(&dir)
-            .expect("toxicity model should load when files are present"),
-    );
+    let scorer = charcoal::toxicity::onnx::OnnxToxicityScorer::load(&dir)
+        .expect("toxicity model should load when files are present");
 
     let rows = evaluate(&scorer).await;
     assert_table(&rows);
