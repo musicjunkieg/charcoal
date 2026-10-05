@@ -497,7 +497,18 @@ impl RunPodCopeBClient {
             if !http.is_success() {
                 bail!("RunPod /status HTTP {http} for {job_id}");
             }
-            let body = resp.text().await?;
+            // The headers arrived but the body can still fail mid-transfer —
+            // the same transient network failure as a failed send, so the same
+            // treatment (CodeRabbit, PR #140; cf. the XRPC client, #183).
+            let body = match resp.text().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(ClassifierTransientError::new(format!(
+                        "read RunPod status body for {job_id}: {e}"
+                    ))
+                    .into())
+                }
+            };
             let latency_ms: u32 = start.elapsed().as_millis().try_into().unwrap_or(u32::MAX);
             match Self::parse_batch_job(&body, latency_ms)? {
                 BatchJobOutcome::Completed(v) => return Ok(v),
