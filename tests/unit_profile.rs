@@ -899,3 +899,160 @@ async fn empty_vec_centroids_degrade_same_as_none() {
     let legacy = score.overlap_legacy.unwrap();
     assert!((overlap - legacy).abs() < 1e-9);
 }
+
+// ============================================================
+// #370: a Low-confidence score can never loop the nightly refresh.
+//
+// The claim in #370 was: a Low-confidence row is valid 3 days, the refresh
+// horizon is 2 days, so a re-scored Low row is due again the very next night,
+// forever. The arithmetic is right, but the refresh only picks rows at
+// High/Elevated (`threat_score >= ThreatTier::ELEVATED_MIN`), and the ONLY
+// writer of `scoring_confidence = "low"` is the Stage-1 early exit, which
+// always writes `threat_score = 0.0`. (Stage 2 used to stamp "low" on
+// near-tier-boundary scores; that went away in 5cae0e5, 2026-04-27, before
+// the refresh existed.) These tests pin both halves so a future change that
+// lets a Low-confidence score reach Elevated fails loudly here.
+// ============================================================
+
+#[cfg(feature = "web")]
+mod issue_370 {
+    use super::*;
+    use charcoal::db::models::{ScoringConfidence, ThreatTier};
+    use charcoal::db::queries::{list_refresh_candidates, upsert_account_score};
+    use charcoal::db::schema::create_tables;
+    use charcoal::web::refresh_scan::REFRESH_HORIZON_DAYS;
+    use rusqlite::Connection;
+
+    const USER: &str = "did:plc:protected370";
+
+    /// The real early-exit score for a clean, topically irrelevant account —
+    /// produced by `stage1_outcome`, not hand-built, so it is exactly what
+    /// the scan and the refresh would write.
+    async fn early_exit_score() -> charcoal::db::models::AccountScore {
+        let originals = (0..15)
+            .map(|i| {
+                post(
+                    &format!("at://a/{i}"),
+                    &format!("watered the tomato plants and baked bread, day {i}"),
+                )
+            })
+            .collect();
+        let sample = PostSample {
+            originals,
+            replies: vec![],
+            quotes: vec![],
+            reply_ratio: 0.0,
+            quote_ratio: 0.0,
+            total_posts: 15,
+        };
+        let outcome = stage1_outcome(
+            &sample,
+            &FixedScorer(0.0),
+            "clean370.bsky.social",
+            "did:plc:clean370",
+            &unrelated_fingerprint(),
+            &ThreatWeights::default(),
+            None,
+        )
+        .await
+        .expect("stage1_outcome should not error");
+        match outcome {
+            Stage1Outcome::Terminal(score) => *score,
+            Stage1Outcome::Proceed { .. } => panic!("expected the Stage-1 early exit"),
+        }
+    }
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn
+    }
+
+    /// Candidates as the refresh would see them `days_later` days after the
+    /// write. Looking `days_later` further ahead now is the same window the
+    /// horizon covers on that later night (expiry is fixed at write time).
+    fn candidates_after(conn: &Connection, days_later: i64) -> Vec<String> {
+        list_refresh_candidates(conn, USER, REFRESH_HORIZON_DAYS + days_later)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.did)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn low_confidence_score_is_never_a_refresh_candidate() {
+        let score = early_exit_score().await;
+        assert_eq!(score.scoring_confidence.as_deref(), Some("low"));
+        assert!(
+            score.threat_score.unwrap() < ThreatTier::ELEVATED_MIN,
+            "a Low-confidence score reached the refresh floor: {:?}",
+            score.threat_score
+        );
+
+        let conn = db();
+        upsert_account_score(&conn, USER, &score).unwrap();
+        // Tonight, the night after its re-score, and long after it expired.
+        for days_later in [0, 1, 30] {
+            assert!(
+                candidates_after(&conn, days_later).is_empty(),
+                "Low-confidence row was a refresh candidate {days_later} day(s) after its write"
+            );
+        }
+    }
+
+    /// The counterfactual — proves the test above can fail. IF a
+    /// Low-confidence row ever carried an Elevated score, it would be due the
+    /// night after its re-score (3-day validity inside a 2-day horizon one
+    /// day on): the #370 loop. Only the scorer never writing that combination
+    /// keeps it from happening.
+    #[tokio::test]
+    async fn low_confidence_at_elevated_would_loop_nightly() {
+        let mut score = early_exit_score().await;
+        score.threat_score = Some(40.0);
+
+        let conn = db();
+        upsert_account_score(&conn, USER, &score).unwrap();
+        assert!(
+            candidates_after(&conn, 0).is_empty(),
+            "fresh 3-day row is not due tonight"
+        );
+        assert_eq!(
+            candidates_after(&conn, 1),
+            vec!["did:plc:clean370".to_string()],
+            "one night later it is due again — the loop #370 describes"
+        );
+    }
+
+    /// The confidences a full (Stage 2) score can carry — the only ones that
+    /// can reach Elevated — must outlive the horizon by more than one nightly
+    /// tick, or a freshly refreshed row is due again the next night.
+    #[test]
+    fn scoreable_confidences_outlive_horizon_plus_one_tick() {
+        for c in [ScoringConfidence::Standard, ScoringConfidence::High] {
+            assert!(
+                c.staleness_days() > REFRESH_HORIZON_DAYS + 1,
+                "{c:?} valid {}d would be refreshed nightly under a {}d horizon",
+                c.staleness_days(),
+                REFRESH_HORIZON_DAYS
+            );
+        }
+    }
+
+    /// Rows still get refreshed BEFORE they expire: a Standard row (7 days)
+    /// is due within the 2-day horizon of its expiry, not after.
+    #[tokio::test]
+    async fn elevated_row_is_refreshed_before_it_expires() {
+        let mut score = early_exit_score().await;
+        score.threat_score = Some(40.0);
+        score.scoring_confidence = Some("standard".to_string());
+
+        let conn = db();
+        upsert_account_score(&conn, USER, &score).unwrap();
+        assert!(candidates_after(&conn, 4).is_empty(), "not due 4 days in");
+        assert_eq!(
+            candidates_after(&conn, 5),
+            vec!["did:plc:clean370".to_string()],
+            "due 5 days in — 2 days before its 7-day expiry"
+        );
+    }
+}

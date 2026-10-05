@@ -11160,9 +11160,9 @@
       "node_type": "action",
       "title": "#236: stash the clean-pass-filtered sample so finalize and enqueued rows agree",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-04T19:45:17.588751-07:00",
-      "updated_at": "2026-10-04T19:45:17.588751-07:00",
+      "updated_at": "2026-10-04T19:48:51.967002-07:00",
       "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"commit\":\"eb99fe2\",\"confidence\":85,\"files\":[\"src/pipeline/scan_phases/gather.rs\",\"tests/unit_scan_phases.rs\"]}"
     },
     {
@@ -11186,6 +11186,28 @@
       "created_at": "2026-10-04T19:48:25.064650-07:00",
       "updated_at": "2026-10-04T19:48:25.064650-07:00",
       "metadata_json": "{\"branch\":\"fix/370-low-confidence-refresh-loop\",\"commit\":\"1021366\",\"confidence\":90}"
+    },
+    {
+      "id": 1027,
+      "change_id": "4fa1042f-9807-4aaf-8a4c-d132ddc03aef",
+      "node_type": "outcome",
+      "title": "#236 fixed: blob sample filtered to scoreable posts; e2e + strengthened tests persist a score (both failed first); pushed 9b163ca",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-04T19:48:48.056273-07:00",
+      "updated_at": "2026-10-04T19:48:51.975132-07:00",
+      "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"commit\":\"9b163ca\",\"confidence\":90}"
+    },
+    {
+      "id": 1028,
+      "change_id": "23aac0b3-cf5a-4e16-8928-40852c5cebd5",
+      "node_type": "outcome",
+      "title": "Merged #136 (#236 unscoreable post fix) and #137 (#370 regression tests) to staging; both 8/8 checks + CodeRabbit APPROVED with zero comments",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:56:19.044121-07:00",
+      "updated_at": "2026-10-04T19:56:19.044121-07:00",
+      "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -22936,6 +22958,39 @@
       "weight": 1.0,
       "rationale": "#370 lane of the parallel round",
       "created_at": "2026-10-04T19:46:06.386308-07:00"
+    },
+    {
+      "id": 1079,
+      "from_node_id": 1025,
+      "to_node_id": 1026,
+      "from_change_id": "737b28a9-eb0f-4ea4-9548-4aa6e40f1367",
+      "to_change_id": "1d9f11ff-397d-4558-a419-bf16b75d45fd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "verification result",
+      "created_at": "2026-10-04T19:48:26.442624-07:00"
+    },
+    {
+      "id": 1080,
+      "from_node_id": 1024,
+      "to_node_id": 1027,
+      "from_change_id": "1d70d3e7-6964-42a3-8762-85b0ed48db24",
+      "to_change_id": "4fa1042f-9807-4aaf-8a4c-d132ddc03aef",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of #236 fix",
+      "created_at": "2026-10-04T19:48:51.959095-07:00"
+    },
+    {
+      "id": 1081,
+      "from_node_id": 1022,
+      "to_node_id": 1028,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "23aac0b3-cf5a-4e16-8928-40852c5cebd5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "lane B + C merged",
+      "created_at": "2026-10-04T19:56:19.071728-07:00"
     }
   ],
   "documents": [

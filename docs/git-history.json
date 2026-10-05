@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9b163caa464e9c52d4e160ae6d6ac50ea8ac6582",
+    "short_hash": "9b163ca",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T19:48:25-07:00",
+    "message": "fix(236): stash the scoreable sample so one bad post cannot cost the account\n\nPhase A drops any post the ONNX clean pass cannot score (#221) but stashed\nthe unfiltered sample in the AccountInput blob. Finalize walks the blob,\nfound no queue row for the dropped post and returned NeedsRegather; the\nre-gather dropped the same post again and the account was skipped.\n\nPhase A now filters the unscoreable posts out of the stashed sample too,\nrecomputing ratios the way partition_assessable does, so blob and rows\nagree. Filtering the sample (not relaxing finalize) keeps score_from_sample\npositional alignment intact and keeps finalize strict about missing or\nforeign evidence (#344 R03/V2-01). No-op when nothing was dropped, so\naccounts that already scored are unchanged.\n\nTests: a new run_phased_scan test with a poisoned original, reply and quote\nasserts a persisted score on the first finalize (no regather, not\ndegraded); the existing gather test now finalizes and asserts a score.\nBoth failed before the fix.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "1021366dd48886da966b9db66214e33e4ead6d1c",
     "short_hash": "1021366",
     "author": "Bryan Guffey",
