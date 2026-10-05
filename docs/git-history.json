@@ -1,5 +1,21 @@
 [
   {
+    "hash": "cc9508385efc0ca41ebd8579be0e735e1b42d8d4",
+    "short_hash": "cc95083",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:21:49-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into fix/358-reply-gate",
+    "files_changed": 0
+  },
+  {
+    "hash": "3c218d68658a7cc4fab31c64f167a2cf1607dd95",
+    "short_hash": "3c218d6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:00:48-07:00",
+    "message": "chore(358): add read-only probe measuring the cost of each reply-gate option\n\nFetches real Stage-1 samples from the public API, runs the real\nstage1_outcome with local ONNX, and counts Stage-2 survivors (RunPod\nrows) each option would add. No paid services, no DB writes, prints\naggregates only.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "9b163caa464e9c52d4e160ae6d6ac50ea8ac6582",
     "short_hash": "9b163ca",
     "author": "Bryan Guffey",
