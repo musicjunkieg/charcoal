@@ -1,5 +1,21 @@
 [
   {
+    "hash": "1021366dd48886da966b9db66214e33e4ead6d1c",
+    "short_hash": "1021366",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T19:47:55-07:00",
+    "message": "test(370): pin that a Low-confidence score never loops the nightly refresh\n\n#370 claimed Low-confidence High/Elevated rows are re-scored every night\nforever (3-day validity inside a 2-day refresh horizon). The arithmetic\nholds, but the combination cannot occur: the only writer of\nscoring_confidence \"low\" is the Stage-1 early exit, which always writes\nthreat_score 0.0, below the refresh floor (ELEVATED_MIN = 15). Stage 2\nstamps only \"standard\" (7d) or \"high\" (14d). The old near-tier-boundary\n\"low\" stamp from Stage 2 was removed in 5cae0e5 (2026-04-27), months\nbefore the refresh shipped.\n\nThese tests pin that, so any change letting a Low-confidence score reach\nElevated fails here (verified by mutating the early-exit score to 40.0):\nthe real early-exit score is never a candidate tonight, the next night,\nor 30 days on; a counterfactual Low row at 40.0 WOULD loop nightly; the\nscoreable confidences outlive horizon + one tick; and an Elevated row is\nstill picked up before it expires. No production code change.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "eb99fe2770328d50c62b443b279e48423bdb3489",
+    "short_hash": "eb99fe2",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T17:42:43-07:00",
+    "message": "Merge pull request #135 from musicjunkieg/fix/133-ranked-hides-gone\n\nfix(398): a gone account leaves the ranked threat list at once",
+    "files_changed": 0
+  },
+  {
     "hash": "dfb655a0c9ae84760372590710cbb40d36d244cf",
     "short_hash": "dfb655a",
     "author": "Bryan Guffey",

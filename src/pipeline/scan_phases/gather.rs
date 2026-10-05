@@ -18,7 +18,7 @@
 // Phase B (the "burst"). This is what lets the scan batch all classifier calls
 // into one phase and stay inside the cost ceiling.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -441,10 +441,12 @@ pub async fn gather_account(
 
     let total_posts = rows.len();
     let mut scored_rows = Vec::with_capacity(total_posts);
+    let mut unscoreable_uris: HashSet<String> = HashSet::new();
     for (mut row, onnx_score) in rows.into_iter().zip(onnx_scores) {
         // An unscoreable post is DROPPED rather than given a fallback score:
         // any sentinel would be wrong somewhere (see `clean_pass_isolated`).
         let Some(onnx_score) = onnx_score else {
+            unscoreable_uris.insert(row.post_uri);
             continue;
         };
         row.onnx_score = onnx_score;
@@ -478,6 +480,25 @@ pub async fn gather_account(
              no toxicity signal available for this account"
         );
     }
+
+    // #236: the blob's sample must list exactly the posts that have a queue
+    // row. Finalize walks `blob.sample` and asks for each post's verdict row;
+    // a post dropped above has no row, so an unfiltered sample made finalize
+    // report NeedsRegather. The re-gather dropped the same post again (it is
+    // unscoreable every time) and the account was skipped — one bad post still
+    // cost the whole account, just one phase later than #221 fixed.
+    //
+    // Filtering the SAMPLE (rather than teaching finalize to skip missing rows)
+    // is deliberate: `score_from_sample` slices verdicts by position
+    // (originals ++ replies ++ quotes), so the sample and the verdict list must
+    // have the same posts in the same order; and finalize's "missing row ⇒
+    // NeedsRegather" rule is what catches genuinely lost or foreign evidence
+    // (#344 R03/V2-01), so it stays strict. Filtering here also keeps the
+    // precomputed target embedding below and the behavioral ratios computed
+    // over the same posts Phase C scores — the same treatment #222 gives
+    // unassessable-language posts. A no-op when nothing was dropped, so
+    // accounts that already scored are unaffected.
+    let sample = retain_scoreable(sample, &unscoreable_uris);
 
     // Precompute the target mean embedding HERE (#213), where it overlaps the
     // account's network I/O, instead of in the serial Phase-C finalize loop
@@ -561,6 +582,47 @@ fn survivor_row(
         confidence: None,
         model_id: None,
         policy_version: None,
+    }
+}
+
+/// Remove the posts the clean pass could not score from `sample`, so the
+/// stashed blob lists exactly the posts that were enqueued (#236).
+///
+/// Ratios and `total_posts` are recomputed over the kept posts, using the same
+/// formula as `partition_assessable` (which already produced this sample), so
+/// behavioral signals describe the posts that are actually scored. Returns the
+/// sample untouched when nothing was dropped.
+fn retain_scoreable(sample: PostSample, unscoreable: &HashSet<String>) -> PostSample {
+    if unscoreable.is_empty() {
+        return sample;
+    }
+    let keep = |uri: &str| !unscoreable.contains(uri);
+    let originals: Vec<_> = sample
+        .originals
+        .into_iter()
+        .filter(|p| keep(&p.uri))
+        .collect();
+    let replies: Vec<_> = sample
+        .replies
+        .into_iter()
+        .filter(|r| keep(&r.post.uri))
+        .collect();
+    let quotes: Vec<_> = sample.quotes.into_iter().filter(|p| keep(&p.uri)).collect();
+    let total_posts = originals.len() + replies.len() + quotes.len();
+    let ratio = |n: usize| {
+        if total_posts > 0 {
+            n as f64 / total_posts as f64
+        } else {
+            0.0
+        }
+    };
+    PostSample {
+        reply_ratio: ratio(replies.len()),
+        quote_ratio: ratio(quotes.len()),
+        originals,
+        replies,
+        quotes,
+        total_posts,
     }
 }
 
