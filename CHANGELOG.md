@@ -99,6 +99,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #350 — one repost-heavy account no longer holds a scan's gather open for
+  minutes. Reading an account's posts skipped reposts and posts under 15
+  characters but still paid a page for them, and only stopped once it had 50
+  usable posts or reached the end of the feed. An account that mostly reposts
+  or posts images was read back to its first post: on staging, rgesteve took
+  1,070 pages and 243 s, davedawn 856 pages and 187 s for zero usable posts,
+  while every other gather slot sat idle. The read now asks for 100 items a
+  page (the API maximum, was 50) and stops after 10 pages, about 1,000 items.
+  What it found by then is kept like any other feed: it is cached for 24 h,
+  so a re-scan costs nothing, and it is not a scan skip, so it cannot pull the
+  next refresh forward to one hour (#394). With fewer than 5 usable posts the
+  account ends as "Insufficient Data". The trade-off, chosen by the
+  maintainer: a heavy reposter whose only originals are years old is no
+  longer scored on those old posts. A normal account finds its 50 posts in
+  1-3 pages and is unaffected. The protected user's own feed read had the
+  same unbounded loop and is now capped at 50 pages, which still leaves room
+  for the 500-post topic fingerprint. A capped read logs one line naming the
+  account, pages read, items seen and posts kept. Part of #359.
 - #358 — a hostile REPLY now blocks the Stage-1 early exit. Stage 1 scored
   replies with ONNX and then left them out of the clean-pass gate, so an
   account with 15 benign off-topic originals and plainly hostile replies

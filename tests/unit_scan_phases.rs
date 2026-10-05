@@ -883,6 +883,55 @@ mod gather_tests {
             .is_none());
     }
 
+    // ── #350: a feed walk that hit the page cap with ZERO usable posts ──
+    //
+    // A repost-only account (davedawn: 40,861 items, every one a repost) now
+    // comes back from the capped feed read as an empty Ok sample. It must end
+    // as a normal "Insufficient Data" row — gather returns Ok, so it is never
+    // recorded as a scan skip (which would shorten the refresh to 1 h, #394).
+    #[tokio::test]
+    async fn gather_empty_capped_feed_is_insufficient_data_not_an_error() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let fetcher = CannedFetcher {
+            sample: PostSample {
+                originals: vec![],
+                replies: vec![],
+                quotes: vec![],
+                reply_ratio: 0.0,
+                quote_ratio: 0.0,
+                total_posts: 0,
+            },
+            parents: HashMap::new(),
+        };
+
+        gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &FixedScorer(0.0),
+            &FixedCleanPass(0.0),
+            &inputs(&fp, &weights),
+        )
+        .await
+        .expect("an empty feed is a scored outcome, not a gather error");
+
+        let score = db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("the Insufficient Data row is persisted");
+        assert_eq!(score.threat_score, None);
+        assert_eq!(score.posts_analyzed, 0);
+        assert!(db
+            .fetch_account_input(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
     // ── Early-exit (clean + topically irrelevant, >=5 first-person) → Low ──
     //
     // 15 originals (not 6): FingerprintQuality::from_counts needs >= 15

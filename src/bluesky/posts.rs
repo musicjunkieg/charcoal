@@ -5,6 +5,7 @@
 // accounts' posting history (toxicity scoring).
 
 use anyhow::{Context, Result};
+use atrium_api::app::bsky::feed::defs::FeedViewPost;
 use atrium_api::app::bsky::feed::{get_author_feed, get_posts};
 use atrium_api::types::TryFromUnknown;
 use serde::{Deserialize, Serialize};
@@ -169,6 +170,108 @@ impl FingerprintQuality {
     }
 }
 
+/// Items asked for per `getAuthorFeed` page. 100 is the API maximum (#350).
+///
+/// This used to be tied to how many posts the caller wanted (50 for a scan),
+/// but reposts and posts under 15 characters are skipped AFTER they are paid
+/// for, so the number wanted says little about how many items must be read.
+/// Asking for the maximum halves the round trips on a deep walk, and costs a
+/// normal account nothing (it simply finishes on an earlier page).
+pub const FEED_PAGE_LIMIT: usize = 100;
+
+/// Most `getAuthorFeed` pages read for one scanned account (#350): 10 pages,
+/// about 1,000 feed items, a few seconds at the ~0.2 s a page we measured.
+///
+/// Without a cap the walk stopped only when it had enough usable posts or the
+/// feed ended. An account that mostly reposts, or posts only images with
+/// short captions, never gets enough, so it was read back to its first post.
+/// Measured on staging (2026-10-03): rgesteve 1,070 pages / 243 s (all but 75
+/// of 50,805 items were reposts), davedawn 856 pages / 187 s (zero usable
+/// posts), superposition 365 pages / 72 s (image posts). One such account
+/// held the whole gather open for minutes while every other slot sat idle.
+///
+/// A normal account needs 1-3 pages, so 10 leaves wide headroom. An account
+/// that has not produced its posts within ~1,000 items is scored on what was
+/// found — usually too few, so it lands as "Insufficient Data". The accepted
+/// trade-off: a heavy reposter whose only originals are years old is no
+/// longer scored on those old posts.
+pub const MAX_FEED_PAGES: usize = 10;
+
+/// Page cap for the PROTECTED user's own feed (`fetch_recent_posts`): 50
+/// pages, about 5,000 items. Larger than [`MAX_FEED_PAGES`] because the topic
+/// fingerprint asks for 500 posts, which needs at least 5 pages even when
+/// every item is usable. It is one read per scan, not one per candidate, so
+/// it cannot cause a gather tail — but it must still end (#350).
+pub const MAX_PROTECTED_FEED_PAGES: usize = 50;
+
+/// What a bounded feed walk did, for the "cap reached" log line.
+struct FeedWalk {
+    pages: usize,
+    items_seen: usize,
+    /// True when the walk stopped because it hit the page cap, with more
+    /// feed still available.
+    capped: bool,
+}
+
+/// Read an author's feed page by page, at most `max_pages` pages.
+///
+/// `on_page` gets each page's items and returns `true` once the caller has
+/// collected enough — the walk then stops. The walk also stops when the feed
+/// ends (no cursor, or an empty page) or after `max_pages` pages. Hitting the
+/// cap is NOT an error: the caller keeps what it collected, so the result is
+/// cached and scored like any other feed, and is never recorded as a scan
+/// skip (a skip would pull the next refresh forward to one hour — #394).
+async fn walk_author_feed<F>(
+    client: &PublicAtpClient,
+    handle: &str,
+    filter: &str,
+    max_pages: usize,
+    mut on_page: F,
+) -> Result<FeedWalk>
+where
+    F: FnMut(&[FeedViewPost]) -> bool,
+{
+    let page_size = FEED_PAGE_LIMIT.to_string();
+    let mut cursor: Option<String> = None;
+    let mut walk = FeedWalk {
+        pages: 0,
+        items_seen: 0,
+        capped: false,
+    };
+
+    loop {
+        let mut params: Vec<(&str, &str)> =
+            vec![("actor", handle), ("filter", filter), ("limit", &page_size)];
+        if let Some(ref c) = cursor {
+            params.push(("cursor", c));
+        }
+
+        let output: get_author_feed::Output = client
+            .xrpc_get("app.bsky.feed.getAuthorFeed", &params)
+            .await
+            .with_context(|| format!("Failed to fetch feed for @{}", handle))?;
+
+        walk.pages += 1;
+        walk.items_seen += output.feed.len();
+        let enough = on_page(&output.feed);
+
+        if enough {
+            break;
+        }
+        cursor = output.data.cursor.clone();
+        if cursor.is_none() || output.feed.is_empty() {
+            break;
+        }
+        if walk.pages >= max_pages {
+            // More feed exists, but we stop here — see MAX_FEED_PAGES.
+            walk.capped = true;
+            break;
+        }
+    }
+
+    Ok(walk)
+}
+
 /// Fetch recent posts for a given account, handling pagination automatically.
 ///
 /// `max_posts` controls how many posts to collect (the API returns up to 100 per
@@ -180,98 +283,82 @@ pub async fn fetch_recent_posts(
     max_posts: usize,
 ) -> Result<Vec<Post>> {
     let mut posts = Vec::new();
-    let mut cursor: Option<String> = None;
 
-    // How many to request per page (API max is 100).
-    let page_size = max_posts.min(100).to_string();
+    let walk = walk_author_feed(
+        client,
+        handle,
+        "posts_no_replies",
+        MAX_PROTECTED_FEED_PAGES,
+        |page| {
+            for feed_item in page {
+                // Skip reposts — we only want posts authored by this account.
+                // Reposts show up with a `reason` of ReasonRepost.
+                if feed_item.reason.is_some() {
+                    continue;
+                }
 
-    loop {
-        let mut params: Vec<(&str, &str)> = vec![
-            ("actor", handle),
-            ("filter", "posts_no_replies"),
-            ("limit", &page_size),
-        ];
-        if let Some(ref c) = cursor {
-            params.push(("cursor", c));
-        }
+                let post_view = &feed_item.post;
 
-        let output: get_author_feed::Output = client
-            .xrpc_get("app.bsky.feed.getAuthorFeed", &params)
-            .await
-            .with_context(|| format!("Failed to fetch feed for @{}", handle))?;
-
-        for feed_item in &output.feed {
-            // Skip reposts — we only want posts authored by this account.
-            // Reposts show up with a `reason` of ReasonRepost.
-            if feed_item.reason.is_some() {
-                continue;
-            }
-
-            let post_view = &feed_item.post;
-
-            // Decode the record once to get both text and declared languages.
-            let record = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
-                post_view.record.clone(),
-            )
-            .ok();
-            let text = record
-                .as_ref()
-                .map(|r| sanitize_post_text(&r.data.text))
-                .unwrap_or_default();
-            let langs = record.as_ref().map(extract_langs).unwrap_or_default();
-
-            // Skip empty posts and very short posts (likely just links/images).
-            // Use char count, not byte length — a 5-char emoji sequence can be 20 bytes.
-            if text.chars().count() < 15 {
-                continue;
-            }
-
-            // Detect quote-posts by checking the embed type.
-            // Quote-posts embed another post via AppBskyEmbedRecordView or
-            // AppBskyEmbedRecordWithMediaView (quote + image/video).
-            let is_quote = post_view.embed.as_ref().is_some_and(|embed| {
-                use atrium_api::types::Union;
-                matches!(
-                    embed,
-                    Union::Refs(
-                        atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordView(_)
-                            | atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(_)
-                    )
+                // Decode the record once to get both text and declared languages.
+                let record = atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+                    post_view.record.clone(),
                 )
-            });
+                .ok();
+                let text = record
+                    .as_ref()
+                    .map(|r| sanitize_post_text(&r.data.text))
+                    .unwrap_or_default();
+                let langs = record.as_ref().map(extract_langs).unwrap_or_default();
 
-            posts.push(Post {
-                uri: post_view.uri.clone(),
-                text,
-                created_at: Some(post_view.indexed_at.as_ref().to_string()),
-                like_count: post_view.like_count.unwrap_or(0),
-                repost_count: post_view.repost_count.unwrap_or(0),
-                quote_count: post_view.quote_count.unwrap_or(0),
-                is_quote,
-                langs,
-            });
+                // Skip empty posts and very short posts (likely just links/images).
+                // Use char count, not byte length — a 5-char emoji sequence can be 20 bytes.
+                if text.chars().count() < 15 {
+                    continue;
+                }
 
-            if posts.len() >= max_posts {
-                break;
+                // Detect quote-posts by checking the embed type.
+                // Quote-posts embed another post via AppBskyEmbedRecordView or
+                // AppBskyEmbedRecordWithMediaView (quote + image/video).
+                let is_quote = post_view.embed.as_ref().is_some_and(|embed| {
+                    use atrium_api::types::Union;
+                    matches!(
+                        embed,
+                        Union::Refs(
+                            atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordView(_)
+                                | atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(_)
+                        )
+                    )
+                });
+
+                posts.push(Post {
+                    uri: post_view.uri.clone(),
+                    text,
+                    created_at: Some(post_view.indexed_at.as_ref().to_string()),
+                    like_count: post_view.like_count.unwrap_or(0),
+                    repost_count: post_view.repost_count.unwrap_or(0),
+                    quote_count: post_view.quote_count.unwrap_or(0),
+                    is_quote,
+                    langs,
+                });
+
+                if posts.len() >= max_posts {
+                    break;
+                }
             }
-        }
+            posts.len() >= max_posts
+        },
+    )
+    .await?;
 
-        debug!(
-            page_posts = output.feed.len(),
-            total_collected = posts.len(),
-            "Fetched page of posts for @{}",
-            handle
+    if walk.capped {
+        info!(
+            handle,
+            pages = walk.pages,
+            items_seen = walk.items_seen,
+            kept = posts.len(),
+            wanted = max_posts,
+            "Feed page cap reached; using the posts found so far"
         );
-
-        // Stop if we have enough posts or there are no more pages
-        if posts.len() >= max_posts {
-            break;
-        }
-
-        cursor = output.data.cursor.clone();
-        if cursor.is_none() || output.feed.is_empty() {
-            break;
-        }
     }
 
     info!(
@@ -286,123 +373,124 @@ pub async fn fetch_recent_posts(
 /// Fetch up to `max_posts` authored posts (reposts skipped) in feed order,
 /// each tagged with its [`FeedKind`]. This is the network half of
 /// [`fetch_posts_with_replies`]; [`sample_from_feed`] is the pure half.
+///
+/// Reads at most [`MAX_FEED_PAGES`] pages, so it may return FEWER than
+/// `max_posts` — even zero — for an account whose feed is mostly reposts or
+/// very short posts. That is still `Ok`: the caller caches and scores it like
+/// any other feed (too few posts ends as "Insufficient Data").
 pub async fn collect_feed_posts(
     client: &PublicAtpClient,
     handle: &str,
     max_posts: usize,
 ) -> Result<Vec<FeedPost>> {
     let mut feed_posts: Vec<FeedPost> = Vec::new();
-    let mut cursor: Option<String> = None;
 
-    // How many to request per page (API max is 100).
-    let page_size = max_posts.min(100).to_string();
-
-    loop {
-        let mut params: Vec<(&str, &str)> = vec![
-            ("actor", handle),
-            ("filter", "posts_with_replies"),
-            ("limit", &page_size),
-        ];
-        if let Some(ref c) = cursor {
-            params.push(("cursor", c));
-        }
-
-        let output: get_author_feed::Output = client
-            .xrpc_get("app.bsky.feed.getAuthorFeed", &params)
-            .await
-            .with_context(|| format!("Failed to fetch feed for @{}", handle))?;
-
-        for feed_item in &output.feed {
-            // Skip reposts — we only want posts authored by this account.
-            if feed_item.reason.is_some() {
-                continue;
-            }
-
-            let post_view = &feed_item.post;
-
-            // Decode the record to get the post text and reply reference.
-            let record = match atrium_api::app::bsky::feed::post::Record::try_from_unknown(
-                post_view.record.clone(),
-            ) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-
-            let text = sanitize_post_text(&record.data.text);
-            let langs = extract_langs(&record);
-
-            // Skip empty posts and very short posts (likely just links/images).
-            if text.chars().count() < 15 {
-                continue;
-            }
-
-            // Detect quote-posts by checking the embed type.
-            let is_quote = post_view.embed.as_ref().is_some_and(|embed| {
-                use atrium_api::types::Union;
-                matches!(
-                    embed,
-                    Union::Refs(
-                        atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordView(_)
-                            | atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(_)
-                    )
-                )
-            });
-
-            let post = Post {
-                uri: post_view.uri.clone(),
-                text,
-                created_at: Some(post_view.indexed_at.as_ref().to_string()),
-                like_count: post_view.like_count.unwrap_or(0),
-                repost_count: post_view.repost_count.unwrap_or(0),
-                quote_count: post_view.quote_count.unwrap_or(0),
-                is_quote,
-                langs,
-            };
-
-            // Classify: reply takes priority over quote (reply context is more
-            // important for NLI pair scoring than the quote relationship).
-            let kind = if feed_item.reply.is_some() {
-                let parent_uri = record
-                    .data
-                    .reply
-                    .as_ref()
-                    .map(|r| r.parent.uri.clone())
-                    .unwrap_or_default();
-                if parent_uri.is_empty() {
-                    // Edge case: feed says it's a reply but no parent URI in
-                    // record. Treat as original.
-                    FeedKind::Original
-                } else {
-                    FeedKind::Reply { parent_uri }
+    let walk = walk_author_feed(
+        client,
+        handle,
+        "posts_with_replies",
+        MAX_FEED_PAGES,
+        |page| {
+            for feed_item in page {
+                // Skip reposts — we only want posts authored by this account.
+                if feed_item.reason.is_some() {
+                    continue;
                 }
-            } else if is_quote {
-                FeedKind::Quote
-            } else {
-                FeedKind::Original
-            };
 
-            feed_posts.push(FeedPost { post, kind });
+                let post_view = &feed_item.post;
 
-            if feed_posts.len() >= max_posts {
-                break;
+                // Decode the record to get the post text and reply reference.
+                let record = match atrium_api::app::bsky::feed::post::Record::try_from_unknown(
+                    post_view.record.clone(),
+                ) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+
+                let text = sanitize_post_text(&record.data.text);
+                let langs = extract_langs(&record);
+
+                // Skip empty posts and very short posts (likely just links/images).
+                if text.chars().count() < 15 {
+                    continue;
+                }
+
+                // Detect quote-posts by checking the embed type.
+                let is_quote = post_view.embed.as_ref().is_some_and(|embed| {
+                    use atrium_api::types::Union;
+                    matches!(
+                        embed,
+                        Union::Refs(
+                            atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordView(_)
+                                | atrium_api::app::bsky::feed::defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(_)
+                        )
+                    )
+                });
+
+                let post = Post {
+                    uri: post_view.uri.clone(),
+                    text,
+                    created_at: Some(post_view.indexed_at.as_ref().to_string()),
+                    like_count: post_view.like_count.unwrap_or(0),
+                    repost_count: post_view.repost_count.unwrap_or(0),
+                    quote_count: post_view.quote_count.unwrap_or(0),
+                    is_quote,
+                    langs,
+                };
+
+                // Classify: reply takes priority over quote (reply context is more
+                // important for NLI pair scoring than the quote relationship).
+                let kind = if feed_item.reply.is_some() {
+                    let parent_uri = record
+                        .data
+                        .reply
+                        .as_ref()
+                        .map(|r| r.parent.uri.clone())
+                        .unwrap_or_default();
+                    if parent_uri.is_empty() {
+                        // Edge case: feed says it's a reply but no parent URI in
+                        // record. Treat as original.
+                        FeedKind::Original
+                    } else {
+                        FeedKind::Reply { parent_uri }
+                    }
+                } else if is_quote {
+                    FeedKind::Quote
+                } else {
+                    FeedKind::Original
+                };
+
+                feed_posts.push(FeedPost { post, kind });
+
+                if feed_posts.len() >= max_posts {
+                    break;
+                }
             }
-        }
+            feed_posts.len() >= max_posts
+        },
+    )
+    .await?;
 
-        debug!(
-            page_posts = output.feed.len(),
-            total_collected = feed_posts.len(),
-            "Fetched page of posts (with replies) for @{}",
-            handle
+    // One line per capped walk (never per page — Railway drops logs above
+    // ~500/s), so the next straggler account is visible without re-walking
+    // feeds by hand. Handles are public; no post text is logged.
+    if walk.capped {
+        info!(
+            handle,
+            pages = walk.pages,
+            items_seen = walk.items_seen,
+            kept = feed_posts.len(),
+            wanted = max_posts,
+            "Feed page cap reached; using the posts found so far"
         );
-
-        if feed_posts.len() >= max_posts {
-            break;
-        }
-
-        cursor = output.data.cursor.clone();
-        if cursor.is_none() || output.feed.is_empty() {
-            break;
-        }
+    } else {
+        debug!(
+            handle,
+            pages = walk.pages,
+            items_seen = walk.items_seen,
+            kept = feed_posts.len(),
+            "Fetched feed (with replies)"
+        );
     }
 
     Ok(feed_posts)

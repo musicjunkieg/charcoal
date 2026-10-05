@@ -1,5 +1,13 @@
 [
   {
+    "hash": "14af0a8a4f66664a5984ede62f3513cb7c44fdc7",
+    "short_hash": "14af0a8",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:43:57-07:00",
+    "message": "Merge pull request #138 from musicjunkieg/fix/358-reply-gate\n\nfix(400,358): correct batched toxicity scores; hostile replies block the Stage-1 early exit",
+    "files_changed": 0
+  },
+  {
     "hash": "45f187890986f4c530f5be06e17a0121f179db50",
     "short_hash": "45f1878",
     "author": "Bryan Guffey",
