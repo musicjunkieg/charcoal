@@ -11197,6 +11197,17 @@
       "created_at": "2026-10-04T19:48:48.056273-07:00",
       "updated_at": "2026-10-04T19:48:51.975132-07:00",
       "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"commit\":\"9b163ca\",\"confidence\":90}"
+    },
+    {
+      "id": 1028,
+      "change_id": "23aac0b3-cf5a-4e16-8928-40852c5cebd5",
+      "node_type": "outcome",
+      "title": "Merged #136 (#236 unscoreable post fix) and #137 (#370 regression tests) to staging; both 8/8 checks + CodeRabbit APPROVED with zero comments",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:56:19.044121-07:00",
+      "updated_at": "2026-10-04T19:56:19.044121-07:00",
+      "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -22969,6 +22980,17 @@
       "weight": 1.0,
       "rationale": "Result of #236 fix",
       "created_at": "2026-10-04T19:48:51.959095-07:00"
+    },
+    {
+      "id": 1081,
+      "from_node_id": 1022,
+      "to_node_id": 1028,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "23aac0b3-cf5a-4e16-8928-40852c5cebd5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "lane B + C merged",
+      "created_at": "2026-10-04T19:56:19.071728-07:00"
     }
   ],
   "documents": [
