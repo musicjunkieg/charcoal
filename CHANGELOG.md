@@ -99,6 +99,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #358 — a hostile REPLY now blocks the Stage-1 early exit. Stage 1 scored
+  replies with ONNX and then left them out of the clean-pass gate, so an
+  account with 15 benign off-topic originals and plainly hostile replies
+  exited Terminal "Low" and its replies never reached the classifier — the
+  reply harassment Charcoal exists to catch. Any reply scoring at or above
+  the 0.10 clean threshold now vetoes the exit (option (a), chosen by the
+  maintainer). The "at least 5 first-person posts" guard still counts
+  originals and quotes only, so friendly replies cannot clear it by volume.
+  Remaining gaps, by decision: a reply hostile only in context ("Exactly."
+  under a cruel post) still scores clean on its own, and replies dropped by
+  the language gate (#222) are never scored (#232). Measured cost on 515 real
+  accounts: about 6% more posts reach the classifier. Ships with #400 under
+  the same scoring-revision change.
+- #400 — batched toxicity scores were wrong for every post after the first.
+  The Detoxify model returns 16 logits per post (7 toxicity heads, then 9
+  identity heads), but `score_batch` stepped through them 7 at a time, so row
+  0 was right and every later row was read out of its neighbours' logits.
+  Stage 1 and the Stage-2 clean pass both batch an account's posts, so a
+  hostile post anywhere but first could score as clean (one hostile sentence:
+  0.999 alone, 0.003 at batch position 3 — under the 0.10 clean threshold)
+  and either let the account exit Low or
+  keep the post from ever reaching the classifier. Live since the ONNX scorer
+  landed (7ebfc46, 2026-02-09). The row width now comes from the model's own
+  output. `ONNX_MODEL_ID` is bumped to `-r2`, which invalidates every cached
+  ONNX score and re-expires every stored score, since all were computed with
+  the bug. Expect more posts to reach the Stage-2 classifier afterwards: that
+  is the correct volume, not a regression. A new test compares every batch
+  position with the same text scored alone; none existed before.
 - #236 — one post the ONNX clean pass can never score no longer costs the
   whole account. #221 stopped such a post failing the batch, but Phase A
   still stashed the *unfiltered* sample in the account's blob while

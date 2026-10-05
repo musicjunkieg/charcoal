@@ -11208,6 +11208,72 @@
       "created_at": "2026-10-04T19:56:19.044121-07:00",
       "updated_at": "2026-10-04T19:56:19.044121-07:00",
       "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"confidence\":90}"
+    },
+    {
+      "id": 1029,
+      "change_id": "b86f3fce-a544-4f0c-acd8-4d0732882601",
+      "node_type": "outcome",
+      "title": "#358 phase 1: bug confirmed; fixtures pinned; measured (a) +6.1% / (b) +7.6% RunPod rows; found #400 toxicity batch bug",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:01:51.517520-07:00",
+      "updated_at": "2026-10-04T20:01:51.517520-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"3c218d6\",\"confidence\":85}"
+    },
+    {
+      "id": 1030,
+      "change_id": "c79bf21f-8df6-434e-9932-636bda0c9e1f",
+      "node_type": "observation",
+      "title": "#350 gather tail = unbounded getAuthorFeed pagination on repost-heavy/short-post feeds (rgesteve 1070 pages/243s, davedawn 856/187s); fix = page cap + limit=100 in collect_feed_posts",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:02:13.111489-07:00",
+      "updated_at": "2026-10-04T20:02:13.111489-07:00",
+      "metadata_json": "{\"branch\":\"investigate/350-gather-tail\",\"confidence\":70}"
+    },
+    {
+      "id": 1031,
+      "change_id": "585d1750-9a6c-407d-9c72-2cd6a93d7a58",
+      "node_type": "observation",
+      "title": "#400 root cause: score_batch reads 16-wide logits at stride 7 (onnx.rs offset i*LABEL_ORDER.len()); row 0 right, rest noise. Platform-independent, live since 7ebfc46. Python ORT repro on same model batches correctly. Fix needs ONNX_MODEL_ID bump (invalidates 6,258 prod cache rows + scoring revision)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:04:26.275949-07:00",
+      "updated_at": "2026-10-04T20:04:26.275949-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":95}"
+    },
+    {
+      "id": 1032,
+      "change_id": "5df48ee6-a5d2-4206-98f0-652daffd7208",
+      "node_type": "action",
+      "title": "#400: fix score_batch row stride (16-wide logits read at stride 7) + bump ONNX_MODEL_ID; TDD with batch-vs-solo equality test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:22:18.800525-07:00",
+      "updated_at": "2026-10-04T20:22:18.800525-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"cc95083\",\"confidence\":90,\"files\":[\"src/toxicity/onnx.rs\",\"tests/regression_onnx_batch_stride.rs\"]}"
+    },
+    {
+      "id": 1033,
+      "change_id": "59e4163a-bbf5-4cda-bbca-7b60a8935355",
+      "node_type": "outcome",
+      "title": "#400 fixed in 9bbc173: stride from output buffer; ONNX_MODEL_ID -r2; batch-vs-solo test red->green; 568 affected tests pass, 0 SKIP",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:24:30.858845-07:00",
+      "updated_at": "2026-10-04T20:24:30.858845-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"9bbc173\",\"confidence\":92}"
+    },
+    {
+      "id": 1034,
+      "change_id": "05c3bd07-f4b1-457a-b3ec-bac7e8313f27",
+      "node_type": "outcome",
+      "title": "#358 option (a) in 45f1878: reply veto (replies_all_clean) outside the first-person guard; mutation-checked; 534 tests pass, 0 SKIP, clippy clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:27:29.838393-07:00",
+      "updated_at": "2026-10-04T20:27:29.838393-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"45f1878\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -22991,6 +23057,72 @@
       "weight": 1.0,
       "rationale": "lane B + C merged",
       "created_at": "2026-10-04T19:56:19.071728-07:00"
+    },
+    {
+      "id": 1082,
+      "from_node_id": 1023,
+      "to_node_id": 1029,
+      "from_change_id": "f710b74a-6922-4442-83df-678a6d127a48",
+      "to_change_id": "b86f3fce-a544-4f0c-acd8-4d0732882601",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "phase 1 result",
+      "created_at": "2026-10-04T20:01:53.132850-07:00"
+    },
+    {
+      "id": 1083,
+      "from_node_id": 1022,
+      "to_node_id": 1029,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "b86f3fce-a544-4f0c-acd8-4d0732882601",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#358 lane outcome",
+      "created_at": "2026-10-04T20:01:53.140119-07:00"
+    },
+    {
+      "id": 1084,
+      "from_node_id": 1022,
+      "to_node_id": 1030,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "c79bf21f-8df6-434e-9932-636bda0c9e1f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#350 investigation finding: slow fetch path identified",
+      "created_at": "2026-10-04T20:02:14.791718-07:00"
+    },
+    {
+      "id": 1085,
+      "from_node_id": 1022,
+      "to_node_id": 1032,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "5df48ee6-a5d2-4206-98f0-652daffd7208",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#400 fix (scoring round)",
+      "created_at": "2026-10-04T20:22:18.825018-07:00"
+    },
+    {
+      "id": 1086,
+      "from_node_id": 1032,
+      "to_node_id": 1033,
+      "from_change_id": "5df48ee6-a5d2-4206-98f0-652daffd7208",
+      "to_change_id": "59e4163a-bbf5-4cda-bbca-7b60a8935355",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-10-04T20:24:30.878990-07:00"
+    },
+    {
+      "id": 1087,
+      "from_node_id": 1022,
+      "to_node_id": 1034,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "05c3bd07-f4b1-457a-b3ec-bac7e8313f27",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#358 shipped with #400",
+      "created_at": "2026-10-04T20:27:29.855339-07:00"
     }
   ],
   "documents": [

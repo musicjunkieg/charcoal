@@ -29,9 +29,15 @@ const MAX_SEQUENCE_LENGTH: usize = 512;
 use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
 
 /// Stable identity of the toxicity model for cache keys (#343 §4.1). Bump
-/// this string whenever the ONNX file or tokenizer changes, or cached
-/// `onnx_scores` rows from the old model will be served for the new one.
-pub const ONNX_MODEL_ID: &str = "detoxify-unbiased-toxic-roberta-quantized";
+/// this string whenever the ONNX file or tokenizer changes — or whenever the
+/// way its output is READ changes — or cached `onnx_scores` rows from the old
+/// behaviour will be served for the new one. It is also composed into
+/// `scoring_revision()`, so a bump re-expires every stored score too.
+///
+/// `-r2` (#400): `score_batch` read every row after the first at the wrong
+/// offset, so cached and stored scores from batched calls are wrong. The
+/// bump retires all of them in one move.
+pub const ONNX_MODEL_ID: &str = "detoxify-unbiased-toxic-roberta-quantized-r2";
 
 /// Env knob for the Phase 0 session experiment (#343 §6). Each extra session
 /// is another full model load (~126 MB), hence the small ceiling.
@@ -287,7 +293,9 @@ impl ToxicityScorer for OnnxToxicityScorer {
                     })
                     .context("ONNX inference failed")?;
 
-                // Output shape: [batch_size, 7] — raw logits (pre-sigmoid)
+                // Output shape: [batch_size, 16] — raw logits (pre-sigmoid).
+                // The Detoxify unbiased export has 16 heads: the 7 toxicity
+                // labels in LABEL_ORDER, then 9 identity heads we do not use.
                 let (_out_shape, data) = outputs[0]
                     .try_extract_tensor::<f32>()
                     .context("Failed to extract output tensor")?;
@@ -295,10 +303,30 @@ impl ToxicityScorer for OnnxToxicityScorer {
                 data.to_vec()
             };
 
-            // Convert logits to results: apply sigmoid and map to our attribute struct
+            // #400: each row is `row_width` logits wide, NOT LABEL_ORDER.len().
+            // Stepping 7 at a time through a 16-wide buffer read row 0
+            // correctly and every later row out of the middle of its
+            // neighbours' logits — so in a batch, a hostile post anywhere but
+            // first could score as clean. The width comes from the model's own
+            // output rather than a constant, so a re-exported model with a
+            // different head count cannot reintroduce this silently.
+            anyhow::ensure!(
+                batch_size > 0 && logits_data.len() % batch_size == 0,
+                "toxicity model returned {} logits for a batch of {batch_size}",
+                logits_data.len()
+            );
+            let row_width = logits_data.len() / batch_size;
+            anyhow::ensure!(
+                row_width >= LABEL_ORDER.len(),
+                "toxicity model returned {row_width} logits per row, expected at least {}",
+                LABEL_ORDER.len()
+            );
+
+            // Convert logits to results: apply sigmoid and map to our attribute struct.
+            // Only the first LABEL_ORDER.len() logits of each row are ours.
             let mut results = Vec::with_capacity(batch_size);
             for (i, text) in texts.iter().enumerate() {
-                let offset = i * LABEL_ORDER.len();
+                let offset = i * row_width;
                 let row = &logits_data[offset..offset + LABEL_ORDER.len()];
 
                 // Apply sigmoid to each logit to get 0-1 probability

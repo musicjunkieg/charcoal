@@ -1,5 +1,37 @@
 [
   {
+    "hash": "45f187890986f4c530f5be06e17a0121f179db50",
+    "short_hash": "45f1878",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:27:20-07:00",
+    "message": "fix(358): a hostile reply blocks the Stage-1 early exit\n\nStage 1 ONNX-scored originals, replies and quotes, then left replies out\nof the clean-pass gate. An account with 15 benign off-topic originals\nand plainly hostile replies therefore exited Terminal \"Low\" and its\nreplies never reached the classifier. The old comment claimed excluding\nreplies sent them to Stage 2; it did the opposite.\n\nOption (a), chosen by the maintainer: any reply scoring at or above\nONNX_CLEAN_THRESHOLD vetoes the exit (replies_all_clean). Reply scores\nare kept OUT of should_early_exit_stage1, so its \"at least 5\nfirst-person posts\" guard still counts originals and quotes only and\nfriendly replies cannot clear it by volume.\n\nKnown gaps, by decision: context-only hostility (\"Exactly.\" under a\ncruel post) still scores clean solo (option (b) not adopted); replies\ndropped by the #222 language gate are never scored (#232).\n\nTests: the fixture suite now asserts current == option (a) on every\nrow; hostile replies proceed; a new guard test pins that 3 originals +\n15 friendly replies cannot exit. Both mutation-checked: dropping the\nveto fails 2 tests, counting replies towards the guard fails 1. The\nreal-model layer now scores through the production batch path (#400).\n\nNo separate SCORING_GENERATION bump: ships with #400, whose\nONNX_MODEL_ID bump already changes scoring_revision().\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "9bbc1737f7049ce1834e34a664964cb5a393f972",
+    "short_hash": "9bbc173",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:24:17-07:00",
+    "message": "fix(400): read batched toxicity logits at the model's real row width\n\nThe Detoxify unbiased export returns logits[batch, 16]: the 7 toxicity\nheads Charcoal uses, then 9 identity heads. score_batch stepped through\nthe flat buffer 7 values per row, so row 0 was correct and every later\nrow was read out of its neighbours' logits. Stage 1 and the Stage-2\nclean pass both batch an account's posts, so a hostile post anywhere but\nfirst could score as clean. Live since 7ebfc46 (2026-02-09).\n\nThe row width now comes from the output buffer (len / batch), checked to\ndivide evenly and to hold at least the 7 labels we read.\n\nONNX_MODEL_ID -> \"...-quantized-r2\": it keys the shared onnx_scores cache\nand is composed into scoring_revision(), so the bump retires every cached\nscore and re-expires every stored score in one move.\n\nNew regression test compares every batch position with the same text\nscored alone (none existed; the session-pool test compared batch to\nbatch). Toxicity must match to 1e-3; attribute heads to 0.1, because the\nraw quantized model itself moves one attribute head by up to 0.078 for a\npadded row (measured with python onnxruntime on the same file).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "cc9508385efc0ca41ebd8579be0e735e1b42d8d4",
+    "short_hash": "cc95083",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:21:49-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into fix/358-reply-gate",
+    "files_changed": 0
+  },
+  {
+    "hash": "3c218d68658a7cc4fab31c64f167a2cf1607dd95",
+    "short_hash": "3c218d6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:00:48-07:00",
+    "message": "chore(358): add read-only probe measuring the cost of each reply-gate option\n\nFetches real Stage-1 samples from the public API, runs the real\nstage1_outcome with local ONNX, and counts Stage-2 survivors (RunPod\nrows) each option would add. No paid services, no DB writes, prints\naggregates only.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "9b163caa464e9c52d4e160ae6d6ac50ea8ac6582",
     "short_hash": "9b163ca",
     "author": "Bryan Guffey",
