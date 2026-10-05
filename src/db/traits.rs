@@ -597,6 +597,8 @@ pub trait Database: Send + Sync {
     async fn upsert_account_score(&self, user_did: &str, score: &AccountScore) -> Result<()>;
 
     /// Get all scored accounts above a minimum score for a user, ranked by threat score descending.
+    /// Only fresh rows, and never a row retired as gone (#394) — a deleted
+    /// account leaves the list at once even while its score is still fresh.
     async fn get_ranked_threats(&self, user_did: &str, min_score: f64)
         -> Result<Vec<AccountScore>>;
 

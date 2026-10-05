@@ -11065,6 +11065,17 @@
       "created_at": "2026-10-04T16:14:12.092990-07:00",
       "updated_at": "2026-10-04T16:14:12.092990-07:00",
       "metadata_json": "{\"branch\":\"fix/394-gone-accounts-gpu-leak\",\"confidence\":95}"
+    },
+    {
+      "id": 1016,
+      "change_id": "5b28eb28-ea69-4f1f-9024-aadc4edf0492",
+      "node_type": "action",
+      "title": "Fixed 3 CodeRabbit findings on #133 (count_expired excludes gone; _migrations guard URL parse; .env.example lazy-probe docs) - PR #134 to staging",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T16:42:40.198837-07:00",
+      "updated_at": "2026-10-04T16:42:40.198837-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-review-findings\",\"commit\":\"dfb655a\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -22771,6 +22782,17 @@
       "weight": 1.0,
       "rationale": "pre-merge backup",
       "created_at": "2026-10-04T16:14:12.105445-07:00"
+    },
+    {
+      "id": 1075,
+      "from_node_id": 1015,
+      "to_node_id": 1016,
+      "from_change_id": "b7aa4228-5225-4fe4-8ff6-e14c993f3bb2",
+      "to_change_id": "5b28eb28-ea69-4f1f-9024-aadc4edf0492",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review fixes before promotion",
+      "created_at": "2026-10-04T16:42:40.227232-07:00"
     }
   ],
   "documents": [

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "dfb655a0c9ae84760372590710cbb40d36d244cf",
+    "short_hash": "dfb655a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T16:25:32-07:00",
+    "message": "fix(397): CodeRabbit findings on promotion PR #133\n\n- count_expired excludes rows retired as gone (#394), in both backends.\n  The dashboard labels the count \"hidden until re-scored\", and the\n  refresh never re-scores a gone account, so it sat there forever.\n- The _migrations guard on the table-dropping Postgres fixture now strips\n  the query string and fragment before taking the last path segment.\n  \"postgres://h/charcoal?application_name=a/b_migrations\" used to pass as\n  \"b_migrations\". Extracted database_name_from_url so the guard is\n  testable without a database.\n- .env.example: the nightly refresh probes lazily before its first\n  classifier batch, not before it gathers (#394). CLI wording unchanged:\n  the CLI still builds its classifier without the cache and never probes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
     "hash": "c5a8d3f8d808e3b6b34c34c4fb8ad0342bf8adb7",
     "short_hash": "c5a8d3f",
     "author": "Bryan Guffey",

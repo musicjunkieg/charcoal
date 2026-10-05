@@ -5945,3 +5945,43 @@ fn migrations_guard_reads_the_database_name_from_the_path() {
         "charcoal_migrations"
     );
 }
+
+/// CodeRabbit (outside-diff, PR #133), Postgres twin: a gone row leaves the
+/// ranked threat list even while its score is still fresh.
+#[tokio::test]
+async fn test_pg_ranked_threats_exclude_gone_accounts() {
+    use sqlx_core::pool::Pool;
+    use sqlx_postgres::Postgres;
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    const OWNER: &str = "did:plc:pggone_ranked_owner";
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    let pool = Pool::<Postgres>::connect(&url).await.unwrap();
+    sqlx_core::query::query("DELETE FROM account_scores WHERE user_did = $1")
+        .bind(OWNER)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for did in ["did:plc:pgrank_alive", "did:plc:pgrank_gone"] {
+        let mut score = AccountScore::default_for_test(did);
+        score.threat_score = Some(40.0);
+        score.threat_tier = Some("High".to_string());
+        db.upsert_account_score(OWNER, &score).await.unwrap();
+    }
+    assert_eq!(db.get_ranked_threats(OWNER, 0.0).await.unwrap().len(), 2);
+
+    db.mark_account_gone(OWNER, "did:plc:pgrank_gone", "Profile not found")
+        .await
+        .unwrap();
+
+    let dids: Vec<String> = db
+        .get_ranked_threats(OWNER, 0.0)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|a| a.did)
+        .collect();
+    assert_eq!(dids, vec!["did:plc:pgrank_alive"]);
+}
