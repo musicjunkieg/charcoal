@@ -10,6 +10,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use charcoal::db::FinishCompletion;
 use charcoal::web::auth::{create_token, COOKIE_NAME};
 use charcoal::web::test_helpers::{build_admin_test_app_with_db, TEST_DID, TEST_SECRET};
 use serde_json::Value;
@@ -140,9 +141,14 @@ async fn failed_scans_report_their_error_and_leave_the_active_list() {
     assert_eq!(body["queue"]["running"], 1);
     assert_eq!(body["queue"]["active"].as_array().unwrap().len(), 1);
 
-    db.finish_queued_scan(OTHER_USER, &claim.claim_id, Some("gather exploded"))
-        .await
-        .unwrap();
+    db.finish_queued_scan(
+        OTHER_USER,
+        &claim.claim_id,
+        FinishCompletion::Failed,
+        Some("gather exploded"),
+    )
+    .await
+    .unwrap();
 
     let (_, body) = get_admin_users(&app).await;
     let row = user_row(&body, OTHER_USER);

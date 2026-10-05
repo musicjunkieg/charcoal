@@ -223,33 +223,33 @@
 </div>
 
 <style>
-	.page { max-width: 56rem; margin: 0 auto; padding: 2rem 1rem; }
-	.back-link { font-size: 0.875rem; color: var(--charcoal-500); text-decoration: none; }
-	.header { margin: 1rem 0 1.5rem; }
-	.headline { font-family: 'Outfit', system-ui, sans-serif; font-size: 1.25rem; margin: 0; }
-	.meta { font-size: 0.8125rem; color: var(--charcoal-500); margin: 0.25rem 0 0.75rem; }
-	.controls { display: flex; gap: 0.5rem; }
-	.controls button { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
+	.page { max-width: 56rem; margin: 0 auto; padding: var(--space-32) var(--space-16); }
+	.back-link { font-size: var(--text-small); color: var(--charcoal-500); text-decoration: none; }
+	.header { margin: var(--space-16) 0 var(--space-24); }
+	.headline { font-family: 'Outfit', system-ui, sans-serif; font-size: var(--text-title); margin: 0; }
+	.meta { font-size: var(--text-label); color: var(--charcoal-500); margin: var(--space-4) 0 var(--space-12); }
+	.controls { display: flex; gap: var(--space-8); }
+	.controls button { padding: var(--space-6) var(--space-12); font: inherit; font-size: var(--text-label); border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: var(--radius-8); background: transparent; color: var(--charcoal-400); cursor: pointer; }
 	.controls button:disabled, .link:disabled { opacity: 0.5; cursor: not-allowed; }
-	.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 1.25rem; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgb(var(--status-ok-rgb) / 0.3); background: rgb(var(--status-ok-rgb) / 0.06); font-size: 0.875rem; }
+	.banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-12); margin: 0 0 var(--space-20); padding: var(--space-12) var(--space-16); border-radius: var(--radius-8); border: 1px solid rgb(var(--status-ok-rgb) / 0.3); background: rgb(var(--status-ok-rgb) / 0.06); font-size: var(--text-small); }
 	.banner[data-tone='error'] { border-color: rgb(var(--status-error-rgb) / 0.3); background: rgb(var(--status-error-rgb) / 0.06); }
 	.banner-text strong { font-weight: 500; }
 	.banner-detail { color: var(--charcoal-400); }
-	.banner-actions { display: flex; align-items: center; gap: 0.5rem; }
-	.banner-actions button { padding: 0.375rem 0.75rem; font: inherit; font-size: 0.8125rem; border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: 8px; background: transparent; color: var(--charcoal-400); cursor: pointer; }
+	.banner-actions { display: flex; align-items: center; gap: var(--space-8); }
+	.banner-actions button { padding: var(--space-6) var(--space-12); font: inherit; font-size: var(--text-label); border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); border-radius: var(--radius-8); background: transparent; color: var(--charcoal-400); cursor: pointer; }
 	.banner-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-	.banner-back { font-size: 0.8125rem; color: var(--copper); text-decoration: none; }
+	.banner-back { font-size: var(--text-label); color: var(--copper); text-decoration: none; }
 	.banner-back:hover { text-decoration: underline; }
-	.link { background: none; border: 0; padding: 0; color: var(--charcoal-400); text-decoration: underline; cursor: pointer; font: inherit; font-size: 0.8125rem; }
-	.rows { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-	.rows th { text-align: left; font-weight: 500; color: var(--charcoal-500); padding: 0.5rem 0.75rem; border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); }
-	.rows td { padding: 0.5rem 0.75rem; border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.08); vertical-align: top; }
+	.link { background: none; border: 0; padding: 0; color: var(--charcoal-400); text-decoration: underline; cursor: pointer; font: inherit; font-size: var(--text-label); }
+	.rows { width: 100%; border-collapse: collapse; font-size: var(--text-small); }
+	.rows th { text-align: left; font-weight: 500; color: var(--charcoal-500); padding: var(--space-8) var(--space-12); border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.15); }
+	.rows td { padding: var(--space-8) var(--space-12); border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.08); vertical-align: top; }
 	.rows a { color: inherit; }
-	.did { font-family: ui-monospace, monospace; font-size: 0.75rem; color: var(--charcoal-500); }
-	.note { display: block; font-size: 0.75rem; color: var(--charcoal-500); }
-	.error { color: var(--status-error); font-size: 0.875rem; }
-	.not-found { padding: 3rem 0; text-align: center; color: var(--charcoal-500); }
-	.loading-state { display: flex; justify-content: center; padding: 4rem 0; }
-	.spinner { width: 1.5rem; height: 1.5rem; border: 2px solid rgb(var(--charcoal-400-rgb) / 0.2); border-top-color: var(--charcoal-400); border-radius: 50%; animation: spin 0.8s linear infinite; }
+	.did { font-family: ui-monospace, monospace; font-size: var(--text-caption); color: var(--charcoal-500); }
+	.note { display: block; font-size: var(--text-caption); color: var(--charcoal-500); }
+	.error { color: var(--status-error); font-size: var(--text-small); }
+	.not-found { padding: var(--space-48) 0; text-align: center; color: var(--charcoal-500); }
+	.loading-state { display: flex; justify-content: center; padding: var(--space-64) 0; }
+	.spinner { width: 1.5rem; height: 1.5rem; border: 2px solid rgb(var(--charcoal-400-rgb) / 0.2); border-top-color: var(--charcoal-400); border-radius: var(--radius-circle); animation: spin 0.8s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 </style>

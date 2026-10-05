@@ -20,8 +20,15 @@ export type DashboardView = 'welcome' | 'all-clear' | 'results';
 export function dashboardView(status: ScanStatus): DashboardView {
 	// tier_counts.total excludes not_assessed (NULL-scored) accounts — a scan
 	// whose entire population came back not_assessed still has real results
-	// to show, not "nothing to worry about" (#222).
-	if (status.scan_running || status.tier_counts.total > 0 || status.tier_counts.not_assessed > 0) {
+	// to show, not "nothing to worry about" (#222). Expired rows are results
+	// too (#344) — the grid explains why they're hidden rather than the page
+	// claiming there's nothing to show.
+	if (
+		status.scan_running ||
+		status.tier_counts.total > 0 ||
+		status.tier_counts.not_assessed > 0 ||
+		status.tier_counts.expired > 0
+	) {
 		return 'results';
 	}
 	return status.started_at ? 'all-clear' : 'welcome';

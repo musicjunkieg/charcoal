@@ -5,6 +5,7 @@
 // pipeline — auth is only needed for write operations (blocking/muting),
 // which is a future feature.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -66,6 +67,91 @@ impl XrpcAttemptError {
     }
 }
 
+/// A non-success HTTP status from an XRPC call, kept typed so callers can ask
+/// *why* without string-matching an `anyhow` chain (#394).
+///
+/// The `Display` text is exactly the string this used to be built as, so logs
+/// and `scan_skips.error` rows read the same as before.
+#[derive(Debug, thiserror::Error)]
+#[error("XRPC {nsid} returned {status_line}: {body}")]
+pub struct XrpcStatusError {
+    pub nsid: String,
+    pub status: u16,
+    /// The XRPC error body's `error` field (e.g. `InvalidRequest`), if the body
+    /// was the standard `{"error", "message"}` JSON.
+    pub error: Option<String>,
+    /// The body's `message` field, likewise.
+    pub message: Option<String>,
+    status_line: String,
+    body: String,
+}
+
+impl XrpcStatusError {
+    pub fn new(nsid: &str, status: reqwest::StatusCode, body: String) -> Self {
+        #[derive(Deserialize)]
+        struct XrpcErrorBody {
+            error: Option<String>,
+            message: Option<String>,
+        }
+        // A body that is not the standard shape is still a failure — it just
+        // carries no code to reason about.
+        let parsed = serde_json::from_str::<XrpcErrorBody>(&body).ok();
+        Self {
+            nsid: nsid.to_string(),
+            status: status.as_u16(),
+            error: parsed.as_ref().and_then(|b| b.error.clone()),
+            message: parsed.and_then(|b| b.message),
+            status_line: status.to_string(),
+            body,
+        }
+    }
+}
+
+/// XRPC error codes that mean "this account no longer exists for us to read".
+/// From the AT Protocol lexicons (`com.atproto.sync.*`, the AppView's actor
+/// errors). Deliberately a short explicit list: anything not on it stays an
+/// ordinary, retryable-next-run skip.
+const ACCOUNT_GONE_CODES: &[&str] = &[
+    "AccountDeactivated",
+    "AccountTakedown",
+    "RepoNotFound",
+    "RepoDeactivated",
+    "RepoTakendown",
+    "RepoSuspended",
+];
+
+/// The AppView answers a deleted account's `getAuthorFeed` with the GENERIC
+/// code `InvalidRequest` — so for that code only the message identifies it.
+const ACCOUNT_GONE_MESSAGES: &[&str] = &["Profile not found"];
+
+/// If `err` says the account it was fetching is permanently gone — deleted,
+/// deactivated, suspended or taken down — return why (#394).
+///
+/// Only a **400** with a recognised code or message counts. A 5xx or a
+/// timeout is transient whatever its text; any other 400 is permanent but is
+/// not about the account (it is more likely our own malformed request), and
+/// treating it as "gone" would retire every account at once. An error with no
+/// typed status at all is never "gone": matching on bare text would be a guess.
+///
+/// Walks the whole `anyhow` chain, so context added by callers
+/// (`"Failed to fetch feed for @…"`) does not hide the status.
+pub fn account_gone_reason(err: &anyhow::Error) -> Option<&str> {
+    let x = err
+        .chain()
+        .find_map(|e| e.downcast_ref::<XrpcStatusError>())?;
+    if x.status != 400 {
+        return None;
+    }
+    if let Some(code) = x.error.as_deref() {
+        if ACCOUNT_GONE_CODES.contains(&code) {
+            return Some(code);
+        }
+    }
+    x.message
+        .as_deref()
+        .filter(|m| ACCOUNT_GONE_MESSAGES.contains(m))
+}
+
 /// Unauthenticated HTTP client for public AT Protocol XRPC endpoints.
 ///
 /// Modeled on the ConstellationClient pattern — a thin reqwest wrapper
@@ -74,6 +160,9 @@ impl XrpcAttemptError {
 pub struct PublicAtpClient {
     client: reqwest::Client,
     base_url: String,
+    /// Last `RateLimit-Limit` value the public API told us (#343 Phase 0).
+    /// 0 means "not observed yet" — the API never advertises a zero limit.
+    rate_limit_limit: AtomicU64,
 }
 
 impl PublicAtpClient {
@@ -98,7 +187,19 @@ impl PublicAtpClient {
         Ok(Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
+            rate_limit_limit: AtomicU64::new(0),
         })
+    }
+
+    /// The most recent `RateLimit-Limit` header seen on any response, if any.
+    /// Bluesky advertises its per-window request budget on every reply; we
+    /// record it so a scan can persist the number the spec asks for without
+    /// anyone reading Railway logs.
+    pub fn observed_rate_limit(&self) -> Option<u64> {
+        match self.rate_limit_limit.load(Ordering::Relaxed) {
+            0 => None,
+            n => Some(n),
+        }
     }
 
     /// Make a GET request to an XRPC endpoint and deserialize the response.
@@ -130,9 +231,19 @@ impl PublicAtpClient {
                 })?;
 
             let status = response.status();
+            // Headers are available before the body; read the limit even on
+            // a 429 so a throttled scan still reports the number.
+            if let Some(limit) = response
+                .headers()
+                .get("ratelimit-limit")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<u64>().ok())
+            {
+                self.rate_limit_limit.store(limit, Ordering::Relaxed);
+            }
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                let err = anyhow::anyhow!("XRPC {nsid} returned {status}: {body}");
+                let err = anyhow::Error::new(XrpcStatusError::new(nsid, status, body));
                 // 429 and 5xx recover on their own; every other 4xx is our bug.
                 return Err(if status.as_u16() == 429 || status.is_server_error() {
                     XrpcAttemptError::Transient(err)
@@ -394,5 +505,71 @@ mod retry_tests {
             .await
             .expect("a prompt response must not be cut short by the timeout");
         assert!(got.ok);
+    }
+
+    #[tokio::test]
+    async fn captures_ratelimit_limit_header() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("RateLimit-Limit", "3000")
+                    .set_body_json(serde_json::json!({"did": "did:plc:abc"})),
+            )
+            .mount(&server)
+            .await;
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+        assert_eq!(
+            client.observed_rate_limit(),
+            None,
+            "nothing observed before a call"
+        );
+
+        let _: serde_json::Value = client
+            .xrpc_get("app.bsky.actor.getProfile", &[("actor", "did:plc:abc")])
+            .await
+            .unwrap();
+
+        assert_eq!(client.observed_rate_limit(), Some(3000));
+    }
+
+    #[tokio::test]
+    async fn missing_ratelimit_header_stays_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"did": "x"})))
+            .mount(&server)
+            .await;
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+        let _: serde_json::Value = client
+            .xrpc_get("app.bsky.actor.getProfile", &[("actor", "x")])
+            .await
+            .unwrap();
+        assert_eq!(client.observed_rate_limit(), None);
+    }
+
+    #[tokio::test]
+    async fn malformed_ratelimit_header_stays_none_and_request_still_succeeds() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("RateLimit-Limit", "abc")
+                    .set_body_json(serde_json::json!({"did": "did:plc:abc"})),
+            )
+            .mount(&server)
+            .await;
+        let client = PublicAtpClient::new(&server.uri()).unwrap();
+
+        let got: serde_json::Value = client
+            .xrpc_get("app.bsky.actor.getProfile", &[("actor", "did:plc:abc")])
+            .await
+            .expect("an unparseable RateLimit-Limit header must not fail the request");
+
+        assert_eq!(got["did"], "did:plc:abc");
+        assert_eq!(client.observed_rate_limit(), None);
     }
 }

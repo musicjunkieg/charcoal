@@ -46,7 +46,7 @@
 		transform: translateX(-50%);
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--space-8);
 		width: min(28rem, calc(100vw - 2rem));
 		z-index: 60;
 		pointer-events: none;
@@ -61,14 +61,14 @@
 		pointer-events: auto;
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
-		padding: 0.625rem 0.75rem 0.625rem 0.875rem;
+		gap: var(--space-10);
+		padding: var(--space-10) var(--space-12) var(--space-10) var(--space-14);
 		background: var(--charcoal-800);
 		color: var(--cream-50);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
 		border-left: 3px solid var(--charcoal-500);
-		border-radius: 8px;
-		font-size: 0.8125rem;
+		border-radius: var(--radius-8);
+		font-size: var(--text-label);
 		box-shadow: 0 8px 24px -8px rgb(var(--charcoal-950-rgb) / 0.6);
 	}
 	.toast[data-tone='ok'] {
@@ -84,12 +84,12 @@
 	.action,
 	.link {
 		font: inherit;
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		font-weight: 500;
 		color: var(--copper);
 		background: none;
 		border: 0;
-		padding: 0.125rem 0.25rem;
+		padding: var(--space-2) var(--space-4);
 		cursor: pointer;
 		text-decoration: none;
 	}
@@ -105,12 +105,12 @@
 	}
 	.close {
 		font: inherit;
-		font-size: 1rem;
+		font-size: var(--text-body);
 		line-height: 1;
 		color: var(--charcoal-500);
 		background: none;
 		border: 0;
-		padding: 0 0.25rem;
+		padding: 0 var(--space-4);
 		cursor: pointer;
 	}
 	.close:hover {
@@ -122,7 +122,7 @@
 		flex: none;
 		border: 2px solid rgb(var(--charcoal-400-rgb) / 0.2);
 		border-top-color: var(--charcoal-400);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 	@keyframes spin {

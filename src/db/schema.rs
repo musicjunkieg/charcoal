@@ -11,6 +11,16 @@ use rusqlite::Connection;
 ///
 /// This is idempotent — safe to call on every startup.
 pub fn create_tables(conn: &Connection) -> Result<()> {
+    create_tables_through(conn, i64::MAX)
+}
+
+/// Apply migrations up to and including `max_version`. Test support for
+/// building an AUTHENTIC older-schema database (V2-07): a fixture made by
+/// dropping the newest columns from a current database is not the old
+/// schema (the other new columns are still there and the migration
+/// re-adding them fails on duplicates). Production always calls
+/// `create_tables`, which is `create_tables_through(conn, i64::MAX)`.
+pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> {
     conn.execute_batch(
         "
         -- Tracks schema version for future migrations
@@ -87,14 +97,14 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // Migration v2: add embedding_vector column to topic_fingerprint.
     // Stores the mean sentence embedding (384-dim, JSON array) for the
     // protected user's posts. Used for semantic topic overlap scoring.
-    run_migration(conn, 2, |c| {
+    run_migration(conn, 2, max_version, |c| {
         c.execute_batch("ALTER TABLE topic_fingerprint ADD COLUMN embedding_vector TEXT;")
     })?;
 
     // Migration v3: add behavioral_signals column to account_scores.
     // Stores a JSON object with quote_ratio, reply_ratio, avg_engagement,
     // pile_on, benign_gate, and behavioral_boost.
-    run_migration(conn, 3, |c| {
+    run_migration(conn, 3, max_version, |c| {
         c.execute_batch("ALTER TABLE account_scores ADD COLUMN behavioral_signals TEXT;")
     })?;
 
@@ -102,7 +112,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // `user_did` to topic_fingerprint, account_scores, amplification_events,
     // and scan_state. Tables with single-column primary keys are rebuilt
     // to use composite keys including user_did.
-    run_migration(conn, 4, |c| {
+    run_migration(conn, 4, max_version, |c| {
         // Wrap in explicit transaction — execute_batch does NOT auto-wrap,
         // so a failure mid-batch would leave a half-migrated schema.
         c.execute_batch(
@@ -214,7 +224,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // Migration v5: contextual scoring support. Adds new columns for NLI
     // pair scoring, a user_labels table for ground truth, and an
     // inferred_pairs table for topic-matched post pairs.
-    run_migration(conn, 5, |c| {
+    run_migration(conn, 5, max_version, |c| {
         c.execute_batch(
             "
             BEGIN;
@@ -262,13 +272,13 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // Migration v6: add graph_distance column to account_scores.
     // Stores the social graph relationship label (Mutual follow, Follows you,
     // You follow, Stranger) for scoring weight adjustments.
-    run_migration(conn, 6, |c| {
+    run_migration(conn, 6, max_version, |c| {
         c.execute_batch("ALTER TABLE account_scores ADD COLUMN graph_distance TEXT;")
     })?;
 
     // Migration v7: add last_login_at to users table.
     // Tracks when each user last authenticated via OAuth, used by admin dashboard.
-    run_migration(conn, 7, |c| {
+    run_migration(conn, 7, max_version, |c| {
         c.execute_batch("ALTER TABLE users ADD COLUMN last_login_at TEXT;")?;
         Ok(())
     })?;
@@ -277,7 +287,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // fingerprint_quality tracks whether the fingerprint was built from originals only
     // (normal), mixed (degraded), or insufficient data (unreliable).
     // scoring_confidence tracks the depth of analysis (low/standard/high).
-    run_migration(conn, 8, |c| {
+    run_migration(conn, 8, max_version, |c| {
         c.execute_batch(
             "
             ALTER TABLE account_scores ADD COLUMN fingerprint_quality TEXT;
@@ -298,7 +308,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     //   The phase marker (gather/burst/finalize/done) continues to live in
     //   scan_state as a key='scan_phase' row — this migration does NOT alter
     //   scan_state.
-    run_migration(conn, 9, |c| {
+    run_migration(conn, 9, max_version, |c| {
         c.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS classification_queue (
@@ -342,7 +352,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // updates rather than duplicates, so the count keeps meaning "accounts
     // missing from this scan". The same account failing at two different
     // phases is two distinct facts and gets two rows.
-    run_migration(conn, 10, |c| {
+    run_migration(conn, 10, max_version, |c| {
         c.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS scan_skips (
@@ -371,7 +381,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     //
     // claim_id is the fencing token; see migrations/postgres/0011_scan_queue.sql
     // for why it exists.
-    run_migration(conn, 11, |c| {
+    run_migration(conn, 11, max_version, |c| {
         c.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS scan_queue (
@@ -408,7 +418,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     //
     // On a fresh database v11 runs first and creates the column, so both probes
     // find it already present and v12 does nothing.
-    run_migration(conn, 12, |c| {
+    run_migration(conn, 12, max_version, |c| {
         let table_exists: bool = c.query_row(
             "SELECT COUNT(*) > 0 FROM sqlite_master
              WHERE type = 'table' AND name = 'scan_queue'",
@@ -436,7 +446,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // No FK on SQLite — topic_fingerprint was rebuilt via a rename in v4 and
     // rusqlite FK enforcement is off by default; deletes are handled
     // explicitly inside delete_user_data's transaction instead.
-    run_migration(conn, 13, |c| {
+    run_migration(conn, 13, max_version, |c| {
         c.execute_batch(
             "BEGIN;
              CREATE TABLE IF NOT EXISTS topic_clusters (
@@ -456,7 +466,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     // "revoked after having access"; the waitlist page never distinguishes.
     // Deliberately NOT touched by delete_user_data: this is the admin's
     // grant/deny record (DID + public handle), not user content.
-    run_migration(conn, 14, |c| {
+    run_migration(conn, 14, max_version, |c| {
         c.execute_batch(
             "BEGIN;
              CREATE TABLE IF NOT EXISTS access_requests (
@@ -479,7 +489,7 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
     //   still explain itself after later rescans move accounts between tiers.
     // Statuses are TEXT with CHECK constraints rather than enums so both
     // backends store identical strings.
-    run_migration(conn, 15, |c| {
+    run_migration(conn, 15, max_version, |c| {
         c.execute_batch(
             "BEGIN;
              CREATE TABLE IF NOT EXISTS oauth_sessions (
@@ -529,15 +539,163 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         )
     })?;
 
+    // v16 (#343 §4.1): the shared cache. None of these tables carry a
+    // user_did — a post's toxicity is a property of the post, so one user's
+    // scan can serve the next. Scores and verdicts are keyed by the SHA-256
+    // of the exact text the model saw (stage 1 scores raw text, the clean
+    // pass scores the parent+reply envelope, so post_uri is not a valid key)
+    // and store no readable text. delete_user_data does not touch them.
+    run_migration(conn, 16, max_version, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS account_feed_snapshots (
+                 did TEXT PRIMARY KEY,
+                 handle TEXT NOT NULL,
+                 posts_json TEXT NOT NULL,
+                 fetched_at TEXT NOT NULL,
+                 source TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS onnx_scores (
+                 text_sha256 TEXT NOT NULL,
+                 model_id TEXT NOT NULL,
+                 score REAL NOT NULL,
+                 scored_at TEXT NOT NULL,
+                 PRIMARY KEY (text_sha256, model_id)
+             );
+             CREATE TABLE IF NOT EXISTS classifier_verdicts (
+                 text_sha256 TEXT NOT NULL,
+                 model_id TEXT NOT NULL,
+                 policy_version TEXT NOT NULL,
+                 toxic_token INTEGER NOT NULL,
+                 confidence REAL NOT NULL,
+                 classified_at TEXT NOT NULL,
+                 PRIMARY KEY (text_sha256, model_id, policy_version)
+             );
+             COMMIT;",
+        )
+    })?;
+
+    // v17 (#343, PR #118 review): bound the v16 cache tables. Nothing else
+    // deletes from them, so without a retention sweep every distinct DID and
+    // every text hash a model or policy generation ever saw is permanent.
+    // `evict_stale_cache` filters on the timestamp columns; these indexes keep
+    // that sweep off a full table scan as the cache grows.
+    run_migration(conn, 17, max_version, |c| {
+        c.execute_batch(
+            "BEGIN;
+             CREATE INDEX IF NOT EXISTS idx_account_feed_snapshots_fetched_at
+                 ON account_feed_snapshots (fetched_at);
+             CREATE INDEX IF NOT EXISTS idx_onnx_scores_scored_at
+                 ON onnx_scores (scored_at);
+             CREATE INDEX IF NOT EXISTS idx_classifier_verdicts_classified_at
+                 ON classifier_verdicts (classified_at);
+             COMMIT;",
+        )
+    })?;
+
+    // v18 (#343 §4.4, #344): score expiry + refresh bookkeeping.
+    //
+    // account_scores: generation stamp + expiry. Existing rows become 'legacy'
+    // (never the current value, so they are hidden at once) with
+    // valid_until = scored_at + 14 d so the column is non-NULL for them; NULL
+    // stays allowed here because SQLite cannot add NOT NULL post hoc, and the
+    // fresh predicate reads NULL (and malformed text) as expired.
+    //
+    // users.refresh_attempted_generation / refreshed_generation are left
+    // NULL: the tick treats "has scores AND refresh_attempted_generation IS
+    // NOT the current revision" as due, which makes this deploy AND every
+    // later revision change refresh users promptly, once, without a one-off
+    // time stamp (R07, V2-03). refreshed_generation is the proof written
+    // only by a completed refresh or full scan.
+    //
+    // scan_queue.full_requested_at is backfilled for rows that are still in
+    // flight at deploy time. Every pre-v18 queued or running row IS a user's
+    // outstanding full-scan request, and `enqueued_at` is when they made it.
+    // Without this, an attempt interrupted across the deploy carries no
+    // obligation, so the tick never retries it as full work (R09/V3-03) and
+    // the user has to click again — the one case the whole rule exists to
+    // prevent. Finished rows are left NULL: nothing is owed on them.
+    //
+    // scan_state.last_full_scan_finished_at is backfilled from every done
+    // queue row — all pre-v18 rows were full scans — so the cooldown keeps
+    // its anchor once a refresh reuses the row (R13).
+    //
+    // topic_fingerprint.embedding_model_id: all-MiniLM-L6-v2 is the only
+    // embedding model Charcoal has ever run, so every stored vector is its.
+    //
+    // Index: (user_did, threat_score) serves the refresh-candidate query
+    // (user + score floor, small residual filter) and ranked reads. See
+    // Task 7 for the recorded plans.
+    run_migration(conn, 18, max_version, |c| {
+        c.execute_batch(
+            "BEGIN;
+             ALTER TABLE account_scores
+                 ADD COLUMN scoring_generation TEXT NOT NULL DEFAULT 'legacy';
+             ALTER TABLE account_scores ADD COLUMN valid_until TEXT;
+             UPDATE account_scores
+                 SET valid_until = datetime(scored_at, '+14 days')
+                 WHERE valid_until IS NULL;
+             CREATE INDEX IF NOT EXISTS idx_account_scores_user_score
+                 ON account_scores (user_did, threat_score);
+             ALTER TABLE scan_queue ADD COLUMN kind TEXT NOT NULL DEFAULT 'full';
+             ALTER TABLE scan_queue ADD COLUMN full_requested_at TEXT;
+             ALTER TABLE scan_queue ADD COLUMN completion TEXT;
+             -- kind = 'full' is belt and braces: the ALTER above defaults
+             -- every existing row to 'full', so on a first run this changes
+             -- nothing. It matters on a re-run against a database that already
+             -- has refresh rows, where an unqualified backfill would invent a
+             -- full-scan obligation for a nightly refresh nobody asked for.
+             UPDATE scan_queue SET full_requested_at = enqueued_at
+                 WHERE status IN ('queued', 'running') AND kind = 'full'
+                   AND full_requested_at IS NULL;
+             ALTER TABLE users ADD COLUMN next_refresh_at TEXT;
+             ALTER TABLE users ADD COLUMN refreshed_generation TEXT;
+             ALTER TABLE users ADD COLUMN refresh_attempted_generation TEXT;
+             ALTER TABLE topic_fingerprint ADD COLUMN embedding_model_id TEXT;
+             UPDATE topic_fingerprint
+                 SET embedding_model_id = 'all-MiniLM-L6-v2'
+                 WHERE embedding_vector IS NOT NULL AND embedding_model_id IS NULL;
+             INSERT OR IGNORE INTO scan_state (user_did, key, value)
+                 SELECT user_did, 'last_full_scan_finished_at', finished_at
+                 FROM scan_queue
+                 WHERE status = 'done' AND finished_at IS NOT NULL;
+             COMMIT;",
+        )
+    })?;
+
+    // v19 (#394): a deleted/deactivated account is retired from the refresh.
+    //
+    // gone_at / gone_reason are stamped when a feed fetch answers with a
+    // permanent "this account is gone" 400. The refresh-candidate query
+    // excludes stamped rows; without that, every refresh re-fetched them,
+    // failed, rescheduled itself an hour later, and woke the GPU each time.
+    // Both NULL for every existing row: nothing is known to be gone yet, and
+    // the first refresh after the deploy finds out. Scoring the account again
+    // clears both (it came back), so the stamp is reversible by construction.
+    run_migration(conn, 19, max_version, |c| {
+        c.execute_batch(
+            "BEGIN;
+             ALTER TABLE account_scores ADD COLUMN gone_at TEXT;
+             ALTER TABLE account_scores ADD COLUMN gone_reason TEXT;
+             COMMIT;",
+        )
+    })?;
+
     Ok(())
 }
 
-/// Run a migration if it hasn't been applied yet.
+/// Run a migration if it hasn't been applied yet and it is at or below
+/// `max_version` (test support for `create_tables_through` — production
+/// passes `i64::MAX`, so this is always true there).
 /// The migration function receives the connection and should execute its SQL.
-fn run_migration<F>(conn: &Connection, version: i64, migrate: F) -> Result<()>
+fn run_migration<F>(conn: &Connection, version: i64, max_version: i64, migrate: F) -> Result<()>
 where
     F: FnOnce(&Connection) -> rusqlite::Result<()>,
 {
+    if version > max_version {
+        return Ok(());
+    }
+
     let already_applied: bool = conn.query_row(
         "SELECT COUNT(*) > 0 FROM schema_version WHERE version = ?1",
         [version],
@@ -586,8 +744,9 @@ mod tests {
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
         // scan_skips, scan_queue, topic_clusters, access_requests,
-        // oauth_sessions, action_batches, actions = 17 tables (v15)
-        assert_eq!(count, 17i64);
+        // oauth_sessions, action_batches, actions, account_feed_snapshots,
+        // onnx_scores, classifier_verdicts = 20 tables (v16)
+        assert_eq!(count, 20i64);
     }
 
     #[test]
@@ -651,7 +810,7 @@ mod tests {
         create_tables(&conn).unwrap();
         create_tables(&conn).unwrap();
 
-        // Verify schema_version has all versions through v15
+        // Verify schema_version has all versions through v19
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -659,7 +818,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=15).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<i64>>());
     }
 
     #[test]
@@ -762,10 +921,11 @@ mod tests {
         // amplification_events, scan_state, users, user_labels,
         // inferred_pairs, classification_queue, scan_account_input,
         // scan_skips, scan_queue, topic_clusters, access_requests,
-        // oauth_sessions, action_batches, actions = 17 tables (v15)
-        assert_eq!(count, 17i64);
+        // oauth_sessions, action_batches, actions, account_feed_snapshots,
+        // onnx_scores, classifier_verdicts = 20 tables (v16)
+        assert_eq!(count, 20i64);
 
-        // Verify schema_version includes v4 through v15
+        // Verify schema_version includes v4 through v19
         let versions: Vec<i64> = conn
             .prepare("SELECT version FROM schema_version ORDER BY version")
             .unwrap()
@@ -773,7 +933,7 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(versions, (1..=15).collect::<Vec<i64>>());
+        assert_eq!(versions, (1..=19).collect::<Vec<i64>>());
     }
 
     /// Does `scan_queue` currently have a `claim_id` column?
@@ -893,7 +1053,12 @@ mod tests {
 
         // Every migration but v12 is already recorded, so v12 is the only one
         // that runs — against a database with no scan_queue table at all.
-        create_tables(&conn).unwrap();
+        // Scoped to v12 (not `create_tables`'s full run): v18 (#344) assumes
+        // scan_queue exists, which is true in every real database (v11
+        // always creates it first) but not in this fixture's deliberately
+        // adversarial state, so running past v12 here would fail for a
+        // reason unrelated to what this test checks.
+        create_tables_through(&conn, 12).unwrap();
 
         let table_exists: bool = conn
             .query_row(
@@ -936,5 +1101,339 @@ mod tests {
             [],
         );
         assert!(err.is_err(), "CHECK constraint must reject invalid status");
+    }
+
+    #[test]
+    fn test_migration_v16_creates_cache_tables_on_a_fresh_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO account_feed_snapshots (did, handle, posts_json, fetched_at, source)
+             VALUES ('did:plc:snap', 's.bsky.social', '[]', '2026-09-08T00:00:00Z', 'bluesky')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+             VALUES ('ab', 'm1', 0.42, '2026-09-08T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO classifier_verdicts
+                (text_sha256, model_id, policy_version, toxic_token, confidence, classified_at)
+             VALUES ('ab', 'cope-b', 'v3', 1, 0.9, '2026-09-08T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        // Composite primary keys reject duplicates.
+        assert!(conn
+            .execute(
+                "INSERT INTO onnx_scores (text_sha256, model_id, score, scored_at)
+                 VALUES ('ab', 'm1', 0.5, '2026-09-08T00:00:01Z')",
+                [],
+            )
+            .is_err());
+    }
+
+    /// Simulate a database that stopped at v15: drop the v16 tables and both
+    /// the v16 and v17 version rows, then re-run `create_tables` — both
+    /// migrations must apply. v17 has to go too: its indexes live on the v16
+    /// tables, so leaving 17 recorded would skip re-creating them (a real v15
+    /// database has neither row, so this is the faithful simulation).
+    #[test]
+    fn test_migration_v16_upgrades_a_v15_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute_batch(
+            "DROP TABLE account_feed_snapshots;
+             DROP TABLE onnx_scores;
+             DROP TABLE classifier_verdicts;
+             DELETE FROM schema_version WHERE version IN (16, 17);",
+        )
+        .unwrap();
+        assert_eq!(table_count(&conn).unwrap(), 17i64, "v15 shape");
+
+        create_tables(&conn).unwrap();
+
+        assert_eq!(table_count(&conn).unwrap(), 20i64);
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            max, 19,
+            "create_tables always advances to the latest version"
+        );
+        assert_eq!(cache_index_names(&conn), CACHE_INDEXES);
+    }
+
+    /// The three indexes eviction sweeps rely on (#343 / PR #118 review).
+    const CACHE_INDEXES: [&str; 3] = [
+        "idx_account_feed_snapshots_fetched_at",
+        "idx_classifier_verdicts_classified_at",
+        "idx_onnx_scores_scored_at",
+    ];
+
+    fn cache_index_names(conn: &Connection) -> Vec<String> {
+        conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index'
+               AND name IN ('idx_account_feed_snapshots_fetched_at',
+                            'idx_onnx_scores_scored_at',
+                            'idx_classifier_verdicts_classified_at')
+             ORDER BY name",
+        )
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+    }
+
+    /// v17: timestamp indexes so `evict_stale_cache` does not table-scan.
+    #[test]
+    fn test_migration_v17_creates_cache_indexes() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        assert_eq!(cache_index_names(&conn), CACHE_INDEXES);
+    }
+
+    /// A v16 database (indexes never created, v17 unrecorded) gains them.
+    #[test]
+    fn test_migration_v17_upgrades_a_v16_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute_batch(
+            "DROP INDEX idx_account_feed_snapshots_fetched_at;
+             DROP INDEX idx_onnx_scores_scored_at;
+             DROP INDEX idx_classifier_verdicts_classified_at;
+             DELETE FROM schema_version WHERE version = 17;",
+        )
+        .unwrap();
+        assert!(cache_index_names(&conn).is_empty(), "v16 shape");
+
+        create_tables(&conn).unwrap();
+
+        assert_eq!(cache_index_names(&conn), CACHE_INDEXES);
+    }
+
+    fn column_names(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn has_column(conn: &Connection, table: &str, col: &str) -> bool {
+        column_names(conn, table).iter().any(|c| c == col)
+    }
+
+    /// v18 (#344): expiry + generation on account_scores, kind +
+    /// full_requested_at on scan_queue, next_refresh_at + refreshed_generation
+    /// on users, embedding_model_id on topic_fingerprint, the (user_did,
+    /// threat_score) index, and the version row.
+    #[test]
+    fn test_migration_v18_adds_expiry_and_refresh_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        for (table, col) in [
+            ("account_scores", "scoring_generation"),
+            ("account_scores", "valid_until"),
+            ("scan_queue", "kind"),
+            ("scan_queue", "full_requested_at"),
+            ("scan_queue", "completion"),
+            ("users", "next_refresh_at"),
+            ("users", "refreshed_generation"),
+            ("users", "refresh_attempted_generation"),
+            ("topic_fingerprint", "embedding_model_id"),
+        ] {
+            assert!(has_column(&conn, table, col), "{table}.{col}");
+        }
+        let has_index: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master
+                 WHERE type = 'index' AND name = 'idx_account_scores_user_score'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_index);
+        let recorded: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM schema_version WHERE version = 18",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(recorded);
+    }
+
+    /// A v17 database with live data. The upgrade must: stamp every score
+    /// 'legacy' with valid_until = scored_at + 14 d; default queue rows to
+    /// 'full'; leave next_refresh_at NULL and refreshed_generation NULL (the
+    /// tick makes users with scores due — R07); stamp fingerprints that have a
+    /// vector with the embedding model id; and copy each done queue row's
+    /// finished_at into scan_state.last_full_scan_finished_at (R13).
+    #[test]
+    fn test_migration_v18_upgrades_a_v17_database() {
+        // An AUTHENTIC v17 database: the migrations up to and including 17,
+        // nothing reconstructed by dropping columns (V2-07).
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables_through(&conn, 17).unwrap();
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(max, 17, "fixture is genuinely at v17 before the upgrade");
+        assert!(!has_column(&conn, "account_scores", "valid_until"));
+        conn.execute_batch(
+            "INSERT INTO users (did, handle) VALUES ('did:plc:scored', 'scored.test');
+             INSERT INTO users (did, handle) VALUES ('did:plc:unscored', 'unscored.test');
+             INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier, scored_at)
+                 VALUES ('did:plc:scored', 'did:plc:acct', 'acct.test', 40.0, 'High', '2026-09-01 12:00:00');
+             INSERT INTO account_scores (user_did, did, handle, threat_tier, scored_at)
+                 VALUES ('did:plc:scored', 'did:plc:na', 'na.test', 'NotAssessed', '2026-09-02 12:00:00');
+             INSERT INTO scan_queue (user_did, status, enqueued_at, started_at, finished_at)
+                 VALUES ('did:plc:scored', 'done', '2026-09-01T11:00:00+00:00',
+                         '2026-09-01T11:00:00+00:00', '2026-09-01T12:00:00+00:00');
+             INSERT INTO scan_queue (user_did, status, enqueued_at)
+                 VALUES ('did:plc:waiting', 'queued', '2026-09-01T13:00:00+00:00');
+             INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+                 VALUES ('did:plc:scored', '{\"clusters\":[],\"post_count\":0}', 0, '[0.1,0.2]');
+             INSERT INTO topic_fingerprint (user_did, fingerprint_json, post_count, embedding_vector)
+                 VALUES ('did:plc:unscored', '{\"clusters\":[],\"post_count\":0}', 0, NULL);",
+        )
+        .unwrap();
+
+        create_tables(&conn).unwrap();
+
+        let (generation, valid_until): (String, String) = conn
+            .query_row(
+                "SELECT scoring_generation, valid_until FROM account_scores WHERE did = 'did:plc:acct'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(generation, "legacy");
+        assert_eq!(valid_until, "2026-09-15 12:00:00", "scored_at + 14 days");
+        let na_valid: String = conn
+            .query_row(
+                "SELECT valid_until FROM account_scores WHERE did = 'did:plc:na'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            na_valid, "2026-09-16 12:00:00",
+            "NULL-score rows are backfilled too"
+        );
+
+        let (kind, done_requested): (String, Option<String>) = conn
+            .query_row(
+                "SELECT kind, full_requested_at FROM scan_queue WHERE user_did = 'did:plc:scored'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "full");
+        assert_eq!(
+            done_requested, None,
+            "a finished row owes nothing, so it keeps a NULL obligation"
+        );
+
+        // A row still in flight at deploy time IS an outstanding request, and
+        // enqueued_at is when the user made it. Left NULL, the tick would
+        // never retry an attempt interrupted across the deploy as full work.
+        let (status, waiting_requested): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, full_requested_at FROM scan_queue WHERE user_did = 'did:plc:waiting'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "queued");
+        assert_eq!(
+            waiting_requested.as_deref(),
+            Some("2026-09-01T13:00:00+00:00")
+        );
+
+        let (next, refreshed, attempted): (Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT next_refresh_at, refreshed_generation, refresh_attempted_generation FROM users WHERE did = 'did:plc:scored'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(
+            next.is_none() && refreshed.is_none() && attempted.is_none(),
+            "due-ness comes from the NULL attempted generation, not a stamped time"
+        );
+
+        let with_vec: Option<String> = conn
+            .query_row("SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = 'did:plc:scored'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(with_vec.as_deref(), Some("all-MiniLM-L6-v2"));
+        let without_vec: Option<String> = conn
+            .query_row("SELECT embedding_model_id FROM topic_fingerprint WHERE user_did = 'did:plc:unscored'", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            without_vec.is_none(),
+            "keyword-only fingerprints have no embedding model"
+        );
+
+        let marker: String = conn
+            .query_row(
+                "SELECT value FROM scan_state WHERE user_did = 'did:plc:scored' AND key = 'last_full_scan_finished_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            marker, "2026-09-01T12:00:00+00:00",
+            "cooldown anchor backfilled from the done row"
+        );
+
+        let max: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(max, 19, "create_tables runs on to the latest version");
+    }
+
+    /// v19 (#394): an AUTHENTIC v18 database with a live score row gains
+    /// `gone_at`/`gone_reason`, both NULL — nothing is known to be gone until
+    /// a refresh finds out — and the score itself is untouched.
+    #[test]
+    fn test_migration_v19_adds_gone_columns_to_a_v18_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables_through(&conn, 18).unwrap();
+        assert!(!has_column(&conn, "account_scores", "gone_at"));
+        conn.execute_batch(
+            "INSERT INTO users (did, handle) VALUES ('did:plc:u', 'u.test');
+             INSERT INTO account_scores (user_did, did, handle, threat_score, threat_tier,
+                                         scoring_generation, valid_until)
+                 VALUES ('did:plc:u', 'did:plc:a', 'a.test', 50.0, 'High', 'legacy',
+                         datetime('now'));",
+        )
+        .unwrap();
+
+        create_tables(&conn).unwrap();
+
+        let (score, gone_at, reason): (f64, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT threat_score, gone_at, gone_reason FROM account_scores WHERE did = 'did:plc:a'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((score, gone_at, reason), (50.0, None, None));
+        let recorded: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM schema_version WHERE version = 19",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(recorded);
     }
 }

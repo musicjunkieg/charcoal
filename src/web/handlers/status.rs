@@ -227,6 +227,19 @@ pub async fn get_status(
         }
     };
 
+    // #344: rows hidden because they expired or predate the current scoring
+    // generation. Reported so a shrunken list is explicable; NOT part of
+    // `total`, which counts current results only. Same 500-on-error policy as
+    // the two reads above — a silent 0 would hide the very thing this number
+    // exists to show.
+    let expired = match state.db.count_expired(&auth.effective_did).await {
+        Ok(n) => n as u32,
+        Err(e) => {
+            tracing::error!(error = %e, "DB error counting expired scores in get_status");
+            return api_error(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+
     // Total is the sum of the exposed buckets, so it reconciles BY CONSTRUCTION
     // regardless of what get_ranked_threats returns. This deliberately excludes
     // the non-threat terminals the loop skips — `Insufficient Data` (and, were it
@@ -250,6 +263,7 @@ pub async fn get_status(
             "watch": watch,
             "low": low,
             "not_assessed": not_assessed,
+            "expired": expired,
             "total": total,
         }
     });

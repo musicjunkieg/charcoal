@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	// The scale tokens (--text-*, --space-*, --radius-*) live here, and this
+	// page's local :root carries only palette, so without this import every
+	// size and gap below falls back to the browser default (#292/#293/#380).
+	import '$lib/website/styles/tokens.css';
 
 	// Leaflet publication URL - update this when you create your publication
 	const LEAFLET_URL = 'https://charcoal.leaflet.pub';
@@ -559,7 +563,7 @@
 
 	.orb {
 		position: absolute;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		filter: blur(100px);
 		animation: drift 30s ease-in-out infinite;
 	}
@@ -613,7 +617,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 1.5rem 2rem;
+		padding: var(--space-24) var(--space-32);
 		background: linear-gradient(to bottom, rgba(12, 10, 9, 0.8) 0%, transparent 100%);
 	}
 
@@ -634,13 +638,13 @@
 	}
 
 	.nav-login {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		font-weight: 500;
 		color: var(--charcoal-300);
 		text-decoration: none;
-		padding: 0.625rem 1.25rem;
+		padding: var(--space-10) var(--space-20);
 		border: 1px solid rgba(168, 162, 158, 0.2);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		transition: all 0.3s var(--ease-in-out);
 	}
 
@@ -658,7 +662,7 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		padding: 6rem 2rem 4rem;
+		padding: var(--space-96) var(--space-32) var(--space-64);
 		text-align: center;
 		position: relative;
 	}
@@ -682,7 +686,7 @@
 	.hero-logo {
 		width: 120px;
 		height: 120px;
-		margin: 0 auto 2rem;
+		margin: 0 auto var(--space-32);
 		color: var(--copper);
 	}
 
@@ -738,22 +742,22 @@
 	}
 
 	.hero-eyebrow {
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		font-weight: 500;
 		letter-spacing: 0.15em;
 		text-transform: uppercase;
 		color: var(--copper);
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-24);
 		animation: emerge 1.2s var(--ease-out-expo) 0.1s backwards;
 	}
 
 	.hero-title {
 		font-family: var(--font-display);
-		font-size: clamp(2.5rem, 8vw, 4.5rem);
+		font-size: var(--text-display);
 		font-weight: 400;
 		line-height: 1.1;
 		color: var(--cream-50);
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-24);
 	}
 
 	.title-word {
@@ -788,11 +792,11 @@
 	}
 
 	.hero-subtitle {
-		font-size: 1.25rem;
+		font-size: var(--text-title);
 		line-height: 1.7;
 		color: var(--charcoal-300);
 		max-width: 560px;
-		margin: 0 auto 2.5rem;
+		margin: 0 auto var(--space-40);
 		font-weight: 300;
 		animation: emerge 1.2s var(--ease-out-expo) 0.5s backwards;
 	}
@@ -800,13 +804,13 @@
 	.hero-cta {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.75rem;
-		padding: 1rem 2rem;
-		font-size: 1.0625rem;
+		gap: var(--space-12);
+		padding: var(--space-16) var(--space-32);
+		font-size: var(--text-lead);
 		font-weight: 500;
 		color: var(--charcoal-950);
 		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
-		border-radius: 12px;
+		border-radius: var(--radius-12);
 		text-decoration: none;
 		transition: all 0.4s var(--ease-out-expo);
 		box-shadow: 0 4px 20px -4px rgba(245, 158, 11, 0.4);
@@ -864,7 +868,7 @@
 
 	/* ===== Sections ===== */
 	.section {
-		padding: 8rem 2rem;
+		padding: var(--space-128) var(--space-32);
 		opacity: 0;
 		transform: translateY(60px);
 		transition:
@@ -884,20 +888,20 @@
 
 	.section-title {
 		font-family: var(--font-display);
-		font-size: clamp(1.75rem, 4vw, 2.5rem);
+		font-size: var(--text-headline);
 		font-weight: 400;
 		color: var(--cream-50);
 		text-align: center;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-16);
 	}
 
 	.section-subtitle {
-		font-size: 1.125rem;
+		font-size: var(--text-subtitle);
 		line-height: 1.7;
 		color: var(--charcoal-400);
 		text-align: center;
 		max-width: 600px;
-		margin: 0 auto 4rem;
+		margin: 0 auto var(--space-64);
 		font-weight: 300;
 	}
 
@@ -906,7 +910,7 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: center;
-		gap: 1rem;
+		gap: var(--space-16);
 		flex-wrap: wrap;
 	}
 
@@ -915,10 +919,10 @@
 		min-width: 200px;
 		max-width: 280px;
 		text-align: center;
-		padding: 2rem 1.5rem;
+		padding: var(--space-32) var(--space-24);
 		background: linear-gradient(145deg, rgba(41, 37, 36, 0.5) 0%, rgba(28, 25, 23, 0.6) 100%);
 		border: 1px solid rgba(168, 162, 158, 0.1);
-		border-radius: 20px;
+		border-radius: var(--radius-20);
 		transition: all 0.4s var(--ease-out-expo);
 	}
 
@@ -931,7 +935,7 @@
 	.step-icon {
 		width: 64px;
 		height: 64px;
-		margin: 0 auto 1.25rem;
+		margin: 0 auto var(--space-20);
 		color: var(--copper);
 		position: relative;
 	}
@@ -977,7 +981,7 @@
 		width: 6px;
 		height: 6px;
 		background: var(--charcoal-500);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: absorb-particle 3s ease-in-out infinite;
 	}
 
@@ -1028,7 +1032,7 @@
 	.pipeline-connector {
 		display: flex;
 		align-items: center;
-		padding-top: 3rem;
+		padding-top: var(--space-48);
 		color: var(--copper);
 	}
 
@@ -1039,14 +1043,14 @@
 
 	.step-title {
 		font-family: var(--font-display);
-		font-size: 1.25rem;
+		font-size: var(--text-title);
 		font-weight: 400;
 		color: var(--cream-50);
-		margin-bottom: 0.75rem;
+		margin-bottom: var(--space-12);
 	}
 
 	.step-desc {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		line-height: 1.6;
 		color: var(--charcoal-400);
 		font-weight: 300;
@@ -1056,14 +1060,14 @@
 	.benefits-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-		gap: 2rem;
+		gap: var(--space-32);
 	}
 
 	.benefit {
-		padding: 2rem;
+		padding: var(--space-32);
 		background: linear-gradient(145deg, rgba(41, 37, 36, 0.4) 0%, rgba(28, 25, 23, 0.5) 100%);
 		border: 1px solid rgba(168, 162, 158, 0.08);
-		border-radius: 16px;
+		border-radius: var(--radius-16);
 		transition: all 0.4s var(--ease-out-expo);
 	}
 
@@ -1076,7 +1080,7 @@
 		width: 48px;
 		height: 48px;
 		color: var(--copper);
-		margin-bottom: 1.25rem;
+		margin-bottom: var(--space-20);
 	}
 
 	.benefit-icon svg {
@@ -1086,14 +1090,14 @@
 
 	.benefit-title {
 		font-family: var(--font-display);
-		font-size: 1.125rem;
+		font-size: var(--text-subtitle);
 		font-weight: 400;
 		color: var(--cream-50);
-		margin-bottom: 0.625rem;
+		margin-bottom: var(--space-10);
 	}
 
 	.benefit-desc {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		line-height: 1.6;
 		color: var(--charcoal-400);
 		font-weight: 300;
@@ -1103,14 +1107,14 @@
 	.testimonials {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-		gap: 2rem;
+		gap: var(--space-32);
 	}
 
 	.testimonial {
-		padding: 2rem;
+		padding: var(--space-32);
 		background: linear-gradient(145deg, rgba(41, 37, 36, 0.5) 0%, rgba(28, 25, 23, 0.6) 100%);
 		border: 1px solid rgba(168, 162, 158, 0.1);
-		border-radius: 16px;
+		border-radius: var(--radius-16);
 		transition: all 0.4s var(--ease-out-expo);
 	}
 
@@ -1120,27 +1124,27 @@
 
 	.testimonial-text {
 		font-family: var(--font-display);
-		font-size: 1.0625rem;
+		font-size: var(--text-lead);
 		font-style: italic;
 		line-height: 1.7;
 		color: var(--charcoal-300);
-		margin-bottom: 1.5rem;
+		margin-bottom: var(--space-24);
 	}
 
 	.testimonial-author {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
+		gap: var(--space-4);
 	}
 
 	.author-name {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		font-weight: 500;
 		color: var(--cream-50);
 	}
 
 	.author-handle {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
 	}
 
@@ -1148,10 +1152,10 @@
 	.cta-card {
 		max-width: 540px;
 		margin: 0 auto;
-		padding: 3rem;
+		padding: var(--space-48);
 		background: linear-gradient(145deg, rgba(41, 37, 36, 0.7) 0%, rgba(28, 25, 23, 0.8) 100%);
 		border: 1px solid rgba(168, 162, 158, 0.15);
-		border-radius: 24px;
+		border-radius: var(--radius-24);
 		text-align: center;
 		box-shadow:
 			0 0 0 1px rgba(0, 0, 0, 0.2),
@@ -1162,7 +1166,7 @@
 	.cta-logo {
 		width: 72px;
 		height: 72px;
-		margin: 0 auto 1.5rem;
+		margin: 0 auto var(--space-24);
 		color: var(--copper);
 	}
 
@@ -1173,17 +1177,17 @@
 
 	.cta-title {
 		font-family: var(--font-display);
-		font-size: 1.75rem;
+		font-size: var(--text-page-title);
 		font-weight: 400;
 		color: var(--cream-50);
-		margin-bottom: 0.75rem;
+		margin-bottom: var(--space-12);
 	}
 
 	.cta-subtitle {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		line-height: 1.7;
 		color: var(--charcoal-400);
-		margin-bottom: 2rem;
+		margin-bottom: var(--space-32);
 		font-weight: 300;
 	}
 
@@ -1191,14 +1195,14 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.75rem;
-		padding: 1rem 2rem;
-		font-size: 1.0625rem;
+		gap: var(--space-12);
+		padding: var(--space-16) var(--space-32);
+		font-size: var(--text-lead);
 		font-weight: 500;
 		font-family: var(--font-body);
 		color: var(--charcoal-950);
 		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
-		border-radius: 12px;
+		border-radius: var(--radius-12);
 		text-decoration: none;
 		transition: all 0.4s var(--ease-out-expo);
 		box-shadow: 0 4px 20px -4px rgba(245, 158, 11, 0.4);
@@ -1221,15 +1225,15 @@
 	}
 
 	.subscribe-hint {
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		color: var(--charcoal-500);
-		margin-top: 1.25rem;
+		margin-top: var(--space-20);
 		font-weight: 300;
 	}
 
 	/* ===== Footer ===== */
 	.site-footer {
-		padding: 3rem 2rem;
+		padding: var(--space-48) var(--space-32);
 		border-top: 1px solid rgba(168, 162, 158, 0.1);
 	}
 
@@ -1239,13 +1243,13 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 1.5rem;
+		gap: var(--space-24);
 	}
 
 	.footer-brand {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
+		gap: var(--space-12);
 		color: var(--copper);
 	}
 
@@ -1256,17 +1260,17 @@
 
 	.footer-name {
 		font-family: var(--font-display);
-		font-size: 1.125rem;
+		font-size: var(--text-subtitle);
 		color: var(--cream-50);
 	}
 
 	.footer-nav {
 		display: flex;
-		gap: 2rem;
+		gap: var(--space-32);
 	}
 
 	.footer-nav a {
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		color: var(--charcoal-400);
 		text-decoration: none;
 		transition: color 0.3s var(--ease-in-out);
@@ -1277,18 +1281,18 @@
 	}
 
 	.footer-copy {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-600);
 	}
 
 	/* ===== Responsive ===== */
 	@media (max-width: 768px) {
 		.nav {
-			padding: 1rem 1.5rem;
+			padding: var(--space-16) var(--space-24);
 		}
 
 		.hero {
-			padding: 5rem 1.5rem 3rem;
+			padding: var(--space-80) var(--space-24) var(--space-48);
 		}
 
 		.hero-logo {
@@ -1297,11 +1301,11 @@
 		}
 
 		.hero-subtitle {
-			font-size: 1.0625rem;
+			font-size: var(--text-lead);
 		}
 
 		.section {
-			padding: 5rem 1.5rem;
+			padding: var(--space-80) var(--space-24);
 		}
 
 		.pipeline {
@@ -1311,7 +1315,7 @@
 
 		.pipeline-connector {
 			transform: rotate(90deg);
-			padding: 1rem 0;
+			padding: var(--space-16) 0;
 		}
 
 		.pipeline-step {
@@ -1319,11 +1323,11 @@
 		}
 
 		.cta-card {
-			padding: 2rem 1.5rem;
+			padding: var(--space-32) var(--space-24);
 		}
 
 		.footer-nav {
-			gap: 1.5rem;
+			gap: var(--space-24);
 		}
 	}
 

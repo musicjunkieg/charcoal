@@ -740,23 +740,23 @@
 	.page-header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
-		margin-bottom: 2rem;
+		gap: var(--space-16);
+		margin-bottom: var(--space-32);
 	}
 
 	.page-title {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.75rem;
+		font-size: var(--text-page-title);
 		font-weight: 400;
 		color: var(--cream-50);
 	}
 
 	.section-title {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		font-weight: 500;
 		color: var(--charcoal-300);
 		letter-spacing: 0.01em;
-		margin-bottom: 0.875rem;
+		margin-bottom: var(--space-14);
 	}
 
 	/* ── Scan queue (#288) ───────────────────────────────────────────────
@@ -766,9 +766,9 @@
 	   --charcoal-400 is the floor for body text here: --charcoal-500 on this
 	   ground fails AA (#249). */
 	.queue-capacity {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		color: var(--charcoal-300);
-		margin: 0 0 0.75rem;
+		margin: 0 0 var(--space-12);
 	}
 
 	.queue-capacity strong {
@@ -777,19 +777,19 @@
 	}
 
 	.queue-idle {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 		margin: 0;
 	}
 
 	.queue-wedged {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--status-error);
 		background: rgb(var(--status-error-rgb) / 0.08);
 		border: 1px solid rgb(var(--status-error-rgb) / 0.35);
-		border-radius: 8px;
-		padding: 0.625rem 0.75rem;
-		margin: 0 0 0.75rem;
+		border-radius: var(--radius-8);
+		padding: var(--space-10) var(--space-12);
+		margin: 0 0 var(--space-12);
 		line-height: 1.5;
 	}
 
@@ -799,22 +799,22 @@
 		padding: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: var(--space-6);
 	}
 
 	.queue-item {
 		display: flex;
 		align-items: baseline;
-		gap: 0.75rem;
+		gap: var(--space-12);
 		flex-wrap: wrap;
-		padding: 0.5rem 0.75rem;
+		padding: var(--space-8) var(--space-12);
 		background: var(--charcoal-900);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 	}
 
 	/* Status as a word, not a colour alone — colour is never the only carrier. */
 	.queue-status {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		font-weight: 500;
 		min-width: 4.5rem;
 	}
@@ -828,18 +828,18 @@
 	}
 
 	.queue-handle {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-300);
 	}
 
 	.queue-detail {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 	}
 
 	/* Table cell — live scan state */
 	.scan-live {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 	}
 
 	.scan-live-running {
@@ -851,7 +851,7 @@
 	}
 
 	.scan-failed {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--status-error);
 	}
 
@@ -860,7 +860,7 @@
 	   for body text here; --charcoal-500 fails WCAG AA on this ground. */
 	.scan-reason {
 		display: block;
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 		/* A stack trace or URL has no spaces to break on, and this column is
 		   9rem wide — without this one row widens the whole table. */
@@ -869,8 +869,8 @@
 
 	.scan-when {
 		display: block;
-		font-size: 0.8125rem;
-		margin-top: 0.25rem;
+		font-size: var(--text-label);
+		margin-top: var(--space-4);
 	}
 
 	/* Visually hidden, still announced. The FULL failure reason lives here, so
@@ -896,30 +896,30 @@
 	   first, colour second: Allowed gets the existing ok-green, Denied gets
 	   quiet grey rather than red — a recorded decision, not an alarm. */
 	.access-section {
-		margin-bottom: 2.5rem;
-		padding: 1.25rem;
+		margin-bottom: var(--space-40);
+		padding: var(--space-20);
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
-		border-radius: 12px;
+		border-radius: var(--radius-12);
 	}
 
 	/* Same voice as .queue-wedged: a real operational warning, quiet red,
 	   never an alarm bar. On-ramp values, tokens only. */
 	.access-gate-off {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--status-error);
 		background: rgb(var(--status-error-rgb) / 0.08);
 		border: 1px solid rgb(var(--status-error-rgb) / 0.35);
-		border-radius: 8px;
-		padding: 0.625rem 0.75rem;
-		margin: 0 0 0.75rem;
+		border-radius: var(--radius-8);
+		padding: var(--space-10) var(--space-12);
+		margin: 0 0 var(--space-12);
 		line-height: 1.5;
 	}
 
 	.access-pending-count {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		color: var(--charcoal-300);
-		margin: 0 0 0.75rem;
+		margin: 0 0 var(--space-12);
 	}
 
 	.access-pending-count strong {
@@ -928,36 +928,36 @@
 	}
 
 	.access-idle {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
-		margin: 0 0 1rem;
+		margin: 0 0 var(--space-16);
 	}
 
 	.access-empty-hint {
-		margin: 1rem 0 0;
+		margin: var(--space-16) 0 0;
 	}
 
 	.access-pending-list {
 		list-style: none;
-		margin: 0 0 1.25rem;
+		margin: 0 0 var(--space-20);
 		padding: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: var(--space-6);
 	}
 
 	.access-pending-item {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
+		gap: var(--space-12);
 		flex-wrap: wrap;
-		padding: 0.5rem 0.75rem;
+		padding: var(--space-8) var(--space-12);
 		background: var(--charcoal-900);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 	}
 
 	.access-when {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
 	}
 
@@ -985,21 +985,21 @@
 	}
 
 	.grant-form {
-		margin-bottom: 1.25rem;
+		margin-bottom: var(--space-20);
 	}
 
 	.access-table {
-		margin-top: 0.25rem;
+		margin-top: var(--space-4);
 	}
 
 	.access-status-allowed {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		font-weight: 500;
 		color: var(--status-ok);
 	}
 
 	.access-status-denied {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		font-weight: 500;
 		color: var(--charcoal-400);
 	}
@@ -1009,24 +1009,24 @@
 	.col-access-action { width: 6rem; text-align: right; }
 
 	.section-hint {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
-		margin: -0.375rem 0 0.875rem;
+		margin: calc(var(--space-6) * -1) 0 var(--space-14);
 		line-height: 1.5;
 	}
 
 	/* Add user form */
 	.add-section {
-		margin-bottom: 2.5rem;
-		padding: 1.25rem;
+		margin-bottom: var(--space-40);
+		padding: var(--space-20);
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
-		border-radius: 14px;
+		border-radius: var(--radius-14);
 	}
 
 	.add-form {
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--space-12);
 		align-items: center;
 	}
 
@@ -1036,8 +1036,8 @@
 		align-items: center;
 		background: rgb(var(--charcoal-950-rgb) / 0.6);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
-		border-radius: 10px;
-		padding: 0 0.875rem;
+		border-radius: var(--radius-10);
+		padding: 0 var(--space-14);
 		transition: border-color 0.2s;
 	}
 
@@ -1046,14 +1046,14 @@
 		box-shadow: 0 0 0 2px rgb(var(--copper-rgb) / 0.1);
 	}
 
-	.input-at { color: var(--charcoal-700); font-size: 0.9375rem; margin-right: 0.25rem; }
+	.input-at { color: var(--charcoal-700); font-size: var(--text-body-sm); margin-right: var(--space-4); }
 
 	.add-input {
 		flex: 1;
 		border: none;
 		background: transparent;
-		padding: 0.625rem 0;
-		font-size: 0.9375rem;
+		padding: var(--space-10) 0;
+		font-size: var(--text-body-sm);
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--cream-100);
 		outline: none;
@@ -1063,14 +1063,14 @@
 	.add-input:disabled { opacity: 0.5; }
 
 	.btn-add {
-		padding: 0.625rem 1.25rem;
-		font-size: 0.9375rem;
+		padding: var(--space-10) var(--space-20);
+		font-size: var(--text-body-sm);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--charcoal-950);
 		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
 		border: none;
-		border-radius: 10px;
+		border-radius: var(--radius-10);
 		cursor: pointer;
 		transition: transform 0.2s, box-shadow 0.2s;
 		box-shadow: 0 4px 12px -2px rgb(var(--amber-500-rgb) / 0.35);
@@ -1080,20 +1080,20 @@
 	.btn-add:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px -2px rgb(var(--amber-500-rgb) / 0.45); }
 	.btn-add:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
 
-	.msg-error { font-size: 0.8125rem; color: var(--status-error); margin-top: 0.625rem; }
-	.msg-success { font-size: 0.8125rem; color: var(--status-ok); margin-top: 0.625rem; }
+	.msg-error { font-size: var(--text-label); color: var(--status-error); margin-top: var(--space-10); }
+	.msg-success { font-size: var(--text-label); color: var(--status-ok); margin-top: var(--space-10); }
 
 	/* Users table */
-	.users-section { margin-top: 1rem; }
+	.users-section { margin-top: var(--space-16); }
 
-	.loading-state { display: flex; justify-content: center; padding: 3rem 0; }
-	.empty-state { padding: 3rem 0; text-align: center; color: var(--charcoal-600); font-size: 0.9375rem; }
+	.loading-state { display: flex; justify-content: center; padding: var(--space-48) 0; }
+	.empty-state { padding: var(--space-48) 0; text-align: center; color: var(--charcoal-600); font-size: var(--text-body-sm); }
 
 	.spinner {
 		width: 32px; height: 32px;
 		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 
@@ -1102,10 +1102,10 @@
 		width: 12px; height: 12px;
 		border: 1.5px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 		vertical-align: middle;
-		margin-right: 0.375rem;
+		margin-right: var(--space-6);
 	}
 
 	@keyframes spin { to { transform: rotate(360deg); } }
@@ -1115,13 +1115,13 @@
 	.table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 	}
 
 	.table th {
 		text-align: left;
-		padding: 0.5rem 0.75rem;
-		font-size: 0.75rem;
+		padding: var(--space-8) var(--space-12);
+		font-size: var(--text-caption);
 		font-weight: 500;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
@@ -1130,7 +1130,7 @@
 	}
 
 	.table td {
-		padding: 0.75rem 0.75rem;
+		padding: var(--space-12) var(--space-12);
 		border-bottom: 1px solid rgb(var(--charcoal-400-rgb) / 0.05);
 		color: var(--charcoal-300);
 	}
@@ -1142,11 +1142,11 @@
 	.muted { color: var(--charcoal-500); }
 	/* DID next to the handle (#309 fast-follow, Fix 1c) — same secondary-text
 	   size as the rest of this file's muted labels. */
-	.did-tail { font-size: 0.8125rem; margin-left: 0.375rem; }
+	.did-tail { font-size: var(--text-label); margin-left: var(--space-6); }
 
-	.status-ready { color: var(--status-ok); font-size: 0.875rem; }
-	.status-building { color: var(--copper); font-size: 0.875rem; }
-	.status-none { color: var(--charcoal-600); font-size: 0.875rem; }
+	.status-ready { color: var(--status-ok); font-size: var(--text-small); }
+	.status-building { color: var(--copper); font-size: var(--text-small); }
+	.status-none { color: var(--charcoal-600); font-size: var(--text-small); }
 
 	.col-handle { min-width: 10rem; }
 	.col-fp { width: 8rem; }
@@ -1154,14 +1154,14 @@
 	.col-count { width: 5rem; }
 	.col-actions { width: 12rem; }
 
-	.action-btns { display: flex; gap: 0.375rem; }
+	.action-btns { display: flex; gap: var(--space-6); }
 
 	.btn-action {
-		padding: 0.375rem 0.75rem;
-		font-size: 0.8125rem;
+		padding: var(--space-6) var(--space-12);
+		font-size: var(--text-label);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		cursor: pointer;
 		transition: background 0.2s;
 		text-decoration: none;
@@ -1190,8 +1190,8 @@
 		color: var(--status-error);
 		background: transparent;
 		border: 1px solid rgb(var(--status-error-rgb) / 0.15);
-		font-size: 0.75rem;
-		padding: 0.375rem 0.5rem;
+		font-size: var(--text-caption);
+		padding: var(--space-6) var(--space-8);
 	}
 
 	.btn-delete:hover:not(:disabled) { background: rgb(var(--status-error-rgb) / 0.08); }

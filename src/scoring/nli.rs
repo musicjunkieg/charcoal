@@ -32,6 +32,12 @@ use tracing::debug;
 
 use crate::scoring::language::pair_is_assessable;
 
+/// Identity of the NLI cross-encoder behind every contextual hostility score.
+/// The **fp32** export, not the quantized one (#231) — composed into
+/// [`crate::scoring::generation::scoring_revision`] so a model swap expires
+/// stored scores automatically.
+pub const NLI_MODEL_ID: &str = "nli-deberta-v3-xsmall-fp32";
+
 /// Raw entailment scores from running NLI hypotheses on a text pair.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HypothesisScores {

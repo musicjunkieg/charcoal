@@ -8,11 +8,17 @@
 
 # ── Per-project ignore extensions ──────────────────────────────────
 # `.gitignore.local` is the extension point for project-specific ignore
-# patterns that don't belong in the template. The template ignores it
-# so it never lands in git, and git respects its patterns locally like
-# a normal .gitignore. This lets `update-project-from-template` overwrite
-# .gitignore freely without clobbering project-only entries. See the
-# CLAUDE.md convention block for the migration pattern.
+# patterns that don't belong in the template. Git does NOT read this
+# file by itself — `scripts/install-hooks.sh` wires it in by symlinking
+# the per-clone `.git/info/exclude` to it. The script only links when
+# `.gitignore.local` exists and info/exclude is still Git's default
+# stub (custom excludes are preserved, and linked worktrees are skipped
+# since they share info/exclude) — so if you create `.gitignore.local`
+# later, rerun the script from the primary checkout. The template
+# ignores the file so it never lands in git. This
+# lets `update-project-from-template` overwrite .gitignore freely
+# without clobbering project-only entries. See the CLAUDE.md convention
+# block for the migration pattern.
 .gitignore.local
 
 # ── macOS ──────────────────────────────────────────────────────────
@@ -69,8 +75,9 @@ logs/
 
 # ── SQLite databases (blanket) ─────────────────────────────────────
 # Local state only — authoritative copies of chainlink/deciduous DBs
-# live in Tigris backups. Blanket pattern also catches any future
-# app-level sqlite files without needing to touch this list.
+# live in the R2 backups the pre-commit hook uploads (ADR 0002). Blanket
+# pattern also catches any future app-level sqlite files without needing
+# to touch this list.
 *.db
 *.db-shm
 *.db-wal
@@ -86,33 +93,10 @@ logs/
 .deciduous/*
 !.deciduous/.gitkeep
 
-# Research scratch files
-/docs/research/
-
-# Chainlink local state. NOTE: there is NO automatic backup unless the four
-# BACKUP_S3_* vars are set in .env (see .env.example) — when they are unset
-# the pre-commit hook prints "Backup not configured" and skips the upload,
-# a notice that is easy to miss. Target is Cloudflare R2.
-# issues.db is per-clone; issues-export.json is the shared recovery source.
-.chainlink/issues.db
+# ── Chainlink local state ──────────────────────────────────────────
+# issues.db is covered by *.db above. issues-export.json is the JSON the
+# pre-commit hook regenerates from it on every commit; it is NOT committed
+# (ADR 0005) — the hook checks this rule with `git check-ignore` and skips
+# staging when it matches. The DB backup in R2 is the off-machine copy.
 .chainlink/.cache/
 .chainlink/issues-export.json
-
-# Git worktrees (local ephemeral state)
-.worktrees/
-.claude/worktrees/
-
-# Downloaded ML model artifacts — fetched via `charcoal download-model`,
-# never committed (the binary blobs are ~210 MB and derivable from
-# upstream Hugging Face releases)
-models/
-
-# Python bytecode + pytest cache (e.g. gpu/cope-b-runpod test runs)
-__pycache__/
-*.pyc
-.pytest_cache/
-
-# Superpowers brainstorm session scratch — ephemeral local server state
-# (.server.pid/.log, generated HTML mockups). Installed skills live under
-# .agents/skills and .claude/skills, which ARE tracked.
-.superpowers/

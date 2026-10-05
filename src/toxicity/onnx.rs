@@ -9,6 +9,7 @@
 // Output: 7 toxicity categories with continuous 0-1 scores via sigmoid.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -27,6 +28,31 @@ const MAX_SEQUENCE_LENGTH: usize = 512;
 
 use super::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
 
+/// Stable identity of the toxicity model for cache keys (#343 §4.1). Bump
+/// this string whenever the ONNX file or tokenizer changes, or cached
+/// `onnx_scores` rows from the old model will be served for the new one.
+pub const ONNX_MODEL_ID: &str = "detoxify-unbiased-toxic-roberta-quantized";
+
+/// Env knob for the Phase 0 session experiment (#343 §6). Each extra session
+/// is another full model load (~126 MB), hence the small ceiling.
+pub const ONNX_SESSIONS_ENV: &str = "CHARCOAL_ONNX_SESSIONS";
+const ONNX_SESSIONS_DEFAULT: usize = 1;
+const ONNX_SESSIONS_MAX: usize = 8;
+
+/// Pure parser so the clamp/default rule is testable without touching the
+/// process environment. Same shape as `burst_concurrency()` in burst.rs.
+pub fn parse_onnx_sessions(raw: Option<&str>) -> usize {
+    match raw.and_then(|v| v.trim().parse::<i64>().ok()) {
+        Some(v) => (v.max(1) as usize).clamp(1, ONNX_SESSIONS_MAX),
+        None => ONNX_SESSIONS_DEFAULT,
+    }
+}
+
+/// Read `CHARCOAL_ONNX_SESSIONS` from the environment.
+pub fn onnx_sessions_from_env() -> usize {
+    parse_onnx_sessions(std::env::var(ONNX_SESSIONS_ENV).ok().as_deref())
+}
+
 /// Labels output by unbiased-toxic-roberta, in the order the model returns them.
 /// These map to: toxicity, severe_toxicity, obscene, identity_attack, insult, threat, sexual_explicit
 const LABEL_ORDER: [&str; 7] = [
@@ -39,26 +65,40 @@ const LABEL_ORDER: [&str; 7] = [
     "sexual_explicit",
 ];
 
-/// Local ONNX-based toxicity scorer. Holds the model session and tokenizer
-/// behind Arc<Mutex> so inference can be offloaded to spawn_blocking without
-/// blocking the async runtime.
+/// Local ONNX-based toxicity scorer. Holds one or more model sessions and
+/// the tokenizer behind Arc so inference can be offloaded to spawn_blocking
+/// without blocking the async runtime.
 pub struct OnnxToxicityScorer {
     // Arc+Mutex because:
     // 1. ort::Session::run takes &mut self, so we need interior mutability
     // 2. spawn_blocking requires 'static, so we need Arc for shared ownership
     // 3. We need Send+Sync for the ToxicityScorer trait
-    // Inference is CPU-bound and serialized through spawn_blocking, so
-    // contention is minimal.
-    session: Arc<Mutex<Session>>,
+    //
+    // More than one session (CHARCOAL_ONNX_SESSIONS > 1) lets concurrent
+    // gather tasks run forward passes in parallel instead of queueing on a
+    // single mutex. Round-robin selection is good enough: every batch is
+    // roughly the same size, and a busy session just makes the next caller
+    // wait exactly as it would have with one session.
+    sessions: Vec<Arc<Mutex<Session>>>,
+    next_session: AtomicUsize,
     tokenizer: Arc<Tokenizer>,
 }
 
 impl OnnxToxicityScorer {
-    /// Load the ONNX model and tokenizer from the given directory.
+    /// Load the ONNX model and tokenizer from the given directory, with the
+    /// number of sessions taken from `CHARCOAL_ONNX_SESSIONS` (default 1).
     ///
     /// Expects `model_quantized.onnx` and `tokenizer.json` to exist in `model_dir`.
     /// Call `download::download_model()` first if they don't.
     pub fn load(model_dir: &Path) -> Result<Self> {
+        Self::load_with_sessions(model_dir, onnx_sessions_from_env())
+    }
+
+    /// As [`load`](Self::load) with an explicit session count (clamped to
+    /// 1..=8). Exposed so the Phase 0 experiment and its test can pick the
+    /// count without touching the environment.
+    pub fn load_with_sessions(model_dir: &Path, sessions: usize) -> Result<Self> {
+        let sessions = sessions.clamp(1, ONNX_SESSIONS_MAX);
         let model_path = model_dir.join("model_quantized.onnx");
         let tokenizer_path = model_dir.join("tokenizer.json");
 
@@ -75,10 +115,16 @@ impl OnnxToxicityScorer {
             );
         }
 
-        let session = Session::builder()
-            .context("Failed to create ONNX session builder")?
-            .commit_from_file(&model_path)
-            .with_context(|| format!("Failed to load ONNX model from {}", model_path.display()))?;
+        let mut pool = Vec::with_capacity(sessions);
+        for _ in 0..sessions {
+            let session = Session::builder()
+                .context("Failed to create ONNX session builder")?
+                .commit_from_file(&model_path)
+                .with_context(|| {
+                    format!("Failed to load ONNX model from {}", model_path.display())
+                })?;
+            pool.push(Arc::new(Mutex::new(session)));
+        }
 
         let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
@@ -125,12 +171,23 @@ impl OnnxToxicityScorer {
             }))
             .map_err(|e| anyhow::anyhow!("Failed to configure tokenizer truncation: {}", e))?;
 
-        debug!("Loaded ONNX toxicity model from {}", model_dir.display());
+        debug!(
+            sessions = sessions,
+            "Loaded ONNX toxicity model from {}",
+            model_dir.display()
+        );
 
         Ok(Self {
-            session: Arc::new(Mutex::new(session)),
+            sessions: pool,
+            next_session: AtomicUsize::new(0),
             tokenizer: Arc::new(tokenizer),
         })
+    }
+
+    /// Pick the next session round-robin.
+    fn pick_session(&self) -> Arc<Mutex<Session>> {
+        let i = self.next_session.fetch_add(1, Ordering::Relaxed) % self.sessions.len();
+        Arc::clone(&self.sessions[i])
     }
 }
 
@@ -152,7 +209,7 @@ impl ToxicityScorer for OnnxToxicityScorer {
         }
 
         // Clone Arc handles for the spawn_blocking closure ('static requirement)
-        let session = Arc::clone(&self.session);
+        let session = self.pick_session();
         let tokenizer = Arc::clone(&self.tokenizer);
         let texts = texts.to_vec();
 
@@ -346,5 +403,22 @@ mod tests {
     #[test]
     fn test_label_order_count() {
         assert_eq!(LABEL_ORDER.len(), 7, "Model should output 7 categories");
+    }
+
+    #[test]
+    fn onnx_sessions_default_is_one() {
+        assert_eq!(parse_onnx_sessions(None), 1);
+        assert_eq!(parse_onnx_sessions(Some("")), 1);
+        assert_eq!(parse_onnx_sessions(Some("banana")), 1);
+    }
+
+    #[test]
+    fn onnx_sessions_clamps_to_1_through_8() {
+        assert_eq!(parse_onnx_sessions(Some("0")), 1);
+        assert_eq!(parse_onnx_sessions(Some("-3")), 1);
+        assert_eq!(parse_onnx_sessions(Some("4")), 4);
+        assert_eq!(parse_onnx_sessions(Some("8")), 8);
+        assert_eq!(parse_onnx_sessions(Some("64")), 8);
+        assert_eq!(parse_onnx_sessions(Some(" 2 ")), 2);
     }
 }

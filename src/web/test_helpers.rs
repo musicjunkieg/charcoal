@@ -217,3 +217,24 @@ pub fn build_test_app() -> Option<axum::Router> {
     let (router, _db) = build_test_app_with_db()?;
     Some(router)
 }
+
+/// Test-only: mark every one of `user_did`'s scores as scored under an older
+/// generation — the shape migration v18 leaves pre-existing rows in (#344).
+/// Lives here rather than on the `Database` trait because production has no
+/// business rewriting generations.
+pub async fn expire_all_scores(db: &Arc<dyn crate::db::Database>, user_did: &str) {
+    let sqlite = db
+        .as_any()
+        .downcast_ref::<crate::db::sqlite::SqliteDatabase>()
+        .expect("test app databases are SqliteDatabase");
+    sqlite
+        .with_conn(|conn| {
+            conn.execute(
+                "UPDATE account_scores SET scoring_generation = 'legacy' WHERE user_did = ?1",
+                rusqlite::params![user_did],
+            )
+            .map(|_| ())
+        })
+        .await
+        .expect("expire scores");
+}

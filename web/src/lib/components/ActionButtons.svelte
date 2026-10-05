@@ -248,17 +248,17 @@
 	.actions {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--space-8);
 		flex-wrap: wrap;
 	}
 	.act,
 	.undo {
-		padding: 0.375rem 0.75rem;
-		font-size: 0.8125rem;
+		padding: var(--space-6) var(--space-12);
+		font-size: var(--text-label);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		background: transparent;
 		color: var(--charcoal-400);
 		cursor: pointer;
@@ -278,7 +278,7 @@
 	.act.working {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.375rem;
+		gap: var(--space-6);
 		opacity: 1;
 		cursor: progress;
 	}
@@ -287,7 +287,7 @@
 		height: 0.75rem;
 		border: 2px solid rgb(var(--charcoal-400-rgb) / 0.2);
 		border-top-color: var(--charcoal-400);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 	@keyframes spin {
@@ -301,17 +301,17 @@
 		}
 	}
 	.done {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--status-ok);
 	}
 	.error {
 		width: 100%;
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		color: var(--status-error);
 	}
 	.notice {
 		width: 100%;
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		color: var(--charcoal-400);
 	}
 </style>

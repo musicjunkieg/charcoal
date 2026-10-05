@@ -38,7 +38,7 @@ use crate::topics::embeddings::SentenceEmbedder;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::toxicity::traits::{BinaryVerdict, ToxicityAttributes};
 
-use super::staging::{AccountInput, ACCOUNT_INPUT_SCHEMA_VERSION};
+use super::staging::{AccountInput, EvidenceContract, ACCOUNT_INPUT_SCHEMA_VERSION};
 
 /// Outcome of finalising one account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,7 @@ pub async fn finalize_account(
     nli_scorer: Option<&NliScorer>,
     protected_posts_with_embeddings: Option<&[(String, Vec<f64>)]>,
     data_dir: Option<&std::path::Path>,
+    evidence: &EvidenceContract<'_>,
 ) -> Result<FinalizeOutcome> {
     // ── Step 1: load + validate the stashed blob ──
     let Some(payload) = db.fetch_account_input(user_did, account_did).await? else {
@@ -105,6 +106,17 @@ pub async fn finalize_account(
         return Ok(FinalizeOutcome::NeedsRegather);
     }
 
+    if blob.scoring_generation != crate::scoring::generation::scoring_revision() {
+        warn!(
+            account_did,
+            blob_generation = %blob.scoring_generation,
+            current = crate::scoring::generation::scoring_revision(),
+            "AccountInput scoring_generation mismatch — clearing staging and re-gathering"
+        );
+        db.clear_account_staging(user_did, account_did).await?;
+        return Ok(FinalizeOutcome::NeedsRegather);
+    }
+
     // ── Step 2: fetch verdict rows (arbitrary order) ──
     let rows = db.fetch_account_verdicts(user_did, account_did).await?;
 
@@ -123,7 +135,7 @@ pub async fn finalize_account(
 
     // Originals — raw text, no context.
     for p in &sample.originals {
-        let Some(verdict) = verdict_for(&row_by_uri, &p.uri) else {
+        let Some(verdict) = verdict_for(&row_by_uri, &p.uri, evidence) else {
             return needs_regather_incomplete(account_did, &p.uri);
         };
         verdicts.push(verdict);
@@ -132,7 +144,7 @@ pub async fn finalize_account(
     }
     // Replies — reply text, context = stashed parent text (by parent_uri).
     for r in &sample.replies {
-        let Some(verdict) = verdict_for(&row_by_uri, &r.post.uri) else {
+        let Some(verdict) = verdict_for(&row_by_uri, &r.post.uri, evidence) else {
             return needs_regather_incomplete(account_did, &r.post.uri);
         };
         verdicts.push(verdict);
@@ -141,7 +153,7 @@ pub async fn finalize_account(
     }
     // Quotes — raw text, no context.
     for p in &sample.quotes {
-        let Some(verdict) = verdict_for(&row_by_uri, &p.uri) else {
+        let Some(verdict) = verdict_for(&row_by_uri, &p.uri, evidence) else {
             return needs_regather_incomplete(account_did, &p.uri);
         };
         verdicts.push(verdict);
@@ -242,21 +254,38 @@ pub async fn finalize_account(
 
 /// Look up a post's verdict row by URI and convert it to a `BinaryVerdict`.
 ///
-/// Returns `None` when the post has no matching row OR the row is not yet
-/// complete. The queue `status` is the source of truth: a row whose
-/// `status != "done"` is treated as incomplete (fail closed), regardless of
-/// whether `toxic_token` happens to be populated. Only after the status gate
-/// passes do we read the verdict (a `done` row without a `toxic_token` is also
-/// inconsistent and yields `None`). `score_from_sample` only reads `is_toxic` +
-/// `onnx_score`; `onnx_attributes` is unused, so `default()` is correct.
+/// Returns `None` when the post has no matching row, the row is not yet
+/// complete, or its recorded producer is not one this binary runs. The queue
+/// `status` is the source of truth: a row whose `status != "done"` is treated
+/// as incomplete (fail closed), regardless of whether `toxic_token` happens to
+/// be populated. Only after the status gate passes do we read the verdict (a
+/// `done` row without a `toxic_token` is also inconsistent and yields `None`).
+/// `score_from_sample` only reads `is_toxic` + `onnx_score`;
+/// `onnx_attributes` is unused, so `default()` is correct.
+///
+/// The provenance gate (#344 R03, V2-01) is the third `None`: a row settled by
+/// another classifier policy, another ONNX model, an old binary that recorded
+/// no producer at all, or the `decode-error` sentinel is not evidence for THIS
+/// revision. Rejecting costs one bounded re-gather — which recreates the row
+/// *with* provenance — and never a silently downgraded score.
 fn verdict_for(
     row_by_uri: &HashMap<&str, &super::staging::QueueRow>,
     post_uri: &str,
+    evidence: &EvidenceContract<'_>,
 ) -> Option<BinaryVerdict> {
     let row = row_by_uri.get(post_uri)?;
     // Status is authoritative: a still-`pending` row is incomplete even if a
     // verdict token somehow leaked onto it. Fail closed → NeedsRegather.
     if row.status != "done" {
+        return None;
+    }
+    if !evidence.accepts(row.model_id.as_deref(), row.policy_version.as_deref()) {
+        warn!(
+            post_uri,
+            model_id = row.model_id.as_deref().unwrap_or("<none>"),
+            policy_version = row.policy_version.as_deref().unwrap_or("<none>"),
+            "verdict row was not produced by a current producer — needs re-gather"
+        );
         return None;
     }
     let is_toxic = row.toxic_token?; // None on a done row ⇒ inconsistent

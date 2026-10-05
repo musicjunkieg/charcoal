@@ -60,6 +60,14 @@ pub async fn show(db: &Arc<dyn Database>, user_did: &str, db_display: &str) -> R
         elevated_count
     );
 
+    let expired = db.count_expired(user_did).await?;
+    if expired > 0 {
+        println!(
+            "  {expired} expired (scored under an older generation or past their window — \
+             hidden until the refresh job or a re-engagement re-scores them)"
+        );
+    }
+
     // Recent events
     let events = db.get_recent_events(user_did, 5).await?;
     if events.is_empty() {

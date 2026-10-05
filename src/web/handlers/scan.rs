@@ -18,6 +18,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
 
+use crate::db::EnqueueOutcome;
 use crate::web::{api_error, AppState, AuthUser};
 
 /// If the last successful scan finished inside the cooldown window, the
@@ -58,55 +59,61 @@ pub async fn trigger_scan(
         }
     }
 
-    // #258: one successful scan per user per cooldown window. Failed scans
-    // don't count, and the admin trigger path (handlers/admin.rs) deliberately
-    // has no such check — that is the operator's bypass.
-    match state.db.list_scan_queue().await {
-        Ok(rows) => {
-            if let Some(row) = rows.iter().find(|r| r.user_did == auth.did) {
-                if row.status == "done" {
-                    if let Some(finished_at) = &row.finished_at {
-                        if let Some(retry_at) = cooldown_retry_at(
-                            finished_at,
-                            chrono::Utc::now(),
-                            state.config.scan_cooldown_hours,
-                        ) {
-                            // Word the limit to match the configured window —
-                            // "one per day" is only true at the 24h default.
-                            let window = match state.config.scan_cooldown_hours {
-                                24 => "one per day".to_string(),
-                                h => format!("one every {h} hours"),
-                            };
-                            return (
-                                StatusCode::TOO_MANY_REQUESTS,
-                                Json(serde_json::json!({
-                                    "error": format!(
-                                        "You scanned recently — scans are limited to {window}"
-                                    ),
-                                    "retry_at": retry_at,
-                                })),
-                            )
-                                .into_response();
-                        }
-                    }
-                }
-            }
-        }
+    // #258 cooldown, #344 R13/V3-02: the anchor is the completion marker
+    // `record_full_scan_completion` writes for a fulfilled full scan. The
+    // queue row is NOT consulted: since #344 it may be a refresh, and an
+    // interrupted full attempt finishes `done` too — neither is a completed
+    // full scan, and neither may block the user's immediate retry.
+    //
+    // The admin trigger path (handlers/admin.rs) deliberately has no such
+    // check — that is the operator's bypass.
+    let anchor = match state
+        .db
+        .get_scan_state(&auth.did, "last_full_scan_finished_at")
+        .await
+    {
+        Ok(m) => m,
         Err(e) => {
-            // A cooldown is an abuse guard, not a correctness gate: if we
-            // cannot read the queue, let the enqueue proceed rather than
-            // refusing service on a DB blip.
-            tracing::warn!(error = %format!("{e:#}"), "cooldown check skipped — could not read scan queue");
+            // A cooldown is an abuse guard, not a correctness gate: on a DB
+            // blip let the enqueue proceed rather than refuse service.
+            tracing::warn!(error = %format!("{e:#}"), "cooldown marker unreadable — skipping the cooldown check");
+            None
+        }
+    };
+    if let Some(finished_at) = anchor {
+        if let Some(retry_at) = cooldown_retry_at(
+            &finished_at,
+            chrono::Utc::now(),
+            state.config.scan_cooldown_hours,
+        ) {
+            // Word the limit to match the configured window — "one per day"
+            // is only true at the 24h default.
+            let window = match state.config.scan_cooldown_hours {
+                24 => "one per day".to_string(),
+                h => format!("one every {h} hours"),
+            };
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "error": format!("You scanned recently — scans are limited to {window}"),
+                    "retry_at": retry_at,
+                })),
+            )
+                .into_response();
         }
     }
 
-    // Idempotent by construction: `enqueue_scan` is a no-op while the user is
-    // queued or running (user_did is the primary key), so a double-click
-    // returns the current position instead of booking a second scan.
-    if let Err(e) = state.db.enqueue_scan(&auth.did).await {
-        tracing::error!(error = %format!("{e:#}"), "enqueue failed");
-        return api_error(StatusCode::SERVICE_UNAVAILABLE, "Could not queue the scan");
-    }
+    // Idempotent by construction: `enqueue_scan` records the request on the
+    // existing row while the user is queued or running (user_did is the
+    // primary key), so a double-click returns the current position instead of
+    // booking a second scan.
+    let outcome = match state.db.enqueue_scan(&auth.did).await {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::error!(error = %format!("{e:#}"), "enqueue failed");
+            return api_error(StatusCode::SERVICE_UNAVAILABLE, "Could not queue the scan");
+        }
+    };
 
     // Wake the admitter so a free slot is taken now, not on the next 30s tick.
     if let Some(wake) = &state.scan_wake {
@@ -149,6 +156,17 @@ pub async fn trigger_scan(
             "status": status,
             "position": position,
             "eta_seconds": eta,
+            // What actually happened to the request (#344 R09).
+            // `after_refresh` means "a background refresh is running; your
+            // scan starts when it finishes" — the row stays `running refresh`
+            // until then, so `status`/`position` alone cannot say it. The
+            // dashboard copy for it is #365's; the frontend keeps reading
+            // `position`/`eta_seconds` as today.
+            "queued": match outcome {
+                EnqueueOutcome::QueuedAfterRefresh => "after_refresh",
+                EnqueueOutcome::AlreadyRunning => "already_running",
+                _ => "now",
+            },
         })),
     )
         .into_response()

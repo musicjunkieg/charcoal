@@ -396,6 +396,18 @@
 					<span class="tier-count">{status.tier_counts.not_assessed}</span>
 					<span class="tier-label">Not assessed</span>
 				</div>
+				<!-- #344: scored under an older generation or past their window.
+				     Hidden from the tiers until the nightly refresh (High/Elevated)
+				     or a re-engagement re-scores them. Neutral, unlinked. -->
+				{#if status.tier_counts.expired > 0}
+					<div
+						class="tier-card tier-not-assessed"
+						title="Scored under an older generation or past their refresh window — hidden until re-scored"
+					>
+						<span class="tier-count">{status.tier_counts.expired}</span>
+						<span class="tier-label">Expired</span>
+					</div>
+				{/if}
 			</div>
 
 			<!-- Tier legend -->
@@ -566,41 +578,41 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1.5rem;
-		margin-bottom: 2rem;
+		gap: var(--space-24);
+		margin-bottom: var(--space-32);
 		flex-wrap: wrap;
 	}
 
 	.page-title {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.75rem;
+		font-size: var(--text-page-title);
 		font-weight: 400;
 		color: var(--cream-50);
 		letter-spacing: -0.01em;
 	}
 
 	.page-subtitle {
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 		color: var(--charcoal-500);
-		margin-top: 0.25rem;
+		margin-top: var(--space-4);
 	}
 
 	.scan-area {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.5rem;
+		gap: var(--space-8);
 	}
 
 	.btn-scan {
-		padding: 0.625rem 1.25rem;
-		font-size: 0.9375rem;
+		padding: var(--space-10) var(--space-20);
+		font-size: var(--text-body-sm);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--charcoal-950);
 		background: linear-gradient(135deg, var(--amber-500) 0%, var(--copper) 100%);
 		border: none;
-		border-radius: 10px;
+		border-radius: var(--radius-10);
 		cursor: pointer;
 		transition:
 			transform 0.2s,
@@ -616,9 +628,9 @@
 	.scan-running {
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		gap: var(--space-10);
 		color: var(--copper);
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 	}
 
 	/* Waiting for a slot, not working (#257): the same layout as .scan-running
@@ -627,21 +639,21 @@
 	.scan-queued {
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		gap: var(--space-10);
 		color: var(--charcoal-400);
-		font-size: 0.875rem;
+		font-size: var(--text-small);
 	}
 
 	.queued-dot {
 		width: 8px;
 		height: 8px;
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		background: var(--charcoal-400);
 		flex-shrink: 0;
 	}
 
 	.scan-error {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--status-error);
 		text-align: right;
 	}
@@ -649,7 +661,7 @@
 	/* Cooldown 429 is a calm notice, not an error — quiet on the ramp,
 	   no red, no border. */
 	.scan-notice {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-300);
 		text-align: right;
 	}
@@ -657,20 +669,20 @@
 	.loading-state {
 		display: flex;
 		justify-content: center;
-		padding: 4rem 0;
+		padding: var(--space-64) 0;
 	}
 
 	.load-error {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 1rem;
-		padding: 4rem 2rem;
+		gap: var(--space-16);
+		padding: var(--space-64) var(--space-32);
 		text-align: center;
 	}
 
 	.load-error-text {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		color: var(--charcoal-400);
 	}
 
@@ -679,7 +691,7 @@
 		height: 24px;
 		border: 2px solid rgb(var(--copper-rgb) / 0.2);
 		border-top-color: var(--copper);
-		border-radius: 50%;
+		border-radius: var(--radius-circle);
 		animation: spin 0.8s linear infinite;
 	}
 
@@ -697,16 +709,16 @@
 	.tier-grid {
 		display: grid;
 		grid-template-columns: repeat(5, 1fr);
-		gap: 1rem;
-		margin-bottom: 2rem;
+		gap: var(--space-16);
+		margin-bottom: var(--space-32);
 	}
 
 	.tier-card {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		padding: 1.5rem 1rem;
-		border-radius: 14px;
+		padding: var(--space-24) var(--space-16);
+		border-radius: var(--radius-14);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
 		text-decoration: none;
 		transition:
@@ -724,14 +736,14 @@
 
 	.tier-count {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 2.5rem;
+		font-size: var(--text-stat-lg);
 		font-weight: 400;
 		line-height: 1;
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--space-8);
 	}
 
 	.tier-label {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		font-weight: 500;
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
@@ -745,13 +757,13 @@
 
 	/* Partial-results banner */
 	.partial-banner {
-		padding: 0.5rem 1rem;
-		margin-bottom: 1rem;
-		font-size: 0.8125rem;
+		padding: var(--space-8) var(--space-16);
+		margin-bottom: var(--space-16);
+		font-size: var(--text-label);
 		color: var(--copper);
 		background: rgb(var(--copper-rgb) / 0.08);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 10px;
+		border-radius: var(--radius-10);
 		text-align: center;
 	}
 
@@ -759,21 +771,21 @@
 	.tier-legend {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.375rem 1.25rem;
-		margin: -1rem 0 2rem 0;
-		padding: 0 0.25rem;
+		gap: var(--space-6) var(--space-20);
+		margin: calc(var(--space-16) * -1) 0 var(--space-32) 0;
+		padding: 0 var(--space-4);
 	}
 
 	.legend-item {
 		display: inline-flex;
 		align-items: baseline;
-		gap: 0.375rem;
-		font-size: 0.75rem;
+		gap: var(--space-6);
+		font-size: var(--text-caption);
 	}
 
 	.legend-tier {
 		font-weight: 600;
-		font-size: 0.6875rem;
+		font-size: var(--text-micro);
 		letter-spacing: 0.05em;
 		text-transform: uppercase;
 	}
@@ -784,24 +796,24 @@
 
 	/* Top threats */
 	.top-threats {
-		margin-bottom: 2.5rem;
+		margin-bottom: var(--space-40);
 	}
 
 	.threat-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.375rem;
+		gap: var(--space-6);
 	}
 
 	.threat-row {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 1rem;
-		padding: 0.625rem 1rem;
+		gap: var(--space-16);
+		padding: var(--space-10) var(--space-16);
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.07);
-		border-radius: 10px;
+		border-radius: var(--radius-10);
 		text-decoration: none;
 		transition: border-color 0.2s;
 	}
@@ -813,7 +825,7 @@
 	.threat-handle {
 		font-weight: 500;
 		color: var(--copper);
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -822,13 +834,13 @@
 	.threat-meta {
 		display: flex;
 		align-items: baseline;
-		gap: 0.75rem;
+		gap: var(--space-12);
 		flex-shrink: 0;
 	}
 
 	.threat-score {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		color: var(--charcoal-300);
 		font-variant-numeric: tabular-nums;
 	}
@@ -839,9 +851,9 @@
 		align-items: center;
 		background: rgb(var(--charcoal-950-rgb) / 0.6);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.15);
-		border-radius: 12px;
-		padding: 0 1rem;
-		margin-bottom: 2.5rem;
+		border-radius: var(--radius-12);
+		padding: 0 var(--space-16);
+		margin-bottom: var(--space-40);
 		transition: border-color 0.2s;
 	}
 
@@ -852,16 +864,16 @@
 
 	.search-at {
 		color: var(--charcoal-600);
-		font-size: 1rem;
-		margin-right: 0.25rem;
+		font-size: var(--text-body);
+		margin-right: var(--space-4);
 	}
 
 	.search-input {
 		flex: 1;
 		border: none;
 		background: transparent;
-		padding: 0.875rem 0;
-		font-size: 0.9375rem;
+		padding: var(--space-14) 0;
+		font-size: var(--text-body-sm);
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--cream-100);
 		outline: none;
@@ -872,14 +884,14 @@
 	}
 
 	.search-btn {
-		padding: 0.5rem 1rem;
-		font-size: 0.875rem;
+		padding: var(--space-8) var(--space-16);
+		font-size: var(--text-small);
 		font-weight: 500;
 		font-family: 'Outfit', system-ui, sans-serif;
 		color: var(--copper);
 		background: rgb(var(--copper-rgb) / 0.1);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 8px;
+		border-radius: var(--radius-8);
 		cursor: pointer;
 		transition: background 0.2s;
 	}
@@ -890,25 +902,25 @@
 
 	/* Events */
 	.events-section {
-		margin-top: 1rem;
+		margin-top: var(--space-16);
 	}
 
 	.section-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-16);
 	}
 
 	.section-title {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		font-weight: 500;
 		color: var(--charcoal-300);
 		letter-spacing: 0.01em;
 	}
 
 	.section-link {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--copper);
 		text-decoration: none;
 	}
@@ -920,18 +932,18 @@
 	.events-list {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--space-8);
 	}
 
 	.event-row {
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
-		padding: 0.875rem 1rem;
+		gap: var(--space-16);
+		padding: var(--space-14) var(--space-16);
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.07);
-		border-radius: 10px;
+		border-radius: var(--radius-10);
 	}
 
 	.event-info {
@@ -943,7 +955,7 @@
 		font-weight: 500;
 		color: var(--copper);
 		text-decoration: none;
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 	}
 
 	.event-handle:hover {
@@ -951,15 +963,15 @@
 	}
 
 	.event-type {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
-		margin-left: 0.5rem;
+		margin-left: var(--space-8);
 	}
 
 	.event-text {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-400);
-		margin-top: 0.25rem;
+		margin-top: var(--space-4);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -969,17 +981,17 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.25rem;
+		gap: var(--space-4);
 		flex-shrink: 0;
 	}
 
 	.event-time {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-600);
 	}
 
 	.event-link {
-		font-size: 0.75rem;
+		font-size: var(--text-caption);
 		color: var(--charcoal-500);
 		text-decoration: none;
 	}
@@ -989,23 +1001,23 @@
 	}
 
 	.empty-state {
-		padding: 3rem 0;
+		padding: var(--space-48) 0;
 		text-align: center;
 		color: var(--charcoal-600);
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 	}
 
 	/* Topic fingerprint card */
 	.fingerprint-card {
-		margin-top: 2rem;
-		padding: 1rem 1.25rem;
+		margin-top: var(--space-32);
+		padding: var(--space-16) var(--space-20);
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
-		border-radius: 14px;
+		border-radius: var(--radius-14);
 	}
 
 	.fingerprint-summary {
-		font-size: 1rem;
+		font-size: var(--text-body);
 		font-weight: 500;
 		color: var(--charcoal-300);
 		cursor: pointer;
@@ -1017,25 +1029,25 @@
 	}
 
 	.fingerprint-hint {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
 		line-height: 1.5;
-		margin: 0.75rem 0;
+		margin: var(--space-12) 0;
 	}
 
 	.fingerprint-chips {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--space-8);
 	}
 
 	.chip {
-		padding: 0.25rem 0.75rem;
-		font-size: 0.8125rem;
+		padding: var(--space-4) var(--space-12);
+		font-size: var(--text-label);
 		color: var(--copper);
 		background: rgb(var(--copper-rgb) / 0.08);
 		border: 1px solid rgb(var(--copper-rgb) / 0.2);
-		border-radius: 999px;
+		border-radius: var(--radius-pill);
 	}
 
 	.btn-scan:disabled {
@@ -1055,64 +1067,64 @@
 		flex-direction: column;
 		align-items: center;
 		text-align: center;
-		padding: 4rem 2rem;
+		padding: var(--space-64) var(--space-32);
 		max-width: 520px;
 		margin: 0 auto;
 	}
 
 	.welcome-title {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.5rem;
+		font-size: var(--text-section-title);
 		font-weight: 400;
 		color: var(--cream-50);
-		margin-bottom: 1.25rem;
+		margin-bottom: var(--space-20);
 	}
 
 	.welcome-text {
-		font-size: 0.9375rem;
+		font-size: var(--text-body-sm);
 		color: var(--charcoal-400);
 		line-height: 1.6;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-16);
 	}
 
 	.btn-scan-welcome {
-		margin-top: 1rem;
-		padding: 0.75rem 2rem;
-		font-size: 1rem;
+		margin-top: var(--space-16);
+		padding: var(--space-12) var(--space-32);
+		font-size: var(--text-body);
 	}
 
 	/* Accuracy Panel */
 	.accuracy-panel {
-		margin-bottom: 2.5rem;
-		padding: 1.25rem;
+		margin-bottom: var(--space-40);
+		padding: var(--space-20);
 		background: rgb(var(--charcoal-900-rgb) / 0.5);
 		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
-		border-radius: 14px;
+		border-radius: var(--radius-14);
 	}
 
 	.accuracy-header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		margin-bottom: 1rem;
+		margin-bottom: var(--space-16);
 	}
 
 	.accuracy-grid {
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
-		gap: 1rem;
+		gap: var(--space-16);
 	}
 
 	.accuracy-stat {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--space-4);
 	}
 
 	.accuracy-num {
 		font-family: 'Libre Baskerville', Georgia, serif;
-		font-size: 1.5rem;
+		font-size: var(--text-section-title);
 		font-weight: 400;
 		color: var(--charcoal-300);
 		line-height: 1;
@@ -1129,7 +1141,7 @@
 	}
 
 	.accuracy-label {
-		font-size: 0.6875rem;
+		font-size: var(--text-micro);
 		font-weight: 500;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
@@ -1137,9 +1149,9 @@
 	}
 
 	.accuracy-hint {
-		font-size: 0.8125rem;
+		font-size: var(--text-label);
 		color: var(--charcoal-500);
-		margin-top: 0.875rem;
+		margin-top: var(--space-14);
 		text-align: center;
 	}
 

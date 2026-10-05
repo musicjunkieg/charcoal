@@ -108,6 +108,25 @@ pub struct PostSample {
     pub total_posts: usize,
 }
 
+/// How a post sits in its author's feed. Kept alongside the post so a cached
+/// feed (#343 §4.1) can be re-partitioned into a [`PostSample`] later without
+/// refetching — the reply/quote classification is decided at fetch time from
+/// feed metadata that the `Post` itself does not carry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FeedKind {
+    Original,
+    Reply { parent_uri: String },
+    Quote,
+}
+
+/// One authored (non-repost) post as it appeared in `getAuthorFeed`, in feed
+/// order. This is the unit stored in `account_feed_snapshots.posts_json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeedPost {
+    pub post: Post,
+    pub kind: FeedKind,
+}
+
 /// Quality of a topic fingerprint based on data availability.
 ///
 /// When an account is reply-heavy, fingerprinting from originals alone
@@ -264,24 +283,16 @@ pub async fn fetch_recent_posts(
     Ok(posts)
 }
 
-/// Fetch recent posts with replies included, partitioned into a PostSample.
-///
-/// Uses the `posts_with_replies` filter to get both original posts and replies
-/// from the same API call. Partitions into originals, replies (with parent URIs),
-/// and quotes. Computes reply and quote ratios from the same data.
-///
-/// This replaces the pattern of calling `fetch_recent_posts` + `fetch_reply_ratio`
-/// separately — one API call yields both toxicity-scoreable text AND behavioral ratios.
-pub async fn fetch_posts_with_replies(
+/// Fetch up to `max_posts` authored posts (reposts skipped) in feed order,
+/// each tagged with its [`FeedKind`]. This is the network half of
+/// [`fetch_posts_with_replies`]; [`sample_from_feed`] is the pure half.
+pub async fn collect_feed_posts(
     client: &PublicAtpClient,
     handle: &str,
     max_posts: usize,
-) -> Result<PostSample> {
-    let mut originals = Vec::new();
-    let mut replies = Vec::new();
-    let mut quotes = Vec::new();
+) -> Result<Vec<FeedPost>> {
+    let mut feed_posts: Vec<FeedPost> = Vec::new();
     let mut cursor: Option<String> = None;
-    let mut total_collected: usize = 0;
 
     // How many to request per page (API max is 100).
     let page_size = max_posts.min(100).to_string();
@@ -348,50 +359,73 @@ pub async fn fetch_posts_with_replies(
                 langs,
             };
 
-            total_collected += 1;
-
             // Classify: reply takes priority over quote (reply context is more
             // important for NLI pair scoring than the quote relationship).
-            if feed_item.reply.is_some() {
+            let kind = if feed_item.reply.is_some() {
                 let parent_uri = record
                     .data
                     .reply
                     .as_ref()
                     .map(|r| r.parent.uri.clone())
                     .unwrap_or_default();
-
                 if parent_uri.is_empty() {
-                    // Edge case: feed says it's a reply but no parent URI in record.
-                    // Treat as original.
-                    originals.push(post);
+                    // Edge case: feed says it's a reply but no parent URI in
+                    // record. Treat as original.
+                    FeedKind::Original
                 } else {
-                    replies.push(ReplyPost { post, parent_uri });
+                    FeedKind::Reply { parent_uri }
                 }
             } else if is_quote {
-                quotes.push(post);
+                FeedKind::Quote
             } else {
-                originals.push(post);
-            }
+                FeedKind::Original
+            };
 
-            if total_collected >= max_posts {
+            feed_posts.push(FeedPost { post, kind });
+
+            if feed_posts.len() >= max_posts {
                 break;
             }
         }
 
         debug!(
             page_posts = output.feed.len(),
-            total_collected = total_collected,
+            total_collected = feed_posts.len(),
             "Fetched page of posts (with replies) for @{}",
             handle
         );
 
-        if total_collected >= max_posts {
+        if feed_posts.len() >= max_posts {
             break;
         }
 
         cursor = output.data.cursor.clone();
         if cursor.is_none() || output.feed.is_empty() {
             break;
+        }
+    }
+
+    Ok(feed_posts)
+}
+
+/// Partition the first `limit` feed posts into a [`PostSample`]. Pure, so a
+/// cached feed of 50 can serve a stage-1 sample of 25 with identical results
+/// to fetching 25 directly (the paged fetch also stops after `limit`).
+pub fn sample_from_feed(feed: &[FeedPost], limit: usize) -> PostSample {
+    let mut originals = Vec::new();
+    let mut replies = Vec::new();
+    let mut quotes = Vec::new();
+    let mut total_collected: usize = 0;
+
+    for fp in feed.iter().take(limit) {
+        total_collected += 1;
+        match &fp.kind {
+            FeedKind::Original => originals.push(fp.post.clone()),
+            FeedKind::Reply { parent_uri } => replies.push(ReplyPost {
+                post: fp.post.clone(),
+                parent_uri: parent_uri.clone(),
+            }),
+            FeedKind::Quote => quotes.push(fp.post.clone()),
         }
     }
 
@@ -406,24 +440,43 @@ pub async fn fetch_posts_with_replies(
         0.0
     };
 
-    info!(
-        originals = originals.len(),
-        replies = replies.len(),
-        quotes = quotes.len(),
-        reply_ratio = format!("{:.2}", reply_ratio),
-        quote_ratio = format!("{:.2}", quote_ratio),
-        handle = handle,
-        "Partitioned post sample"
-    );
-
-    Ok(PostSample {
+    PostSample {
         originals,
         replies,
         quotes,
         reply_ratio,
         quote_ratio,
         total_posts: total_collected,
-    })
+    }
+}
+
+/// Fetch recent posts with replies included, partitioned into a PostSample.
+///
+/// Uses the `posts_with_replies` filter to get both original posts and replies
+/// from the same API call. Partitions into originals, replies (with parent URIs),
+/// and quotes. Computes reply and quote ratios from the same data.
+///
+/// This replaces the pattern of calling `fetch_recent_posts` + `fetch_reply_ratio`
+/// separately — one API call yields both toxicity-scoreable text AND behavioral ratios.
+pub async fn fetch_posts_with_replies(
+    client: &PublicAtpClient,
+    handle: &str,
+    max_posts: usize,
+) -> Result<PostSample> {
+    let feed = collect_feed_posts(client, handle, max_posts).await?;
+    let sample = sample_from_feed(&feed, max_posts);
+
+    info!(
+        originals = sample.originals.len(),
+        replies = sample.replies.len(),
+        quotes = sample.quotes.len(),
+        reply_ratio = format!("{:.2}", sample.reply_ratio),
+        quote_ratio = format!("{:.2}", sample.quote_ratio),
+        handle = handle,
+        "Partitioned post sample"
+    );
+
+    Ok(sample)
 }
 
 /// Fetch a single post's text by its AT URI.
@@ -597,5 +650,95 @@ mod tests {
     fn extract_langs_none_is_empty() {
         let record = record_with_langs(None);
         assert_eq!(extract_langs(&record), Vec::<String>::new());
+    }
+}
+
+#[cfg(test)]
+mod feed_sample_tests {
+    use super::*;
+
+    fn post(uri: &str) -> Post {
+        Post {
+            uri: uri.to_string(),
+            text: format!("text for {uri} long enough"),
+            created_at: None,
+            like_count: 0,
+            repost_count: 0,
+            quote_count: 0,
+            is_quote: false,
+            langs: vec![],
+        }
+    }
+
+    fn feed() -> Vec<FeedPost> {
+        vec![
+            FeedPost {
+                post: post("at://a/1"),
+                kind: FeedKind::Original,
+            },
+            FeedPost {
+                post: post("at://a/2"),
+                kind: FeedKind::Reply {
+                    parent_uri: "at://b/9".into(),
+                },
+            },
+            FeedPost {
+                post: post("at://a/3"),
+                kind: FeedKind::Quote,
+            },
+            FeedPost {
+                post: post("at://a/4"),
+                kind: FeedKind::Reply {
+                    parent_uri: "at://b/8".into(),
+                },
+            },
+        ]
+    }
+
+    #[test]
+    fn partitions_and_computes_ratios_over_the_whole_feed() {
+        let s = sample_from_feed(&feed(), 50);
+        assert_eq!(s.total_posts, 4);
+        assert_eq!(
+            s.originals
+                .iter()
+                .map(|p| p.uri.as_str())
+                .collect::<Vec<_>>(),
+            ["at://a/1"]
+        );
+        assert_eq!(s.replies.len(), 2);
+        assert_eq!(s.replies[0].parent_uri, "at://b/9");
+        assert_eq!(s.quotes.len(), 1);
+        assert!((s.reply_ratio - 0.5).abs() < 1e-9);
+        assert!((s.quote_ratio - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn limit_takes_a_prefix_and_ratios_follow_the_prefix() {
+        // Same rule as the paged fetch: stop after `limit` posts, ratios over
+        // what was kept. First two = 1 original + 1 reply.
+        let s = sample_from_feed(&feed(), 2);
+        assert_eq!(s.total_posts, 2);
+        assert_eq!(s.originals.len(), 1);
+        assert_eq!(s.replies.len(), 1);
+        assert_eq!(s.quotes.len(), 0);
+        assert!((s.reply_ratio - 0.5).abs() < 1e-9);
+        assert!((s.quote_ratio - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn empty_feed_has_zero_ratios() {
+        let s = sample_from_feed(&[], 25);
+        assert_eq!(s.total_posts, 0);
+        assert_eq!(s.reply_ratio, 0.0);
+        assert_eq!(s.quote_ratio, 0.0);
+    }
+
+    #[test]
+    fn feed_post_round_trips_through_json() {
+        let f = feed();
+        let json = serde_json::to_string(&f).unwrap();
+        let back: Vec<FeedPost> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, f);
     }
 }

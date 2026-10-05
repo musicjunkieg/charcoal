@@ -60,6 +60,12 @@ fn scan_row_json(row: &crate::db::traits::ScanQueueRow, handle: Option<&str>) ->
         "started_at": row.started_at,
         "finished_at": row.finished_at,
         "last_error": row.last_error,
+        // #344: which pipeline the row runs, and whether a user is still owed
+        // a full scan. Without these the panel shows a nightly refresh and a
+        // user-triggered scan as the same row.
+        "kind": row.kind.as_str(),
+        "full_requested_at": row.full_requested_at,
+        "completion": row.completion.map(|c| c.as_str()),
     })
 }
 
@@ -298,7 +304,9 @@ pub async fn trigger_admin_scan(
             )
         })?;
 
-    state.db.enqueue_scan(&target_did).await.map_err(|e| {
+    // The outcome is not surfaced: the operator's bypass reports only that the
+    // row is on the queue.
+    let _ = state.db.enqueue_scan(&target_did).await.map_err(|e| {
         tracing::error!(error = %format!("{e:#}"), "admin enqueue failed");
         (
             StatusCode::SERVICE_UNAVAILABLE,

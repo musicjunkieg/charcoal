@@ -6,7 +6,114 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- #344 — `charcoal migrate` copies every score row verbatim
+  (`export_scores` / `import_score`), including expired, legacy and
+  NotAssessed rows, with their original `scored_at`, revision stamp and
+  expiry — and never renews expiry. (It previously copied through the
+  ranked-threats query, which omits NULL-score rows and would now omit
+  hidden ones.) SQLite rows whose `valid_until` is NULL or unparseable
+  arrive in Postgres as `valid_until = scored_at` — expired the instant
+  they were scored, never renewed, never dropped. Corrupt evidence JSON
+  still reads as empty on export (#364).
+- #344 — freshness reads in the pipeline are hard errors; a refresh that
+  cannot load its required context (stored events, protected posts,
+  embeddings) fails and retries rather than scoring without it.
+- #344 — a user's full-scan request made while a refresh is running is
+  recorded durably and runs when the refresh finishes; upgrading a queued
+  refresh to a full scan keeps the user's queue position. The 24 h cooldown
+  anchors on the last *full* scan that was actually fulfilled
+  (`scan_state.last_full_scan_finished_at`, backfilled by migration v18) —
+  never on a queue row's `done` status — so an interrupted scan can be
+  re-run at once. The queue ETA median now samples fulfilled full attempts,
+  including those that completed with skips or unverified, rather than only
+  clean ones.
+- #343 Phase 0/1 measured on staging (2026-09-13, #346). One ONNX session
+  already drives 13–15 cores through ort's intra-op threads, so a pool of
+  four changed the gather wall by 0 % for +1.5 GB RSS and
+  `CHARCOAL_ONNX_SESSIONS` stays at 1; the gather is fetch-bound, with a 5–8 minute near-idle tail
+  on larger accounts. The public AppView sends no `RateLimit-*` headers at
+  all, so §4.3's adaptive limiter has nothing to read. The shared cache hit
+  6.6 % of the one onboarding measured so far — exactly that account's
+  candidate-set overlap with the prior scan, which validates the mechanism.
+  The single-pair ≥ 50 % / < 20 % thresholds are withdrawn: the spec now
+  defines overlap as candidate-set overlap, records it per onboarding via
+  an enumerate-only probe (#353), and decides Phase 3 sizing after ten real
+  onboardings (spec §4.1, Phase 1b). Both runbooks corrected: the gather's
+  `total_ms` is the sum of per-account milliseconds across all workers
+  (aggregate worker time — `829992` ms ≈ 830 worker-seconds), not wall
+  time; a same-account rerun inside 7 days drops every candidate it scored
+  last time (#344), so runs must reset `account_scores` between them.
+
+### Added
+- #344 / #343 Phase 2 — score expiry and the nightly refresh. Every
+  `account_scores` row carries `scoring_generation` (the build-time scoring
+  *revision*, `src/scoring/generation.rs`: the human `SCORING_GENERATION`
+  composed with the identity of every model this binary loads, so swapping
+  a model expires stored scores by itself) and `valid_until` (3/7/14 days
+  by scoring confidence — the tiers that existed since #135, finally
+  wired). Tier lists, counts and the pipeline's already-scored gates show
+  fresh rows only; expired and old-revision rows are kept, hidden, and
+  reported as `tier_counts.expired` on `GET /api/status`, on the dashboard
+  tier grid and in `charcoal status`. A refresh queue kind
+  (`CHARCOAL_REFRESH_INTERVAL_HOURS`, default 24, `0`/`off` disables, clamp
+  1–168) re-scores each user's High/Elevated rows that expire within two
+  days or predate the current revision, read from the table, on the
+  existing admitter tick — one bounded transaction per tick (25 users), so
+  a crash cannot lose a scheduled refresh. A revision bump makes every user
+  with scores due again (`users.refreshed_generation`). Staged scan work
+  records its owning run kind and revision: a refresh resumes its own
+  interrupted work, never a user's, and never publishes a current stamp
+  from another revision's inputs or another classifier policy's verdicts.
+  Fingerprints record their embedding model; a refresh whose fingerprint is
+  missing or incompatible asks for a full scan instead of rebuilding.
+  Schema v18. Deploy runbook:
+  `docs/runbooks/343-phase2-expiry-refresh.md`.
+- `CHARCOAL_COPE_B_POLICY_VERSION` — the Stage-2 CoPE-B endpoint's own
+  `POLICY_VERSION`, declared to Charcoal because the classifier runs outside
+  this binary. A web-triggered scan, and a nightly refresh with work to do,
+  probes the endpoint before it gathers and refuses to start on a mismatch,
+  naming both values. The CLI `scan` and `sweep` commands do not probe; they
+  gather first, and a mismatch discovered mid-scan logs one error per batch. Unset means `policy-unknown`, today's advertised
+  value. See README "Stage-2 classifier policy".
+- #343 Phase 0 + Phase 1 — measurement hooks and the shared cache. The
+  gather now logs `cpu_cores_busy` once a minute and records the observed
+  Bluesky `RateLimit-Limit` to `scan_state` once per scan, so the first
+  real numbers on inference headroom and the API ceiling come from the DB
+  rather than guesses. `CHARCOAL_ONNX_SESSIONS` (default 1, clamp 1–8)
+  builds a round-robin pool of ONNX sessions for the session experiment.
+  Three new user-independent tables (schema v16) cache what never changes
+  between users: an account's recent feed for 24 h keyed by DID, stage-1
+  ONNX scores keyed by the SHA-256 of the exact text scored, and stage-2
+  verdicts keyed by (text hash, model, policy version). No readable post
+  text is stored in the score tables, and `delete_user_data` leaves the
+  cache alone because none of it belongs to a user. The two-stage scorer
+  also gained a `score_batch` override — stage 1 was doing 25 single
+  forward passes per account. Hit/miss counts land in `scan_state` as
+  `{feed,onnx,classifier}_cache_{hits,misses}`. The cache tables are
+  bounded: every scan starts by evicting feed snapshots older than 7 days
+  and scores/verdicts older than 90 days, so a DID that is never sampled
+  again and a text hash from a retired model or policy generation both age
+  out instead of living forever. Schema v17 adds the timestamp indexes that
+  sweep reads. Eviction is best-effort — it is an optimisation, and a
+  failed sweep warns and lets the scan continue.
+
 ### Fixed
+- #394 — deleted accounts no longer keep a user on an hourly refresh that
+  wakes the GPU forever. Measured on staging 2026-10-02: 29 deleted accounts
+  across 7 users cost ~$0.45–0.57 an hour while scoring nothing. Three causes,
+  three fixes. (A) A feed fetch that answers HTTP 400 with "Profile not found",
+  `AccountDeactivated`, `AccountTakedown` or one of the `Repo*` gone codes now
+  stamps that user's score row `gone_at`/`gone_reason` (migration v19) and
+  leaves the refresh candidates; scoring the account again clears it. A 5xx,
+  a timeout, or any other 400 is still an ordinary skip. (B) A gone account
+  is not a skip, so a refresh whose only failures were gone accounts
+  completes and takes the nightly cadence instead of the one-hour retry.
+  (C) The classifier identity probe is no longer paid before gathering: it
+  runs inside `CachedClassifier`, at most once per run, only when a cache
+  miss is about to reach the endpoint. A run that classifies nothing, or
+  finds every verdict cached, never contacts the GPU. The full scan keeps its
+  fail-fast probe at start, which now counts as the run's only probe.
 - Review fixes from the staging→main promotion PR (#345, PR #115). The DPoP
   nonce retry re-signed the *same* proof with the new nonce, so the retry
   carried the jti the server had already seen — RFC 9449 makes `jti` a

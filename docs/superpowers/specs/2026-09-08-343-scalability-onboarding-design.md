@@ -1,0 +1,704 @@
+# #343 — Scalability & onboarding design
+
+**Status:** approved in brainstorm 2026-09-07/08, awaiting written-spec review
+**Issues:** #343 (this), folds in #344 (scores never re-scored), #182 (no 429
+handling), unblocks #342 (scheduled sweeps). Follow-ups: #135 (tier
+calibration, gets a soot-vs-Bluesky sample from Phase 4).
+**Deciduous:** goal 773 → decisions 775, 777, 778, 783, 784; observations
+774, 776, 779, 785; options 780–782.
+
+## 0. The question, and the answer in one paragraph
+
+Bryan asked what it takes to onboard strangers fast and concurrently, and
+where web, workers and Postgres should live once Railway stops being
+cheapest. The answer: the scan is **half local CPU inference, half Bluesky
+I/O**, and both halves are spent redundantly — every user re-fetches and
+re-classifies the same community. A **shared, user-independent cache** of
+account feeds and post classifications removes most of both halves for
+every user after the first; a **token-bucket Bluesky client** and a
+**logical web/worker split** make ten concurrent scans safe on one Railway
+replica; **score expiry plus a top-tier refresh job** closes #344 and gives
+#342 its scheduler; and **soot** later replaces the Bluesky gather entirely.
+Hosting stays on Railway at roughly today's bill; a worker on the Hetzner
+soot box is kept as a gated option, not a plan.
+
+## 1. Where the time goes today (measured 2026-09-07, staging, post region fix)
+
+One cold scan of Bryan's account: **13 m 42 s** for 934 candidates
+(0.88 s/candidate; 2.0 s/candidate on 2026-08-07 before the Postgres region
+move, so every earlier timing is stale).
+
+| Phase | Wall | Notes |
+|---|---|---|
+| Enumeration (Constellation + follows) | 27 s | Bluesky/Constellation I/O |
+| Gather (fetch + clean-pass + stage-1 ONNX) | **10 m 16 s** | 3 618 worker-seconds over 8 workers ≈ 5.9 effective. Fetch 39 %, clean-pass 7 %, stage-1 ONNX 41 % (`inference_pct` 47) |
+| Burst (classifier, 887 posts) | 2 m 14 s | RunPod CoPE-B |
+| Finalize (569 accounts scored) | 45 s | DB writes, 5 ms each |
+
+Memory: 0.7 GB idle, 1.9 GB peak. vCPU during the gather is **unmeasured**
+(Railway's metrics API reports 0.012 max during a known 10-minute gather —
+unusable; Phase 0 fixes this).
+
+**Measured 2026-09-13 (Phase 0, staging `593c40d`; runbooks
+`docs/runbooks/343-phase0-session-experiment.md` and `…-phase1-hit-rate.md`,
+deciduous 846–858):**
+
+- **Inference cores.** One ONNX session drives **13–15 cores** during a
+  gather (`cpu_cores_busy` median ≈ 13 on Bryan's account, ≈ 8 on a
+  3 630-candidate account; Railway's metrics API now agrees, 15.3 peak). That
+  is ort's intra-op parallelism on a single session, not eight workers each
+  using one core — so "inference cores per worker" is ~1.7 and the 24 vCPU
+  cap is one scan's headroom, not ten's.
+- **`RateLimit-Limit`: none.** `public.api.bsky.app` sends no `RateLimit-*`
+  headers (see 4.3).
+- **Session pool: no.** N=4 sessions vs N=1 on the same 464-candidate set:
+  gather wall 129 s vs 137 s / 120 s (N=1 twice) — a 0 % change against a
+  25 % bar, for +1.5 GB RSS. Stage-1 ONNX worker-seconds do halve
+  (172/213 → 90 s), but the gather is fetch-bound: `fetch_ms` is 46–84 % of
+  worker time depending on the account, and larger accounts end with a
+  **5–8 minute tail at ≈ 0 cores** waiting on a few straggler fetches.
+  `CHARCOAL_ONNX_SESSIONS` stays at 1.
+- **Freshness filter halves the population.** A rescan within 7 days drops
+  every candidate scored last time (`get_fresh_scored_dids`, #344): Bryan's
+  "cold" run saw 469 candidates, not 934. Per-candidate throughput on that
+  set was 0.59 s (cold) and 0.37 s on a 3 095-candidate warm run.
+- **Burst cold start.** The first RunPod burst of the session took 127 s;
+  the next took 11 s. `scan_queue` wall is not a gather measure.
+
+What this means for ten users at once, unshared: ~22 Bluesky requests/s from
+one IP and ~20 cores of inference. With realistic community overlap (three
+users share roughly a third of their candidates) that is ~7 req/s and ~6
+cores, which one Railway Pro replica (24 vCPU cap) absorbs. The per-wave
+metered cost is cents (17 400 vCPU-s ≈ $0.13 unshared). **The cost driver is
+idle memory, not waves.**
+
+## 2. Target
+
+**Ten concurrent onboardings, each finished in ≤ 15 minutes**, without
+tripping Bluesky rate limits and without degrading the web tier — at a total
+hosting bill ≤ $60/month across production and staging (today ≈ $30).
+
+## 3. Approach chosen
+
+Three approaches were weighed (deciduous 780–783):
+
+- **A. Shared cache + logical worker split** — cache feeds and
+  classifications across users; add rate limiting; make the process role
+  configurable. Cheapest, no new infrastructure, every phase independently
+  measurable. **Chosen.**
+- **B. Soot as candidate source** — replace the Bluesky gather with soot's
+  `/export`. Largest win but gated on soot's full-network backfill finishing.
+  **Kept as the final phase.**
+- **C. Move workers off Railway now** — dropped: it moves cost without
+  removing work, and re-creates #335 (cross-region DB writes).
+
+## 4. Design
+
+### 4.1 Shared cache (S1)
+
+Three new tables, all **keyed by DID or by scored text — no `user_did`** —
+because a post's toxicity is a property of the post, not of who is being
+protected. Only topic overlap, graph distance and targeting are per-user,
+and those stay in the existing `(user_did, account_did, …)` tables.
+
+```
+account_feed_snapshots
+  did          TEXT PRIMARY KEY
+  handle       TEXT NOT NULL
+  posts_json   TEXT NOT NULL      -- Vec<FeedPost>, the ordered getAuthorFeed sample
+  fetched_at   TIMESTAMP NOT NULL
+  source       TEXT NOT NULL      -- 'bluesky' | 'soot'
+
+onnx_scores                       -- stage-1 / clean-pass primary-scorer output
+  text_sha256  TEXT NOT NULL      -- SHA-256 (hex) of the exact text the model saw
+  model_id     TEXT NOT NULL      -- ONNX model identity
+  score        REAL NOT NULL
+  scored_at    TIMESTAMP NOT NULL
+  PRIMARY KEY (text_sha256, model_id)
+
+classifier_verdicts               -- burst (CoPE-B / stub) output
+  text_sha256     TEXT NOT NULL
+  model_id        TEXT NOT NULL
+  policy_version  TEXT NOT NULL
+  toxic_token     BOOLEAN NOT NULL
+  confidence      REAL NOT NULL
+  classified_at   TIMESTAMP NOT NULL
+  PRIMARY KEY (text_sha256, model_id, policy_version)
+```
+
+**Why text hashes, not `(post_uri, cid)`** (amended 2026-09-08 while
+planning): `Post` carries no cid, and the same post is scored as **two
+different texts** — stage 1 scores the raw text, the clean pass scores the
+`format_parent_reply(parent, reply)` envelope for replies. A post-URI key
+would have to store both, and would silently serve a raw-text score for an
+envelope lookup. The hash is the exact identity of what the model saw: a
+missing parent produces a different envelope and therefore a different key,
+which is the correct behaviour. It also stores **no readable post text** —
+a privacy improvement over `posts_json`, which is the only place the text
+itself is persisted.
+
+- **Read-through as decorators.** The gather/burst scoring code does not
+  change. `CachedPostFetcher` wraps the Bluesky feed source: if a snapshot
+  exists with `fetched_at > now − SNAPSHOT_TTL` (24 h) and decodes, use it;
+  otherwise fetch once (50 posts — removing today's 25-then-50 double
+  fetch), upsert, and sample from it. `CachedToxicityScorer` wraps the ONNX
+  scorer's `score_batch` with an `onnx_scores` lookup by hash; misses are
+  scored and inserted. `CachedClassifier` wraps the classifier's
+  `classify_batch` with a `classifier_verdicts` lookup by
+  `(hash, model_id, policy_version)`; only successful verdicts are cached.
+- **Per-user tables are populated from the cache**, never the other way
+  round. `classification_queue` and `scan_account_input` keep their shape.
+- **`delete_user_data` does not touch these tables** — they hold nothing
+  about the protected user.
+- **Migration v16**, both backends. Postgres migration self-records its
+  version (`INSERT INTO schema_version … ON CONFLICT DO NOTHING`).
+  **No backfill** — existing rows in `classification_queue` are not copied;
+  the cache fills on the next scan.
+- ~~**Claim to verify:** the second user in a community sees ≥ 50 % of
+  candidates hit the snapshot cache. Below 20 % the cache is not paying for
+  its writes and the plan is re-costed before Phase 2.~~ **Withdrawn
+  2026-09-13** — replaced by the measurement plan below.
+
+**What "overlap" means here (amended 2026-09-13, deciduous 863–866).**
+This spec used "community" loosely. The only thing the cache can see is
+the **candidate set**: for a protected user, the accounts that quoted or
+reposted them (Constellation) plus a capped number of each amplifier's
+followers, minus anything scored for that user in the last 7 days
+(`src/pipeline/amplification.rs`). Two users' *overlap* is the share of
+the second user's candidate DIDs that the first user's scan already
+fetched. It is a property of who happened to amplify each of them lately,
+not of who they are friends with or what they post about — so it cannot be
+guessed from the outside, and surveying people about their circles does
+not predict it. Measured on 2026-09-13, the best pair available on
+staging overlapped 6.6 % and the cache hit exactly that.
+
+Three consequences:
+
+1. **Measure, don't guess.** The candidate set is the *enumeration*
+   step, which uses only public data and took 27 s in the §1 baseline
+   (the gather that follows is the expensive part). An **enumerate-only
+   probe** (#353) computes any handle's candidate DIDs, intersects them
+   with `account_feed_snapshots`, and reports count + overlap % in under a
+   minute with no login, no scoring and no cache writes. Used before
+   granting access, it answers "will this person's scan share anything?"
+   with a number instead of a hunch, and doubles as the wave-composition
+   check for the Phase 3 test.
+2. **The pass criterion is a distribution, not a threshold on one pair.**
+   Record the probe overlap for every real onboarding. If the distribution
+   sits near the 6.6 % measured today, the cache buys little *between*
+   users, Phase 3 sizing must assume ~zero sharing, and soot (4.5) is the
+   real lever. If it is bimodal — friends who invite friends share a lot,
+   strangers share nothing — the cache earns its keep for the first group
+   and the 4.3 arithmetic should use the measured lower mode.
+3. **Time matters as much as people.** Snapshots are reused only inside
+   the 24 h `SNAPSHOT_TTL`, so onboardings a day apart never share
+   regardless of overlap. The one consumer guaranteed to hit inside the
+   TTL is the **Phase 2 refresh job** (4.4), which re-scores the *same*
+   user's high/elevated set nightly — those DIDs were fetched hours
+   earlier. That hit rate is measurable today with no second account and
+   is likely the cache's largest payoff; it gets its own target under
+   Phase 2.
+
+### 4.2 Worker role and concurrency knobs (S2)
+
+- `CHARCOAL_ROLE=web|worker|both`, default `both` (today's behaviour).
+  `worker` runs the admitter and the refresh tick (4.4) and serves only
+  `/healthz`; `web` serves the app and does not run the admitter. This is a
+  config split, not a code split — one binary, one Docker image.
+- Three semaphores, all process-global:
+  - `gather_permits` — default 16, replaces the literal `8` at
+    `src/web/scan_job.rs:1047`.
+  - `bluesky_permits` — in-flight cap that backs the token bucket in 4.3.
+  - `burst_permits` — default 16, shared across all running scans.
+- `CHARCOAL_SCAN_CONCURRENCY` (`src/web/admitter.rs:58`) clamp becomes
+  1..16, default 10.
+- **ONNX sessions.** ort 2.0.0-rc.11's `Session::run` takes `&mut self`
+  (`session/mod.rs:206`), so the `Arc<Mutex<Session>>` in
+  `src/toxicity/onnx.rs`, `src/topics/embeddings.rs:32` and
+  `src/scoring/nli.rs:107` is required, not optional. Parallel inference
+  therefore means **N sessions**, at ~500 MB per set. Phase 0 decides this
+  with a number (see 6).
+- **#277 (LiveScans process-local)** stays accepted until there are ≥ 2
+  worker replicas; at that point `scan_queue.running_on` records the
+  replica and the admitter counts by row, not by in-memory set.
+
+### 4.3 Bluesky rate-limit strategy (S3)
+
+Facts: `public.api.bsky.app` publishes no numeric limit ("generous"); the
+3 000 per 5 min figure in the docs is the PDS limit, not the AppView's.
+**Corrected 2026-09-13:** the AppView returns **no** `RateLimit-*` headers
+at all — verified with a bare `curl` (responses come from a BunnyCDN edge
+with `cache-control: public, max-age=30`), and the Phase 0 scan logged
+"no RateLimit-Limit header observed". The "adaptive" bullet below therefore
+has nothing to read; the bucket is sized by hand and 429s are the only
+feedback. The 30 s CDN cache also means repeated fetches of the same feed
+inside that window never reach the origin.
+`PublicAtpClient` (`src/bluesky/client.rs:74`) has **no 429 handling**
+(#182); the only existing limiter is `src/toxicity/rate_limiter.rs`, used
+by Perspective and Zentropi.
+
+- **Shared token bucket** on the client: `CHARCOAL_BLUESKY_RPS` default 8,
+  burst 16. Every scan draws from the same bucket, so ten scans cannot
+  exceed what one replica's IP is allowed.
+- **Adaptive:** read `RateLimit-*` on every response. When `Remaining` drops
+  under 10 % of `Limit`, halve the refill rate until `Reset`. Log the
+  observed `Limit` at INFO once per minute at most, and persist the last
+  observed value in `scan_state` so Phase 0 gets its number for free.
+- **429 (#182):** honour `Retry-After` or `RateLimit-Reset`; park the
+  **whole bucket**, not just the failing call; retry up to 3× with jitter;
+  after that surface a typed transient error into the #183 resumable path
+  (the scan pauses and resumes, it does not abort).
+- **Boundary condition:** at ~4 calls per unique candidate, 8 rps supports
+  ~2 candidates/s ≈ 1 200 unique candidates per 10 minutes. A ten-user wave
+  with no cache overlap needs ~9 000; **the wave target depends on the
+  cache (4.1) or on soot (4.5), not on the bucket alone.** The bucket makes
+  the wave safe; the cache makes it fast.
+- Constellation is unchanged (its own bounded client, #235). Once soot is
+  the source, Bluesky calls fall to ~1 per candidate (profile + follows).
+
+### 4.4 Score expiry and refresh (S4 — closes #344, unblocks #342)
+
+Today `sweep.rs:134` and `amplification.rs:312` call
+`get_fresh_scored_dids(user_did, 7)`; `ScoringConfidence::staleness_days()`
+(`src/db/models.rs:63`, 14/7/3 days) is dead in production, and a DB error
+in the freshness read silently re-scores everything via
+`.unwrap_or_default()`.
+
+- `account_scores` gains `scoring_generation TEXT NOT NULL` and
+  `valid_until TIMESTAMP NOT NULL`. `valid_until = scored_at +
+  staleness_days()` at write time.
+- **Fresh** = `valid_until > now() AND scoring_generation = <current>`.
+  The current generation is a build-time constant bumped whenever the
+  formula, the models or the policy change. `get_fresh_scored_dids` takes
+  no `max_age_days` any more.
+- The freshness read is a **hard error** — a scan that cannot read
+  freshness does not run.
+- Expired rows are **kept** but filtered out of tier lists; the UI shows
+  "N expired" so a user can see why a list shrank.
+- **Re-entry** is by re-engagement (the normal path) or by the **top-tier
+  refresh job**: high and elevated rows with `valid_until < now() + 2 d`,
+  read from `account_scores`, re-scored through the normal pipeline.
+- `scan_queue.kind = 'full' | 'refresh'`; `users.next_refresh_at`. The
+  refresh tick runs inside the `worker` role, reusing the admitter's `TICK`
+  (`admitter.rs:53`) — **no second lock, no second loop**. Defaults:
+  refresh nightly, full fortnightly.
+- **Migration v17**: backfill `valid_until = scored_at + 14 d`,
+  `scoring_generation = 'legacy'`. Legacy rows expire naturally and are
+  refreshed by the job; nothing is deleted.
+
+*Amended 2026-09-14 (Phase 2 plan rev 2, after Astra's plan review; deciduous
+877/878):*
+
+- The migration is **v18** (v17 shipped with Phase 1's cache indexes).
+- **Due-ness is generation-driven, not stamped.** `users.refreshed_generation`
+  records the generation under which a user's High/Elevated set was last
+  refreshed or fully scanned; a user with scores is due when
+  `next_refresh_at` has passed **or** `refreshed_generation` is not the
+  current generation. Migration v18 leaves it NULL, so the first tick after
+  the deploy — and after every later bump — refreshes everyone. There is no
+  one-off `next_refresh_at = NOW()` backfill.
+- **Scheduling is one bounded transaction per tick** (25 users): select due
+  users with no queued/running work, create their refresh rows, advance
+  `next_refresh_at` — together. A failure advances nothing.
+- **Staging carries its owner.** `scan_state.scan_run_kind` and
+  `scan_run_generation` are written at every fresh start. A refresh resumes
+  its own interrupted work; it defers (retry in 1 h) when the staging belongs
+  to a full scan; a full scan drains a refresh's leftovers before gathering;
+  staging from another generation is discarded.
+- **Compatibility contract.** A current-generation score is published only
+  from a fingerprint whose `embedding_model_id` matches the binary's
+  `EMBEDDING_MODEL_ID` (or a keyword-only fingerprint), an `AccountInput`
+  blob stamped with the current generation, and verdict rows whose
+  `policy_version` matches the running classifier. `SCORING_GENERATION` is
+  bumped only for formula/format/policy changes — model changes are carried
+  by their own identities and never require a bump or invalidate the caches.
+  A refresh never rebuilds a fingerprint; a missing or incompatible one makes
+  the refresh defer and request a full scan.
+- **The user's request always wins.** A full enqueue over a queued refresh
+  upgrades it in place (queue position kept); a full request during a running
+  refresh is recorded in `scan_queue.full_requested_at` and becomes the
+  user's queued full scan when the refresh finishes. Queue order stays FIFO
+  across kinds (#271). The 24 h cooldown anchors on
+  `scan_state.last_full_scan_finished_at`, backfilled by v18 from done rows.
+- **`charcoal migrate` is lossless:** `export_scores`/`import_score` copy every
+  row (expired, legacy, NotAssessed) with its original `scored_at`,
+  generation and expiry; importing never renews expiry.
+- **Missing context is an error, not an absence:** a refresh that cannot load
+  stored events, protected posts or embeddings fails and retries; it never
+  overwrites a High/Elevated row with a score computed without them.
+- SQLite `valid_until` stays nullable; NULL and malformed values read as
+  expired everywhere (COALESCE), and malformed rows are refresh-eligible.
+- Refresh candidates are selected by score (`threat_score ≥
+  ThreatTier::ELEVATED_MIN`), not the stored tier string. Index:
+  `(user_did, threat_score)`, measured (runbook).
+- "Full fortnightly" is **not** in Phase 2 — it is #342's remaining scope.
+
+*Amended 2026-09-14 (plan rev 3, after Astra's second review V2-01–V2-07;
+deciduous 880):*
+
+- **The stored stamp is a composite revision**, not the bare generation:
+  `scoring_revision()` = `SCORING_GENERATION | ONNX model | embedding model |
+  NLI model`. Swapping any in-binary model expires every stored score by
+  itself; `SCORING_GENERATION` is bumped by hand for formula/format/policy
+  changes **and for CoPE-B/Zentropi classifier model or policy changes**
+  (the classifier's identity lives outside the binary). Caches keep their
+  own model-id keys and survive a revision change.
+- Staged verdict rows are reused only when **both** their classifier model
+  id and policy version match the running classifier.
+- The full scan's fingerprint rebuild decision checks the stored embedding
+  model id (same dimensions are not compatibility); a rebuild forced by an
+  incompatible model has **no fallback** — the scan aborts before scoring.
+- Scheduling writes the refresh queue row **conditionally** (`ON CONFLICT …
+  WHERE status IN ('done','failed')`) and advances a user only when that
+  write happened, so a full scan enqueued or admitted between the tick's
+  select and its write always wins. Two columns separate "this revision
+  still needs a first attempt" (`refresh_attempted_generation`, set by the
+  tick) from "this revision is proven" (`refreshed_generation`, set only by
+  complete work); a failed attempt waits for its hourly retry deadline
+  instead of being re-selected on the next tick.
+- **Completion is explicit.** `Ok` from the pipeline is classified into
+  complete / complete-with-skips / resumable; only complete work writes
+  the cooldown marker, schedules the nightly and proves the revision. Skips
+  and interruptions keep their successful writes, retry in an hour and read
+  as degraded. A full scan that only partially drains a refresh's leftovers
+  is resumable, not complete.
+- Migration carries SQLite's NULL/malformed expiries into Postgres as
+  `valid_until = scored_at` (expired when scored, never renewed, never
+  dropped); Postgres microseconds survive export/import, SQLite's whole-
+  second column form is a documented one-way truncation. Old-schema test
+  fixtures are built by running the migrations up to that version.
+- The refresh's context loads sit behind an injectable boundary so the
+  "missing context fails the run without writing" rule has a deterministic
+  test, not a runbook step.
+
+*Amended 2026-09-14 (plan rev 4, after Astra's third review V3-01–V3-06;
+deciduous 882):*
+
+- **Evidence provenance.** Every done verdict row names its producer. The
+  Stage-1 clean pass is a producer (`ONNX_MODEL_ID` + `onnx-clean-pass`);
+  the Stage-2 classifier is a producer (its model id + policy version, one
+  string on every path — advertised, written on a miss, matched on a hit;
+  Zentropi's advertised policy becomes the configured labeler version).
+  Finalize accepts a row only from a producer this binary runs; missing,
+  foreign and decode-error-sentinel provenance are distinct and all rejected
+  (bounded re-gather, never a skip).
+- **Cooldown reads only the completion marker.** `scan_state.
+  last_full_scan_finished_at` is written for `Complete` and
+  `CompleteWithSkips` (the request was fulfilled), never for a resumable
+  attempt; the queue row's `done` status is never consulted, and the row
+  records the outcome (`scan_queue.completion`). Only `Complete` proves the
+  revision.
+- **A full-scan request is a durable obligation.** `scan_queue.
+  full_requested_at` is set by every user enqueue, kept through a refresh
+  handover and through resumable/failed attempts, and cleared only when a
+  full scan completes. The retry tick re-queues owed work as `kind = 'full'`,
+  never as a refresh, so an interrupted drain continues automatically.
+- `mark_refreshed_generation` sets both revision columns; all refresh setup
+  (marker reset, scorers, client, context) runs inside one captured outcome
+  with a single scheduling site, so a setup failure still gets the hourly
+  retry.
+- Destructive Postgres migration fixtures run only against a dedicated
+  `*_migrations` database (`DATABASE_URL_MIGRATIONS`); the suite's isolation
+  is proven by a ten-run loop, not by a process-local lock.
+
+*Amended 2026-09-14 (plan rev 5, after Astra's fourth review V4-01–V4-05;
+deciduous 884):*
+
+- An owed full scan is eligible for the retry tick **without any score
+  row** — a first scan that failed before its first write is retried, as a
+  full scan, after its deadline; users with neither scores nor an
+  obligation are never selected. `schedule_retry` stamps the attempted
+  revision, so retries of either kind respect the deadline.
+- A full scan always enters the phased pipeline, even with no fresh
+  candidates: staged work is resumed or drained first, and a `burst` /
+  `finalize` marker after the run is resumable regardless of the summary's
+  flag. Empty discovery over no staging still completes legitimately.
+- Postgres `enqueue_scan` takes a per-user transaction advisory lock before
+  reading queue state (an absent row cannot be row-locked), with a
+  conditional absent-row insert and re-read as defense in depth; a running
+  claim and lease survive a concurrent first enqueue.
+- Both scan kinds return one `ScanReport` through one `finish_scan`, so the
+  queue row's completion is recorded the same way for full and refresh.
+- Destructive migration tests are serialized among themselves by a process
+  mutex plus a Postgres session advisory lock on the migrations database.
+
+*Amended 2026-09-14 (plan rev 6, after Astra's fifth review V5-01–V5-03;
+deciduous 886):*
+
+- Completion is classified from **persisted** skip state, not only the
+  resuming invocation's flag: a `done` marker with a positive skip count is
+  complete-with-skips even when the resume itself saw no new error; an
+  unreadable skip count is "complete, unverified" — fulfilled for the
+  cooldown, never clean, never proof of the revision.
+- The full scan has one bookkeeping boundary like the refresh: scorer
+  construction, fingerprint rebuild (including its abort), discovery and
+  the pipeline all run inside one captured outcome, and every error reaches
+  the single retry site — a scheduler-created owed full scan whose setup
+  fails gets the hourly retry, not the nightly deadline the tick set.
+- The Postgres enqueue concurrency tests are deterministic: serialization
+  is proven by observing the competitor's ungranted advisory lock, and
+  claim preservation establishes the committed running claim before the
+  competing request reads state.
+
+*Amended 2026-09-14 (plan rev 7, after Astra's sixth review V6-01–V6-02;
+deciduous 888):*
+
+- "Complete, unverified" is **fulfilled**: it writes the cooldown marker and
+  clears the full-scan obligation exactly like complete-with-skips, while
+  still withholding revision proof and scheduling the hourly retry. When a
+  full scan drains refresh-owned staging, the drain's outcome is folded into
+  the run's own (the worse of the two wins), and a drain alone never counts
+  as completing the user's full scan — only the run's own gather reaching
+  `done` does.
+- Retry deadlines are anchored on the **end** of the attempt, not its
+  start: both wrappers take an injected clock, read it after the attempt
+  returns, and schedule from that instant, so a failed attempt that outlasts
+  the retry window still gets the full backoff. The start instant is
+  telemetry only.
+
+*Amended 2026-09-14 (plan rev 8, after Astra's seventh review V7-01–V7-03;
+deciduous 890):*
+
+- A drained refresh's outcome is **persisted**, not just remembered: the
+  full scan writes a "draining" sentinel to `scan_state` before the drain,
+  replaces it with the drain's outcome (skips or unverified; nothing for a
+  clean drain) after, and folds it back in at the end of whichever attempt
+  finishes its own run — even after an interruption and a process restart,
+  and even though the fresh start wipes the drain's skip records. The key is
+  consumed by the fulfilled completion and dropped on a scoring-revision
+  change; a lost sentinel reads as unverified. Skip counts are set, never
+  added twice.
+- The injected clock is thread-safe (`Sync`) so the spawned scan futures
+  stay `Send`; a compile-time check guards it.
+- The unverified-drain test injects its failure into exactly the drain's
+  skip-count read (a fail-once counter seam) instead of dropping the table,
+  so the following cleanup and fresh gather really run.
+- Plan revisions settle design; compile-level and fixture-level facts are
+  settled by the toolchain at implementation. The plan carries a note asking
+  the reviewer to file those as implementation-gate notes, not
+  change-requested findings.
+
+*Amended 2026-09-15 (as built, #344 on `feat/343-phase2-expiry-refresh`).*
+Everything above shipped as designed. Four things the plan did not specify,
+settled during implementation:
+
+- **The Stage-2 classifier's policy is operator-declared.**
+  `CHARCOAL_COPE_B_POLICY_VERSION` names the `POLICY_VERSION` the hosted
+  CoPE-B endpoint serves (default `policy-unknown`, today's advertised
+  value). Verdict rows keep the **endpoint's** reported value, never the
+  configured one — a row's provenance has to describe what actually
+  produced it — and the configured value is what "a producer this binary
+  runs" is checked against. Because a mismatch would otherwise make every
+  verdict foreign evidence and every refresh fail, every scan **probes the
+  endpoint before it gathers anything and refuses to start**, naming both
+  values, and a mismatch that appears mid-scan logs one error per batch.
+  This is a deploy checklist item (runbook §0.1), and it is the concrete
+  form of the rule that a classifier policy change requires a manual
+  `SCORING_GENERATION` bump.
+- **The queue ETA is sampled per user, not from queue rows.** One row per
+  user plus the refresh's conditional rewrite destroyed the old median's
+  input, so a completed full scan writes its duration to `scan_state`
+  alongside the cooldown marker and the median reads those samples. It
+  samples every **fulfilled** full attempt — complete, complete-with-skips
+  and complete-unverified — and excludes resumable ones, so an interrupted
+  attempt never shortens the estimate and a slow degraded one never
+  flatters it.
+- **The refresh records eight `scan_state` keys per run**, zeroed at the
+  start of every run so a previous run's numbers can never be read as this
+  one's: `refresh_last_run_id`, `refresh_last_outcome`,
+  `refresh_last_run_at`, `refresh_candidates`, `refresh_scored`,
+  `refresh_feed_cache_hits`, `refresh_feed_cache_misses` and
+  `refresh_feed_cache_applicable`. `refresh_last_outcome` is the stable
+  string the runbook greps.
+- **A nothing-due refresh pays no classifier cold start.** The identity
+  probe sits below the candidate count and runs only when there are
+  candidates or resumable staging, so the nightly no-op does not meter a
+  RunPod warm-up against the scan cost budget.
+
+Known gaps at ship, all listed in the runbook: `GET /api/status` reports
+"scan running" during a refresh (#365); account-detail and typeahead reads
+still present expired scores as current (outside this plan's scope); the
+Postgres suite has no CI coverage.
+
+### 4.5 Candidate source trait and soot (S5)
+
+```rust
+#[async_trait]
+pub trait CandidateSource: Send + Sync {
+    /// Accounts that engaged with `user_did` since `since`.
+    async fn engagers(&self, user_did: &str, since: DateTime<Utc>)
+        -> Result<Vec<EngagementEvent>>;
+    /// Recent posts authored by `did`, newest first, at most `limit`.
+    async fn recent_posts(&self, did: &str, limit: usize)
+        -> Result<AccountPosts>;
+}
+```
+
+- `BlueskySource` wraps today's Constellation + `getAuthorFeed` path.
+- `SootSource`: `engagers` = `/export?parent_did=<did>` ∪
+  `/export?quoted_did=<did>` (replies targeting and quotes targeting);
+  `recent_posts` = `/export?did=<did>&since=<now−90d>`, capped at 50.
+- The cache (4.1) sits **above** the trait: a snapshot is a snapshot
+  whichever source filled it (`source` column).
+- `CHARCOAL_CANDIDATE_SOURCE=bluesky|soot|soot-then-bluesky`, default
+  `bluesky`. In `soot-then-bluesky`, an account with fewer than `MIN_POSTS`
+  (10) from soot falls back to Bluesky for that account.
+- `SOOT_URL` / `SOOT_TOKEN` from env only, never logged. Expect ~150 ms RTT
+  from us-west2 to the Hetzner box.
+- Profiles and follows stay on Bluesky — soot indexes posts, not the
+  social graph.
+- **Calibration checkpoint** before switching the default: score 100
+  candidates from both sources, diff tiers, file the result under #135.
+- Caveats carried from soot's author: the date filter is the author-supplied
+  `createdAt` (backdatable — fine for windows, not forensic); coverage is
+  what has been ingested (complete per-DID history only after the
+  full-network backfill); deleted content is absent by design.
+
+## 5. Hosting matrix
+
+Railway rates (pricing page, 2026-09-08): CPU $0.00000772/vCPU-s ≈
+$20/vCPU-mo; memory $0.00000386/GB-s ≈ $10/GB-mo; volume ≈ $0.155/GB-mo;
+egress $0.05/GB. Pro: $20 minimum with $20 usage credit; **24 vCPU / 24 GB
+per replica**, up to 42 replicas.
+
+| Option | Marginal $/mo (prod + staging) | Wave risk | Verdict |
+|---|---|---|---|
+| **A. Railway, `CHARCOAL_ROLE=both`** | +$0 idle, +$1–3 metered | Web shares the replica; sluggish under a wave, never stalled (24 vCPU headroom) | **Default for Phases 1–4.** Total ≈ $30–35 |
+| B. Railway, separate `worker` service | +$15–20 (second process's ~0.7–1 GB idle × 2 envs + model volume) | None | Only if a measured wave degrades web p95. Config change, not code |
+| C. Worker on the Hetzner soot box | +$0 (sunk $80) | **#335 again**: EU↔us-west2 ≈ 150 ms RTT ⇒ ~300 ms per row write; finalize alone +3 min. Shares CPU with soot's backfill; needs Postgres TCP proxy + TLS | **Gated**, see below |
+
+**Gate for C** (all three): soot's full-network backfill is finished; the
+pipeline writes in batches per phase (multi-row inserts), not per candidate;
+the measured effective DB write cost from that box is < 50 ms per candidate.
+Gate fails → stay on A. C is kept open because it also buys a second
+Bluesky source IP and ~1 ms soot RTT.
+
+Out of scope: moving Postgres off Railway (Bryan's constraint; it would also
+drag web latency with it).
+
+## 6. Phased plan
+
+Each phase: its own `feat/*` branch → PR to `staging` (CodeRabbit
+APPROVED) → soak → promotion PR to `main`. Each phase has a pass number
+before the next starts.
+
+**Phase 0 — Measure** (no product code beyond logging)
+1. Sample the process's own CPU time once a minute during the gather and log
+   it. *Pass:* inference cores per worker known to ±1.
+2. Log the observed `RateLimit-Limit` once per scan. *Pass:* a number.
+3. ONNX session experiment on a fixed 200-candidate sample: one mutexed
+   session set vs N=4 session sets (≈ +1.5 GB). *Pass for N sessions:*
+   gather wall drops ≥ 25 %; otherwise the mutex stays and CPU headroom is
+   spent on more concurrent scans instead.
+
+*Result 2026-09-13:* (1) ≈ 1.7 cores per worker, 13–15 per gather — done.
+(2) No number: the AppView sends no header (4.3). (3) **Pool rejected**:
+0 % gather-wall change on a 464-candidate set; default stays 1. Headroom
+goes to Phase 3 concurrency. Numbers in §1 and the runbook.
+
+**Phase 1 — Shared cache (4.1)**
+*Original pass (withdrawn 2026-09-13):* second staging account with
+overlapping community: snapshot hit rate ≥ 50 % **and** scan wall ≤ 60 %
+of the cold baseline. Hit rate < 20 % → re-cost before Phase 2.
+
+*Result 2026-09-13:* **untestable as specified — no overlapping pair
+exists on staging.** Against the best available second account
+(brookie.blog, predicted 7.9 % overlap) the feed hit rate was **6.6 %**,
+onnx 8.4 % cross-scan, classifier 7.8 % — i.e. the cache hits exactly the
+overlap that exists, which validates the mechanism but says nothing about
+the ≥ 50 % claim. The re-cost clause is **not** triggered on this pair: it
+assumed an overlapping community. Phase 2 may proceed.
+Also learned: the same-user 7-day freshness filter and RunPod cold start
+both distort wall comparisons — see the runbook.
+
+*Amended pass (4.1, "What overlap means"):* the mechanism is verified
+(hit rate = measured overlap). The remaining question — how much real
+onboardings share — is answered by data, not by a hand-picked pair:
+
+**Phase 1b — Overlap probe (#353)** — small, no schema change.
+Enumerate-only endpoint/subcommand: candidate DIDs for any handle
+(public data), intersected with `account_feed_snapshots`, returning
+`{candidates, cached, overlap_pct, snapshot_age_max}`. *Pass:* any handle
+in ≤ 60 s with zero cache writes and zero scoring; the probe's candidate
+count matches a subsequent real scan's `candidates_total` for the same
+handle on the same day. Then record the probe result for every onboarding
+in `scan_state` (`probe_overlap_pct`) so the distribution accumulates
+for free. *Decision point, after the first ten real onboardings:* median
+overlap < 15 % → Phase 3 sizes for zero sharing and Phase 4 moves up;
+a clear high mode ≥ 40 % → use its size as the Phase 3 wave assumption.
+
+**Phase 2 — Expiry + refresh (4.4)**
+*Pass:* deploy → every pre-existing row hidden and `tier_counts.expired`
+equals the row count; the first ticks enqueue a refresh for every user with
+scores (via `refreshed_generation`); each refresh re-scores exactly that
+user's High/Elevated set; no `legacy` row at or above Elevated remains after
+one refresh per user; an interrupted refresh resumes itself on its retry;
+a user's full-scan request during a refresh runs afterwards; `charcoal
+migrate` rehearsal on a prod copy preserves row counts and provenance.
+Plan: `docs/superpowers/plans/2026-09-13-343-phase2-expiry-refresh.md`.
+*Withdrawn 2026-09-14 (deciduous 878):* the ≥ 80 % refresh feed-hit target
+added on 2026-09-13. The arithmetic does not support it: High rows (14 d)
+enter the 2 d refresh horizon ~12 d after scoring while feed snapshots live
+24 h, so a steady-state refresh misses the cache for every candidate that
+was not active in the last day — by design, not by defect. The refresh job
+is therefore **not** the cache's main beneficiary. Phase 2 keeps a
+*functional* cache test (warm eligible candidate → hit; cold → miss;
+nothing due → not applicable, counters zeroed per run) and records the
+steady-state hit share as a number with no threshold. `SNAPSHOT_TTL` is not
+raised to move that number.
+*Implemented 2026-09-15.* Every pass number above is executed from
+`docs/runbooks/343-phase2-expiry-refresh.md`, which carries the commands and
+the expected readings: the functional cache test is its §6 (a)/(b)/(c), the
+steady-state share is recorded in the table there, and the deploy's
+prerequisites — `CHARCOAL_COPE_B_POLICY_VERSION` matching the endpoint, and
+the `SCORING_GENERATION` bump rule — are its §0. Phase 2 closes when that
+runbook has been executed on staging and its readings pasted back into it,
+not when the code merges.
+
+**Phase 3 — Rate limiting + worker role (4.2, 4.3)**
+*Pass — the #343 acceptance test:* ten gated staging accounts whose
+candidate sets overlap (the realistic onboarding case: friends invite
+friends) enqueued together, with the cache holding at least one prior scan
+from that group; all ten `done` in ≤ 15 min; zero 429s; web p95 unchanged.
+"Overlap" is the probe's number (Phase 1b), not a judgement: run the probe
+on all ten before enqueueing and record the ten values with the result, so
+the wall time is read against the sharing that actually existed. If the
+Phase 1b decision point landed on "zero sharing", this test is run as-is
+and its ≤ 15 min is expected to fail on 4.3's arithmetic — that is the
+signal to pull Phase 4 forward, not a Phase 3 defect.
+Ten accounts with **no** overlap and a cold cache is not the target — 4.3's
+arithmetic puts that at ~19 min on Bluesky alone, and Phase 4 is what
+fixes it. If Phase 0's observed `RateLimit-Limit` supports it, raise
+`CHARCOAL_BLUESKY_RPS` before running this test and record the value here.
+
+**Phase 4 — Soot source (4.5)** — gated on the full-network backfill.
+*Pass:* same ten-user wave ≤ 5 min; Bluesky calls per candidate ≈ 1;
+calibration diff filed under #135.
+
+**Phase 5 (optional) — Hetzner worker** — only if the §5 gate passes.
+
+## 7. Testing rules for every phase
+
+- TDD per the project mandate: failing test first, then code.
+- Migrations get a fresh-DB test and an upgrade-from-v15 test on **both**
+  backends (`cargo test --features web` and the Postgres run against
+  `postgres://$USER@localhost/charcoal_test`).
+- Every new env knob has a clamp/default test; every semaphore has a test
+  that proves the cap holds under contention.
+- Rate-limiter tests use a fake clock and a fake server returning
+  `RateLimit-*` and 429 with `Retry-After`; assert the bucket parks as a
+  whole.
+- The ten-user wave is a **manual runbook** in this spec's plan, not a cargo
+  test: which accounts, how to enqueue, what to read from `scan_queue` and
+  `scan_skips` (not Railway logs).
+- Model-gated tests run with `CHARCOAL_MODEL_DIR=./models` and are checked
+  for zero `SKIP:` lines.
+
+## 8. Not doing
+
+- Hosting Postgres anywhere but Railway.
+- A second admitter loop or a distributed lock for the refresh tick.
+- Backfilling the cache from historical `classification_queue` rows.
+- Cross-user score sharing — per-user tables stay per-user; only the
+  user-independent layer is shared.
+- Tuning ORT intra-op thread counts before Phase 0's measurement exists.

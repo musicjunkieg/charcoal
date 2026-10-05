@@ -10,7 +10,7 @@ function status(overrides: Partial<ScanStatus>): ScanStatus {
 		last_error: null,
 		phase: 'idle',
 		progress: null,
-		tier_counts: { high: 0, elevated: 0, watch: 0, low: 0, not_assessed: 0, total: 0 },
+		tier_counts: { high: 0, elevated: 0, watch: 0, low: 0, not_assessed: 0, expired: 0, total: 0 },
 		...overrides
 	};
 }
@@ -38,7 +38,15 @@ describe('dashboardView', () => {
 	});
 
 	it('shows results whenever any accounts are scored, scanning or not', () => {
-		const counts = { high: 1, elevated: 0, watch: 2, low: 5, not_assessed: 0, total: 8 };
+		const counts = {
+			high: 1,
+			elevated: 0,
+			watch: 2,
+			low: 5,
+			not_assessed: 0,
+			expired: 0,
+			total: 8
+		};
 		expect(dashboardView(status({ tier_counts: counts }))).toBe('results');
 		expect(
 			dashboardView(
@@ -52,7 +60,15 @@ describe('dashboardView', () => {
 
 	it('shows results with data even if started_at is missing (server restarted)', () => {
 		// started_at lives in server memory only; scored accounts are in the DB.
-		const counts = { high: 0, elevated: 0, watch: 0, low: 3, not_assessed: 0, total: 3 };
+		const counts = {
+			high: 0,
+			elevated: 0,
+			watch: 0,
+			low: 3,
+			not_assessed: 0,
+			expired: 0,
+			total: 3
+		};
 		expect(dashboardView(status({ tier_counts: counts, started_at: null }))).toBe('results');
 	});
 
@@ -60,10 +76,36 @@ describe('dashboardView', () => {
 		// total excludes not_assessed (NULL-scored accounts are filtered out of
 		// get_ranked_threats), so a scan whose entire population came back
 		// not_assessed must not be presented as "nothing to worry about."
-		const counts = { high: 0, elevated: 0, watch: 0, low: 0, not_assessed: 4, total: 0 };
+		const counts = {
+			high: 0,
+			elevated: 0,
+			watch: 0,
+			low: 0,
+			not_assessed: 4,
+			expired: 0,
+			total: 0
+		};
 		expect(dashboardView(status({ tier_counts: counts, started_at: '2026-07-05T12:00:00Z' }))).toBe(
 			'results'
 		);
+	});
+
+	it('shows results (not welcome) when every score has expired', () => {
+		expect(
+			dashboardView(
+				status({
+					tier_counts: {
+						high: 0,
+						elevated: 0,
+						watch: 0,
+						low: 0,
+						not_assessed: 0,
+						expired: 12,
+						total: 0
+					}
+				})
+			)
+		).toBe('results');
 	});
 });
 

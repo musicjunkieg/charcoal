@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use charcoal::toxicity::classifier::{ClassifierVerdict, StubClassifier};
 use charcoal::toxicity::ensemble::{TwoStageToxicityScorer, VerdictSource};
 use charcoal::toxicity::traits::{ToxicityAttributes, ToxicityResult, ToxicityScorer};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Test scorer that returns a fixed continuous toxicity score for any input.
@@ -297,4 +298,63 @@ async fn onnx_clean_pass_empty_input_returns_empty() {
     );
     let result = scorer.onnx_clean_pass(&[]).await.unwrap();
     assert!(result.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// score_batch override (Task 1, #343)
+// ---------------------------------------------------------------------------
+
+/// Records how many times `score_batch` is called and how large each batch was.
+struct CountingScorer {
+    calls: Arc<AtomicUsize>,
+    batch_sizes: Arc<std::sync::Mutex<Vec<usize>>>,
+}
+
+#[async_trait]
+impl ToxicityScorer for CountingScorer {
+    async fn score_text(&self, _text: &str) -> anyhow::Result<ToxicityResult> {
+        // The default `score_batch` would route here one text at a time.
+        // We count it as a batch of size 1 so the test can tell the two apart.
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.batch_sizes.lock().unwrap().push(1);
+        Ok(ToxicityResult {
+            toxicity: 0.0,
+            attributes: ToxicityAttributes::default(),
+        })
+    }
+
+    async fn score_batch(&self, texts: &[String]) -> anyhow::Result<Vec<ToxicityResult>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.batch_sizes.lock().unwrap().push(texts.len());
+        Ok(texts
+            .iter()
+            .map(|_| ToxicityResult {
+                toxicity: 0.0,
+                attributes: ToxicityAttributes::default(),
+            })
+            .collect())
+    }
+}
+
+#[tokio::test]
+async fn two_stage_score_batch_is_one_forward_pass() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let sizes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let primary = CountingScorer {
+        calls: Arc::clone(&calls),
+        batch_sizes: Arc::clone(&sizes),
+    };
+    let classifier = Arc::new(StubClassifier::with_script(vec![]));
+    let scorer = TwoStageToxicityScorer::new(Box::new(primary), classifier);
+
+    let texts: Vec<String> = (0..25).map(|i| format!("post number {i}")).collect();
+    let out = scorer.score_batch(&texts).await.unwrap();
+
+    assert_eq!(out.len(), 25);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "stage-1 must be a single primary call"
+    );
+    assert_eq!(*sizes.lock().unwrap(), vec![25]);
 }

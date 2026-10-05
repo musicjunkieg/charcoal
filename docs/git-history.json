@@ -1,5 +1,589 @@
 [
   {
+    "hash": "dfb655a0c9ae84760372590710cbb40d36d244cf",
+    "short_hash": "dfb655a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T16:25:32-07:00",
+    "message": "fix(397): CodeRabbit findings on promotion PR #133\n\n- count_expired excludes rows retired as gone (#394), in both backends.\n  The dashboard labels the count \"hidden until re-scored\", and the\n  refresh never re-scores a gone account, so it sat there forever.\n- The _migrations guard on the table-dropping Postgres fixture now strips\n  the query string and fragment before taking the last path segment.\n  \"postgres://h/charcoal?application_name=a/b_migrations\" used to pass as\n  \"b_migrations\". Extracted database_name_from_url so the guard is\n  testable without a database.\n- .env.example: the nightly refresh probes lazily before its first\n  classifier batch, not before it gathers (#394). CLI wording unchanged:\n  the CLI still builds its classifier without the cache and never probes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
+    "hash": "c5a8d3f8d808e3b6b34c34c4fb8ad0342bf8adb7",
+    "short_hash": "c5a8d3f",
+    "author": "Bryan Guffey",
+    "date": "2026-10-03T18:13:34-07:00",
+    "message": "fix(394): retire deleted accounts instead of skipping them hourly\n\nA feed fetch that answers HTTP 400 with \"Profile not found\",\nAccountDeactivated, AccountTakedown or a Repo* gone code now stamps the\nuser's score row gone_at/gone_reason (schema v19, both backends) and the\nrefresh-candidate query excludes it. Scoring the account again clears\nthe stamp. A 5xx, a timeout or any other 400 stays an ordinary skip, and\na stamp that cannot be written falls back to a skip so the next run\nretries.\n\nA gone account is not a skip, so a refresh whose only failures were\ngone accounts completes and takes the nightly cadence instead of the\none-hour retry (#394 part B).\n\nXRPC failures are now a typed XrpcStatusError with the same Display\ntext, so scan_skips rows and logs read as before.\n\nAcceptance test: a refresh of only gone accounts makes zero classifier\ncontacts (probe included), records no skips, and leaves no candidates.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 15
+  },
+  {
+    "hash": "2c34a98f424eb61c47e5435771976542408e79c3",
+    "short_hash": "2c34a98",
+    "author": "Bryan Guffey",
+    "date": "2026-10-03T16:47:46-07:00",
+    "message": "fix(394): pay the classifier probe lazily, once per run\n\nThe refresh probed the RunPod endpoint before gathering anything, so a\nrefresh whose candidates were all deleted accounts woke the GPU every\nhour to classify nothing. The probe now lives in CachedClassifier: it\nruns at most once per instance (one per run), and only when a cache miss\nis about to reach the endpoint. A run that classifies nothing, or finds\nevery verdict cached, never contacts it. A refused probe is not\nmemoised. The full scan keeps its explicit fail-fast probe at start,\nwhich counts as the run's one probe.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
+    "hash": "af476cc6f09e5e23bce7a92b7a932ddf5ab282b3",
+    "short_hash": "af476cc",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T18:10:35-07:00",
+    "message": "feat(395): rebuild the landing in the colours of the reference photo\n\nBryan rejected the first build as too bright, too long and too literal: it\ncopied the look of the reference instead of its feeling. He brought back a\nfilm photograph instead, and asked for its tones: more colour, less full\ndarkness.\n\n- palette read from the photo: rust, umber shade, sandstone sun and placard\n  card as whole fields; faded pink and dusty blue as the only cool notes;\n  the darkest field is umber, never black\n- every borrowed motif is gone (rings, beadwork bands, sawtooth trim) along\n  with the fonts chosen for their provenance; Archivo set heavy and narrow\n  for headlines, Atkinson Hyperlegible for reading\n- film grain over the page, as texture rather than pattern\n- half the length: hero, the before/after as one shade-to-sun moment, how\n  it works, and a close that holds who decides plus the sign-in\n\nCopy, the single sign-in action, the ACTIONS_MODE switch and every guard in\nlanding.test.ts are unchanged and still pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "c48140a669d2e1b64b5a10da322b9cc5992a2bd8",
+    "short_hash": "c48140a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T15:15:01-07:00",
+    "message": "chore(395): keep the screenshot script and the landing surface brief\n\npage-shots.mjs drives headless Chrome over the DevTools Protocol so a full\npage can be captured in viewport-high slices at a true phone width. Plain\n--screenshot cannot scroll and has a 500px minimum window.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "2c426f1d82ebc691ea3ba40178d62d8c9f7c431b",
+    "short_hash": "2c426f1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T14:56:08-07:00",
+    "message": "docs(395): automated actions are a launch gate, not a later phase\n\nBryan confirmed 2026-10-02 that automatic muting/blocking ships before the\nallowlist opens. Records that, and that no surface promises it until it works.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "e48adbac85f20e04b74e179dd9f78fdcf673199c",
+    "short_hash": "e48adba",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T14:31:18-07:00",
+    "message": "Merge pull request #131 from musicjunkieg/docs/382-runbook-policy-version\n\ndocs(382): POLICY_VERSION is baked into the image, not an endpoint variable",
+    "files_changed": 0
+  },
+  {
+    "hash": "6c9ac1b46e56bbc6b623b3b72ba1949107b467e6",
+    "short_hash": "6c9ac1b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-02T08:49:30-07:00",
+    "message": "docs(382): POLICY_VERSION is baked into the image, not an endpoint variable\n\nThe runbook sent the operator to the RunPod console for a value that\ncannot be there. The endpoint env carries only MODEL_PATH; POLICY_VERSION\nis an ARG/ENV in gpu/cope-b-runpod/Dockerfile, set by CI from the build\nshort SHA plus date. The running image is the only place it exists.\n\n§0.1 now probes the endpoint for a verdict and reads policy_version off\nthe response, notes the batch input shape (contents, plural — content\nraises KeyError), and gives the cold-start cost so nobody mistakes a\n2-minute wait for a hang. The image tag is offered as a cross-check\nonly: it says which commit was built, not which image is serving.\n\nRecords the probed value as of 2026-09-19 — policy-ddac468-2026-07-03,\nmodel cope-b-a4b — while telling the reader to re-probe rather than\ntrust the line, since the endpoint can be repointed with no change here.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 1
+  },
+  {
+    "hash": "f3f750d7a51655e2e59e0a18dae24805b991c818",
+    "short_hash": "f3f750d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T18:09:15-07:00",
+    "message": "fix(344): address CodeRabbit review of 39e20fe\n\n- CarriedCompletion::parse treats a skips value cut off before its\n  revision (\"skips|2\") as Draining, not absence, matching the rule for\n  the other truncated values. Absence deleted the key and let the run\n  report Complete.\n- README and the ScoringConfidence docs described confidence as post\n  counts (50+/25-50/<25). It is actually a Stage-1 early exit (Low) or\n  the fingerprint quality: Normal, at least 15 originals, is High;\n  Degraded or Unreliable is Standard.\n- The runbook records measured v18 lock times: production 5,427 rows,\n  staging 61,330, and the whole v18 transaction on a 101 MB local copy\n  took 499 ms.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 6
+  },
+  {
+    "hash": "39e20fe8d4098abe3e4921fc73271fa76e29c486",
+    "short_hash": "39e20fe",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T17:45:03-07:00",
+    "message": "test(344): finish the queue row after scheduling in the tick-off test\n\nWith the schedule now claim-fenced the test holds a real claim, and a\nstill-running queue row keeps the tick from enqueuing the user for the\nwrong reason. Finish the row after scheduling, as production does.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
+    "hash": "9e253fac511ebf542af26f0b3face2b1630d0a32",
+    "short_hash": "9e253fa",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:39:49-07:00",
+    "message": "fix(344): claim-fence the refresh schedule writes atomically\n\nCodeRabbit on PR #124: the refresh and full-scan bookkeeping checked\nowns_claim once, then wrote next_refresh_at, the generation markers and\nfull_requested_at without the claim. A lease that lapsed between the\ncheck and the writes let a stale worker move a successor schedule.\n\n- Database::apply_refresh_schedule(user, claim_id, Success|Retry)\n  reads the queue row owner and writes the schedule in one transaction\n  (Immediate on SQLite, FOR UPDATE on Postgres) and reports whether it\n  wrote. The success deadline and proof are now one statement.\n- request_full_after_refresh matches claim_id in its UPDATE and\n  returns whether it annotated a row.\n- Both bookkeeping traits pass claim_id through; the scheduling helpers\n  use the fenced write.\n- Tests on both backends reclaim a real expired lease and assert the\n  stale claim writes nothing while the successor writes land. The\n  SQLite test fails with the ownership check disabled.\n\nAlso fixes a Postgres bug the new test exposed: request_full bound RFC\n3339 text into COALESCE with a timestamptz column, which errors, so on\nPostgres a deferred refresh never recorded its follow-up full scan.\n\nTests that scheduled without a claim now hold one, in production order\n(schedule, then finish the queue row). Supersedes the deferral to #378.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 12
+  },
+  {
+    "hash": "5749eb34fe9593b1f0253ec5b65d1a5f7deb5e2c",
+    "short_hash": "5749eb3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:13:25-07:00",
+    "message": "fix(344): address CodeRabbit review of PR #124\n\n- classify_refresh takes has_own_resumable_staging. A refresh with no\n  fresh candidates that resumed and scored its own staging is Completed,\n  not NothingDue; NothingDue had recorded nothing_due and a scored count\n  of zero.\n- The admin cooldown-bypass test writes the cooldown anchor the way\n  production does and first proves the user route answers 429, so the\n  202 assertion can actually detect cooldown enforcement.\n- .env.example, CHANGELOG and the runbook no longer say every scan\n  probes the Stage-2 endpoint: web scans and refreshes with work do; the\n  CLI scan and sweep commands do not.\n\nThe two claim-fence findings (schedule/request_full are check-then-write)\nare deferred to #378 with the reasoning on the threads.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 8
+  },
+  {
+    "hash": "55bc065e3ea36f5842fdc6cecd7162fc2d03b38f",
+    "short_hash": "55bc065",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T16:11:14-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into feat/343-phase2-expiry-refresh",
+    "files_changed": 0
+  },
+  {
+    "hash": "a4b3d9240eaee4209b609c334d6f6d2026715cf4",
+    "short_hash": "a4b3d92",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:42:49-07:00",
+    "message": "fix(377): download models in the Postgres CI job without the web build\n\nThe Postgres job ran `cargo run --features web -- download-model`, but\nit never builds the frontend, and the web build cannot compile without\nweb/build (include_dir!). A model-cache hit skips the step, so this\npassed on PR #125 and staging and failed on the first cache miss.\nDownload with --features postgres, which the migration step compiles\nanyway.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
+    "hash": "f2bce2fdfaa6ad4a0429ca3b9c4acb4268dfc777",
+    "short_hash": "f2bce2f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:18:26-07:00",
+    "message": "Merge staging into feat/343-phase2-expiry-refresh\n\nBrings in #367 (PR #125): the affected-tests pre-push hook and the\nPostgres CI job, so PR #124 gets Postgres coverage in CI. The two\ngenerated decision-graph exports conflicted and were regenerated with\ndeciduous sync.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 0
+  },
+  {
+    "hash": "09780928b5b131974743766fed64ee2a2f3f9320",
+    "short_hash": "0978092",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T15:18:05-07:00",
+    "message": "fix(344): address Codex review of PR #124\n\n- CachedClassifier caches a verdict only when its reported model and\n  policy match the advertised identity, so a foreign verdict can never\n  be stored as a current one.\n- schedule_after_success stops before marking the generation when the\n  deadline write fails, so a first-scan user is not stranded with no\n  next_refresh_at.\n- prepare_refresh skips the context loads only when there are no\n  candidates AND the user owns no resumable staging (resume consumes\n  the protected posts at finalize).\n- An amplifier whose events yield no usable pairs stays an amplifier;\n  mode follows event existence, not pair count.\n- ZentropiClient interns its policy string, leaking each distinct value\n  once instead of once per construction (per scan).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 8
+  },
+  {
+    "hash": "a9f792a864ba904f4defbac26a5ad4bf3fbcec4b",
+    "short_hash": "a9f792a",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T14:54:53-07:00",
+    "message": "fix(367): address Codex review — frontend build, Postgres trigger, combined lint\n\n- The web build embeds web/build (include_dir!), which is gitignored,\n  so on a fresh clone or worktree every Rust push failed web clippy.\n  The hook now builds the frontend once when web/build is missing.\n- Postgres clippy also triggers on any changed Rust file with\n  Postgres-only sections (src/main.rs selects the backend that way),\n  not only on src/db paths. Locally it lints the production\n  web,postgres combination.\n- CI lints --features web,postgres, the combination the Dockerfile\n  builds. Each feature alone was linted, never the two together.\n\nVerified by running the hook for real in a worktree with no web/build:\nfrontend built, both clippy gates clean with -D warnings.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 5
+  },
+  {
+    "hash": "f772a3d1dd9798a01b1a6172a04fb71152590ca1",
+    "short_hash": "f772a3d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T14:05:55-07:00",
+    "message": "fix(367): union the change set across every ref a push sends\n\nThe hook took the base only from the stdin line pushing HEAD, so a push\nof several branches measured only the checked-out one and could skip\ntests for paths the others change. It now reads every pushed ref and\nunions their changed paths, each against its remote tip or, for a new\nref, its fork point. Any comparison that fails still marks the change\nset unknown, which checks every tracked file. Deleting a remote ref\nadds nothing. When a pushed ref is not HEAD, the hook says local tests\nrun against HEAD and CI covers each branch.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 3
+  },
+  {
+    "hash": "ea05fb101c68787292f64d9cb81ba2435419ae44",
+    "short_hash": "ea05fb1",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T13:57:54-07:00",
+    "message": "fix(367): address CodeRabbit review on the pre-push hook and CI\n\n- The hook now measures the change set from the remote tip that git\n  reports on stdin. A pushed URL maps to a named remote only when it is\n  the same repository (SSH and HTTPS spellings compare equal); it no\n  longer guesses origin.\n- A change set that cannot be determined (unresolved remote, no fork\n  point) falls back to every tracked file instead of an empty set that\n  skipped every gate.\n- Local clippy gates pass -D warnings. CI already denied warnings via\n  the workflow RUSTFLAGS.\n- CI actions are pinned to full commit SHAs, and checkout no longer\n  persists the token.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 4
+  },
+  {
+    "hash": "4eedce3efea084ebded2e613ca9c9f1755b455b2",
+    "short_hash": "4eedce3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-16T13:39:56-07:00",
+    "message": "ci(367): migrate the fresh test database before the Postgres tests\n\nThe first CI run of the Postgres job failed 10 of 44 db_postgres tests with\n`relation \"…\" does not exist` for account_scores, actions,\namplification_events and scan_queue.\n\nThose tests clean up with raw SQL before they connect through the app, and\nconnecting is what runs the migrations. A long-lived local database already has\nevery table, so this never showed. CI starts from an empty database and runs the\ntests in parallel, so the tests that clean up first lose the race to the ones\nthat connect first.\n\nThe job now runs `charcoal init` against the test database before the tests,\nwhich applies the migrations the way production does at boot. This is a\nworkflow-only fix on purpose: tests/db_postgres.rs is heavily rewritten on the\n#344 branch, with raw-SQL helpers of its own, so a test-side fix here would\nconflict with PR #124 and still miss that branch. The test ordering itself is\ntracked as #376.\n\nThe failure was genuine rather than a silent skip: the job ran 44 Postgres\ntests, which is the thing this job exists to prove.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XQ25q3auabEcCtVGh5Nfr4",
+    "files_changed": 2
+  },
+  {
+    "hash": "ddbc90387e604e12a77b07354696d5f841b18c99",
+    "short_hash": "ddbc903",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T16:33:38-07:00",
+    "message": "docs(344): add a Rollback section, correct the probe claim, record the cache cold start\n\nF1: new §2b \"Rollback\" in the Phase 2 runbook. The deploy's designed\nfirst-minute behaviour is \"every tier list goes to zero\", and the instinctive\nundo — redeploy the previous binary — is actively harmful on Postgres: v18\nmakes account_scores.valid_until NOT NULL with no default and drops the\nscoring_generation default (0018_score_expiry.sql:32-37), the pre-v18\nupsert_account_score names neither column (staging src/db/postgres.rs ~452),\nand nothing stops the old binary booting on the newer schema because the\nrunner only iterates its own embedded list (src/db/postgres.rs:391-404). So\nit boots green and then fails every score write ~2h later. The section states\nthat first, then: a FAILED migration is the safe case (one transaction,\n:411-417, nothing to undo); three graded options with real commands and\ncorrect readings — disable the nightly job (a stampede brake, not a\nrollback), un-hide in place (the SQL, flagged as a deliberate lie to the\nfreshness system), and a real binary rollback (schema reversed first, most\ndangerous); and how to read the current scoring revision off a row, since no\nCLI subcommand prints it and the only log that carries it is a staged-blob\nmismatch warn!.\n\nF2: README:280 claimed every scan probes the classifier endpoint before\ngathering. True only for the two web paths (scan_job.rs:1384,\nrefresh_scan.rs:768, the latter conditional on having work). charcoal scan\nand charcoal sweep call the pipelines directly, so on the CLI a wrong policy\nvalue still costs a full gather and then skips every account.\n\nF3: runbook §0.1 and a new §2a record that this deploy cold-starts the\nStage-2 verdict cache. CachedClassifier keys on policy_version\n(cached_classifier.rs:69-73, :116), which now returns cope_b_expected_policy()\n(runpod_cope_b.rs:663-670) where it returned \"policy-unknown\" before, so every\ncached verdict is unreachable. Unavoidable — keeping \"policy-unknown\" is what\nthe probe refuses. Orphans age out at 90 days (cache_retention.rs:25). It\nlands in the same window as re-scoring every High/Elevated row, so deploy day\nis a real classifier bill.\n\nDocumentation only; no code changed.\n\nRefs #344\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "e17590471055d41837b9d022b0380d915491969c",
+    "short_hash": "e175904",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T14:36:04-07:00",
+    "message": "docs(344): correct the High tier floor and tighten the runbook\n\nCorrections found while proofreading Task 10 against source:\n\n- README \"Threat tiers\" said High starts at 25. ThreatTier::from_score\n  (src/db/models.rs:256) has used 35 for a long time, with Elevated\n  running 15-34. The table has been wrong, not the code.\n- Runbook 0.3 counted the pre-deploy top tiers at the same wrong\n  boundary. It now records the refresh candidate count by SCORE\n  (threat_score >= ThreatTier::ELEVATED_MIN, 15.0 — which is how\n  list_refresh_candidates selects, deliberately) alongside the stored\n  tier strings, which is how GET /api/status buckets, so the two can be\n  reconciled without assuming they agree.\n- Runbook 5: railway variables --set redeploys, and the ceiling is only\n  read at process start — say to wait for that deploy before forcing the\n  tick, or the tick runs under the old ceiling.\n- Runbook 6(b): DELETE FROM account_feed_snapshots empties the cache for\n  every user; marked staging-only.\n- Markdown: a fenced block inside a bullet was splitting the list.\n\nRefs #344.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "42774ad0b21af9f131b1d730729e6e4fbcce5f36",
+    "short_hash": "42774ad",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T14:32:03-07:00",
+    "message": "docs(344): say what has_own_resumable_staging actually answers\n\nThe doc claimed to mirror the ownership read run_phased_scan performs on\nentry, minus its mutating fallbacks. It does not, in two arms, and both\nwere undocumented:\n\n  - Resumable staging with a current generation but no recorded kind is\n    attributed to Full by run_phased_scan, which resumes and bursts it.\n    This helper returns false for a Full identity, because the kind is\n    absent rather than Full.\n  - An unrecognised phase marker makes run_phased_scan bail; this helper\n    reads it as \"nothing resumable\".\n\nBoth divergences are conservative, and harmless for the only caller: a\nrefresh reaches OwnedByOtherKind or the bail before any classifier call,\nso a skipped probe never precedes classification. But the promise was\nwrong, and a future caller passing RunIdentity::full() would have\ninherited it — skipping a probe and then classifying the staging it had\njust disclaimed. Narrowing the doc is the honest fix; widening the\nfunction would add an arm no caller exercises.\n\nThe test is renamed to match: its assertions were always on the helper\nalone, never on agreement with run_phased_scan, and the states where the\ntwo disagree are exactly the ones a test claiming agreement would have\nhad to cover.\n\nAlso: the dashboard tooltip now names both halves of the expired\npopulation, matching the CLI wording, and prettier formatting is\nrestored in the dashboard-state test.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 11
+  },
+  {
+    "hash": "f4489493b04ca0434810b88f06f32cc6003d085c",
+    "short_hash": "f448949",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T13:37:22-07:00",
+    "message": "fix(344): a nothing-due refresh pays no classifier cold start\n\nThe Stage-2 policy probe ran as the first statement of the refresh\npipeline, above the candidate count. A NothingDue tick — no expiring\nrows and nothing of its own left staged — therefore paid a RunPod\nwarm_up round trip, with its long warmup timeout and FlashBoot cold\nstart, metered against the scan cost budget, for a run that makes zero\nclassifier calls. The scheduling tick enqueues on a time deadline, not\non candidate existence, so every user paid this every night.\n\nThe probe now runs below the count, gated on refresh_should_probe:\ncandidates present, or this refresh owns resumable staging (a prior\nattempt cut off mid-burst still bursts, so it still needs the probe).\nhas_own_resumable_staging performs the same ownership read as\nrun_phased_scan, without its mutating fallbacks.\n\nThe full scan probe placement is deliberately unchanged — it sits\nbefore discovery, where one round trip replaces gathering every\naccount and then skipping all of them.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
+    "hash": "63fccb263a5b4b50cab6bf34aaed9a6433ad1304",
+    "short_hash": "63fccb2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T08:12:22-07:00",
+    "message": "docs(344): document CHARCOAL_COPE_B_POLICY_VERSION\n\nA new operator-facing knob shipped with no reference documentation\n(#344 F6). README gains a bullet in the env list and a \"Stage-2\nclassifier policy\" section saying what the value must equal, that it is\ntrimmed, what the default is, and — the part that matters — exactly what\nhappens when it does not match: every verdict becomes foreign evidence,\nevery account is re-gathered once and then skipped, and no scores are\nwritten. It also records the two guardrails that now exist for it: the\nscan-start probe that refuses to start, and the once-per-batch error for\na scan already in flight.\n\n.env.example gains the whole Stage-2 backend-selection block —\nCHARCOAL_CLASSIFIER, RUNPOD_ENDPOINT_URL, RUNPOD_API_KEY and the policy\nversion — which was undocumented there too.\n\nThe deploy-checklist entry (set it before shipping; bump\nSCORING_GENERATION if the policy itself changed) belongs to the Task 10\nrunbook; this is the reference half.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 2
+  },
+  {
+    "hash": "d835154f73cdcab944185e47ea53022548453976",
+    "short_hash": "d835154",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T05:24:33-07:00",
+    "message": "test(344): gate the ownership tests on the web feature\n\nThey assert through classify_full_scan / classify_refresh, which live in\nthe web layer, so the module would not compile under\n--all-targets --features postgres. The ownership behaviour itself is\nbackend-agnostic and VERIFY_WEB is what runs these.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 1
+  },
+  {
+    "hash": "bf2a5536e530e1646a51f2e525feb9edb0898c8b",
+    "short_hash": "bf2a553",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T02:39:15-07:00",
+    "message": "refactor(344): extract scan setup into src/web/scan_setup.rs\n\nPure move. No logic changes: no renamed items, no changed signatures or\nbodies, no reordered arms, no visibility widened beyond what the move\nrequires to keep compiling. The correctness argument is that the compiler\nand the existing tests prove nothing changed — 1070 tests pass before and\nafter, zero model-gated skips, clippy clean on all three feature sets.\n\nMoved out of scan_job.rs (3555 -> 3155 lines):\n  ScanModels and its loader, ScanScorers, build_scan_scorers,\n  record_scan_cache_stats, embed_protected_posts, pile_on_dids,\n  fingerprint_is_stale, fingerprint_needs_rebuild_for_format,\n  RebuildReason, rebuild_decision, and fingerprint_staleness_tests.\n\nScanModels moved with build_scan_scorers deliberately, so scan_setup is a\nleaf rather than referring back up into scan_job. The pub(crate) re-exports\nleft in scan_job are a bridge for existing call sites; new code should\nimport crate::web::scan_setup directly.\n\nTwo reviewers recommended this seam before the refresh runner lands, so\nthat the runner is reviewed on its own merits rather than among relocated\nlines.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 5
+  },
+  {
+    "hash": "a6c00fa70785b9f35f44fdbdc9596d4adf3b550b",
+    "short_hash": "a6c00fa",
+    "author": "Bryan Guffey",
+    "date": "2026-09-15T01:25:11-07:00",
+    "message": "refactor(344): extract scan setup helpers; context loaders return errors; rebuild decision checks the embedding model and never falls back to incompatible vectors\n\nTask 8 of the #343 Phase 2 plan. The nightly refresh (Task 9) needs the same\nscorer bundle, protected-post embeddings, pile-on set and direct-pair loading\nthat run_scan and amplification::run build inline, so they move into shared\nhelpers — and the two that used to swallow a failure into an absence now\nreturn Result (R05):\n\n- pipeline::amplification::direct_pairs_for: Ok(empty) means \"the lookup\n  succeeded and there are no pairs\"; Err means \"the lookup failed\". The full\n  scan still degrades at its call site (unchanged behaviour — the account\n  scores on the follower path); the refresh will not.\n- scan_job::embed_protected_posts: replaces fetch_recent_posts().unwrap_or_default()\n  with a context-carrying Result. Behaviour-preserving for scoring (None and\n  Some(vec![]) both mean \"no inferred pairs\") and it gains a log line.\n- scan_job::{ScanScorers, build_scan_scorers, record_scan_cache_stats,\n  pile_on_dids}: bodies moved verbatim out of run_scan_inner.\n\nV2-04: the fingerprint rebuild decision becomes the pure, testable\nrebuild_decision() returning RebuildReason, which now also fires when the\nstored vectors carry a different embedding_model_id — or none at all. Reasons\nare ordered by severity because RebuildReason::fallback_allowed() is read off\nthe returned one: only Stale and Format may fall back to the stored\nfingerprint when the rebuild fails. Absent, Unreadable and IncompatibleModel\nabort the scan before any account is scored, since a score against\nincompatible vectors would be stamped current and hide the real state until\nit expired. The abort lands in run_scan_with as Err, so the obligation is\nkept and the hourly retry is written (V5-02).\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 5
+  },
+  {
+    "hash": "3a51da5a1153182d91062b28bfd1ef8b8fcabf57",
+    "short_hash": "3a51da5",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T22:29:09-07:00",
+    "message": "fix(344): Task 7 review findings F1-F6 — negative-horizon fail-open, partition test, Postgres index plans\n\nF2 (important): list_refresh_candidates built its SQLite date modifier as\nformat!(\"+{horizon_days} days\"), so a negative horizon rendered \"+-1 days\".\nSQLite cannot parse that, datetime() returns NULL, and COALESCE(..., 1) then\nreturns 1 for every row — both the expiry and the generation filter vanished\nand every High/Elevated row came back. Postgres make_interval(days => -1)\nnarrowed correctly, so the two backends disagreed. Now format!(\"{n:+} days\"),\nvalid for both signs. New tests on both backends assert the -1 set is a strict\nsubset of the 0 set; the SQLite one was run against the old spelling first and\nfailed with all four fixture rows returned.\n\nF3 (minor): the fresh predicate and the candidate predicate are two spellings\nof one rule with nothing pinning their complementarity. New SQLite test seeds\nten rows spanning fresh, expired, NULL expiry, malformed expiry, the\nvalid_until == now boundary and old generation, then asserts\nget_fresh_scored_dids and list_refresh_candidates(user, 0) partition the\nHigh/Elevated rows exactly — disjoint, union equal, both halves non-empty.\n\nF4 (minor): the Postgres twin gained a NotAssessed row (NULL threat_score,\nexpired, legacy generation) and asserts it is absent, pinning the three-valued\nNULL >= $2 case on the backend production runs on.\n\nF5 (minor): the index test bound a literal 15.0 where ThreatTier::ELEVATED_MIN\nbelongs — the one place the constant was re-typed by hand.\n\nF6 (minor): the trait doc garbled the conjunction (score AND due, not a list of\nalternatives) and said the >= comparison is \"false against NULL\"; it is\nSQL-unknown, which the WHERE clause then filters.\n\nF1 (important) needed no code change: the Postgres EXPLAIN (ANALYZE, BUFFERS)\nmeasurement the brief required was taken against a seeded two-user 3000-row\nload and recorded for the Task 10 runbook. The planner picks\nidx_account_scores_user_score on its own in both workloads — no seq scan, so\nenable_seqscan = off produces an identical plan — at 0.38-1.3 ms, far under the\n50 ms threshold that would have justified a partial index. The seeded rows were\ndeleted afterwards.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 6
+  },
+  {
+    "hash": "ce8ceaf820ff71153d83b10654d55fbe3aa8b4b0",
+    "short_hash": "ce8ceaf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T21:17:47-07:00",
+    "message": "feat(344): list_refresh_candidates — High/Elevated rows whose expiry is due\n\nThe complement of the fresh predicate: a row is a refresh candidate when\nits valid_until falls within the horizon, is already past, is NULL, or is\nmalformed, or when its scoring_generation is not the current revision.\nCOALESCE(..., 1) on SQLite makes NULL and unparseable expiry eligible, so\na row can never become permanently invisible by being unreadable.\n\nThreatTier::ELEVATED_MIN is the score floor, shared with from_score so the\nquery and the tier mapping cannot drift. Ordering is by score descending\nso a bounded refresh scores the most dangerous accounts first.\n\nThe SQLite plan is asserted, not assumed:\n  SEARCH account_scores USING INDEX idx_account_scores_user_score\n      (user_did=? AND threat_score>?)\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 10
+  },
+  {
+    "hash": "a58e310097d4ca6ed4ce71b0decbaea3444da933",
+    "short_hash": "a58e310",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T16:35:32-07:00",
+    "message": "fix(344): Task 6 review findings F1–F8 — refresh dispatch guard, claim-fenced scheduling\n\nF1 (a) CHARCOAL_REFRESH_INTERVAL_HOURS now defaults to DISABLED on this\nbranch: nothing dispatches a kind=refresh claim until Task 9 lands the\nrunner, so a tick that is on by default would queue rows no worker can\nexecute. Explicit values still parse and clamp (1..=168); 0/off still\ndisable. Task 9 restores the spec default of 24 in default_refresh_interval.\n\nF1 (b) launch_scan now takes the claim kind and dispatches through\nrun_claim, which refuses a refresh claim outright: the full pipeline is\nnever constructed, the claim finishes failed with a message naming the\nmissing runner, and no full-scan cooldown marker or ETA duration sample can\nbe written against a refresh row (N4). Task 9 replaces the guard with the\nreal dispatch.\n\nF2 run_scan_with asks once whether the attempt still owns the queue row and\nskips all three completion writes when it does not. record_completion was\nalready fenced; schedule_success/schedule_retry write users.next_refresh_at\nand users.refreshed_generation, which no WHERE clause on scan_queue can\ncover — a zombie whose lease lapsed would have clobbered its successor.\nNew read-only Database::scan_claim_is_current on both backends.\n\nF3 schedule_after_success takes its interval as an argument instead of\nreading the environment, so no test mutates a process-global variable.\n\nF4 a success writes its deadline even while the tick is off. It stamps\nrefresh_attempted_generation either way, and a user with a NULL deadline and\nthe current attempted revision matches neither due clause — re-enabling the\nknob would never have picked them up.\n\nF5 finish_full_scan_state_inner takes an Immediate transaction: it is a\nread-then-write and Deferred takes no write lock until the first INSERT.\n\nF6 FullScanRun narrowed to pub(crate), like run_scan_with.\n\nF7 parse_refresh_interval accepts off case-insensitively. The parse takes\nits fallback as an argument so \"OFF disables\" stays distinguishable from\n\"unparseable falls back\" while the branch default is itself None.\n\nF8 quiesce_users_outside documents its invariant: it rewrites users rows\nother tests own, so any Postgres test asserting on the refresh-schedule\ncolumns must hold scan_queue_test_lock.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 10
+  },
+  {
+    "hash": "4bbb400cf6c2af558bbde79f5d96a9dee397841f",
+    "short_hash": "4bbb400",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T13:26:49-07:00",
+    "message": "style(344): drop an unnecessary clippy allow on run_scan_inner\n\nrun_scan_inner carries the same seven arguments run_scan always had, which\nis at clippy's threshold, not over it — the allow was defensive and says\nnothing true.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 1
+  },
+  {
+    "hash": "65f81b9451a35fa6fb2aefef064865a0e66fce69",
+    "short_hash": "65f81b9",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T10:23:58-07:00",
+    "message": "fix(344): source the queue ETA median from per-user scan_state samples\n\nReview wave over Task 5 (findings F1-F6). One commit: F1 and F2 are the same\ntransaction, and F3-F5 share the test binaries that prove F1.\n\nF1 (controller decision, deciduous 910, option A). The ETA median read\n`scan_queue` rows with `kind = full AND completion = 'complete'`. There is\none queue row per user and REFRESH_ENQUEUE_SQL resets started_at/finished_at\nand sets kind = 'refresh', so the first night Task 6's tick ran, every\nuser's full-scan timing sample was erased and the median went permanently\nempty — eta_seconds null forever. finish_full_scan_state now also writes the\nper-user scan_state key `last_full_scan_duration_secs`, derived inside the same\ntransaction from the row's own started_at and the marker instant (no key when\nstarted_at is NULL, unparseable or negative), and both backends read the median\nfrom those rows. The median itself moved to a shared helper next to\neta_seconds so Postgres and SQLite cannot drift; unparseable values are warned\nabout and skipped.\n\nF2. Added the forced-failure half of the one-transaction property on both\nbackends via a #[doc(hidden)] seam that runs the identical statements in the\nidentical transaction and then fails on a NOT NULL violation. Proven RED by\ncommitting between the statements, then GREEN.\n\nF3. v18 (unshipped) now backfills scan_queue.full_requested_at from\nenqueued_at for rows still queued or running at deploy time — otherwise an\nattempt interrupted across the deploy carries no obligation and is never\nretried as full work. Both upgrade-from-v17 tests seed an in-flight row and\nassert the backfill, and that a finished row stays NULL.\n\nF4. Tested the COALESCE arms for AlreadyQueued and AlreadyRunning on both\nbackends: a pre-v18 in-flight row with a NULL obligation is repaired without\nmoving the user's position or disturbing the running scan.\n\nF5. The Postgres fallback re-read's catch-all reported AlreadyQueued for a\nmissing row too. A 0-row conditional INSERT implies a conflicting row exists,\nso no row is an invariant violation; it now bails rather than telling the user\ntheir scan is waiting in a queue it is not in.\n\nF6. record_full_scan_completion's doc comment now lists CompleteUnverified,\nmatching fulfilled() and the test.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 10
+  },
+  {
+    "hash": "7b3cff7e25f20171d2cd662a4c2b5171cfbe66cb",
+    "short_hash": "7b3cff7",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T09:14:49-07:00",
+    "message": "fix(344): Postgres enqueue_scan upgrades a refresh found on the fallback re-read\n\nSELECT ... FOR UPDATE locks nothing on an ABSENT row, and the scheduling\ntick writes scan_queue without taking the per-user advisory lock, so a\nrefresh created between the state read and the conditional INSERT lands\nin the affected-0 fallback. It now applies the same in-place upgrade the\nmain arm would and reports Queued, instead of recording only the\nobligation and reporting AlreadyQueued.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 1
+  },
+  {
+    "hash": "0f100211703dc33b2e5f50181ac831034ea23410",
+    "short_hash": "0f10021",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T06:29:32-07:00",
+    "message": "test(344): assert migrated generations from Postgres, not the source export\n\nThe generation_of closure in test_pg_migrate_from_sqlite_preserves_every_row\nclosed over the SQLite-side export and asserted against it, making the\nper-row generation check a tautology about the source instead of a check on\nwhat import_score actually wrote into Postgres. Replace it with direct SQL\nagainst the Postgres pool for all five non-legacy rows, matching the style\nalready used by the other direct-SQL assertions in the same test.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
+    "hash": "dd12ec2a7660e70991bf7c683536004ad9d54890",
+    "short_hash": "dd12ec2",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T06:14:24-07:00",
+    "message": "feat(344): stamp scores; null-safe fresh-only reads; lossless export/import for migrate\n\nupsert stamps scoring_generation + valid_until (3/7/14 d by confidence).\nOne boolean-explicit fresh predicate (COALESCE on SQLite so NULL and\nmalformed expiries are hidden AND counted) behind is_score_stale,\nget_fresh_scored_dids, count_expired, count_not_assessed,\nget_ranked_threats; topic-first discovery uses the fresh set too. The\npipeline propagates freshness-read errors. charcoal migrate now copies\nevery row verbatim through export_scores/import_score and never renews\nexpiry. Fingerprints record their embedding model id.\n\nFixes two pre-existing Postgres test races surfaced while adding this\nsuite: three tests sharing topic_fingerprint (a per-user singleton row)\nunder the same TEST_USER constant raced each others cleanup/write cycles;\ngave each its own dedicated user_did, matching the isolation pattern\nalready used elsewhere in the file.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 14
+  },
+  {
+    "hash": "bb47ba6f475573438c14b067009959de47bfbaaf",
+    "short_hash": "bb47ba6",
+    "author": "Bryan Guffey",
+    "date": "2026-09-14T02:00:52-07:00",
+    "message": "feat(344): migration v18 — expiry, queue kind + full_requested_at, refresh schedule, embedding model id, cooldown backfill\n\naccount_scores.scoring_generation/valid_until (legacy backfill), the\n(user_did, threat_score) index, scan_queue.kind/full_requested_at,\nusers.next_refresh_at/refreshed_generation/refresh_attempted_generation\n(left NULL: due-ness is revision-driven), topic_fingerprint.embedding_model_id,\ncreate_tables_through / migrate_postgres_through for authentic old-schema\nfixtures, and\nscan_state.last_full_scan_finished_at from done queue rows. Fresh +\nupgrade-from-v17 tests on both backends; Postgres suite fails in CI\nwithout DATABASE_URL.\n\nPostgres drops the DEFAULT on scoring_generation after backfill (a\nforgetful writer must fail, not silently write \"legacy\") — this leaves\nthree pre-existing Postgres integration tests failing\n(test_pg_account_score_upsert_and_rank, test_pg_action_score_snapshots_and_cascade,\ntest_pg_get_fresh_scored_dids_matches_is_score_stale) until Task 3 stamps\nscoring_generation on every write, per task-3-brief.md. Expected and\nout of scope here.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 6
+  },
+  {
+    "hash": "91eadcf822f14dbabde38000ad6761b550285318",
+    "short_hash": "91eadcf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T22:22:14-07:00",
+    "message": "feat(344): scoring_revision() = generation + model ids; EMBEDDING/NLI model ids; staged blobs carry the revision\n\nThe composite stamp every score row will carry (#343 §4.4, V2-01) so a\nmodel swap expires stored scores by itself, the embedding and NLI model\nidentities, and blob schema v3 so Phase C refuses to finalize inputs\ngathered under another revision.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 12
+  },
+  {
+    "hash": "96f2ebfb2d5d8a67dcc32ae45e521eff6569bab5",
+    "short_hash": "96f2ebf",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T21:12:52-07:00",
+    "message": "Merge pull request #123 from musicjunkieg/docs/343-phase2-plan\n\ndocs(343): Phase 2 implementation plan — score expiry + nightly refresh (#344)",
+    "files_changed": 0
+  },
+  {
+    "hash": "b777c25691a0a2191644b147504ad1b1c5e83422",
+    "short_hash": "b777c25",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T19:45:09-07:00",
+    "message": "docs(343): Phase 2 plan rev 8 — resolve Astra seventh review V7-01/V7-02/V7-03; reviewer note; spec §4.4 amended\n\nV7-01: the injected clock is &(dyn Fn() -> DateTime<Utc> + Sync) so the\nspawned scan futures stay Send; a compile-time assert_send test guards it.\nV7-02: a drained refresh outcome is persisted in scan_state under\nfull_carried_completion — a Draining sentinel before the drain, the\nclassified outcome after, folded back by drain_then_run at the end of\nwhichever attempt finishes the own run, consumed by the fulfilled\ncompletion in one transaction with the cooldown marker, dropped on a\nrevision mismatch. delete_scan_state and finish_full_scan_state join the\ntrait on both backends. V7-03: the unverified-drain test injects a\nfail-once fault into exactly the drain skip-count read through a\nPhasedScanDeps.skip_counter seam instead of dropping the table. Adds a\nnote to the reviewer separating design findings from implementation-gate\nfindings the plan cannot settle. Seventh resolution table; plan revision\nonly, no tests executed.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "96ffdfe4aff5908d22022cc694ffab08d0be03ae",
+    "short_hash": "96ffdfe",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T19:12:14-07:00",
+    "message": "docs(343): Phase 2 plan rev 7 — resolve Astra sixth review V6-01/V6-02; spec §4.4 amended\n\nV6-01: CompleteUnverified is fulfilled everywhere the contract says so —\nScanCompletion::fulfilled() drives the cooldown marker, finish_queued_scan\nclears full_requested_at for it on both backends, and a full scan folds a\nrefresh-owned drain into its own completion with ScanCompletion::worst so\na drain can neither launder an unverified outcome nor complete the request\non its own. V6-02: run_scan_with and run_refresh_with take an injected\nclock, read it after the attempt returns, and anchor the retry deadline on\nthat end instant; the start instant is telemetry only. Sixth resolution\ntable added; plan revision only, no tests executed.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "86c4756f4e96d32173983415c532a6e65f860f87",
+    "short_hash": "86c4756",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T18:40:21-07:00",
+    "message": "docs(343): Phase 2 plan rev 6 — resolve Astra fifth review V5-01..V5-03; spec §4.4 amended\n\nV5-01 classify_full_scan takes the PERSISTED skip count as Option<i64>:\ndone + skips > 0 is CompleteWithSkips even when the resuming invocation\nreports degraded=false; an unreadable count is CompleteUnverified\n(cooldown yes, proof never); RefreshOutcome::CompletedUnverified,\nFinishCompletion::CompleteUnverified, CHECK list; staged resume test.\nV5-02 run_scan becomes run_scan_with over FullScanBookkeeping — scorer\nsetup, fingerprint rebuild (abort arm), discovery and pipeline all inside\none captured outcome with a single scheduling site; injected-failure test\nproves the hourly retry replaces the tick-set nightly deadline and the\nobligation survives, without manual schedule_retry or models. V5-03 the\nPostgres enqueue tests are split: serialization observed via pg_locks\n(then AlreadyQueued), claim preservation with the running claim committed\nfirst (then AlreadyRunning). Fifth resolution table.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "4b9459db433010c39dc24ff49ec3fe89547eb203",
+    "short_hash": "4b9459d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T17:56:49-07:00",
+    "message": "docs(343): Phase 2 plan rev 5 — resolve Astra fourth review V4-01..V4-05; spec §4.4 amended\n\nV4-01 an owed full scan is retry-eligible with zero score rows\n(REFRESH_DUE_SQL eligibility = scores OR owed full); schedule_retry_at\nstamps refresh_attempted_generation so retries of either kind wait for\ntheir deadline; restart test with a never-scored first scan. V4-02 the\nempty-candidate shortcut in amplification::run is removed — a full scan\nalways enters run_phased_scan so staged work resumes or drains, and\nclassify_full_scan treats a burst/finalize/missing marker as Resumable\nregardless of degraded. V4-03 Postgres enqueue_scan takes a per-user\npg_advisory_xact_lock before reading state, with a conditional\nabsent-row insert + re-read; two-connection barrier test. V4-04\nrun_refresh_with/run_refresh return Result<ScanReport> through one\nfinish_scan, so both launch_scan arms share a type. V4-05 destructive\nmigration tests serialized by migrations_fixture(): process mutex +\nPostgres session advisory lock; ordering test. Fourth resolution table.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "fb713a3ffc761bf63286c1260f1169867255b495",
+    "short_hash": "fb713a3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T17:34:01-07:00",
+    "message": "docs(343): Phase 2 plan rev 4 — resolve Astra third review V3-01..V3-06; spec §4.4 amended\n\nV3-01 per-producer evidence provenance: mark_clean stamps ONNX_MODEL_ID +\nCLEAN_PASS_POLICY, EvidenceContract/Provenance distinguish clean-pass,\nclassifier, missing, foreign and decode-error rows; Zentropi advertises\nthe configured labeler version and writes the same string. V3-02 the\ncooldown reads only scan_state.last_full_scan_finished_at (written for\nComplete and CompleteWithSkips, never Resumable); scan_queue.completion\nkeeps the durable distinction; composed web tests through run_under_slot\nand POST /api/scan. V3-03 full_requested_at is a durable obligation set by\nevery user enqueue and cleared only by a completed full scan; the tick\nretries owed work as kind=full; lifecycle test across a restart. V3-04\nmark_refreshed_generation sets both columns; real-path test. V3-05\nRefreshBookkeeping boundary — marker reset, scorers, client and context\nall inside one captured outcome with a single scheduling site; setup and\nmarker-failure tests without models. V3-06 destructive fixtures on a\ndedicated *_migrations database with a suffix guard; ten-run isolation\nloop. Third resolution table + provenance and lifecycle contracts.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "c40be7f4d1e2910b15cb684b344b41e45d3299ae",
+    "short_hash": "c40be7f",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T14:36:18-07:00",
+    "message": "docs(343): Phase 2 plan rev 3 — resolve Astra second review V2-01..V2-07; spec §4.4 amended\n\nV2-01 the stored stamp is scoring_revision() = generation | ONNX | embedding\n| NLI model ids (a model swap expires scores by itself; classifier\nmodel/policy changes still need a manual bump, documented); verdicts are\nreused only on matching classifier model AND policy. V2-02 the tick writes\nthe refresh row conditionally (ON CONFLICT … WHERE done/failed) and\nadvances a user only when the write happened; the two statements are pub\nconsts so the interleaving is tested on real SQL. V2-03\nrefresh_attempted_generation (set by the tick) is separated from\nrefreshed_generation (proof); failed attempts wait for their retry\ndeadline, a new revision is attempted promptly once. V2-04 the full\nscan rebuild decision checks the embedding model id and never falls back\nto incompatible vectors. V2-05 ScanCompletion / RefreshOutcome\n(CompletedWithSkips) — Ok is classified, only complete work earns the\ncooldown marker, the nightly schedule and the revision proof. V2-06\nExportedExpiry {At, Missing, Invalid}; NULL/malformed import as\nscored_at; microseconds kept on Postgres, whole-second truncation into\nSQLite documented and tested; real SQLite→Postgres migration test.\nV2-07 authentic v17 fixtures via create_tables_through /\nmigrate_postgres_through; relative dates; the export test imports.\nMandatory missing-context test via RefreshContextSource. Resolution\ntables for R01–R13 (cross-referenced) and V2-01–V2-07.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "30cd7f4913a502b939687b3bfd0c00d77b6fe510",
+    "short_hash": "30cd7f4",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T13:45:57-07:00",
+    "message": "docs(343): Phase 2 plan rev 2 — resolve Astra plan review R01-R13; spec §4.4/§6 amended\n\nLossless export/import for charcoal migrate (R01); staging ownership\nmarkers, typed OwnedByOtherKind error, RefreshOutcome and full-drains-\nrefresh transition (R02); EMBEDDING_MODEL_ID on fingerprints, generation\non staged blobs, policy check on verdicts, narrowed bump rule (R03);\nclaim + enqueue in one bounded transaction, generation-driven due-ness\nvia users.refreshed_generation (R04, R07); context helpers return Result\nand a refresh fails rather than scoring without context (R05);\ntopic-first discovery uses the fresh set (R06); the 80% feed-hit gate\nwithdrawn for a functional test + recorded share (R08, deciduous 878);\nfull_requested_at + in-place upgrade so a user request always runs\n(R09); VERIFY_* commands with pipefail and single filters (R10);\nCOALESCE-boolean fresh predicate and malformed-eligible candidates\n(R11); (user_did, threat_score) index with plan evidence (R12);\ncooldown marker backfilled from done queue rows (R13).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "c91afb85a5bdab4b284c01b1256b485802504e85",
+    "short_hash": "c91afb8",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T03:55:08-07:00",
+    "message": "docs(343): Phase 2 implementation plan — score expiry + nightly refresh (#344)\n\nTen TDD tasks: SCORING_GENERATION + confidence label parsing; migration v18\n(scoring_generation, valid_until, scan_queue.kind, users.next_refresh_at,\nlegacy backfill) on both backends; fresh-only reads with hard-error\nfreshness in the pipeline; tier_counts.expired in the UI; refresh queue\nkind with upgrade/no-downgrade rules, full-only ETA median and a cooldown\nanchor; the refresh schedule on the admitter tick (one UPDATE … RETURNING,\nCHARCOAL_REFRESH_INTERVAL_HOURS); list_refresh_candidates from the table;\nshared-setup extraction; run_refresh through the unchanged run_phased_scan;\ndocs, runbook and spec §4.4 amendment (v18 not v17, FIFO across kinds,\nfortnightly full stays with #342).\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
+    "hash": "b24765e9f312cd814ab51764d9b25eb226f3e708",
+    "short_hash": "b24765e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T03:24:51-07:00",
+    "message": "Merge pull request #122 from musicjunkieg/docs/343-overlap-probe",
+    "files_changed": 0
+  },
+  {
+    "hash": "bd4812d2f012f2d87e27ab9faa3d4b866ad953cd",
+    "short_hash": "bd4812d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T00:37:15-07:00",
+    "message": "docs(343): drop the last single-pair threshold wording; state total_ms units (CodeRabbit)\n\nCHANGELOG: record 6.6% as one onboarding observation under the\nten-onboarding rule; total_ms is summed per-account milliseconds\n(829992 ms ~= 830 worker-seconds), not wall. Phase 1 runbook: the\nheader, the pass block and the result verdict now read as the mechanism\ncheck (hit rate ~= measured overlap) with no per-pair pass/re-cost.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "45b637e659d7858bbae209a8e0ad229f345a804d",
+    "short_hash": "45b637e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-13T00:30:23-07:00",
+    "message": "docs(343): define overlap as candidate-set overlap; replace the Phase 1 pass with a measured distribution\n\n\"Community overlap\" was never defined. The cache can only see the\ncandidate set (Constellation amplifiers + amplifier followers), whose\noverlap between two users depends on who amplified each of them lately,\nnot on friendship or topic - so it cannot be guessed and surveying does\nnot predict it. Measured 2026-09-13: 6.6% on the best pair available.\n\nWithdraw the >=50% / <20% one-pair pass. Add Phase 1b: an enumerate-only\noverlap probe (#353) that reports any handle's candidate count and cache\noverlap in under a minute from public data, records it per onboarding,\nand drives a decision point after ten real onboardings. Add a refresh-job\nfeed hit-rate target (>=80%) under Phase 2, since the nightly refresh is\nthe one consumer guaranteed to run inside the 24h snapshot TTL. Phase 3\nwave test now records the probe values instead of asserting overlap.\n\nRefs #351, #353.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 4
+  },
+  {
+    "hash": "573540efcc4cd5c20858b3066b9445fb13919ae5",
+    "short_hash": "573540e",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T22:33:52-07:00",
+    "message": "docs(343): label the +1.5 GB session-pool cost as RSS (CodeRabbit)\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 3
+  },
+  {
+    "hash": "102dd65e05123680b88ec867a2b6d01df83d8e8d",
+    "short_hash": "102dd65",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T21:21:05-07:00",
+    "message": "docs(343): record Phase 0/1 staging results; fix both runbooks\n\nPhase 0: one ONNX session already drives 13-15 cores; a 4-session pool\nchanged the gather wall by 0% (129 s vs 137/120 s) for +1.5 GB, so\nCHARCOAL_ONNX_SESSIONS stays at 1. The gather is fetch-bound with a\n5-8 minute near-idle tail on larger accounts. The public AppView sends\nno RateLimit-* headers at all.\n\nPhase 1: feed cache hit 6.6% on the best available second account,\nwhich equals the measured community overlap (7.9% predicted) - the\nmechanism works but the >=50% pass is untestable until an overlapping\naccount exists on staging.\n\nRunbook corrections: total_ms is worker-seconds, not wall; a same-account\nrerun inside 7 days drops every candidate it scored (#344), so runs must\nreset account_scores between them; add the psql enqueue recipe.\n\nRefs #346, #350, #351, #352.\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01XXbqRMsMWnxFpWxs3XRqSX",
+    "files_changed": 6
+  },
+  {
+    "hash": "593c40d279c8c8802fc1da745ca8f09e4d81de00",
+    "short_hash": "593c40d",
+    "author": "Bryan Guffey",
+    "date": "2026-09-12T19:57:37-07:00",
+    "message": "Merge pull request #118 from musicjunkieg/feat/343-phase1-cache\n\nfeat(343): Phase 0 measurement + Phase 1 shared feed/score cache",
+    "files_changed": 0
+  },
+  {
+    "hash": "fb39f7841b073b8dedbabff5723200896b5af993",
+    "short_hash": "fb39f78",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T21:11:41-07:00",
+    "message": "docs(343): say why v17 uses plain CREATE INDEX, not CONCURRENTLY\n\nv16 tables and v17 indexes ship in the same release, migrations run in\ndb::open() before the server takes traffic, and the runner wraps each\nmigration in a transaction. The indexes are always built on empty tables.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
+    "hash": "60584140e57bd569f9ae9c991014fcb24795da48",
+    "short_hash": "6058414",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T19:27:32-07:00",
+    "message": "docs(343): correct the RFC3339 ordering rationale; remove clock-tie in eviction test\n\nchrono to_rfc3339() is not fixed-width (0/3/6/9 fractional digits). The\nlexicographic sweep is still sound because every writer emits +00:00 and\n\"+\" sorts below \".\" and digits — say that, once, on the trait doc, and\npoint the other four sites at it. Test feed cutoff moves to now+1s so the\nseed row stamped in the same instant cannot tie.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 8
+  },
+  {
+    "hash": "2a8aea356f8f5a9b2b3ea203be5bc34c7d419c0c",
+    "short_hash": "2a8aea3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T19:09:54-07:00",
+    "message": "perf(343): batch the Postgres cache upserts with UNNEST\n\nCodeRabbit on PR #118: upsert_onnx_scores and upsert_classifier_verdicts\nexecuted one round trip per miss inside a transaction. Both now use a\nsingle UNNEST INSERT ... SELECT, the shape insert_amplification_events_batch\nalready uses — model_id, policy_version and the timestamp are scalars\nbroadcast to every row, so the statement binds a fixed number of\nparameters at any batch size.\n\nRows are deduplicated last-write-wins first, and that is load-bearing:\none INSERT ... ON CONFLICT DO UPDATE cannot touch the same row twice\n(\"command cannot affect row a second time\"), where the per-row loop\nsimply let a later duplicate overwrite an earlier one. Todays callers\nalready pass distinct hashes, but the trait is public.\n\nNo WITH ORDINALITY here — unlike the amplification batch these tables\nhave no serial id whose order is part of the contract.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 2
+  },
+  {
+    "hash": "7063776b0de425a86c63d5b99ceac86a358ed95b",
+    "short_hash": "7063776",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T17:47:18-07:00",
+    "message": "fix(343): wrap SQLite cache batch upserts in one transaction\n\nCodeRabbit on PR #118: SqliteDatabase called upsert_onnx_scores and\nupsert_classifier_verdicts without a transaction, so each row was its\nown autocommit - a mid-batch error left earlier rows behind, unlike the\nPostgres backend which wraps the batch. Now unchecked_transaction +\ncommit around the loop in both, matching delete_user_data.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
+    "hash": "23de7f7b244acc48a1ab9f7b0085ac721a5e85fd",
+    "short_hash": "23de7f7",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:48:31-07:00",
+    "message": "fix(343): final-review fixes - per-candidate feed hit counting, feed stats never fail the scan\n\nFeed cache hits/misses now count once per DID per scan so the Phase 1 gate\nmatches spec §4.1 (per candidate, not per fetch); runbook corrected to\nmatch. The feed stats write after a successful scan is warn-on-error like\nthe onnx/classifier writes - a diagnostic must not fail the scan.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 8
+  },
+  {
+    "hash": "529adf0f81e4cf71e2745cf14c68c75d3caa6a1a",
+    "short_hash": "529adf0",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:27:41-07:00",
+    "message": "docs(343): CHANGELOG, README knob, Phase 0/1 runbooks\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
+    "hash": "9c176f3c03d93e3e00c534774d5a04529a2034d3",
+    "short_hash": "9c176f3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-09T00:20:39-07:00",
+    "message": "feat(343): CachedClassifier — stage-2 verdicts cached by (hash, model, policy)\n\nOnly decodable verdicts are stored; slot errors and request errors pass\nthrough untouched so the burst downcasts still work. Counts land in\nscan_state classifier_cache_hits/misses.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
+    "hash": "4a9239452dd18478efa8f460c73cc3bcb109097a",
+    "short_hash": "4a92394",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T23:20:44-07:00",
+    "message": "feat(343): CachedToxicityScorer — ONNX scores cached by text SHA-256\n\nDistinct misses go to the model in one batch; hits return the cached\ntoxicity with default attributes. Keyed by (text hash, model id), shared\nacross users. Counts land in scan_state onnx_cache_hits/misses.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 7
+  },
+  {
+    "hash": "2b3f14458e379b12fdb3a7d66e43148014e95da8",
+    "short_hash": "2b3f144",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T22:46:44-07:00",
+    "message": "test(343): update sqlite trait table-count assertion for v16 cache tables\n\nTask 5 added three tables in migration v16 but only refreshed the\nschema.rs assertions; the sibling assertion in sqlite.rs still expected\n17 and failed on the full --lib run.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 1
+  },
+  {
+    "hash": "73033da26b3e1b86819ee959f753200a031a232d",
+    "short_hash": "73033da",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T22:14:09-07:00",
+    "message": "feat(343): Database trait methods for the shared cache\n\nget/upsert feed snapshots, onnx scores and classifier verdicts on SQLite\nand Postgres. Batch lookups return only hits; empty inputs are no-ops.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 9
+  },
+  {
+    "hash": "5b2f84ce8c793333a50498a2e1451ccc971a9053",
+    "short_hash": "5b2f84c",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T21:54:03-07:00",
+    "message": "feat(343): migration v16 - shared cache tables on both backends\n\naccount_feed_snapshots, onnx_scores, classifier_verdicts. No user_did;\nkeyed by DID or text SHA-256. Fresh + upgrade-from-v15 tests on SQLite and\nPostgres; 0016 self-records its version.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 6
+  },
+  {
+    "hash": "c6523483772be64bb0da8930eb8b22b2ce2eba5d",
+    "short_hash": "c652348",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T21:04:03-07:00",
+    "message": "refactor(343): split feed fetch from sampling; PostFetcher takes the DID\n\ncollect_feed_posts + pure sample_from_feed replace the fused loop so a cached\nfeed can be re-partitioned. FeedSource is the raw network trait; PostFetcher\ngains did for the cache key. No behaviour change.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 5
+  },
+  {
+    "hash": "30f95d3f40752765e9120264dd1f1b327f7a7b6d",
+    "short_hash": "30f95d3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T20:45:40-07:00",
+    "message": "feat(343): CHARCOAL_ONNX_SESSIONS session pool for the Phase 0 experiment\n\nDefault 1, clamp 1..=8, round-robin selection. Adds ONNX_MODEL_ID for the\nPhase 1 cache key.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "fd123b34589e5dc237f45c6d9b2041fa8af5807a",
+    "short_hash": "fd123b3",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T20:33:28-07:00",
+    "message": "test(343): cover the missing-RateLimit-Limit warn branch\n\nExtract record_observed_rate_limit so the Some/None persistence paths are unit-testable; the None branch now has a tracing-capture test proving one warn per scan and no scan_state row.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 1
+  },
+  {
+    "hash": "ceac618e44fd1ac482a0919876fac04789d760ef",
+    "short_hash": "ceac618",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T18:42:59-07:00",
+    "message": "perf(343): forward stage-1 batches to the primary scorer intact\n\nTwoStageToxicityScorer had no score_batch override, so stage 1 ran one\nONNX forward pass per post. Delegate to primary.score_batch.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "d27b19983148d5433af0831936cb4c01ab188630",
+    "short_hash": "d27b199",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T18:36:25-07:00",
+    "message": "Merge pull request #117 from musicjunkieg/docs/343-scalability-design\n\ndocs(343): scalability & onboarding design spec + Phase 0/1 implementation plan",
+    "files_changed": 0
+  },
+  {
+    "hash": "b0ed9499c0ee6ac2883538a2dc1ff38e64dc2784",
+    "short_hash": "b0ed949",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T11:16:01-07:00",
+    "message": "docs(343): Phase 0+1 implementation plan; spec §4.1 three-table cache keyed by text hash\n\nPlan covers Phase 0 (measurement: batched stage-1 forward pass, CPU\nsampler, rate-limit header capture, CHARCOAL_ONNX_SESSIONS pool) and\nPhase 1 (shared cache: account_feed_snapshots / onnx_scores /\nclassifier_verdicts tables, migration v16, six Database trait methods,\nCachedPostFetcher / CachedToxicityScorer / CachedClassifier decorators,\ncache hit/miss stats in scan_state) as ten TDD tasks plus two runbooks.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 4
+  },
+  {
+    "hash": "5d5355b5427ff728d49739d5d1a77c193d70fbe0",
+    "short_hash": "5d5355b",
+    "author": "Bryan Guffey",
+    "date": "2026-09-08T00:53:32-07:00",
+    "message": "docs(343): scalability & onboarding design spec\n\nAnswers #343: measured scan breakdown, 10x15-min wave target, shared\nuser-independent cache, worker role + semaphores, Bluesky token bucket\nwith 429 handling (#182), score expiry + top-tier refresh (#344, unblocks\n#342), CandidateSource trait for soot, hosting matrix with live Railway\nrates, phased plan with pass numbers.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 3
+  },
+  {
+    "hash": "946de942062867cc542fa634bb0dd2064447e0fd",
+    "short_hash": "946de94",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T13:44:43-07:00",
+    "message": "Merge branch 'main' into staging",
+    "files_changed": 0
+  },
+  {
+    "hash": "acd98e0c79aaf20f7d6c0452052ad6b3d8784b9e",
+    "short_hash": "acd98e0",
+    "author": "Bryan Guffey",
+    "date": "2026-09-07T03:56:08-07:00",
+    "message": "fix(345): latest-wins guard for overlapping actions-list loads\n\nThe poll timer and disconnect() can both call load(), and whichever\nresolves last writes state. A pre-disconnect read that finishes late\nput \"connected\" back on screen and re-armed polling from stale rows\n(CodeRabbit, PR #116). Each load now takes a ticket from a small\ngeneration() helper and drops its result if a newer load started\nsince. Covered by a reverse-completion vitest.\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UnZQUWhbcAg4gMZpmSrYqY",
+    "files_changed": 5
+  },
+  {
     "hash": "48384191e01ebaf9950ea194817bba0ffe6e0d51",
     "short_hash": "4838419",
     "author": "Bryan Guffey",

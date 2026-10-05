@@ -4,7 +4,7 @@
 // compute_threat_score edge cases (gate logic, clamping, custom weights),
 // and truncate_chars UTF-8 safety.
 
-use charcoal::db::models::ThreatTier;
+use charcoal::db::models::{ScoringConfidence, ThreatTier};
 use charcoal::output::truncate_chars;
 use charcoal::scoring::threat::{
     compute_threat_score, compute_threat_score_contextual, ThreatWeights,
@@ -632,4 +632,111 @@ fn stage2_continues_when_near_high_boundary() {
 
     // Score 37.0 is within ±5 of High boundary at 35.0
     assert!(should_continue_to_stage3(37.0));
+}
+
+// --- #343 Phase 2 / #344: generation stamp, model identity, label parsing ---
+
+#[test]
+fn scoring_generation_is_a_real_stamp_not_legacy() {
+    use charcoal::scoring::generation::{LEGACY_GENERATION, SCORING_GENERATION};
+    assert!(!SCORING_GENERATION.is_empty());
+    assert_ne!(SCORING_GENERATION, LEGACY_GENERATION);
+    assert_eq!(
+        LEGACY_GENERATION, "legacy",
+        "migration v18 backfills this literal"
+    );
+    assert!(!SCORING_GENERATION.contains(char::is_whitespace));
+}
+
+/// V2-01: the STORED stamp is the composite revision — the human generation
+/// plus every in-binary model identity — so a model swap invalidates stored
+/// scores automatically, without anyone remembering to bump.
+#[test]
+fn scoring_revision_changes_when_any_component_changes() {
+    use charcoal::scoring::generation::{compose_revision, scoring_revision, SCORING_GENERATION};
+    use charcoal::scoring::nli::NLI_MODEL_ID;
+    use charcoal::topics::embeddings::EMBEDDING_MODEL_ID;
+    use charcoal::toxicity::onnx::ONNX_MODEL_ID;
+    let base = compose_revision(
+        SCORING_GENERATION,
+        ONNX_MODEL_ID,
+        EMBEDDING_MODEL_ID,
+        NLI_MODEL_ID,
+    );
+    assert_eq!(scoring_revision(), base);
+    assert_ne!(
+        compose_revision("other-gen", ONNX_MODEL_ID, EMBEDDING_MODEL_ID, NLI_MODEL_ID),
+        base
+    );
+    assert_ne!(
+        compose_revision(
+            SCORING_GENERATION,
+            "other-onnx",
+            EMBEDDING_MODEL_ID,
+            NLI_MODEL_ID
+        ),
+        base
+    );
+    assert_ne!(
+        compose_revision(SCORING_GENERATION, ONNX_MODEL_ID, "other-emb", NLI_MODEL_ID),
+        base
+    );
+    assert_ne!(
+        compose_revision(
+            SCORING_GENERATION,
+            ONNX_MODEL_ID,
+            EMBEDDING_MODEL_ID,
+            "other-nli"
+        ),
+        base
+    );
+    assert_ne!(scoring_revision(), "legacy");
+    assert!(
+        !scoring_revision().contains(char::is_whitespace),
+        "bound into SQL equality and shown in the UI"
+    );
+    assert_eq!(
+        base.matches('|').count(),
+        3,
+        "delimited so component sets cannot collide by concatenation"
+    );
+}
+
+#[test]
+fn embedding_model_id_names_the_shipped_model() {
+    use charcoal::topics::embeddings::EMBEDDING_MODEL_ID;
+    // Migration v18 backfills this literal onto every fingerprint that has a
+    // vector, because it is the only embedding model Charcoal has ever run.
+    assert_eq!(EMBEDDING_MODEL_ID, "all-MiniLM-L6-v2");
+}
+
+#[test]
+fn scoring_confidence_round_trips_through_its_label() {
+    for c in [
+        ScoringConfidence::Low,
+        ScoringConfidence::Standard,
+        ScoringConfidence::High,
+    ] {
+        assert_eq!(ScoringConfidence::from_label(c.as_str()), Some(c));
+    }
+    assert_eq!(ScoringConfidence::from_label("bogus"), None);
+    assert_eq!(ScoringConfidence::from_label(""), None);
+}
+
+#[test]
+fn staleness_days_for_label_falls_back_to_standard() {
+    assert_eq!(ScoringConfidence::staleness_days_for_label(Some("low")), 3);
+    assert_eq!(
+        ScoringConfidence::staleness_days_for_label(Some("standard")),
+        7
+    );
+    assert_eq!(
+        ScoringConfidence::staleness_days_for_label(Some("high")),
+        14
+    );
+    assert_eq!(ScoringConfidence::staleness_days_for_label(None), 7);
+    assert_eq!(
+        ScoringConfidence::staleness_days_for_label(Some("bogus")),
+        7
+    );
 }

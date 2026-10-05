@@ -23,6 +23,13 @@ use tracing::debug;
 /// Embedding dimension for all-MiniLM-L6-v2.
 pub const EMBEDDING_DIM: usize = 384;
 
+/// Identity of the embedding model behind every vector this module produces.
+/// Stored on `topic_fingerprint.embedding_model_id` (migration v18) so a
+/// fingerprint built by a different model — even one with the same
+/// `EMBEDDING_DIM` — is recognised as incompatible and rebuilt rather than
+/// compared against candidate vectors from this one (#344, R03).
+pub const EMBEDDING_MODEL_ID: &str = "all-MiniLM-L6-v2";
+
 /// Sentence embedder using a local ONNX model. Converts text into dense
 /// 384-dimensional vectors suitable for cosine similarity comparison.
 ///
