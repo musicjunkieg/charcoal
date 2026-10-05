@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3d6a1f85f2a38aa2f7cbd83d774f06397ad0fcdf",
+    "short_hash": "3d6a1f8",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:49:01-07:00",
+    "message": "fix(350): cap the getAuthorFeed walk at 10 pages of 100\n\nAn account whose feed is mostly reposts or image-only posts never\nyielded 50 usable posts, so collect_feed_posts walked its whole history\none 50-item page at a time. On staging rgesteve took 1,070 pages / 243 s\nand davedawn 856 pages / 187 s, holding the gather open alone while the\nother slots idled: the 80 s to 8 min gather tail.\n\nEvery page now asks for 100 items (the API maximum) and the walk stops\nafter MAX_FEED_PAGES = 10. What was found is returned as Ok, so it is\ncached in the feed snapshot and scored like any feed (Insufficient Data\nbelow 5 posts) and is never a scan skip that would shorten the refresh\nto 1 h (#394). The protected user feed read had the same unbounded loop\nand now stops at 50 pages, enough for the 500-post fingerprint. A capped\nwalk logs one info line; nothing is logged per page.\n\nTests (wiremock, endless feeds with a tokio timeout) failed against the\nold code by timing out, and pass now.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "14af0a8a4f66664a5984ede62f3513cb7c44fdc7",
     "short_hash": "14af0a8",
     "author": "Bryan Guffey",
