@@ -316,6 +316,15 @@ impl RunPodCopeBClient {
         })
     }
 
+    /// Override the steady and warm-up request deadlines. Exists so the poll
+    /// timeout is testable without a multi-minute test or a process-global
+    /// environment variable (which parallel tests cannot share safely).
+    pub fn with_timeouts(mut self, steady: Duration, warmup: Duration) -> Self {
+        self.steady_timeout = steady;
+        self.warmup_timeout = warmup;
+        self
+    }
+
     /// Attach a per-scan cost meter. Builder so `new`'s signature (and its
     /// existing callers/tests) stay unchanged.
     pub fn with_meter(mut self, meter: Arc<ScanCostMeter>) -> Self {
@@ -450,17 +459,35 @@ impl RunPodCopeBClient {
         let poll_interval = Duration::from_millis(2_000);
         loop {
             if start.elapsed() >= timeout {
-                bail!("RunPod job {job_id} did not complete within {timeout:?}");
+                // #402: a job still running at the deadline is a cold start that
+                // ran long — TRANSIENT. As a plain error it aborted the burst
+                // and failed the whole run (retry in an hour, re-gathering
+                // everything); typed as transient, the burst stops resumably
+                // and a resume re-sends only the still-pending rows.
+                return Err(ClassifierTransientError::new(format!(
+                    "RunPod job {job_id} did not complete within {timeout:?}"
+                ))
+                .into());
             }
             tokio::time::sleep(poll_interval).await;
-            let resp = self
+            // A transport failure while POLLING is as transient as one while
+            // submitting (which the retry loop already treats that way).
+            let resp = match self
                 .client
                 .get(&url)
                 .bearer_auth(&self.api_key)
                 .timeout(Duration::from_secs(30))
                 .send()
                 .await
-                .with_context(|| format!("poll RunPod status for {job_id}"))?;
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(ClassifierTransientError::new(format!(
+                        "poll RunPod status for {job_id}: {e}"
+                    ))
+                    .into())
+                }
+            };
             let http = resp.status();
             // 5xx while polling is transient — keep waiting. 4xx is a real
             // contract/config error.
@@ -470,7 +497,18 @@ impl RunPodCopeBClient {
             if !http.is_success() {
                 bail!("RunPod /status HTTP {http} for {job_id}");
             }
-            let body = resp.text().await?;
+            // The headers arrived but the body can still fail mid-transfer —
+            // the same transient network failure as a failed send, so the same
+            // treatment (CodeRabbit, PR #140; cf. the XRPC client, #183).
+            let body = match resp.text().await {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(ClassifierTransientError::new(format!(
+                        "read RunPod status body for {job_id}: {e}"
+                    ))
+                    .into())
+                }
+            };
             let latency_ms: u32 = start.elapsed().as_millis().try_into().unwrap_or(u32::MAX);
             match Self::parse_batch_job(&body, latency_ms)? {
                 BatchJobOutcome::Completed(v) => return Ok(v),

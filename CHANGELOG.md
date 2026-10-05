@@ -99,6 +99,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #402 (part of #387) — a RunPod job that outlives its deadline, or a
+  network error while polling its status, is now a TRANSIENT failure. Both
+  were plain errors, so a cold start that ran past the warm-up limit (180 s)
+  aborted the burst and failed the whole run, which then retried an hour later
+  from scratch — what happened to one prod user's first refresh on
+  2026-10-05. Typed as transient, the burst stops resumably and a resume
+  re-sends only the rows still pending. A 4xx from the status endpoint stays
+  permanent. The backoff and circuit-breaker halves of #387 are separate.
 - #350 — one repost-heavy account no longer holds a scan's gather open for
   minutes. Reading an account's posts skipped reposts and posts under 15
   characters but still paid a page for them, and only stopped once it had 50

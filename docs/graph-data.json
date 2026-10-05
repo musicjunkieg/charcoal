@@ -11296,6 +11296,28 @@
       "created_at": "2026-10-04T20:44:33.251046-07:00",
       "updated_at": "2026-10-04T20:44:33.251046-07:00",
       "metadata_json": "{\"branch\":\"fix/350-feed-page-cap\",\"commit\":\"14af0a8\",\"confidence\":85,\"files\":[\"src/bluesky/posts.rs\"]}"
+    },
+    {
+      "id": 1037,
+      "change_id": "f0b6bddc-0ba3-451a-bfe4-7bc3193f444d",
+      "node_type": "outcome",
+      "title": "#350 fixed in 3d6a1f8: getAuthorFeed limit=100, MAX_FEED_PAGES=10 (protected feed 50); capped walk Ok+cached, not a skip; 8 wiremock tests red(timeout)->green; clippy clean, 0 SKIP",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:49:29.051718-07:00",
+      "updated_at": "2026-10-04T20:49:29.051718-07:00",
+      "metadata_json": "{\"branch\":\"fix/350-feed-page-cap\",\"commit\":\"3d6a1f8\",\"confidence\":90}"
+    },
+    {
+      "id": 1038,
+      "change_id": "19cd810f-57c5-40b5-9fa6-89362cac2988",
+      "node_type": "outcome",
+      "title": "PR #139 (#350 feed page cap) merged to staging, 8/8 + CodeRabbit APPROVED with no comments",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:57:05.219246-07:00",
+      "updated_at": "2026-10-04T20:57:05.219246-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -23167,6 +23189,39 @@
       "weight": 1.0,
       "rationale": "Implementation of #350 option A",
       "created_at": "2026-10-04T20:44:34.879116-07:00"
+    },
+    {
+      "id": 1090,
+      "from_node_id": 1036,
+      "to_node_id": 1037,
+      "from_change_id": "c022a7f5-5893-44df-a3b7-abca272cf895",
+      "to_change_id": "f0b6bddc-0ba3-451a-bfe4-7bc3193f444d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result of implementation",
+      "created_at": "2026-10-04T20:49:32.541590-07:00"
+    },
+    {
+      "id": 1091,
+      "from_node_id": 1022,
+      "to_node_id": 1037,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "f0b6bddc-0ba3-451a-bfe4-7bc3193f444d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Outcome for goal",
+      "created_at": "2026-10-04T20:49:32.548721-07:00"
+    },
+    {
+      "id": 1092,
+      "from_node_id": 1022,
+      "to_node_id": 1038,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "19cd810f-57c5-40b5-9fa6-89362cac2988",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#350 merged",
+      "created_at": "2026-10-04T20:57:05.238563-07:00"
     }
   ],
   "documents": [
