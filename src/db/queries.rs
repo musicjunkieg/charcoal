@@ -453,8 +453,11 @@ pub fn get_ranked_threats(
                 graph_distance, fingerprint_quality, scoring_confidence, context_score,
                 overlap_legacy
          FROM account_scores
-         WHERE user_did = ?1 AND threat_score >= ?2 AND {}
+         WHERE user_did = ?1 AND threat_score >= ?2 AND gone_at IS NULL AND {}
          ORDER BY threat_score DESC, did",
+        // `gone_at IS NULL` here and NOT in `fresh_sql`: a retired account
+        // (#394) leaves the threat list at once, but stays "fresh" for
+        // discovery so a full scan does not re-gather it either.
         fresh_sql("?3")
     ))?;
 

@@ -224,3 +224,36 @@ fn a_gone_account_is_not_counted_as_expired() {
 
     assert_eq!(count_expired(&conn, USER).unwrap(), 1);
 }
+
+/// CodeRabbit (outside-diff, PR #133): the refresh looks 2 days ahead of
+/// expiry, so it can retire an account whose score is still FRESH. That row
+/// must leave the threat list at once — a deleted account cannot engage, and
+/// a block or mute against it would fail — not linger until it expires.
+#[test]
+fn a_gone_account_leaves_the_ranked_threat_list_at_once() {
+    let conn = Connection::open_in_memory().unwrap();
+    create_tables(&conn).unwrap();
+    insert_score(&conn, "did:plc:fresh-alive", 1, scoring_revision());
+    insert_score(&conn, "did:plc:fresh-gone", 1, scoring_revision());
+    let dids = |conn: &Connection| -> Vec<String> {
+        get_ranked_threats(conn, USER, 0.0)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.did)
+            .collect()
+    };
+    assert_eq!(dids(&conn).len(), 2, "both fresh rows listed before");
+
+    charcoal::db::queries::mark_account_gone(
+        &conn,
+        USER,
+        "did:plc:fresh-gone",
+        "Profile not found",
+    )
+    .unwrap();
+
+    assert_eq!(dids(&conn), vec!["did:plc:fresh-alive"]);
+    // Discovery freshness is deliberately untouched: the row is still fresh,
+    // so a full scan does not re-gather it either.
+    assert!(fresh_set(&conn).contains("did:plc:fresh-gone"));
+}

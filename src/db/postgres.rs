@@ -807,7 +807,8 @@ impl Database for PgDatabase {
                     fingerprint_quality, scoring_confidence, graph_distance,
                     overlap_legacy
              FROM account_scores
-             WHERE user_did = $1 AND threat_score >= $2 AND scoring_generation = $3 AND valid_until > NOW()
+             WHERE user_did = $1 AND threat_score >= $2 AND gone_at IS NULL
+               AND scoring_generation = $3 AND valid_until > NOW()
              ORDER BY threat_score DESC, did",
         )
         .bind(user_did)
