@@ -11263,6 +11263,17 @@
       "created_at": "2026-10-04T20:24:30.858845-07:00",
       "updated_at": "2026-10-04T20:24:30.858845-07:00",
       "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"9bbc173\",\"confidence\":92}"
+    },
+    {
+      "id": 1034,
+      "change_id": "05c3bd07-f4b1-457a-b3ec-bac7e8313f27",
+      "node_type": "outcome",
+      "title": "#358 option (a) in 45f1878: reply veto (replies_all_clean) outside the first-person guard; mutation-checked; 534 tests pass, 0 SKIP, clippy clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T20:27:29.838393-07:00",
+      "updated_at": "2026-10-04T20:27:29.838393-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"45f1878\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -23101,6 +23112,17 @@
       "weight": 1.0,
       "rationale": "result",
       "created_at": "2026-10-04T20:24:30.878990-07:00"
+    },
+    {
+      "id": 1087,
+      "from_node_id": 1022,
+      "to_node_id": 1034,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "05c3bd07-f4b1-457a-b3ec-bac7e8313f27",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#358 shipped with #400",
+      "created_at": "2026-10-04T20:27:29.855339-07:00"
     }
   ],
   "documents": [
