@@ -1,5 +1,13 @@
 [
   {
+    "hash": "eb99fe2770328d50c62b443b279e48423bdb3489",
+    "short_hash": "eb99fe2",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T17:42:43-07:00",
+    "message": "Merge pull request #135 from musicjunkieg/fix/133-ranked-hides-gone\n\nfix(398): a gone account leaves the ranked threat list at once",
+    "files_changed": 0
+  },
+  {
     "hash": "dfb655a0c9ae84760372590710cbb40d36d244cf",
     "short_hash": "dfb655a",
     "author": "Bryan Guffey",

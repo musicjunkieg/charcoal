@@ -11076,6 +11076,105 @@
       "created_at": "2026-10-04T16:42:40.198837-07:00",
       "updated_at": "2026-10-04T16:42:40.198837-07:00",
       "metadata_json": "{\"branch\":\"fix/133-review-findings\",\"commit\":\"dfb655a\",\"confidence\":90}"
+    },
+    {
+      "id": 1017,
+      "change_id": "f91629f4-a135-4e4c-82de-adfd69da9c58",
+      "node_type": "action",
+      "title": "Merged #134 (f4f9c42) and #135 to staging: count_expired + get_ranked_threats exclude gone rows; migrations guard URL fix; docs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T17:42:44.589909-07:00",
+      "updated_at": "2026-10-04T17:42:44.589909-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":90}"
+    },
+    {
+      "id": 1018,
+      "change_id": "e0187ec7-05d3-4139-a9d9-85e3dc5d51be",
+      "node_type": "observation",
+      "title": "CodeRabbit round 3 on #133: point lookups should hide gone accounts. Bryan deferred it -> chainlink #399; replied on thread",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T18:20:58.137958-07:00",
+      "updated_at": "2026-10-04T18:20:58.137958-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":90}"
+    },
+    {
+      "id": 1019,
+      "change_id": "25265328-d8dc-4154-8ac2-001dddc4cdf1",
+      "node_type": "action",
+      "title": "Merged promotion PR #133 to main (ea704be) at 01:21Z after dismissing two stale CodeRabbit change-requests (fixed in #134 / deferred to #399)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T18:21:47.425443-07:00",
+      "updated_at": "2026-10-04T18:21:47.425443-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":90}"
+    },
+    {
+      "id": 1020,
+      "change_id": "2028d2c2-6169-4023-8ef1-bbd51ca76337",
+      "node_type": "outcome",
+      "title": "Prod promoted (ea704be, deploy SUCCESS 01:22Z, health 200, schema 19). First refresh: chaosgreml + grimalkina completed at 24h, 115 scores re-scored current-gen, 11 gone retired. psingletary failed: warm-up probe timed out at 180s (cold start) -> +1h retry; noted on #387",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T18:31:21.704680-07:00",
+      "updated_at": "2026-10-04T18:31:21.704680-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":85}"
+    },
+    {
+      "id": 1021,
+      "change_id": "95775c6d-df3e-438e-9b24-cd6aa04a9467",
+      "node_type": "outcome",
+      "title": "Prod steady: 3/3 refreshes completed at 24h (psingletary succeeded on the 02:26Z retry), 116 current-gen scores, 11 gone; RunPod 01:00Z hour $0.65 (bottom of the $0.65-1.15 estimate)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:38:29.651643-07:00",
+      "updated_at": "2026-10-04T19:38:29.651643-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":95}"
+    },
+    {
+      "id": 1022,
+      "change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "node_type": "goal",
+      "title": "Parallel round: #358 reply gate, #236 unscoreable post, #370 refresh loop, #350 gather tail (investigation)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:43:47.712947-07:00",
+      "updated_at": "2026-10-04T19:43:47.712947-07:00",
+      "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":85,\"prompt\":\"Yes\"}"
+    },
+    {
+      "id": 1023,
+      "change_id": "f710b74a-6922-4442-83df-678a6d127a48",
+      "node_type": "action",
+      "title": "#358 phase 1: adversarial fixtures pinning Stage-1 reply gate + option cost analysis",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:44:28.439186-07:00",
+      "updated_at": "2026-10-04T19:44:28.439186-07:00",
+      "metadata_json": "{\"branch\":\"fix/358-reply-gate\",\"commit\":\"eb99fe2\",\"confidence\":85,\"files\":[\"src/scoring/profile.rs\"]}"
+    },
+    {
+      "id": 1024,
+      "change_id": "1d70d3e7-6964-42a3-8762-85b0ed48db24",
+      "node_type": "action",
+      "title": "#236: stash the clean-pass-filtered sample so finalize and enqueued rows agree",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:45:17.588751-07:00",
+      "updated_at": "2026-10-04T19:45:17.588751-07:00",
+      "metadata_json": "{\"branch\":\"fix/236-unscoreable-post\",\"commit\":\"eb99fe2\",\"confidence\":85,\"files\":[\"src/pipeline/scan_phases/gather.rs\",\"tests/unit_scan_phases.rs\"]}"
+    },
+    {
+      "id": 1025,
+      "change_id": "737b28a9-eb0f-4ea4-9548-4aa6e40f1367",
+      "node_type": "action",
+      "title": "#370: verify Low-confidence nightly refresh loop claim; prove with test",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-04T19:46:04.400072-07:00",
+      "updated_at": "2026-10-04T19:46:04.400072-07:00",
+      "metadata_json": "{\"branch\":\"fix/370-low-confidence-refresh-loop\",\"commit\":\"eb99fe2\",\"confidence\":80,\"files\":[\"tests/unit_profile.rs\"]}"
     }
   ],
   "edges": [
@@ -22793,6 +22892,39 @@
       "weight": 1.0,
       "rationale": "review fixes before promotion",
       "created_at": "2026-10-04T16:42:40.227232-07:00"
+    },
+    {
+      "id": 1076,
+      "from_node_id": 1022,
+      "to_node_id": 1023,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "f710b74a-6922-4442-83df-678a6d127a48",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "lane #358 phase 1 evidence",
+      "created_at": "2026-10-04T19:44:30.889390-07:00"
+    },
+    {
+      "id": 1077,
+      "from_node_id": 1022,
+      "to_node_id": 1024,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "1d70d3e7-6964-42a3-8762-85b0ed48db24",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Lane #236 implementation",
+      "created_at": "2026-10-04T19:45:19.408559-07:00"
+    },
+    {
+      "id": 1078,
+      "from_node_id": 1022,
+      "to_node_id": 1025,
+      "from_change_id": "b97a0186-b30b-40a9-8575-d59564b1551a",
+      "to_change_id": "737b28a9-eb0f-4ea4-9548-4aa6e40f1367",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "#370 lane of the parallel round",
+      "created_at": "2026-10-04T19:46:06.386308-07:00"
     }
   ],
   "documents": [
