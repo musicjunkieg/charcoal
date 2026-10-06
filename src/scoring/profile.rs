@@ -316,15 +316,22 @@ pub async fn stage1_outcome_timed(
         })));
     }
 
-    // Quick ONNX scores for clean-pass check.
+    // Quick ONNX scores for the clean-pass check.
     //
-    // Originals + quotes are scored solo against ONNX_CLEAN_THRESHOLD — those
-    // are first-person posts and ONNX in isolation is a reliable "obviously
-    // clean" filter for them. Reply texts in isolation are NOT reliable: a
-    // benign-looking "I agree" only becomes hostile in conversation context,
-    // and stage 1 has no parent texts available. Excluding replies from the
-    // early-exit decision means reply-context-dependent toxicity makes it to
-    // stage 2 where Zentropi can do pair classification with parent text.
+    // EVERY Stage-1 post — originals, replies AND quotes — must score under
+    // ONNX_CLEAN_THRESHOLD for the account to exit early (#358, option (a)).
+    // Replies used to be scored and then left out of the gate, on the theory
+    // that it sent reply-context toxicity to Stage 2. It did the opposite:
+    // excluding replies made the exit MORE likely, so an account with 15
+    // benign off-topic originals and plainly hostile replies exited Terminal
+    // "Low" and its replies never reached the classifier — the reply/quote
+    // harassment Charcoal exists to catch.
+    //
+    // Known limit, by decision: a reply that is hostile only in context
+    // ("Exactly." under a cruel post) scores clean on its own, so it still
+    // does not block the exit. Catching those means sending reply-heavy
+    // accounts to Stage 2 regardless (#358 option (b), not adopted). Measured
+    // cost of (a): ~6% more posts reach the classifier.
     let stage1_texts: Vec<String> = stage1_sample
         .originals
         .iter()
@@ -338,20 +345,22 @@ pub async fn stage1_outcome_timed(
         *onnx_ms += t.elapsed().as_millis() as u64;
         r
     };
+    // Split the batch back into its parts. First-person posts (originals,
+    // then quotes) keep feeding `should_early_exit_stage1` exactly as before,
+    // so its "at least N first-person posts" guard still counts first-person
+    // posts only — an account of nothing but friendly replies must not clear
+    // that guard by volume. Replies get their own veto below.
     let originals_count = stage1_sample.originals.len();
     let quotes_offset = originals_count + stage1_sample.replies.len();
     let stage1_clean_pass_scores: Vec<f64> = stage1_onnx
         .iter()
         .enumerate()
-        .filter_map(|(i, r)| {
-            // Keep only originals (indices 0..originals_count) and quotes
-            // (indices quotes_offset..). Skip replies (the middle range).
-            if i < originals_count || i >= quotes_offset {
-                Some(r.toxicity)
-            } else {
-                None
-            }
-        })
+        .filter(|(i, _)| *i < originals_count || *i >= quotes_offset)
+        .map(|(_, r)| r.toxicity)
+        .collect();
+    let stage1_reply_scores: Vec<f64> = stage1_onnx[originals_count..quotes_offset]
+        .iter()
+        .map(|r| r.toxicity)
         .collect();
 
     // Preliminary topic overlap via TF-IDF (cheap, always available)
@@ -390,7 +399,8 @@ pub async fn stage1_outcome_timed(
         stage1_overlap,
         weights.keyword_gate_threshold, // Stage 1 overlap IS keyword-scale
         fp_quality,
-    ) {
+    ) && replies_all_clean(&stage1_reply_scores)
+    {
         info!(
             handle = target_handle,
             posts = stage1_sample.total_posts,
@@ -1064,6 +1074,15 @@ pub fn should_early_exit_stage1(
         return false;
     };
     overlap < overlap_gate_threshold && onnx_scores.iter().all(|&s| s < ONNX_CLEAN_THRESHOLD)
+}
+
+/// #358 option (a): the reply veto on the Stage-1 early exit. Any reply that
+/// scores at or above `ONNX_CLEAN_THRESHOLD` on its own sends the account to
+/// Stage 2, where the classifier judges it with its parent post. No replies
+/// at all is "clean" — the first-person guard in `should_early_exit_stage1`
+/// already decides whether there is enough to judge.
+pub fn replies_all_clean(reply_scores: &[f64]) -> bool {
+    reply_scores.iter().all(|&s| s < ONNX_CLEAN_THRESHOLD)
 }
 
 /// Tier boundary proximity thresholds.

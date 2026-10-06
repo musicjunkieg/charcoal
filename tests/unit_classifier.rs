@@ -501,6 +501,55 @@ mod retry {
         assert!(dyn_ref.probe_identity().await.is_err());
     }
 
+    /// #402 (part of #387): a job that is still running when the poll deadline
+    /// passes is a cold start that ran long — TRANSIENT, so the burst stops
+    /// resumably. It used to be a plain `bail!` (permanent), which failed the
+    /// whole refresh and left the user on the hourly retry (prod, 2026-10-05:
+    /// psingletary's warm-up probe hit the 180 s limit on a cold worker).
+    #[tokio::test]
+    async fn a_poll_that_outlives_its_deadline_is_transient_not_permanent() {
+        use charcoal::toxicity::classifier::ClassifierTransientError;
+        use std::time::Duration;
+
+        let server = MockServer::start().await;
+        let pending = r#"{"id":"job-cold","status":"IN_PROGRESS"}"#;
+        Mock::given(method("POST"))
+            .and(path("/runsync"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(pending, "application/json"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/status/job-cold"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(pending, "application/json"))
+            .mount(&server)
+            .await;
+
+        // Both deadlines short so the test is quick; the poll interval is 2 s.
+        let client = RunPodCopeBClient::new(server.uri(), "k".into())
+            .unwrap()
+            .with_timeouts(Duration::from_millis(2_500), Duration::from_millis(2_500));
+
+        let dyn_ref: &dyn ToxicityClassifier = &client;
+        let err = dyn_ref
+            .classify_batch(&["hello".to_string()])
+            .await
+            .expect_err("a job that never finishes must not succeed");
+        assert!(
+            err.downcast_ref::<ClassifierTransientError>().is_some(),
+            "a poll timeout must be ClassifierTransientError, got: {err:#}"
+        );
+
+        // The warm-up probe goes through the same poll loop.
+        let err = dyn_ref
+            .probe_identity()
+            .await
+            .expect_err("a probe that never finishes must not succeed");
+        assert!(
+            err.downcast_ref::<ClassifierTransientError>().is_some(),
+            "a probe timeout must be ClassifierTransientError, got: {err:#}"
+        );
+    }
+
     #[tokio::test]
     async fn runsync_pending_then_polls_status_to_completion() {
         // /runsync returns ~90s before a cold-start job finishes, yielding a

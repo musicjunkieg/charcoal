@@ -1,5 +1,77 @@
 [
   {
+    "hash": "3d6a1f85f2a38aa2f7cbd83d774f06397ad0fcdf",
+    "short_hash": "3d6a1f8",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:49:01-07:00",
+    "message": "fix(350): cap the getAuthorFeed walk at 10 pages of 100\n\nAn account whose feed is mostly reposts or image-only posts never\nyielded 50 usable posts, so collect_feed_posts walked its whole history\none 50-item page at a time. On staging rgesteve took 1,070 pages / 243 s\nand davedawn 856 pages / 187 s, holding the gather open alone while the\nother slots idled: the 80 s to 8 min gather tail.\n\nEvery page now asks for 100 items (the API maximum) and the walk stops\nafter MAX_FEED_PAGES = 10. What was found is returned as Ok, so it is\ncached in the feed snapshot and scored like any feed (Insufficient Data\nbelow 5 posts) and is never a scan skip that would shorten the refresh\nto 1 h (#394). The protected user feed read had the same unbounded loop\nand now stops at 50 pages, enough for the 500-post fingerprint. A capped\nwalk logs one info line; nothing is logged per page.\n\nTests (wiremock, endless feeds with a tokio timeout) failed against the\nold code by timing out, and pass now.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
+    "hash": "14af0a8a4f66664a5984ede62f3513cb7c44fdc7",
+    "short_hash": "14af0a8",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:43:57-07:00",
+    "message": "Merge pull request #138 from musicjunkieg/fix/358-reply-gate\n\nfix(400,358): correct batched toxicity scores; hostile replies block the Stage-1 early exit",
+    "files_changed": 0
+  },
+  {
+    "hash": "45f187890986f4c530f5be06e17a0121f179db50",
+    "short_hash": "45f1878",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:27:20-07:00",
+    "message": "fix(358): a hostile reply blocks the Stage-1 early exit\n\nStage 1 ONNX-scored originals, replies and quotes, then left replies out\nof the clean-pass gate. An account with 15 benign off-topic originals\nand plainly hostile replies therefore exited Terminal \"Low\" and its\nreplies never reached the classifier. The old comment claimed excluding\nreplies sent them to Stage 2; it did the opposite.\n\nOption (a), chosen by the maintainer: any reply scoring at or above\nONNX_CLEAN_THRESHOLD vetoes the exit (replies_all_clean). Reply scores\nare kept OUT of should_early_exit_stage1, so its \"at least 5\nfirst-person posts\" guard still counts originals and quotes only and\nfriendly replies cannot clear it by volume.\n\nKnown gaps, by decision: context-only hostility (\"Exactly.\" under a\ncruel post) still scores clean solo (option (b) not adopted); replies\ndropped by the #222 language gate are never scored (#232).\n\nTests: the fixture suite now asserts current == option (a) on every\nrow; hostile replies proceed; a new guard test pins that 3 originals +\n15 friendly replies cannot exit. Both mutation-checked: dropping the\nveto fails 2 tests, counting replies towards the guard fails 1. The\nreal-model layer now scores through the production batch path (#400).\n\nNo separate SCORING_GENERATION bump: ships with #400, whose\nONNX_MODEL_ID bump already changes scoring_revision().\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "9bbc1737f7049ce1834e34a664964cb5a393f972",
+    "short_hash": "9bbc173",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:24:17-07:00",
+    "message": "fix(400): read batched toxicity logits at the model's real row width\n\nThe Detoxify unbiased export returns logits[batch, 16]: the 7 toxicity\nheads Charcoal uses, then 9 identity heads. score_batch stepped through\nthe flat buffer 7 values per row, so row 0 was correct and every later\nrow was read out of its neighbours' logits. Stage 1 and the Stage-2\nclean pass both batch an account's posts, so a hostile post anywhere but\nfirst could score as clean. Live since 7ebfc46 (2026-02-09).\n\nThe row width now comes from the output buffer (len / batch), checked to\ndivide evenly and to hold at least the 7 labels we read.\n\nONNX_MODEL_ID -> \"...-quantized-r2\": it keys the shared onnx_scores cache\nand is composed into scoring_revision(), so the bump retires every cached\nscore and re-expires every stored score in one move.\n\nNew regression test compares every batch position with the same text\nscored alone (none existed; the session-pool test compared batch to\nbatch). Toxicity must match to 1e-3; attribute heads to 0.1, because the\nraw quantized model itself moves one attribute head by up to 0.078 for a\npadded row (measured with python onnxruntime on the same file).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "cc9508385efc0ca41ebd8579be0e735e1b42d8d4",
+    "short_hash": "cc95083",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:21:49-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into fix/358-reply-gate",
+    "files_changed": 0
+  },
+  {
+    "hash": "3c218d68658a7cc4fab31c64f167a2cf1607dd95",
+    "short_hash": "3c218d6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T20:00:48-07:00",
+    "message": "chore(358): add read-only probe measuring the cost of each reply-gate option\n\nFetches real Stage-1 samples from the public API, runs the real\nstage1_outcome with local ONNX, and counts Stage-2 survivors (RunPod\nrows) each option would add. No paid services, no DB writes, prints\naggregates only.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "9b163caa464e9c52d4e160ae6d6ac50ea8ac6582",
+    "short_hash": "9b163ca",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T19:48:25-07:00",
+    "message": "fix(236): stash the scoreable sample so one bad post cannot cost the account\n\nPhase A drops any post the ONNX clean pass cannot score (#221) but stashed\nthe unfiltered sample in the AccountInput blob. Finalize walks the blob,\nfound no queue row for the dropped post and returned NeedsRegather; the\nre-gather dropped the same post again and the account was skipped.\n\nPhase A now filters the unscoreable posts out of the stashed sample too,\nrecomputing ratios the way partition_assessable does, so blob and rows\nagree. Filtering the sample (not relaxing finalize) keeps score_from_sample\npositional alignment intact and keeps finalize strict about missing or\nforeign evidence (#344 R03/V2-01). No-op when nothing was dropped, so\naccounts that already scored are unchanged.\n\nTests: a new run_phased_scan test with a poisoned original, reply and quote\nasserts a persisted score on the first finalize (no regather, not\ndegraded); the existing gather test now finalizes and asserts a score.\nBoth failed before the fix.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "1021366dd48886da966b9db66214e33e4ead6d1c",
+    "short_hash": "1021366",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T19:47:55-07:00",
+    "message": "test(370): pin that a Low-confidence score never loops the nightly refresh\n\n#370 claimed Low-confidence High/Elevated rows are re-scored every night\nforever (3-day validity inside a 2-day refresh horizon). The arithmetic\nholds, but the combination cannot occur: the only writer of\nscoring_confidence \"low\" is the Stage-1 early exit, which always writes\nthreat_score 0.0, below the refresh floor (ELEVATED_MIN = 15). Stage 2\nstamps only \"standard\" (7d) or \"high\" (14d). The old near-tier-boundary\n\"low\" stamp from Stage 2 was removed in 5cae0e5 (2026-04-27), months\nbefore the refresh shipped.\n\nThese tests pin that, so any change letting a Low-confidence score reach\nElevated fails here (verified by mutating the early-exit score to 40.0):\nthe real early-exit score is never a candidate tonight, the next night,\nor 30 days on; a counterfactual Low row at 40.0 WOULD loop nightly; the\nscoreable confidences outlive horizon + one tick; and an Elevated row is\nstill picked up before it expires. No production code change.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "eb99fe2770328d50c62b443b279e48423bdb3489",
+    "short_hash": "eb99fe2",
+    "author": "Bryan Guffey",
+    "date": "2026-10-04T17:42:43-07:00",
+    "message": "Merge pull request #135 from musicjunkieg/fix/133-ranked-hides-gone\n\nfix(398): a gone account leaves the ranked threat list at once",
+    "files_changed": 0
+  },
+  {
     "hash": "dfb655a0c9ae84760372590710cbb40d36d244cf",
     "short_hash": "dfb655a",
     "author": "Bryan Guffey",

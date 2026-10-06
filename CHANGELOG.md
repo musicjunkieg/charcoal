@@ -99,6 +99,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #402 (part of #387) — a RunPod job that outlives its deadline, or a
+  network error while polling its status, is now a TRANSIENT failure. Both
+  were plain errors, so a cold start that ran past the warm-up limit (180 s)
+  aborted the burst and failed the whole run, which then retried an hour later
+  from scratch — what happened to one prod user's first refresh on
+  2026-10-05. Typed as transient, the burst stops resumably and a resume
+  re-sends only the rows still pending. A 4xx from the status endpoint stays
+  permanent. The backoff and circuit-breaker halves of #387 are separate.
+- #350 — one repost-heavy account no longer holds a scan's gather open for
+  minutes. Reading an account's posts skipped reposts and posts under 15
+  characters but still paid a page for them, and only stopped once it had 50
+  usable posts or reached the end of the feed. An account that mostly reposts
+  or posts images was read back to its first post: on staging, rgesteve took
+  1,070 pages and 243 s, davedawn 856 pages and 187 s for zero usable posts,
+  while every other gather slot sat idle. The read now asks for 100 items a
+  page (the API maximum, was 50) and stops after 10 pages, about 1,000 items.
+  What it found by then is kept like any other feed: it is cached for 24 h,
+  so a re-scan costs nothing, and it is not a scan skip, so it cannot pull the
+  next refresh forward to one hour (#394). With fewer than 5 usable posts the
+  account ends as "Insufficient Data". The trade-off, chosen by the
+  maintainer: a heavy reposter whose only originals are years old is no
+  longer scored on those old posts. A normal account finds its 50 posts in
+  1-3 pages and is unaffected. The protected user's own feed read had the
+  same unbounded loop and is now capped at 50 pages, which still leaves room
+  for the 500-post topic fingerprint. A capped read logs one line naming the
+  account, pages read, items seen and posts kept. Part of #359.
+- #358 — a hostile REPLY now blocks the Stage-1 early exit. Stage 1 scored
+  replies with ONNX and then left them out of the clean-pass gate, so an
+  account with 15 benign off-topic originals and plainly hostile replies
+  exited Terminal "Low" and its replies never reached the classifier — the
+  reply harassment Charcoal exists to catch. Any reply scoring at or above
+  the 0.10 clean threshold now vetoes the exit (option (a), chosen by the
+  maintainer). The "at least 5 first-person posts" guard still counts
+  originals and quotes only, so friendly replies cannot clear it by volume.
+  Remaining gaps, by decision: a reply hostile only in context ("Exactly."
+  under a cruel post) still scores clean on its own, and replies dropped by
+  the language gate (#222) are never scored (#232). Measured cost on 515 real
+  accounts: about 6% more posts reach the classifier. Ships with #400 under
+  the same scoring-revision change.
+- #400 — batched toxicity scores were wrong for every post after the first.
+  The Detoxify model returns 16 logits per post (7 toxicity heads, then 9
+  identity heads), but `score_batch` stepped through them 7 at a time, so row
+  0 was right and every later row was read out of its neighbours' logits.
+  Stage 1 and the Stage-2 clean pass both batch an account's posts, so a
+  hostile post anywhere but first could score as clean (one hostile sentence:
+  0.999 alone, 0.003 at batch position 3 — under the 0.10 clean threshold)
+  and either let the account exit Low or
+  keep the post from ever reaching the classifier. Live since the ONNX scorer
+  landed (7ebfc46, 2026-02-09). The row width now comes from the model's own
+  output. `ONNX_MODEL_ID` is bumped to `-r2`, which invalidates every cached
+  ONNX score and re-expires every stored score, since all were computed with
+  the bug. Expect more posts to reach the Stage-2 classifier afterwards: that
+  is the correct volume, not a regression. A new test compares every batch
+  position with the same text scored alone; none existed before.
+- #236 — one post the ONNX clean pass can never score no longer costs the
+  whole account. #221 stopped such a post failing the batch, but Phase A
+  still stashed the *unfiltered* sample in the account's blob while
+  enqueuing rows only for the posts it could score. Finalize walks the blob,
+  found no row for the dropped post, and asked for a re-gather; the
+  re-gather dropped the same post again, and the account was skipped. Phase
+  A now removes the unscoreable posts from the stashed sample too, so the
+  blob and the queue rows list the same posts, and the account is scored on
+  the rest with `posts_analyzed` counting only the posts actually read.
+  Finalize's rule that a missing row means re-gather is unchanged — it is
+  what catches lost or foreign evidence (#344). Accounts with no dropped
+  posts are untouched. The old test only checked the account was enqueued;
+  it and a new end-to-end test now require a persisted score.
 - #394 — deleted accounts no longer keep a user on an hourly refresh that
   wakes the GPU forever. Measured on staging 2026-10-02: 29 deleted accounts
   across 7 users cost ~$0.45–0.57 an hour while scoring nothing. Three causes,

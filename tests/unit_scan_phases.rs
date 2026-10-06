@@ -805,6 +805,23 @@ mod gather_tests {
             1,
             "the account must still be staged for finalize"
         );
+
+        // Being staged is not the same as being scored (#236): the blob used
+        // to list the dropped post, finalize found no row for it, and the
+        // account was re-gathered into the same mismatch and skipped. Every
+        // remaining post is clean (the double scores 0.0), so finalize needs
+        // no burst and must score the account on the 20 posts that were read.
+        assert_eq!(
+            finalize_account_for_test(&db, TEST_USER, ACCT).await,
+            charcoal::pipeline::scan_phases::finalize::FinalizeOutcome::Scored,
+            "finalize must score the account, not ask for a re-gather"
+        );
+        let score = db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("a score must be persisted for the account");
+        assert_eq!(score.posts_analyzed as usize, total - 1);
     }
 
     // ── < 5 posts → Insufficient Data, no enqueue/stash ──
@@ -859,6 +876,55 @@ mod gather_tests {
             .await
             .unwrap()
             .is_empty());
+        assert!(db
+            .fetch_account_input(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    // ── #350: a feed walk that hit the page cap with ZERO usable posts ──
+    //
+    // A repost-only account (davedawn: 40,861 items, every one a repost) now
+    // comes back from the capped feed read as an empty Ok sample. It must end
+    // as a normal "Insufficient Data" row — gather returns Ok, so it is never
+    // recorded as a scan skip (which would shorten the refresh to 1 h, #394).
+    #[tokio::test]
+    async fn gather_empty_capped_feed_is_insufficient_data_not_an_error() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+
+        let fetcher = CannedFetcher {
+            sample: PostSample {
+                originals: vec![],
+                replies: vec![],
+                quotes: vec![],
+                reply_ratio: 0.0,
+                quote_ratio: 0.0,
+                total_posts: 0,
+            },
+            parents: HashMap::new(),
+        };
+
+        gather_account(
+            &db,
+            TEST_USER,
+            &fetcher,
+            &FixedScorer(0.0),
+            &FixedCleanPass(0.0),
+            &inputs(&fp, &weights),
+        )
+        .await
+        .expect("an empty feed is a scored outcome, not a gather error");
+
+        let score = db
+            .get_account_by_did(TEST_USER, ACCT)
+            .await
+            .unwrap()
+            .expect("the Insufficient Data row is persisted");
+        assert_eq!(score.threat_score, None);
+        assert_eq!(score.posts_analyzed, 0);
         assert!(db
             .fetch_account_input(TEST_USER, ACCT)
             .await
@@ -3373,6 +3439,123 @@ mod orchestration_tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    // Clean-pass that fails the WHOLE batch whenever it contains "POISON" — the
+    // #220 ONNX failure shape — and otherwise behaves like `MarkerCleanPass`
+    // ("SURVIVOR" stays pending for the burst, everything else is clean). The
+    // per-post retry in `clean_pass_isolated` therefore scores every neighbour
+    // and returns `None` only for the poisoned posts, every single time: the
+    // post is *persistently* unscoreable, so a re-gather cannot help.
+    struct PoisonMarkerCleanPass;
+
+    #[async_trait]
+    impl CleanPassScorer for PoisonMarkerCleanPass {
+        async fn onnx_clean_pass(&self, texts: &[String]) -> Result<Vec<f64>> {
+            if texts.iter().any(|t| t.contains("POISON")) {
+                anyhow::bail!("ONNX inference failed: invalid expand shape");
+            }
+            Ok(texts
+                .iter()
+                .map(|t| if t.contains("SURVIVOR") { 0.9 } else { 0.0 })
+                .collect())
+        }
+    }
+
+    // ── #236: a persistently unscoreable post must not cost the account ──
+    //
+    // Phase A drops a post the ONNX clean pass cannot score (#221), but used to
+    // stash the UNFILTERED sample in the AccountInput blob. Finalize walks the
+    // blob's sample, found no queue row for the dropped post, and asked for a
+    // re-gather; the re-gather dropped the same post again, and the account was
+    // skipped. This drives the whole gather → burst → finalize path and asserts
+    // the account is SCORED on its first finalize, not merely enqueued.
+    //
+    // One poisoned post sits in EACH of originals, replies and quotes, between
+    // scoreable neighbours, with survivors in all three, so a filter that drops
+    // the wrong post — or keeps the buckets out of step — fails here too.
+    #[tokio::test]
+    async fn persistently_unscoreable_post_still_scores_the_account() {
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchpoison00000000000";
+        let text = "quasar nebula redshift telescope galaxy cosmology pulsar photon";
+
+        let mut originals: Vec<Post> = (0..6)
+            .map(|i| make_post(&format!("at://p/o/{i}"), text))
+            .collect();
+        originals.insert(
+            3,
+            make_post("at://p/o/poison", "quasar POISON nebula redshift telescope"),
+        );
+        originals.push(make_post("at://p/o/survivor", "quasar SURVIVOR nebula"));
+
+        let reply = |uri: &str, t: &str| charcoal::bluesky::posts::ReplyPost {
+            post: make_post(uri, t),
+            parent_uri: "at://parent/1".to_string(),
+        };
+        let replies = vec![
+            reply("at://p/r/0", text),
+            reply("at://p/r/poison", "galaxy POISON redshift pulsar photon"),
+            reply("at://p/r/survivor", "telescope SURVIVOR galaxy"),
+            reply("at://p/r/1", text),
+        ];
+        let quotes = vec![
+            make_post("at://p/q/survivor", "cosmology SURVIVOR photon"),
+            make_post("at://p/q/poison", "nebula POISON quasar cosmology"),
+            make_post("at://p/q/0", text),
+        ];
+        let total = originals.len() + replies.len() + quotes.len();
+        let sample = PostSample {
+            reply_ratio: replies.len() as f64 / total as f64,
+            quote_ratio: quotes.len() as f64 / total as f64,
+            originals,
+            replies,
+            quotes,
+            total_posts: total,
+        };
+
+        let mut by_handle = HashMap::new();
+        by_handle.insert("poison.bsky.social".to_string(), sample);
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = PoisonMarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(AlwaysOkClassifier);
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &[candidate(acct, "poison.bsky.social")],
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
+        )
+        .await
+        .unwrap();
+
+        // The burst really ran: the three survivors reached the classifier, so
+        // this score came from Phase C and not from a Stage-1 early exit.
+        assert_eq!(
+            db.get_scan_state(ORCH_USER, "classifications_total")
+                .await
+                .unwrap(),
+            Some("3".to_string())
+        );
+        assert_eq!(summary.accounts_scored, 1, "the account must be scored");
+        assert_eq!(
+            summary.regathered, 0,
+            "the first finalize must succeed — a re-gather means the blob and the rows disagreed"
+        );
+        assert!(!summary.degraded, "nothing was skipped, so not degraded");
+
+        let score = db
+            .get_account_by_did(ORCH_USER, acct)
+            .await
+            .unwrap()
+            .expect("a score must be PERSISTED, not just enqueued");
+        // Honest coverage: the three posts nobody could score are not counted
+        // as analysed.
+        assert_eq!(score.posts_analyzed as usize, total - 3);
     }
 
     // ── Test 2: resume at burst skips gather ──
