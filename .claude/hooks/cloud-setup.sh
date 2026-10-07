@@ -23,7 +23,9 @@ SRC="$(cd "$(dirname "$0")" && pwd)/cloud-tools"
 DEST="${XDG_CACHE_HOME:-$HOME/.cache}/claude-cloud-tools"
 CF_PIN=$(sed -n 's/.*"cf": *"\([^"]*\)".*/\1/p' "$SRC/package.json" 2>/dev/null | head -1)
 
-# True only for Cloudflare's cf at exactly the pinned version. A bare
+# True only for Cloudflare's cf at exactly the pinned version (matched as
+# a whole word anywhere in the banner — cf appends " · delegated" under
+# CF_DELEGATION). A bare
 # `command -v cf` is not enough: Cloud Foundry's CLI is also called cf,
 # and a sandbox can carry an older cf from before a pin bump.
 # ARG: path or name of the executable to test (default: cf on PATH).
@@ -31,7 +33,7 @@ cf_is_pinned() {
     local bin="${1:-cf}"
     [ -n "$CF_PIN" ] && command -v "$bin" >/dev/null 2>&1 \
         && "$bin" --version 2>/dev/null | grep -F 'cf · v' \
-            | awk -v want="v$CF_PIN" '$NF == want { ok = 1 } END { exit !ok }'
+            | awk -v want="v$CF_PIN" '{ for (i = 1; i <= NF; i++) if ($i == want) ok = 1 } END { exit !ok }'
 }
 
 install_cf() {
@@ -79,7 +81,7 @@ if ! cf_is_pinned; then
 fi
 
 if cf_is_pinned && [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-    echo "cloud-setup: CLOUDFLARE_API_TOKEN is not set in this environment — cf commands that touch the account will fail until Bryan adds it to the cloud environment."
+    echo "cloud-setup: CLOUDFLARE_API_TOKEN is not set in this environment. Unless a cf auth profile is configured (check with 'cf auth whoami'), cf commands that touch the account will fail — ask Bryan to add the token to the cloud environment."
 fi
 
 exit 0
