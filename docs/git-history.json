@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f9af9f6bb08d75180cabc89694166148836aa7fc",
+    "short_hash": "f9af9f6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T19:06:27-07:00",
+    "message": "fix(387): back off repeated identical refresh failures; break the circuit on deployment-wide faults\n\nA failed refresh now extends the user's streak of identical failures\n(stored in scan_state, keyed by cause signature and deployment) and\nretries after 1h, 2h, 4h ... capped at 24h. Any non-failure clears it.\n\nrun_refresh_with consults a process-wide RefreshBreaker first: once two\ndifferent users fail with the same cause, further refreshes are refused\nbefore setup (no Bluesky, no GPU), recorded as failed with the real cause,\nand backed off. One probe per cool-down; success closes it.\n\nOn startup, users backed off under an earlier deployment are made due\nnow, so a fix that ships via deploy is not held behind a 24h backoff.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "3fe83136c3135705704fc602c5914b6a0004ff6e",
     "short_hash": "3fe8313",
     "author": "Bryan Guffey",

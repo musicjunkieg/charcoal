@@ -11406,6 +11406,17 @@
       "created_at": "2026-10-06T18:49:45.672192-07:00",
       "updated_at": "2026-10-06T18:49:45.672192-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":80}"
+    },
+    {
+      "id": 1047,
+      "change_id": "e75fc415-d164-4050-bd65-2ae746acf424",
+      "node_type": "action",
+      "title": "#387 wiring: streak backoff in run_refresh_with, breaker admit before setup, deploy pull-forward at admitter start; 7 tests mutation-checked",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T19:06:37.703731-07:00",
+      "updated_at": "2026-10-06T19:06:37.703731-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"f9af9f6\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"src/web/refresh.rs\",\"src/web/admitter.rs\"]}"
     }
   ],
   "edges": [
@@ -23365,6 +23376,17 @@
       "weight": 1.0,
       "rationale": "implementation",
       "created_at": "2026-10-06T18:49:45.705065-07:00"
+    },
+    {
+      "id": 1098,
+      "from_node_id": 1046,
+      "to_node_id": 1047,
+      "from_change_id": "082d42d6-45a9-41d2-9d14-70f3b329a8d1",
+      "to_change_id": "e75fc415-d164-4050-bd65-2ae746acf424",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-10-06T19:16:42.844649-07:00"
     }
   ],
   "documents": [
