@@ -21,7 +21,7 @@
 //!   Process-local on purpose: a deploy — which is how a config change lands
 //!   on Railway — starts closed.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -41,6 +41,12 @@ pub const BACKOFF_CAP_HOURS: u64 = 24;
 /// there is no tick-wide view to wait for, and production has three users —
 /// a threshold of three would only ever open after the money was spent.
 pub const BREAKER_TRIP_USERS: usize = 2;
+
+/// How far apart two failures can be and still count toward tripping the
+/// breaker. A deployment-wide fault fails every refresh it touches within
+/// hours; two identical failures days apart, with quiet nights between, are
+/// two per-user faults (#387 review). A day: the nightly cadence.
+pub const BREAKER_WINDOW: Duration = Duration::from_secs(BACKOFF_CAP_HOURS * 3600);
 
 /// How long the breaker stays open the first time it trips.
 pub const BREAKER_COOLDOWN: Duration = Duration::from_secs(3600);
@@ -216,8 +222,9 @@ pub enum BreakerReport<'a> {
 #[derive(Debug)]
 enum BreakerState {
     /// Counting: for each cause, the distinct users that failed with it since
-    /// the last success.
-    Closed(HashMap<String, HashSet<String>>),
+    /// the last success, each with when it last did (only those inside
+    /// [`BREAKER_WINDOW`] count).
+    Closed(HashMap<String, HashMap<String, DateTime<Utc>>>),
     /// Refusing until `until`; then one probe is let through, tagged `probe`,
     /// and `until` is pushed out a further `cooldown`, so concurrent
     /// refreshes keep waiting for the probe's answer.
@@ -316,7 +323,9 @@ impl RefreshBreaker {
                 BreakerReport::Success => BreakerState::Closed(HashMap::new()),
                 BreakerReport::Failure(cause) => {
                     let users = failures.entry(cause.to_string()).or_default();
-                    users.insert(user_did.to_string());
+                    let window = chrono_dur(BREAKER_WINDOW);
+                    users.retain(|_, at| now - *at < window);
+                    users.insert(user_did.to_string(), now);
                     if users.len() < BREAKER_TRIP_USERS {
                         return;
                     }
@@ -386,7 +395,10 @@ impl RefreshBreaker {
                             "refresh circuit breaker closed: the probe got past the original fault"
                         );
                         let mut failures = HashMap::new();
-                        failures.insert(cause.to_string(), HashSet::from([user_did.to_string()]));
+                        failures.insert(
+                            cause.to_string(),
+                            HashMap::from([(user_did.to_string(), now)]),
+                        );
                         BreakerState::Closed(failures)
                     }
                 }
@@ -584,6 +596,20 @@ mod tests {
         b.report(Admission::normal(), "did:x", BreakerReport::Neutral, t0());
         fail(&b, "did:b", "policy mismatch", t0());
         assert!(b.admit(t0()).is_err());
+    }
+
+    /// #387 review: two same-cause failures a day or more apart, with
+    /// nothing but quiet nights between, are two per-user faults, not one
+    /// deployment-wide one.
+    #[test]
+    fn failures_more_than_a_window_apart_do_not_trip_it() {
+        let b = RefreshBreaker::new("d");
+        fail(&b, "did:a", "c", t0());
+        fail(&b, "did:b", "c", t0() + chrono::Duration::hours(25));
+        assert!(b.admit(t0() + chrono::Duration::hours(25)).is_ok());
+        // Within the window it still trips.
+        fail(&b, "did:c", "c", t0() + chrono::Duration::hours(26));
+        assert!(b.admit(t0() + chrono::Duration::hours(26)).is_err());
     }
 
     #[test]

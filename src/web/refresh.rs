@@ -276,7 +276,12 @@ pub async fn pull_forward_after_deploy(
         let Ok(streak) = serde_json::from_str::<FailureStreak>(&raw) else {
             continue;
         };
-        if streak.deploy == deploy {
+        // A single failure waits the base hour — pulling that forward saves
+        // little — and it is the only streak a NEW deployment can write while
+        // a retiring container's sweep is still running: a second failure
+        // needs a retry an hour after the first. So the retiring container can
+        // never undo the new deployment's backoff (#387 review).
+        if streak.deploy == deploy || streak.count < 2 {
             continue;
         }
         let due_later = match db.next_refresh_at(&user.did).await {
@@ -1160,7 +1165,7 @@ mod tests {
         let earlier = (now - ChronoDuration::hours(1)).to_rfc3339();
         let streak = |deploy: &str| {
             serde_json::to_string(&FailureStreak {
-                count: 5,
+                count: if deploy == "single" { 1 } else { 5 },
                 cause: "policy mismatch".into(),
                 deploy: deploy.into(),
             })
@@ -1171,6 +1176,10 @@ mod tests {
             ("did:plc:same", &later, Some("deploy-2")),
             ("did:plc:clean", &later, None),
             ("did:plc:due", &earlier, Some("deploy-1")),
+            // One failure = the base hour, never pulled forward: that is the
+            // only streak a NEW deployment can write while a retiring one's
+            // sweep is still running (#387 review).
+            ("did:plc:once", &later, Some("single")),
         ] {
             db.upsert_user(did, "h").await.unwrap();
             db.schedule_refresh(did, at).await.unwrap();
@@ -1203,6 +1212,7 @@ mod tests {
         assert_eq!(at("did:plc:clean").await, later);
         assert_eq!(at("did:plc:due").await, earlier);
         assert_eq!(at("did:plc:corrupt").await, later);
+        assert_eq!(at("did:plc:once").await, later);
     }
 
     /// Codex review (#387): a successful full scan proves the user healthy,
