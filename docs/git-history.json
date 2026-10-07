@@ -1,5 +1,13 @@
 [
   {
+    "hash": "826b270267ee34d9639aebe83984939f2b3a0ff0",
+    "short_hash": "826b270",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T22:18:17-07:00",
+    "message": "fix(387): Codex review: cost caps are progress; full scans clear the streak; re-sweep deploys\n\n- ScanSummary.interrupted distinguishes a transient classifier stop from\n  the cost ceiling. Only an interrupted pause extends the refresh failure\n  streak; a cost-capped chunk is planned progress and resumes hourly.\n- schedule_after_success (refresh AND full scan) deletes the streak once\n  its claim-fenced write lands, so a healthy user is not pulled forward by\n  a later redeploy or handed a stale count.\n- The deploy-reset sweep re-runs every 10 minutes, catching an\n  old-deployment streak written by a retiring container after boot.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
     "hash": "8c5780a54d16a092667d63fee4c16dbfbbeea939",
     "short_hash": "8c5780a",
     "author": "Bryan Guffey",

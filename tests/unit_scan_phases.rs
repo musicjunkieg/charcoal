@@ -5,7 +5,7 @@ use charcoal::pipeline::scan_phases::staging::{
 };
 use rusqlite::Connection;
 
-// ââ helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 const TEST_USER: &str = "did:plc:testuser000000000000";
 
@@ -31,7 +31,7 @@ fn make_queue_row(account_did: &str, post_uri: &str, status: &str) -> QueueRow {
     }
 }
 
-// ââ Database trait staging tests ââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Database trait staging tests ──────────────────────────────────────────────
 
 #[tokio::test]
 async fn staging_enqueue_then_fetch_pending_honors_status() {
@@ -299,7 +299,7 @@ async fn staging_reenqueue_does_not_clobber_done_row() {
         .await
         .unwrap();
 
-    // Phase B: record a verdict â flips the row to done with a real verdict
+    // Phase B: record a verdict — flips the row to done with a real verdict
     let verdict = VerdictRow {
         account_did: "did:plc:acctX".to_string(),
         post_uri: "at://did:plc:acctX/post/1".to_string(),
@@ -377,7 +377,7 @@ fn schema_v9_creates_classification_queue_and_scan_account_input() {
 #[test]
 fn schema_v9_classification_queue_has_expected_columns() {
     let conn = setup_v9_db();
-    // Insert a row using all required columns â compile-time DDL check
+    // Insert a row using all required columns — compile-time DDL check
     conn.execute(
         "INSERT INTO classification_queue \
          (user_did, account_did, post_uri, text, context_text, post_kind, onnx_score, status) \
@@ -487,7 +487,7 @@ fn schema_v9_scan_account_input_has_payload_json() {
 #[test]
 fn schema_v9_does_not_alter_scan_state() {
     let conn = setup_v9_db();
-    // scan_state must still accept key/value rows â the phase marker is stored
+    // scan_state must still accept key/value rows — the phase marker is stored
     // as key='scan_phase', not as a column
     conn.execute(
         "INSERT INTO scan_state (user_did, key, value) VALUES (?1, ?2, ?3)",
@@ -542,10 +542,10 @@ fn account_input_target_embedding_survives_json_roundtrip() {
 #[test]
 fn account_input_deserializes_legacy_blob_without_target_embedding() {
     // A blob serialized before #213 (no `target_embedding` key) must still
-    // deserialize â `#[serde(default)]` fills it with None. The schema_version
+    // deserialize — `#[serde(default)]` fills it with None. The schema_version
     // gate at finalize handles rejecting/regathering; serde must not hard-fail.
     //
-    // `scoring_generation` (schema v3, #344) has no `#[serde(default)]` â a
+    // `scoring_generation` (schema v3, #344) has no `#[serde(default)]` — a
     // blob missing IT is a genuinely different failure mode (a pre-v3 blob,
     // rejected as unreadable rather than as a generation mismatch), so this
     // fixture carries a (deliberately stale) value to keep testing only what
@@ -568,7 +568,7 @@ fn account_input_deserializes_legacy_blob_without_target_embedding() {
     assert_eq!(back.account_handle, "legacy.bsky.social");
 }
 
-// ââ Phase A: gather_account tests âââââââââââââââââââââââââââââââââââââââââââ
+// ── Phase A: gather_account tests ───────────────────────────────────────────
 
 mod gather_tests {
     use super::*;
@@ -682,7 +682,7 @@ mod gather_tests {
         }
     }
 
-    // Fingerprint about astrophysics â unrelated to everyday-topic posts, so
+    // Fingerprint about astrophysics — unrelated to everyday-topic posts, so
     // TF-IDF overlap stays below the 0.15 gate (drives the early-exit path).
     fn astrophysics_fingerprint() -> TopicFingerprint {
         TopicFingerprint {
@@ -728,7 +728,7 @@ mod gather_tests {
         Arc::new(db)
     }
 
-    // Clean-pass that fails the WHOLE batch if it contains the poison text â
+    // Clean-pass that fails the WHOLE batch if it contains the poison text —
     // the shape of the #220 ONNX failure. Succeeds for any batch without it,
     // so per-item retries can still score the good posts.
     struct PoisonCleanPass(String);
@@ -743,12 +743,12 @@ mod gather_tests {
         }
     }
 
-    // ââ #221: one unscoreable post must not cost the whole account ââ
+    // ── #221: one unscoreable post must not cost the whole account ──
     //
     // This is the end-to-end proof that `clean_pass_isolated` is actually WIRED
     // IN. Before #221 the call site was `.await?`, so a poisoned batch
     // propagated out of `gather_account` and the caller dropped the account
-    // along with every one of its scoreable posts â a 4.3% post failure rate
+    // along with every one of its scoreable posts — a 4.3% post failure rate
     // became 100% account loss for 34 accounts on the 2026-07-19 scan.
     #[tokio::test]
     async fn one_poisoned_post_no_longer_costs_the_whole_account() {
@@ -775,7 +775,7 @@ mod gather_tests {
             sample,
             parents: HashMap::new(),
         };
-        // Non-clean Stage-1 scores so the account does NOT early-exit â we need
+        // Non-clean Stage-1 scores so the account does NOT early-exit — we need
         // it to reach the Proceed branch where the batched clean pass runs.
         let scorer = FixedScorer(0.9);
         let clean = PoisonCleanPass("POISON".to_string());
@@ -824,7 +824,7 @@ mod gather_tests {
         assert_eq!(score.posts_analyzed as usize, total - 1);
     }
 
-    // ââ < 5 posts â Insufficient Data, no enqueue/stash ââ
+    // ── < 5 posts → Insufficient Data, no enqueue/stash ──
     #[tokio::test]
     async fn gather_insufficient_data_finalizes_and_stages_nothing() {
         let db = open_db().await;
@@ -868,7 +868,7 @@ mod gather_tests {
             .unwrap();
         assert_eq!(
             score.threat_score, None,
-            "insufficient data â no threat score"
+            "insufficient data → no threat score"
         );
         assert_eq!(score.posts_analyzed, 2);
         assert!(db
@@ -883,11 +883,11 @@ mod gather_tests {
             .is_none());
     }
 
-    // ââ #350: a feed walk that hit the page cap with ZERO usable posts ââ
+    // ── #350: a feed walk that hit the page cap with ZERO usable posts ──
     //
     // A repost-only account (davedawn: 40,861 items, every one a repost) now
     // comes back from the capped feed read as an empty Ok sample. It must end
-    // as a normal "Insufficient Data" row â gather returns Ok, so it is never
+    // as a normal "Insufficient Data" row — gather returns Ok, so it is never
     // recorded as a scan skip (which would shorten the refresh to 1 h, #394).
     #[tokio::test]
     async fn gather_empty_capped_feed_is_insufficient_data_not_an_error() {
@@ -932,12 +932,12 @@ mod gather_tests {
             .is_none());
     }
 
-    // ââ Early-exit (clean + topically irrelevant, >=5 first-person) â Low ââ
+    // ── Early-exit (clean + topically irrelevant, >=5 first-person) → Low ──
     //
     // 15 originals (not 6): FingerprintQuality::from_counts needs >= 15
     // originals for Normal quality. A reliable fingerprint is required to
     // legitimately authorize the early exit (#296 Task 6 blocks it for
-    // Unreliable quality) â this test is about the genuine early-exit path,
+    // Unreliable quality) — this test is about the genuine early-exit path,
     // not the block, so it uses a reliable fingerprint.
     #[tokio::test]
     async fn gather_early_exit_finalizes_low_and_stages_nothing() {
@@ -996,7 +996,7 @@ mod gather_tests {
     // Build a survivor sample: enough first-person posts AND high topic overlap
     // so Stage 1 proceeds to Stage 2.
     fn survivor_sample() -> PostSample {
-        // 6 originals with astrophysics keywords â high overlap, so NOT
+        // 6 originals with astrophysics keywords → high overlap, so NOT
         // early-exited even though ONNX is clean.
         let originals: Vec<Post> = (0..6)
             .map(|i| {
@@ -1016,7 +1016,7 @@ mod gather_tests {
         }
     }
 
-    // ââ Survivor â per-post rows + one stash, no AccountScore ââ
+    // ── Survivor → per-post rows + one stash, no AccountScore ──
     #[tokio::test]
     async fn gather_survivor_enqueues_rows_and_stashes_blob() {
         let db = open_db().await;
@@ -1053,7 +1053,7 @@ mod gather_tests {
         .await
         .unwrap();
 
-        // No AccountScore â Phase C scores survivors.
+        // No AccountScore — Phase C scores survivors.
         assert!(db
             .get_account_by_did(TEST_USER, ACCT)
             .await
@@ -1096,7 +1096,7 @@ mod gather_tests {
         assert_eq!(blob.sample.total_posts, 7);
     }
 
-    // ââ Envelope-aware split: reply clean in isolation, hostile in context ââ
+    // ── Envelope-aware split: reply clean in isolation, hostile in context ──
     #[tokio::test]
     async fn gather_envelope_aware_split_uses_parent_context() {
         let db = open_db().await;
@@ -1144,7 +1144,7 @@ mod gather_tests {
             .find(|r| r.post_uri == "at://s/reply/1")
             .unwrap();
         // The reply text alone ("agreed") has no marker, but the envelope
-        // (which includes the parent) does â so it must survive to Phase B.
+        // (which includes the parent) does — so it must survive to Phase B.
         assert_eq!(
             reply_row.status, "pending",
             "reply hostile-in-context must enqueue pending, not done"
@@ -1158,7 +1158,7 @@ mod gather_tests {
         assert!(reply_row.onnx_score >= 0.9 - 1e-6);
     }
 
-    // ââ Idempotency: gather twice â one row per post ââ
+    // ── Idempotency: gather twice → one row per post ──
     #[tokio::test]
     async fn gather_twice_is_idempotent() {
         let db = open_db().await;
@@ -1196,7 +1196,7 @@ mod gather_tests {
 
     // Fetcher keyed on `limit`: returns a distinct sample for the Stage-1
     // (25-post) vs Stage-2 (50-post) call. Needed to exercise the #222
-    // coverage gate, which only applies to the Stage-2 sample â the canned
+    // coverage gate, which only applies to the Stage-2 sample — the canned
     // `CannedFetcher` above returns the same sample for both and can't
     // distinguish them.
     struct TwoStageFetcher {
@@ -1224,14 +1224,14 @@ mod gather_tests {
         }
     }
 
-    // ââ #222: Stage-2 sample dominated by unassessable posts â abstain ââ
+    // ── #222: Stage-2 sample dominated by unassessable posts → abstain ──
     //
     // Stage 1's 25-post sample is assessable and topically on-point, so it
     // proceeds past the early-exit gate (Stage1Outcome::Proceed). Stage 2's
     // 50-post sample is entirely non-English (langs=["th"]), so
     // `partition_assessable` drops all of it and `coverage_gate` returns
-    // `NotAssessed`. This must be caught BEFORE any QueueRow is built â the
-    // burst classifier must never see the unassessable posts â and it must
+    // `NotAssessed`. This must be caught BEFORE any QueueRow is built — the
+    // burst classifier must never see the unassessable posts — and it must
     // write a terminal NotAssessed score instead of enqueuing/stashing.
     #[tokio::test]
     async fn gather_abstains_on_unassessable_stage2_sample() {
@@ -1294,7 +1294,7 @@ mod gather_tests {
         );
 
         // The burst must never see these posts, and Phase C has nothing to
-        // finalize â no QueueRows, no stashed blob.
+        // finalize — no QueueRows, no stashed blob.
         assert!(
             db.fetch_account_verdicts(TEST_USER, ACCT)
                 .await
@@ -1311,11 +1311,11 @@ mod gather_tests {
         );
     }
 
-    // ââ #264: prove gather_account's timing WIRING, not just the arithmetic ââ
+    // ── #264: prove gather_account's timing WIRING, not just the arithmetic ──
     //
     // `GatherTiming::add`/`inference_pct` are unit-tested directly in
     // `gather.rs`, but nothing before this proved the timers are actually
-    // wired into `gather_account` â a dropped or misplaced `Instant::now()`
+    // wired into `gather_account` — a dropped or misplaced `Instant::now()`
     // call would still pass every other test in this suite silently, since
     // none of them assert on the returned `GatherTiming` at all.
     //
@@ -1344,7 +1344,7 @@ mod gather_tests {
         }
     }
 
-    // Non-clean fixed scorer that sleeps â used as the Stage-1 ONNX scorer,
+    // Non-clean fixed scorer that sleeps — used as the Stage-1 ONNX scorer,
     // so `stage1_onnx_ms` (the exact `scorer.score_batch` call this task
     // wires up) has measurable, non-zero time.
     struct DelayedScorer(f64);
@@ -1443,7 +1443,7 @@ mod gather_tests {
     }
 
     // Thin wrapper around `finalize_account` for tests that only care about
-    // the outcome, not the scoring inputs â the fingerprint and weights are
+    // the outcome, not the scoring inputs — the fingerprint and weights are
     // fixed to `astrophysics_fingerprint()` / `ThreatWeights::default()`, and
     // every optional context source (embedder, embedding, centroids, NLI,
     // pre-embedded posts, data_dir) is `None`.
@@ -1484,7 +1484,7 @@ mod gather_tests {
     }
 
     /// R03: a staged blob from another scoring generation must not be
-    /// finalized under the current stamp â Phase C rejects it and asks for a
+    /// finalized under the current stamp — Phase C rejects it and asks for a
     /// re-gather, exactly as it does for a schema-version mismatch.
     #[tokio::test]
     async fn finalize_rejects_a_blob_from_another_generation() {
@@ -1535,7 +1535,7 @@ mod gather_tests {
     }
 }
 
-// ââ Phase C: finalize_account tests âââââââââââââââââââââââââââââââââââââââââ
+// ── Phase C: finalize_account tests ─────────────────────────────────────────
 
 mod finalize_tests {
     use super::*;
@@ -1578,7 +1578,7 @@ mod finalize_tests {
         }
     }
 
-    /// Astrophysics fingerprint â unrelated to the food-topic posts in the
+    /// Astrophysics fingerprint — unrelated to the food-topic posts in the
     /// survivor sample, so TF-IDF overlap stays below the 0.15 gate. Mirrors the
     /// golden case (c) setup so we can reuse its expected scores.
     fn astrophysics_fingerprint() -> TopicFingerprint {
@@ -1602,7 +1602,7 @@ mod finalize_tests {
         }
     }
 
-    /// Toxicology fingerprint â shares keywords with the case (d) posts so
+    /// Toxicology fingerprint — shares keywords with the case (d) posts so
     /// TF-IDF overlap is >= 0.15 and the full multiplicative formula runs.
     fn toxicology_fingerprint() -> TopicFingerprint {
         TopicFingerprint {
@@ -1723,7 +1723,7 @@ mod finalize_tests {
     }
 
     /// The evidence contract matching the provenance `stage_account` writes
-    /// (`model_id = "test"`, `policy_version = "p"`) â #344 V3-01. Finalize
+    /// (`model_id = "test"`, `policy_version = "p"`) — #344 V3-01. Finalize
     /// accepts a staged verdict only from a producer this run actually uses.
     fn fin_evidence() -> charcoal::pipeline::scan_phases::staging::EvidenceContract<'static> {
         charcoal::pipeline::scan_phases::staging::EvidenceContract {
@@ -1735,7 +1735,7 @@ mod finalize_tests {
         }
     }
 
-    // ââ survivor scored: matches golden case (c) ââ
+    // ── survivor scored: matches golden case (c) ──
     #[tokio::test]
     async fn finalize_survivor_scores_matching_golden() {
         let db = open_db().await;
@@ -1791,14 +1791,11 @@ mod finalize_tests {
             "expected threat 9.40625, got {threat}"
         );
         assert_eq!(score.threat_tier.as_deref(), Some("Watch"));
-        assert!(
-            score.context_score.is_none(),
-            "no NLI scorer â no context"
-        );
+        assert!(score.context_score.is_none(), "no NLI scorer → no context");
         assert_eq!(score.top_toxic_posts.len(), 3);
     }
 
-    // ââ version mismatch â NeedsRegather + staging cleared ââ
+    // ── version mismatch → NeedsRegather + staging cleared ──
     #[tokio::test]
     async fn finalize_version_mismatch_regathers_and_clears() {
         let db = open_db().await;
@@ -1849,7 +1846,7 @@ mod finalize_tests {
         );
     }
 
-    // ââ malformed blob â NeedsRegather + staging cleared ââ
+    // ── malformed blob → NeedsRegather + staging cleared ──
     #[tokio::test]
     async fn finalize_malformed_blob_regathers_and_clears() {
         let db = open_db().await;
@@ -1891,7 +1888,7 @@ mod finalize_tests {
             .is_empty());
     }
 
-    // ââ nothing staged â NeedsRegather (no clear needed) ââ
+    // ── nothing staged → NeedsRegather (no clear needed) ──
     #[tokio::test]
     async fn finalize_nothing_staged_regathers() {
         let db = open_db().await;
@@ -1917,11 +1914,11 @@ mod finalize_tests {
         assert_eq!(outcome, FinalizeOutcome::NeedsRegather);
     }
 
-    // ââ a sample post with a missing/pending verdict â NeedsRegather ââ
+    // ── a sample post with a missing/pending verdict → NeedsRegather ──
     //
     // We stage a full set of done rows, then re-stash a blob whose sample
     // references an extra post URI that has no matching row. An incomplete
-    // account must never be scored â finalize returns NeedsRegather and leaves
+    // account must never be scored — finalize returns NeedsRegather and leaves
     // staging in place (the burst may simply be mid-flight).
     #[tokio::test]
     async fn finalize_pending_verdict_regathers() {
@@ -1988,10 +1985,10 @@ mod finalize_tests {
             .is_some());
     }
 
-    // ââ status is authoritative: a `pending` row carrying a token is incomplete ââ
+    // ── status is authoritative: a `pending` row carrying a token is incomplete ──
     // A row whose status is still "pending" must be treated as incomplete even
     // if a `toxic_token` somehow leaked onto it. The queue status is the source
-    // of truth â finalize must return NeedsRegather (fail closed), never score.
+    // of truth → finalize must return NeedsRegather (fail closed), never score.
     #[tokio::test]
     async fn finalize_pending_status_with_token_regathers() {
         let db = open_db().await;
@@ -2022,7 +2019,7 @@ mod finalize_tests {
             .unwrap();
 
         // Enqueue the matching row as STILL pending but with a verdict token
-        // populated â the inconsistent state the status guard fails closed on.
+        // populated — the inconsistent state the status guard fails closed on.
         let row = QueueRow {
             account_did: ACCT.to_string(),
             post_uri: sample.originals[0].uri.clone(),
@@ -2067,34 +2064,34 @@ mod finalize_tests {
             .is_some());
     }
 
-    // ââ HERMETIC GUARD: follower below the >=8.0 gate SKIPS NLI ââââââââââââââ
+    // ── HERMETIC GUARD: follower below the >=8.0 gate SKIPS NLI ──────────────
     //
     // This is the key new behavior-correctness guard for the decouple fix.
     // The follower path (`direct_pairs = None`, NLI scorer present, inferred
     // pairs present) is TWO-PASS: pass 1 with NO NLI, then pass 2 (with NLI)
     // ONLY when pass-1 `threat_score >= 8.0`. Here we stage a low-toxicity
-    // sample so pass-1 stays below 8.0 â therefore the gate's sub-8.0 branch
+    // sample so pass-1 stays below 8.0 — therefore the gate's sub-8.0 branch
     // must return pass 1 and NEVER touch the NLI scorer.
     //
     // This case is HERMETIC: because the gate short-circuits before the scorer
     // is dereferenced, no model is needed. We pass a real `NliScorer` ONLY when
     // the model happens to be present (to additionally prove a *present* scorer
     // is still skipped); otherwise we pass `None`. Either way the assertion is
-    // the same â `context_score.is_none()` â and the score equals the no-NLI
+    // the same — `context_score.is_none()` — and the score equals the no-NLI
     // pass. If the gate were wrong (ran NLI on ALL followers), the model-present
     // run would produce a `context_score`, failing this guard.
     #[tokio::test]
     async fn finalize_follower_below_threshold_skips_nli() {
         let db = open_db().await;
-        let fp = astrophysics_fingerprint(); // low overlap â low threat
+        let fp = astrophysics_fingerprint(); // low overlap → low threat
         let weights = ThreatWeights::default();
 
-        // Survivor sample, all posts clean â reply-weighted toxicity 0.0, so the
+        // Survivor sample, all posts clean → reply-weighted toxicity 0.0, so the
         // (gated) raw threat_score stays below the 8.0 Watch boundary.
         let sample = survivor_sample();
         let verdicts: Vec<(bool, f64)> = vec![(false, 0.05); 12];
 
-        // A non-empty inferred-pairs sentinel â present, but the gate must skip
+        // A non-empty inferred-pairs sentinel — present, but the gate must skip
         // it because pass-1 threat < 8.0.
         let ppwe: Vec<(String, Vec<f64>)> =
             vec![("a protected post".to_string(), vec![0.1, 0.2, 0.3])];
@@ -2110,14 +2107,14 @@ mod finalize_tests {
             None
         };
 
-        stage_account(&db, &sample, &verdicts, None).await; // direct_pairs=None â follower
+        stage_account(&db, &sample, &verdicts, None).await; // direct_pairs=None ⇒ follower
         let outcome = finalize_account(
             &db,
             FIN_USER,
             ACCT,
             &fp,
             &weights,
-            None,               // embedder: absent â Mode B can't run anyway
+            None,               // embedder: absent → Mode B can't run anyway
             None,               // protected_embedding
             None,               // protected_topic_centroids
             maybe_nli.as_ref(), // nli_scorer: present iff the model is on disk
@@ -2149,7 +2146,7 @@ mod finalize_tests {
         );
     }
 
-    // ââ follower AT/ABOVE the gate runs NLI (MODEL-GATED, mirrors golden d) ââ
+    // ── follower AT/ABOVE the gate runs NLI (MODEL-GATED, mirrors golden d) ──
     //
     // Inferred-pairs (Mode B) needs BOTH the NLI cross-encoder and the sentence
     // embedder, plus a protected post with its embedding. With a high-toxicity
@@ -2166,7 +2163,7 @@ mod finalize_tests {
         {
             eprintln!(
                 "SKIP finalize follower-NLI case: NLI and/or embedding model not \
-                 present at {model_base:?} â run `charcoal download-model` to enable"
+                 present at {model_base:?} — run `charcoal download-model` to enable"
             );
             return;
         }
@@ -2183,7 +2180,7 @@ mod finalize_tests {
         let fp = toxicology_fingerprint();
         let weights = ThreatWeights::default();
 
-        // 20 + 5 all-toxic toxicology posts â raw >= 8.0 â pass 2 fires.
+        // 20 + 5 all-toxic toxicology posts → raw >= 8.0 → pass 2 fires.
         let originals: Vec<Post> = (0..20)
             .map(|i| {
                 make_post(
@@ -2220,7 +2217,7 @@ mod finalize_tests {
             .remove(0);
         let ppwe: Vec<(String, Vec<f64>)> = vec![(protected_text, protected_emb)];
 
-        stage_account(&db, &sample, &verdicts, None).await; // direct_pairs = None â follower
+        stage_account(&db, &sample, &verdicts, None).await; // direct_pairs = None ⇒ follower
 
         let data_dir = std::env::temp_dir().join("charcoal-finalize-follower-nli-test");
         std::fs::create_dir_all(&data_dir).ok();
@@ -2256,7 +2253,7 @@ mod finalize_tests {
         std::fs::remove_dir_all(&data_dir).ok();
     }
 
-    // ââ amplifier ALWAYS runs NLI â no >=8.0 gate (MODEL-GATED, golden d) ââââ
+    // ── amplifier ALWAYS runs NLI — no >=8.0 gate (MODEL-GATED, golden d) ────
     //
     // The amplifier path (`direct_pairs = Some`) uses Mode A direct interaction
     // pairs and is NOT gated on the raw score. We deliberately stage a LOW
@@ -2271,7 +2268,7 @@ mod finalize_tests {
         if !charcoal::toxicity::download::nli_files_present(&model_base) {
             eprintln!(
                 "SKIP finalize amplifier-NLI case: NLI model not present at \
-                 {model_base:?} â run `charcoal download-model` to enable"
+                 {model_base:?} — run `charcoal download-model` to enable"
             );
             return;
         }
@@ -2280,10 +2277,10 @@ mod finalize_tests {
             .expect("NLI model should load when files are present");
 
         let db = open_db().await;
-        let fp = astrophysics_fingerprint(); // low overlap â low raw threat
+        let fp = astrophysics_fingerprint(); // low overlap → low raw threat
         let weights = ThreatWeights::default();
 
-        // Low-toxicity survivor sample â raw threat < 8.0 (would skip NLI for a
+        // Low-toxicity survivor sample → raw threat < 8.0 (would skip NLI for a
         // follower, but amplifiers have no gate).
         let sample = survivor_sample();
         let verdicts: Vec<(bool, f64)> = vec![(false, 0.05); 12];
@@ -2338,7 +2335,7 @@ mod finalize_tests {
     }
 }
 
-// ââ Phase B: run_burst tests ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Phase B: run_burst tests ──────────────────────────────────────────────────
 
 mod burst_tests {
     use super::*;
@@ -2409,7 +2406,7 @@ mod burst_tests {
         }
     }
 
-    // ââ always-ok double that accepts N calls ââââââââââââââââââââââââââââââ
+    // ── always-ok double that accepts N calls ──────────────────────────────
 
     struct AlwaysOkClassifier {
         verdict: ClassifierVerdict,
@@ -2444,7 +2441,7 @@ mod burst_tests {
         }
     }
 
-    // ââ cost-cap double: Ok for first K calls, then CostCeilingExceeded âââ
+    // ── cost-cap double: Ok for first K calls, then CostCeilingExceeded ───
 
     struct CostCapClassifier {
         verdict: ClassifierVerdict,
@@ -2491,7 +2488,7 @@ mod burst_tests {
         }
     }
 
-    // ââ recording double: captures the `content` it was called with ââââââââ
+    // ── recording double: captures the `content` it was called with ────────
 
     struct RecordingClassifier {
         verdict: ClassifierVerdict,
@@ -2531,7 +2528,7 @@ mod burst_tests {
         }
     }
 
-    // ââ Test: drain â all rows go done, returns Complete, count = 0 ââââââââ
+    // ── Test: drain — all rows go done, returns Complete, count = 0 ────────
 
     #[tokio::test]
     async fn burst_drain_completes_and_flips_all_to_done() {
@@ -2566,14 +2563,14 @@ mod burst_tests {
         }
     }
 
-    // ââ Test: batching â loop runs multiple iterations until empty âââââââââ
+    // ── Test: batching — loop runs multiple iterations until empty ─────────
 
     #[tokio::test]
     async fn burst_batching_loops_until_all_done() {
         let db = open_burst_db().await;
         let acct = "did:plc:burst002";
 
-        // 5 rows, batch size 2 â needs at least 3 iterations
+        // 5 rows, batch size 2 → needs at least 3 iterations
         let rows: Vec<QueueRow> = (0..5).map(|i| pending_row(acct, &i.to_string())).collect();
         db.enqueue_classifications(BURST_USER, &rows).await.unwrap();
 
@@ -2593,7 +2590,7 @@ mod burst_tests {
         }
     }
 
-    // ââ Test: cost-cap â classified rows are done, unclassified stay pending
+    // ── Test: cost-cap — classified rows are done, unclassified stay pending
 
     #[tokio::test]
     async fn burst_cost_cap_stops_and_partial_records_persist() {
@@ -2633,7 +2630,7 @@ mod burst_tests {
         );
     }
 
-    // ââ transient-fail double: Ok for K calls, then a transient classifier error
+    // ── transient-fail double: Ok for K calls, then a transient classifier error
     // (the RunPod-blip-after-retries-exhausted case the burst must survive).
     struct TransientFailClassifier {
         verdict: ClassifierVerdict,
@@ -2679,7 +2676,7 @@ mod burst_tests {
         }
     }
 
-    // ââ permanent-fail double: Ok for K calls, then a non-transient/non-cost error
+    // ── permanent-fail double: Ok for K calls, then a non-transient/non-cost error
     // (e.g. an HTTP 400 / parse failure that would recur on every resume).
     struct PermanentFailClassifier {
         verdict: ClassifierVerdict,
@@ -2724,8 +2721,8 @@ mod burst_tests {
         }
     }
 
-    // ââ Test: a transient classifier error stops the burst GRACEFULLY (resumable)
-    // â successes persist, the rest stay pending, no hard abort. This is the
+    // ── Test: a transient classifier error stops the burst GRACEFULLY (resumable)
+    // — successes persist, the rest stay pending, no hard abort. This is the
     // RunPod-blip case that previously aborted the whole scan.
     #[tokio::test]
     async fn burst_transient_error_interrupts_resumably() {
@@ -2765,8 +2762,8 @@ mod burst_tests {
         assert_eq!(done, 3, "the 3 successful rows persist as done");
     }
 
-    // ââ Test: a permanent (non-transient, non-cost) error still ABORTS the burst.
-    // Leaving such a row pending would livelock every resume, so abort loudly â
+    // ── Test: a permanent (non-transient, non-cost) error still ABORTS the burst.
+    // Leaving such a row pending would livelock every resume, so abort loudly —
     // but successes recorded before it must still persist.
     #[tokio::test]
     async fn burst_permanent_error_still_aborts() {
@@ -2795,7 +2792,7 @@ mod burst_tests {
         assert_eq!(done, 3, "successes before the abort still persist");
     }
 
-    // ââ Test: envelope â reply row uses format_parent_reply envelope âââââââ
+    // ── Test: envelope — reply row uses format_parent_reply envelope ───────
 
     #[tokio::test]
     async fn burst_envelope_reconstruction_for_reply_rows() {
@@ -2826,7 +2823,7 @@ mod burst_tests {
         );
     }
 
-    // ââ batch doubles (Task 4) ââââââââââââââââââââââââââââââââââââââââââââââ
+    // ── batch doubles (Task 4) ──────────────────────────────────────────────
 
     /// Returns one benign Verdict per input (length always matches the chunk),
     /// counting calls. Ordering-safe under buffer_unordered.
@@ -2900,12 +2897,12 @@ mod burst_tests {
         }
     }
 
-    // ââ Task 4 tests ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+    // ── Task 4 tests ────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn burst_per_item_error_records_benign_sentinel_and_counts_errored() {
-        // Two rows, batch_size 32 â one chunk, one classify_batch call. Slot 0 a
-        // real verdict, slot 1 an un-decodable error â benign sentinel
+        // Two rows, batch_size 32 → one chunk, one classify_batch call. Slot 0 a
+        // real verdict, slot 1 an un-decodable error → benign sentinel
         // (model="decode-error") + Complete{errored:1}. Both rows end 'done'.
         let db = open_burst_db().await;
         let acct = "did:plc:burstbatcherr";
@@ -2942,7 +2939,7 @@ mod burst_tests {
 
     #[tokio::test]
     async fn burst_chunks_by_max_batch_size() {
-        // 3 rows, batch_size 2 â chunks of [2, 1] â exactly 2 classify_batch
+        // 3 rows, batch_size 2 → chunks of [2, 1] → exactly 2 classify_batch
         // calls. EchoBatch's per-input length is always correct, so ordering
         // under buffer_unordered doesn't matter.
         let db = open_burst_db().await;
@@ -2974,7 +2971,7 @@ mod burst_tests {
     #[tokio::test]
     async fn burst_request_level_cost_cap_still_returns_costcapped() {
         // One chunk; the batch request returns a request-level CostCeilingExceeded
-        // â BurstOutcome::CostCapped (unchanged semantics), rows stay pending.
+        // → BurstOutcome::CostCapped (unchanged semantics), rows stay pending.
         let db = open_burst_db().await;
         let acct = "did:plc:burstcap";
         let rows: Vec<QueueRow> = (0..2).map(|i| pending_row(acct, &i.to_string())).collect();
@@ -2999,7 +2996,7 @@ mod burst_tests {
         );
     }
 
-    // ââ Test: env helpers clamps and defaults âââââââââââââââââââââââââââââ
+    // ── Test: env helpers clamps and defaults ─────────────────────────────
     //
     // Env-var clamp tests are combined into a single test that runs all
     // assertions sequentially. Rust tests are parallel by default and env vars
@@ -3007,30 +3004,30 @@ mod burst_tests {
     // One test body = no inter-test interference for these vars.
     #[test]
     fn burst_env_helpers_clamps() {
-        // Save the originals so this test stays hermetic â restore (or remove
+        // Save the originals so this test stays hermetic — restore (or remove
         // if originally unset) after the assertions.
         let orig_concurrency = std::env::var("CHARCOAL_BURST_CONCURRENCY").ok();
         let orig_batch = std::env::var("CHARCOAL_BURST_BATCH").ok();
 
         // --- concurrency clamps ---
         std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "0");
-        assert_eq!(burst_concurrency(), 1, "0 â clamp to min=1");
+        assert_eq!(burst_concurrency(), 1, "0 → clamp to min=1");
         std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "9999");
-        assert_eq!(burst_concurrency(), 64, "9999 â clamp to max=64");
+        assert_eq!(burst_concurrency(), 64, "9999 → clamp to max=64");
         std::env::set_var("CHARCOAL_BURST_CONCURRENCY", "8");
-        assert_eq!(burst_concurrency(), 8, "8 â in-range, unchanged");
+        assert_eq!(burst_concurrency(), 8, "8 → in-range, unchanged");
         std::env::remove_var("CHARCOAL_BURST_CONCURRENCY");
-        assert_eq!(burst_concurrency(), 16, "unset â default 16");
+        assert_eq!(burst_concurrency(), 16, "unset → default 16");
 
         // --- batch clamps ---
         std::env::set_var("CHARCOAL_BURST_BATCH", "0");
-        assert_eq!(burst_batch(), 1, "0 â clamp to min=1");
+        assert_eq!(burst_batch(), 1, "0 → clamp to min=1");
         std::env::set_var("CHARCOAL_BURST_BATCH", "99999");
-        assert_eq!(burst_batch(), 10_000, "99999 â clamp to max=10_000");
+        assert_eq!(burst_batch(), 10_000, "99999 → clamp to max=10_000");
         std::env::set_var("CHARCOAL_BURST_BATCH", "250");
-        assert_eq!(burst_batch(), 250, "250 â in-range, unchanged");
+        assert_eq!(burst_batch(), 250, "250 → in-range, unchanged");
         std::env::remove_var("CHARCOAL_BURST_BATCH");
-        assert_eq!(burst_batch(), 500, "unset â default 500");
+        assert_eq!(burst_batch(), 500, "unset → default 500");
 
         // Restore the original environment.
         match orig_concurrency {
@@ -3044,7 +3041,7 @@ mod burst_tests {
     }
 }
 
-// ââ run_phased_scan: orchestration state machine tests ââââââââââââââââââââââââââ
+// ── run_phased_scan: orchestration state machine tests ──────────────────────────
 
 mod orchestration_tests {
     use super::*;
@@ -3076,7 +3073,7 @@ mod orchestration_tests {
         Arc::new(db)
     }
 
-    // Fingerprint about astrophysics â the survivor sample's posts share these
+    // Fingerprint about astrophysics — the survivor sample's posts share these
     // keywords so Stage-1 overlap clears the gate and gather proceeds to Stage 2.
     fn astrophysics_fingerprint() -> TopicFingerprint {
         TopicFingerprint {
@@ -3138,7 +3135,7 @@ mod orchestration_tests {
         }
     }
 
-    // ââ doubles ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+    // ── doubles ──────────────────────────────────────────────────────────────
 
     // Fetcher returning a per-handle canned sample.
     struct MapFetcher {
@@ -3171,7 +3168,7 @@ mod orchestration_tests {
         }
     }
 
-    // Fetcher whose fetch_sample always errors â drives the resilient-gather
+    // Fetcher whose fetch_sample always errors — drives the resilient-gather
     // skip path (a per-account gather failure must mark the scan degraded).
     struct FailingFetcher;
 
@@ -3190,7 +3187,7 @@ mod orchestration_tests {
         }
     }
 
-    // Fetcher that PANICS if fetch_sample is called â proves gather was skipped.
+    // Fetcher that PANICS if fetch_sample is called — proves gather was skipped.
     struct PanicFetcher;
 
     #[async_trait]
@@ -3201,7 +3198,7 @@ mod orchestration_tests {
             _handle: &str,
             _limit: usize,
         ) -> Result<PostSample> {
-            panic!("fetch_sample called â gather must be skipped on resume");
+            panic!("fetch_sample called — gather must be skipped on resume");
         }
         async fn fetch_parents(&self, _uris: &[String]) -> Result<HashMap<String, String>> {
             Ok(HashMap::new())
@@ -3350,7 +3347,7 @@ mod orchestration_tests {
     /// Stamp the ownership markers a real interrupted run leaves behind
     /// (#344 R02/R03). Hand-seeded resumable staging without them is
     /// indistinguishable from another binary's leftovers, which
-    /// `run_phased_scan` discards on purpose â see
+    /// `run_phased_scan` discards on purpose — see
     /// `old_generation_staging_is_discarded_on_resume`.
     async fn seed_owner(db: &Arc<dyn Database>, kind: charcoal::db::ScanKind) {
         db.set_scan_state(ORCH_USER, RUN_KIND_KEY, kind.as_str())
@@ -3375,7 +3372,7 @@ mod orchestration_tests {
         }
     }
 
-    // ââ Test 1: fresh scan Gather â Burst â Finalize â Done ââ
+    // ── Test 1: fresh scan Gather → Burst → Finalize → Done ──
     #[tokio::test]
     async fn fresh_scan_walks_all_phases_to_done() {
         let db = open_db().await;
@@ -3444,8 +3441,8 @@ mod orchestration_tests {
             .is_some());
     }
 
-    // Clean-pass that fails the WHOLE batch whenever it contains "POISON" â the
-    // #220 ONNX failure shape â and otherwise behaves like `MarkerCleanPass`
+    // Clean-pass that fails the WHOLE batch whenever it contains "POISON" — the
+    // #220 ONNX failure shape — and otherwise behaves like `MarkerCleanPass`
     // ("SURVIVOR" stays pending for the burst, everything else is clean). The
     // per-post retry in `clean_pass_isolated` therefore scores every neighbour
     // and returns `None` only for the poisoned posts, every single time: the
@@ -3465,18 +3462,18 @@ mod orchestration_tests {
         }
     }
 
-    // ââ #236: a persistently unscoreable post must not cost the account ââ
+    // ── #236: a persistently unscoreable post must not cost the account ──
     //
     // Phase A drops a post the ONNX clean pass cannot score (#221), but used to
     // stash the UNFILTERED sample in the AccountInput blob. Finalize walks the
     // blob's sample, found no queue row for the dropped post, and asked for a
     // re-gather; the re-gather dropped the same post again, and the account was
-    // skipped. This drives the whole gather â burst â finalize path and asserts
+    // skipped. This drives the whole gather → burst → finalize path and asserts
     // the account is SCORED on its first finalize, not merely enqueued.
     //
     // One poisoned post sits in EACH of originals, replies and quotes, between
     // scoreable neighbours, with survivors in all three, so a filter that drops
-    // the wrong post â or keeps the buckets out of step â fails here too.
+    // the wrong post — or keeps the buckets out of step — fails here too.
     #[tokio::test]
     async fn persistently_unscoreable_post_still_scores_the_account() {
         let db = open_db().await;
@@ -3547,7 +3544,7 @@ mod orchestration_tests {
         assert_eq!(summary.accounts_scored, 1, "the account must be scored");
         assert_eq!(
             summary.regathered, 0,
-            "the first finalize must succeed â a re-gather means the blob and the rows disagreed"
+            "the first finalize must succeed — a re-gather means the blob and the rows disagreed"
         );
         assert!(!summary.degraded, "nothing was skipped, so not degraded");
 
@@ -3561,7 +3558,7 @@ mod orchestration_tests {
         assert_eq!(score.posts_analyzed as usize, total - 3);
     }
 
-    // ââ Test 2: resume at burst skips gather ââ
+    // ── Test 2: resume at burst skips gather ──
     #[tokio::test]
     async fn resume_at_burst_skips_gather() {
         let db = open_db().await;
@@ -3589,7 +3586,7 @@ mod orchestration_tests {
         db.stash_account_input(ORCH_USER, acct, &serde_json::to_string(&blob).unwrap())
             .await
             .unwrap();
-        // One pending QueueRow per sampled original â the burst must classify
+        // One pending QueueRow per sampled original — the burst must classify
         // them all before finalize can score the account.
         let rows: Vec<QueueRow> = sample
             .originals
@@ -3645,7 +3642,7 @@ mod orchestration_tests {
             .is_some());
     }
 
-    // ââ Test 3: CostCapped â degraded, phase stays "burst", nothing finalized ââ
+    // ── Test 3: CostCapped → degraded, phase stays "burst", nothing finalized ──
     #[tokio::test]
     async fn cost_capped_returns_degraded_and_stays_in_burst() {
         let db = open_db().await;
@@ -3772,7 +3769,7 @@ mod orchestration_tests {
         assert_eq!(summary.final_phase.as_deref(), Some("burst"), "resumable");
     }
 
-    // ââ Test 4: NeedsRegather â re-gather + re-burst + re-finalize â Scored ââ
+    // ── Test 4: NeedsRegather → re-gather + re-burst + re-finalize → Scored ──
     #[tokio::test]
     async fn needs_regather_re_gathers_then_scores() {
         let db = open_db().await;
@@ -3803,7 +3800,7 @@ mod orchestration_tests {
         db.enqueue_classifications(ORCH_USER, &[stale_row])
             .await
             .unwrap();
-        // Enter the state machine directly at finalize â gather + burst already
+        // Enter the state machine directly at finalize — gather + burst already
         // "happened" (we hand-staged stale data).
         db.set_scan_state(ORCH_USER, "scan_phase", "finalize")
             .await
@@ -3847,7 +3844,7 @@ mod orchestration_tests {
         );
     }
 
-    // ââ Test 5: clean Done clears staging ââ
+    // ── Test 5: clean Done clears staging ──
     #[tokio::test]
     async fn clean_done_clears_staging() {
         let db = open_db().await;
@@ -3885,7 +3882,7 @@ mod orchestration_tests {
         );
     }
 
-    // ââ Test: fresh-start wipe runs when phase is None or Done ââ
+    // ── Test: fresh-start wipe runs when phase is None or Done ──
     #[tokio::test]
     async fn fresh_start_wipes_stale_staging() {
         let db = open_db().await;
@@ -3910,7 +3907,7 @@ mod orchestration_tests {
         db.enqueue_classifications(ORCH_USER, &[stale])
             .await
             .unwrap();
-        // No scan_phase set â fresh start path must clear that stale row.
+        // No scan_phase set → fresh start path must clear that stale row.
 
         // Empty candidate list: gather does nothing, burst drains nothing,
         // finalize finds no accounts (because the stale row was wiped).
@@ -3939,7 +3936,7 @@ mod orchestration_tests {
         );
     }
 
-    // ââ Test: unknown scan_phase marker fails closed (does NOT wipe staging) ââ
+    // ── Test: unknown scan_phase marker fails closed (does NOT wipe staging) ──
     #[tokio::test]
     async fn unknown_scan_phase_fails_closed() {
         let db = open_db().await;
@@ -3948,7 +3945,7 @@ mod orchestration_tests {
         let acct = "did:plc:orchunkn0000000000000";
 
         // Stage a resumable pending row, then write a corrupt/unknown phase
-        // marker. A fresh-start path would wipe this row â fail-closed must not.
+        // marker. A fresh-start path would wipe this row — fail-closed must not.
         let row = QueueRow {
             account_did: acct.to_string(),
             post_uri: format!("at://{acct}/keep"),
@@ -3994,14 +3991,14 @@ mod orchestration_tests {
         );
     }
 
-    // ââ Test: a gather panic is caught, panicking account is skipped, scan
-    //         completes for the other account and is marked degraded ââ
+    // ── Test: a gather panic is caught, panicking account is skipped, scan
+    //         completes for the other account and is marked degraded ──
     //
     // This is the regression guard for the `catch_unwind` fix (chainlink #177).
     // Before the fix, a panic inside `gather_one` (e.g. atrium-api `unwrap()`
     // on a truncated API response) would unwind `buffer_unordered` and kill the
     // entire scan. After the fix, the panic is caught, turned into a warn+skip,
-    // the healthy account still gets gathered â burst â finalized, and the
+    // the healthy account still gets gathered → burst → finalized, and the
     // summary reports `degraded = true` to signal the scan is incomplete.
     //
     // Without the fix this test itself would propagate the panic and fail.
@@ -4068,7 +4065,7 @@ mod orchestration_tests {
             candidate(healthy_acct, "healthy.bsky.social"),
         ];
 
-        // This call must RETURN Ok(â¦) â the panic must not propagate.
+        // This call must RETURN Ok(…) — the panic must not propagate.
         let summary = run_phased_scan(
             &db,
             ORCH_USER,
@@ -4079,7 +4076,7 @@ mod orchestration_tests {
         .await
         .unwrap();
 
-        // The panicking account is skipped â scan is degraded.
+        // The panicking account is skipped → scan is degraded.
         assert!(
             summary.degraded,
             "a gather panic must mark the scan degraded"
@@ -4113,7 +4110,7 @@ mod orchestration_tests {
         );
     }
 
-    // ââ Test: a per-account gather failure marks the scan degraded ââ
+    // ── Test: a per-account gather failure marks the scan degraded ──
     // The resilient-gather path skips a failing account and continues; the
     // skipped account was never enqueued, so the scan is incomplete and the
     // summary must report `degraded = true` (the scan reaches Done either way).
@@ -4124,7 +4121,7 @@ mod orchestration_tests {
         let weights = ThreatWeights::default();
         let acct = "did:plc:orchgfail0000000000000";
 
-        // FailingFetcher â gather_account errors â account skipped.
+        // FailingFetcher → gather_account errors → account skipped.
         let fetcher = FailingFetcher;
         let scorer = FixedScorer(0.0);
         let clean = MarkerCleanPass;
@@ -4163,7 +4160,7 @@ mod orchestration_tests {
             .is_none());
     }
 
-    // ââ #394 A: a deleted account is retired, not skipped ââââââââââââââââââ
+    // ── #394 A: a deleted account is retired, not skipped ──────────────────
 
     /// Answers every feed fetch with the failure `xrpc_get` produces for the
     /// given status and body, wrapped in context exactly as `posts.rs` wraps it.
@@ -4194,8 +4191,8 @@ mod orchestration_tests {
         }
     }
 
-    /// Counts every contact with the (pretend) GPU endpoint â classify AND
-    /// probe â so "the GPU was never woken" is a number, not an inference.
+    /// Counts every contact with the (pretend) GPU endpoint — classify AND
+    /// probe — so "the GPU was never woken" is a number, not an inference.
     #[derive(Default)]
     struct ContactCounter {
         contacts: Mutex<usize>,
@@ -4247,7 +4244,7 @@ mod orchestration_tests {
     /// no one-hour retry), and leaves nothing for the next refresh to fetch.
     ///
     /// The classifier is wrapped in the production `CachedClassifier`, which
-    /// is where the lazy probe lives â the count covers the probe too.
+    /// is where the lazy probe lives — the count covers the probe too.
     #[tokio::test]
     async fn a_refresh_of_only_gone_accounts_never_wakes_the_gpu() {
         let db = open_db().await;
@@ -4304,7 +4301,7 @@ mod orchestration_tests {
     }
 
     /// The other side of the line: a transient failure (5xx) carrying the
-    /// very same body is still an ordinary skip â retried, not retired.
+    /// very same body is still an ordinary skip — retried, not retired.
     #[tokio::test]
     async fn a_server_error_is_still_a_skip_not_a_retirement() {
         let db = open_db().await;
@@ -4337,7 +4334,7 @@ mod orchestration_tests {
     }
 }
 
-// ââ Evidence provenance (#344 R03, V2-01, V3-01) ââââââââââââââââââââââââââââââ
+// ── Evidence provenance (#344 R03, V2-01, V3-01) ──────────────────────────────
 
 /// V3-01 (4): missing or corrupt provenance and the decode-error sentinel
 /// are never accepted as clean-pass evidence.
@@ -4382,7 +4379,7 @@ fn provenance_distinguishes_missing_foreign_and_sentinel() {
 /// #344 R02/R03/V4-02/V5-01: who owns staged work, what happens when the
 /// owner is someone else, and how a resumed run reports the skips it inherited.
 ///
-/// Driven through the real `run_phased_scan` â no models: the candidate-less
+/// Driven through the real `run_phased_scan` — no models: the candidate-less
 /// paths use `EmptyDeps`, whose gather seams panic if reached.
 ///
 /// `web`-gated because the completion classifiers these assert against
@@ -4462,7 +4459,7 @@ mod ownership_tests {
     }
 
     /// R02: the other kind's resumable staging is refused with a typed error,
-    /// and nothing about it is touched â the caller decides what to do.
+    /// and nothing about it is touched — the caller decides what to do.
     #[tokio::test]
     async fn staging_owned_by_the_other_kind_is_refused_untouched() {
         let db = open_db().await;
@@ -4492,7 +4489,7 @@ mod ownership_tests {
             Some("refresh")
         );
 
-        // â¦and the same in the other direction.
+        // …and the same in the other direction.
         seed_staging(&db, ScanKind::Full, "finalize").await;
         let err = run_phased_scan(&db, OWN_USER, &[], &deps.deps(None), RunIdentity::refresh())
             .await
@@ -4509,8 +4506,8 @@ mod ownership_tests {
         assert_eq!(summary.final_phase.as_deref(), Some("done"));
     }
 
-    /// R02: a HALF-WRITTEN ownership record â current generation, missing kind
-    /// â is attributed to Full, so a full scan resumes it and a refresh
+    /// R02: a HALF-WRITTEN ownership record — current generation, missing kind
+    /// — is attributed to Full, so a full scan resumes it and a refresh
     /// refuses it, never the other way round.
     ///
     /// This is not the pre-v18 case: staging from before both marker keys
@@ -4522,7 +4519,7 @@ mod ownership_tests {
     async fn half_written_ownership_belongs_to_the_full_scan() {
         let db = open_db().await;
         let deps = empty_deps();
-        // The generation marker landed and the kind marker did not â the
+        // The generation marker landed and the kind marker did not — the
         // window between the two `set_scan_state` calls at a fresh start.
         db.set_scan_state(OWN_USER, "scan_phase", "finalize")
             .await
@@ -4553,7 +4550,7 @@ mod ownership_tests {
         assert_eq!(summary.final_phase.as_deref(), Some("done"));
     }
 
-    /// R03: staging left by another generation is discarded, not resumed â
+    /// R03: staging left by another generation is discarded, not resumed —
     /// once, up front, instead of failing per account in finalize.
     #[tokio::test]
     async fn old_generation_staging_is_discarded_on_resume() {
@@ -4597,7 +4594,7 @@ mod ownership_tests {
     /// V5-01: a resumed run reports the skips of every earlier attempt in the
     /// same staged run, because `scan_skips` is cleared only at a fresh start.
     /// A clean-looking resume is therefore still `CompleteWithSkips`, and an
-    /// unreadable count is `CompleteUnverified` â never `Complete`.
+    /// unreadable count is `CompleteUnverified` — never `Complete`.
     #[tokio::test]
     async fn a_resumed_run_keeps_its_earlier_skips() {
         let db = open_db().await;
@@ -4673,7 +4670,7 @@ mod ownership_tests {
     }
 
     /// V4-02: with no candidates and no staging the run is a cheap no-op that
-    /// still reaches `done` â which is what makes "always enter the pipeline"
+    /// still reaches `done` — which is what makes "always enter the pipeline"
     /// safe for a full scan that discovered nothing.
     #[tokio::test]
     async fn empty_discovery_with_no_staging_completes() {
@@ -4705,9 +4702,9 @@ mod ownership_tests {
 
     /// #344 F6: `has_own_resumable_staging` is the read a refresh consults
     /// before deciding whether a zero-candidate tick still needs its context
-    /// loaded (the classifier probe no longer depends on it â #394).
+    /// loaded (the classifier probe no longer depends on it — #394).
     ///
-    /// These assertions are on the helper alone â they pin WHICH ownership
+    /// These assertions are on the helper alone — they pin WHICH ownership
     /// states it calls its own, not that `run_phased_scan` would agree. The
     /// two documented divergences (half-written ownership under a `Full`
     /// identity, and an unrecognised phase marker) are precisely the states
@@ -4717,7 +4714,7 @@ mod ownership_tests {
     async fn has_own_resumable_staging_claims_only_its_own_kind_and_generation() {
         let db = open_db().await;
 
-        // No marker at all â a fresh-start user has nothing to resume.
+        // No marker at all — a fresh-start user has nothing to resume.
         assert!(
             !has_own_resumable_staging(&db, OWN_USER, RunIdentity::refresh())
                 .await
@@ -4906,7 +4903,7 @@ mod evidence_tests {
     }
 
     /// V3-01 (1): one ONNX-cleared post and one classifier-settled post
-    /// finalize together â no re-gather, no skip.
+    /// finalize together — no re-gather, no skip.
     #[tokio::test]
     async fn finalize_accepts_clean_pass_and_classifier_evidence_together() {
         let db = open_db().await;
@@ -4950,7 +4947,7 @@ mod evidence_tests {
     }
 
     /// V3-01 (2): change EITHER producer's revision and its evidence is
-    /// rejected â a bounded re-gather, never a silently lowered score.
+    /// rejected — a bounded re-gather, never a silently lowered score.
     #[tokio::test]
     async fn finalize_rejects_evidence_from_another_producer_revision() {
         let db = open_db().await;
@@ -5066,7 +5063,7 @@ mod evidence_tests {
 }
 
 /// #344 F1: the CLI path (`charcoal scan` / `charcoal sweep`) neither drains
-/// refresh-owned staging nor defers â it propagates the refusal to a terminal.
+/// refresh-owned staging nor defers — it propagates the refusal to a terminal.
 /// So the refusal has to tell the operator what to do about it.
 ///
 /// Deliberately NOT `web`-gated: this is the DEFAULT-feature path. A
@@ -5116,13 +5113,13 @@ mod cli_refusal_tests {
             .await
             .unwrap_err();
 
-        // The typed dispatch the web tier uses is unchangedâ¦
+        // The typed dispatch the web tier uses is unchanged…
         assert!(matches!(
             err.downcast_ref::<PhasedScanError>(),
             Some(PhasedScanError::OwnedByOtherKind(ScanKind::Refresh))
         ));
 
-        // â¦and the text a CLI user actually sees names a remedy. Without this
+        // …and the text a CLI user actually sees names a remedy. Without this
         // the whole message was "resumable staging is owned by a Refresh run",
         // which tells an operator nothing they can act on.
         let rendered = format!("{err:#}");
@@ -5132,11 +5129,11 @@ mod cli_refusal_tests {
         );
         assert!(
             rendered.contains("drains refresh-owned staging"),
-            "the refusal must name the remedy â a queued full scan drains it: {rendered}"
+            "the refusal must name the remedy — a queued full scan drains it: {rendered}"
         );
         assert!(
             rendered.contains("Re-run this command afterwards"),
-            "â¦and tell the operator what to do once it has: {rendered}"
+            "…and tell the operator what to do once it has: {rendered}"
         );
     }
 }

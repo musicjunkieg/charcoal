@@ -578,21 +578,22 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
     // for the supervision work; being loud is the part that matters now.
     tokio::spawn(async move {
         let refresh = crate::web::refresh::refresh_interval_from_env();
-        // #387: before the first tick, so a user the previous deployment had
-        // backed off for a day is claimed on this one's first pass — and then
-        // again every DEPLOY_RESET_SWEEP, because during a rolling deploy the
-        // retiring container can still finish a refresh AFTER this boot sweep
-        // and stamp an old-deployment streak with a long deadline (Codex
-        // review). The sweep only ever pulls a deadline earlier, and only for
-        // a streak from another deployment, so repeating it is idempotent.
+        // #387: users the previous deployment backed off for up to a day are
+        // made due again — at boot and then every DEPLOY_RESET_SWEEP, because
+        // during a rolling deploy the retiring container can still finish a
+        // refresh AFTER a boot-only sweep and stamp an old-deployment streak
+        // with a long deadline (Codex review). Spawned, never awaited here:
+        // the sweep reads every user, and admission — full scans included —
+        // must not wait on it (CodeRabbit, PR #143). A deadline it pulls
+        // forward is claimed by the admitter's next tick. Only ever moving a
+        // deadline earlier, for a streak from another deployment, it is
+        // idempotent and safe to repeat.
         if refresh.is_some() {
             let deploy = crate::web::refresh_backoff::RefreshBreaker::global().deploy();
-            crate::web::refresh::pull_forward_after_deploy(db.as_ref(), deploy, chrono::Utc::now())
-                .await;
             let sweep_db = db.clone();
             tokio::spawn(async move {
+                // The first tick of an interval completes at once: the boot sweep.
                 let mut every = tokio::time::interval(DEPLOY_RESET_SWEEP);
-                every.tick().await; // the first tick is immediate; boot already swept
                 loop {
                     every.tick().await;
                     crate::web::refresh::pull_forward_after_deploy(
