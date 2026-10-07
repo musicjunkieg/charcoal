@@ -319,6 +319,10 @@ Wrangler is only for projects that already use it – a `wrangler.jsonc`, `wrang
 
 `cf` commands differ from Wrangler's; check `cf --help` or `cf cli search <what you want to do>` instead of guessing. If a `cf` command fails in a project that doesn't use Wrangler, don't fall back to Wrangler (including `npx wrangler`) without offering to report it.
 
+A migrated project wins over the Wrangler-file rule: if the project has a
+`cloudflare.config.ts` or lists `cf` in its `package.json`, use `cf` even
+when a Wrangler config file is still present.
+
 Cloud sessions: the `cloud-setup.sh` SessionStart hook installs `cf` with
 a pinned `cf` and says so (or says why not) at session start. `cf`
 authenticates there from `CLOUDFLARE_API_TOKEN` in the cloud environment.
