@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8389c3bc6c6784951c8a730c87911c8a5dbfa317",
+    "short_hash": "8389c3b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T19:17:15-07:00",
+    "message": "docs(387): changelog entry for refresh backoff and circuit breaker\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "f9af9f6bb08d75180cabc89694166148836aa7fc",
     "short_hash": "f9af9f6",
     "author": "Bryan Guffey",

@@ -47,7 +47,8 @@ use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity,
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
 use crate::web::refresh_backoff::{
-    backoff_delay, failure_signature, CircuitOpen, FailureStreak, RefreshBreaker, STREAK_KEY,
+    backoff_delay, failure_signature, BreakerReport, CircuitOpen, FailureStreak, RefreshBreaker,
+    STREAK_KEY,
 };
 use crate::web::scan_job::{finish_scan, set_progress, ScanManager, ScanReport, WebScanPhase};
 use crate::web::scan_setup::{
@@ -589,12 +590,14 @@ where
     F: FnOnce(RefreshPlan) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<ScanSummary>>,
 {
-    let started = clock(); // telemetry, and the breaker's notion of "now"
-                           // #387: a deployment-wide fault is already known — every refresh is
-                           // failing the same way — so this one is not attempted. Nothing below runs:
-                           // no marker reset, no scorer, no Bluesky, no GPU. It still flows through
-                           // the one bookkeeping site, so it is recorded as failed and backs off.
-    let refused = breaker.admit(started).err();
+    // Telemetry, and the breaker's notion of "now".
+    let started = clock();
+    // #387: a deployment-wide fault is already known — every refresh is
+    // failing the same way — so this one is not attempted. Nothing below runs:
+    // no marker reset, no scorer, no Bluesky, no GPU. It still flows through
+    // the one bookkeeping site, so it is recorded as failed and backs off.
+    let admission = breaker.admit(started);
+    let refused = admission.as_ref().err().cloned();
     let outcome: anyhow::Result<RefreshOutcome> = async {
         if let Some(open) = refused {
             return Err(anyhow::Error::new(open));
@@ -652,29 +655,38 @@ where
         Err(e) => (Err(anyhow::anyhow!("{e:#}")), "failed".to_string(), None),
     };
 
-    // #387: what this attempt teaches the breaker, and its cause.
+    // #387: what this attempt teaches the breaker, and what it adds to the
+    // user's streak (`cause`; `None` ends the streak).
     //
-    // A refusal carries the cause that opened the breaker, so a refused user's
-    // streak counts against the fault itself and is not reported back as a new
-    // failure. Any other `Err` is a failure with its own signature. A deferral
-    // never reached the deployment's machinery and proves nothing either way;
-    // every other `Ok` — even a resumable pause — got past whatever the breaker
-    // guards against.
+    // - A refusal was never admitted, so it reports nothing to the breaker;
+    //   it carries the cause that opened it, so the refused user's streak
+    //   counts against the fault itself.
+    // - Any other `Err` is a failure with its own signature.
+    // - Only a refresh that actually SCORED accounts is a breaker success.
+    //   Nothing due, a deferral, or a completion that scored nothing never
+    //   exercised the deployment, and must neither close the breaker nor
+    //   wipe its count (#387 review).
+    // - A resumable pause is neutral for the breaker — a cold start that
+    //   outlives the warm-up window pauses two users at once, which is not a
+    //   reason to stop the third — but it DOES extend the user's streak: a GPU
+    //   that times out on every attempt is a paid, repeated failure, and an
+    //   hourly retry forever is exactly what #387 exists to stop.
     let cause: Option<String> = match &outcome {
         Err(e) => Some(match e.downcast_ref::<CircuitOpen>() {
             Some(open) => open.cause.clone(),
-            None => {
-                let cause = failure_signature(&format!("{e:#}"));
-                breaker.record_failure(user_did, &cause, now);
-                cause
-            }
+            None => failure_signature(&format!("{e:#}")),
         }),
-        Ok(RefreshOutcome::Deferred(_)) => None,
-        Ok(_) => {
-            breaker.record_success();
-            None
-        }
+        Ok(RefreshOutcome::Resumable) => Some(RefreshOutcome::Resumable.label()),
+        Ok(_) => None,
     };
+    if let Ok(admitted) = admission {
+        let report = match &outcome {
+            Err(_) => BreakerReport::Failure(cause.as_deref().unwrap_or_default()),
+            Ok(o) if o.scored() > 0 => BreakerReport::Success,
+            Ok(_) => BreakerReport::Neutral,
+        };
+        breaker.report(admitted, user_did, report, now);
+    }
 
     // One ownership check for every write below (#344 F2). A worker whose
     // lease lapsed would otherwise move `next_refresh_at` and stamp an outcome
@@ -2162,6 +2174,18 @@ mod tests {
         (result, deadline_of(db.next_refresh_at(did).await.unwrap()))
     }
 
+    /// How a non-failing test attempt ends.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Ending {
+        /// No candidates, drained: `NothingDue` — touched nothing.
+        NothingDue,
+        /// One candidate, scored: `Completed` — real end-to-end work.
+        Scored,
+        /// One candidate, staging left in `burst`: `Resumable` — the shape a
+        /// GPU timeout leaves (#402).
+        Paused,
+    }
+
     /// One refresh attempt that completes with nothing due.
     async fn succeed_attempt(
         db: &Arc<dyn Database>,
@@ -2169,14 +2193,35 @@ mod tests {
         did: &str,
         at: DateTime<Utc>,
     ) {
-        struct Idle;
+        let completion = end_attempt(db, breaker, did, at, Ending::NothingDue).await;
+        assert_eq!(completion, crate::db::FinishCompletion::Complete);
+    }
+
+    /// One refresh attempt that ends as `ending`, without error. Returns the
+    /// queue-row completion, having finished the row.
+    async fn end_attempt(
+        db: &Arc<dyn Database>,
+        breaker: &RefreshBreaker,
+        did: &str,
+        at: DateTime<Utc>,
+        ending: Ending,
+    ) -> crate::db::FinishCompletion {
+        struct Idle(bool);
         #[async_trait]
         impl RefreshContextSource for Idle {
             async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
                 Ok(Some(usable_fingerprint()))
             }
             async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
-                Ok(vec![])
+                Ok(if self.0 {
+                    vec![RefreshCandidate {
+                        did: "did:plc:high".into(),
+                        handle: "high.h".into(),
+                        graph_distance: None,
+                    }]
+                } else {
+                    vec![]
+                })
             }
             async fn has_own_resumable_staging(&self, _: &str) -> anyhow::Result<bool> {
                 Ok(false)
@@ -2205,23 +2250,30 @@ mod tests {
         let books = CountingBooks::new(db.clone(), false);
         let clock = move || at;
         let report = run_refresh_with(mgr, &books, breaker, &clock, did, "h", &claim_id, || {
-            let ctx: Box<dyn RefreshContextSource> = Box::new(Idle);
-            Ok((ctx, |_plan: RefreshPlan| async {
+            let ctx: Box<dyn RefreshContextSource> = Box::new(Idle(ending != Ending::NothingDue));
+            Ok((ctx, move |_plan: RefreshPlan| async move {
                 Ok(ScanSummary {
-                    accounts_scored: 0,
+                    accounts_scored: usize::from(ending == Ending::Scored),
                     regathered: 0,
-                    degraded: false,
-                    final_phase: Some("done".into()),
+                    degraded: ending == Ending::Paused,
+                    final_phase: Some(
+                        if ending == Ending::Paused {
+                            "burst"
+                        } else {
+                            "done"
+                        }
+                        .into(),
+                    ),
                     skipped: Some(0),
                 })
             }))
         })
         .await
-        .expect("an idle refresh succeeds");
-        assert_eq!(report.completion, crate::db::FinishCompletion::Complete);
+        .expect("a non-failing refresh");
         db.finish_queued_scan(did, &claim_id, report.completion, None)
             .await
             .unwrap();
+        report.completion
     }
 
     fn hours(n: i64) -> chrono::Duration {
@@ -2396,10 +2448,30 @@ mod tests {
         );
     }
 
-    /// A success between two identical failures means the fault is not
-    /// deployment-wide: the breaker stays closed and the next user runs.
+    /// A refresh that SCORED accounts between two identical failures means the
+    /// fault is not deployment-wide: the breaker stays closed and the next
+    /// user runs.
     #[tokio::test]
     async fn a_success_in_between_keeps_the_breaker_closed() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let _failed = fail_attempt(&db, &breaker, "did:plc:a", t0, "policy mismatch").await;
+        end_attempt(&db, &breaker, "did:plc:b", t0, Ending::Scored).await;
+        let _failed = fail_attempt(&db, &breaker, "did:plc:c", t0, "policy mismatch").await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", t0, "something else").await;
+        let err = format!("{:#}", result.expect_err("its own failure"));
+        assert!(
+            err.contains("something else"),
+            "user d's own setup ran, so its own error surfaced: {err}"
+        );
+    }
+
+    /// #387 review: a user with nothing due never touched the GPU, so it is
+    /// no evidence the fault is gone. Two identical failures around it still
+    /// open the breaker.
+    #[tokio::test]
+    async fn nothing_due_in_between_does_not_hide_a_deployment_wide_fault() {
         let db = test_db();
         let breaker = RefreshBreaker::new("deploy-1");
         let t0 = Utc::now();
@@ -2407,10 +2479,39 @@ mod tests {
         succeed_attempt(&db, &breaker, "did:plc:b", t0).await;
         let _failed = fail_attempt(&db, &breaker, "did:plc:c", t0, "policy mismatch").await;
         let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", t0, "something else").await;
-        let err = format!("{:#}", result.expect_err("its own failure"));
+        let err = format!("{:#}", result.expect_err("refused"));
+        assert!(err.contains("deployment-wide"), "{err}");
+    }
+
+    /// #387 review: a GPU that times out on every attempt leaves every refresh
+    /// `Resumable`. That is a paid, repeated failure, so it backs off like one —
+    /// but it does not open the breaker: one cold start pausing two users at
+    /// once is not a reason to stop the third.
+    #[tokio::test]
+    async fn repeated_resumable_pauses_back_off_without_opening_the_breaker() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let deadline = |did: &'static str| {
+            let db = db.clone();
+            async move { deadline_of(db.next_refresh_at(did).await.unwrap()) }
+        };
+        assert_eq!(
+            end_attempt(&db, &breaker, "did:plc:u", t0, Ending::Paused).await,
+            crate::db::FinishCompletion::Resumable
+        );
+        let d1 = deadline("did:plc:u").await;
+        assert_eq!(d1, t0 + hours(1));
+        end_attempt(&db, &breaker, "did:plc:u", d1, Ending::Paused).await;
+        let d2 = deadline("did:plc:u").await;
+        assert_eq!(d2, d1 + hours(2));
+
+        end_attempt(&db, &breaker, "did:plc:v", d2, Ending::Paused).await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:w", d2, "its own error").await;
+        let err = format!("{:#}", result.expect_err("w ran"));
         assert!(
-            err.contains("something else"),
-            "user d's own setup ran, so its own error surfaced: {err}"
+            err.contains("its own error"),
+            "the breaker stayed closed: {err}"
         );
     }
 }

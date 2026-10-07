@@ -11417,6 +11417,28 @@
       "created_at": "2026-10-06T19:06:37.703731-07:00",
       "updated_at": "2026-10-06T19:06:37.703731-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"f9af9f6\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"src/web/refresh.rs\",\"src/web/admitter.rs\"]}"
+    },
+    {
+      "id": 1048,
+      "change_id": "5ba33a00-3475-4fda-b1e3-cfc13382eceb",
+      "node_type": "outcome",
+      "title": "PR #143 opened to staging for #387 backoff + breaker (3fe8313, f9af9f6, 8389c3b)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T19:28:55.626653-07:00",
+      "updated_at": "2026-10-06T19:28:55.626653-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"8389c3b\",\"confidence\":85}"
+    },
+    {
+      "id": 1049,
+      "change_id": "5fa28dc0-5a9f-41cd-8df6-9a36bd19004f",
+      "node_type": "action",
+      "title": "Prod config: CHARCOAL_CLASSIFIER_WARMUP_TIMEOUT_MS=300000 (cold-start mitigation; triggered redeploy 0115076e)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T19:38:51.038210-07:00",
+      "updated_at": "2026-10-06T19:38:51.038210-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -23387,6 +23409,28 @@
       "weight": 1.0,
       "rationale": "implementation",
       "created_at": "2026-10-06T19:16:42.844649-07:00"
+    },
+    {
+      "id": 1099,
+      "from_node_id": 1047,
+      "to_node_id": 1048,
+      "from_change_id": "e75fc415-d164-4050-bd65-2ae746acf424",
+      "to_change_id": "5ba33a00-3475-4fda-b1e3-cfc13382eceb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR for the implementation",
+      "created_at": "2026-10-06T19:28:56.968945-07:00"
+    },
+    {
+      "id": 1100,
+      "from_node_id": 1040,
+      "to_node_id": 1049,
+      "from_change_id": "906a0547-b59f-4d13-98de-58c46edf748d",
+      "to_change_id": "5fa28dc0-5a9f-41cd-8df6-9a36bd19004f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "mitigates the 180 s cold-start pauses observed in prod",
+      "created_at": "2026-10-06T19:38:52.625929-07:00"
     }
   ],
   "documents": [
