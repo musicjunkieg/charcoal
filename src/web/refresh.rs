@@ -174,7 +174,19 @@ pub async fn schedule_after_success(
         generation: scoring_revision(),
     };
     match db.apply_refresh_schedule(user_did, claim_id, write).await {
-        Ok(true) => {}
+        // A proven success — refresh or full scan — ends any refresh failure
+        // streak (#387, Codex review). Left behind, it would make a later
+        // redeploy pull this healthy deadline forward and hand its old count
+        // to the next unrelated failure. Only after the fenced write landed:
+        // a superseded worker must not touch the successor's state.
+        Ok(true) => {
+            if let Err(e) = db
+                .delete_scan_state(user_did, crate::web::refresh_backoff::STREAK_KEY)
+                .await
+            {
+                warn!(user_did, error = %format!("{e:#}"), "could not clear the refresh failure streak");
+            }
+        }
         Ok(false) => warn!(
             user_did,
             "the claim no longer owns the queue row — not scheduling the next refresh; \
@@ -1191,5 +1203,65 @@ mod tests {
         assert_eq!(at("did:plc:clean").await, later);
         assert_eq!(at("did:plc:due").await, earlier);
         assert_eq!(at("did:plc:corrupt").await, later);
+    }
+
+    /// Codex review (#387): a successful full scan proves the user healthy,
+    /// so it ends any refresh failure streak. A leftover streak would make a
+    /// later redeploy pull a valid nightly deadline forward, and hand its old
+    /// count to the next unrelated failure.
+    #[tokio::test]
+    async fn a_successful_scan_clears_the_refresh_failure_streak() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        user(&db, "did:plc:s", None, None).await;
+        db.set_scan_state(
+            "did:plc:s",
+            STREAK_KEY,
+            r#"{"count":4,"cause":"c","deploy":"d"}"#,
+        )
+        .await
+        .unwrap();
+        let claim = claimed(&db, "did:plc:s").await;
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:s",
+            &claim,
+            Utc::now(),
+            Duration::from_secs(24 * 3600),
+        )
+        .await;
+        assert_eq!(
+            db.get_scan_state("did:plc:s", STREAK_KEY).await.unwrap(),
+            None
+        );
+    }
+
+    /// The clear is fenced like the schedule it rides on: a worker whose claim
+    /// was lost writes nothing, streak included.
+    #[tokio::test]
+    async fn a_superseded_success_leaves_the_streak_alone() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        user(&db, "did:plc:s", None, None).await;
+        let streak = r#"{"count":4,"cause":"c","deploy":"d"}"#;
+        db.set_scan_state("did:plc:s", STREAK_KEY, streak)
+            .await
+            .unwrap();
+        let _claim = claimed(&db, "did:plc:s").await;
+        schedule_after_success(
+            db.as_ref(),
+            "did:plc:s",
+            "not-the-owner",
+            Utc::now(),
+            Duration::from_secs(24 * 3600),
+        )
+        .await;
+        assert_eq!(
+            db.get_scan_state("did:plc:s", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(streak)
+        );
     }
 }

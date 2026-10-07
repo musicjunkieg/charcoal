@@ -598,6 +598,10 @@ where
     // the one bookkeeping site, so it is recorded as failed and backs off.
     let admission = breaker.admit(started);
     let refused = admission.as_ref().err().cloned();
+    // Set when the pipeline stopped on a transient classifier failure rather
+    // than its cost ceiling — both come back `Resumable`, and only the first
+    // is a failure (#387, Codex review).
+    let mut interrupted = false;
     let outcome: anyhow::Result<RefreshOutcome> = async {
         if let Some(open) = refused {
             return Err(anyhow::Error::new(open));
@@ -628,6 +632,7 @@ where
             }
             Err(e) => return Err(e),
         };
+        interrupted = summary.interrupted;
         Ok(classify_refresh(
             candidates,
             has_own_resumable_staging,
@@ -668,15 +673,17 @@ where
     //   wipe its count (#387 review).
     // - A resumable pause is neutral for the breaker — a cold start that
     //   outlives the warm-up window pauses two users at once, which is not a
-    //   reason to stop the third — but it DOES extend the user's streak: a GPU
-    //   that times out on every attempt is a paid, repeated failure, and an
-    //   hourly retry forever is exactly what #387 exists to stop.
+    //   reason to stop the third. For the streak it depends on WHY it paused:
+    //   a GPU that times out on every attempt (`interrupted`) is a paid,
+    //   repeated failure and extends it; a cost cap is planned progress on a
+    //   large refresh and ends it, so a healthy refresh is not made to wait
+    //   hours between chunks.
     let cause: Option<String> = match &outcome {
         Err(e) => Some(match e.downcast_ref::<CircuitOpen>() {
             Some(open) => open.cause.clone(),
             None => failure_signature(&format!("{e:#}")),
         }),
-        Ok(RefreshOutcome::Resumable) => Some(RefreshOutcome::Resumable.label()),
+        Ok(RefreshOutcome::Resumable) if interrupted => Some("resumable:interrupted".to_string()),
         Ok(_) => None,
     };
     if let Ok(admitted) = admission {
@@ -2059,6 +2066,7 @@ mod tests {
             accounts_scored: 2,
             regathered: 0,
             degraded,
+            interrupted: false,
             final_phase: Some("done".into()),
             skipped,
         };
@@ -2109,6 +2117,7 @@ mod tests {
                 accounts_scored: 0,
                 regathered: 0,
                 degraded: false,
+                interrupted: false,
                 final_phase: phase.clone(),
                 skipped: Some(0),
             };
@@ -2184,6 +2193,9 @@ mod tests {
         /// One candidate, staging left in `burst`: `Resumable` — the shape a
         /// GPU timeout leaves (#402).
         Paused,
+        /// One candidate, staging left in `burst` by the cost ceiling:
+        /// `Resumable` too, but planned progress rather than a failure.
+        CostCapped,
     }
 
     /// One refresh attempt that completes with nothing due.
@@ -2255,9 +2267,10 @@ mod tests {
                 Ok(ScanSummary {
                     accounts_scored: usize::from(ending == Ending::Scored),
                     regathered: 0,
-                    degraded: ending == Ending::Paused,
+                    degraded: ending != Ending::Scored && ending != Ending::NothingDue,
+                    interrupted: ending == Ending::Paused,
                     final_phase: Some(
-                        if ending == Ending::Paused {
+                        if matches!(ending, Ending::Paused | Ending::CostCapped) {
                             "burst"
                         } else {
                             "done"
@@ -2512,6 +2525,36 @@ mod tests {
         assert!(
             err.contains("its own error"),
             "the breaker stayed closed: {err}"
+        );
+    }
+
+    /// Codex review (#387): a cost cap is a healthy large refresh making
+    /// planned progress. It must never back off — each chunk resumes an hour
+    /// later, every time, and it clears any earlier streak.
+    #[tokio::test]
+    async fn cost_capped_refreshes_never_back_off() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let (_, d0) = fail_attempt(&db, &breaker, "did:plc:u", t0, "policy mismatch").await;
+        let mut at = d0;
+        for _ in 0..3 {
+            assert_eq!(
+                end_attempt(&db, &breaker, "did:plc:u", at, Ending::CostCapped).await,
+                crate::db::FinishCompletion::Resumable
+            );
+            let next = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
+            assert_eq!(
+                next,
+                at + hours(1),
+                "a cost-capped chunk resumes in an hour"
+            );
+            at = next;
+        }
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None,
+            "planned progress ends the streak"
         );
     }
 }

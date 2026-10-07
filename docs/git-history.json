@@ -1,5 +1,13 @@
 [
   {
+    "hash": "8c5780a54d16a092667d63fee4c16dbfbbeea939",
+    "short_hash": "8c5780a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T19:54:54-07:00",
+    "message": "fix(387): only the probe moves an open breaker; only scored work is success\n\nInternal review + CodeRabbit (PR #143):\n- admit() now hands out an Admission; while the breaker is open only the\n  current probe's report can change it. A refresh that started before the\n  breaker opened can no longer close it or stretch the cool-down. A probe\n  that proves nothing frees the slot at once.\n- Breaker success = a refresh that SCORED accounts. Nothing due, deferrals\n  and resumable pauses are neutral, so they neither close the breaker nor\n  wipe its count.\n- A Resumable outcome now extends the per-user streak, so a GPU that times\n  out on every attempt backs off instead of retrying hourly forever.\n- failure_signature keeps bare HTTP status codes (100-599): a 404 and a\n  503 are different causes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "8389c3bc6c6784951c8a730c87911c8a5dbfa317",
     "short_hash": "8389c3b",
     "author": "Bryan Guffey",

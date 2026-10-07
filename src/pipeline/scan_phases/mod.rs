@@ -239,6 +239,11 @@ pub struct ScanSummary {
     pub regathered: usize,
     /// True when a `CostCapped` burst left the scan incomplete/resumable.
     pub degraded: bool,
+    /// True when a TRANSIENT classifier failure stopped the burst, as opposed
+    /// to the cost ceiling. Both leave the scan resumable, but only this one
+    /// is a failure: a cost cap is planned, paid-for progress, while a GPU
+    /// that times out every attempt is the repeated failure #387 backs off.
+    pub interrupted: bool,
     /// The `scan_phase` marker as this call returned — the authority on
     /// whether the staging actually drained. `None` when it could not be read,
     /// which is never proof of completion.
@@ -439,6 +444,7 @@ pub async fn run_phased_scan(
                     "burst interrupted by transient classifier failure — scan resumable"
                 );
                 summary.degraded = true;
+                summary.interrupted = true;
                 return finish_summary(db, user_did, deps, summary).await;
             }
             BurstOutcome::Complete { errored } => {

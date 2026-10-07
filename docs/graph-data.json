@@ -11439,6 +11439,17 @@
       "created_at": "2026-10-06T19:38:51.038210-07:00",
       "updated_at": "2026-10-06T19:38:51.038210-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":80}"
+    },
+    {
+      "id": 1050,
+      "change_id": "2c178b73-3733-4d96-bd10-9ed3e1d6552f",
+      "node_type": "action",
+      "title": "#387 review fixes: probe token, scored-only success, resumable extends streak, keep HTTP codes (internal review + CodeRabbit)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T19:55:01.722135-07:00",
+      "updated_at": "2026-10-06T19:55:01.722135-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"8c5780a\",\"confidence\":85,\"files\":[\"src/web/refresh_backoff.rs\",\"src/web/refresh_scan.rs\"]}"
     }
   ],
   "edges": [
@@ -23431,6 +23442,17 @@
       "weight": 1.0,
       "rationale": "mitigates the 180 s cold-start pauses observed in prod",
       "created_at": "2026-10-06T19:38:52.625929-07:00"
+    },
+    {
+      "id": 1101,
+      "from_node_id": 1048,
+      "to_node_id": 1050,
+      "from_change_id": "5ba33a00-3475-4fda-b1e3-cfc13382eceb",
+      "to_change_id": "2c178b73-3733-4d96-bd10-9ed3e1d6552f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "review findings on the PR",
+      "created_at": "2026-10-06T19:55:03.197073-07:00"
     }
   ],
   "documents": [
