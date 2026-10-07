@@ -44,14 +44,19 @@ install_cf() {
         cf_is_pinned "$DEST/node_modules/.bin/cf" || { echo "installed cf does not report v$CF_PIN"; return 1; }
     fi
     # Put it on PATH: link into a bin dir that is already there (next to
-    # npm, or ~/.local/bin). That only counts if the pinned cf is what
-    # then resolves — another cf earlier on PATH would still win.
-    for bindir in "$(dirname "$(command -v npm 2>/dev/null)")" "$HOME/.local/bin"; do
-        if [ -d "$bindir" ] && [ -w "$bindir" ] \
-            && ln -sf "$DEST/node_modules/.bin/cf" "$bindir/cf" 2>/dev/null \
-            && cf_is_pinned; then
-            return 0
+    # npm, or ~/.local/bin). Only into a vacant slot or over our own
+    # earlier link — never replace someone else's cf — and it only
+    # counts if the pinned cf is what then resolves (another cf earlier
+    # on PATH would still win).
+    local npm_bin target ours="$DEST/node_modules/.bin/cf"
+    npm_bin=$(command -v npm 2>/dev/null)
+    for bindir in "${npm_bin:+$(dirname "$npm_bin")}" "$HOME/.local/bin"; do
+        [ -n "$bindir" ] && [ -d "$bindir" ] && [ -w "$bindir" ] || continue
+        target="$bindir/cf"
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            [ -L "$target" ] && [ "$(readlink "$target")" = "$ours" ] || continue
         fi
+        ln -sf "$ours" "$target" 2>/dev/null && cf_is_pinned && return 0
     done
     # Otherwise prepend through the session env file, which outranks
     # anything already on PATH.
