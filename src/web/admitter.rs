@@ -572,6 +572,17 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
     // bigger question (a panicking loop that respawns can hot-loop) and is left
     // for the supervision work; being loud is the part that matters now.
     tokio::spawn(async move {
+        let refresh = crate::web::refresh::refresh_interval_from_env();
+        // #387: before the first tick, so a user the previous deployment had
+        // backed off for a day is claimed on this one's first pass.
+        if refresh.is_some() {
+            crate::web::refresh::pull_forward_after_deploy(
+                db.as_ref(),
+                crate::web::refresh_backoff::RefreshBreaker::global().deploy(),
+                chrono::Utc::now(),
+            )
+            .await;
+        }
         let admitter = tokio::spawn(run_admitter(
             db,
             launcher,
@@ -579,7 +590,7 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
             rx,
             TICK,
             scan_concurrency,
-            crate::web::refresh::refresh_interval_from_env(),
+            refresh,
         ));
         match admitter.await {
             Ok(()) => error!(

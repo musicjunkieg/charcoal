@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3fe83136c3135705704fc602c5914b6a0004ff6e",
+    "short_hash": "3fe8313",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T18:49:33-07:00",
+    "message": "feat(387): refresh failure backoff and circuit breaker primitives\n\nbackoff_delay (1h doubling, 24h cap), failure_signature (masks ids and\ncounts so identical causes compare equal), FailureStreak (resets on a new\ncause or a new deployment), and a process-wide RefreshBreaker that opens\nwhen two different users fail with the same cause, probes once per\ncool-down, and doubles the cool-down on a repeat failure. Not wired in yet.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "3d6a1f85f2a38aa2f7cbd83d774f06397ad0fcdf",
     "short_hash": "3d6a1f8",
     "author": "Bryan Guffey",

@@ -11362,6 +11362,50 @@
       "created_at": "2026-10-06T18:42:29.266519-07:00",
       "updated_at": "2026-10-06T18:42:29.266519-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":85,\"prompt\":\"Let's pick up with #387, I believe?\"}"
+    },
+    {
+      "id": 1043,
+      "change_id": "4cd3707a-806d-4695-b9e1-de77a944ec5e",
+      "node_type": "action",
+      "title": "#387: backoff + breaker primitives (refresh_backoff.rs), TDD 16 tests",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T18:49:40.573874-07:00",
+      "updated_at": "2026-10-06T18:49:40.573874-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"3fe8313\",\"confidence\":85,\"files\":[\"src/web/refresh_backoff.rs\"]}"
+    },
+    {
+      "id": 1044,
+      "change_id": "3450fef3-3bf2-426b-b77f-78520a207797",
+      "node_type": "option",
+      "title": "Streak in scan_state JSON (no migration) + process-local breaker (deploy resets it)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T18:49:43.116666-07:00",
+      "updated_at": "2026-10-06T18:49:43.116666-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":80}"
+    },
+    {
+      "id": 1045,
+      "change_id": "726ae727-719f-4899-8d81-fa6dae65672f",
+      "node_type": "option",
+      "title": "New users columns (migration v20) + due-SQL deploy clause",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T18:49:43.128300-07:00",
+      "updated_at": "2026-10-06T18:49:43.128300-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":50}"
+    },
+    {
+      "id": 1046,
+      "change_id": "082d42d6-45a9-41d2-9d14-70f3b329a8d1",
+      "node_type": "decision",
+      "title": "Choose scan_state streak + process-local breaker; deploy reset via startup pull-forward of backed-off users",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T18:49:45.672192-07:00",
+      "updated_at": "2026-10-06T18:49:45.672192-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":80}"
     }
   ],
   "edges": [
@@ -23266,6 +23310,61 @@
       "weight": 1.0,
       "rationale": "#350 merged",
       "created_at": "2026-10-04T20:57:05.238563-07:00"
+    },
+    {
+      "id": 1093,
+      "from_node_id": 1042,
+      "to_node_id": 1044,
+      "from_change_id": "6d7475f5-da18-4407-b40d-8288834a4f03",
+      "to_change_id": "3450fef3-3bf2-426b-b77f-78520a207797",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-06T18:49:45.678980-07:00"
+    },
+    {
+      "id": 1094,
+      "from_node_id": 1042,
+      "to_node_id": 1045,
+      "from_change_id": "6d7475f5-da18-4407-b40d-8288834a4f03",
+      "to_change_id": "726ae727-719f-4899-8d81-fa6dae65672f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-06T18:49:45.684901-07:00"
+    },
+    {
+      "id": 1095,
+      "from_node_id": 1044,
+      "to_node_id": 1046,
+      "from_change_id": "3450fef3-3bf2-426b-b77f-78520a207797",
+      "to_change_id": "082d42d6-45a9-41d2-9d14-70f3b329a8d1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: no schema change, deploy naturally resets breaker",
+      "created_at": "2026-10-06T18:49:45.691106-07:00"
+    },
+    {
+      "id": 1096,
+      "from_node_id": 1045,
+      "to_node_id": 1046,
+      "from_change_id": "726ae727-719f-4899-8d81-fa6dae65672f",
+      "to_change_id": "082d42d6-45a9-41d2-9d14-70f3b329a8d1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: migration on two backends for a few bookkeeping fields",
+      "created_at": "2026-10-06T18:49:45.697816-07:00"
+    },
+    {
+      "id": 1097,
+      "from_node_id": 1046,
+      "to_node_id": 1043,
+      "from_change_id": "082d42d6-45a9-41d2-9d14-70f3b329a8d1",
+      "to_change_id": "4cd3707a-806d-4695-b9e1-de77a944ec5e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "implementation",
+      "created_at": "2026-10-06T18:49:45.705065-07:00"
     }
   ],
   "documents": [

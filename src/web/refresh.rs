@@ -195,7 +195,26 @@ pub async fn schedule_after_success(
 /// the runbook can see the user is behind. One write, fenced on `claim_id`
 /// exactly as [`schedule_after_success`] is.
 pub async fn schedule_retry(db: &dyn Database, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
-    let at = plus(now, Duration::from_secs(REFRESH_RETRY_HOURS * 3600));
+    schedule_retry_after(
+        db,
+        user_did,
+        claim_id,
+        now,
+        Duration::from_secs(REFRESH_RETRY_HOURS * 3600),
+    )
+    .await
+}
+
+/// [`schedule_retry`] with the delay chosen by the caller — the backoff for a
+/// repeated identical failure (#387).
+pub async fn schedule_retry_after(
+    db: &dyn Database,
+    user_did: &str,
+    claim_id: &str,
+    now: DateTime<Utc>,
+    delay: Duration,
+) {
+    let at = plus(now, delay);
     let write = RefreshScheduleWrite::Retry {
         at_rfc3339: &at,
         attempted_generation: scoring_revision(),
@@ -209,6 +228,67 @@ pub async fn schedule_retry(db: &dyn Database, user_did: &str, claim_id: &str, n
         ),
         Err(e) => warn!(error = %format!("{e:#}"), "could not schedule the refresh retry"),
     }
+}
+
+/// On startup: make every user who is backing off under an EARLIER deployment
+/// due now (#387). Returns how many were pulled forward.
+///
+/// A deploy is how a fix lands — a code change, or a variable change, which
+/// Railway applies by redeploying — so an operator who fixed the fault must
+/// not wait out a backoff the old deployment stretched to 24 hours. The
+/// streak itself is left as is: the next failure sees the new deployment id
+/// and starts counting again from one.
+///
+/// Unfenced, unlike the scheduling writes: no claim is held at boot. That is
+/// safe because it only ever moves a deadline EARLIER, and a user who already
+/// has queue work is skipped by the tick anyway. Best-effort throughout — a
+/// failure here costs at most the old backoff.
+pub async fn pull_forward_after_deploy(
+    db: &dyn Database,
+    deploy: &str,
+    now: DateTime<Utc>,
+) -> usize {
+    use crate::web::refresh_backoff::{FailureStreak, STREAK_KEY};
+    let users = match db.list_users().await {
+        Ok(u) => u,
+        Err(e) => {
+            warn!(error = %format!("{e:#}"), "could not list users to reset refresh backoff after deploy");
+            return 0;
+        }
+    };
+    let mut pulled = 0;
+    for user in users {
+        let Ok(Some(raw)) = db.get_scan_state(&user.did, STREAK_KEY).await else {
+            continue;
+        };
+        let Ok(streak) = serde_json::from_str::<FailureStreak>(&raw) else {
+            continue;
+        };
+        if streak.deploy == deploy {
+            continue;
+        }
+        let due_later = match db.next_refresh_at(&user.did).await {
+            Ok(Some(at)) => DateTime::parse_from_rfc3339(&at).is_ok_and(|at| at > now),
+            _ => false,
+        };
+        if !due_later {
+            continue;
+        }
+        match db.schedule_refresh(&user.did, &now.to_rfc3339()).await {
+            Ok(()) => pulled += 1,
+            Err(e) => {
+                warn!(user_did = %user.did, error = %format!("{e:#}"), "could not reset refresh backoff after deploy")
+            }
+        }
+    }
+    if pulled > 0 {
+        info!(
+            pulled,
+            deploy,
+            "new deployment: users backing off after repeated refresh failures are due again"
+        );
+    }
+    pulled
 }
 
 #[cfg(test)]
@@ -1053,5 +1133,63 @@ mod tests {
                 .as_deref(),
             Some(scoring_revision())
         );
+    }
+
+    /// #387: a deploy may be the fix, so a user backed off under an EARLIER
+    /// deployment is due again now — not at the end of a 24-hour backoff. A
+    /// streak from this deployment, no streak at all, and a deadline already
+    /// due are all left alone.
+    #[tokio::test]
+    async fn a_deploy_pulls_backed_off_users_forward() {
+        use crate::web::refresh_backoff::{FailureStreak, STREAK_KEY};
+        let db = db();
+        let now = Utc::now();
+        let later = (now + ChronoDuration::hours(20)).to_rfc3339();
+        let earlier = (now - ChronoDuration::hours(1)).to_rfc3339();
+        let streak = |deploy: &str| {
+            serde_json::to_string(&FailureStreak {
+                count: 5,
+                cause: "policy mismatch".into(),
+                deploy: deploy.into(),
+            })
+            .unwrap()
+        };
+        for (did, at, deploy) in [
+            ("did:plc:old", &later, Some("deploy-1")),
+            ("did:plc:same", &later, Some("deploy-2")),
+            ("did:plc:clean", &later, None),
+            ("did:plc:due", &earlier, Some("deploy-1")),
+        ] {
+            db.upsert_user(did, "h").await.unwrap();
+            db.schedule_refresh(did, at).await.unwrap();
+            if let Some(d) = deploy {
+                db.set_scan_state(did, STREAK_KEY, &streak(d))
+                    .await
+                    .unwrap();
+            }
+        }
+        // A corrupt streak is skipped, not fatal.
+        db.upsert_user("did:plc:corrupt", "h").await.unwrap();
+        db.schedule_refresh("did:plc:corrupt", &later)
+            .await
+            .unwrap();
+        db.set_scan_state("did:plc:corrupt", STREAK_KEY, "{not json")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", now).await,
+            1
+        );
+
+        let at = |did: &'static str| {
+            let db = db.clone();
+            async move { db.next_refresh_at(did).await.unwrap().unwrap() }
+        };
+        assert_eq!(at("did:plc:old").await, now.to_rfc3339());
+        assert_eq!(at("did:plc:same").await, later);
+        assert_eq!(at("did:plc:clean").await, later);
+        assert_eq!(at("did:plc:due").await, earlier);
+        assert_eq!(at("did:plc:corrupt").await, later);
     }
 }
