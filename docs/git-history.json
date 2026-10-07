@@ -1,5 +1,13 @@
 [
   {
+    "hash": "a2d50627adbc284f4a0c3c0824f1feb6583bb1b9",
+    "short_hash": "a2d5062",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T23:02:33-07:00",
+    "message": "fix(387): breaker counts failures within a day; sweep only lifts repeated backoffs\n\nInternal review:\n- The closed breaker kept every failing user forever, so two same-cause\n  per-user faults days apart (with only neutral nights between) tripped it.\n  Failures now count only within BREAKER_WINDOW (24 h).\n- During a rolling deploy the RETIRING container's sweep could pull forward\n  a backoff the new deployment had just written. The sweep now only lifts\n  streaks of 2+: a new deployment cannot reach 2 inside an overlap window\n  (the second failure needs a retry an hour after the first), and a\n  1-failure retry is the base hour anyway.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "826b270267ee34d9639aebe83984939f2b3a0ff0",
     "short_hash": "826b270",
     "author": "Bryan Guffey",

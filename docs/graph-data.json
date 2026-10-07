@@ -11461,6 +11461,17 @@
       "created_at": "2026-10-06T22:18:27.302984-07:00",
       "updated_at": "2026-10-06T22:18:27.302984-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"826b270\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"src/web/refresh.rs\",\"src/web/admitter.rs\",\"src/pipeline/scan_phases/mod.rs\"]}"
+    },
+    {
+      "id": 1052,
+      "change_id": "5880e9b8-b11e-435c-b139-be8b072a476f",
+      "node_type": "action",
+      "title": "#387 CodeRabbit round 2 + internal review: non-blocking sweep, test encoding repair, 24h breaker window, sweep lifts only 2+ streaks",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T23:02:40.629520-07:00",
+      "updated_at": "2026-10-06T23:02:40.629520-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"a2d5062\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23475,6 +23486,17 @@
       "weight": 1.0,
       "rationale": "Codex review after internal review fixes",
       "created_at": "2026-10-06T22:18:28.677336-07:00"
+    },
+    {
+      "id": 1103,
+      "from_node_id": 1051,
+      "to_node_id": 1052,
+      "from_change_id": "aa75e0f9-b745-43f0-9dea-2edc15fe24f2",
+      "to_change_id": "5880e9b8-b11e-435c-b139-be8b072a476f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "next review round",
+      "created_at": "2026-10-06T23:02:41.933357-07:00"
     }
   ],
   "documents": [

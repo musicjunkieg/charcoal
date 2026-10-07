@@ -827,15 +827,24 @@ async fn recover_account(
     // account, transient fetch failure) is contained rather than aborting the
     // whole finalize loop via `?`.
     match recover_account_inner(db, user_did, account_did, candidate, deps).await {
-        Ok(true) => {
+        Ok(Recovery::Scored) => {
             summary.accounts_scored += 1;
             summary.regathered += 1;
             true
         }
-        Ok(false) => {
+        Ok(Recovery::NotScored) => {
             // Recovery completed without error but did not score the account
             // (cost-cap, or still incomplete after one pass). Already warned
             // inside the helper.
+            false
+        }
+        Ok(Recovery::Interrupted) => {
+            // A transient classifier failure on the recovery burst is the same
+            // fault as one on the main burst, and must read as one (#387,
+            // Codex review): without this a refresh would report a completion
+            // with skips, clear its failure streak, and retry hourly through a
+            // classifier outage.
+            summary.interrupted = true;
             false
         }
         Err(e) => {
@@ -849,9 +858,19 @@ async fn recover_account(
     }
 }
 
+/// How one account's recovery pass ended, short of an error.
+enum Recovery {
+    Scored,
+    /// A cost cap, or still incomplete after one pass.
+    NotScored,
+    /// The re-burst was stopped by a transient classifier failure.
+    Interrupted,
+}
+
 /// The fallible body of [`recover_account`]: clear stale staging, re-gather,
-/// re-burst, re-finalize. Returns `Ok(true)` when the account was scored,
-/// `Ok(false)` when a cost-cap or still-incomplete verdict stops recovery, and
+/// re-burst, re-finalize. Returns `Scored` when the account was scored,
+/// `NotScored` when a cost-cap or still-incomplete verdict stops recovery,
+/// `Interrupted` when a transient classifier failure stops the re-burst, and
 /// `Err` on any DB/fetch failure (caught by the caller, never propagated to the
 /// finalize loop).
 async fn recover_account_inner(
@@ -860,7 +879,7 @@ async fn recover_account_inner(
     account_did: &str,
     candidate: &CandidateInput,
     deps: &PhasedScanDeps<'_>,
-) -> Result<bool> {
+) -> Result<Recovery> {
     // Clear any stale staging from the prior attempt before re-gathering.
     // finalize's incomplete-verdict path intentionally leaves staging in place,
     // so the prior queue rows / blob still exist; if we re-gather without
@@ -889,31 +908,41 @@ async fn recover_account_inner(
     ) {
         // Re-gather hit a terminal Stage-1 outcome: the score was written by
         // gather itself, nothing was enqueued. Done — no re-burst / re-finalize.
-        return Ok(true);
+        return Ok(Recovery::Scored);
     }
 
     // Drain the account's freshly-enqueued pending rows. A cost-cap here just
-    // means the retry could not complete — stop and report not-scored.
-    if matches!(
-        run_burst(
-            db,
-            user_did,
-            deps.classifier,
-            deps.burst_concurrency,
-            deps.burst_batch,
-        )
-        .await?,
-        BurstOutcome::CostCapped
-    ) {
-        warn!(
-            account_did,
-            "re-burst hit the cost ceiling during re-gather — skipping account"
-        );
-        return Ok(false);
+    // means the retry could not complete — stop and report not-scored. A
+    // transient interruption stops it too: finalizing over rows still pending
+    // could only ask for another re-gather.
+    match run_burst(
+        db,
+        user_did,
+        deps.classifier,
+        deps.burst_concurrency,
+        deps.burst_batch,
+    )
+    .await?
+    {
+        BurstOutcome::CostCapped => {
+            warn!(
+                account_did,
+                "re-burst hit the cost ceiling during re-gather — skipping account"
+            );
+            return Ok(Recovery::NotScored);
+        }
+        BurstOutcome::Interrupted => {
+            warn!(
+                account_did,
+                "re-burst interrupted by a transient classifier failure — skipping account"
+            );
+            return Ok(Recovery::Interrupted);
+        }
+        BurstOutcome::Complete { .. } => {}
     }
 
     match finalize_one(db, user_did, account_did, deps).await? {
-        FinalizeOutcome::Scored => Ok(true),
+        FinalizeOutcome::Scored => Ok(Recovery::Scored),
         FinalizeOutcome::NeedsRegather => {
             // Still incomplete after one recovery pass — give up on this account
             // (bounded) rather than loop forever.
@@ -921,7 +950,7 @@ async fn recover_account_inner(
                 account_did,
                 "account still needs re-gather after one recovery pass — skipping"
             );
-            Ok(false)
+            Ok(Recovery::NotScored)
         }
     }
 }

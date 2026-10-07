@@ -594,7 +594,7 @@ where
     let started = clock();
     // #387: a deployment-wide fault is already known — every refresh is
     // failing the same way — so this one is not attempted. Nothing below runs:
-    // no marker reset, no scorer, no Bluesky, no GPU. It still flows through
+    // no scorer, no Bluesky, no GPU (only the marker reset). It still flows through
     // the one bookkeeping site, so it is recorded as failed and backs off.
     let admission = breaker.admit(started);
     let refused = admission.as_ref().err().cloned();
@@ -603,13 +603,17 @@ where
     // is a failure (#387, Codex review).
     let mut interrupted = false;
     let outcome: anyhow::Result<RefreshOutcome> = async {
-        if let Some(open) = refused {
-            return Err(anyhow::Error::new(open));
-        }
+        // Markers first, even for a refusal: a refused run is still a run,
+        // and recording its `failed` outcome against the PREVIOUS run's id
+        // and counts would give the runbook a mixed record (Codex review).
+        // This is a `scan_state` write, not Bluesky or GPU work.
         books
             .reset_markers(user_did, claim_id)
             .await
             .context("resetting refresh markers")?;
+        if let Some(open) = refused {
+            return Err(anyhow::Error::new(open));
+        }
         let (ctx, pipeline) = setup().context("refresh setup")?;
         let plan = match prepare_refresh(ctx.as_ref(), user_did, actor_handle).await? {
             Ok(plan) => plan,
@@ -683,7 +687,9 @@ where
             Some(open) => open.cause.clone(),
             None => failure_signature(&format!("{e:#}")),
         }),
-        Ok(RefreshOutcome::Resumable) if interrupted => Some("resumable:interrupted".to_string()),
+        // Whatever the outcome: a recovery-burst timeout ends as a
+        // completion with skips, not a pause (Codex review).
+        Ok(_) if interrupted => Some("classifier_interrupted".to_string()),
         Ok(_) => None,
     };
     if let Ok(admitted) = admission {
@@ -2196,6 +2202,9 @@ mod tests {
         /// One candidate, staging left in `burst` by the cost ceiling:
         /// `Resumable` too, but planned progress rather than a failure.
         CostCapped,
+        /// Drained, but one account's RECOVERY burst timed out: completed
+        /// with a skip, and interrupted (#387, Codex review).
+        RecoveryInterrupted,
     }
 
     /// One refresh attempt that completes with nothing due.
@@ -2268,7 +2277,7 @@ mod tests {
                     accounts_scored: usize::from(ending == Ending::Scored),
                     regathered: 0,
                     degraded: ending != Ending::Scored && ending != Ending::NothingDue,
-                    interrupted: ending == Ending::Paused,
+                    interrupted: matches!(ending, Ending::Paused | Ending::RecoveryInterrupted),
                     final_phase: Some(
                         if matches!(ending, Ending::Paused | Ending::CostCapped) {
                             "burst"
@@ -2277,7 +2286,7 @@ mod tests {
                         }
                         .into(),
                     ),
-                    skipped: Some(0),
+                    skipped: Some(i64::from(ending == Ending::RecoveryInterrupted)),
                 })
             }))
         })
@@ -2432,6 +2441,16 @@ mod tests {
         .await;
         let err = format!("{:#}", result.expect_err("refused"));
         assert!(err.contains("deployment-wide"), "{err}");
+        // Codex review: a refused run is still a run. Its markers are reset
+        // like any other, so the recorded outcome is never paired with the
+        // PREVIOUS run's id and counts.
+        assert_eq!(
+            db.get_scan_state("did:plc:c", "refresh_last_run_id")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(claim_id.as_str())
+        );
         assert_eq!(
             db.get_scan_state("did:plc:c", "refresh_last_outcome")
                 .await
@@ -2556,5 +2575,24 @@ mod tests {
             None,
             "planned progress ends the streak"
         );
+    }
+
+    /// Codex review (#387): a classifier timeout on an account's RECOVERY
+    /// burst ends the run as a completion with skips, not a pause. It is
+    /// still the same paid, repeating fault, so it extends the streak.
+    #[tokio::test]
+    async fn an_interrupted_recovery_backs_off_too() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        assert_eq!(
+            end_attempt(&db, &breaker, "did:plc:u", t0, Ending::RecoveryInterrupted).await,
+            crate::db::FinishCompletion::CompleteWithSkips
+        );
+        let d1 = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
+        assert_eq!(d1, t0 + hours(1));
+        end_attempt(&db, &breaker, "did:plc:u", d1, Ending::RecoveryInterrupted).await;
+        let d2 = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
+        assert_eq!(d2, d1 + hours(2));
     }
 }
