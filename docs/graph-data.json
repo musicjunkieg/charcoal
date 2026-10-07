@@ -11318,6 +11318,50 @@
       "created_at": "2026-10-04T20:57:05.219246-07:00",
       "updated_at": "2026-10-04T20:57:05.219246-07:00",
       "metadata_json": "{\"branch\":\"fix/133-ranked-hides-gone\",\"confidence\":90}"
+    },
+    {
+      "id": 1039,
+      "change_id": "a4360334-203b-4503-8b61-c1037a72e9cd",
+      "node_type": "outcome",
+      "title": "#402 merged to staging via PR #140 (poll timeout + poll transport + body read -> ClassifierTransientError); CodeRabbit outside-diff fixed in 1355eeb",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-05T00:49:54.307617-07:00",
+      "updated_at": "2026-10-05T00:49:54.307617-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-poll-timeout-transient\",\"confidence\":90}"
+    },
+    {
+      "id": 1040,
+      "change_id": "906a0547-b59f-4d13-98de-58c46edf748d",
+      "node_type": "observation",
+      "title": "Prod after #141: 2 refreshes paused resumable on 180 s cold-start timeouts (#402 working as designed, 0 skips); resume ~03:42Z. Suggests longer first-batch warm-up / staggered fan-out (#387/#388)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-05T19:44:12.928459-07:00",
+      "updated_at": "2026-10-05T19:44:12.928459-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-poll-timeout-transient\",\"confidence\":85}"
+    },
+    {
+      "id": 1041,
+      "change_id": "2241be44-5de5-4c90-aebc-a99174fc0d2c",
+      "node_type": "outcome",
+      "title": "Prod ffeb15d verified: 3/3 refreshes completed (2 after resuming from 180 s cold-start pauses), 3 r2 scores, 0 skips",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-05T20:50:32.481049-07:00",
+      "updated_at": "2026-10-05T20:50:32.481049-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-poll-timeout-transient\",\"confidence\":92}"
+    },
+    {
+      "id": 1042,
+      "change_id": "6d7475f5-da18-4407-b40d-8288834a4f03",
+      "node_type": "goal",
+      "title": "#387 rest: per-user failure backoff + deployment-wide circuit breaker for refresh",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-06T18:42:29.266519-07:00",
+      "updated_at": "2026-10-06T18:42:29.266519-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":85,\"prompt\":\"Let's pick up with #387, I believe?\"}"
     }
   ],
   "edges": [
