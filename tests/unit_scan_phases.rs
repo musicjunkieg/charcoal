@@ -3684,6 +3684,9 @@ mod orchestration_tests {
         .unwrap();
 
         assert!(summary.degraded, "cost cap must mark the scan degraded");
+        // #387: a cost cap is planned progress, not a failure, so it must not
+        // read as the transient interruption that extends a backoff streak.
+        assert!(!summary.interrupted, "a cost cap is not an interruption");
         assert_eq!(
             summary.accounts_scored, 0,
             "no account finalized in a cost-capped call"
@@ -3704,6 +3707,157 @@ mod orchestration_tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// #387: the other resumable stop. A GPU that times out (a transient
+    /// classifier error) leaves the same degraded, still-in-burst state as a
+    /// cost cap, but it is a FAILURE — and `interrupted` is the only field
+    /// that tells the refresh's backoff which of the two happened.
+    #[tokio::test]
+    async fn a_transient_classifier_failure_is_reported_as_interrupted() {
+        struct TimesOut;
+        #[async_trait::async_trait]
+        impl ToxicityClassifier for TimesOut {
+            async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+                Err(
+                    charcoal::toxicity::classifier::ClassifierTransientError::new(
+                        "RunPod job did not complete within 180s",
+                    )
+                    .into(),
+                )
+            }
+            fn name(&self) -> &'static str {
+                "times-out"
+            }
+            fn model_id(&self) -> &'static str {
+                "times-out"
+            }
+            fn policy_version(&self) -> &'static str {
+                "times-out"
+            }
+            fn threshold(&self) -> f32 {
+                0.0
+            }
+        }
+
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchtimeout00000000000000";
+        let mut by_handle = HashMap::new();
+        by_handle.insert(
+            "timeout.bsky.social".to_string(),
+            survivor_sample("timeout"),
+        );
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(TimesOut);
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &[candidate(acct, "timeout.bsky.social")],
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::refresh(),
+        )
+        .await
+        .unwrap();
+
+        assert!(summary.degraded);
+        assert!(summary.interrupted, "a timeout is an interruption");
+        assert_eq!(summary.final_phase.as_deref(), Some("burst"), "resumable");
+    }
+
+    /// #387 (Codex review): an account that needs a re-gather is re-burst on
+    /// the recovery path. If THAT burst times out, the run must say it was
+    /// interrupted — otherwise a refresh reports a clean-looking completion
+    /// with skips, its failure streak is cleared, and a classifier outage that
+    /// only bites during recovery retries hourly at full price.
+    #[tokio::test]
+    async fn an_interrupted_recovery_burst_is_reported_as_interrupted() {
+        struct TimesOut;
+        #[async_trait::async_trait]
+        impl ToxicityClassifier for TimesOut {
+            async fn classify(&self, _content: &str) -> Result<ClassifierVerdict> {
+                Err(
+                    charcoal::toxicity::classifier::ClassifierTransientError::new(
+                        "RunPod job did not complete within 180s",
+                    )
+                    .into(),
+                )
+            }
+            fn name(&self) -> &'static str {
+                "times-out"
+            }
+            fn model_id(&self) -> &'static str {
+                "times-out"
+            }
+            fn policy_version(&self) -> &'static str {
+                "times-out"
+            }
+            fn threshold(&self) -> f32 {
+                0.0
+            }
+        }
+
+        let db = open_db().await;
+        let fp = astrophysics_fingerprint();
+        let weights = ThreatWeights::default();
+        let acct = "did:plc:orchrgtimeout00000000000";
+        // The same stale staging as Test 4: the first finalize asks for a
+        // re-gather, so the classifier is only ever called on recovery.
+        let bad_payload = r#"{"schema_version":999,"scoring_generation":"whatever","account_handle":"rgt.bsky.social","sample":{"originals":[],"replies":[],"quotes":[],"reply_ratio":0.0,"quote_ratio":0.0,"total_posts":0},"parent_texts":{},"median_engagement":0.0,"is_pile_on":false,"direct_pairs":null,"graph_distance":null,"fingerprint_quality":"normal"}"#;
+        db.stash_account_input(ORCH_USER, acct, bad_payload)
+            .await
+            .unwrap();
+        let stale_row = QueueRow {
+            account_did: acct.to_string(),
+            post_uri: format!("at://{acct}/o/stale"),
+            text: "stale".to_string(),
+            context_text: None,
+            post_kind: "original".to_string(),
+            onnx_score: 0.3,
+            status: "pending".to_string(),
+            toxic_token: None,
+            confidence: None,
+            model_id: None,
+            policy_version: None,
+        };
+        db.enqueue_classifications(ORCH_USER, &[stale_row])
+            .await
+            .unwrap();
+        db.set_scan_state(ORCH_USER, "scan_phase", "finalize")
+            .await
+            .unwrap();
+        seed_owner(&db, charcoal::db::ScanKind::Full).await;
+
+        let mut by_handle = HashMap::new();
+        by_handle.insert("rgt.bsky.social".to_string(), survivor_sample("rgt"));
+        let fetcher = MapFetcher { by_handle };
+        let scorer = FixedScorer(0.0);
+        let clean = MarkerCleanPass;
+        let classifier: Arc<dyn ToxicityClassifier> = Arc::new(TimesOut);
+
+        let summary = run_phased_scan(
+            &db,
+            ORCH_USER,
+            &[candidate(acct, "rgt.bsky.social")],
+            &deps(&fetcher, &scorer, &clean, &classifier, &fp, &weights),
+            RunIdentity::full(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            summary.accounts_scored, 0,
+            "the recovery burst never finished"
+        );
+        assert!(summary.degraded);
+        assert!(
+            summary.interrupted,
+            "a timeout on the recovery burst is an interruption"
+        );
     }
 
     // ── Test 4: NeedsRegather → re-gather + re-burst + re-finalize → Scored ──
@@ -4622,6 +4776,7 @@ mod ownership_tests {
                 accounts_scored: 0,
                 regathered: 0,
                 degraded: false,
+                interrupted: false,
                 final_phase: Some("done".into()),
                 skipped: Some(0),
             }
