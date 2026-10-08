@@ -73,29 +73,41 @@ pub fn backoff_delay(streak: u32) -> Duration {
 /// job id, a DID's key, a UUID) and becomes `<id>`; in any other word, digit
 /// runs become `#` (`180s` → `#s`), so a changed timeout or count does not
 /// read as a new cause. The words that say WHAT failed are kept as they are,
-/// and so is a bare HTTP status code (`404` vs `503`).
+/// and so is an HTTP status code the message names as one (`HTTP 404`,
+/// `503 Service Unavailable`) — see [`is_http_status`].
 pub fn failure_signature(message: &str) -> String {
     // A word is what a person would select with a double-click: letters,
     // digits, `-` and `_`. Separators (`:`, spaces, `/`) are copied through.
     fn is_word(c: char) -> bool {
         c.is_alphanumeric() || c == '-' || c == '_'
     }
-    // A bare 100–599 is almost always an HTTP status, and a status is part of
-    // the cause: a 404 for one user and a 503 for another are different
-    // faults, and merging them would open the breaker on a per-user error.
-    fn is_http_status(word: &str) -> bool {
-        word.len() == 3
-            && word.bytes().all(|b| b.is_ascii_digit())
-            && (b'1'..=b'5').contains(&word.as_bytes()[0])
+
+    // Split into alternating words and separators, keeping both, so each
+    // word can be judged with the word before it and the text after it.
+    let mut parts: Vec<(bool, String)> = Vec::new();
+    for c in message.chars() {
+        match parts.last_mut() {
+            Some((w, text)) if *w == is_word(c) => text.push(c),
+            _ => parts.push((is_word(c), c.to_string())),
+        }
     }
-    fn mask(word: &str, out: &mut String) {
-        if !word.chars().any(|c| c.is_ascii_digit()) || is_http_status(word) {
-            out.push_str(word);
-        } else if word.chars().count() >= 8 {
+
+    let mut out = String::with_capacity(message.len().min(SIGNATURE_MAX_CHARS * 2));
+    let mut prev_word: Option<&str> = None;
+    for (i, (word, text)) in parts.iter().enumerate() {
+        if !*word {
+            out.push_str(text);
+            continue;
+        }
+        if !text.chars().any(|c| c.is_ascii_digit())
+            || is_http_status(text, prev_word, &parts[i + 1..])
+        {
+            out.push_str(text);
+        } else if text.chars().count() >= 8 {
             out.push_str("<id>");
         } else {
             let mut in_digits = false;
-            for c in word.chars() {
+            for c in text.chars() {
                 if c.is_ascii_digit() {
                     if !in_digits {
                         out.push('#');
@@ -107,21 +119,40 @@ pub fn failure_signature(message: &str) -> String {
                 }
             }
         }
+        prev_word = Some(text);
     }
-
-    let mut out = String::with_capacity(message.len().min(SIGNATURE_MAX_CHARS * 2));
-    let mut word = String::new();
-    for c in message.chars() {
-        if is_word(c) {
-            word.push(c);
-        } else {
-            mask(&word, &mut out);
-            word.clear();
-            out.push(c);
-        }
-    }
-    mask(&word, &mut out);
     crate::output::truncate_chars(out.trim(), SIGNATURE_MAX_CHARS)
+}
+
+/// Is `word` an HTTP status code — one the MESSAGE identifies as such?
+///
+/// A status is part of the cause (a 404 for one user and a 503 for another
+/// are different faults), but a three-digit COUNT is not (CodeRabbit,
+/// PR #143): "after 200 rows" and "after 300 rows" are one cause. So the
+/// number must be a real status AND be named as one, either by the word
+/// before it (`HTTP 404`, `status 503`) or the way `reqwest::StatusCode`
+/// prints itself, the number followed by its own reason (`502 Bad Gateway`).
+fn is_http_status(word: &str, prev_word: Option<&str>, after: &[(bool, String)]) -> bool {
+    // Cheap rejections first: this runs for every word containing a digit.
+    if word.len() != 3 || !word.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let Ok(code) = word.parse::<u16>() else {
+        return false;
+    };
+    let Ok(status) = reqwest::StatusCode::from_u16(code) else {
+        return false;
+    };
+    let named_before = prev_word
+        .is_some_and(|p| p.eq_ignore_ascii_case("http") || p.eq_ignore_ascii_case("status"));
+    // Only as much of the following text as a reason phrase can span: the
+    // longest, "Request Header Fields Too Large", is 5 words + 4 spaces.
+    let rest: String = after.iter().take(12).map(|(_, t)| t.as_str()).collect();
+    let reason_after = status.canonical_reason().is_some_and(|reason| {
+        rest.strip_prefix(' ')
+            .is_some_and(|r| r.starts_with(reason))
+    });
+    named_before || reason_after
 }
 
 /// This process's deployment, for resetting backoff on a deploy.
@@ -217,6 +248,11 @@ pub enum BreakerReport<'a> {
     Success,
     /// Proves nothing either way: deferred, nothing due, or paused resumably.
     Neutral,
+    /// Did some real work but was ALSO stopped by a transient classifier
+    /// failure: the fault may still be live. Never closes the breaker, and —
+    /// unlike `Neutral` — never frees the probe slot early either; an open
+    /// breaker waits out another cool-down (CodeRabbit, PR #143).
+    Inconclusive,
 }
 
 #[derive(Debug)]
@@ -319,7 +355,7 @@ impl RefreshBreaker {
         let (state, _) = &mut *guard;
         let next = match state {
             BreakerState::Closed(failures) => match report {
-                BreakerReport::Neutral => return,
+                BreakerReport::Neutral | BreakerReport::Inconclusive => return,
                 BreakerReport::Success => BreakerState::Closed(HashMap::new()),
                 BreakerReport::Failure(cause) => {
                     let users = failures.entry(cause.to_string()).or_default();
@@ -358,6 +394,13 @@ impl RefreshBreaker {
                     return;
                 }
                 match report {
+                    BreakerReport::Inconclusive => {
+                        // Possibly still broken: re-arm the same cool-down.
+                        // Not doubled — the probe did get some work through.
+                        *probe = None;
+                        *until = now + chrono_dur(*cooldown);
+                        return;
+                    }
                     BreakerReport::Neutral => {
                         // The probe tested nothing. Free the slot so the next
                         // refresh can probe now, rather than a cool-down later.
@@ -456,22 +499,35 @@ mod tests {
     /// another's 503 must not read as one deployment-wide fault.
     #[test]
     fn signature_keeps_http_status_codes() {
+        // After the word HTTP or status.
         assert_ne!(
             failure_signature("RunPod /status HTTP 404 for job sync-1a2b3c4d9"),
             failure_signature("RunPod /status HTTP 503 for job sync-1a2b3c4d9"),
         );
+        // As reqwest's StatusCode prints itself: the number, then its reason.
         assert_ne!(
-            failure_signature("getAuthorFeed: 400"),
-            failure_signature("getAuthorFeed: 502"),
+            failure_signature("PLC directory returned 404 Not Found for did:plc:abc"),
+            failure_signature("PLC directory returned 503 Service Unavailable for did:plc:abc"),
         );
-        // A duration is still masked, and so is a number out of status range.
+    }
+
+    /// CodeRabbit (PR #143): only a number the message identifies as a status
+    /// is kept. A count that happens to be three digits is masked like any
+    /// other, or a changing row total would restart the backoff.
+    #[test]
+    fn signature_masks_three_digit_counts() {
+        assert_eq!(
+            failure_signature("gave up after 200 rows"),
+            failure_signature("gave up after 300 rows")
+        );
         assert_eq!(
             failure_signature("within 180s"),
             failure_signature("within 240s")
         );
+        // A number followed by the WRONG reason is not a status line.
         assert_eq!(
-            failure_signature("after 900 rows"),
-            failure_signature("after 750 rows")
+            failure_signature("got 404 Bad things"),
+            failure_signature("got 405 Bad things")
         );
     }
 
@@ -699,6 +755,41 @@ mod tests {
         assert!(first.is_probe() && second.is_probe() && first != second);
         b.report(first, "did:x", BreakerReport::Success, t0() + mins(123));
         assert!(b.admit(t0() + mins(123)).is_err(), "still open");
+    }
+
+    /// CodeRabbit (PR #143): a probe that scored something but was ALSO
+    /// interrupted by the classifier proves the fault may still be live. It
+    /// must not close the breaker, and must not free the slot for an instant
+    /// re-probe either: the breaker stays open for another (undoubled)
+    /// cool-down.
+    #[test]
+    fn an_inconclusive_probe_keeps_it_open_for_another_cooldown() {
+        let b = RefreshBreaker::new("d");
+        trip(&b, "c");
+        let p = t0() + mins(61);
+        let probe = b.admit(p).unwrap();
+        b.report(probe, "did:x", BreakerReport::Inconclusive, p);
+        assert!(b.admit(p).is_err(), "not closed, slot not freed");
+        assert!(b.admit(p + mins(59)).is_err(), "a full cool-down");
+        assert!(
+            b.admit(p + mins(61)).unwrap().is_probe(),
+            "and not a doubled one"
+        );
+    }
+
+    /// While closed, an inconclusive run neither counts nor resets anything.
+    #[test]
+    fn an_inconclusive_run_is_ignored_while_closed() {
+        let b = RefreshBreaker::new("d");
+        fail(&b, "did:a", "c", t0());
+        b.report(
+            Admission::normal(),
+            "did:x",
+            BreakerReport::Inconclusive,
+            t0(),
+        );
+        fail(&b, "did:b", "c", t0());
+        assert!(b.admit(t0()).is_err(), "the count survived");
     }
 
     /// A probe that proved nothing frees the slot at once, rather than

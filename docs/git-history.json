@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d4cf053860f728a8ac4a7bc127bea85e2b923e8b",
+    "short_hash": "d4cf053",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T16:43:42-07:00",
+    "message": "fix(387): Codex review: recovery-burst timeouts count; refused runs reset markers\n\n- recover_account_inner returns a Recovery enum; an Interrupted re-burst\n  now stops recovery (no finalize over still-pending rows) and sets\n  ScanSummary.interrupted, the same as a main-burst timeout.\n- The refresh streak keys on `interrupted` whatever the outcome, since a\n  recovery timeout ends as CompletedWithSkips rather than Resumable.\n- A breaker refusal resets the run markers first (a scan_state write, no\n  external work), so its failed outcome is never paired with the previous\n  run's id and counts.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "a2d50627adbc284f4a0c3c0824f1feb6583bb1b9",
     "short_hash": "a2d5062",
     "author": "Bryan Guffey",

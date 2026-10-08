@@ -695,6 +695,9 @@ where
     if let Ok(admitted) = admission {
         let report = match &outcome {
             Err(_) => BreakerReport::Failure(cause.as_deref().unwrap_or_default()),
+            // An interruption outranks any scored accounts: the classifier
+            // fault may still be live (CodeRabbit, PR #143).
+            Ok(_) if interrupted => BreakerReport::Inconclusive,
             Ok(o) if o.scored() > 0 => BreakerReport::Success,
             Ok(_) => BreakerReport::Neutral,
         };
@@ -2274,7 +2277,11 @@ mod tests {
             let ctx: Box<dyn RefreshContextSource> = Box::new(Idle(ending != Ending::NothingDue));
             Ok((ctx, move |_plan: RefreshPlan| async move {
                 Ok(ScanSummary {
-                    accounts_scored: usize::from(ending == Ending::Scored),
+                    // A recovery interruption still scored the OTHER account.
+                    accounts_scored: usize::from(matches!(
+                        ending,
+                        Ending::Scored | Ending::RecoveryInterrupted
+                    )),
                     regathered: 0,
                     degraded: ending != Ending::Scored && ending != Ending::NothingDue,
                     interrupted: matches!(ending, Ending::Paused | Ending::RecoveryInterrupted),
@@ -2594,5 +2601,29 @@ mod tests {
         end_attempt(&db, &breaker, "did:plc:u", d1, Ending::RecoveryInterrupted).await;
         let d2 = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
         assert_eq!(d2, d1 + hours(2));
+    }
+
+    /// CodeRabbit (PR #143): the probe scored one account but a classifier
+    /// timeout skipped another. The fault may still be live, so the breaker
+    /// must stay open — the next refresh is still refused.
+    #[tokio::test]
+    async fn a_probe_that_scored_but_was_interrupted_does_not_close_the_breaker() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let _failed = fail_attempt(&db, &breaker, "did:plc:a", t0, "classifier down").await;
+        let _failed = fail_attempt(&db, &breaker, "did:plc:b", t0, "classifier down").await;
+        let probe_at = t0 + chrono::Duration::minutes(61);
+        end_attempt(
+            &db,
+            &breaker,
+            "did:plc:p",
+            probe_at,
+            Ending::RecoveryInterrupted,
+        )
+        .await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", probe_at, "its own").await;
+        let err = format!("{:#}", result.expect_err("refused"));
+        assert!(err.contains("deployment-wide"), "still open: {err}");
     }
 }
