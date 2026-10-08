@@ -11494,6 +11494,17 @@
       "created_at": "2026-10-07T17:32:44.435703-07:00",
       "updated_at": "2026-10-07T17:32:44.435703-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"064defa\",\"confidence\":85}"
+    },
+    {
+      "id": 1055,
+      "change_id": "146c6c16-34e7-4d2f-a8e4-afb0dc819585",
+      "node_type": "action",
+      "title": "#387 internal review round 3: rival causes keep breaker open (take over at 2 probes); mask handles/DIDs",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-07T17:50:51.540403-07:00",
+      "updated_at": "2026-10-07T17:50:51.540403-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"b12781c\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23541,6 +23552,17 @@
       "weight": 1.0,
       "rationale": "CodeRabbit round 3",
       "created_at": "2026-10-07T17:32:46.212021-07:00"
+    },
+    {
+      "id": 1106,
+      "from_node_id": 1054,
+      "to_node_id": 1055,
+      "from_change_id": "2a8426f3-a306-4374-b9f9-565d7869ae78",
+      "to_change_id": "146c6c16-34e7-4d2f-a8e4-afb0dc819585",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "internal review round 3",
+      "created_at": "2026-10-07T17:50:51.622067-07:00"
     }
   ],
   "documents": [

@@ -82,6 +82,15 @@ pub fn failure_signature(message: &str) -> String {
         c.is_alphanumeric() || c == '-' || c == '_'
     }
 
+    // A URL's query string carries the account (`?actor=alice.bsky.social`)
+    // and paging values; the scheme, host and path — WHICH endpoint failed —
+    // are the cause (Codex review). Mask the query, keep the rest.
+    static URL_QUERY: OnceLock<regex_lite::Regex> = OnceLock::new();
+    let url_query = URL_QUERY.get_or_init(|| {
+        regex_lite::Regex::new(r"(https?://[^\s?#()]+)\?[^\s()]*").expect("valid pattern")
+    });
+    let message = url_query.replace_all(message, "${1}?<query>");
+
     // Split into alternating words and separators, keeping both, so each
     // word can be judged with the word before it and the text after it.
     let mut parts: Vec<(bool, String)> = Vec::new();
@@ -645,6 +654,22 @@ mod tests {
         assert_ne!(
             failure_signature("Failed to fetch feed for @a.bsky.social"),
             failure_signature("Failed to resolve handle @a.bsky.social"),
+        );
+        // Codex review: the same handle also rides in request URLs. Query
+        // values are masked; the endpoint — what was being fetched — is kept.
+        let a = failure_signature(
+            "error sending request for url (https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=alice.bsky.social&limit=100)",
+        );
+        let b = failure_signature(
+            "error sending request for url (https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=bob.example.com&limit=100)",
+        );
+        assert_eq!(a, b);
+        assert!(a.contains("getAuthorFeed"), "{a}");
+        assert_ne!(
+            a,
+            failure_signature(
+                "error sending request for url (https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=alice.bsky.social)",
+            )
         );
         // An address-like word with no handle shape after `@` is left alone.
         assert!(failure_signature("x @ y").contains("@ y"));

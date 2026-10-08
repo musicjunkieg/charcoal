@@ -692,8 +692,15 @@ where
         Ok(_) if interrupted => Some("classifier_interrupted".to_string()),
         Ok(_) => None,
     };
+    // One ownership check for every write below (#344 F2) — the breaker
+    // included (Codex review). A worker whose lease was reclaimed must not
+    // open, close or stretch the process-wide breaker on the strength of an
+    // attempt its successor now owns; it reports Neutral, which frees the
+    // probe slot if it held one and changes nothing otherwise.
+    let owns_claim = books.owns_claim(user_did, claim_id).await;
     if let Ok(admitted) = admission {
         let report = match &outcome {
+            _ if !owns_claim => BreakerReport::Neutral,
             Err(_) => BreakerReport::Failure(cause.as_deref().unwrap_or_default()),
             // An interruption outranks any scored accounts: the classifier
             // fault may still be live (CodeRabbit, PR #143).
@@ -704,12 +711,12 @@ where
         breaker.report(admitted, user_did, report, now);
     }
 
-    // One ownership check for every write below (#344 F2). A worker whose
-    // lease lapsed would otherwise move `next_refresh_at` and stamp an outcome
+    // The same ownership answer gates the database bookkeeping. A worker
+    // whose lease lapsed would otherwise move `next_refresh_at` and stamp an outcome
     // for a user its successor now owns — and, being the slow one, its write
     // lands last. `finish_scan` is still called: its writes are fenced on the
     // claim of their own accord, and the caller must learn the outcome anyway.
-    if books.owns_claim(user_did, claim_id).await {
+    if owns_claim {
         // Record before scheduling so an operator reading `scan_state` sees the
         // outcome that produced the schedule. If the database is down for THIS
         // write it is down for the schedule too: log + count, never pretend.
@@ -2625,5 +2632,51 @@ mod tests {
         let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", probe_at, "its own").await;
         let err = format!("{:#}", result.expect_err("refused"));
         assert!(err.contains("deployment-wide"), "still open: {err}");
+    }
+
+    /// Codex review (#387): a worker whose lease was reclaimed has had all
+    /// its other bookkeeping suppressed; it must not move the process-wide
+    /// breaker either. Its failure does not count toward tripping it.
+    #[tokio::test]
+    async fn a_superseded_worker_does_not_count_toward_the_breaker() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+
+        // User a's worker loses its claim to a successor mid-run, then fails.
+        let (stale_claim, mgr) = claim_refresh(&db, "did:plc:a").await;
+        db.finish_queued_scan(
+            "did:plc:a",
+            &stale_claim,
+            crate::db::FinishCompletion::Failed,
+            None,
+        )
+        .await
+        .unwrap();
+        db.enqueue_refresh_scan("did:plc:a").await.unwrap();
+        let _successor = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || t0;
+        let _stale = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:a",
+            "h",
+            &stale_claim,
+            || anyhow::bail!("classifier down"),
+        )
+        .await;
+
+        // One genuine failure with the same cause is then not enough to trip it.
+        let _failed = fail_attempt(&db, &breaker, "did:plc:b", t0, "classifier down").await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:c", t0, "its own").await;
+        let err = format!("{:#}", result.expect_err("c ran"));
+        assert!(err.contains("its own"), "breaker stayed closed: {err}");
     }
 }

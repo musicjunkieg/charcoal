@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b12781c90b2230f18053a8ba28ad534ff4bd79c5",
+    "short_hash": "b12781c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T17:50:43-07:00",
+    "message": "fix(387): a differently-failing probe keeps the breaker open; mask handles and DIDs\n\nInternal review:\n- A probe failing with a DIFFERENT cause used to close the breaker, though\n  it may never have reached the faulty part (a Bluesky hiccup, a setup\n  blip). It now stays open and frees the slot for the next probe. Rival\n  causes are counted per window; one that fails two different probes is\n  deployment-wide itself and takes over the breaker with a fresh cool-down.\n- failure_signature masks `@handle` and `did:<method>:<id>`: error contexts\n  name the user, so an AppView outage gave every user a different cause\n  and the breaker could never trip on it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "064defa4ad6cf58479a24d45dfc70aac3c5bfc18",
     "short_hash": "064defa",
     "author": "Bryan Guffey",
