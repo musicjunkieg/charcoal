@@ -1,5 +1,13 @@
 [
   {
+    "hash": "064defa4ad6cf58479a24d45dfc70aac3c5bfc18",
+    "short_hash": "064defa",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T17:32:36-07:00",
+    "message": "fix(387): CodeRabbit: interruption outranks scored work; keep only named HTTP statuses\n\n- New BreakerReport::Inconclusive for a refresh that scored accounts but\n  was also interrupted by the classifier. It never closes the breaker and,\n  unlike Neutral, does not free the probe slot early: an open breaker\n  re-arms the same (undoubled) cool-down. Ignored while closed.\n- failure_signature keeps a 3-digit number only when the message names it\n  as a status: after \"HTTP\"/\"status\", or followed by its canonical reason\n  phrase (reqwest StatusCode Display, e.g. \"502 Bad Gateway\"). Counts such\n  as \"after 200 rows\" are masked again.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "d4cf053860f728a8ac4a7bc127bea85e2b923e8b",
     "short_hash": "d4cf053",
     "author": "Bryan Guffey",

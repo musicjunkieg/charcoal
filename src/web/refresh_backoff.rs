@@ -94,9 +94,38 @@ pub fn failure_signature(message: &str) -> String {
 
     let mut out = String::with_capacity(message.len().min(SIGNATURE_MAX_CHARS * 2));
     let mut prev_word: Option<&str> = None;
-    for (i, (word, text)) in parts.iter().enumerate() {
+    let mut i = 0;
+    while i < parts.len() {
+        let (word, text) = (&parts[i].0, parts[i].1.as_str());
         if !*word {
             out.push_str(text);
+            // `@alice.bsky.social` names a user, not a cause (#387 review):
+            // an AppView outage would otherwise give every user a different
+            // signature, and the breaker could never see it as one fault.
+            if text.ends_with('@') {
+                if let Some(end) = dotted_name_end(&parts, i + 1) {
+                    out.push_str("<handle>");
+                    i = end;
+                    continue;
+                }
+            }
+            i += 1;
+            continue;
+        }
+        // `did:plc:…` / `did:web:host` — the method is kept, the id is not.
+        // A did:web id can contain no digit at all, so the digit rule alone
+        // would leave it in.
+        if text == "did"
+            && parts.get(i + 1).is_some_and(|(_, t)| t == ":")
+            && parts.get(i + 2).is_some_and(|(w, _)| *w)
+            && parts.get(i + 3).is_some_and(|(_, t)| t == ":")
+            && parts.get(i + 4).is_some_and(|(w, _)| *w)
+        {
+            out.push_str("did:");
+            out.push_str(&parts[i + 2].1);
+            out.push_str(":<id>");
+            i = dotted_name_end(&parts, i + 4).unwrap_or(i + 5);
+            prev_word = None;
             continue;
         }
         if !text.chars().any(|c| c.is_ascii_digit())
@@ -120,8 +149,27 @@ pub fn failure_signature(message: &str) -> String {
             }
         }
         prev_word = Some(text);
+        i += 1;
     }
     crate::output::truncate_chars(out.trim(), SIGNATURE_MAX_CHARS)
+}
+
+/// If `parts[start..]` begins with a dotted name — `word(.word)*` — return
+/// the index just past it. A bare word with no dot is not a hostname or a
+/// handle, so it returns `None`.
+fn dotted_name_end(parts: &[(bool, String)], start: usize) -> Option<usize> {
+    if !parts.get(start).is_some_and(|(w, _)| *w) {
+        return None;
+    }
+    let mut end = start + 1;
+    let mut dotted = false;
+    while parts.get(end).is_some_and(|(_, t)| t == ".")
+        && parts.get(end + 1).is_some_and(|(w, _)| *w)
+    {
+        end += 2;
+        dotted = true;
+    }
+    dotted.then_some(end)
 }
 
 /// Is `word` an HTTP status code — one the MESSAGE identifies as such?
@@ -260,7 +308,7 @@ enum BreakerState {
     /// Counting: for each cause, the distinct users that failed with it since
     /// the last success, each with when it last did (only those inside
     /// [`BREAKER_WINDOW`] count).
-    Closed(HashMap<String, HashMap<String, DateTime<Utc>>>),
+    Closed(Failures),
     /// Refusing until `until`; then one probe is let through, tagged `probe`,
     /// and `until` is pushed out a further `cooldown`, so concurrent
     /// refreshes keep waiting for the probe's answer.
@@ -270,7 +318,24 @@ enum BreakerState {
         until: DateTime<Utc>,
         cooldown: Duration,
         probe: Option<u64>,
+        /// Probes that failed with some OTHER cause, counted the way the
+        /// closed state counts: if a new cause fails two different probes it
+        /// is deployment-wide too, and takes over the breaker.
+        rivals: Failures,
     },
+}
+
+/// For each cause, the distinct users that failed with it, and when.
+type Failures = HashMap<String, HashMap<String, DateTime<Utc>>>;
+
+/// Record `user` failing with `cause` at `now` and return how many distinct
+/// users failed with it inside [`BREAKER_WINDOW`].
+fn count_failure(failures: &mut Failures, cause: &str, user: &str, now: DateTime<Utc>) -> usize {
+    let users = failures.entry(cause.to_string()).or_default();
+    let window = chrono_dur(BREAKER_WINDOW);
+    users.retain(|_, at| now - *at < window);
+    users.insert(user.to_string(), now);
+    users.len()
 }
 
 /// The process-wide refresh circuit breaker. See the module docs.
@@ -319,6 +384,7 @@ impl RefreshBreaker {
                 until,
                 cooldown,
                 probe,
+                ..
             } => {
                 if now < *until {
                     return Err(CircuitOpen {
@@ -358,16 +424,13 @@ impl RefreshBreaker {
                 BreakerReport::Neutral | BreakerReport::Inconclusive => return,
                 BreakerReport::Success => BreakerState::Closed(HashMap::new()),
                 BreakerReport::Failure(cause) => {
-                    let users = failures.entry(cause.to_string()).or_default();
-                    let window = chrono_dur(BREAKER_WINDOW);
-                    users.retain(|_, at| now - *at < window);
-                    users.insert(user_did.to_string(), now);
-                    if users.len() < BREAKER_TRIP_USERS {
+                    let users = count_failure(failures, cause, user_did, now);
+                    if users < BREAKER_TRIP_USERS {
                         return;
                     }
                     tracing::error!(
                         cause,
-                        users = users.len(),
+                        users,
                         cooldown_secs = BREAKER_COOLDOWN.as_secs(),
                         "refresh circuit breaker OPEN: different users are failing with the \
                          same cause, so the fault is the deployment's — no further refresh \
@@ -375,10 +438,11 @@ impl RefreshBreaker {
                     );
                     BreakerState::Open {
                         cause: cause.to_string(),
-                        users: users.len(),
+                        users,
                         until: now + chrono_dur(BREAKER_COOLDOWN),
                         cooldown: BREAKER_COOLDOWN,
                         probe: None,
+                        rivals: HashMap::new(),
                     }
                 }
             },
@@ -388,6 +452,7 @@ impl RefreshBreaker {
                 until,
                 cooldown,
                 probe,
+                rivals,
             } => {
                 // Only the current probe speaks for an open breaker.
                 if admission.probe.is_none() || admission.probe != *probe {
@@ -427,22 +492,46 @@ impl RefreshBreaker {
                             until: now + chrono_dur(cooldown),
                             cooldown,
                             probe: None,
+                            rivals: std::mem::take(rivals),
                         }
                     }
                     BreakerReport::Failure(cause) => {
-                        // The deployment-wide fault is gone; this is a new
-                        // one, counted from scratch like any other.
-                        tracing::warn!(
+                        // A different failure is NOT evidence the original
+                        // fault is gone: the probe may have failed before it
+                        // ever reached the faulty part — a Bluesky hiccup, a
+                        // database blip in setup (#387 review). Stay open and
+                        // free the slot so the next refresh probes now. But
+                        // count it: a new cause that fails two different
+                        // probes is deployment-wide in its own right, and
+                        // takes over the breaker with a fresh cool-down
+                        // rather than handing out free probes forever.
+                        let users = count_failure(rivals, cause, user_did, now);
+                        if users < BREAKER_TRIP_USERS {
+                            tracing::warn!(
+                                open_cause = %open_cause,
+                                cause,
+                                "refresh circuit breaker: the probe failed differently — \
+                                 staying open; the next refresh probes"
+                            );
+                            *probe = None;
+                            *until = now;
+                            return;
+                        }
+                        tracing::error!(
                             previous = %open_cause,
                             cause,
-                            "refresh circuit breaker closed: the probe got past the original fault"
+                            users,
+                            "refresh circuit breaker: a new cause is failing every probe — \
+                             it is the deployment's fault now"
                         );
-                        let mut failures = HashMap::new();
-                        failures.insert(
-                            cause.to_string(),
-                            HashMap::from([(user_did.to_string(), now)]),
-                        );
-                        BreakerState::Closed(failures)
+                        BreakerState::Open {
+                            cause: cause.to_string(),
+                            users,
+                            until: now + chrono_dur(BREAKER_COOLDOWN),
+                            cooldown: BREAKER_COOLDOWN,
+                            probe: None,
+                            rivals: HashMap::new(),
+                        }
                     }
                 }
             }
@@ -529,6 +618,36 @@ mod tests {
             failure_signature("got 404 Bad things"),
             failure_signature("got 405 Bad things")
         );
+    }
+
+    /// #387 review: errors name the user (`@handle`, a DID). Unmasked, an
+    /// AppView outage gives every user a different cause and the breaker can
+    /// never see it as one fault.
+    #[test]
+    fn signature_masks_handles_and_dids() {
+        assert_eq!(
+            failure_signature("Failed to fetch feed for @alice.bsky.social: 502 Bad Gateway"),
+            failure_signature("Failed to fetch feed for @bob.example.com: 502 Bad Gateway"),
+        );
+        assert_eq!(
+            failure_signature("Failed to fetch DID document for did:web:alice.example"),
+            failure_signature("Failed to fetch DID document for did:web:bob.example.org"),
+        );
+        assert_eq!(
+            failure_signature("PLC directory returned 404 Not Found for did:plc:abcdefgh"),
+            failure_signature("PLC directory returned 404 Not Found for did:plc:zyxwvuts"),
+        );
+        // The status still tells them apart, and so does what was being done.
+        assert_ne!(
+            failure_signature("Failed to fetch feed for @alice.bsky.social: 502 Bad Gateway"),
+            failure_signature("Failed to fetch feed for @alice.bsky.social: 404 Not Found"),
+        );
+        assert_ne!(
+            failure_signature("Failed to fetch feed for @a.bsky.social"),
+            failure_signature("Failed to resolve handle @a.bsky.social"),
+        );
+        // An address-like word with no handle shape after `@` is left alone.
+        assert!(failure_signature("x @ y").contains("@ y"));
     }
 
     #[test]
@@ -713,16 +832,39 @@ mod tests {
         }
     }
 
+    /// #387 review: a probe that fails for a DIFFERENT reason may never have
+    /// reached the faulty component (a Bluesky hiccup, a database blip during
+    /// setup), so it is no evidence the original fault is gone. The breaker
+    /// stays open and the slot is freed for the next refresh to probe at once.
     #[test]
-    fn a_probe_failing_differently_closes_it_and_counts_afresh() {
+    fn a_probe_failing_differently_does_not_close_it() {
         let b = RefreshBreaker::new("d");
         trip(&b, "c");
         let p = t0() + mins(61);
         let probe = b.admit(p).unwrap();
         b.report(probe, "did:a", BreakerReport::Failure("other"), p);
-        assert!(b.admit(p).is_ok(), "the original fault is gone");
-        fail(&b, "did:b", "other", p);
-        assert_eq!(b.admit(p).unwrap_err().cause, "other");
+        let next = b.admit(p).expect("the slot is free again");
+        assert!(next.is_probe(), "still open: the next refresh is a probe");
+        b.report(next, "did:b", BreakerReport::Success, p);
+        assert!(!b.admit(p).unwrap().is_probe(), "closed by a real success");
+    }
+
+    /// …but a NEW cause that fails two different probes is itself
+    /// deployment-wide: the breaker switches to it, with a fresh cool-down,
+    /// rather than handing out probe after probe for free.
+    #[test]
+    fn a_new_cause_failing_two_probes_takes_over_the_breaker() {
+        let b = RefreshBreaker::new("d");
+        trip(&b, "c");
+        let p = t0() + mins(61);
+        let first = b.admit(p).unwrap();
+        b.report(first, "did:a", BreakerReport::Failure("other"), p);
+        let second = b.admit(p).unwrap();
+        b.report(second, "did:b", BreakerReport::Failure("other"), p);
+        let refused = b.admit(p).unwrap_err();
+        assert_eq!(refused.cause, "other");
+        assert!(b.admit(p + mins(59)).is_err());
+        assert!(b.admit(p + mins(61)).unwrap().is_probe());
     }
 
     /// #387 review + CodeRabbit (PR #143): a refresh that started before the
