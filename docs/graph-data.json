@@ -11505,6 +11505,39 @@
       "created_at": "2026-10-07T17:50:51.540403-07:00",
       "updated_at": "2026-10-07T17:50:51.540403-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"b12781c\",\"confidence\":85}"
+    },
+    {
+      "id": 1056,
+      "change_id": "3dd96293-4a5e-4e26-aca8-dccfa7e7c55f",
+      "node_type": "action",
+      "title": "#387 Codex round 3: ownership-gated breaker report, URL query masking; deferred streak fencing + sweep CAS to #403",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-07T18:50:39.057493-07:00",
+      "updated_at": "2026-10-07T18:50:39.057493-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"09ab228\",\"confidence\":85}"
+    },
+    {
+      "id": 1057,
+      "change_id": "00e26c06-6a28-4519-81c0-7b4be477f982",
+      "node_type": "outcome",
+      "title": "PR #143 (#387 backoff + breaker) merged to staging at 6e1dba1 after 3 internal + 3 Codex + 4 CodeRabbit rounds; CodeRabbit APPROVED, CI green; races deferred to #403",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-07T19:21:24.425458-07:00",
+      "updated_at": "2026-10-07T19:21:24.425458-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":90}"
+    },
+    {
+      "id": 1058,
+      "change_id": "32cc0c03-a85e-4104-bf95-4d4f7c2f0f14",
+      "node_type": "action",
+      "title": "Promote #387 to prod: PR #144 staging->main; prod backup charcoal-prod-pre-promote387-20261008T230942Z.dump restore-verified",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T16:10:38.858864-07:00",
+      "updated_at": "2026-10-08T16:10:38.858864-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23563,6 +23596,39 @@
       "weight": 1.0,
       "rationale": "internal review round 3",
       "created_at": "2026-10-07T17:50:51.622067-07:00"
+    },
+    {
+      "id": 1107,
+      "from_node_id": 1055,
+      "to_node_id": 1056,
+      "from_change_id": "146c6c16-34e7-4d2f-a8e4-afb0dc819585",
+      "to_change_id": "3dd96293-4a5e-4e26-aca8-dccfa7e7c55f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codex round 3",
+      "created_at": "2026-10-07T18:50:39.136383-07:00"
+    },
+    {
+      "id": 1108,
+      "from_node_id": 1056,
+      "to_node_id": 1057,
+      "from_change_id": "3dd96293-4a5e-4e26-aca8-dccfa7e7c55f",
+      "to_change_id": "00e26c06-6a28-4519-81c0-7b4be477f982",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "merged after approval",
+      "created_at": "2026-10-07T19:21:27.597330-07:00"
+    },
+    {
+      "id": 1109,
+      "from_node_id": 1057,
+      "to_node_id": 1058,
+      "from_change_id": "00e26c06-6a28-4519-81c0-7b4be477f982",
+      "to_change_id": "32cc0c03-a85e-4104-bf95-4d4f7c2f0f14",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "promotion after staging verification",
+      "created_at": "2026-10-08T16:10:39.478107-07:00"
     }
   ],
   "documents": [

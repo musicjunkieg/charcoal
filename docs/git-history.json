@@ -1,5 +1,13 @@
 [
   {
+    "hash": "09ab228a4d468774296dc8c403b289d4bf9b297e",
+    "short_hash": "09ab228",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T18:50:31-07:00",
+    "message": "fix(387): Codex: stale workers cannot move the breaker; mask URL query strings\n\n- run_refresh_with checks claim ownership once, BEFORE the breaker report:\n  a worker whose lease was reclaimed reports Neutral (frees a probe slot,\n  otherwise no-op) instead of opening, closing or stretching the breaker.\n- failure_signature masks URL query strings (`?actor=alice.bsky.social`),\n  keeping scheme, host and path, so an AppView outage reads as one cause.\n\nDeferred to #403 (same atomic fix): fencing the streak writes inside the\nclaim-fenced schedule transaction, and a conditional deploy sweep.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "b12781c90b2230f18053a8ba28ad534ff4bd79c5",
     "short_hash": "b12781c",
     "author": "Bryan Guffey",

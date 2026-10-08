@@ -248,8 +248,8 @@ pub async fn schedule_retry_after(
 /// A deploy is how a fix lands — a code change, or a variable change, which
 /// Railway applies by redeploying — so an operator who fixed the fault must
 /// not wait out a backoff the old deployment stretched to 24 hours. The
-/// streak itself is left as is: the next failure sees the new deployment id
-/// and starts counting again from one.
+/// streak is cleared with the pull, so each user is pulled forward once per
+/// deployment and the next failure starts counting again from one.
 ///
 /// Unfenced, unlike the scheduling writes: no claim is held at boot. That is
 /// safe because it only ever moves a deadline EARLIER, and a user who already
@@ -292,7 +292,18 @@ pub async fn pull_forward_after_deploy(
             continue;
         }
         match db.schedule_refresh(&user.did, &now.to_rfc3339()).await {
-            Ok(()) => pulled += 1,
+            Ok(()) => {
+                pulled += 1;
+                // Consume the streak the pull acted on (CodeRabbit, PR #144).
+                // A deploy restarts the backoff anyway, and a leftover streak
+                // would let the next sweep pull this user forward AGAIN — a
+                // failed full scan schedules a plain one-hour retry without
+                // touching the streak, so that could repeat a paid scan every
+                // ten minutes. The next refresh failure starts a fresh count.
+                if let Err(e) = db.delete_scan_state(&user.did, STREAK_KEY).await {
+                    warn!(user_did = %user.did, error = %format!("{e:#}"), "could not clear the refresh failure streak after the deploy reset");
+                }
+            }
             Err(e) => {
                 warn!(user_did = %user.did, error = %format!("{e:#}"), "could not reset refresh backoff after deploy")
             }
@@ -1272,6 +1283,58 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(streak)
+        );
+    }
+
+    /// CodeRabbit (PR #144): the sweep must clear the streak it acts on. A
+    /// failed FULL scan schedules a plain one-hour retry and never touches
+    /// the streak, so a leftover old-deployment streak would let the next
+    /// 10-minute sweep pull the user forward again — a paid full scan every
+    /// ten minutes. One pull per deployment: after it, the user is left alone.
+    #[tokio::test]
+    async fn the_sweep_pulls_each_backed_off_user_forward_once() {
+        use crate::web::refresh_backoff::{FailureStreak, STREAK_KEY};
+        let db = db();
+        let now = Utc::now();
+        db.upsert_user("did:plc:u", "h").await.unwrap();
+        db.schedule_refresh("did:plc:u", &(now + ChronoDuration::hours(16)).to_rfc3339())
+            .await
+            .unwrap();
+        let streak = FailureStreak {
+            count: 5,
+            cause: "policy mismatch".into(),
+            deploy: "deploy-1".into(),
+        };
+        db.set_scan_state(
+            "did:plc:u",
+            STREAK_KEY,
+            &serde_json::to_string(&streak).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", now).await,
+            1
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None,
+            "the old-deployment streak is consumed by the pull"
+        );
+
+        // A full scan then fails and schedules the plain one-hour retry,
+        // touching no streak — the next sweep must leave it alone.
+        let retry_at = (now + ChronoDuration::hours(1)).to_rfc3339();
+        db.schedule_refresh("did:plc:u", &retry_at).await.unwrap();
+        let later = now + ChronoDuration::minutes(10);
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", later).await,
+            0
+        );
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            retry_at
         );
     }
 }
