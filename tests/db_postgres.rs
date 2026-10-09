@@ -5462,6 +5462,7 @@ async fn test_pg_a_superseded_claim_moves_no_schedule_and_requests_no_full_scan(
     let retry = RefreshScheduleWrite::Retry {
         at_rfc3339: &next_at,
         attempted_generation: "rev-fence",
+        streak: charcoal::db::StreakWrite::Keep,
     };
     assert!(
         !db.apply_refresh_schedule(U, &stale, success).await.unwrap(),
@@ -5984,4 +5985,180 @@ async fn test_pg_ranked_threats_exclude_gone_accounts() {
         .map(|a| a.did)
         .collect();
     assert_eq!(dids, vec!["did:plc:pgrank_alive"]);
+}
+
+/// #387 (CodeRabbit, PR #145): the deploy sweep's pull-forward is ONE
+/// conditional write — it consumes the streak and moves the deadline only
+/// while the streak still holds exactly the value the sweep read.
+#[tokio::test]
+async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
+    const DID: &str = "did:plc:pgtest_pull_forward_cas";
+    const KEY: &str = "refresh_failure_streak";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(DID).await.unwrap();
+    db.upsert_user(DID, "pull.h").await.unwrap();
+    let now = chrono::Utc::now();
+    let later = now + chrono::Duration::hours(16);
+    db.schedule_refresh(DID, &later.to_rfc3339()).await.unwrap();
+    let observed = r#"{"count":5,"cause":"c","deploy":"deploy-1"}"#;
+    let replaced = r#"{"count":1,"cause":"c","deploy":"deploy-2"}"#;
+    let deadline = |raw: Option<String>| {
+        chrono::DateTime::parse_from_rfc3339(&raw.expect("a deadline"))
+            .unwrap()
+            .timestamp()
+    };
+
+    db.set_scan_state(DID, KEY, replaced).await.unwrap();
+    assert!(!db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &later.to_rfc3339(), &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        later.timestamp()
+    );
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(replaced)
+    );
+
+    db.set_scan_state(DID, KEY, observed).await.unwrap();
+    assert!(db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &later.to_rfc3339(), &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        now.timestamp()
+    );
+    assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
+
+    // The deadline is re-checked inside the write: a matching streak whose
+    // deadline is not ahead of `now` is left alone.
+    let due = now - chrono::Duration::minutes(5);
+    db.schedule_refresh(DID, &due.to_rfc3339()).await.unwrap();
+    db.set_scan_state(DID, KEY, observed).await.unwrap();
+    assert!(!db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &due.to_rfc3339(), &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        due.timestamp()
+    );
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(observed)
+    );
+
+    // The deadline must be EXACTLY the one the sweep read: a fresh future
+    // retry (a failed full scan, which keeps the streak) wins.
+    let fresh = now + chrono::Duration::hours(1);
+    db.schedule_refresh(DID, &fresh.to_rfc3339()).await.unwrap();
+    assert!(!db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &later.to_rfc3339(), &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        fresh.timestamp()
+    );
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(observed)
+    );
+
+    db.delete_user_data(DID).await.unwrap();
+}
+
+/// #387 (Codex review): a Success schedule write ends the refresh failure
+/// streak inside its own fenced transaction; a Retry write leaves it alone.
+#[tokio::test]
+async fn test_pg_success_schedule_write_clears_the_streak() {
+    use charcoal::db::RefreshScheduleWrite;
+    const DID: &str = "did:plc:pgtest_success_clears_streak";
+    const KEY: &str = charcoal::db::REFRESH_FAILURE_STREAK_KEY;
+    let _guard = scan_queue_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(DID).await.unwrap();
+    seed_refreshable(&db, DID, None, None).await;
+    let streak = r#"{"count":4,"cause":"c","deploy":"d"}"#;
+    db.set_scan_state(DID, KEY, streak).await.unwrap();
+    db.enqueue_scan(DID).await.unwrap();
+    let claim = loop {
+        let c = db.claim_next_scan(64, 60).await.unwrap().expect("a claim");
+        if c.user_did == DID {
+            break c.claim_id;
+        }
+    };
+    let at = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let rev = charcoal::scoring::generation::scoring_revision();
+
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Retry {
+                at_rfc3339: &at,
+                attempted_generation: rev,
+                streak: charcoal::db::StreakWrite::Keep,
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(streak)
+    );
+
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Success {
+                next_at_rfc3339: &at,
+                generation: rev,
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
+
+    // A Retry write sets or clears the streak with its deadline.
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Retry {
+                at_rfc3339: &at,
+                attempted_generation: rev,
+                streak: charcoal::db::StreakWrite::Set(streak),
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(streak)
+    );
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Retry {
+                at_rfc3339: &at,
+                attempted_generation: rev,
+                streak: charcoal::db::StreakWrite::Clear,
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
+    db.delete_user_data(DID).await.unwrap();
 }

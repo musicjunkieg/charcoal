@@ -42,7 +42,7 @@ use tracing::{debug, error, info, warn};
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::relationships::GraphDistance;
 use crate::config::Config;
-use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind};
+use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind, StreakWrite};
 use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity, ScanSummary};
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
@@ -399,20 +399,21 @@ pub trait RefreshBookkeeping: Send + Sync {
     /// Best-effort by contract: logs and counts a failure, never returns it.
     /// `now` is the attempt's END instant, from the injected clock (V6-02).
     async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
-    /// Best-effort, like `schedule_success`. `delay` is the backoff (#387).
+    /// Best-effort, like `schedule_success`. `delay` is the backoff and
+    /// `streak` the failure-streak change, written in the SAME fenced
+    /// transaction as the deadline (#387) — never as a separate write.
     async fn schedule_retry(
         &self,
         user_did: &str,
         claim_id: &str,
         now: DateTime<Utc>,
         delay: std::time::Duration,
+        streak: StreakWrite<'_>,
     );
     /// The user's current run of identical failures, if any (#387).
     /// Best-effort: an unreadable streak is no streak — the backoff restarts
     /// at an hour, which is the old behaviour, never a skipped retry.
     async fn load_streak(&self, user_did: &str) -> Option<FailureStreak>;
-    /// Record the streak, or clear it with `None`. Best-effort.
-    async fn store_streak(&self, user_did: &str, streak: Option<&FailureStreak>);
 }
 
 /// The production bookkeeping.
@@ -525,9 +526,17 @@ impl RefreshBookkeeping for DbBookkeeping {
         claim_id: &str,
         now: DateTime<Utc>,
         delay: std::time::Duration,
+        streak: StreakWrite<'_>,
     ) {
-        crate::web::refresh::schedule_retry_after(self.db.as_ref(), user_did, claim_id, now, delay)
-            .await
+        crate::web::refresh::schedule_retry_after(
+            self.db.as_ref(),
+            user_did,
+            claim_id,
+            now,
+            delay,
+            streak,
+        )
+        .await
     }
 
     async fn load_streak(&self, user_did: &str) -> Option<FailureStreak> {
@@ -544,19 +553,6 @@ impl RefreshBookkeeping for DbBookkeeping {
                 warn!(user_did, error = %e, "unreadable refresh failure streak — starting over");
                 None
             }
-        }
-    }
-
-    async fn store_streak(&self, user_did: &str, streak: Option<&FailureStreak>) {
-        let written = match streak {
-            Some(s) => match serde_json::to_string(s) {
-                Ok(json) => self.db.set_scan_state(user_did, STREAK_KEY, &json).await,
-                Err(e) => Err(e.into()),
-            },
-            None => self.db.delete_scan_state(user_did, STREAK_KEY).await,
-        };
-        if let Err(e) = written {
-            warn!(user_did, error = %format!("{e:#}"), "could not record the refresh failure streak");
         }
     }
 }
@@ -726,8 +722,9 @@ where
         }
         // #387: the retry delay. A failure extends the user's streak of
         // identical failures and backs off by it; anything else ends the
-        // streak and retries at the base hour.
-        let delay = match &cause {
+        // streak and retries at the base hour. The streak is only COMPUTED
+        // here: it is written inside the schedule's own fenced transaction.
+        let (streak, delay) = match &cause {
             Some(cause) => {
                 let prev = books.load_streak(user_did).await;
                 let streak = FailureStreak::after_failure(prev.as_ref(), cause, breaker.deploy());
@@ -741,13 +738,32 @@ where
                         "refresh failed the same way again — backing off"
                     );
                 }
-                books.store_streak(user_did, Some(&streak)).await;
-                delay
+                (Some(streak), delay)
             }
-            None => {
-                books.store_streak(user_did, None).await;
-                backoff_delay(1)
-            }
+            None => (None, backoff_delay(1)),
+        };
+        // The streak change rides in the SAME fenced transaction as the
+        // deadline (#387): a success clears it inside `schedule_success`; a
+        // retry sets the new streak or clears an ended one alongside its
+        // deadline. Written as separate writes in any order, a deploy sweep
+        // landing between them could pair a stale streak with a fresh
+        // deadline — three review rounds found a different such window each
+        // time a separate write was reordered.
+        let streak_json = streak
+            .as_ref()
+            .and_then(|s| match serde_json::to_string(s) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    warn!(user_did, error = %e, "could not encode the refresh failure streak");
+                    None
+                }
+            });
+        let streak_write = match (&streak, &streak_json) {
+            (Some(_), Some(json)) => StreakWrite::Set(json),
+            // Unencodable (cannot happen for this plain struct): leave the
+            // stored streak alone rather than wrongly ending it.
+            (Some(_), None) => StreakWrite::Keep,
+            (None, _) => StreakWrite::Clear,
         };
         // Exactly one scheduling site. The slot lifecycle (`run_under_slot`)
         // does NOT schedule; it only finishes the queue row.
@@ -759,9 +775,15 @@ where
                         warn!(error = %format!("{e:#}"), "could not request the follow-up full scan");
                     }
                 }
-                books.schedule_retry(user_did, claim_id, now, delay).await;
+                books
+                    .schedule_retry(user_did, claim_id, now, delay, streak_write)
+                    .await;
             }
-            None => books.schedule_retry(user_did, claim_id, now, delay).await,
+            None => {
+                books
+                    .schedule_retry(user_did, claim_id, now, delay, streak_write)
+                    .await
+            }
         }
     } else {
         warn!(
@@ -1256,6 +1278,8 @@ mod tests {
         fail_reset: bool,
         retries: AtomicUsize,
         successes: AtomicUsize,
+        /// The order the schedule and streak writes happened in.
+        order: std::sync::Mutex<Vec<&'static str>>,
     }
 
     impl CountingBooks {
@@ -1265,6 +1289,7 @@ mod tests {
                 fail_reset,
                 retries: 0.into(),
                 successes: 0.into(),
+                order: std::sync::Mutex::new(Vec::new()),
             }
         }
     }
@@ -1289,6 +1314,7 @@ mod tests {
         }
         async fn schedule_success(&self, u: &str, c: &str, now: DateTime<Utc>) {
             self.successes.fetch_add(1, SeqCst);
+            self.order.lock().unwrap().push("success");
             self.inner.schedule_success(u, c, now).await
         }
         async fn schedule_retry(
@@ -1297,15 +1323,18 @@ mod tests {
             c: &str,
             now: DateTime<Utc>,
             delay: std::time::Duration,
+            streak: StreakWrite<'_>,
         ) {
             self.retries.fetch_add(1, SeqCst);
-            self.inner.schedule_retry(u, c, now, delay).await
+            self.order.lock().unwrap().push(match streak {
+                StreakWrite::Keep => "retry:keep",
+                StreakWrite::Set(_) => "retry:set",
+                StreakWrite::Clear => "retry:clear",
+            });
+            self.inner.schedule_retry(u, c, now, delay, streak).await
         }
         async fn load_streak(&self, u: &str) -> Option<FailureStreak> {
             self.inner.load_streak(u).await
-        }
-        async fn store_streak(&self, u: &str, s: Option<&FailureStreak>) {
-            self.inner.store_streak(u, s).await
         }
     }
 
@@ -2678,5 +2707,105 @@ mod tests {
         let (result, _) = fail_attempt(&db, &breaker, "did:plc:c", t0, "its own").await;
         let err = format!("{:#}", result.expect_err("c ran"));
         assert!(err.contains("its own"), "breaker stayed closed: {err}");
+    }
+
+    /// #387: a failure's new streak is written in the SAME fenced transaction
+    /// as its deadline. As two separate writes, a deploy sweep landing
+    /// between them paired a stale streak with a fresh deadline (internal
+    /// review, Codex and CodeRabbit each found a different such window).
+    #[tokio::test]
+    async fn a_failed_refresh_records_its_streak_with_its_deadline() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let t0 = Utc::now();
+        let clock = move || t0;
+        let _failed = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:u",
+            "h",
+            &claim_id,
+            || anyhow::bail!("classifier down"),
+        )
+        .await;
+        assert_eq!(
+            *books.order.lock().unwrap(),
+            vec!["retry:set"],
+            "a failure records its streak in the same write as its deadline"
+        );
+    }
+
+    /// #387: a refresh that ENDS a streak (here a deferral) clears it in the
+    /// same fenced transaction as its deadline, so no deploy sweep can pair
+    /// the stale streak with the fresh deadline and pull it forward to now.
+    #[tokio::test]
+    async fn a_refresh_that_ends_a_streak_clears_it_with_its_deadline() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        // A refresh that defers (no fingerprint) is not a failure: it ends
+        // the streak and retries at the base hour.
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || t0;
+        struct NoFp;
+        #[async_trait]
+        impl RefreshContextSource for NoFp {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
+                Ok(None)
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![])
+            }
+            async fn protected_posts_embeddings(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                Ok(vec![])
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
+                Ok(HashSet::new())
+            }
+            async fn direct_pairs(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+                Ok(None)
+            }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
+                Ok(0.0)
+            }
+        }
+        run_refresh_with(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:u",
+            "h",
+            &claim_id,
+            || {
+                let ctx: Box<dyn RefreshContextSource> = Box::new(NoFp);
+                Ok((ctx, |_plan: RefreshPlan| async {
+                    panic!("a deferral never reaches the pipeline")
+                }))
+            },
+        )
+        .await
+        .expect("a deferral is not an error");
+        assert_eq!(
+            *books.order.lock().unwrap(),
+            vec!["retry:clear"],
+            "a non-failure ends the streak in the same write as its deadline"
+        );
     }
 }

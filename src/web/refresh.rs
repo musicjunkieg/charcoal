@@ -13,7 +13,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
 
-use crate::db::{Database, RefreshScheduleWrite};
+use crate::db::{Database, RefreshScheduleWrite, StreakWrite};
 use crate::scoring::generation::scoring_revision;
 
 pub const REFRESH_INTERVAL_ENV: &str = "CHARCOAL_REFRESH_INTERVAL_HOURS";
@@ -174,19 +174,10 @@ pub async fn schedule_after_success(
         generation: scoring_revision(),
     };
     match db.apply_refresh_schedule(user_did, claim_id, write).await {
-        // A proven success — refresh or full scan — ends any refresh failure
-        // streak (#387, Codex review). Left behind, it would make a later
-        // redeploy pull this healthy deadline forward and hand its old count
-        // to the next unrelated failure. Only after the fenced write landed:
-        // a superseded worker must not touch the successor's state.
-        Ok(true) => {
-            if let Err(e) = db
-                .delete_scan_state(user_did, crate::web::refresh_backoff::STREAK_KEY)
-                .await
-            {
-                warn!(user_did, error = %format!("{e:#}"), "could not clear the refresh failure streak");
-            }
-        }
+        // The Success write also ends any refresh failure streak, inside its
+        // own fenced transaction (#387): a separate clear afterwards left a
+        // window for a deploy sweep to pull this healthy deadline forward.
+        Ok(true) => {}
         Ok(false) => warn!(
             user_did,
             "the claim no longer owns the queue row — not scheduling the next refresh; \
@@ -213,23 +204,27 @@ pub async fn schedule_retry(db: &dyn Database, user_did: &str, claim_id: &str, n
         claim_id,
         now,
         Duration::from_secs(REFRESH_RETRY_HOURS * 3600),
+        StreakWrite::Keep,
     )
     .await
 }
 
 /// [`schedule_retry`] with the delay chosen by the caller — the backoff for a
-/// repeated identical failure (#387).
+/// repeated identical failure (#387) — and the streak change, written in the
+/// same fenced transaction as the deadline.
 pub async fn schedule_retry_after(
     db: &dyn Database,
     user_did: &str,
     claim_id: &str,
     now: DateTime<Utc>,
     delay: Duration,
+    streak: StreakWrite<'_>,
 ) {
     let at = plus(now, delay);
     let write = RefreshScheduleWrite::Retry {
         at_rfc3339: &at,
         attempted_generation: scoring_revision(),
+        streak,
     };
     match db.apply_refresh_schedule(user_did, claim_id, write).await {
         Ok(true) => {}
@@ -248,8 +243,8 @@ pub async fn schedule_retry_after(
 /// A deploy is how a fix lands — a code change, or a variable change, which
 /// Railway applies by redeploying — so an operator who fixed the fault must
 /// not wait out a backoff the old deployment stretched to 24 hours. The
-/// streak itself is left as is: the next failure sees the new deployment id
-/// and starts counting again from one.
+/// streak is cleared with the pull, so each user is pulled forward once per
+/// deployment and the next failure starts counting again from one.
 ///
 /// Unfenced, unlike the scheduling writes: no claim is held at boot. That is
 /// safe because it only ever moves a deadline EARLIER, and a user who already
@@ -284,15 +279,32 @@ pub async fn pull_forward_after_deploy(
         if streak.deploy == deploy || streak.count < 2 {
             continue;
         }
-        let due_later = match db.next_refresh_at(&user.did).await {
-            Ok(Some(at)) => DateTime::parse_from_rfc3339(&at).is_ok_and(|at| at > now),
-            _ => false,
+        // Keep the exact deadline read: the write below only lands while it
+        // is unchanged, so a fresh retry written since always wins.
+        let deadline = match db.next_refresh_at(&user.did).await {
+            Ok(Some(at)) if DateTime::parse_from_rfc3339(&at).is_ok_and(|at| at > now) => at,
+            _ => continue,
         };
-        if !due_later {
-            continue;
-        }
-        match db.schedule_refresh(&user.did, &now.to_rfc3339()).await {
-            Ok(()) => pulled += 1,
+        // Consume the streak the pull acts on, in the SAME write as the pull
+        // (CodeRabbit and Codex, PRs #144/#145). A deploy restarts the
+        // backoff anyway, and a leftover old-deployment streak would let the
+        // next sweep pull this user forward AGAIN — a failed full scan
+        // schedules a plain one-hour retry without touching the streak, so
+        // that could repeat a paid scan every ten minutes. The write is
+        // conditional on the streak still holding exactly `raw`: a refresh
+        // that recorded a new streak and deadline since we read it wins.
+        match db
+            .pull_refresh_forward_if_streak(
+                &user.did,
+                STREAK_KEY,
+                &raw,
+                &deadline,
+                &now.to_rfc3339(),
+            )
+            .await
+        {
+            Ok(true) => pulled += 1,
+            Ok(false) => {}
             Err(e) => {
                 warn!(user_did = %user.did, error = %format!("{e:#}"), "could not reset refresh backoff after deploy")
             }
@@ -1272,6 +1284,371 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(streak)
+        );
+    }
+
+    /// CodeRabbit (PR #144): the sweep must clear the streak it acts on. A
+    /// failed FULL scan schedules a plain one-hour retry and never touches
+    /// the streak, so a leftover old-deployment streak would let the next
+    /// 10-minute sweep pull the user forward again — a paid full scan every
+    /// ten minutes. One pull per deployment: after it, the user is left alone.
+    #[tokio::test]
+    async fn the_sweep_pulls_each_backed_off_user_forward_once() {
+        use crate::web::refresh_backoff::{FailureStreak, STREAK_KEY};
+        let db = db();
+        let now = Utc::now();
+        db.upsert_user("did:plc:u", "h").await.unwrap();
+        db.schedule_refresh("did:plc:u", &(now + ChronoDuration::hours(16)).to_rfc3339())
+            .await
+            .unwrap();
+        let streak = FailureStreak {
+            count: 5,
+            cause: "policy mismatch".into(),
+            deploy: "deploy-1".into(),
+        };
+        db.set_scan_state(
+            "did:plc:u",
+            STREAK_KEY,
+            &serde_json::to_string(&streak).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", now).await,
+            1
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None,
+            "the old-deployment streak is consumed by the pull"
+        );
+
+        // A full scan then fails and schedules the plain one-hour retry,
+        // touching no streak — the next sweep must leave it alone.
+        let retry_at = (now + ChronoDuration::hours(1)).to_rfc3339();
+        db.schedule_refresh("did:plc:u", &retry_at).await.unwrap();
+        let later = now + ChronoDuration::minutes(10);
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", later).await,
+            0
+        );
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            retry_at
+        );
+    }
+
+    /// Codex review (PR #144 fix): consuming the streak and moving the
+    /// deadline are two writes. The streak goes FIRST, so if clearing it
+    /// fails nothing moves: a deadline pulled forward with the old-deployment
+    /// streak still in place is exactly the 10-minute paid-scan loop.
+    #[tokio::test]
+    async fn a_failed_streak_clear_moves_no_deadline() {
+        use crate::web::refresh_backoff::{FailureStreak, STREAK_KEY};
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_streak_clear BEFORE DELETE ON scan_state
+             WHEN OLD.key = 'refresh_failure_streak'
+             BEGIN SELECT RAISE(ABORT, 'disk on fire'); END;",
+        )
+        .unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        let now = Utc::now();
+        let later = (now + ChronoDuration::hours(16)).to_rfc3339();
+        db.upsert_user("did:plc:u", "h").await.unwrap();
+        db.schedule_refresh("did:plc:u", &later).await.unwrap();
+        let streak = serde_json::to_string(&FailureStreak {
+            count: 5,
+            cause: "policy mismatch".into(),
+            deploy: "deploy-1".into(),
+        })
+        .unwrap();
+        db.set_scan_state("did:plc:u", STREAK_KEY, &streak)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", now).await,
+            0
+        );
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            later
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(streak.as_str())
+        );
+    }
+
+    /// CodeRabbit (PR #145) — the third reviewer to flag this: the sweep reads
+    /// a streak, and a refresh worker can write a NEW one before the sweep
+    /// acts. Consuming the streak and moving the deadline is therefore one
+    /// conditional write: it lands only while the streak still holds exactly
+    /// what the sweep read, and otherwise changes nothing.
+    #[tokio::test]
+    async fn the_pull_forward_only_consumes_the_streak_it_read() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        let now = Utc::now();
+        let later = (now + ChronoDuration::hours(16)).to_rfc3339();
+        let observed = r#"{"count":5,"cause":"c","deploy":"deploy-1"}"#;
+        let replaced = r#"{"count":1,"cause":"c","deploy":"deploy-2"}"#;
+        db.upsert_user("did:plc:u", "h").await.unwrap();
+        db.schedule_refresh("did:plc:u", &later).await.unwrap();
+
+        // A worker replaced the streak after the sweep read it: no-op.
+        db.set_scan_state("did:plc:u", STREAK_KEY, replaced)
+            .await
+            .unwrap();
+        assert!(!db
+            .pull_refresh_forward_if_streak(
+                "did:plc:u",
+                STREAK_KEY,
+                observed,
+                &later,
+                &now.to_rfc3339()
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            later
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(replaced)
+        );
+
+        // The streak still holds what was read: consumed and pulled, together.
+        db.set_scan_state("did:plc:u", STREAK_KEY, observed)
+            .await
+            .unwrap();
+        assert!(db
+            .pull_refresh_forward_if_streak(
+                "did:plc:u",
+                STREAK_KEY,
+                observed,
+                &later,
+                &now.to_rfc3339()
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            now.to_rfc3339()
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None
+        );
+
+        // Internal review: the deadline is re-checked INSIDE the write. A
+        // streak that still matches but whose deadline is no longer in the
+        // future (a fresh full-scan retry, or already due) is left alone.
+        let due = (now - ChronoDuration::minutes(5)).to_rfc3339();
+        db.schedule_refresh("did:plc:u", &due).await.unwrap();
+        db.set_scan_state("did:plc:u", STREAK_KEY, observed)
+            .await
+            .unwrap();
+        assert!(!db
+            .pull_refresh_forward_if_streak(
+                "did:plc:u",
+                STREAK_KEY,
+                observed,
+                &due,
+                &now.to_rfc3339()
+            )
+            .await
+            .unwrap());
+        assert_eq!(db.next_refresh_at("did:plc:u").await.unwrap().unwrap(), due);
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(observed),
+            "nothing consumed when the deadline is not ahead"
+        );
+        db.delete_scan_state("did:plc:u", STREAK_KEY).await.unwrap();
+        db.schedule_refresh("did:plc:u", &now.to_rfc3339())
+            .await
+            .unwrap();
+
+        // Codex review: the deadline must be EXACTLY the one the sweep read.
+        // A failed full scan writes a fresh future retry without touching the
+        // streak; "still in the future" alone would let the sweep clobber it.
+        let fresh = (now + ChronoDuration::hours(1)).to_rfc3339();
+        db.schedule_refresh("did:plc:u", &fresh).await.unwrap();
+        db.set_scan_state("did:plc:u", STREAK_KEY, observed)
+            .await
+            .unwrap();
+        assert!(!db
+            .pull_refresh_forward_if_streak(
+                "did:plc:u",
+                STREAK_KEY,
+                observed,
+                &later,
+                &now.to_rfc3339()
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            fresh
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(observed),
+            "a fresh deadline wins: nothing consumed"
+        );
+        db.delete_scan_state("did:plc:u", STREAK_KEY).await.unwrap();
+        db.schedule_refresh("did:plc:u", &now.to_rfc3339())
+            .await
+            .unwrap();
+
+        // Already consumed (or cleared by a success): no-op.
+        assert!(!db
+            .pull_refresh_forward_if_streak(
+                "did:plc:u",
+                STREAK_KEY,
+                observed,
+                &now.to_rfc3339(),
+                &later
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            now.to_rfc3339()
+        );
+    }
+
+    /// Codex review: a success clears the streak INSIDE its claim-fenced
+    /// schedule write, so no sweep can land between the healthy deadline and
+    /// the clear. A retry write leaves the streak alone — the caller writes
+    /// the new streak itself, after the deadline.
+    #[tokio::test]
+    async fn only_a_success_schedule_write_clears_the_streak() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        user(&db, "did:plc:s", None, None).await;
+        let streak = r#"{"count":4,"cause":"c","deploy":"d"}"#;
+        db.set_scan_state("did:plc:s", STREAK_KEY, streak)
+            .await
+            .unwrap();
+        let claim = claimed(&db, "did:plc:s").await;
+        let at = (Utc::now() + ChronoDuration::hours(1)).to_rfc3339();
+        assert!(db
+            .apply_refresh_schedule(
+                "did:plc:s",
+                &claim,
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: crate::db::StreakWrite::Keep,
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_scan_state("did:plc:s", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(streak),
+            "a retry write does not touch the streak"
+        );
+        assert!(db
+            .apply_refresh_schedule(
+                "did:plc:s",
+                &claim,
+                RefreshScheduleWrite::Success {
+                    next_at_rfc3339: &at,
+                    generation: scoring_revision(),
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_scan_state("did:plc:s", STREAK_KEY).await.unwrap(),
+            None
+        );
+    }
+
+    /// #387: a Retry write applies its streak change in the same fenced
+    /// transaction as its deadline — Set records it, Clear ends it.
+    #[tokio::test]
+    async fn a_retry_write_sets_or_clears_the_streak_with_its_deadline() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        user(&db, "did:plc:r", None, None).await;
+        let claim = claimed(&db, "did:plc:r").await;
+        let at = (Utc::now() + ChronoDuration::hours(2)).to_rfc3339();
+        let streak = r#"{"count":2,"cause":"c","deploy":"d"}"#;
+        assert!(db
+            .apply_refresh_schedule(
+                "did:plc:r",
+                &claim,
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: StreakWrite::Set(streak),
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(db.next_refresh_at("did:plc:r").await.unwrap().unwrap(), at);
+        assert_eq!(
+            db.get_scan_state("did:plc:r", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(streak)
+        );
+        assert!(db
+            .apply_refresh_schedule(
+                "did:plc:r",
+                &claim,
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: StreakWrite::Clear,
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_scan_state("did:plc:r", STREAK_KEY).await.unwrap(),
+            None
+        );
+        // Fenced like the deadline: a lost claim writes neither.
+        assert!(!db
+            .apply_refresh_schedule(
+                "did:plc:r",
+                "not-the-owner",
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: StreakWrite::Set(streak),
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_scan_state("did:plc:r", STREAK_KEY).await.unwrap(),
+            None
         );
     }
 }

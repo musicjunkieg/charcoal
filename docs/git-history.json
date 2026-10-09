@@ -1,5 +1,61 @@
 [
   {
+    "hash": "0a3dd44be310f41d2471bc5149a4ec01c6e267f0",
+    "short_hash": "0a3dd44",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T20:32:10-07:00",
+    "message": "fix(387): the sweep locks users first and re-checks the deadline in its write\n\nInternal review:\n- Postgres: pull_refresh_forward_if_streak deleted from scan_state before\n  updating users, the opposite lock order to apply_refresh_schedule; the\n  two could deadlock and Postgres would abort one, possibly the refresh's\n  schedule write. It now locks the users row first (SELECT ... FOR UPDATE).\n- Both backends re-check, under that lock, that next_refresh_at is still\n  later than now: a failed full scan's fresh retry touches no streak, so\n  the streak match alone could pull it forward.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
+    "hash": "fdf8733f795fab4691ab261e7905858186929f88",
+    "short_hash": "fdf8733",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T20:12:32-07:00",
+    "message": "fix(387): the failure streak is written in the same fenced write as the deadline\n\nEach reordering of two separate writes (deadline, streak) opened a new\nwindow for the deploy sweep: internal review, Codex and CodeRabbit each\nfound a different one. Make it one write instead:\n\n- RefreshScheduleWrite::Retry carries a StreakWrite (Keep | Set | Clear),\n  applied in the same claim-fenced transaction as the deadline on both\n  backends; Success already clears it there.\n- run_refresh_with passes Set for a failure and Clear for anything else;\n  the separate RefreshBookkeeping::store_streak is gone. The full scan's\n  retry passes Keep.\n- The sweep therefore only ever sees before-or-after, never a stale streak\n  paired with a fresh deadline. Completes #403.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 9
+  },
+  {
+    "hash": "a21b29ddead9613bf3f317cde269062ff79196e8",
+    "short_hash": "a21b29d",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:53:21-07:00",
+    "message": "fix(387): a success clears the streak inside its fenced schedule write\n\nCodex review: deadline-before-streak is only safe when writing a NEW\nstreak. When a refresh or full scan SUCCEEDS, clearing the streak after the\nhealthy deadline left a window for a deploy sweep to consume the stale\nstreak and pull that fresh deadline forward to now.\n\n- apply_refresh_schedule(Success) now deletes the streak in the same\n  claim-fenced transaction (SQLite + Postgres); the separate clear in\n  schedule_after_success is gone. Retry writes leave the streak alone.\n- run_refresh_with clears an ending streak BEFORE scheduling, and still\n  writes a new streak AFTER the deadline.\n- REFRESH_FAILURE_STREAK_KEY moves to the db module (it builds without web).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 10
+  },
+  {
+    "hash": "bddd7d01f1d0c4a816e64e783115cf1fe2d0c3e1",
+    "short_hash": "bddd7d0",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:20:43-07:00",
+    "message": "fix(387): a failed refresh writes its deadline before its streak\n\nInternal review: with the streak written first, a deploy sweep landing\nbetween the two writes consumed the streak and pulled the deadline\nforward, then the retiring worker's long deadline landed with no streak\nleft for any later sweep to see. Deadline first, then streak: every\ninterleaving now ends with either the sweep acting on the final streak or\nthe next sweep doing so.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "0961cd928042da173e0f3abbedc36e137a173b36",
+    "short_hash": "0961cd9",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:07:32-07:00",
+    "message": "fix(387): the deploy sweep pulls forward in one conditional write\n\nCodeRabbit (PR #145), after Codex flagged the same race twice: the sweep\nread a streak, then deleted it and moved the deadline in separate writes,\nso a refresh that recorded a NEW streak and deadline in between had both\nclobbered. New Database::pull_refresh_forward_if_streak deletes the streak\nonly while it still holds exactly the value the sweep read and, only then,\nmoves the deadline, in one transaction (SQLite Immediate, Postgres tx).\nTested on both backends. Closes the sweep half of #403.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
+    "hash": "7afbf9a5efb48225e93810129ea38a5e892d9596",
+    "short_hash": "7afbf9a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T16:30:55-07:00",
+    "message": "fix(387): the deploy sweep consumes the streak it acts on\n\nCodeRabbit (PR #144): the sweep pulled a backed-off user forward but left\nthe old-deployment streak in place. A failed FULL scan schedules a plain\none-hour retry without touching the streak, so the next 10-minute sweep\ncould pull the user forward again and repeat a paid scan every ten\nminutes. The sweep now deletes the streak once its pull lands: one pull per\nuser per deployment, and the next refresh failure counts from one.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "09ab228a4d468774296dc8c403b289d4bf9b297e",
+    "short_hash": "09ab228",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T18:50:31-07:00",
+    "message": "fix(387): Codex: stale workers cannot move the breaker; mask URL query strings\n\n- run_refresh_with checks claim ownership once, BEFORE the breaker report:\n  a worker whose lease was reclaimed reports Neutral (frees a probe slot,\n  otherwise no-op) instead of opening, closing or stretching the breaker.\n- failure_signature masks URL query strings (`?actor=alice.bsky.social`),\n  keeping scheme, host and path, so an AppView outage reads as one cause.\n\nDeferred to #403 (same atomic fix): fencing the streak writes inside the\nclaim-fenced schedule transaction, and a conditional deploy sweep.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "b12781c90b2230f18053a8ba28ad534ff4bd79c5",
     "short_hash": "b12781c",
     "author": "Bryan Guffey",
