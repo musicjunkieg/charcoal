@@ -1,0 +1,8 @@
+{
+  "name": "cloud-tools",
+  "private": true,
+  "description": "CLIs cloud-setup.sh installs in claude.ai cloud sessions. Exact versions only; package-lock.json pins the whole tree by integrity hash.",
+  "dependencies": {
+    "cf": "1.0.0-beta.12"
+  }
+}
