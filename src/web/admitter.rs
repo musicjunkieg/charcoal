@@ -52,6 +52,11 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(LEASE_SECS as u64 /
 /// only covers a missed wake.
 const TICK: Duration = Duration::from_secs(30);
 
+/// How often the deploy-reset sweep re-runs after boot (#387). Ten minutes
+/// bounds how long a late write from a retiring container can hold a user's
+/// backoff, at the cost of one users list + one `scan_state` read per user.
+const DEPLOY_RESET_SWEEP: Duration = Duration::from_secs(600);
+
 /// Concurrent scans allowed. Default 2 — conservative given the ~500MB shared
 /// model floor and the Bluesky pressure #182 addresses. Raise only after #264
 /// reports the fetch/inference split.
@@ -572,6 +577,34 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
     // bigger question (a panicking loop that respawns can hot-loop) and is left
     // for the supervision work; being loud is the part that matters now.
     tokio::spawn(async move {
+        let refresh = crate::web::refresh::refresh_interval_from_env();
+        // #387: users the previous deployment backed off for up to a day are
+        // made due again — at boot and then every DEPLOY_RESET_SWEEP, because
+        // during a rolling deploy the retiring container can still finish a
+        // refresh AFTER a boot-only sweep and stamp an old-deployment streak
+        // with a long deadline (Codex review). Spawned, never awaited here:
+        // the sweep reads every user, and admission — full scans included —
+        // must not wait on it (CodeRabbit, PR #143). A deadline it pulls
+        // forward is claimed by the admitter's next tick. Only ever moving a
+        // deadline earlier, for a streak from another deployment, it is
+        // idempotent and safe to repeat.
+        if refresh.is_some() {
+            let deploy = crate::web::refresh_backoff::RefreshBreaker::global().deploy();
+            let sweep_db = db.clone();
+            tokio::spawn(async move {
+                // The first tick of an interval completes at once: the boot sweep.
+                let mut every = tokio::time::interval(DEPLOY_RESET_SWEEP);
+                loop {
+                    every.tick().await;
+                    crate::web::refresh::pull_forward_after_deploy(
+                        sweep_db.as_ref(),
+                        deploy,
+                        chrono::Utc::now(),
+                    )
+                    .await;
+                }
+            });
+        }
         let admitter = tokio::spawn(run_admitter(
             db,
             launcher,
@@ -579,7 +612,7 @@ pub fn spawn_admitter(state: AppState) -> mpsc::Sender<()> {
             rx,
             TICK,
             scan_concurrency,
-            crate::web::refresh::refresh_interval_from_env(),
+            refresh,
         ));
         match admitter.await {
             Ok(()) => error!(

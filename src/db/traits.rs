@@ -294,17 +294,34 @@ impl FinishCompletion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefreshScheduleWrite<'a> {
     /// A completed run: the next deadline plus the proof — `refreshed_generation`
-    /// and `refresh_attempted_generation` both set to `generation` (V3-04).
+    /// and `refresh_attempted_generation` both set to `generation` (V3-04) —
+    /// and the end of any refresh failure streak, in the same transaction
+    /// ([`super::REFRESH_FAILURE_STREAK_KEY`], #387).
     Success {
         next_at_rfc3339: &'a str,
         generation: &'a str,
     },
     /// A failed or deferred attempt: the backoff deadline plus
-    /// `refresh_attempted_generation` (V4-01).
+    /// `refresh_attempted_generation` (V4-01), and what happens to the
+    /// refresh failure streak — in the same transaction (#387), so the deploy
+    /// sweep can never observe a deadline without its matching streak.
     Retry {
         at_rfc3339: &'a str,
         attempted_generation: &'a str,
+        streak: StreakWrite<'a>,
     },
+}
+
+/// What a [`RefreshScheduleWrite::Retry`] does to the refresh failure streak
+/// ([`super::REFRESH_FAILURE_STREAK_KEY`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreakWrite<'a> {
+    /// Leave it as it is (the full scan's retry knows nothing of streaks).
+    Keep,
+    /// Record this streak (JSON): the attempt failed again.
+    Set(&'a str),
+    /// End it: the attempt was not a failure.
+    Clear,
 }
 
 /// A successful claim on a queued scan (#257).
@@ -508,6 +525,30 @@ pub trait Database: Send + Sync {
 
     /// Set a scan state value (upsert) for a specific user.
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
+
+    /// The deploy sweep's pull-forward (#387): in ONE transaction — and only
+    /// while `next_refresh_at` is still EXACTLY `observed_deadline` (the value
+    /// the sweep read) and later than `now_rfc3339` — delete `key` for
+    /// `user_did` only while it still holds exactly `observed`, and if, and
+    /// only if, that delete happened, set `next_refresh_at` to `now_rfc3339`.
+    /// Returns whether it wrote anything.
+    ///
+    /// The exact-deadline condition matters because a failed full scan writes
+    /// a fresh retry WITHOUT touching the streak (Codex review). Takes the
+    /// `users` row lock before `scan_state`, the same order as
+    /// [`Self::apply_refresh_schedule`], so the two cannot deadlock.
+    ///
+    /// Conditional on the observed value because the sweep reads the streak
+    /// first: a refresh worker that wrote a NEW streak (and a new deadline) in
+    /// between must not have both clobbered (CodeRabbit, PR #145).
+    async fn pull_refresh_forward_if_streak(
+        &self,
+        user_did: &str,
+        key: &str,
+        observed: &str,
+        observed_deadline: &str,
+        now_rfc3339: &str,
+    ) -> Result<bool>;
 
     /// Remove a single scan state key. Absent keys are not an error — the
     /// callers use this to retract a marker whose presence is the signal, and

@@ -42,10 +42,14 @@ use tracing::{debug, error, info, warn};
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::relationships::GraphDistance;
 use crate::config::Config;
-use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind};
+use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind, StreakWrite};
 use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity, ScanSummary};
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
+use crate::web::refresh_backoff::{
+    backoff_delay, failure_signature, BreakerReport, CircuitOpen, FailureStreak, RefreshBreaker,
+    STREAK_KEY,
+};
 use crate::web::scan_job::{finish_scan, set_progress, ScanManager, ScanReport, WebScanPhase};
 use crate::web::scan_setup::{
     build_scan_scorers, embed_protected_posts, pile_on_dids, record_scan_cache_stats, ScanModels,
@@ -395,7 +399,21 @@ pub trait RefreshBookkeeping: Send + Sync {
     /// Best-effort by contract: logs and counts a failure, never returns it.
     /// `now` is the attempt's END instant, from the injected clock (V6-02).
     async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
-    async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
+    /// Best-effort, like `schedule_success`. `delay` is the backoff and
+    /// `streak` the failure-streak change, written in the SAME fenced
+    /// transaction as the deadline (#387) — never as a separate write.
+    async fn schedule_retry(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        now: DateTime<Utc>,
+        delay: std::time::Duration,
+        streak: StreakWrite<'_>,
+    );
+    /// The user's current run of identical failures, if any (#387).
+    /// Best-effort: an unreadable streak is no streak — the backoff restarts
+    /// at an hour, which is the old behaviour, never a skipped retry.
+    async fn load_streak(&self, user_did: &str) -> Option<FailureStreak>;
 }
 
 /// The production bookkeeping.
@@ -502,8 +520,40 @@ impl RefreshBookkeeping for DbBookkeeping {
         .await
     }
 
-    async fn schedule_retry(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>) {
-        crate::web::refresh::schedule_retry(self.db.as_ref(), user_did, claim_id, now).await
+    async fn schedule_retry(
+        &self,
+        user_did: &str,
+        claim_id: &str,
+        now: DateTime<Utc>,
+        delay: std::time::Duration,
+        streak: StreakWrite<'_>,
+    ) {
+        crate::web::refresh::schedule_retry_after(
+            self.db.as_ref(),
+            user_did,
+            claim_id,
+            now,
+            delay,
+            streak,
+        )
+        .await
+    }
+
+    async fn load_streak(&self, user_did: &str) -> Option<FailureStreak> {
+        let raw = match self.db.get_scan_state(user_did, STREAK_KEY).await {
+            Ok(raw) => raw?,
+            Err(e) => {
+                warn!(user_did, error = %format!("{e:#}"), "could not read the refresh failure streak");
+                return None;
+            }
+        };
+        match serde_json::from_str(&raw) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                warn!(user_did, error = %e, "unreadable refresh failure streak — starting over");
+                None
+            }
+        }
     }
 }
 
@@ -524,6 +574,7 @@ impl RefreshBookkeeping for DbBookkeeping {
 pub(crate) async fn run_refresh_with<S, F, Fut>(
     scan_manager: Arc<RwLock<ScanManager>>,
     books: &dyn RefreshBookkeeping,
+    breaker: &RefreshBreaker,
     clock: &(dyn Fn() -> DateTime<Utc> + Sync),
     user_did: &str,
     actor_handle: &str,
@@ -535,12 +586,30 @@ where
     F: FnOnce(RefreshPlan) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<ScanSummary>>,
 {
-    let started = clock(); // telemetry only (V6-02)
+    // Telemetry, and the breaker's notion of "now".
+    let started = clock();
+    // #387: a deployment-wide fault is already known — every refresh is
+    // failing the same way — so this one is not attempted. Nothing below runs:
+    // no scorer, no Bluesky, no GPU (only the marker reset). It still flows through
+    // the one bookkeeping site, so it is recorded as failed and backs off.
+    let admission = breaker.admit(started);
+    let refused = admission.as_ref().err().cloned();
+    // Set when the pipeline stopped on a transient classifier failure rather
+    // than its cost ceiling — both come back `Resumable`, and only the first
+    // is a failure (#387, Codex review).
+    let mut interrupted = false;
     let outcome: anyhow::Result<RefreshOutcome> = async {
+        // Markers first, even for a refusal: a refused run is still a run,
+        // and recording its `failed` outcome against the PREVIOUS run's id
+        // and counts would give the runbook a mixed record (Codex review).
+        // This is a `scan_state` write, not Bluesky or GPU work.
         books
             .reset_markers(user_did, claim_id)
             .await
             .context("resetting refresh markers")?;
+        if let Some(open) = refused {
+            return Err(anyhow::Error::new(open));
+        }
         let (ctx, pipeline) = setup().context("refresh setup")?;
         let plan = match prepare_refresh(ctx.as_ref(), user_did, actor_handle).await? {
             Ok(plan) => plan,
@@ -563,6 +632,7 @@ where
             }
             Err(e) => return Err(e),
         };
+        interrupted = summary.interrupted;
         Ok(classify_refresh(
             candidates,
             has_own_resumable_staging,
@@ -590,12 +660,59 @@ where
         Err(e) => (Err(anyhow::anyhow!("{e:#}")), "failed".to_string(), None),
     };
 
-    // One ownership check for every write below (#344 F2). A worker whose
-    // lease lapsed would otherwise move `next_refresh_at` and stamp an outcome
+    // #387: what this attempt teaches the breaker, and what it adds to the
+    // user's streak (`cause`; `None` ends the streak).
+    //
+    // - A refusal was never admitted, so it reports nothing to the breaker;
+    //   it carries the cause that opened it, so the refused user's streak
+    //   counts against the fault itself.
+    // - Any other `Err` is a failure with its own signature.
+    // - Only a refresh that actually SCORED accounts is a breaker success.
+    //   Nothing due, a deferral, or a completion that scored nothing never
+    //   exercised the deployment, and must neither close the breaker nor
+    //   wipe its count (#387 review).
+    // - A resumable pause is neutral for the breaker — a cold start that
+    //   outlives the warm-up window pauses two users at once, which is not a
+    //   reason to stop the third. For the streak it depends on WHY it paused:
+    //   a GPU that times out on every attempt (`interrupted`) is a paid,
+    //   repeated failure and extends it; a cost cap is planned progress on a
+    //   large refresh and ends it, so a healthy refresh is not made to wait
+    //   hours between chunks.
+    let cause: Option<String> = match &outcome {
+        Err(e) => Some(match e.downcast_ref::<CircuitOpen>() {
+            Some(open) => open.cause.clone(),
+            None => failure_signature(&format!("{e:#}")),
+        }),
+        // Whatever the outcome: a recovery-burst timeout ends as a
+        // completion with skips, not a pause (Codex review).
+        Ok(_) if interrupted => Some("classifier_interrupted".to_string()),
+        Ok(_) => None,
+    };
+    // One ownership check for every write below (#344 F2) — the breaker
+    // included (Codex review). A worker whose lease was reclaimed must not
+    // open, close or stretch the process-wide breaker on the strength of an
+    // attempt its successor now owns; it reports Neutral, which frees the
+    // probe slot if it held one and changes nothing otherwise.
+    let owns_claim = books.owns_claim(user_did, claim_id).await;
+    if let Ok(admitted) = admission {
+        let report = match &outcome {
+            _ if !owns_claim => BreakerReport::Neutral,
+            Err(_) => BreakerReport::Failure(cause.as_deref().unwrap_or_default()),
+            // An interruption outranks any scored accounts: the classifier
+            // fault may still be live (CodeRabbit, PR #143).
+            Ok(_) if interrupted => BreakerReport::Inconclusive,
+            Ok(o) if o.scored() > 0 => BreakerReport::Success,
+            Ok(_) => BreakerReport::Neutral,
+        };
+        breaker.report(admitted, user_did, report, now);
+    }
+
+    // The same ownership answer gates the database bookkeeping. A worker
+    // whose lease lapsed would otherwise move `next_refresh_at` and stamp an outcome
     // for a user its successor now owns — and, being the slow one, its write
     // lands last. `finish_scan` is still called: its writes are fenced on the
     // claim of their own accord, and the caller must learn the outcome anyway.
-    if books.owns_claim(user_did, claim_id).await {
+    if owns_claim {
         // Record before scheduling so an operator reading `scan_state` sees the
         // outcome that produced the schedule. If the database is down for THIS
         // write it is down for the schedule too: log + count, never pretend.
@@ -603,6 +720,51 @@ where
             error!(user_did, error = %format!("{e:#}"), "could not record the refresh outcome");
             crate::observability::refresh_metrics::record_bookkeeping_failure();
         }
+        // #387: the retry delay. A failure extends the user's streak of
+        // identical failures and backs off by it; anything else ends the
+        // streak and retries at the base hour. The streak is only COMPUTED
+        // here: it is written inside the schedule's own fenced transaction.
+        let (streak, delay) = match &cause {
+            Some(cause) => {
+                let prev = books.load_streak(user_did).await;
+                let streak = FailureStreak::after_failure(prev.as_ref(), cause, breaker.deploy());
+                let delay = backoff_delay(streak.count);
+                if streak.count > 1 {
+                    warn!(
+                        user_did,
+                        consecutive = streak.count,
+                        retry_in_hours = delay.as_secs() / 3600,
+                        cause = %streak.cause,
+                        "refresh failed the same way again — backing off"
+                    );
+                }
+                (Some(streak), delay)
+            }
+            None => (None, backoff_delay(1)),
+        };
+        // The streak change rides in the SAME fenced transaction as the
+        // deadline (#387): a success clears it inside `schedule_success`; a
+        // retry sets the new streak or clears an ended one alongside its
+        // deadline. Written as separate writes in any order, a deploy sweep
+        // landing between them could pair a stale streak with a fresh
+        // deadline — three review rounds found a different such window each
+        // time a separate write was reordered.
+        let streak_json = streak
+            .as_ref()
+            .and_then(|s| match serde_json::to_string(s) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    warn!(user_did, error = %e, "could not encode the refresh failure streak");
+                    None
+                }
+            });
+        let streak_write = match (&streak, &streak_json) {
+            (Some(_), Some(json)) => StreakWrite::Set(json),
+            // Unencodable (cannot happen for this plain struct): leave the
+            // stored streak alone rather than wrongly ending it.
+            (Some(_), None) => StreakWrite::Keep,
+            (None, _) => StreakWrite::Clear,
+        };
         // Exactly one scheduling site. The slot lifecycle (`run_under_slot`)
         // does NOT schedule; it only finishes the queue row.
         match books_for {
@@ -613,9 +775,15 @@ where
                         warn!(error = %format!("{e:#}"), "could not request the follow-up full scan");
                     }
                 }
-                books.schedule_retry(user_did, claim_id, now).await;
+                books
+                    .schedule_retry(user_did, claim_id, now, delay, streak_write)
+                    .await;
             }
-            None => books.schedule_retry(user_did, claim_id, now).await,
+            None => {
+                books
+                    .schedule_retry(user_did, claim_id, now, delay, streak_write)
+                    .await
+            }
         }
     } else {
         warn!(
@@ -901,6 +1069,7 @@ pub(crate) async fn run_refresh(
     run_refresh_with(
         scan_manager,
         &books,
+        RefreshBreaker::global(),
         &chrono::Utc::now,
         user_did,
         actor_handle,
@@ -1109,6 +1278,8 @@ mod tests {
         fail_reset: bool,
         retries: AtomicUsize,
         successes: AtomicUsize,
+        /// The order the schedule and streak writes happened in.
+        order: std::sync::Mutex<Vec<&'static str>>,
     }
 
     impl CountingBooks {
@@ -1118,6 +1289,7 @@ mod tests {
                 fail_reset,
                 retries: 0.into(),
                 successes: 0.into(),
+                order: std::sync::Mutex::new(Vec::new()),
             }
         }
     }
@@ -1142,11 +1314,27 @@ mod tests {
         }
         async fn schedule_success(&self, u: &str, c: &str, now: DateTime<Utc>) {
             self.successes.fetch_add(1, SeqCst);
+            self.order.lock().unwrap().push("success");
             self.inner.schedule_success(u, c, now).await
         }
-        async fn schedule_retry(&self, u: &str, c: &str, now: DateTime<Utc>) {
+        async fn schedule_retry(
+            &self,
+            u: &str,
+            c: &str,
+            now: DateTime<Utc>,
+            delay: std::time::Duration,
+            streak: StreakWrite<'_>,
+        ) {
             self.retries.fetch_add(1, SeqCst);
-            self.inner.schedule_retry(u, c, now).await
+            self.order.lock().unwrap().push(match streak {
+                StreakWrite::Keep => "retry:keep",
+                StreakWrite::Set(_) => "retry:set",
+                StreakWrite::Clear => "retry:clear",
+            });
+            self.inner.schedule_retry(u, c, now, delay, streak).await
+        }
+        async fn load_streak(&self, u: &str) -> Option<FailureStreak> {
+            self.inner.load_streak(u).await
         }
     }
 
@@ -1298,6 +1486,7 @@ mod tests {
         let result = run_refresh_with(
             mgr,
             &books,
+            &RefreshBreaker::new("test-deploy"),
             &chrono::Utc::now,
             "did:plc:u",
             "u.h",
@@ -1328,6 +1517,7 @@ mod tests {
         >(
             mgr,
             &books,
+            &RefreshBreaker::new("test-deploy"),
             &chrono::Utc::now,
             "did:plc:u",
             "u.h",
@@ -1353,6 +1543,7 @@ mod tests {
         >(
             mgr,
             &books,
+            &RefreshBreaker::new("test-deploy"),
             &chrono::Utc::now,
             "did:plc:u",
             "u.h",
@@ -1386,6 +1577,7 @@ mod tests {
         >(
             mgr,
             &books,
+            &RefreshBreaker::new("test-deploy"),
             &now_fn,
             "did:plc:u",
             "u.h",
@@ -1753,6 +1945,7 @@ mod tests {
         let report = run_refresh_with(
             mgr,
             &books,
+            &RefreshBreaker::new("test-deploy"),
             &chrono::Utc::now,
             "did:plc:u",
             "u.h",
@@ -1891,6 +2084,7 @@ mod tests {
         >(
             mgr,
             &books,
+            &RefreshBreaker::new("test-deploy"),
             &chrono::Utc::now,
             "did:plc:u",
             "u.h",
@@ -1917,6 +2111,7 @@ mod tests {
             accounts_scored: 2,
             regathered: 0,
             degraded,
+            interrupted: false,
             final_phase: Some("done".into()),
             skipped,
         };
@@ -1967,6 +2162,7 @@ mod tests {
                 accounts_scored: 0,
                 regathered: 0,
                 degraded: false,
+                interrupted: false,
                 final_phase: phase.clone(),
                 skipped: Some(0),
             };
@@ -1975,5 +2171,641 @@ mod tests {
                 RefreshOutcome::Resumable
             );
         }
+    }
+
+    // ---- #387: backoff on repeated identical failure, and the breaker ----
+
+    /// A fresh refresh claim for `did` (the user row is created if missing).
+    async fn claim_refresh(
+        db: &Arc<dyn Database>,
+        did: &str,
+    ) -> (String, Arc<RwLock<ScanManager>>) {
+        db.upsert_user(did, &format!("{did}.h")).await.unwrap();
+        db.enqueue_refresh_scan(did).await.unwrap();
+        let claim = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+        assert_eq!(claim.user_did, did);
+        let mgr = manager_with_running_scan(did, &claim.claim_id);
+        (claim.claim_id, mgr)
+    }
+
+    fn deadline_of(raw: Option<String>) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(&raw.expect("a retry was scheduled"))
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// One refresh attempt for `did` at `at` whose setup fails with `msg`.
+    /// Returns the retry deadline it scheduled. The queue row is finished
+    /// afterwards, as `run_under_slot` would, so the next attempt can claim.
+    async fn fail_attempt(
+        db: &Arc<dyn Database>,
+        breaker: &RefreshBreaker,
+        did: &str,
+        at: DateTime<Utc>,
+        msg: &'static str,
+    ) -> (anyhow::Result<ScanReport>, DateTime<Utc>) {
+        let (claim_id, mgr) = claim_refresh(db, did).await;
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || at;
+        let result = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            breaker,
+            &clock,
+            did,
+            "h",
+            &claim_id,
+            move || anyhow::bail!(msg),
+        )
+        .await;
+        db.finish_queued_scan(did, &claim_id, crate::db::FinishCompletion::Failed, None)
+            .await
+            .unwrap();
+        (result, deadline_of(db.next_refresh_at(did).await.unwrap()))
+    }
+
+    /// How a non-failing test attempt ends.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Ending {
+        /// No candidates, drained: `NothingDue` — touched nothing.
+        NothingDue,
+        /// One candidate, scored: `Completed` — real end-to-end work.
+        Scored,
+        /// One candidate, staging left in `burst`: `Resumable` — the shape a
+        /// GPU timeout leaves (#402).
+        Paused,
+        /// One candidate, staging left in `burst` by the cost ceiling:
+        /// `Resumable` too, but planned progress rather than a failure.
+        CostCapped,
+        /// Drained, but one account's RECOVERY burst timed out: completed
+        /// with a skip, and interrupted (#387, Codex review).
+        RecoveryInterrupted,
+    }
+
+    /// One refresh attempt that completes with nothing due.
+    async fn succeed_attempt(
+        db: &Arc<dyn Database>,
+        breaker: &RefreshBreaker,
+        did: &str,
+        at: DateTime<Utc>,
+    ) {
+        let completion = end_attempt(db, breaker, did, at, Ending::NothingDue).await;
+        assert_eq!(completion, crate::db::FinishCompletion::Complete);
+    }
+
+    /// One refresh attempt that ends as `ending`, without error. Returns the
+    /// queue-row completion, having finished the row.
+    async fn end_attempt(
+        db: &Arc<dyn Database>,
+        breaker: &RefreshBreaker,
+        did: &str,
+        at: DateTime<Utc>,
+        ending: Ending,
+    ) -> crate::db::FinishCompletion {
+        struct Idle(bool);
+        #[async_trait]
+        impl RefreshContextSource for Idle {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
+                Ok(Some(usable_fingerprint()))
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(if self.0 {
+                    vec![RefreshCandidate {
+                        did: "did:plc:high".into(),
+                        handle: "high.h".into(),
+                        graph_distance: None,
+                    }]
+                } else {
+                    vec![]
+                })
+            }
+            async fn has_own_resumable_staging(&self, _: &str) -> anyhow::Result<bool> {
+                Ok(false)
+            }
+            async fn protected_posts_embeddings(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                Ok(vec![])
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
+                Ok(HashSet::new())
+            }
+            async fn direct_pairs(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+                Ok(None)
+            }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
+                Ok(0.0)
+            }
+        }
+        let (claim_id, mgr) = claim_refresh(db, did).await;
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || at;
+        let report = run_refresh_with(mgr, &books, breaker, &clock, did, "h", &claim_id, || {
+            let ctx: Box<dyn RefreshContextSource> = Box::new(Idle(ending != Ending::NothingDue));
+            Ok((ctx, move |_plan: RefreshPlan| async move {
+                Ok(ScanSummary {
+                    // A recovery interruption still scored the OTHER account.
+                    accounts_scored: usize::from(matches!(
+                        ending,
+                        Ending::Scored | Ending::RecoveryInterrupted
+                    )),
+                    regathered: 0,
+                    degraded: ending != Ending::Scored && ending != Ending::NothingDue,
+                    interrupted: matches!(ending, Ending::Paused | Ending::RecoveryInterrupted),
+                    final_phase: Some(
+                        if matches!(ending, Ending::Paused | Ending::CostCapped) {
+                            "burst"
+                        } else {
+                            "done"
+                        }
+                        .into(),
+                    ),
+                    skipped: Some(i64::from(ending == Ending::RecoveryInterrupted)),
+                })
+            }))
+        })
+        .await
+        .expect("a non-failing refresh");
+        db.finish_queued_scan(did, &claim_id, report.completion, None)
+            .await
+            .unwrap();
+        report.completion
+    }
+
+    fn hours(n: i64) -> chrono::Duration {
+        chrono::Duration::hours(n)
+    }
+
+    /// The incident shape: one user, the same refusal every attempt. The
+    /// retry stretches 1 h → 2 h → 4 h instead of staying hourly, even though
+    /// each attempt's message carries a different job id.
+    #[tokio::test]
+    async fn a_repeated_identical_failure_backs_off() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let (_, d1) = fail_attempt(
+            &db,
+            &breaker,
+            "did:plc:u",
+            t0,
+            "job sync-1a2b3c4d9 refused: policy mismatch",
+        )
+        .await;
+        assert_eq!(d1, t0 + hours(1));
+        let (_, d2) = fail_attempt(
+            &db,
+            &breaker,
+            "did:plc:u",
+            d1,
+            "job sync-9f8e7d6c5 refused: policy mismatch",
+        )
+        .await;
+        assert_eq!(d2, d1 + hours(2));
+        let (_, d3) = fail_attempt(
+            &db,
+            &breaker,
+            "did:plc:u",
+            d2,
+            "job sync-0a0b0c0d1 refused: policy mismatch",
+        )
+        .await;
+        assert_eq!(d3, d2 + hours(4));
+        let streak: FailureStreak = serde_json::from_str(
+            &db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(streak.count, 3);
+        assert_eq!(streak.deploy, "deploy-1");
+    }
+
+    /// A different cause is a different problem: back to an hour.
+    #[tokio::test]
+    async fn a_new_cause_restarts_the_backoff() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let (_, d1) = fail_attempt(&db, &breaker, "did:plc:u", t0, "policy mismatch").await;
+        let (_, d2) = fail_attempt(&db, &breaker, "did:plc:u", d1, "policy mismatch").await;
+        assert_eq!(d2, d1 + hours(2));
+        let (_, d3) = fail_attempt(&db, &breaker, "did:plc:u", d2, "AppView 502").await;
+        assert_eq!(d3, d2 + hours(1));
+    }
+
+    /// A success ends the streak: the next failure waits an hour, not eight.
+    #[tokio::test]
+    async fn a_success_clears_the_streak() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let (_, d1) = fail_attempt(&db, &breaker, "did:plc:u", t0, "policy mismatch").await;
+        let (_, d2) = fail_attempt(&db, &breaker, "did:plc:u", d1, "policy mismatch").await;
+        succeed_attempt(&db, &breaker, "did:plc:u", d2).await;
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None,
+            "a success deletes the streak"
+        );
+        let later = d2 + hours(30);
+        let (_, d3) = fail_attempt(&db, &breaker, "did:plc:u", later, "policy mismatch").await;
+        assert_eq!(d3, later + hours(1));
+    }
+
+    /// An operator who fixed the problem and redeployed must not wait out the
+    /// previous deployment's backoff.
+    #[tokio::test]
+    async fn a_new_deployment_restarts_the_backoff() {
+        let db = test_db();
+        let t0 = Utc::now();
+        let old = RefreshBreaker::new("deploy-1");
+        let (_, d1) = fail_attempt(&db, &old, "did:plc:u", t0, "policy mismatch").await;
+        let (_, d2) = fail_attempt(&db, &old, "did:plc:u", d1, "policy mismatch").await;
+        assert_eq!(d2, d1 + hours(2));
+        let new = RefreshBreaker::new("deploy-2");
+        let (_, d3) = fail_attempt(&db, &new, "did:plc:u", d2, "policy mismatch").await;
+        assert_eq!(d3, d2 + hours(1));
+    }
+
+    /// Two different users failing with the same cause is a deployment-wide
+    /// fault. The third user's refresh is not attempted at all — its setup
+    /// (scorers, clients, and everything after: Bluesky and the GPU) never
+    /// runs — and it says why, then backs off like any failure.
+    #[tokio::test]
+    async fn a_deployment_wide_fault_stops_further_refreshes_before_any_work() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let _failed = fail_attempt(
+            &db,
+            &breaker,
+            "did:plc:a",
+            t0,
+            "job sync-1a2b3c4d9 refused: policy mismatch",
+        )
+        .await;
+        let _failed = fail_attempt(
+            &db,
+            &breaker,
+            "did:plc:b",
+            t0,
+            "job sync-9f8e7d6c5 refused: policy mismatch",
+        )
+        .await;
+
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:c").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || t0;
+        let result = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:c",
+            "h",
+            &claim_id,
+            || panic!("an open breaker must stop the refresh before setup"),
+        )
+        .await;
+        let err = format!("{:#}", result.expect_err("refused"));
+        assert!(err.contains("deployment-wide"), "{err}");
+        // Codex review: a refused run is still a run. Its markers are reset
+        // like any other, so the recorded outcome is never paired with the
+        // PREVIOUS run's id and counts.
+        assert_eq!(
+            db.get_scan_state("did:plc:c", "refresh_last_run_id")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(claim_id.as_str())
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:c", "refresh_last_outcome")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("failed")
+        );
+        assert_eq!(books.retries.load(SeqCst), 1);
+        assert_eq!(
+            deadline_of(db.next_refresh_at("did:plc:c").await.unwrap()),
+            t0 + hours(1)
+        );
+        // The refused user's streak names the real cause, not "breaker open",
+        // so its backoff keeps counting against the fault itself.
+        let streak: FailureStreak = serde_json::from_str(
+            &db.get_scan_state("did:plc:c", STREAK_KEY)
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(streak.cause.contains("policy mismatch"), "{}", streak.cause);
+        assert!(
+            !streak.cause.contains("deployment-wide"),
+            "{}",
+            streak.cause
+        );
+    }
+
+    /// A refresh that SCORED accounts between two identical failures means the
+    /// fault is not deployment-wide: the breaker stays closed and the next
+    /// user runs.
+    #[tokio::test]
+    async fn a_success_in_between_keeps_the_breaker_closed() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let _failed = fail_attempt(&db, &breaker, "did:plc:a", t0, "policy mismatch").await;
+        end_attempt(&db, &breaker, "did:plc:b", t0, Ending::Scored).await;
+        let _failed = fail_attempt(&db, &breaker, "did:plc:c", t0, "policy mismatch").await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", t0, "something else").await;
+        let err = format!("{:#}", result.expect_err("its own failure"));
+        assert!(
+            err.contains("something else"),
+            "user d's own setup ran, so its own error surfaced: {err}"
+        );
+    }
+
+    /// #387 review: a user with nothing due never touched the GPU, so it is
+    /// no evidence the fault is gone. Two identical failures around it still
+    /// open the breaker.
+    #[tokio::test]
+    async fn nothing_due_in_between_does_not_hide_a_deployment_wide_fault() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let _failed = fail_attempt(&db, &breaker, "did:plc:a", t0, "policy mismatch").await;
+        succeed_attempt(&db, &breaker, "did:plc:b", t0).await;
+        let _failed = fail_attempt(&db, &breaker, "did:plc:c", t0, "policy mismatch").await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", t0, "something else").await;
+        let err = format!("{:#}", result.expect_err("refused"));
+        assert!(err.contains("deployment-wide"), "{err}");
+    }
+
+    /// #387 review: a GPU that times out on every attempt leaves every refresh
+    /// `Resumable`. That is a paid, repeated failure, so it backs off like one —
+    /// but it does not open the breaker: one cold start pausing two users at
+    /// once is not a reason to stop the third.
+    #[tokio::test]
+    async fn repeated_resumable_pauses_back_off_without_opening_the_breaker() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let deadline = |did: &'static str| {
+            let db = db.clone();
+            async move { deadline_of(db.next_refresh_at(did).await.unwrap()) }
+        };
+        assert_eq!(
+            end_attempt(&db, &breaker, "did:plc:u", t0, Ending::Paused).await,
+            crate::db::FinishCompletion::Resumable
+        );
+        let d1 = deadline("did:plc:u").await;
+        assert_eq!(d1, t0 + hours(1));
+        end_attempt(&db, &breaker, "did:plc:u", d1, Ending::Paused).await;
+        let d2 = deadline("did:plc:u").await;
+        assert_eq!(d2, d1 + hours(2));
+
+        end_attempt(&db, &breaker, "did:plc:v", d2, Ending::Paused).await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:w", d2, "its own error").await;
+        let err = format!("{:#}", result.expect_err("w ran"));
+        assert!(
+            err.contains("its own error"),
+            "the breaker stayed closed: {err}"
+        );
+    }
+
+    /// Codex review (#387): a cost cap is a healthy large refresh making
+    /// planned progress. It must never back off — each chunk resumes an hour
+    /// later, every time, and it clears any earlier streak.
+    #[tokio::test]
+    async fn cost_capped_refreshes_never_back_off() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let (_, d0) = fail_attempt(&db, &breaker, "did:plc:u", t0, "policy mismatch").await;
+        let mut at = d0;
+        for _ in 0..3 {
+            assert_eq!(
+                end_attempt(&db, &breaker, "did:plc:u", at, Ending::CostCapped).await,
+                crate::db::FinishCompletion::Resumable
+            );
+            let next = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
+            assert_eq!(
+                next,
+                at + hours(1),
+                "a cost-capped chunk resumes in an hour"
+            );
+            at = next;
+        }
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None,
+            "planned progress ends the streak"
+        );
+    }
+
+    /// Codex review (#387): a classifier timeout on an account's RECOVERY
+    /// burst ends the run as a completion with skips, not a pause. It is
+    /// still the same paid, repeating fault, so it extends the streak.
+    #[tokio::test]
+    async fn an_interrupted_recovery_backs_off_too() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        assert_eq!(
+            end_attempt(&db, &breaker, "did:plc:u", t0, Ending::RecoveryInterrupted).await,
+            crate::db::FinishCompletion::CompleteWithSkips
+        );
+        let d1 = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
+        assert_eq!(d1, t0 + hours(1));
+        end_attempt(&db, &breaker, "did:plc:u", d1, Ending::RecoveryInterrupted).await;
+        let d2 = deadline_of(db.next_refresh_at("did:plc:u").await.unwrap());
+        assert_eq!(d2, d1 + hours(2));
+    }
+
+    /// CodeRabbit (PR #143): the probe scored one account but a classifier
+    /// timeout skipped another. The fault may still be live, so the breaker
+    /// must stay open — the next refresh is still refused.
+    #[tokio::test]
+    async fn a_probe_that_scored_but_was_interrupted_does_not_close_the_breaker() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        let _failed = fail_attempt(&db, &breaker, "did:plc:a", t0, "classifier down").await;
+        let _failed = fail_attempt(&db, &breaker, "did:plc:b", t0, "classifier down").await;
+        let probe_at = t0 + chrono::Duration::minutes(61);
+        end_attempt(
+            &db,
+            &breaker,
+            "did:plc:p",
+            probe_at,
+            Ending::RecoveryInterrupted,
+        )
+        .await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:d", probe_at, "its own").await;
+        let err = format!("{:#}", result.expect_err("refused"));
+        assert!(err.contains("deployment-wide"), "still open: {err}");
+    }
+
+    /// Codex review (#387): a worker whose lease was reclaimed has had all
+    /// its other bookkeeping suppressed; it must not move the process-wide
+    /// breaker either. Its failure does not count toward tripping it.
+    #[tokio::test]
+    async fn a_superseded_worker_does_not_count_toward_the_breaker() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+
+        // User a's worker loses its claim to a successor mid-run, then fails.
+        let (stale_claim, mgr) = claim_refresh(&db, "did:plc:a").await;
+        db.finish_queued_scan(
+            "did:plc:a",
+            &stale_claim,
+            crate::db::FinishCompletion::Failed,
+            None,
+        )
+        .await
+        .unwrap();
+        db.enqueue_refresh_scan("did:plc:a").await.unwrap();
+        let _successor = db.claim_next_scan(8, 60).await.unwrap().unwrap();
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || t0;
+        let _stale = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:a",
+            "h",
+            &stale_claim,
+            || anyhow::bail!("classifier down"),
+        )
+        .await;
+
+        // One genuine failure with the same cause is then not enough to trip it.
+        let _failed = fail_attempt(&db, &breaker, "did:plc:b", t0, "classifier down").await;
+        let (result, _) = fail_attempt(&db, &breaker, "did:plc:c", t0, "its own").await;
+        let err = format!("{:#}", result.expect_err("c ran"));
+        assert!(err.contains("its own"), "breaker stayed closed: {err}");
+    }
+
+    /// #387: a failure's new streak is written in the SAME fenced transaction
+    /// as its deadline. As two separate writes, a deploy sweep landing
+    /// between them paired a stale streak with a fresh deadline (internal
+    /// review, Codex and CodeRabbit each found a different such window).
+    #[tokio::test]
+    async fn a_failed_refresh_records_its_streak_with_its_deadline() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let t0 = Utc::now();
+        let clock = move || t0;
+        let _failed = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:u",
+            "h",
+            &claim_id,
+            || anyhow::bail!("classifier down"),
+        )
+        .await;
+        assert_eq!(
+            *books.order.lock().unwrap(),
+            vec!["retry:set"],
+            "a failure records its streak in the same write as its deadline"
+        );
+    }
+
+    /// #387: a refresh that ENDS a streak (here a deferral) clears it in the
+    /// same fenced transaction as its deadline, so no deploy sweep can pair
+    /// the stale streak with the fresh deadline and pull it forward to now.
+    #[tokio::test]
+    async fn a_refresh_that_ends_a_streak_clears_it_with_its_deadline() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        // A refresh that defers (no fingerprint) is not a failure: it ends
+        // the streak and retries at the base hour.
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || t0;
+        struct NoFp;
+        #[async_trait]
+        impl RefreshContextSource for NoFp {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
+                Ok(None)
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![])
+            }
+            async fn protected_posts_embeddings(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                Ok(vec![])
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
+                Ok(HashSet::new())
+            }
+            async fn direct_pairs(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+                Ok(None)
+            }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
+                Ok(0.0)
+            }
+        }
+        run_refresh_with(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:u",
+            "h",
+            &claim_id,
+            || {
+                let ctx: Box<dyn RefreshContextSource> = Box::new(NoFp);
+                Ok((ctx, |_plan: RefreshPlan| async {
+                    panic!("a deferral never reaches the pipeline")
+                }))
+            },
+        )
+        .await
+        .expect("a deferral is not an error");
+        assert_eq!(
+            *books.order.lock().unwrap(),
+            vec!["retry:clear"],
+            "a non-failure ends the streak in the same write as its deadline"
+        );
     }
 }

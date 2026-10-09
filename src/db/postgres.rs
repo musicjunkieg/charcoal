@@ -1741,6 +1741,20 @@ impl Database for PgDatabase {
         // can't leave the user's data half-deleted. Delete in dependency
         // order to avoid FK issues if constraints are added later.
         let mut tx = self.pool.begin().await?;
+        // Take the row locks in the order every other multi-row writer uses —
+        // `scan_queue`, then `users`, then everything else
+        // (`apply_refresh_schedule`, the deploy sweep's
+        // `pull_refresh_forward_if_streak`). Deleting `scan_state` before
+        // `users` without them deadlocked against the sweep, and Postgres
+        // aborts one side to break a deadlock (Codex review, #387).
+        sqlx_core::query::query("SELECT 1 FROM scan_queue WHERE user_did = $1 FOR UPDATE")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("SELECT 1 FROM users WHERE did = $1 FOR UPDATE")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         // Staging tables first (#208) — a user's queued classification work
         // must not outlive the account itself.
         sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
@@ -2662,6 +2676,63 @@ impl Database for PgDatabase {
         Ok(())
     }
 
+    async fn pull_refresh_forward_if_streak(
+        &self,
+        user_did: &str,
+        key: &str,
+        observed: &str,
+        observed_deadline: &str,
+        now_rfc3339: &str,
+    ) -> Result<bool> {
+        // One transaction — see the SQLite twin. The conditional DELETE takes
+        // the row lock, so a concurrent writer of the streak either commits
+        // first (and the delete matches nothing) or waits for this commit.
+        let mut tx = self.pool.begin().await?;
+        // Lock the `users` row FIRST, as `apply_refresh_schedule` does (it
+        // writes `users` before `scan_state`). The opposite order deadlocked
+        // against a finishing refresh, and Postgres resolves that by aborting
+        // one side — possibly the refresh's schedule write (#387 review).
+        // Under the same lock, re-check that the deadline is EXACTLY the one
+        // the sweep read and still ahead: a failed full scan writes a fresh
+        // retry that touches no streak, which the streak check alone would
+        // not notice (Codex review).
+        let ahead: Option<Option<bool>> = sqlx_core::query::query(
+            "SELECT next_refresh_at = $3::timestamptz AND next_refresh_at > $2::timestamptz
+               FROM users WHERE did = $1 FOR UPDATE",
+        )
+        .bind(user_did)
+        .bind(now_rfc3339)
+        .bind(observed_deadline)
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(|r| r.get::<Option<bool>, _>(0));
+        if ahead != Some(Some(true)) {
+            return Ok(false);
+        }
+        let consumed = sqlx_core::query::query(
+            "DELETE FROM scan_state WHERE user_did = $1 AND key = $2 AND value = $3",
+        )
+        .bind(user_did)
+        .bind(key)
+        .bind(observed)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if consumed == 0 {
+            // Dropping `tx` rolls back; nothing was written.
+            return Ok(false);
+        }
+        sqlx_core::query::query(
+            "UPDATE users SET next_refresh_at = $2::timestamptz WHERE did = $1",
+        )
+        .bind(user_did)
+        .bind(now_rfc3339)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     async fn schedule_retry_at(
         &self,
         user_did: &str,
@@ -2721,10 +2792,18 @@ impl Database for PgDatabase {
                 .bind(generation)
                 .execute(&mut *tx)
                 .await?;
+                // A success ends the refresh failure streak in this same
+                // transaction — see the SQLite twin (#387, Codex review).
+                sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1 AND key = $2")
+                    .bind(user_did)
+                    .bind(super::REFRESH_FAILURE_STREAK_KEY)
+                    .execute(&mut *tx)
+                    .await?;
             }
             RefreshScheduleWrite::Retry {
                 at_rfc3339,
                 attempted_generation,
+                streak,
             } => {
                 sqlx_core::query::query(
                     "UPDATE users
@@ -2736,6 +2815,31 @@ impl Database for PgDatabase {
                 .bind(attempted_generation)
                 .execute(&mut *tx)
                 .await?;
+                // The streak moves with the deadline — see the SQLite twin.
+                match streak {
+                    super::traits::StreakWrite::Keep => {}
+                    super::traits::StreakWrite::Set(json) => {
+                        sqlx_core::query::query(
+                            "INSERT INTO scan_state (user_did, key, value, updated_at)
+                             VALUES ($1, $2, $3, NOW())
+                             ON CONFLICT(user_did, key) DO UPDATE SET value = $3, updated_at = NOW()",
+                        )
+                        .bind(user_did)
+                        .bind(super::REFRESH_FAILURE_STREAK_KEY)
+                        .bind(json)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                    super::traits::StreakWrite::Clear => {
+                        sqlx_core::query::query(
+                            "DELETE FROM scan_state WHERE user_did = $1 AND key = $2",
+                        )
+                        .bind(user_did)
+                        .bind(super::REFRESH_FAILURE_STREAK_KEY)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                }
             }
         }
         tx.commit().await?;

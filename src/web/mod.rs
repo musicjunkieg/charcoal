@@ -30,6 +30,7 @@ pub mod admitter;
 pub mod auth;
 pub mod handlers;
 pub mod refresh;
+pub mod refresh_backoff;
 pub mod refresh_scan;
 pub mod scan_job;
 pub mod scan_setup;

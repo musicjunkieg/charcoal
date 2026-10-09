@@ -1,5 +1,133 @@
 [
   {
+    "hash": "0a3dd44be310f41d2471bc5149a4ec01c6e267f0",
+    "short_hash": "0a3dd44",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T20:32:10-07:00",
+    "message": "fix(387): the sweep locks users first and re-checks the deadline in its write\n\nInternal review:\n- Postgres: pull_refresh_forward_if_streak deleted from scan_state before\n  updating users, the opposite lock order to apply_refresh_schedule; the\n  two could deadlock and Postgres would abort one, possibly the refresh's\n  schedule write. It now locks the users row first (SELECT ... FOR UPDATE).\n- Both backends re-check, under that lock, that next_refresh_at is still\n  later than now: a failed full scan's fresh retry touches no streak, so\n  the streak match alone could pull it forward.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
+    "hash": "fdf8733f795fab4691ab261e7905858186929f88",
+    "short_hash": "fdf8733",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T20:12:32-07:00",
+    "message": "fix(387): the failure streak is written in the same fenced write as the deadline\n\nEach reordering of two separate writes (deadline, streak) opened a new\nwindow for the deploy sweep: internal review, Codex and CodeRabbit each\nfound a different one. Make it one write instead:\n\n- RefreshScheduleWrite::Retry carries a StreakWrite (Keep | Set | Clear),\n  applied in the same claim-fenced transaction as the deadline on both\n  backends; Success already clears it there.\n- run_refresh_with passes Set for a failure and Clear for anything else;\n  the separate RefreshBookkeeping::store_streak is gone. The full scan's\n  retry passes Keep.\n- The sweep therefore only ever sees before-or-after, never a stale streak\n  paired with a fresh deadline. Completes #403.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 9
+  },
+  {
+    "hash": "a21b29ddead9613bf3f317cde269062ff79196e8",
+    "short_hash": "a21b29d",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:53:21-07:00",
+    "message": "fix(387): a success clears the streak inside its fenced schedule write\n\nCodex review: deadline-before-streak is only safe when writing a NEW\nstreak. When a refresh or full scan SUCCEEDS, clearing the streak after the\nhealthy deadline left a window for a deploy sweep to consume the stale\nstreak and pull that fresh deadline forward to now.\n\n- apply_refresh_schedule(Success) now deletes the streak in the same\n  claim-fenced transaction (SQLite + Postgres); the separate clear in\n  schedule_after_success is gone. Retry writes leave the streak alone.\n- run_refresh_with clears an ending streak BEFORE scheduling, and still\n  writes a new streak AFTER the deadline.\n- REFRESH_FAILURE_STREAK_KEY moves to the db module (it builds without web).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 10
+  },
+  {
+    "hash": "bddd7d01f1d0c4a816e64e783115cf1fe2d0c3e1",
+    "short_hash": "bddd7d0",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:20:43-07:00",
+    "message": "fix(387): a failed refresh writes its deadline before its streak\n\nInternal review: with the streak written first, a deploy sweep landing\nbetween the two writes consumed the streak and pulled the deadline\nforward, then the retiring worker's long deadline landed with no streak\nleft for any later sweep to see. Deadline first, then streak: every\ninterleaving now ends with either the sweep acting on the final streak or\nthe next sweep doing so.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "0961cd928042da173e0f3abbedc36e137a173b36",
+    "short_hash": "0961cd9",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:07:32-07:00",
+    "message": "fix(387): the deploy sweep pulls forward in one conditional write\n\nCodeRabbit (PR #145), after Codex flagged the same race twice: the sweep\nread a streak, then deleted it and moved the deadline in separate writes,\nso a refresh that recorded a NEW streak and deadline in between had both\nclobbered. New Database::pull_refresh_forward_if_streak deletes the streak\nonly while it still holds exactly the value the sweep read and, only then,\nmoves the deadline, in one transaction (SQLite Immediate, Postgres tx).\nTested on both backends. Closes the sweep half of #403.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
+    "hash": "7afbf9a5efb48225e93810129ea38a5e892d9596",
+    "short_hash": "7afbf9a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T16:30:55-07:00",
+    "message": "fix(387): the deploy sweep consumes the streak it acts on\n\nCodeRabbit (PR #144): the sweep pulled a backed-off user forward but left\nthe old-deployment streak in place. A failed FULL scan schedules a plain\none-hour retry without touching the streak, so the next 10-minute sweep\ncould pull the user forward again and repeat a paid scan every ten\nminutes. The sweep now deletes the streak once its pull lands: one pull per\nuser per deployment, and the next refresh failure counts from one.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "09ab228a4d468774296dc8c403b289d4bf9b297e",
+    "short_hash": "09ab228",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T18:50:31-07:00",
+    "message": "fix(387): Codex: stale workers cannot move the breaker; mask URL query strings\n\n- run_refresh_with checks claim ownership once, BEFORE the breaker report:\n  a worker whose lease was reclaimed reports Neutral (frees a probe slot,\n  otherwise no-op) instead of opening, closing or stretching the breaker.\n- failure_signature masks URL query strings (`?actor=alice.bsky.social`),\n  keeping scheme, host and path, so an AppView outage reads as one cause.\n\nDeferred to #403 (same atomic fix): fencing the streak writes inside the\nclaim-fenced schedule transaction, and a conditional deploy sweep.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "b12781c90b2230f18053a8ba28ad534ff4bd79c5",
+    "short_hash": "b12781c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T17:50:43-07:00",
+    "message": "fix(387): a differently-failing probe keeps the breaker open; mask handles and DIDs\n\nInternal review:\n- A probe failing with a DIFFERENT cause used to close the breaker, though\n  it may never have reached the faulty part (a Bluesky hiccup, a setup\n  blip). It now stays open and frees the slot for the next probe. Rival\n  causes are counted per window; one that fails two different probes is\n  deployment-wide itself and takes over the breaker with a fresh cool-down.\n- failure_signature masks `@handle` and `did:<method>:<id>`: error contexts\n  name the user, so an AppView outage gave every user a different cause\n  and the breaker could never trip on it.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "064defa4ad6cf58479a24d45dfc70aac3c5bfc18",
+    "short_hash": "064defa",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T17:32:36-07:00",
+    "message": "fix(387): CodeRabbit: interruption outranks scored work; keep only named HTTP statuses\n\n- New BreakerReport::Inconclusive for a refresh that scored accounts but\n  was also interrupted by the classifier. It never closes the breaker and,\n  unlike Neutral, does not free the probe slot early: an open breaker\n  re-arms the same (undoubled) cool-down. Ignored while closed.\n- failure_signature keeps a 3-digit number only when the message names it\n  as a status: after \"HTTP\"/\"status\", or followed by its canonical reason\n  phrase (reqwest StatusCode Display, e.g. \"502 Bad Gateway\"). Counts such\n  as \"after 200 rows\" are masked again.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "d4cf053860f728a8ac4a7bc127bea85e2b923e8b",
+    "short_hash": "d4cf053",
+    "author": "Bryan Guffey",
+    "date": "2026-10-07T16:43:42-07:00",
+    "message": "fix(387): Codex review: recovery-burst timeouts count; refused runs reset markers\n\n- recover_account_inner returns a Recovery enum; an Interrupted re-burst\n  now stops recovery (no finalize over still-pending rows) and sets\n  ScanSummary.interrupted, the same as a main-burst timeout.\n- The refresh streak keys on `interrupted` whatever the outcome, since a\n  recovery timeout ends as CompletedWithSkips rather than Resumable.\n- A breaker refusal resets the run markers first (a scan_state write, no\n  external work), so its failed outcome is never paired with the previous\n  run's id and counts.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "a2d50627adbc284f4a0c3c0824f1feb6583bb1b9",
+    "short_hash": "a2d5062",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T23:02:33-07:00",
+    "message": "fix(387): breaker counts failures within a day; sweep only lifts repeated backoffs\n\nInternal review:\n- The closed breaker kept every failing user forever, so two same-cause\n  per-user faults days apart (with only neutral nights between) tripped it.\n  Failures now count only within BREAKER_WINDOW (24 h).\n- During a rolling deploy the RETIRING container's sweep could pull forward\n  a backoff the new deployment had just written. The sweep now only lifts\n  streaks of 2+: a new deployment cannot reach 2 inside an overlap window\n  (the second failure needs a retry an hour after the first), and a\n  1-failure retry is the base hour anyway.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "826b270267ee34d9639aebe83984939f2b3a0ff0",
+    "short_hash": "826b270",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T22:18:17-07:00",
+    "message": "fix(387): Codex review: cost caps are progress; full scans clear the streak; re-sweep deploys\n\n- ScanSummary.interrupted distinguishes a transient classifier stop from\n  the cost ceiling. Only an interrupted pause extends the refresh failure\n  streak; a cost-capped chunk is planned progress and resumes hourly.\n- schedule_after_success (refresh AND full scan) deletes the streak once\n  its claim-fenced write lands, so a healthy user is not pulled forward by\n  a later redeploy or handed a stale count.\n- The deploy-reset sweep re-runs every 10 minutes, catching an\n  old-deployment streak written by a retiring container after boot.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
+    "hash": "8c5780a54d16a092667d63fee4c16dbfbbeea939",
+    "short_hash": "8c5780a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T19:54:54-07:00",
+    "message": "fix(387): only the probe moves an open breaker; only scored work is success\n\nInternal review + CodeRabbit (PR #143):\n- admit() now hands out an Admission; while the breaker is open only the\n  current probe's report can change it. A refresh that started before the\n  breaker opened can no longer close it or stretch the cool-down. A probe\n  that proves nothing frees the slot at once.\n- Breaker success = a refresh that SCORED accounts. Nothing due, deferrals\n  and resumable pauses are neutral, so they neither close the breaker nor\n  wipe its count.\n- A Resumable outcome now extends the per-user streak, so a GPU that times\n  out on every attempt backs off instead of retrying hourly forever.\n- failure_signature keeps bare HTTP status codes (100-599): a 404 and a\n  503 are different causes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "8389c3bc6c6784951c8a730c87911c8a5dbfa317",
+    "short_hash": "8389c3b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T19:17:15-07:00",
+    "message": "docs(387): changelog entry for refresh backoff and circuit breaker\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "f9af9f6bb08d75180cabc89694166148836aa7fc",
+    "short_hash": "f9af9f6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T19:06:27-07:00",
+    "message": "fix(387): back off repeated identical refresh failures; break the circuit on deployment-wide faults\n\nA failed refresh now extends the user's streak of identical failures\n(stored in scan_state, keyed by cause signature and deployment) and\nretries after 1h, 2h, 4h ... capped at 24h. Any non-failure clears it.\n\nrun_refresh_with consults a process-wide RefreshBreaker first: once two\ndifferent users fail with the same cause, further refreshes are refused\nbefore setup (no Bluesky, no GPU), recorded as failed with the real cause,\nand backed off. One probe per cool-down; success closes it.\n\nOn startup, users backed off under an earlier deployment are made due\nnow, so a fix that ships via deploy is not held behind a 24h backoff.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "3fe83136c3135705704fc602c5914b6a0004ff6e",
+    "short_hash": "3fe8313",
+    "author": "Bryan Guffey",
+    "date": "2026-10-06T18:49:33-07:00",
+    "message": "feat(387): refresh failure backoff and circuit breaker primitives\n\nbackoff_delay (1h doubling, 24h cap), failure_signature (masks ids and\ncounts so identical causes compare equal), FailureStreak (resets on a new\ncause or a new deployment), and a process-wide RefreshBreaker that opens\nwhen two different users fail with the same cause, probes once per\ncool-down, and doubles the cool-down on a repeat failure. Not wired in yet.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "3d6a1f85f2a38aa2f7cbd83d774f06397ad0fcdf",
     "short_hash": "3d6a1f8",
     "author": "Bryan Guffey",

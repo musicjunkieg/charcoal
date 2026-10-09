@@ -99,6 +99,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #387 — a refresh that keeps failing for the same reason no longer retries
+  every hour at full cost. Each failure extends the user's streak of
+  identical failures (the cause with job ids, DIDs and counts masked out,
+  but HTTP status codes kept), and the retry stretches 1 h → 2 h → 4 h …
+  capped at 24 h. A pause on a GPU timeout counts as a failure too; a pause
+  at the cost ceiling does not — that is a large refresh making planned
+  progress, and it resumes hourly. Any other outcome ends the streak, as do
+  a successful full scan, a new cause and a new deployment. At startup, and
+  every ten minutes after (a retiring container can still write during a
+  rolling deploy), users backed off two or more times under an earlier
+  deployment are made due at once, so a fix that ships as a deploy (or a
+  variable change, which Railway applies by redeploying) is not held behind
+  yesterday's backoff. And when two different users fail with the same cause
+  within a day, the fault is the deployment's: a circuit breaker refuses
+  further refreshes before any Bluesky or GPU work, logs why, and lets one
+  probe through per cool-down (1 h, doubling to 24 h). Only that probe can
+  close it, and only by scoring accounts — a user with nothing due proves
+  nothing. In the cost incident behind #385 — nine users, 216 identical paid
+  attempts a day — this would have meant about six paid attempts on the
+  first day and one a day after.
 - #402 (part of #387) — a RunPod job that outlives its deadline, or a
   network error while polling its status, is now a TRANSIENT failure. Both
   were plain errors, so a cold start that ran past the warm-up limit (180 s)
