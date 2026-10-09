@@ -2673,6 +2673,24 @@ impl Database for PgDatabase {
         // the row lock, so a concurrent writer of the streak either commits
         // first (and the delete matches nothing) or waits for this commit.
         let mut tx = self.pool.begin().await?;
+        // Lock the `users` row FIRST, as `apply_refresh_schedule` does (it
+        // writes `users` before `scan_state`). The opposite order deadlocked
+        // against a finishing refresh, and Postgres resolves that by aborting
+        // one side — possibly the refresh's schedule write (#387 review).
+        // Under the same lock, re-check that the deadline is still ahead: a
+        // failed full scan may have written a fresh retry that touches no
+        // streak, which the streak check alone would not notice.
+        let ahead: Option<Option<bool>> = sqlx_core::query::query(
+            "SELECT next_refresh_at > $2::timestamptz FROM users WHERE did = $1 FOR UPDATE",
+        )
+        .bind(user_did)
+        .bind(now_rfc3339)
+        .fetch_optional(&mut *tx)
+        .await?
+        .map(|r| r.get::<Option<bool>, _>(0));
+        if ahead != Some(Some(true)) {
+            return Ok(false);
+        }
         let consumed = sqlx_core::query::query(
             "DELETE FROM scan_state WHERE user_did = $1 AND key = $2 AND value = $3",
         )

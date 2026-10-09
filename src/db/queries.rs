@@ -2019,6 +2019,24 @@ pub fn pull_refresh_forward_if_streak(
     // Immediate: the conditional delete decides whether the deadline moves,
     // so the write lock is taken up front, not at the first statement.
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    // Re-check the deadline under the lock (#387 review): the sweep read it
+    // earlier, and a failed full scan may have written a fresh retry since —
+    // one that touches no streak, so the streak check alone would not notice.
+    let deadline: Option<Option<String>> = tx
+        .query_row(
+            "SELECT next_refresh_at FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let now = chrono::DateTime::parse_from_rfc3339(now_rfc3339)?;
+    let ahead = deadline
+        .flatten()
+        .and_then(|d| chrono::DateTime::parse_from_rfc3339(&d).ok())
+        .is_some_and(|d| d > now);
+    if !ahead {
+        return Ok(false);
+    }
     let consumed = tx.execute(
         "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2 AND value = ?3",
         params![user_did, key, observed],

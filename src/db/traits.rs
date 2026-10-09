@@ -526,10 +526,13 @@ pub trait Database: Send + Sync {
     /// Set a scan state value (upsert) for a specific user.
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
 
-    /// The deploy sweep's pull-forward (#387): in ONE transaction, delete
-    /// `key` for `user_did` only while it still holds exactly `observed`, and
-    /// if — and only if — that delete happened, set `next_refresh_at` to
-    /// `now_rfc3339`. Returns whether it wrote anything.
+    /// The deploy sweep's pull-forward (#387): in ONE transaction — and only
+    /// while `next_refresh_at` is still later than `now_rfc3339` — delete `key`
+    /// for `user_did` only while it still holds exactly `observed`, and if,
+    /// and only if, that delete happened, set `next_refresh_at` to
+    /// `now_rfc3339`. Returns whether it wrote anything. Takes the `users`
+    /// row lock before `scan_state`, the same order as
+    /// [`Self::apply_refresh_schedule`], so the two cannot deadlock.
     ///
     /// Conditional on the observed value because the sweep reads the streak
     /// first: a refresh worker that wrote a NEW streak (and a new deadline) in

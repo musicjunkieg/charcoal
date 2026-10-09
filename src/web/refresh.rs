@@ -1434,6 +1434,32 @@ mod tests {
             None
         );
 
+        // Internal review: the deadline is re-checked INSIDE the write. A
+        // streak that still matches but whose deadline is no longer in the
+        // future (a fresh full-scan retry, or already due) is left alone.
+        let due = (now - ChronoDuration::minutes(5)).to_rfc3339();
+        db.schedule_refresh("did:plc:u", &due).await.unwrap();
+        db.set_scan_state("did:plc:u", STREAK_KEY, observed)
+            .await
+            .unwrap();
+        assert!(!db
+            .pull_refresh_forward_if_streak("did:plc:u", STREAK_KEY, observed, &now.to_rfc3339())
+            .await
+            .unwrap());
+        assert_eq!(db.next_refresh_at("did:plc:u").await.unwrap().unwrap(), due);
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(observed),
+            "nothing consumed when the deadline is not ahead"
+        );
+        db.delete_scan_state("did:plc:u", STREAK_KEY).await.unwrap();
+        db.schedule_refresh("did:plc:u", &now.to_rfc3339())
+            .await
+            .unwrap();
+
         // Already consumed (or cleared by a success): no-op.
         assert!(!db
             .pull_refresh_forward_if_streak("did:plc:u", STREAK_KEY, observed, &later)

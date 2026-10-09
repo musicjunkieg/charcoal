@@ -1,5 +1,13 @@
 [
   {
+    "hash": "fdf8733f795fab4691ab261e7905858186929f88",
+    "short_hash": "fdf8733",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T20:12:32-07:00",
+    "message": "fix(387): the failure streak is written in the same fenced write as the deadline\n\nEach reordering of two separate writes (deadline, streak) opened a new\nwindow for the deploy sweep: internal review, Codex and CodeRabbit each\nfound a different one. Make it one write instead:\n\n- RefreshScheduleWrite::Retry carries a StreakWrite (Keep | Set | Clear),\n  applied in the same claim-fenced transaction as the deadline on both\n  backends; Success already clears it there.\n- run_refresh_with passes Set for a failure and Clear for anything else;\n  the separate RefreshBookkeeping::store_streak is gone. The full scan's\n  retry passes Keep.\n- The sweep therefore only ever sees before-or-after, never a stale streak\n  paired with a fresh deadline. Completes #403.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 9
+  },
+  {
     "hash": "a21b29ddead9613bf3f317cde269062ff79196e8",
     "short_hash": "a21b29d",
     "author": "Bryan Guffey",

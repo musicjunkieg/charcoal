@@ -6036,6 +6036,24 @@ async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
     );
     assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
 
+    // The deadline is re-checked inside the write: a matching streak whose
+    // deadline is not ahead of `now` is left alone.
+    let due = now - chrono::Duration::minutes(5);
+    db.schedule_refresh(DID, &due.to_rfc3339()).await.unwrap();
+    db.set_scan_state(DID, KEY, observed).await.unwrap();
+    assert!(!db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        due.timestamp()
+    );
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(observed)
+    );
+
     db.delete_user_data(DID).await.unwrap();
 }
 
