@@ -2014,6 +2014,7 @@ pub fn pull_refresh_forward_if_streak(
     user_did: &str,
     key: &str,
     observed: &str,
+    observed_deadline: &str,
     now_rfc3339: &str,
 ) -> Result<bool> {
     // Immediate: the conditional delete decides whether the deadline moves,
@@ -2030,11 +2031,15 @@ pub fn pull_refresh_forward_if_streak(
         )
         .optional()?;
     let now = chrono::DateTime::parse_from_rfc3339(now_rfc3339)?;
+    // Exactly the deadline the sweep read (Codex review): a failed full scan
+    // writes a fresh retry without touching the streak, and "still later than
+    // now" alone would let the sweep clobber it.
+    let deadline = deadline.flatten();
+    let unchanged = deadline.as_deref() == Some(observed_deadline);
     let ahead = deadline
-        .flatten()
         .and_then(|d| chrono::DateTime::parse_from_rfc3339(&d).ok())
         .is_some_and(|d| d > now);
-    if !ahead {
+    if !(unchanged && ahead) {
         return Ok(false);
     }
     let consumed = tx.execute(

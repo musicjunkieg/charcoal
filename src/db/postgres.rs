@@ -1741,6 +1741,20 @@ impl Database for PgDatabase {
         // can't leave the user's data half-deleted. Delete in dependency
         // order to avoid FK issues if constraints are added later.
         let mut tx = self.pool.begin().await?;
+        // Take the row locks in the order every other multi-row writer uses —
+        // `scan_queue`, then `users`, then everything else
+        // (`apply_refresh_schedule`, the deploy sweep's
+        // `pull_refresh_forward_if_streak`). Deleting `scan_state` before
+        // `users` without them deadlocked against the sweep, and Postgres
+        // aborts one side to break a deadlock (Codex review, #387).
+        sqlx_core::query::query("SELECT 1 FROM scan_queue WHERE user_did = $1 FOR UPDATE")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
+        sqlx_core::query::query("SELECT 1 FROM users WHERE did = $1 FOR UPDATE")
+            .bind(user_did)
+            .execute(&mut *tx)
+            .await?;
         // Staging tables first (#208) — a user's queued classification work
         // must not outlive the account itself.
         sqlx_core::query::query("DELETE FROM classification_queue WHERE user_did = $1")
@@ -2667,6 +2681,7 @@ impl Database for PgDatabase {
         user_did: &str,
         key: &str,
         observed: &str,
+        observed_deadline: &str,
         now_rfc3339: &str,
     ) -> Result<bool> {
         // One transaction — see the SQLite twin. The conditional DELETE takes
@@ -2677,14 +2692,17 @@ impl Database for PgDatabase {
         // writes `users` before `scan_state`). The opposite order deadlocked
         // against a finishing refresh, and Postgres resolves that by aborting
         // one side — possibly the refresh's schedule write (#387 review).
-        // Under the same lock, re-check that the deadline is still ahead: a
-        // failed full scan may have written a fresh retry that touches no
-        // streak, which the streak check alone would not notice.
+        // Under the same lock, re-check that the deadline is EXACTLY the one
+        // the sweep read and still ahead: a failed full scan writes a fresh
+        // retry that touches no streak, which the streak check alone would
+        // not notice (Codex review).
         let ahead: Option<Option<bool>> = sqlx_core::query::query(
-            "SELECT next_refresh_at > $2::timestamptz FROM users WHERE did = $1 FOR UPDATE",
+            "SELECT next_refresh_at = $3::timestamptz AND next_refresh_at > $2::timestamptz
+               FROM users WHERE did = $1 FOR UPDATE",
         )
         .bind(user_did)
         .bind(now_rfc3339)
+        .bind(observed_deadline)
         .fetch_optional(&mut *tx)
         .await?
         .map(|r| r.get::<Option<bool>, _>(0));

@@ -6013,7 +6013,7 @@ async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
 
     db.set_scan_state(DID, KEY, replaced).await.unwrap();
     assert!(!db
-        .pull_refresh_forward_if_streak(DID, KEY, observed, &now.to_rfc3339())
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &later.to_rfc3339(), &now.to_rfc3339())
         .await
         .unwrap());
     assert_eq!(
@@ -6027,7 +6027,7 @@ async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
 
     db.set_scan_state(DID, KEY, observed).await.unwrap();
     assert!(db
-        .pull_refresh_forward_if_streak(DID, KEY, observed, &now.to_rfc3339())
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &later.to_rfc3339(), &now.to_rfc3339())
         .await
         .unwrap());
     assert_eq!(
@@ -6042,12 +6042,29 @@ async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
     db.schedule_refresh(DID, &due.to_rfc3339()).await.unwrap();
     db.set_scan_state(DID, KEY, observed).await.unwrap();
     assert!(!db
-        .pull_refresh_forward_if_streak(DID, KEY, observed, &now.to_rfc3339())
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &due.to_rfc3339(), &now.to_rfc3339())
         .await
         .unwrap());
     assert_eq!(
         deadline(db.next_refresh_at(DID).await.unwrap()),
         due.timestamp()
+    );
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(observed)
+    );
+
+    // The deadline must be EXACTLY the one the sweep read: a fresh future
+    // retry (a failed full scan, which keeps the streak) wins.
+    let fresh = now + chrono::Duration::hours(1);
+    db.schedule_refresh(DID, &fresh.to_rfc3339()).await.unwrap();
+    assert!(!db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &later.to_rfc3339(), &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        fresh.timestamp()
     );
     assert_eq!(
         db.get_scan_state(DID, KEY).await.unwrap().as_deref(),

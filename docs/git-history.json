@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0a3dd44be310f41d2471bc5149a4ec01c6e267f0",
+    "short_hash": "0a3dd44",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T20:32:10-07:00",
+    "message": "fix(387): the sweep locks users first and re-checks the deadline in its write\n\nInternal review:\n- Postgres: pull_refresh_forward_if_streak deleted from scan_state before\n  updating users, the opposite lock order to apply_refresh_schedule; the\n  two could deadlock and Postgres would abort one, possibly the refresh's\n  schedule write. It now locks the users row first (SELECT ... FOR UPDATE).\n- Both backends re-check, under that lock, that next_refresh_at is still\n  later than now: a failed full scan's fresh retry touches no streak, so\n  the streak match alone could pull it forward.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
     "hash": "fdf8733f795fab4691ab261e7905858186929f88",
     "short_hash": "fdf8733",
     "author": "Bryan Guffey",

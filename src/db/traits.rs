@@ -527,11 +527,15 @@ pub trait Database: Send + Sync {
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
 
     /// The deploy sweep's pull-forward (#387): in ONE transaction — and only
-    /// while `next_refresh_at` is still later than `now_rfc3339` — delete `key`
-    /// for `user_did` only while it still holds exactly `observed`, and if,
-    /// and only if, that delete happened, set `next_refresh_at` to
-    /// `now_rfc3339`. Returns whether it wrote anything. Takes the `users`
-    /// row lock before `scan_state`, the same order as
+    /// while `next_refresh_at` is still EXACTLY `observed_deadline` (the value
+    /// the sweep read) and later than `now_rfc3339` — delete `key` for
+    /// `user_did` only while it still holds exactly `observed`, and if, and
+    /// only if, that delete happened, set `next_refresh_at` to `now_rfc3339`.
+    /// Returns whether it wrote anything.
+    ///
+    /// The exact-deadline condition matters because a failed full scan writes
+    /// a fresh retry WITHOUT touching the streak (Codex review). Takes the
+    /// `users` row lock before `scan_state`, the same order as
     /// [`Self::apply_refresh_schedule`], so the two cannot deadlock.
     ///
     /// Conditional on the observed value because the sweep reads the streak
@@ -542,6 +546,7 @@ pub trait Database: Send + Sync {
         user_did: &str,
         key: &str,
         observed: &str,
+        observed_deadline: &str,
         now_rfc3339: &str,
     ) -> Result<bool>;
 

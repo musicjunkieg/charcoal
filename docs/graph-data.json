@@ -11648,6 +11648,17 @@
       "created_at": "2026-10-08T20:12:41.061187-07:00",
       "updated_at": "2026-10-08T20:12:41.061187-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"fdf8733\",\"confidence\":90}"
+    },
+    {
+      "id": 1069,
+      "change_id": "5c43ceec-c1ba-4202-b599-556a6fcf8ecb",
+      "node_type": "action",
+      "title": "#387 sweep CAS: lock users first (deadlock fix) + deadline re-check inside tx",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T20:32:18.026336-07:00",
+      "updated_at": "2026-10-08T20:32:18.026336-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"0a3dd44\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23860,6 +23871,17 @@
       "weight": 1.0,
       "rationale": "end the ordering whack-a-mole",
       "created_at": "2026-10-08T20:12:41.159491-07:00"
+    },
+    {
+      "id": 1121,
+      "from_node_id": 1068,
+      "to_node_id": 1069,
+      "from_change_id": "108c97c5-c23d-4e30-b78f-74c2f79d5dd3",
+      "to_change_id": "5c43ceec-c1ba-4202-b599-556a6fcf8ecb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "internal review",
+      "created_at": "2026-10-08T20:32:18.136586-07:00"
     }
   ],
   "documents": [

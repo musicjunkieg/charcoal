@@ -615,10 +615,18 @@ impl Database for SqliteDatabase {
         user_did: &str,
         key: &str,
         observed: &str,
+        observed_deadline: &str,
         now_rfc3339: &str,
     ) -> Result<bool> {
         let conn = self.conn.lock().await;
-        super::queries::pull_refresh_forward_if_streak(&conn, user_did, key, observed, now_rfc3339)
+        super::queries::pull_refresh_forward_if_streak(
+            &conn,
+            user_did,
+            key,
+            observed,
+            observed_deadline,
+            now_rfc3339,
+        )
     }
 
     async fn schedule_retry_at(
