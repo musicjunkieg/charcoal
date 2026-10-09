@@ -5985,3 +5985,55 @@ async fn test_pg_ranked_threats_exclude_gone_accounts() {
         .collect();
     assert_eq!(dids, vec!["did:plc:pgrank_alive"]);
 }
+
+/// #387 (CodeRabbit, PR #145): the deploy sweep's pull-forward is ONE
+/// conditional write — it consumes the streak and moves the deadline only
+/// while the streak still holds exactly the value the sweep read.
+#[tokio::test]
+async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
+    const DID: &str = "did:plc:pgtest_pull_forward_cas";
+    const KEY: &str = "refresh_failure_streak";
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(DID).await.unwrap();
+    db.upsert_user(DID, "pull.h").await.unwrap();
+    let now = chrono::Utc::now();
+    let later = now + chrono::Duration::hours(16);
+    db.schedule_refresh(DID, &later.to_rfc3339()).await.unwrap();
+    let observed = r#"{"count":5,"cause":"c","deploy":"deploy-1"}"#;
+    let replaced = r#"{"count":1,"cause":"c","deploy":"deploy-2"}"#;
+    let deadline = |raw: Option<String>| {
+        chrono::DateTime::parse_from_rfc3339(&raw.expect("a deadline"))
+            .unwrap()
+            .timestamp()
+    };
+
+    db.set_scan_state(DID, KEY, replaced).await.unwrap();
+    assert!(!db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        later.timestamp()
+    );
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(replaced)
+    );
+
+    db.set_scan_state(DID, KEY, observed).await.unwrap();
+    assert!(db
+        .pull_refresh_forward_if_streak(DID, KEY, observed, &now.to_rfc3339())
+        .await
+        .unwrap());
+    assert_eq!(
+        deadline(db.next_refresh_at(DID).await.unwrap()),
+        now.timestamp()
+    );
+    assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
+
+    db.delete_user_data(DID).await.unwrap();
+}

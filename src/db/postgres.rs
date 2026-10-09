@@ -2662,6 +2662,41 @@ impl Database for PgDatabase {
         Ok(())
     }
 
+    async fn pull_refresh_forward_if_streak(
+        &self,
+        user_did: &str,
+        key: &str,
+        observed: &str,
+        now_rfc3339: &str,
+    ) -> Result<bool> {
+        // One transaction — see the SQLite twin. The conditional DELETE takes
+        // the row lock, so a concurrent writer of the streak either commits
+        // first (and the delete matches nothing) or waits for this commit.
+        let mut tx = self.pool.begin().await?;
+        let consumed = sqlx_core::query::query(
+            "DELETE FROM scan_state WHERE user_did = $1 AND key = $2 AND value = $3",
+        )
+        .bind(user_did)
+        .bind(key)
+        .bind(observed)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if consumed == 0 {
+            // Dropping `tx` rolls back; nothing was written.
+            return Ok(false);
+        }
+        sqlx_core::query::query(
+            "UPDATE users SET next_refresh_at = $2::timestamptz WHERE did = $1",
+        )
+        .bind(user_did)
+        .bind(now_rfc3339)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     async fn schedule_retry_at(
         &self,
         user_did: &str,

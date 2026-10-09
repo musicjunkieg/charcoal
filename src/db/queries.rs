@@ -2008,6 +2008,33 @@ pub fn schedule_retry_at(
     Ok(())
 }
 
+/// `Database::pull_refresh_forward_if_streak` — see the trait for the contract.
+pub fn pull_refresh_forward_if_streak(
+    conn: &Connection,
+    user_did: &str,
+    key: &str,
+    observed: &str,
+    now_rfc3339: &str,
+) -> Result<bool> {
+    // Immediate: the conditional delete decides whether the deadline moves,
+    // so the write lock is taken up front, not at the first statement.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let consumed = tx.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2 AND value = ?3",
+        params![user_did, key, observed],
+    )?;
+    if consumed == 0 {
+        // The streak changed (or is gone) since it was read: touch nothing.
+        return Ok(false);
+    }
+    tx.execute(
+        "UPDATE users SET next_refresh_at = ?2 WHERE did = ?1",
+        params![user_did, now_rfc3339],
+    )?;
+    tx.commit()?;
+    Ok(true)
+}
+
 /// `Database::apply_refresh_schedule` — see the trait for the contract.
 pub fn apply_refresh_schedule(
     conn: &Connection,

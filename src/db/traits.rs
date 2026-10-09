@@ -509,6 +509,22 @@ pub trait Database: Send + Sync {
     /// Set a scan state value (upsert) for a specific user.
     async fn set_scan_state(&self, user_did: &str, key: &str, value: &str) -> Result<()>;
 
+    /// The deploy sweep's pull-forward (#387): in ONE transaction, delete
+    /// `key` for `user_did` only while it still holds exactly `observed`, and
+    /// if — and only if — that delete happened, set `next_refresh_at` to
+    /// `now_rfc3339`. Returns whether it wrote anything.
+    ///
+    /// Conditional on the observed value because the sweep reads the streak
+    /// first: a refresh worker that wrote a NEW streak (and a new deadline) in
+    /// between must not have both clobbered (CodeRabbit, PR #145).
+    async fn pull_refresh_forward_if_streak(
+        &self,
+        user_did: &str,
+        key: &str,
+        observed: &str,
+        now_rfc3339: &str,
+    ) -> Result<bool>;
+
     /// Remove a single scan state key. Absent keys are not an error — the
     /// callers use this to retract a marker whose presence is the signal, and
     /// "already gone" is the state they wanted.

@@ -291,20 +291,20 @@ pub async fn pull_forward_after_deploy(
         if !due_later {
             continue;
         }
-        // Consume the streak the pull acts on, and do it FIRST (CodeRabbit
-        // and Codex, PR #144). A deploy restarts the backoff anyway; a
-        // leftover old-deployment streak would let the next sweep pull this
-        // user forward AGAIN — a failed full scan schedules a plain one-hour
-        // retry without touching the streak, so that could repeat a paid scan
-        // every ten minutes. Clear-then-move fails safe: if the clear fails,
-        // nothing moves; if the move fails, the user just keeps the deadline
-        // they already had. (Making the two one atomic write is #403.)
-        if let Err(e) = db.delete_scan_state(&user.did, STREAK_KEY).await {
-            warn!(user_did = %user.did, error = %format!("{e:#}"), "could not clear the refresh failure streak — not pulling this user forward");
-            continue;
-        }
-        match db.schedule_refresh(&user.did, &now.to_rfc3339()).await {
-            Ok(()) => pulled += 1,
+        // Consume the streak the pull acts on, in the SAME write as the pull
+        // (CodeRabbit and Codex, PRs #144/#145). A deploy restarts the
+        // backoff anyway, and a leftover old-deployment streak would let the
+        // next sweep pull this user forward AGAIN — a failed full scan
+        // schedules a plain one-hour retry without touching the streak, so
+        // that could repeat a paid scan every ten minutes. The write is
+        // conditional on the streak still holding exactly `raw`: a refresh
+        // that recorded a new streak and deadline since we read it wins.
+        match db
+            .pull_refresh_forward_if_streak(&user.did, STREAK_KEY, &raw, &now.to_rfc3339())
+            .await
+        {
+            Ok(true) => pulled += 1,
+            Ok(false) => {}
             Err(e) => {
                 warn!(user_did = %user.did, error = %format!("{e:#}"), "could not reset refresh backoff after deploy")
             }
@@ -1383,6 +1383,70 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(streak.as_str())
+        );
+    }
+
+    /// CodeRabbit (PR #145) — the third reviewer to flag this: the sweep reads
+    /// a streak, and a refresh worker can write a NEW one before the sweep
+    /// acts. Consuming the streak and moving the deadline is therefore one
+    /// conditional write: it lands only while the streak still holds exactly
+    /// what the sweep read, and otherwise changes nothing.
+    #[tokio::test]
+    async fn the_pull_forward_only_consumes_the_streak_it_read() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        let now = Utc::now();
+        let later = (now + ChronoDuration::hours(16)).to_rfc3339();
+        let observed = r#"{"count":5,"cause":"c","deploy":"deploy-1"}"#;
+        let replaced = r#"{"count":1,"cause":"c","deploy":"deploy-2"}"#;
+        db.upsert_user("did:plc:u", "h").await.unwrap();
+        db.schedule_refresh("did:plc:u", &later).await.unwrap();
+
+        // A worker replaced the streak after the sweep read it: no-op.
+        db.set_scan_state("did:plc:u", STREAK_KEY, replaced)
+            .await
+            .unwrap();
+        assert!(!db
+            .pull_refresh_forward_if_streak("did:plc:u", STREAK_KEY, observed, &now.to_rfc3339())
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            later
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(replaced)
+        );
+
+        // The streak still holds what was read: consumed and pulled, together.
+        db.set_scan_state("did:plc:u", STREAK_KEY, observed)
+            .await
+            .unwrap();
+        assert!(db
+            .pull_refresh_forward_if_streak("did:plc:u", STREAK_KEY, observed, &now.to_rfc3339())
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            now.to_rfc3339()
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY).await.unwrap(),
+            None
+        );
+
+        // Already consumed (or cleared by a success): no-op.
+        assert!(!db
+            .pull_refresh_forward_if_streak("did:plc:u", STREAK_KEY, observed, &later)
+            .await
+            .unwrap());
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            now.to_rfc3339()
         );
     }
 }

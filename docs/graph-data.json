@@ -11549,6 +11549,61 @@
       "created_at": "2026-10-08T16:31:03.534179-07:00",
       "updated_at": "2026-10-08T16:31:03.534179-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"7afbf9a\",\"confidence\":85,\"files\":[\"src/web/refresh.rs\"]}"
+    },
+    {
+      "id": 1060,
+      "change_id": "08f0adc2-a00d-448a-b804-4ba8833b435c",
+      "node_type": "goal",
+      "title": "#404 Classifier eval harness: compare new decision models vs CoPE-B",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T18:43:08.527158-07:00",
+      "updated_at": "2026-10-08T18:43:08.527158-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85,\"prompt\":\"i want you to brainstorm ways we might use the class of new models coming out called classifiers to help or replace parts of our worldly and design evals that let us compare what is better for our current use cases or future use cases.\"}"
+    },
+    {
+      "id": 1061,
+      "change_id": "e0ed2c77-7d5d-4eb5-8992-8ad845c7bd21",
+      "node_type": "option",
+      "title": "Rust eval-classifiers command on ToxicityClassifier",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T18:43:11.419947-07:00",
+      "updated_at": "2026-10-08T18:43:11.419947-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
+    },
+    {
+      "id": 1062,
+      "change_id": "0a220682-0130-42f6-bff3-2a07487f70d0",
+      "node_type": "option",
+      "title": "Python tool in tools/",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T18:43:11.435492-07:00",
+      "updated_at": "2026-10-08T18:43:11.435492-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":40}"
+    },
+    {
+      "id": 1063,
+      "change_id": "71cae964-8afa-45da-a969-b69cd13dcb1d",
+      "node_type": "option",
+      "title": "External eval service",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T18:43:11.448728-07:00",
+      "updated_at": "2026-10-08T18:43:11.448728-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":20}"
+    },
+    {
+      "id": 1064,
+      "change_id": "68c99d1a-fdf2-46a9-8ed8-a3ef520a6666",
+      "node_type": "decision",
+      "title": "Chose Rust eval-classifiers command; post-level, label-the-disagreements, both error rates reported",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T18:43:13.157092-07:00",
+      "updated_at": "2026-10-08T18:43:13.157092-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23651,6 +23706,72 @@
       "weight": 1.0,
       "rationale": "CodeRabbit finding on promotion PR",
       "created_at": "2026-10-08T16:31:03.613271-07:00"
+    },
+    {
+      "id": 1111,
+      "from_node_id": 1060,
+      "to_node_id": 1061,
+      "from_change_id": "08f0adc2-a00d-448a-b804-4ba8833b435c",
+      "to_change_id": "e0ed2c77-7d5d-4eb5-8992-8ad845c7bd21",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-08T18:43:13.167613-07:00"
+    },
+    {
+      "id": 1112,
+      "from_node_id": 1060,
+      "to_node_id": 1062,
+      "from_change_id": "08f0adc2-a00d-448a-b804-4ba8833b435c",
+      "to_change_id": "0a220682-0130-42f6-bff3-2a07487f70d0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-08T18:43:13.176452-07:00"
+    },
+    {
+      "id": 1113,
+      "from_node_id": 1060,
+      "to_node_id": 1063,
+      "from_change_id": "08f0adc2-a00d-448a-b804-4ba8833b435c",
+      "to_change_id": "71cae964-8afa-45da-a969-b69cd13dcb1d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-08T18:43:13.184472-07:00"
+    },
+    {
+      "id": 1114,
+      "from_node_id": 1061,
+      "to_node_id": 1064,
+      "from_change_id": "e0ed2c77-7d5d-4eb5-8992-8ad845c7bd21",
+      "to_change_id": "68c99d1a-fdf2-46a9-8ed8-a3ef520a6666",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen: measures production path; winner ships without rewrite",
+      "created_at": "2026-10-08T18:43:13.192709-07:00"
+    },
+    {
+      "id": 1115,
+      "from_node_id": 1062,
+      "to_node_id": 1064,
+      "from_change_id": "0a220682-0130-42f6-bff3-2a07487f70d0",
+      "to_change_id": "68c99d1a-fdf2-46a9-8ed8-a3ef520a6666",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: drifts from production, needs Rust rewrite",
+      "created_at": "2026-10-08T18:43:13.200624-07:00"
+    },
+    {
+      "id": 1116,
+      "from_node_id": 1063,
+      "to_node_id": 1064,
+      "from_change_id": "71cae964-8afa-45da-a969-b69cd13dcb1d",
+      "to_change_id": "68c99d1a-fdf2-46a9-8ed8-a3ef520a6666",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: posts leave our infra, not our code path",
+      "created_at": "2026-10-08T18:43:13.209271-07:00"
     }
   ],
   "documents": [
