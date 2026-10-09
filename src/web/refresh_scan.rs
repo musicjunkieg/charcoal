@@ -746,6 +746,14 @@ where
             }
             None => (None, backoff_delay(1)),
         };
+        // Ending a streak: clear it BEFORE scheduling (Codex review). With a
+        // stale old-deployment streak still in place after the new deadline,
+        // a deploy sweep could consume it and pull that deadline forward to
+        // now. (A success also clears it inside its own fenced write; this
+        // covers the retry paths that end a streak, e.g. a deferral.)
+        if streak.is_none() {
+            books.store_streak(user_did, None).await;
+        }
         // Exactly one scheduling site. The slot lifecycle (`run_under_slot`)
         // does NOT schedule; it only finishes the queue row.
         match books_for {
@@ -760,7 +768,7 @@ where
             }
             None => books.schedule_retry(user_did, claim_id, now, delay).await,
         }
-        // The streak AFTER the deadline (#387 review). The deploy sweep
+        // A NEW streak goes AFTER the deadline (#387 review). The deploy sweep
         // consumes a streak only while it still holds what the sweep read, and
         // in the same write pulls the deadline forward. Written in this order,
         // a sweep that lands between the two writes either sees the old streak
@@ -769,7 +777,9 @@ where
         // record a fresh one. The reverse order let a sweep consume the streak
         // and THEN have this worker's long deadline land with no streak left
         // for any later sweep to see.
-        books.store_streak(user_did, streak.as_ref()).await;
+        if let Some(streak) = &streak {
+            books.store_streak(user_did, Some(streak)).await;
+        }
     } else {
         warn!(
             user_did,
@@ -1299,6 +1309,7 @@ mod tests {
         }
         async fn schedule_success(&self, u: &str, c: &str, now: DateTime<Utc>) {
             self.successes.fetch_add(1, SeqCst);
+            self.order.lock().unwrap().push("schedule");
             self.inner.schedule_success(u, c, now).await
         }
         async fn schedule_retry(
@@ -2722,5 +2733,69 @@ mod tests {
         )
         .await;
         assert_eq!(*books.order.lock().unwrap(), vec!["schedule", "streak"]);
+    }
+
+    /// Codex review: when a refresh ENDS a streak, the clear must come first.
+    /// Deadline-first is only safe when writing a replacement streak: with a
+    /// stale old-deployment streak still in place after the healthy deadline
+    /// is written, a deploy sweep could consume it and pull that fresh nightly
+    /// deadline forward to now — an immediate, needless refresh.
+    #[tokio::test]
+    async fn a_refresh_that_ends_a_streak_clears_it_before_scheduling() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let t0 = Utc::now();
+        // A refresh that defers (no fingerprint) is not a failure: it ends
+        // the streak and retries at the base hour.
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let clock = move || t0;
+        struct NoFp;
+        #[async_trait]
+        impl RefreshContextSource for NoFp {
+            async fn fingerprint(&self, _: &str) -> anyhow::Result<Option<StoredFingerprint>> {
+                Ok(None)
+            }
+            async fn candidates(&self, _: &str) -> anyhow::Result<Vec<RefreshCandidate>> {
+                Ok(vec![])
+            }
+            async fn protected_posts_embeddings(
+                &self,
+                _: &str,
+            ) -> anyhow::Result<Vec<(String, Vec<f64>)>> {
+                Ok(vec![])
+            }
+            async fn pile_on(&self, _: &str) -> anyhow::Result<HashSet<String>> {
+                Ok(HashSet::new())
+            }
+            async fn direct_pairs(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> anyhow::Result<Option<Vec<(String, String)>>> {
+                Ok(None)
+            }
+            async fn median_engagement(&self, _: &str) -> anyhow::Result<f64> {
+                Ok(0.0)
+            }
+        }
+        run_refresh_with(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:u",
+            "h",
+            &claim_id,
+            || {
+                let ctx: Box<dyn RefreshContextSource> = Box::new(NoFp);
+                Ok((ctx, |_plan: RefreshPlan| async {
+                    panic!("a deferral never reaches the pipeline")
+                }))
+            },
+        )
+        .await
+        .expect("a deferral is not an error");
+        assert_eq!(*books.order.lock().unwrap(), vec!["streak", "schedule"]);
     }
 }

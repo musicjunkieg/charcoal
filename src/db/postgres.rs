@@ -2756,6 +2756,13 @@ impl Database for PgDatabase {
                 .bind(generation)
                 .execute(&mut *tx)
                 .await?;
+                // A success ends the refresh failure streak in this same
+                // transaction — see the SQLite twin (#387, Codex review).
+                sqlx_core::query::query("DELETE FROM scan_state WHERE user_did = $1 AND key = $2")
+                    .bind(user_did)
+                    .bind(super::REFRESH_FAILURE_STREAK_KEY)
+                    .execute(&mut *tx)
+                    .await?;
             }
             RefreshScheduleWrite::Retry {
                 at_rfc3339,

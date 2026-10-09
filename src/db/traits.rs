@@ -294,7 +294,9 @@ impl FinishCompletion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefreshScheduleWrite<'a> {
     /// A completed run: the next deadline plus the proof — `refreshed_generation`
-    /// and `refresh_attempted_generation` both set to `generation` (V3-04).
+    /// and `refresh_attempted_generation` both set to `generation` (V3-04) —
+    /// and the end of any refresh failure streak, in the same transaction
+    /// ([`super::REFRESH_FAILURE_STREAK_KEY`], #387).
     Success {
         next_at_rfc3339: &'a str,
         generation: &'a str,

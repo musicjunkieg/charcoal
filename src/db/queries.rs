@@ -2074,6 +2074,14 @@ pub fn apply_refresh_schedule(
                   WHERE did = ?1",
                 params![user_did, next_at_rfc3339, generation],
             )?;
+            // A success ends any refresh failure streak, in THIS transaction
+            // (#387, Codex review): cleared in a separate write after the
+            // healthy deadline, a deploy sweep could land in between, consume
+            // the stale streak and pull that fresh deadline forward to now.
+            tx.execute(
+                "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+                params![user_did, super::REFRESH_FAILURE_STREAK_KEY],
+            )?;
         }
         RefreshScheduleWrite::Retry {
             at_rfc3339,

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "bddd7d01f1d0c4a816e64e783115cf1fe2d0c3e1",
+    "short_hash": "bddd7d0",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:20:43-07:00",
+    "message": "fix(387): a failed refresh writes its deadline before its streak\n\nInternal review: with the streak written first, a deploy sweep landing\nbetween the two writes consumed the streak and pulled the deadline\nforward, then the retiring worker's long deadline landed with no streak\nleft for any later sweep to see. Deadline first, then streak: every\ninterleaving now ends with either the sweep acting on the final streak or\nthe next sweep doing so.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "0961cd928042da173e0f3abbedc36e137a173b36",
     "short_hash": "0961cd9",
     "author": "Bryan Guffey",

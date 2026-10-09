@@ -6037,3 +6037,60 @@ async fn test_pg_pull_refresh_forward_only_consumes_the_streak_it_read() {
 
     db.delete_user_data(DID).await.unwrap();
 }
+
+/// #387 (Codex review): a Success schedule write ends the refresh failure
+/// streak inside its own fenced transaction; a Retry write leaves it alone.
+#[tokio::test]
+async fn test_pg_success_schedule_write_clears_the_streak() {
+    use charcoal::db::RefreshScheduleWrite;
+    const DID: &str = "did:plc:pgtest_success_clears_streak";
+    const KEY: &str = charcoal::db::REFRESH_FAILURE_STREAK_KEY;
+    let _guard = scan_queue_test_lock().lock().await;
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    db.delete_user_data(DID).await.unwrap();
+    seed_refreshable(&db, DID, None, None).await;
+    let streak = r#"{"count":4,"cause":"c","deploy":"d"}"#;
+    db.set_scan_state(DID, KEY, streak).await.unwrap();
+    db.enqueue_scan(DID).await.unwrap();
+    let claim = loop {
+        let c = db.claim_next_scan(64, 60).await.unwrap().expect("a claim");
+        if c.user_did == DID {
+            break c.claim_id;
+        }
+    };
+    let at = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+    let rev = charcoal::scoring::generation::scoring_revision();
+
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Retry {
+                at_rfc3339: &at,
+                attempted_generation: rev,
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(streak)
+    );
+
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Success {
+                next_at_rfc3339: &at,
+                generation: rev,
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
+    db.delete_user_data(DID).await.unwrap();
+}
