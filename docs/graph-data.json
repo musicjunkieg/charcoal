@@ -11538,6 +11538,17 @@
       "created_at": "2026-10-08T16:10:38.858864-07:00",
       "updated_at": "2026-10-08T16:10:38.858864-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":85}"
+    },
+    {
+      "id": 1059,
+      "change_id": "e50740e3-efce-42e9-b356-6b56e954cf32",
+      "node_type": "action",
+      "title": "#387 sweep consumes the streak it acts on (CodeRabbit on promotion PR #144)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T16:31:03.534179-07:00",
+      "updated_at": "2026-10-08T16:31:03.534179-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"7afbf9a\",\"confidence\":85,\"files\":[\"src/web/refresh.rs\"]}"
     }
   ],
   "edges": [
@@ -23629,6 +23640,17 @@
       "weight": 1.0,
       "rationale": "promotion after staging verification",
       "created_at": "2026-10-08T16:10:39.478107-07:00"
+    },
+    {
+      "id": 1110,
+      "from_node_id": 1058,
+      "to_node_id": 1059,
+      "from_change_id": "32cc0c03-a85e-4104-bf95-4d4f7c2f0f14",
+      "to_change_id": "e50740e3-efce-42e9-b356-6b56e954cf32",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit finding on promotion PR",
+      "created_at": "2026-10-08T16:31:03.613271-07:00"
     }
   ],
   "documents": [

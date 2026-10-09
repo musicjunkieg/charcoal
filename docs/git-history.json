@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7afbf9a5efb48225e93810129ea38a5e892d9596",
+    "short_hash": "7afbf9a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T16:30:55-07:00",
+    "message": "fix(387): the deploy sweep consumes the streak it acts on\n\nCodeRabbit (PR #144): the sweep pulled a backed-off user forward but left\nthe old-deployment streak in place. A failed FULL scan schedules a plain\none-hour retry without touching the streak, so the next 10-minute sweep\ncould pull the user forward again and repeat a paid scan every ten\nminutes. The sweep now deletes the streak once its pull lands: one pull per\nuser per deployment, and the next refresh failure counts from one.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "09ab228a4d468774296dc8c403b289d4bf9b297e",
     "short_hash": "09ab228",
     "author": "Bryan Guffey",

@@ -291,19 +291,20 @@ pub async fn pull_forward_after_deploy(
         if !due_later {
             continue;
         }
+        // Consume the streak the pull acts on, and do it FIRST (CodeRabbit
+        // and Codex, PR #144). A deploy restarts the backoff anyway; a
+        // leftover old-deployment streak would let the next sweep pull this
+        // user forward AGAIN — a failed full scan schedules a plain one-hour
+        // retry without touching the streak, so that could repeat a paid scan
+        // every ten minutes. Clear-then-move fails safe: if the clear fails,
+        // nothing moves; if the move fails, the user just keeps the deadline
+        // they already had. (Making the two one atomic write is #403.)
+        if let Err(e) = db.delete_scan_state(&user.did, STREAK_KEY).await {
+            warn!(user_did = %user.did, error = %format!("{e:#}"), "could not clear the refresh failure streak — not pulling this user forward");
+            continue;
+        }
         match db.schedule_refresh(&user.did, &now.to_rfc3339()).await {
-            Ok(()) => {
-                pulled += 1;
-                // Consume the streak the pull acted on (CodeRabbit, PR #144).
-                // A deploy restarts the backoff anyway, and a leftover streak
-                // would let the next sweep pull this user forward AGAIN — a
-                // failed full scan schedules a plain one-hour retry without
-                // touching the streak, so that could repeat a paid scan every
-                // ten minutes. The next refresh failure starts a fresh count.
-                if let Err(e) = db.delete_scan_state(&user.did, STREAK_KEY).await {
-                    warn!(user_did = %user.did, error = %format!("{e:#}"), "could not clear the refresh failure streak after the deploy reset");
-                }
-            }
+            Ok(()) => pulled += 1,
             Err(e) => {
                 warn!(user_did = %user.did, error = %format!("{e:#}"), "could not reset refresh backoff after deploy")
             }
@@ -1335,6 +1336,53 @@ mod tests {
         assert_eq!(
             db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
             retry_at
+        );
+    }
+
+    /// Codex review (PR #144 fix): consuming the streak and moving the
+    /// deadline are two writes. The streak goes FIRST, so if clearing it
+    /// fails nothing moves: a deadline pulled forward with the old-deployment
+    /// streak still in place is exactly the 10-minute paid-scan loop.
+    #[tokio::test]
+    async fn a_failed_streak_clear_moves_no_deadline() {
+        use crate::web::refresh_backoff::{FailureStreak, STREAK_KEY};
+        let conn = Connection::open_in_memory().unwrap();
+        create_tables(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_streak_clear BEFORE DELETE ON scan_state
+             WHEN OLD.key = 'refresh_failure_streak'
+             BEGIN SELECT RAISE(ABORT, 'disk on fire'); END;",
+        )
+        .unwrap();
+        let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
+        let now = Utc::now();
+        let later = (now + ChronoDuration::hours(16)).to_rfc3339();
+        db.upsert_user("did:plc:u", "h").await.unwrap();
+        db.schedule_refresh("did:plc:u", &later).await.unwrap();
+        let streak = serde_json::to_string(&FailureStreak {
+            count: 5,
+            cause: "policy mismatch".into(),
+            deploy: "deploy-1".into(),
+        })
+        .unwrap();
+        db.set_scan_state("did:plc:u", STREAK_KEY, &streak)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            pull_forward_after_deploy(db.as_ref(), "deploy-2", now).await,
+            0
+        );
+        assert_eq!(
+            db.next_refresh_at("did:plc:u").await.unwrap().unwrap(),
+            later
+        );
+        assert_eq!(
+            db.get_scan_state("did:plc:u", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(streak.as_str())
         );
     }
 }
