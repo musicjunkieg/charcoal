@@ -11604,6 +11604,17 @@
       "created_at": "2026-10-08T18:43:13.157092-07:00",
       "updated_at": "2026-10-08T18:43:13.157092-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
+    },
+    {
+      "id": 1065,
+      "change_id": "9cbe54d4-d7d7-4968-baf2-ec237eab1e0d",
+      "node_type": "action",
+      "title": "#387 sweep pull-forward as one conditional write (CAS on streak value), SQLite + Postgres",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-08T19:07:41.199691-07:00",
+      "updated_at": "2026-10-08T19:07:41.199691-07:00",
+      "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"0961cd9\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23772,6 +23783,17 @@
       "weight": 1.0,
       "rationale": "rejected: posts leave our infra, not our code path",
       "created_at": "2026-10-08T18:43:13.209271-07:00"
+    },
+    {
+      "id": 1117,
+      "from_node_id": 1059,
+      "to_node_id": 1065,
+      "from_change_id": "e50740e3-efce-42e9-b356-6b56e954cf32",
+      "to_change_id": "9cbe54d4-d7d7-4968-baf2-ec237eab1e0d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit on PR #145",
+      "created_at": "2026-10-08T19:07:41.291582-07:00"
     }
   ],
   "documents": [

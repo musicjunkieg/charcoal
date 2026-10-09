@@ -726,8 +726,9 @@ where
         }
         // #387: the retry delay. A failure extends the user's streak of
         // identical failures and backs off by it; anything else ends the
-        // streak and retries at the base hour.
-        let delay = match &cause {
+        // streak and retries at the base hour. The streak is only COMPUTED
+        // here; it is written after the schedule, below.
+        let (streak, delay) = match &cause {
             Some(cause) => {
                 let prev = books.load_streak(user_did).await;
                 let streak = FailureStreak::after_failure(prev.as_ref(), cause, breaker.deploy());
@@ -741,13 +742,9 @@ where
                         "refresh failed the same way again — backing off"
                     );
                 }
-                books.store_streak(user_did, Some(&streak)).await;
-                delay
+                (Some(streak), delay)
             }
-            None => {
-                books.store_streak(user_did, None).await;
-                backoff_delay(1)
-            }
+            None => (None, backoff_delay(1)),
         };
         // Exactly one scheduling site. The slot lifecycle (`run_under_slot`)
         // does NOT schedule; it only finishes the queue row.
@@ -763,6 +760,16 @@ where
             }
             None => books.schedule_retry(user_did, claim_id, now, delay).await,
         }
+        // The streak AFTER the deadline (#387 review). The deploy sweep
+        // consumes a streak only while it still holds what the sweep read, and
+        // in the same write pulls the deadline forward. Written in this order,
+        // a sweep that lands between the two writes either sees the old streak
+        // and is then out-raced by this write (it changes nothing; the next
+        // sweep acts on the new streak) or consumes it and leaves this write to
+        // record a fresh one. The reverse order let a sweep consume the streak
+        // and THEN have this worker's long deadline land with no streak left
+        // for any later sweep to see.
+        books.store_streak(user_did, streak.as_ref()).await;
     } else {
         warn!(
             user_did,
@@ -1256,6 +1263,8 @@ mod tests {
         fail_reset: bool,
         retries: AtomicUsize,
         successes: AtomicUsize,
+        /// The order the schedule and streak writes happened in.
+        order: std::sync::Mutex<Vec<&'static str>>,
     }
 
     impl CountingBooks {
@@ -1265,6 +1274,7 @@ mod tests {
                 fail_reset,
                 retries: 0.into(),
                 successes: 0.into(),
+                order: std::sync::Mutex::new(Vec::new()),
             }
         }
     }
@@ -1299,12 +1309,14 @@ mod tests {
             delay: std::time::Duration,
         ) {
             self.retries.fetch_add(1, SeqCst);
+            self.order.lock().unwrap().push("schedule");
             self.inner.schedule_retry(u, c, now, delay).await
         }
         async fn load_streak(&self, u: &str) -> Option<FailureStreak> {
             self.inner.load_streak(u).await
         }
         async fn store_streak(&self, u: &str, s: Option<&FailureStreak>) {
+            self.order.lock().unwrap().push("streak");
             self.inner.store_streak(u, s).await
         }
     }
@@ -2678,5 +2690,37 @@ mod tests {
         let (result, _) = fail_attempt(&db, &breaker, "did:plc:c", t0, "its own").await;
         let err = format!("{:#}", result.expect_err("c ran"));
         assert!(err.contains("its own"), "breaker stayed closed: {err}");
+    }
+
+    /// #387 review: the deadline is written BEFORE the streak. The deploy
+    /// sweep consumes a streak only while it still holds what the sweep read;
+    /// if the worker wrote the streak first and the deadline second, a sweep
+    /// landing between them would consume the streak, and the worker's long
+    /// deadline would then land with no streak left for any later sweep to
+    /// see — a user stuck on the old deployment's backoff.
+    #[tokio::test]
+    async fn a_failed_refresh_schedules_before_it_records_the_streak() {
+        let db = test_db();
+        let breaker = RefreshBreaker::new("deploy-1");
+        let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
+        let books = CountingBooks::new(db.clone(), false);
+        let t0 = Utc::now();
+        let clock = move || t0;
+        let _failed = run_refresh_with::<
+            _,
+            fn(RefreshPlan) -> std::future::Ready<anyhow::Result<ScanSummary>>,
+            _,
+        >(
+            mgr,
+            &books,
+            &breaker,
+            &clock,
+            "did:plc:u",
+            "h",
+            &claim_id,
+            || anyhow::bail!("classifier down"),
+        )
+        .await;
+        assert_eq!(*books.order.lock().unwrap(), vec!["schedule", "streak"]);
     }
 }

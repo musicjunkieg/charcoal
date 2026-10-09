@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0961cd928042da173e0f3abbedc36e137a173b36",
+    "short_hash": "0961cd9",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:07:32-07:00",
+    "message": "fix(387): the deploy sweep pulls forward in one conditional write\n\nCodeRabbit (PR #145), after Codex flagged the same race twice: the sweep\nread a streak, then deleted it and moved the deadline in separate writes,\nso a refresh that recorded a NEW streak and deadline in between had both\nclobbered. New Database::pull_refresh_forward_if_streak deletes the streak\nonly while it still holds exactly the value the sweep read and, only then,\nmoves the deadline, in one transaction (SQLite Immediate, Postgres tx).\nTested on both backends. Closes the sweep half of #403.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 7
+  },
+  {
     "hash": "7afbf9a5efb48225e93810129ea38a5e892d9596",
     "short_hash": "7afbf9a",
     "author": "Bryan Guffey",
