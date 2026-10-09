@@ -42,7 +42,7 @@ use tracing::{debug, error, info, warn};
 use crate::bluesky::client::PublicAtpClient;
 use crate::bluesky::relationships::GraphDistance;
 use crate::config::Config;
-use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind};
+use crate::db::{Database, FinishCompletion, RefreshCandidate, ScanKind, StreakWrite};
 use crate::pipeline::scan_phases::{CandidateInput, PhasedScanError, RunIdentity, ScanSummary};
 use crate::topics::embeddings::EMBEDDING_MODEL_ID;
 use crate::topics::fingerprint::TopicFingerprint;
@@ -399,20 +399,21 @@ pub trait RefreshBookkeeping: Send + Sync {
     /// Best-effort by contract: logs and counts a failure, never returns it.
     /// `now` is the attempt's END instant, from the injected clock (V6-02).
     async fn schedule_success(&self, user_did: &str, claim_id: &str, now: DateTime<Utc>);
-    /// Best-effort, like `schedule_success`. `delay` is the backoff (#387).
+    /// Best-effort, like `schedule_success`. `delay` is the backoff and
+    /// `streak` the failure-streak change, written in the SAME fenced
+    /// transaction as the deadline (#387) — never as a separate write.
     async fn schedule_retry(
         &self,
         user_did: &str,
         claim_id: &str,
         now: DateTime<Utc>,
         delay: std::time::Duration,
+        streak: StreakWrite<'_>,
     );
     /// The user's current run of identical failures, if any (#387).
     /// Best-effort: an unreadable streak is no streak — the backoff restarts
     /// at an hour, which is the old behaviour, never a skipped retry.
     async fn load_streak(&self, user_did: &str) -> Option<FailureStreak>;
-    /// Record the streak, or clear it with `None`. Best-effort.
-    async fn store_streak(&self, user_did: &str, streak: Option<&FailureStreak>);
 }
 
 /// The production bookkeeping.
@@ -525,9 +526,17 @@ impl RefreshBookkeeping for DbBookkeeping {
         claim_id: &str,
         now: DateTime<Utc>,
         delay: std::time::Duration,
+        streak: StreakWrite<'_>,
     ) {
-        crate::web::refresh::schedule_retry_after(self.db.as_ref(), user_did, claim_id, now, delay)
-            .await
+        crate::web::refresh::schedule_retry_after(
+            self.db.as_ref(),
+            user_did,
+            claim_id,
+            now,
+            delay,
+            streak,
+        )
+        .await
     }
 
     async fn load_streak(&self, user_did: &str) -> Option<FailureStreak> {
@@ -544,19 +553,6 @@ impl RefreshBookkeeping for DbBookkeeping {
                 warn!(user_did, error = %e, "unreadable refresh failure streak — starting over");
                 None
             }
-        }
-    }
-
-    async fn store_streak(&self, user_did: &str, streak: Option<&FailureStreak>) {
-        let written = match streak {
-            Some(s) => match serde_json::to_string(s) {
-                Ok(json) => self.db.set_scan_state(user_did, STREAK_KEY, &json).await,
-                Err(e) => Err(e.into()),
-            },
-            None => self.db.delete_scan_state(user_did, STREAK_KEY).await,
-        };
-        if let Err(e) = written {
-            warn!(user_did, error = %format!("{e:#}"), "could not record the refresh failure streak");
         }
     }
 }
@@ -727,7 +723,7 @@ where
         // #387: the retry delay. A failure extends the user's streak of
         // identical failures and backs off by it; anything else ends the
         // streak and retries at the base hour. The streak is only COMPUTED
-        // here; it is written after the schedule, below.
+        // here: it is written inside the schedule's own fenced transaction.
         let (streak, delay) = match &cause {
             Some(cause) => {
                 let prev = books.load_streak(user_did).await;
@@ -746,14 +742,29 @@ where
             }
             None => (None, backoff_delay(1)),
         };
-        // Ending a streak: clear it BEFORE scheduling (Codex review). With a
-        // stale old-deployment streak still in place after the new deadline,
-        // a deploy sweep could consume it and pull that deadline forward to
-        // now. (A success also clears it inside its own fenced write; this
-        // covers the retry paths that end a streak, e.g. a deferral.)
-        if streak.is_none() {
-            books.store_streak(user_did, None).await;
-        }
+        // The streak change rides in the SAME fenced transaction as the
+        // deadline (#387): a success clears it inside `schedule_success`; a
+        // retry sets the new streak or clears an ended one alongside its
+        // deadline. Written as separate writes in any order, a deploy sweep
+        // landing between them could pair a stale streak with a fresh
+        // deadline — three review rounds found a different such window each
+        // time a separate write was reordered.
+        let streak_json = streak
+            .as_ref()
+            .and_then(|s| match serde_json::to_string(s) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    warn!(user_did, error = %e, "could not encode the refresh failure streak");
+                    None
+                }
+            });
+        let streak_write = match (&streak, &streak_json) {
+            (Some(_), Some(json)) => StreakWrite::Set(json),
+            // Unencodable (cannot happen for this plain struct): leave the
+            // stored streak alone rather than wrongly ending it.
+            (Some(_), None) => StreakWrite::Keep,
+            (None, _) => StreakWrite::Clear,
+        };
         // Exactly one scheduling site. The slot lifecycle (`run_under_slot`)
         // does NOT schedule; it only finishes the queue row.
         match books_for {
@@ -764,21 +775,15 @@ where
                         warn!(error = %format!("{e:#}"), "could not request the follow-up full scan");
                     }
                 }
-                books.schedule_retry(user_did, claim_id, now, delay).await;
+                books
+                    .schedule_retry(user_did, claim_id, now, delay, streak_write)
+                    .await;
             }
-            None => books.schedule_retry(user_did, claim_id, now, delay).await,
-        }
-        // A NEW streak goes AFTER the deadline (#387 review). The deploy sweep
-        // consumes a streak only while it still holds what the sweep read, and
-        // in the same write pulls the deadline forward. Written in this order,
-        // a sweep that lands between the two writes either sees the old streak
-        // and is then out-raced by this write (it changes nothing; the next
-        // sweep acts on the new streak) or consumes it and leaves this write to
-        // record a fresh one. The reverse order let a sweep consume the streak
-        // and THEN have this worker's long deadline land with no streak left
-        // for any later sweep to see.
-        if let Some(streak) = &streak {
-            books.store_streak(user_did, Some(streak)).await;
+            None => {
+                books
+                    .schedule_retry(user_did, claim_id, now, delay, streak_write)
+                    .await
+            }
         }
     } else {
         warn!(
@@ -1309,7 +1314,7 @@ mod tests {
         }
         async fn schedule_success(&self, u: &str, c: &str, now: DateTime<Utc>) {
             self.successes.fetch_add(1, SeqCst);
-            self.order.lock().unwrap().push("schedule");
+            self.order.lock().unwrap().push("success");
             self.inner.schedule_success(u, c, now).await
         }
         async fn schedule_retry(
@@ -1318,17 +1323,18 @@ mod tests {
             c: &str,
             now: DateTime<Utc>,
             delay: std::time::Duration,
+            streak: StreakWrite<'_>,
         ) {
             self.retries.fetch_add(1, SeqCst);
-            self.order.lock().unwrap().push("schedule");
-            self.inner.schedule_retry(u, c, now, delay).await
+            self.order.lock().unwrap().push(match streak {
+                StreakWrite::Keep => "retry:keep",
+                StreakWrite::Set(_) => "retry:set",
+                StreakWrite::Clear => "retry:clear",
+            });
+            self.inner.schedule_retry(u, c, now, delay, streak).await
         }
         async fn load_streak(&self, u: &str) -> Option<FailureStreak> {
             self.inner.load_streak(u).await
-        }
-        async fn store_streak(&self, u: &str, s: Option<&FailureStreak>) {
-            self.order.lock().unwrap().push("streak");
-            self.inner.store_streak(u, s).await
         }
     }
 
@@ -2703,14 +2709,12 @@ mod tests {
         assert!(err.contains("its own"), "breaker stayed closed: {err}");
     }
 
-    /// #387 review: the deadline is written BEFORE the streak. The deploy
-    /// sweep consumes a streak only while it still holds what the sweep read;
-    /// if the worker wrote the streak first and the deadline second, a sweep
-    /// landing between them would consume the streak, and the worker's long
-    /// deadline would then land with no streak left for any later sweep to
-    /// see — a user stuck on the old deployment's backoff.
+    /// #387: a failure's new streak is written in the SAME fenced transaction
+    /// as its deadline. As two separate writes, a deploy sweep landing
+    /// between them paired a stale streak with a fresh deadline (internal
+    /// review, Codex and CodeRabbit each found a different such window).
     #[tokio::test]
-    async fn a_failed_refresh_schedules_before_it_records_the_streak() {
+    async fn a_failed_refresh_records_its_streak_with_its_deadline() {
         let db = test_db();
         let breaker = RefreshBreaker::new("deploy-1");
         let (claim_id, mgr) = claim_refresh(&db, "did:plc:u").await;
@@ -2732,16 +2736,18 @@ mod tests {
             || anyhow::bail!("classifier down"),
         )
         .await;
-        assert_eq!(*books.order.lock().unwrap(), vec!["schedule", "streak"]);
+        assert_eq!(
+            *books.order.lock().unwrap(),
+            vec!["retry:set"],
+            "a failure records its streak in the same write as its deadline"
+        );
     }
 
-    /// Codex review: when a refresh ENDS a streak, the clear must come first.
-    /// Deadline-first is only safe when writing a replacement streak: with a
-    /// stale old-deployment streak still in place after the healthy deadline
-    /// is written, a deploy sweep could consume it and pull that fresh nightly
-    /// deadline forward to now — an immediate, needless refresh.
+    /// #387: a refresh that ENDS a streak (here a deferral) clears it in the
+    /// same fenced transaction as its deadline, so no deploy sweep can pair
+    /// the stale streak with the fresh deadline and pull it forward to now.
     #[tokio::test]
-    async fn a_refresh_that_ends_a_streak_clears_it_before_scheduling() {
+    async fn a_refresh_that_ends_a_streak_clears_it_with_its_deadline() {
         let db = test_db();
         let breaker = RefreshBreaker::new("deploy-1");
         let t0 = Utc::now();
@@ -2796,6 +2802,10 @@ mod tests {
         )
         .await
         .expect("a deferral is not an error");
-        assert_eq!(*books.order.lock().unwrap(), vec!["streak", "schedule"]);
+        assert_eq!(
+            *books.order.lock().unwrap(),
+            vec!["retry:clear"],
+            "a non-failure ends the streak in the same write as its deadline"
+        );
     }
 }

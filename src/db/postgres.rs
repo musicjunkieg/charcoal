@@ -2767,6 +2767,7 @@ impl Database for PgDatabase {
             RefreshScheduleWrite::Retry {
                 at_rfc3339,
                 attempted_generation,
+                streak,
             } => {
                 sqlx_core::query::query(
                     "UPDATE users
@@ -2778,6 +2779,31 @@ impl Database for PgDatabase {
                 .bind(attempted_generation)
                 .execute(&mut *tx)
                 .await?;
+                // The streak moves with the deadline — see the SQLite twin.
+                match streak {
+                    super::traits::StreakWrite::Keep => {}
+                    super::traits::StreakWrite::Set(json) => {
+                        sqlx_core::query::query(
+                            "INSERT INTO scan_state (user_did, key, value, updated_at)
+                             VALUES ($1, $2, $3, NOW())
+                             ON CONFLICT(user_did, key) DO UPDATE SET value = $3, updated_at = NOW()",
+                        )
+                        .bind(user_did)
+                        .bind(super::REFRESH_FAILURE_STREAK_KEY)
+                        .bind(json)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                    super::traits::StreakWrite::Clear => {
+                        sqlx_core::query::query(
+                            "DELETE FROM scan_state WHERE user_did = $1 AND key = $2",
+                        )
+                        .bind(user_did)
+                        .bind(super::REFRESH_FAILURE_STREAK_KEY)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                }
             }
         }
         tx.commit().await?;

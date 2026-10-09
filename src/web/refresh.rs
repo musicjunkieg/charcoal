@@ -13,7 +13,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
 
-use crate::db::{Database, RefreshScheduleWrite};
+use crate::db::{Database, RefreshScheduleWrite, StreakWrite};
 use crate::scoring::generation::scoring_revision;
 
 pub const REFRESH_INTERVAL_ENV: &str = "CHARCOAL_REFRESH_INTERVAL_HOURS";
@@ -204,23 +204,27 @@ pub async fn schedule_retry(db: &dyn Database, user_did: &str, claim_id: &str, n
         claim_id,
         now,
         Duration::from_secs(REFRESH_RETRY_HOURS * 3600),
+        StreakWrite::Keep,
     )
     .await
 }
 
 /// [`schedule_retry`] with the delay chosen by the caller — the backoff for a
-/// repeated identical failure (#387).
+/// repeated identical failure (#387) — and the streak change, written in the
+/// same fenced transaction as the deadline.
 pub async fn schedule_retry_after(
     db: &dyn Database,
     user_did: &str,
     claim_id: &str,
     now: DateTime<Utc>,
     delay: Duration,
+    streak: StreakWrite<'_>,
 ) {
     let at = plus(now, delay);
     let write = RefreshScheduleWrite::Retry {
         at_rfc3339: &at,
         attempted_generation: scoring_revision(),
+        streak,
     };
     match db.apply_refresh_schedule(user_did, claim_id, write).await {
         Ok(true) => {}
@@ -1463,6 +1467,7 @@ mod tests {
                 RefreshScheduleWrite::Retry {
                     at_rfc3339: &at,
                     attempted_generation: scoring_revision(),
+                    streak: crate::db::StreakWrite::Keep,
                 },
             )
             .await
@@ -1488,6 +1493,71 @@ mod tests {
             .unwrap());
         assert_eq!(
             db.get_scan_state("did:plc:s", STREAK_KEY).await.unwrap(),
+            None
+        );
+    }
+
+    /// #387: a Retry write applies its streak change in the same fenced
+    /// transaction as its deadline — Set records it, Clear ends it.
+    #[tokio::test]
+    async fn a_retry_write_sets_or_clears_the_streak_with_its_deadline() {
+        use crate::web::refresh_backoff::STREAK_KEY;
+        let db = db();
+        user(&db, "did:plc:r", None, None).await;
+        let claim = claimed(&db, "did:plc:r").await;
+        let at = (Utc::now() + ChronoDuration::hours(2)).to_rfc3339();
+        let streak = r#"{"count":2,"cause":"c","deploy":"d"}"#;
+        assert!(db
+            .apply_refresh_schedule(
+                "did:plc:r",
+                &claim,
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: StreakWrite::Set(streak),
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(db.next_refresh_at("did:plc:r").await.unwrap().unwrap(), at);
+        assert_eq!(
+            db.get_scan_state("did:plc:r", STREAK_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(streak)
+        );
+        assert!(db
+            .apply_refresh_schedule(
+                "did:plc:r",
+                &claim,
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: StreakWrite::Clear,
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_scan_state("did:plc:r", STREAK_KEY).await.unwrap(),
+            None
+        );
+        // Fenced like the deadline: a lost claim writes neither.
+        assert!(!db
+            .apply_refresh_schedule(
+                "did:plc:r",
+                "not-the-owner",
+                RefreshScheduleWrite::Retry {
+                    at_rfc3339: &at,
+                    attempted_generation: scoring_revision(),
+                    streak: StreakWrite::Set(streak),
+                },
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_scan_state("did:plc:r", STREAK_KEY).await.unwrap(),
             None
         );
     }

@@ -2086,11 +2086,32 @@ pub fn apply_refresh_schedule(
         RefreshScheduleWrite::Retry {
             at_rfc3339,
             attempted_generation,
+            streak,
         } => {
             tx.execute(
                 "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
                 params![user_did, at_rfc3339, attempted_generation],
             )?;
+            // The streak moves with the deadline, in this transaction (#387):
+            // written separately, a deploy sweep landing between the two writes
+            // could pair a stale streak with this deadline.
+            match streak {
+                super::traits::StreakWrite::Keep => {}
+                super::traits::StreakWrite::Set(json) => {
+                    tx.execute(
+                        "INSERT INTO scan_state (user_did, key, value, updated_at)
+                         VALUES (?1, ?2, ?3, datetime('now'))
+                         ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
+                        params![user_did, super::REFRESH_FAILURE_STREAK_KEY, json],
+                    )?;
+                }
+                super::traits::StreakWrite::Clear => {
+                    tx.execute(
+                        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+                        params![user_did, super::REFRESH_FAILURE_STREAK_KEY],
+                    )?;
+                }
+            }
         }
     }
     tx.commit()?;

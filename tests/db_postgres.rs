@@ -5462,6 +5462,7 @@ async fn test_pg_a_superseded_claim_moves_no_schedule_and_requests_no_full_scan(
     let retry = RefreshScheduleWrite::Retry {
         at_rfc3339: &next_at,
         attempted_generation: "rev-fence",
+        streak: charcoal::db::StreakWrite::Keep,
     };
     assert!(
         !db.apply_refresh_schedule(U, &stale, success).await.unwrap(),
@@ -6071,6 +6072,7 @@ async fn test_pg_success_schedule_write_clears_the_streak() {
             RefreshScheduleWrite::Retry {
                 at_rfc3339: &at,
                 attempted_generation: rev,
+                streak: charcoal::db::StreakWrite::Keep,
             }
         )
         .await
@@ -6087,6 +6089,37 @@ async fn test_pg_success_schedule_write_clears_the_streak() {
             RefreshScheduleWrite::Success {
                 next_at_rfc3339: &at,
                 generation: rev,
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
+
+    // A Retry write sets or clears the streak with its deadline.
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Retry {
+                at_rfc3339: &at,
+                attempted_generation: rev,
+                streak: charcoal::db::StreakWrite::Set(streak),
+            }
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        db.get_scan_state(DID, KEY).await.unwrap().as_deref(),
+        Some(streak)
+    );
+    assert!(db
+        .apply_refresh_schedule(
+            DID,
+            &claim,
+            RefreshScheduleWrite::Retry {
+                at_rfc3339: &at,
+                attempted_generation: rev,
+                streak: charcoal::db::StreakWrite::Clear,
             }
         )
         .await

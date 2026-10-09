@@ -1,5 +1,13 @@
 [
   {
+    "hash": "a21b29ddead9613bf3f317cde269062ff79196e8",
+    "short_hash": "a21b29d",
+    "author": "Bryan Guffey",
+    "date": "2026-10-08T19:53:21-07:00",
+    "message": "fix(387): a success clears the streak inside its fenced schedule write\n\nCodex review: deadline-before-streak is only safe when writing a NEW\nstreak. When a refresh or full scan SUCCEEDS, clearing the streak after the\nhealthy deadline left a window for a deploy sweep to consume the stale\nstreak and pull that fresh deadline forward to now.\n\n- apply_refresh_schedule(Success) now deletes the streak in the same\n  claim-fenced transaction (SQLite + Postgres); the separate clear in\n  schedule_after_success is gone. Retry writes leave the streak alone.\n- run_refresh_with clears an ending streak BEFORE scheduling, and still\n  writes a new streak AFTER the deadline.\n- REFRESH_FAILURE_STREAK_KEY moves to the db module (it builds without web).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 10
+  },
+  {
     "hash": "bddd7d01f1d0c4a816e64e783115cf1fe2d0c3e1",
     "short_hash": "bddd7d0",
     "author": "Bryan Guffey",

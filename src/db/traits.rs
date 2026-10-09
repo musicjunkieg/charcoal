@@ -302,11 +302,26 @@ pub enum RefreshScheduleWrite<'a> {
         generation: &'a str,
     },
     /// A failed or deferred attempt: the backoff deadline plus
-    /// `refresh_attempted_generation` (V4-01).
+    /// `refresh_attempted_generation` (V4-01), and what happens to the
+    /// refresh failure streak — in the same transaction (#387), so the deploy
+    /// sweep can never observe a deadline without its matching streak.
     Retry {
         at_rfc3339: &'a str,
         attempted_generation: &'a str,
+        streak: StreakWrite<'a>,
     },
+}
+
+/// What a [`RefreshScheduleWrite::Retry`] does to the refresh failure streak
+/// ([`super::REFRESH_FAILURE_STREAK_KEY`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreakWrite<'a> {
+    /// Leave it as it is (the full scan's retry knows nothing of streaks).
+    Keep,
+    /// Record this streak (JSON): the attempt failed again.
+    Set(&'a str),
+    /// End it: the attempt was not a failure.
+    Clear,
 }
 
 /// A successful claim on a queued scan (#257).
