@@ -1194,7 +1194,7 @@ async fn main() -> Result<()> {
                             .iter()
                             .filter(|(_, s)| *s == data::Source::Holdout)
                             .count();
-                        labelling::write_to_label(&to_label, &picked)?;
+                        labelling::write_to_label(&to_label, &picked, &answers)?;
                         println!(
                             "{} posts to label ({holdout} holdout, {} diagnostic) in {} — set label to toxic or clean, then run with --merge",
                             picked.len(),

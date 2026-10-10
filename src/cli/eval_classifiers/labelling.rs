@@ -70,9 +70,48 @@ struct ToLabel<'a> {
     note: &'a str,
 }
 
+/// Refuse to overwrite `path` while it holds a typed answer that has not been
+/// merged into labels.jsonl yet: overwriting would silently lose the human's
+/// work. Answers already in `merged` are safe to drop — they are kept in
+/// labels.jsonl — so the normal label → answer → merge → label cycle works.
+fn ensure_no_unmerged_answers(path: &Path, merged: &HashMap<String, Answer>) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        // A line we cannot read might hold an answer: fail closed, never
+        // overwrite what we could not check.
+        let row: serde_json::Value = serde_json::from_str(l).with_context(|| {
+            format!(
+                "{} line {} is not valid JSON — fix it or run `charcoal eval-classifiers label --merge` first",
+                path.display(),
+                i + 1
+            )
+        })?;
+        let answered = !row["label"].as_str().unwrap_or("").trim().is_empty();
+        let already_merged = row["id"].as_str().is_some_and(|id| merged.contains_key(id));
+        if answered && !already_merged {
+            bail!(
+                "{} has answers you have not saved yet (line {}). Run `charcoal eval-classifiers label --merge` first, then run `label` again.",
+                path.display(),
+                i + 1
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Blind on purpose: no model votes, so they cannot anchor the answer. The
-/// `source` is shown for the labeller's information only.
-pub fn write_to_label(path: &Path, rows: &[(FixtureRow, Source)]) -> Result<()> {
+/// `source` is shown for the labeller's information only. `merged` is the
+/// current labels.jsonl: the file is refused if it holds answers not in it.
+pub fn write_to_label(
+    path: &Path,
+    rows: &[(FixtureRow, Source)],
+    merged: &HashMap<String, Answer>,
+) -> Result<()> {
+    ensure_no_unmerged_answers(path, merged)?;
     let mut f =
         std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
     for (r, source) in rows {
@@ -271,6 +310,7 @@ mod tests {
         write_to_label(
             &to_label,
             &[(row(&h), Source::Holdout), (row(&o), Source::Diagnostic)],
+            &HashMap::new(),
         )
         .unwrap();
         let text = std::fs::read_to_string(&to_label).unwrap();
@@ -335,6 +375,74 @@ mod tests {
             !labels.exists() || std::fs::read_to_string(&labels).unwrap().is_empty(),
             "no partial merge"
         );
+    }
+
+    /// Final review fix 2: re-running `label` before `--merge` must not
+    /// throw away answers the human already typed.
+    #[test]
+    fn label_refuses_to_overwrite_unmerged_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let h = holdout_id();
+        let typed = format!(
+            "{{\"id\":\"{h}\",\"content\":\"post {h}\",\"source\":\"holdout\",\"label\":\"toxic\",\"note\":\"\"}}\n"
+        );
+        std::fs::write(&to_label, &typed).unwrap();
+        let err = write_to_label(
+            &to_label,
+            &[(row(&other_id()), Source::Diagnostic)],
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("label --merge"),
+            "tells the user what to run: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&to_label).unwrap(),
+            typed,
+            "the typed answer is untouched"
+        );
+    }
+
+    /// Final review fix 2: a file of blank answers holds nothing to lose.
+    #[test]
+    fn label_may_overwrite_a_file_with_only_blank_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let (h, o) = (holdout_id(), other_id());
+        write_to_label(&to_label, &[(row(&h), Source::Holdout)], &HashMap::new()).unwrap();
+        // A whitespace-only answer is still blank (merge treats it so too).
+        let spaced = std::fs::read_to_string(&to_label)
+            .unwrap()
+            .replace(r#""label":"""#, r#""label":"  ""#);
+        std::fs::write(&to_label, spaced).unwrap();
+        write_to_label(&to_label, &[(row(&o), Source::Diagnostic)], &HashMap::new()).unwrap();
+        let text = std::fs::read_to_string(&to_label).unwrap();
+        assert!(
+            text.contains(&o) && !text.contains(&format!("\"{h}\"")),
+            "{text}"
+        );
+    }
+
+    /// Final review fix 2: after `--merge` the answers live in labels.jsonl,
+    /// so the next `label` may replace the file (no deadlock after a merge).
+    #[test]
+    fn label_may_overwrite_answers_that_are_already_merged() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let (h, o) = (holdout_id(), other_id());
+        let pool = vec![row(&h), row(&o)];
+        write_to_label(&to_label, &[(row(&h), Source::Holdout)], &HashMap::new()).unwrap();
+        let answered = std::fs::read_to_string(&to_label)
+            .unwrap()
+            .replace(r#""label":"""#, r#""label":"clean""#);
+        std::fs::write(&to_label, answered).unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 1);
+        let merged = load_labels(&labels).unwrap();
+        write_to_label(&to_label, &[(row(&o), Source::Diagnostic)], &merged).unwrap();
+        assert!(std::fs::read_to_string(&to_label).unwrap().contains(&o));
     }
 
     /// Review fix: the same id answered twice is a file error, not two labels.

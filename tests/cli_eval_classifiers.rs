@@ -84,7 +84,12 @@ async fn a_full_round_runs_picks_merges_and_reports() {
     assert_eq!(picked.len(), 2, "the holdout post, and the disagreement");
 
     let to_label = dir.path().join("to-label.jsonl");
-    labelling::write_to_label(&to_label, &picked).unwrap();
+    labelling::write_to_label(
+        &to_label,
+        &picked,
+        &data::load_labels(&labels_path).unwrap(),
+    )
+    .unwrap();
     let answered = std::fs::read_to_string(&to_label)
         .unwrap()
         .replace("\"label\":\"\"", "\"label\":\"toxic\"");
