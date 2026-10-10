@@ -11758,6 +11758,28 @@
       "created_at": "2026-10-09T18:05:34.430893-07:00",
       "updated_at": "2026-10-09T18:05:34.430893-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"ed8475a\",\"confidence\":75}"
+    },
+    {
+      "id": 1079,
+      "change_id": "58185788-a824-4f6a-aaeb-4f8b4e79f228",
+      "node_type": "action",
+      "title": "Task 2 implemented: eval pool/labels/pricing, fnv1a + content_hash, loaders (6 tests)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:12:58.565019-07:00",
+      "updated_at": "2026-10-09T18:12:58.565019-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"8f66166\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/mod.rs\",\"src/cli/eval_classifiers/data.rs\",\"evals/classifiers\"]}"
+    },
+    {
+      "id": 1080,
+      "change_id": "d543699e-b43f-43b3-8b1a-fd5fd7d16126",
+      "node_type": "outcome",
+      "title": "Task 2 review clean (3 minor: duplicate-id overwrite, no malformed-pool test, fixture name) — logged for final review",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:13:34.729323-07:00",
+      "updated_at": "2026-10-09T18:13:34.729323-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"8f66166\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24080,6 +24102,28 @@
       "weight": 1.0,
       "rationale": "Task 1 result",
       "created_at": "2026-10-09T18:05:35.966831-07:00"
+    },
+    {
+      "id": 1131,
+      "from_node_id": 1076,
+      "to_node_id": 1079,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "58185788-a824-4f6a-aaeb-4f8b4e79f228",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 of plan",
+      "created_at": "2026-10-09T18:12:59.816578-07:00"
+    },
+    {
+      "id": 1132,
+      "from_node_id": 1079,
+      "to_node_id": 1080,
+      "from_change_id": "58185788-a824-4f6a-aaeb-4f8b4e79f228",
+      "to_change_id": "d543699e-b43f-43b3-8b1a-fd5fd7d16126",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review result",
+      "created_at": "2026-10-09T18:13:35.899052-07:00"
     }
   ],
   "documents": [
