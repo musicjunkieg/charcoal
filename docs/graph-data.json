@@ -11945,6 +11945,17 @@
       "created_at": "2026-10-09T19:51:47.536281-07:00",
       "updated_at": "2026-10-09T19:51:47.536281-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":90}"
+    },
+    {
+      "id": 1096,
+      "change_id": "a9a3b8c5-e88c-4d16-847b-c17399d0a130",
+      "node_type": "outcome",
+      "title": "Task 8 complete: leakage test covers false alarms, Better branch exercised, always-clean line pinned (7d0b965)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:53:57.451809-07:00",
+      "updated_at": "2026-10-09T19:53:57.451809-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"7d0b965\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24454,6 +24465,17 @@
       "weight": 1.0,
       "rationale": "Review found GPU-wake-before-refuse + meter under-count",
       "created_at": "2026-10-09T19:51:49.687865-07:00"
+    },
+    {
+      "id": 1148,
+      "from_node_id": 1093,
+      "to_node_id": 1096,
+      "from_change_id": "4d827ec9-d7ee-444a-9709-7061e5c9a0bd",
+      "to_change_id": "a9a3b8c5-e88c-4d16-847b-c17399d0a130",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review + test fix",
+      "created_at": "2026-10-09T19:53:58.725235-07:00"
     }
   ],
   "documents": [

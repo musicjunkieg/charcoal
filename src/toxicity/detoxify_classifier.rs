@@ -36,7 +36,8 @@ impl<S: ToxicityScorer> ToxicityClassifier for DetoxifyClassifier<S> {
         "detoxify"
     }
     fn model_id(&self) -> &'static str {
-        "unbiased-toxic-roberta"
+        // Production's id, revision included: the eval cache keys on it.
+        super::onnx::ONNX_MODEL_ID
     }
     fn policy_version(&self) -> &'static str {
         "none"
@@ -60,6 +61,30 @@ mod tests {
                 attributes: ToxicityAttributes::default(),
             })
         }
+    }
+
+    /// The eval cache keys reuse on model_id, so it must carry the ONNX
+    /// revision (a model fix like #400's `-r2` must invalidate old verdicts).
+    #[test]
+    fn model_id_is_the_production_onnx_id() {
+        assert_eq!(
+            DetoxifyClassifier::new(Fixed(0.0)).model_id(),
+            crate::toxicity::onnx::ONNX_MODEL_ID
+        );
+    }
+
+    #[tokio::test]
+    async fn exactly_half_is_toxic_just_below_is_not() {
+        let at = DetoxifyClassifier::new(Fixed(0.5))
+            .classify("x")
+            .await
+            .unwrap();
+        assert!(at.toxic_token);
+        let below = DetoxifyClassifier::new(Fixed(0.4999))
+            .classify("x")
+            .await
+            .unwrap();
+        assert!(!below.toxic_token);
     }
 
     #[tokio::test]

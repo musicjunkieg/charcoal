@@ -165,19 +165,41 @@ impl ScanCostMeter {
                 }
             },
         };
-        let rate_cents_per_hour = std::env::var("CHARCOAL_GPU_COST_CENTS_PER_HOUR")
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .filter(|&v| v > 0)
-            .unwrap_or(DEFAULT_RATE_CENTS_PER_HOUR);
-        // Max concurrent RunPod workers — the per-worker billing multiplier the
-        // cost integral caps at. Set this to match the endpoint's workersMax.
-        let workers_max = std::env::var("CHARCOAL_RUNPOD_WORKERS_MAX")
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-            .filter(|&v| v > 0)
-            .unwrap_or(DEFAULT_WORKERS_MAX);
-        Self::with_workers(ceiling_cents, rate_cents_per_hour, workers_max)
+        Self::from_env_with_ceiling(ceiling_cents)
+    }
+
+    /// As [`from_env`](Self::from_env) but with the ceiling given explicitly
+    /// (the eval's run cap). Rate and workers resolve exactly as production
+    /// does, so the eval counts spend the same way a scan would.
+    pub fn from_env_with_ceiling(ceiling_cents: u32) -> Self {
+        Self::from_overrides(
+            ceiling_cents,
+            std::env::var("CHARCOAL_GPU_COST_CENTS_PER_HOUR")
+                .ok()
+                .as_deref(),
+            std::env::var("CHARCOAL_RUNPOD_WORKERS_MAX").ok().as_deref(),
+        )
+    }
+
+    /// The env-free core shared by both constructors, so the parsing lives in
+    /// one place and is testable without mutating process-global env.
+    /// Rate: unset / malformed / 0 -> 329. Workers (the per-worker billing
+    /// multiplier; match the endpoint's workersMax): same rule -> 10.
+    fn from_overrides(
+        ceiling_cents: u32,
+        rate_raw: Option<&str>,
+        workers_raw: Option<&str>,
+    ) -> Self {
+        let positive = |raw: Option<&str>, default: u32| {
+            raw.and_then(|s| s.trim().parse::<u32>().ok())
+                .filter(|&v| v > 0)
+                .unwrap_or(default)
+        };
+        Self::with_workers(
+            ceiling_cents,
+            positive(rate_raw, DEFAULT_RATE_CENTS_PER_HOUR),
+            positive(workers_raw, DEFAULT_WORKERS_MAX),
+        )
     }
 
     /// Whether the one-shot trip WARN has fired. Introspection for tests
@@ -277,6 +299,29 @@ impl ScanCostMeter {
     pub fn force_worker_seconds(&self, secs: f64) {
         let _ = self.base.get_or_init(Instant::now);
         self.acc.lock().unwrap().worker_secs = secs;
+    }
+}
+
+#[cfg(test)]
+mod ceiling_ctor_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_ceiling_honours_rate_and_workers_overrides() {
+        let m = ScanCostMeter::from_overrides(42, Some(" 500 "), Some("3"));
+        assert_eq!(m.ceiling_cents, 42);
+        assert_eq!(m.rate_cents_per_hour, 500);
+        assert_eq!(m.acc.lock().unwrap().workers_max, 3);
+    }
+
+    #[test]
+    fn explicit_ceiling_falls_back_to_production_defaults() {
+        for bad in [None, Some("0"), Some("banana")] {
+            let m = ScanCostMeter::from_overrides(7, bad, bad);
+            assert_eq!(m.ceiling_cents, 7);
+            assert_eq!(m.rate_cents_per_hour, DEFAULT_RATE_CENTS_PER_HOUR);
+            assert_eq!(m.acc.lock().unwrap().workers_max, DEFAULT_WORKERS_MAX);
+        }
     }
 }
 
