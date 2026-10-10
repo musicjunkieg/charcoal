@@ -112,6 +112,16 @@ impl Budget {
         true
     }
 
+    /// Mark the whole cap as used. Called when a model stops at the cap:
+    /// this budget only tracks ESTIMATES, and a backend's real meter (CoPE-B
+    /// counts actual GPU seconds) can reach the cap while the estimates are
+    /// still small. Exhausting it means no later paid model can be woken on
+    /// the strength of headroom that may not really exist; $0 models (local
+    /// Detoxify) still pass `can_afford(0.0)`.
+    pub fn exhaust(&mut self) {
+        self.spent_usd = self.spent_usd.max(self.cap_usd);
+    }
+
     pub fn spent(&self) -> f64 {
         self.spent_usd
     }
@@ -264,6 +274,16 @@ mod tests {
     /// Final review fix 1: the runner asks "would the first batch fit?" before
     /// waking a paid GPU, without reserving anything. The answer must follow
     /// exactly the same fail-closed rules as `try_spend`.
+    #[test]
+    fn an_exhausted_budget_admits_only_free_calls() {
+        let mut b = Budget::new(1.0);
+        assert!(b.try_spend(0.1));
+        b.exhaust();
+        assert_eq!(b.spent(), 1.0);
+        assert!(!b.can_afford(0.0001), "no paid call after exhaustion");
+        assert!(b.can_afford(0.0), "a free model still runs");
+    }
+
     #[test]
     fn can_afford_applies_try_spends_rules_without_reserving() {
         let mut b = Budget::new(1.0);

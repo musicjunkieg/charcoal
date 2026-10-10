@@ -12033,6 +12033,39 @@
       "created_at": "2026-10-10T13:31:12.875125-07:00",
       "updated_at": "2026-10-10T13:31:12.875125-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":90}"
+    },
+    {
+      "id": 1104,
+      "change_id": "991413bf-41f2-48dc-8f48-cbe8b9159c8f",
+      "node_type": "outcome",
+      "title": "Codex fixes applied: 73e0260 9b9f355 baf0a08 e3622ab (cache per identity, label content_hash, continue after cap, typed ProbeFailed)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T15:16:36.346418-07:00",
+      "updated_at": "2026-10-10T15:16:36.346418-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"e3622ab\",\"confidence\":85}"
+    },
+    {
+      "id": 1105,
+      "change_id": "5d2cb3b1-3572-40a3-b72a-2e1ec90ff173",
+      "node_type": "observation",
+      "title": "Re-review of Codex fixes: NOT approved - I1 cap hole: CoPE-B meter trip only records estimate in shared Budget, continue lets a later paid model spend ~whole cap again; 9 minors",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T15:28:35.053484-07:00",
+      "updated_at": "2026-10-10T15:28:35.053484-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"e3622ab\",\"confidence\":90}"
+    },
+    {
+      "id": 1106,
+      "change_id": "cd51c53f-8d9c-493b-be5f-4db7b505f8fe",
+      "node_type": "action",
+      "title": "Exhaust shared eval budget when any model stops at the cap (I1) + re-review minors",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T15:29:08.780748-07:00",
+      "updated_at": "2026-10-10T15:29:08.780748-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"e3622ab\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -24630,6 +24663,39 @@
       "weight": 1.0,
       "rationale": "Codex push-gate review",
       "created_at": "2026-10-10T13:31:14.660736-07:00"
+    },
+    {
+      "id": 1156,
+      "from_node_id": 1103,
+      "to_node_id": 1104,
+      "from_change_id": "8f1ad0b9-f2af-474f-9cfc-ca97cb0e0991",
+      "to_change_id": "991413bf-41f2-48dc-8f48-cbe8b9159c8f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fixes for the accepted Codex findings",
+      "created_at": "2026-10-10T15:20:40.126012-07:00"
+    },
+    {
+      "id": 1157,
+      "from_node_id": 1104,
+      "to_node_id": 1105,
+      "from_change_id": "991413bf-41f2-48dc-8f48-cbe8b9159c8f",
+      "to_change_id": "5d2cb3b1-3572-40a3-b72a-2e1ec90ff173",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review found cap hole introduced by fix 3",
+      "created_at": "2026-10-10T15:28:35.062259-07:00"
+    },
+    {
+      "id": 1158,
+      "from_node_id": 1105,
+      "to_node_id": 1106,
+      "from_change_id": "5d2cb3b1-3572-40a3-b72a-2e1ec90ff173",
+      "to_change_id": "cd51c53f-8d9c-493b-be5f-4db7b505f8fe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "fix for re-review",
+      "created_at": "2026-10-10T15:29:10.191480-07:00"
     }
   ],
   "documents": [

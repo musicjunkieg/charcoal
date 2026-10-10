@@ -26,8 +26,9 @@ blank, are safe to replace.
 **A label belongs to the exact text you labelled.** `label --merge` records a
 fingerprint of the post's text (`content_hash`) next to your answer. If a
 post's text in `pool.jsonl` changes later, its old label is no longer used:
-`label` and `report` print "N labels ignored - post text changed since
-labelling; relabel", and `label` offers that post again. Your new answer is
+`label` and `report` print "N labels ignored — post text changed since
+labelling; relabel (run `charcoal eval-classifiers label`)", and `label`
+offers that post again. Your new answer is
 added as a new line and replaces the old one.
 
 ## What the spending cap does (and does not) cover
@@ -44,9 +45,12 @@ added as a new line and replaces the old one.
   spend can go over the cap by roughly one batch plus that ~60 s of idle time
   for each worker.
 - **Reaching the cap stops paid models, not free ones.** When one model hits
-  the cap, the run still moves on to the next model. A model that costs
-  nothing (Detoxify runs on this machine) still runs; a paid model that
-  cannot afford its first batch stops before waking anything.
+  the cap - whether the eval's own estimate or CoPE-B's real cost meter
+  stopped it - the whole cap counts as used, and the run moves on to the next
+  model. A model that costs nothing (Detoxify runs on this machine) still
+  runs; every later paid model stops before waking anything. (The eval's
+  running total is only an estimate, and the real meter can reach the cap
+  well before it, so the remaining "headroom" cannot be trusted.)
 - **A request the eval gives up on may keep running on RunPod.** If a batch
   hits the eval's timeout, the eval records those posts as errors and moves
   on, but RunPod may still finish the job, and that time is not counted
@@ -73,8 +77,10 @@ CoPE-B calls the paid RunPod endpoint, so it needs all of these set (in
 
 Detoxify needs the local ONNX models (`charcoal download-model`, or
 `CHARCOAL_MODEL_DIR=./models`). A model that is missing its keys or files, or
-that fails its identity check, is skipped - nothing has been spent on it, so
-the rest of the run continues. **Any other error stops the whole run** with a
+that fails its identity check, is skipped - no verdicts were bought from it,
+so the rest of the run continues. (A missing key or file is caught before
+anything is contacted; a failed CoPE-B identity check, though, has already
+woken the GPU, so it may have cost one cold start plus the ~60 s idle tail.) **Any other error stops the whole run** with a
 non-zero exit - for example a verdict file in `verdicts/` that cannot be read
 or written. That can happen right after a paid batch, so carrying on would
 keep spending while losing what was paid for. Fix the file problem, then run

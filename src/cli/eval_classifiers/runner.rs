@@ -27,17 +27,24 @@ use crate::toxicity::cost_meter::CostCeilingExceeded;
 /// this guards against a hang, it must not race the backend's own timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// The backend failed its identity probe, so the model was not run and
-/// nothing was spent on it. The ONLY `run_model` error a multi-model run may
-/// skip past: every other error (a cache that will not parse, an identity or
-/// verdict file that will not write — possibly after a PAID batch) stops the
-/// run, so it can neither keep spending nor lose paid verdicts and exit 0
-/// (Codex fix 4).
+/// The backend failed its identity probe, so the model was not run and no
+/// verdicts were bought. (On RunPod the probe itself wakes the GPU, so a
+/// failed probe may still have cost a cold start plus the billed idle tail —
+/// skipping cannot undo that, but it spends nothing further.) The ONLY
+/// `run_model` error a multi-model run may skip past: every other error (a
+/// cache that will not parse, an identity or verdict file that will not
+/// write — possibly after a PAID batch) stops the run, so it can neither keep
+/// spending nor lose paid verdicts and exit 0 (Codex fix 4).
+///
+/// The message leaves out the model name on purpose: the caller already
+/// says which model it skipped. The underlying error is kept as the
+/// `source`, so `{:#}` still prints it and a caller can downcast it.
 #[derive(Debug, thiserror::Error)]
-#[error("{model}: identity probe failed — not running it: {detail}")]
+#[error("identity probe failed — not running it")]
 pub struct ProbeFailed {
     pub model: String,
-    pub detail: String,
+    #[source]
+    pub source: anyhow::Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,8 +101,9 @@ pub async fn run_model(
     // GPU wake-up (cold start + ~60 s billed idle) that no meter can stop,
     // because nothing has been spent yet. The identity file is still brought
     // in line, though: it records the identity whose verdicts are current.
-    // Every pool post's latest record is a successful verdict that passed the
-    // per-verdict model/policy check under `who` when it was recorded, which
+    // For every pool post, the newest record that matches `who` and the
+    // post's present text is a successful verdict that passed the
+    // per-verdict model/policy check when it was recorded, which
     // is stronger evidence than a probe. Without this, an earlier run under
     // another policy that probed but recorded nothing leaves the file
     // pointing at that policy, and report/label would drop this model.
@@ -127,7 +135,7 @@ pub async fn run_model(
     if let Err(e) = classifier.probe_identity().await {
         return Err(ProbeFailed {
             model: model.to_string(),
-            detail: format!("{e:#}"),
+            source: e,
         }
         .into());
     }
@@ -234,7 +242,8 @@ pub async fn run_model(
 #[derive(Debug)]
 pub enum ModelOutcome {
     Ran(RunStats),
-    /// Not run, before anything was spent on it; the run went on.
+    /// Not run and no verdicts bought (a failed probe may still have woken
+    /// the GPU); the run went on.
     Skipped {
         model: String,
         reason: String,
@@ -287,11 +296,22 @@ where
         };
         match run_model(name, classifier.as_ref(), pool, dir, price, budget, timeout).await {
             // Reaching the cap does NOT end the run: a later model may cost
-            // nothing (Detoxify is local). Each model's own `can_afford`
-            // check, against the same budget, decides whether it can spend
-            // — and stops before its probe if it cannot (Codex fix 3).
-            Ok(s) => report(&ModelOutcome::Ran(s)),
-            // Nothing was spent on a model whose probe failed: skip it.
+            // nothing (Detoxify is local) (Codex fix 3). But it DOES end all
+            // paid work: the budget holds only estimates, and if the stop came
+            // from a backend's real meter (CoPE-B's GPU seconds) the estimates
+            // understate what was actually spent. Exhausting the budget makes
+            // every later paid model fail its `can_afford` check before its
+            // probe, so nothing more is woken; $0 models still run
+            // (re-review I1).
+            Ok(s) => {
+                if s.stopped_at_cap {
+                    budget.exhaust();
+                }
+                report(&ModelOutcome::Ran(s))
+            }
+            // A failed probe bought no verdicts, so there is nothing to lose
+            // by moving on (the probe itself may have woken — and billed —
+            // the GPU; skipping does not undo that, but it spends no more).
             Err(e) if e.downcast_ref::<ProbeFailed>().is_some() => report(&ModelOutcome::Skipped {
                 model: name.clone(),
                 reason: format!("{e:#}"),
@@ -920,6 +940,55 @@ mod tests {
         assert!(budget.spent() <= 0.5, "the cap still holds");
     }
 
+    /// Re-review I1: the shared budget only holds ESTIMATES, but a backend's
+    /// real cost meter can trip long before the estimates add up (CoPE-B's
+    /// meter counts real GPU seconds). Once any model stops at the cap, a
+    /// later PAID model must not be woken at all — it would get nearly the
+    /// whole cap again — while a free one still runs.
+    #[tokio::test]
+    async fn after_a_real_meter_trip_no_later_paid_model_is_woken() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "capped"), row("c", "fine")];
+        let prices: HashMap<String, Price> = [
+            ("paid_a".to_string(), priced(0.001)),
+            ("paid_b".to_string(), priced(0.001)),
+            ("free".to_string(), Price::default()),
+        ]
+        .into();
+        let paid_a = Arc::new(Fake {
+            capped_on: Some("capped"),
+            ..Fake::new()
+        });
+        let paid_b = Arc::new(Fake::new());
+        let free = Arc::new(Fake::new());
+        let mut budget = Budget::new(1.0);
+        let (res, seen) = run_all(
+            &["paid_a", "paid_b", "free"],
+            &[
+                ("paid_a", Arc::clone(&paid_a)),
+                ("paid_b", Arc::clone(&paid_b)),
+                ("free", Arc::clone(&free)),
+            ],
+            &prices,
+            &pool,
+            dir.path(),
+            &mut budget,
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(
+            seen,
+            vec![
+                "ran paid_a judged 1 cap true".to_string(),
+                "ran paid_b judged 0 cap true".to_string(),
+                "ran free judged 3 cap false".to_string(),
+            ]
+        );
+        assert_eq!(paid_b.probes.load(Ordering::SeqCst), 0, "B never woken");
+        assert_eq!(paid_b.calls.load(Ordering::SeqCst), 0, "B never called");
+        assert_eq!(free.calls.load(Ordering::SeqCst), 3, "free still runs");
+    }
+
     /// Codex fix 4: a failed probe is the one run_model error that is safe to
     /// skip (nothing was spent), so it carries its own type.
     #[tokio::test]
@@ -941,6 +1010,11 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.downcast_ref::<ProbeFailed>().is_some(), "{err:#}");
+        // The cause survives (re-review M8) and the model name is not
+        // repeated — the CLI prefixes it already (re-review M9).
+        let shown = format!("{err:#}");
+        assert!(shown.contains("endpoint serves policy-old"), "{shown}");
+        assert!(!shown.starts_with("m:"), "{shown}");
     }
 
     /// Codex fix 4: a local file failure (here: the verdicts "directory" is a

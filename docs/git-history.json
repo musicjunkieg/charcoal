@@ -1,5 +1,13 @@
 [
   {
+    "hash": "e3622ab406205373159f096ea8d83d299ce56075",
+    "short_hash": "e3622ab",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T15:15:54-07:00",
+    "message": "fix(404): skip a model only when its identity probe fails\n\nEvery run_model error was treated as a skippable probe failure, including\ncache parse errors and failures to save verdicts after a PAID batch, so the\nrun kept spending and exited 0 while losing paid verdicts. The probe now\nreturns a typed ProbeFailed; run_models skips only that and stops with an\nerror on anything else. Build errors stay skippable (nothing spent yet).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "77d8af58b99339b980848df112ec4bce585902d2",
     "short_hash": "77d8af5",
     "author": "Bryan Guffey",

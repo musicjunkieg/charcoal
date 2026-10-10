@@ -120,7 +120,12 @@ pub fn append(dir: &Path, rec: &VerdictRecord) -> Result<()> {
     Ok(())
 }
 
-pub fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>> {
+/// Each id's LAST record only. Test-only on purpose: last-record-wins is
+/// exactly the P1 → P2 → P1 bug (a newer record under another identity hides
+/// a verdict already paid for). Production code must use [`load_all`] with
+/// [`latest_match`] or [`current_for`], which pick by identity and text.
+#[cfg(test)]
+pub(crate) fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>> {
     let path = path_for(dir, model);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -138,7 +143,7 @@ pub fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>> {
 
 /// Every record ever written for `model`, per id, in file (= time) order.
 ///
-/// Unlike [`load`], nothing is dropped: after P1 → P2 → P1 the P1 verdicts
+/// Unlike a last-record-per-id read, nothing is dropped: after P1 → P2 → P1 the P1 verdicts
 /// are still here even though P2's records are newer, so going back to P1
 /// re-pays nothing (Codex fix 1). Choosing among them is [`latest_match`]'s job.
 pub fn load_all(dir: &Path, model: &str) -> Result<HashMap<String, Vec<VerdictRecord>>> {
@@ -198,7 +203,11 @@ pub fn load_identity(dir: &Path, model: &str) -> Result<Option<IdentityRecord>> 
 /// The ONE gate every consumer goes through: only verdicts for posts still
 /// in the pool, with the pool's present text, from the identity last
 /// verified. Errors that pass are kept — they count against coverage.
-pub fn current(
+///
+/// Test-only: it takes one record per id, so feeding it a last-record-wins
+/// map would hide older paid verdicts. Production uses [`current_for`].
+#[cfg(test)]
+pub(crate) fn current(
     recs: HashMap<String, VerdictRecord>,
     pool: &[FixtureRow],
     who: Option<&IdentityRecord>,
@@ -209,7 +218,7 @@ pub fn current(
     current_from_history(&history, pool, who)
 }
 
-/// [`current`] over the full history: per pool post, the newest record that
+/// The current-verdict gate over the full history: per pool post, the newest record that
 /// matches the post's present text AND `who` — so a newer record under
 /// another identity never hides a paid verdict (Codex fix 1). At most one
 /// record per id, as before.
