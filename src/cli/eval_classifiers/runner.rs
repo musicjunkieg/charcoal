@@ -9,7 +9,7 @@
 //!    so a job the backend still owns is never abandoned;
 //! 6. stop at the reservation cap or when the backend's real cost meter trips.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -26,6 +26,19 @@ use crate::toxicity::cost_meter::CostCeilingExceeded;
 /// Above the RunPod client's own warm-up (180–300 s) and steady timeouts:
 /// this guards against a hang, it must not race the backend's own timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// The backend failed its identity probe, so the model was not run and
+/// nothing was spent on it. The ONLY `run_model` error a multi-model run may
+/// skip past: every other error (a cache that will not parse, an identity or
+/// verdict file that will not write — possibly after a PAID batch) stops the
+/// run, so it can neither keep spending nor lose paid verdicts and exit 0
+/// (Codex fix 4).
+#[derive(Debug, thiserror::Error)]
+#[error("{model}: identity probe failed — not running it: {detail}")]
+pub struct ProbeFailed {
+    pub model: String,
+    pub detail: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStats {
@@ -110,10 +123,14 @@ pub async fn run_model(
     }
 
     // Only now is waking the backend worth paying for.
-    classifier
-        .probe_identity()
-        .await
-        .with_context(|| format!("{model}: identity probe failed — not running it"))?;
+    // Typed, so the run loop can tell "skip this model" from "stop".
+    if let Err(e) = classifier.probe_identity().await {
+        return Err(ProbeFailed {
+            model: model.to_string(),
+            detail: format!("{e:#}"),
+        }
+        .into());
+    }
     save_identity(dir, model, who)?;
 
     for chunk in todo.chunks(batch) {
@@ -274,10 +291,14 @@ where
             // check, against the same budget, decides whether it can spend
             // — and stops before its probe if it cannot (Codex fix 3).
             Ok(s) => report(&ModelOutcome::Ran(s)),
-            Err(e) => report(&ModelOutcome::Skipped {
+            // Nothing was spent on a model whose probe failed: skip it.
+            Err(e) if e.downcast_ref::<ProbeFailed>().is_some() => report(&ModelOutcome::Skipped {
                 model: name.clone(),
                 reason: format!("{e:#}"),
             }),
+            // Anything else may follow a paid batch whose verdicts were not
+            // saved: stop the run with a non-zero exit (Codex fix 4).
+            Err(e) => return Err(e.context(format!("{name}: run stopped"))),
         }
     }
     Ok(())
@@ -290,6 +311,7 @@ mod tests {
     use crate::cli::eval_classifiers::cost::Price;
     use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
     use crate::toxicity::cost_meter::CostCeilingExceeded;
+    use anyhow::Context;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Fake {
@@ -896,6 +918,144 @@ mod tests {
         );
         assert_eq!(free.calls.load(Ordering::SeqCst), 2);
         assert!(budget.spent() <= 0.5, "the cap still holds");
+    }
+
+    /// Codex fix 4: a failed probe is the one run_model error that is safe to
+    /// skip (nothing was spent), so it carries its own type.
+    #[tokio::test]
+    async fn a_failed_probe_is_a_typed_probe_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = Fake {
+            probe_fails: true,
+            ..Fake::new()
+        };
+        let err = run_model(
+            "m",
+            &model,
+            &[row("a", "bad")],
+            dir.path(),
+            &Price::default(),
+            &mut Budget::new(1.0),
+            T,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<ProbeFailed>().is_some(), "{err:#}");
+    }
+
+    /// Codex fix 4: a local file failure (here: the verdicts "directory" is a
+    /// plain file) is NOT a probe failure — it could lose paid verdicts.
+    #[tokio::test]
+    async fn a_cache_failure_is_not_a_probe_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let not_a_dir = dir.path().join("verdicts");
+        std::fs::write(&not_a_dir, "").unwrap();
+        let err = run_model(
+            "m",
+            &Fake::new(),
+            &[row("a", "bad")],
+            &not_a_dir,
+            &Price::default(),
+            &mut Budget::new(1.0),
+            T,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<ProbeFailed>().is_none(), "{err:#}");
+    }
+
+    /// Codex fix 4: the run skips a model whose probe fails and goes on...
+    #[tokio::test]
+    async fn the_run_skips_a_model_whose_probe_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad")];
+        let prices: HashMap<String, Price> = [
+            ("broken".to_string(), Price::default()),
+            ("ok".to_string(), Price::default()),
+        ]
+        .into();
+        let broken = Arc::new(Fake {
+            probe_fails: true,
+            ..Fake::new()
+        });
+        let (res, seen) = run_all(
+            &["broken", "ok"],
+            &[("broken", broken), ("ok", Arc::new(Fake::new()))],
+            &prices,
+            &pool,
+            dir.path(),
+            &mut Budget::new(1.0),
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(
+            seen,
+            vec![
+                "skipped broken".to_string(),
+                "ran ok judged 1 cap false".to_string()
+            ]
+        );
+    }
+
+    /// ...but stops, with an error, on anything else: a local file error
+    /// after a paid batch would otherwise keep spending while losing what
+    /// it paid for, and exit 0.
+    #[tokio::test]
+    async fn the_run_stops_on_a_local_file_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let not_a_dir = dir.path().join("verdicts");
+        std::fs::write(&not_a_dir, "").unwrap();
+        let prices: HashMap<String, Price> = [
+            ("first".to_string(), Price::default()),
+            ("second".to_string(), Price::default()),
+        ]
+        .into();
+        let second = Arc::new(Fake::new());
+        let (res, seen) = run_all(
+            &["first", "second"],
+            &[
+                ("first", Arc::new(Fake::new())),
+                ("second", Arc::clone(&second)),
+            ],
+            &prices,
+            &[row("a", "bad")],
+            &not_a_dir,
+            &mut Budget::new(1.0),
+        )
+        .await;
+        assert!(res.is_err(), "a file error is not skippable");
+        assert!(seen.is_empty(), "{seen:?}");
+        assert_eq!(second.probes.load(Ordering::SeqCst), 0, "nothing after it");
+    }
+
+    /// The same rule when the paid batch itself is the thing whose verdicts
+    /// cannot be saved: the run must not report success.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_append_after_a_paid_batch_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A dangling symlink reads as "no cache yet" (NotFound), so the run
+        // probes and pays; appending then fails, because the link points
+        // into a directory that does not exist.
+        std::os::unix::fs::symlink(
+            dir.path().join("missing").join("m.jsonl"),
+            dir.path().join("m.jsonl"),
+        )
+        .unwrap();
+        let model = Fake::new();
+        let res = run_model(
+            "m",
+            &model,
+            &[row("a", "bad")],
+            dir.path(),
+            &Price::default(),
+            &mut Budget::new(1.0),
+            T,
+        )
+        .await;
+        let err = res.unwrap_err();
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1, "the batch was paid");
+        assert!(err.downcast_ref::<ProbeFailed>().is_none(), "{err:#}");
     }
 
     /// What one slot of a scripted batch answers. Keyed by post text.

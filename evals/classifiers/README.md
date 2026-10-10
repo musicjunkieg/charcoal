@@ -73,7 +73,12 @@ CoPE-B calls the paid RunPod endpoint, so it needs all of these set (in
 
 Detoxify needs the local ONNX models (`charcoal download-model`, or
 `CHARCOAL_MODEL_DIR=./models`). A model that is missing its keys or files, or
-that fails its identity check, is skipped - the rest of the run continues.
+that fails its identity check, is skipped - nothing has been spent on it, so
+the rest of the run continues. **Any other error stops the whole run** with a
+non-zero exit - for example a verdict file in `verdicts/` that cannot be read
+or written. That can happen right after a paid batch, so carrying on would
+keep spending while losing what was paid for. Fix the file problem, then run
+again: verdicts already saved are reused.
 
 ## Grow the pool before expecting a verdict
 
