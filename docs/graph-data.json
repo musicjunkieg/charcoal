@@ -12011,6 +12011,28 @@
       "created_at": "2026-10-09T21:21:45.874117-07:00",
       "updated_at": "2026-10-09T21:21:45.874117-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"5769d8f\",\"confidence\":85}"
+    },
+    {
+      "id": 1102,
+      "change_id": "0446449c-cbeb-4e8a-909a-f09f7a120e41",
+      "node_type": "outcome",
+      "title": "#404 Part A complete at 77d8af5: 10 tasks + final review fixed (incl. stuck-identity round 2); 71 eval + 3 e2e tests, clippy clean; awaiting Codex review gate before push",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T21:36:42.394705-07:00",
+      "updated_at": "2026-10-09T21:36:42.394705-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"77d8af5\",\"confidence\":90}"
+    },
+    {
+      "id": 1103,
+      "change_id": "8f1ad0b9-f2af-474f-9cfc-ca97cb0e0991",
+      "node_type": "observation",
+      "title": "Codex review vs staging: 4 P2 accepted - cache drops paid verdicts across identity changes, labels not bound to content, cap break skips free models, persistence errors swallowed as skips",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T13:31:12.875125-07:00",
+      "updated_at": "2026-10-10T13:31:12.875125-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24586,6 +24608,28 @@
       "weight": 1.0,
       "rationale": "Fix batch for final review",
       "created_at": "2026-10-09T21:21:47.164958-07:00"
+    },
+    {
+      "id": 1154,
+      "from_node_id": 1101,
+      "to_node_id": 1102,
+      "from_change_id": "1c204ecc-f837-4fd7-b9fb-396ecefdb3a3",
+      "to_change_id": "0446449c-cbeb-4e8a-909a-f09f7a120e41",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix batch + round 2 complete",
+      "created_at": "2026-10-09T21:36:45.862615-07:00"
+    },
+    {
+      "id": 1155,
+      "from_node_id": 1102,
+      "to_node_id": 1103,
+      "from_change_id": "0446449c-cbeb-4e8a-909a-f09f7a120e41",
+      "to_change_id": "8f1ad0b9-f2af-474f-9cfc-ca97cb0e0991",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codex push-gate review",
+      "created_at": "2026-10-10T13:31:14.660736-07:00"
     }
   ],
   "documents": [

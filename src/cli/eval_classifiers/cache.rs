@@ -136,6 +136,41 @@ pub fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>> {
     Ok(out)
 }
 
+/// Every record ever written for `model`, per id, in file (= time) order.
+///
+/// Unlike [`load`], nothing is dropped: after P1 → P2 → P1 the P1 verdicts
+/// are still here even though P2's records are newer, so going back to P1
+/// re-pays nothing (Codex fix 1). Choosing among them is [`latest_match`]'s job.
+pub fn load_all(dir: &Path, model: &str) -> Result<HashMap<String, Vec<VerdictRecord>>> {
+    let path = path_for(dir, model);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut out: HashMap<String, Vec<VerdictRecord>> = HashMap::new();
+    for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let rec: VerdictRecord = serde_json::from_str(l)
+            .with_context(|| format!("{} line {}", path.display(), i + 1))?;
+        out.entry(rec.id.clone()).or_default().push(rec);
+    }
+    Ok(out)
+}
+
+/// The NEWEST of one post's records that describes the post's present text
+/// under `who`. It may be an error (the latest attempt failed): the caller
+/// decides whether that is reusable (no) or counts against coverage (yes).
+pub fn latest_match<'r>(
+    history: &'r [VerdictRecord],
+    content: &str,
+    who: Identity<'_>,
+) -> Option<&'r VerdictRecord> {
+    history
+        .iter()
+        .rev()
+        .find(|r| r.matches(content, who.model_id, who.policy_version))
+}
+
 /// The identity the last run verified, so report and label — which build no
 /// backend — know which verdicts are current.
 pub fn save_identity(dir: &Path, model: &str, who: Identity<'_>) -> Result<()> {
@@ -168,32 +203,48 @@ pub fn current(
     pool: &[FixtureRow],
     who: Option<&IdentityRecord>,
 ) -> HashMap<String, VerdictRecord> {
+    // One record per id is a history of length one: same gate.
+    let history: HashMap<String, Vec<VerdictRecord>> =
+        recs.into_iter().map(|(id, r)| (id, vec![r])).collect();
+    current_from_history(&history, pool, who)
+}
+
+/// [`current`] over the full history: per pool post, the newest record that
+/// matches the post's present text AND `who` — so a newer record under
+/// another identity never hides a paid verdict (Codex fix 1). At most one
+/// record per id, as before.
+pub fn current_from_history(
+    history: &HashMap<String, Vec<VerdictRecord>>,
+    pool: &[FixtureRow],
+    who: Option<&IdentityRecord>,
+) -> HashMap<String, VerdictRecord> {
     let Some(who) = who else {
         return HashMap::new();
     };
-    let text: HashMap<&str, &str> = pool
-        .iter()
-        .map(|r| (r.id.as_str(), r.content.as_str()))
-        .collect();
-    recs.into_iter()
-        .filter(|(id, r)| {
-            text.get(id.as_str())
-                .is_some_and(|content| r.matches(content, &who.model_id, &who.policy_version))
+    let who = Identity {
+        model_id: &who.model_id,
+        policy_version: &who.policy_version,
+    };
+    pool.iter()
+        .filter_map(|row| {
+            let recs = history.get(&row.id)?;
+            latest_match(recs, &row.content, who).map(|r| (row.id.clone(), r.clone()))
         })
         .collect()
 }
 
-/// `model`'s current verdicts, read from disk: load + last verified identity +
-/// [`current`]. The label and report commands both call this, and the
-/// end-to-end test calls it too, so a consumer that skipped the gate would be
-/// a visible change to one function rather than a hand-built closure.
+/// `model`'s current verdicts, read from disk: full history + last verified
+/// identity + [`current_from_history`]. The label and report commands both
+/// call this, and the end-to-end test calls it too, so a consumer that
+/// skipped the gate would be a visible change to one function rather than a
+/// hand-built closure.
 pub fn current_for(
     dir: &Path,
     model: &str,
     pool: &[FixtureRow],
 ) -> Result<HashMap<String, VerdictRecord>> {
-    Ok(current(
-        load(dir, model)?,
+    Ok(current_from_history(
+        &load_all(dir, model)?,
         pool,
         load_identity(dir, model)?.as_ref(),
     ))
@@ -286,6 +337,47 @@ mod tests {
             load_identity(dir.path(), "m").unwrap().unwrap().model_id,
             "m-1"
         );
+    }
+
+    /// Codex fix 1: the history keeps every identity's records, and the gate
+    /// picks the NEWEST record matching both the present text and the
+    /// identity asked about — a newer record under another identity (or for
+    /// older text) does not hide it.
+    #[test]
+    fn history_keeps_every_identity_and_the_newest_match_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let p2 = Identity {
+            model_id: "m-1",
+            policy_version: "p-2",
+        };
+        let v_p2 = ClassifierVerdict {
+            policy_version: "p-2".into(),
+            ..verdict(false, 0.9)
+        };
+        // P1 error, then P1 success, then P2 success, then a P1 verdict on
+        // text the pool no longer has.
+        for rec in [
+            VerdictRecord::from_error("a", "m", "x", WHO, "timeout", 0.0),
+            VerdictRecord::from_verdict("a", "m", "x", &verdict(true, 0.9), 0.0),
+            VerdictRecord::from_verdict("a", "m", "x", &v_p2, 0.0),
+            VerdictRecord::from_verdict("a", "m", "old", &verdict(false, 0.9), 0.0),
+        ] {
+            append(dir.path(), &rec).unwrap();
+        }
+        let hist = load_all(dir.path(), "m").unwrap();
+        assert_eq!(hist["a"].len(), 4, "every record kept, in file order");
+        let pool = vec![row("a", "x")];
+        save_identity(dir.path(), "m", WHO).unwrap();
+        let p1 = current_for(dir.path(), "m", &pool).unwrap();
+        assert_eq!(p1["a"].called_toxic, Some(true));
+        assert_eq!(p1["a"].policy_version, "p-1");
+        save_identity(dir.path(), "m", p2).unwrap();
+        assert_eq!(
+            current_for(dir.path(), "m", &pool).unwrap()["a"].policy_version,
+            "p-2"
+        );
+        assert!(latest_match(&hist["a"], "x", WHO).is_some_and(|r| r.reusable("x", WHO)));
+        assert!(latest_match(&hist["a"], "new", WHO).is_none());
     }
 
     /// Codex review, round 2: report and label must not score stale or

@@ -13,7 +13,9 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
 
-use super::cache::{append, load, load_identity, save_identity, Identity, VerdictRecord};
+use super::cache::{
+    append, latest_match, load_all, load_identity, save_identity, Identity, VerdictRecord,
+};
 use super::cost::{estimate_usd, Budget, Price};
 use super::data::FixtureRow;
 use crate::toxicity::classifier::{ItemOutcome, ToxicityClassifier};
@@ -48,7 +50,11 @@ pub async fn run_model(
         policy_version: classifier.policy_version(),
     };
 
-    let cached = load(dir, model)?;
+    // The FULL history, not just each id's last record: a newer record under
+    // another identity must not hide a verdict already paid for under this
+    // one (Codex fix 1). Reusable = the newest record for this text and
+    // identity is a success; if that newest one is an error, re-judge.
+    let cached = load_all(dir, model)?;
     let mut stats = RunStats {
         model: model.to_string(),
         judged: 0,
@@ -59,9 +65,9 @@ pub async fn run_model(
     let todo: Vec<&FixtureRow> = pool
         .iter()
         .filter(|row| {
-            let hit = cached
-                .get(&row.id)
-                .is_some_and(|r| r.reusable(&row.content, who));
+            let hit = cached.get(&row.id).is_some_and(|h| {
+                latest_match(h, &row.content, who).is_some_and(|r| r.reusable(&row.content, who))
+            });
             if hit {
                 stats.cached += 1;
             }
@@ -208,6 +214,7 @@ pub async fn run_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::eval_classifiers::cache::load;
     use crate::cli::eval_classifiers::cost::Price;
     use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
     use crate::toxicity::cost_meter::CostCeilingExceeded;
@@ -388,6 +395,55 @@ mod tests {
             !current_for(dir.path(), "m", &pool).unwrap().is_empty(),
             "report/label must still see the P1 verdicts"
         );
+    }
+
+    /// Codex fix 1: P1 -> P2 -> P1. The P2 records are newer, but they must
+    /// not hide the P1 verdicts already paid for: going back to P1 re-pays
+    /// nothing, wakes nothing, and report/label see the P1 verdicts.
+    #[tokio::test]
+    async fn returning_to_an_earlier_identity_reuses_its_verdicts() {
+        use crate::cli::eval_classifiers::cache::current_for;
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let mut budget = Budget::new(1.0);
+        for policy in ["p-1", "p-2"] {
+            let m = Fake {
+                policy,
+                ..Fake::new()
+            };
+            let s = run_model(
+                "m",
+                &m,
+                &pool,
+                dir.path(),
+                &Price::default(),
+                &mut budget,
+                T,
+            )
+            .await
+            .unwrap();
+            assert_eq!(s.judged, 2, "{policy} judges both posts");
+        }
+        let back = Fake::new();
+        let s = run_model(
+            "m",
+            &back,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert_eq!((s.judged, s.cached), (0, 2));
+        assert_eq!(back.probes.load(Ordering::SeqCst), 0, "no GPU wake-up");
+        assert_eq!(back.calls.load(Ordering::SeqCst), 0, "nothing re-paid");
+        let cur = current_for(dir.path(), "m", &pool).unwrap();
+        assert_eq!(cur.len(), 2);
+        assert!(cur.values().all(|r| r.policy_version == "p-1"), "{cur:?}");
+        assert_eq!(cur["a"].called_toxic, Some(true));
+        assert_eq!(cur["b"].called_toxic, Some(false));
     }
 
     #[tokio::test]
