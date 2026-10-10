@@ -11923,6 +11923,28 @@
       "created_at": "2026-10-09T19:41:39.287424-07:00",
       "updated_at": "2026-10-09T19:41:39.287424-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"b21f02c\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/report.rs\"]}"
+    },
+    {
+      "id": 1094,
+      "change_id": "73ee9268-2449-4df1-927b-fce9417e0b05",
+      "node_type": "action",
+      "title": "Task 9 implemented: DetoxifyClassifier (toxic >= 0.5) + eval-only registry; CoPE-B built with real ScanCostMeter at run cap",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:50:13.440066-07:00",
+      "updated_at": "2026-10-09T19:50:13.440066-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"4d207b1\",\"confidence\":85,\"files\":[\"src/toxicity/detoxify_classifier.rs\",\"src/cli/eval_classifiers/models.rs\"]}"
+    },
+    {
+      "id": 1095,
+      "change_id": "80c6d487-b984-4198-aa56-2b08b97c858a",
+      "node_type": "decision",
+      "title": "Fix Task 9 plan-mandated literals: eval meter from production env (rate/workers), Detoxify id = ONNX_MODEL_ID; add policy-version precheck before GPU wake ( pattern)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:51:47.536281-07:00",
+      "updated_at": "2026-10-09T19:51:47.536281-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24410,6 +24432,28 @@
       "weight": 1.0,
       "rationale": "Task 8 of plan",
       "created_at": "2026-10-09T19:41:40.736529-07:00"
+    },
+    {
+      "id": 1146,
+      "from_node_id": 1076,
+      "to_node_id": 1094,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "73ee9268-2449-4df1-927b-fce9417e0b05",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 9 of plan",
+      "created_at": "2026-10-09T19:50:14.716275-07:00"
+    },
+    {
+      "id": 1147,
+      "from_node_id": 1094,
+      "to_node_id": 1095,
+      "from_change_id": "73ee9268-2449-4df1-927b-fce9417e0b05",
+      "to_change_id": "80c6d487-b984-4198-aa56-2b08b97c858a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review found GPU-wake-before-refuse + meter under-count",
+      "created_at": "2026-10-09T19:51:49.687865-07:00"
     }
   ],
   "documents": [

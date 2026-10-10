@@ -1,5 +1,13 @@
 [
   {
+    "hash": "4d207b1cf636a18e038f8225ba082cd66da73e92",
+    "short_hash": "4d207b1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:49:25-07:00",
+    "message": "feat(404): Detoxify eval classifier; CoPE-B built with the real cost meter at the run cap\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "b21f02c27ecb54dffcaaca264d53b1ecfccb1ca0",
     "short_hash": "b21f02c",
     "author": "Bryan Guffey",

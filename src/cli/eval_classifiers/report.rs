@@ -281,10 +281,42 @@ mod tests {
             "coin-flip loses on both"
         );
         let text = render(&reports, &holdout(), "cope-b");
-        assert!(
-            text.contains("always-clean: false alarms") && text.contains("misses worse"),
-            "{text}"
+        // The coin-flip line also says "misses worse", so check the line that
+        // belongs to the always-clean model specifically.
+        let line = text
+            .lines()
+            .find(|l| l.contains("always-clean: false alarms"))
+            .unwrap_or_else(|| panic!("no always-clean comparison line in:\n{text}"));
+        assert!(line.contains("misses worse"), "{line}");
+    }
+
+    #[test]
+    fn a_better_candidate_is_reported_as_better() {
+        // Arguments reversed: the bad model is the baseline, so a swap of
+        // better/worse anywhere in the report path would show up here.
+        let reports = build(
+            &[
+                model("always-clean", |_| Some(false)),
+                model("cope-b", good),
+            ],
+            &holdout(),
+            &HashMap::new(),
         );
+        let p = vs_baseline(&reports[0], &reports[1], &holdout());
+        assert_eq!(
+            p.miss,
+            Comparison::Better,
+            "good catches what always-clean misses"
+        );
+        // always-clean never false-alarms; good does on 2 posts -> 0 vs 2
+        // discordant pairs, p = 0.5, nowhere near significant.
+        assert_eq!(p.false_alarm, Comparison::TooClose);
+        let text = render(&reports, &holdout(), "always-clean");
+        let line = text
+            .lines()
+            .find(|l| l.contains("cope-b: false alarms"))
+            .unwrap_or_else(|| panic!("no cope-b comparison line in:\n{text}"));
+        assert!(line.contains("misses better"), "{line}");
     }
 
     #[test]
@@ -377,6 +409,17 @@ mod tests {
             "headline = holdout only"
         );
         assert_eq!((r.diagnostic.miss.hits, r.diagnostic.miss.n), (20, 20));
+        // Seed calls are all "toxic" on clean-labelled posts, so a seed leak
+        // would surface as false alarms. Holdout: only p40,p41 (2 of 40).
+        assert_eq!(
+            (r.holdout.false_alarm.hits, r.holdout.false_alarm.n),
+            (2, 40),
+            "seed false alarms must not leak into the headline"
+        );
+        // Diagnostic labels are all toxic: no clean posts, so no rate at all.
+        assert_eq!(r.diagnostic.false_alarm.n, 0);
+        assert_eq!(r.diagnostic.false_alarm.value(), None);
+        assert_eq!((r.holdout.labelled, r.diagnostic.labelled), (80, 20));
     }
 
     #[test]
