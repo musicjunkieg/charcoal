@@ -11692,6 +11692,17 @@
       "created_at": "2026-10-09T08:04:07.627562-07:00",
       "updated_at": "2026-10-09T08:04:07.627562-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"confidence\":90}"
+    },
+    {
+      "id": 1073,
+      "change_id": "b3a63bb8-a3dc-473c-afc6-27946468bbdd",
+      "node_type": "action",
+      "title": "#404 implementation plan Part A written (10 TDD tasks; provider API verification gate; Part B adapters after)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T10:05:29.160992-07:00",
+      "updated_at": "2026-10-09T10:05:29.160992-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"ee866d0\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-09-404-classifier-eval-harness.md\"]}"
     }
   ],
   "edges": [
@@ -23948,6 +23959,17 @@
       "weight": 1.0,
       "rationale": "promotion",
       "created_at": "2026-10-09T08:04:09.560475-07:00"
+    },
+    {
+      "id": 1125,
+      "from_node_id": 1064,
+      "to_node_id": 1073,
+      "from_change_id": "68c99d1a-fdf2-46a9-8ed8-a3ef520a6666",
+      "to_change_id": "b3a63bb8-a3dc-473c-afc6-27946468bbdd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "plan from the chosen design",
+      "created_at": "2026-10-09T10:05:29.574316-07:00"
     }
   ],
   "documents": [

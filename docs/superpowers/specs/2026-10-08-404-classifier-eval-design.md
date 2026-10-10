@@ -56,10 +56,17 @@ charcoal eval-classifiers report ──► per-model table
 - **`run`** — every pool post through every selected model, in production's
   `format_parent_reply` envelope. Verdicts are cached per (model, post id):
   re-runs and newly added models never re-pay for a post already judged.
-- **`label`** (a file, not a UI) — writes `to-label.jsonl`: posts the models
-  disagree on, plus a random ~10 % of agreed posts so a blind spot every model
-  shares still reaches a human. Blind: model votes are not shown. The 10
-  existing smoke labels seed `labels.jsonl`.
+- **`label`** (a file, not a UI) — writes `to-label.jsonl`, blind (no model
+  votes shown), with each post tagged by why it is there:
+  - **holdout** — a fixed, hash-chosen ~⅓ of the pool, labelled regardless
+    of what the models say. **Headline rates are computed on the holdout
+    only**: disagreement-driven picks are outcome-dependent and would bias
+    the rates and invalidate the intervals (Codex review).
+  - **diagnostic** — posts the models disagree on, plus a stable ~10 % of
+    agreed posts. Shown in a separate "where models differ" section, never
+    mixed into the headline rates.
+  - The 10 existing smoke labels seed `labels.jsonl` as **seed** — curated,
+    so excluded from rates.
 - **`report`** — scores each model against the labels.
 
 ## 2. Adapters and fairness
@@ -73,10 +80,18 @@ Fairness rules:
 1. **Same input** — production's reply + parent envelope for every model.
 2. **Same instructions** — decision models get the same policy CoPE-B judges
    against (`gpu/cope-b-runpod/policy.txt`) as their question.
-3. **Same threshold** — toxic = confidence ≥ 0.5 for all; raw confidence is
-   cached so another cut-off can be scored later without re-running.
-4. **Real cost** — tokens actually sent × list price, from one pricing config
-   file (`evals/classifiers/pricing.toml`), so a price change needs no code.
+3. **Same decision rule** — every model is scored on its **own binary
+   answer** (`toxic_token`). A probability of toxic is recorded only where the
+   model provides a real one (Detoxify, the decision models); it is never
+   fabricated. CoPE-B's `confidence` is `exp(logprob)` of the emitted token over
+   the whole vocabulary, so `1 − confidence` is **not** p(toxic) (Codex review,
+   2026-10-09).
+4. **Real cost** — the whole request (post + the model's fixed instruction
+   overhead, e.g. the policy) × list price, from one pricing file
+   (`evals/classifiers/pricing.json` — JSON, since the project has no TOML
+   dependency). **A model without a pricing entry is refused**, never treated
+   as free. Part B adapters also record provider-reported usage and reconcile
+   it (Codex review).
 
 Safety:
 
@@ -92,16 +107,22 @@ Safety:
 **Report, one row per model:**
 
 - false-alarm rate (clean posts called toxic) and miss rate (toxic posts
-  called clean), each with a **95 % Wilson interval**;
+  called clean), each with a **95 % Wilson interval**, on the **holdout**;
+- comparisons on a **paired cohort** — only posts both models judged — with
+  coverage shown, and **no winner named below 90 % coverage** (Codex review);
 - error rate — calls that failed or timed out, recorded as errors, **never** as
   clean;
 - cost per 1,000 posts; median and p95 latency;
 - a verdict line: when two models' intervals overlap, it says **"too close to
   call — label more"** instead of naming a winner.
 
-**Errors:** a failed or timed-out call is an `error` verdict and the run
-continues. Missing API keys skip that model with a clear message rather than
-failing the run.
+**Errors:** every call runs under a timeout (default 60 s); a failed or
+timed-out call is an `error` verdict and the run continues. Missing API keys
+skip that model with a clear message rather than failing the run.
+
+**Cache identity:** a cached verdict is reused only while the post's content
+hash, the model ID and the policy version all still match — an edited post, a
+new policy or a redeployed model is re-judged (Codex review).
 
 **Proof the eval can fail:** the test suite includes two deliberately bad fake
 models — always-clean and coin-flip. The report must rank them last and flag
@@ -115,8 +136,9 @@ the agreed-sample net, the spending cap and resume, error-as-error handling.
 
 - `evals/classifiers/pool.jsonl` and `labels.jsonl` — PII-scrubbed (via
   `find-fixtures`), committed, the same practice as `tests/fixtures/cope_b/`.
-- `evals/classifiers/verdicts/` and raw responses — local only, listed in
-  `.gitignore.local`.
+- `evals/classifiers/verdicts/` and raw responses — local only, enforced by a
+  committed `evals/classifiers/verdicts/.gitignore` (`.gitignore.local` is
+  untracked, so it would not protect a fresh clone — Codex review).
 - Posts go only to the models under test, never to an eval service.
 
 ## Out of scope (YAGNI)

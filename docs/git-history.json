@@ -1,5 +1,13 @@
 [
   {
+    "hash": "ee866d0ea9fe5938db23a4fde092417b8328a9dc",
+    "short_hash": "ee866d0",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T10:05:18-07:00",
+    "message": "docs(404): implementation plan for the classifier eval harness (Part A)\n\nTen TDD tasks: verify provider APIs (gate), eval data + loaders, Wilson\nmetrics, verdict cache, pricing + spending cap, runner, blind label picker\nwith a stable 10% agreed sample, report proven against always-clean and\ncoin-flip fakes, Detoxify adapter + eval-only registry, and the\neval-classifiers run|label|report CLI. Part B (Jev/Clef/Strands adapters)\nis written from Task 1's verified contracts.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "42a8b92e8ccc30938bc6ade7f2b1c28cbac312a2",
     "short_hash": "42a8b92",
     "author": "Bryan Guffey",
