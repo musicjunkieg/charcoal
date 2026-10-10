@@ -11791,6 +11791,28 @@
       "created_at": "2026-10-09T18:14:59.727294-07:00",
       "updated_at": "2026-10-09T18:14:59.727294-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"f2d4781\",\"confidence\":90}"
+    },
+    {
+      "id": 1082,
+      "change_id": "a710250e-505a-4bd8-a693-cb9f7771dd6e",
+      "node_type": "action",
+      "title": "Task 3 implemented: Wilson, per-class coverage, exact McNemar comparison (6 tests)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:22:29.285022-07:00",
+      "updated_at": "2026-10-09T18:22:29.285022-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"30904c9\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/metrics.rs\"]}"
+    },
+    {
+      "id": 1083,
+      "change_id": "cca5f363-7188-44d7-a90e-42587a6aa223",
+      "node_type": "outcome",
+      "title": "Task 3 review clean; hand checks of Wilson + exact McNemar match; minor: Paired metrics hide coverage (report must use model_metrics)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:22:55.692599-07:00",
+      "updated_at": "2026-10-09T18:22:55.692599-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"30904c9\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24146,6 +24168,28 @@
       "weight": 1.0,
       "rationale": "Review + fix round",
       "created_at": "2026-10-09T18:15:00.935175-07:00"
+    },
+    {
+      "id": 1134,
+      "from_node_id": 1076,
+      "to_node_id": 1082,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "a710250e-505a-4bd8-a693-cb9f7771dd6e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 of plan",
+      "created_at": "2026-10-09T18:22:30.526954-07:00"
+    },
+    {
+      "id": 1135,
+      "from_node_id": 1082,
+      "to_node_id": 1083,
+      "from_change_id": "a710250e-505a-4bd8-a693-cb9f7771dd6e",
+      "to_change_id": "cca5f363-7188-44d7-a90e-42587a6aa223",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review result",
+      "created_at": "2026-10-09T18:22:56.934617-07:00"
     }
   ],
   "documents": [

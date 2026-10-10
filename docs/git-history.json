@@ -1,5 +1,13 @@
 [
   {
+    "hash": "30904c980482d609c318bd4b12530d9cad449647",
+    "short_hash": "30904c9",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:21:15-07:00",
+    "message": "feat(404): exact paired McNemar comparison with per-class coverage and label gates\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "f2d4781111ba74e03e7c4136351b6d9448167554",
     "short_hash": "f2d4781",
     "author": "Bryan Guffey",

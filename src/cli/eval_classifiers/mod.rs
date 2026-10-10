@@ -1,6 +1,7 @@
 //! `charcoal eval-classifiers` — compare classifiers on labelled posts (#404).
 //! See docs/superpowers/specs/2026-10-08-404-classifier-eval-design.md.
 
+pub mod cache;
 pub mod data;
 pub mod metrics;
 
