@@ -23,6 +23,13 @@ impl<S: ToxicityScorer> ToxicityClassifier for DetoxifyClassifier<S> {
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict> {
         let started = Instant::now();
         let t = self.scorer.score_text(content).await?.toxicity as f32;
+        // `NaN >= 0.5` is false: without this check a broken model output
+        // would be recorded as a clean verdict. Errors are never clean. This
+        // backend batches one post per call (the trait default), so an `Err`
+        // here marks only this post as an error.
+        if !t.is_finite() {
+            anyhow::bail!("detoxify returned a toxicity score that is not a finite number ({t})");
+        }
         let toxic = t >= 0.5;
         Ok(ClassifierVerdict {
             toxic_token: toxic,
@@ -85,6 +92,19 @@ mod tests {
             .await
             .unwrap();
         assert!(!below.toxic_token);
+    }
+
+    /// Final review fix 3: `NaN >= 0.5` is false, so a broken model output
+    /// used to be recorded as clean. Errors are never clean.
+    #[tokio::test]
+    async fn a_non_finite_score_is_an_error_not_clean() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = DetoxifyClassifier::new(Fixed(bad))
+                .classify("x")
+                .await
+                .expect_err("a non-finite score must not become a verdict");
+            assert!(format!("{err:#}").contains("not a finite"), "{err:#}");
+        }
     }
 
     #[tokio::test]
