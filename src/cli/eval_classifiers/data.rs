@@ -138,11 +138,12 @@ mod tests {
         );
     }
 
-    /// The committed pool must still load: its ids are unique.
+    /// The committed pool must still load: its ids are unique. `>=` because
+    /// the README tells the owner to grow it (~600), which must not fail this.
     #[test]
     fn the_committed_pool_has_unique_ids() {
         let pool = Path::new(env!("CARGO_MANIFEST_DIR")).join("evals/classifiers/pool.jsonl");
-        assert_eq!(load_pool(&pool).unwrap().len(), 110);
+        assert!(load_pool(&pool).unwrap().len() >= 110);
     }
 
     #[test]
