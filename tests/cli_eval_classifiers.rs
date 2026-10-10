@@ -70,13 +70,8 @@ async fn a_full_round_runs_picks_merges_and_reports() {
         .await
         .unwrap();
     }
-    let current = |m: &str| {
-        cache::current(
-            cache::load(&verdicts, m).unwrap(),
-            &pool,
-            cache::load_identity(&verdicts, m).unwrap().as_ref(),
-        )
-    };
+    // The same library gate main.rs's label and report handlers call.
+    let current = |m: &str| cache::current_for(&verdicts, m, &pool).unwrap();
     let per_model = vec![current("good"), current("lazy")];
     let labels_path = dir.path().join("labels.jsonl");
     let picked =
@@ -115,4 +110,61 @@ async fn a_full_round_runs_picks_merges_and_reports() {
         text.contains("not enough holdout labels"),
         "one label is far below the 20-per-class gate: {text}"
     );
+}
+
+/// One judged post "a" (text "bad") under model "good", as a run leaves it.
+async fn one_judged_post(verdicts: &std::path::Path) -> Vec<data::FixtureRow> {
+    let pool: Vec<data::FixtureRow> =
+        vec![serde_json::from_str(r#"{"id":"a","content":"bad"}"#).unwrap()];
+    runner::run_model(
+        "good",
+        &Says(true),
+        &pool,
+        verdicts,
+        &Price::default(),
+        &mut Budget::new(1.0),
+        runner::DEFAULT_TIMEOUT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        cache::current_for(verdicts, "good", &pool).unwrap()["a"].called_toxic,
+        Some(true),
+        "the fresh verdict is current"
+    );
+    pool
+}
+
+/// Final review fix 6: a verdict for text that has since changed is stale.
+#[tokio::test]
+async fn a_verdict_for_changed_post_text_is_not_current() {
+    let dir = tempfile::tempdir().unwrap();
+    let verdicts = dir.path().join("verdicts");
+    one_judged_post(&verdicts).await;
+    let edited: Vec<data::FixtureRow> =
+        vec![serde_json::from_str(r#"{"id":"a","content":"bad, edited"}"#).unwrap()];
+    assert!(cache::current_for(&verdicts, "good", &edited)
+        .unwrap()
+        .is_empty());
+}
+
+/// Final review fix 6: after a redeploy (a different verified identity),
+/// verdicts from the old identity are not current.
+#[tokio::test]
+async fn a_verdict_from_a_changed_identity_is_not_current() {
+    let dir = tempfile::tempdir().unwrap();
+    let verdicts = dir.path().join("verdicts");
+    let pool = one_judged_post(&verdicts).await;
+    cache::save_identity(
+        &verdicts,
+        "good",
+        cache::Identity {
+            model_id: "f",
+            policy_version: "p-new",
+        },
+    )
+    .unwrap();
+    assert!(cache::current_for(&verdicts, "good", &pool)
+        .unwrap()
+        .is_empty());
 }

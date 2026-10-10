@@ -183,6 +183,22 @@ pub fn current(
         .collect()
 }
 
+/// `model`'s current verdicts, read from disk: load + last verified identity +
+/// [`current`]. The label and report commands both call this, and the
+/// end-to-end test calls it too, so a consumer that skipped the gate would be
+/// a visible change to one function rather than a hand-built closure.
+pub fn current_for(
+    dir: &Path,
+    model: &str,
+    pool: &[FixtureRow],
+) -> Result<HashMap<String, VerdictRecord>> {
+    Ok(current(
+        load(dir, model)?,
+        pool,
+        load_identity(dir, model)?.as_ref(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

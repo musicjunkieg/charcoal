@@ -1113,14 +1113,6 @@ async fn main() -> Result<()> {
             let verdicts = dir.join("verdicts");
             let pool = data::load_pool(&dir.join("pool.jsonl"))?;
             let labels_path = dir.join("labels.jsonl");
-            // The ONE gate for label and report: current verdicts only.
-            let current = |m: &str| -> anyhow::Result<_> {
-                Ok(cache::current(
-                    cache::load(&verdicts, m)?,
-                    &pool,
-                    cache::load_identity(&verdicts, m)?.as_ref(),
-                ))
-            };
             match action {
                 EvalAction::Run {
                     models: names,
@@ -1186,7 +1178,7 @@ async fn main() -> Result<()> {
                     } else {
                         let per_model: Vec<_> = models::KNOWN_MODELS
                             .iter()
-                            .map(|m| current(m))
+                            .map(|m| cache::current_for(&verdicts, m, &pool))
                             .collect::<anyhow::Result<_>>()?;
                         let answers = data::load_labels(&labels_path)?;
                         let picked = labelling::pick_for_labelling(&pool, &per_model, &answers);
@@ -1208,7 +1200,7 @@ async fn main() -> Result<()> {
                     let prices = cost::load_pricing(&dir.join("pricing.json"))?;
                     let mut loaded = Vec::new();
                     for m in models::KNOWN_MODELS {
-                        let recs = current(m)?;
+                        let recs = cache::current_for(&verdicts, m, &pool)?;
                         if !recs.is_empty() {
                             loaded.push((m.to_string(), recs));
                         }
