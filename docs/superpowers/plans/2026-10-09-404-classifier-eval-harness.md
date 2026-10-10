@@ -30,6 +30,8 @@
 - Data: `evals/classifiers/pool.jsonl`, `labels.jsonl`, `pricing.json` committed (PII-scrubbed); `evals/classifiers/verdicts/` never committed, enforced by a committed `evals/classifiers/verdicts/.gitignore`.
 - No new crate dependencies: pricing is JSON; hashing is FNV-1a 64-bit.
 - `cargo test` accepts **one** name filter per invocation.
+- **Red means red (pre-flight fix, 2026-10-09):** in Tasks 2–9 the `pub mod …;` line that wires a new file into the module tree is listed under *Implement*, but without it cargo never compiles the new file and the "verify they fail" run passes with 0 tests. Add the `pub mod` line **in the "Write the failing tests" step**, so the red run genuinely fails — a compile error naming the missing items, or failing assertions.
+- **Carry-forward to Part B (not a Part A defect):** after CoPE-B, Task 10 passes `cap_usd - budget.spent()` to the next model, and `spent` is CoPE-B's *estimate*, not its meter's real figure; a batch the real meter refuses has already been reserved, so "estimated spend" overstates. Harmless with free Detoxify; Part B must derive the remaining cap from real spend.
 - Charcoal conventions: `anyhow::Result`, `?` not `.unwrap()` outside tests, comments explain *why*, conventional commits, explicit `git add <paths>`.
 
 ---

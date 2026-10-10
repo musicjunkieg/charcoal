@@ -116,10 +116,12 @@ Safety:
 - error rate — calls that failed or timed out, recorded as errors, **never** as
   clean;
 - cost per 1,000 posts; median and p95 latency;
-- a verdict line: when two models' intervals overlap, it says **"too close to
-  call — label more"** instead of naming a winner.
+- a verdict line: when the McNemar test is not significant, it says **"too
+  close to call — label more"** instead of naming a winner (overlapping
+  Wilson intervals alone decide nothing — they are descriptive).
 
-**Errors:** every call runs under a timeout (default 60 s); a failed or
+**Errors:** every call runs under a timeout (default 600 s, above the RunPod
+client's own warm-up and steady timeouts — see *Real spend*); a failed or
 timed-out call is an `error` verdict and the run continues. Missing API keys
 skip that model with a clear message rather than failing the run.
 
@@ -143,8 +145,9 @@ production; the eval's own timeout sits above the client's so jobs are never
 abandoned (round 2).
 
 **Proof the eval can fail:** the test suite includes two deliberately bad fake
-models — always-clean and coin-flip. The report must rank them last and flag
-them; if it cannot catch an obviously bad model, it cannot rank good ones.
+models — always-clean and coin-flip. The report must flag them — a
+significant "worse" against a good model in the class they fail; if it cannot
+catch an obviously bad model, it cannot rank good ones.
 
 **Tests** (all against fake classifiers; **CI never calls a paid API**):
 metrics and Wilson intervals, the verdict cache, the disagreement picker and
