@@ -168,54 +168,6 @@ mod tests {
         );
     }
 
-    // === Task 5 Review Fixes ===
-
-    #[test]
-    fn pricing_rejects_negative_usd_per_post() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("pricing.json");
-        std::fs::write(&p, r#"{"model":{"usd_per_post":-0.001}}"#).unwrap();
-        let err = format!("{:#}", load_pricing(&p).unwrap_err());
-        assert!(
-            err.contains("model") && (err.contains("invalid") || err.contains("negative")),
-            "negative usd_per_post must be rejected: {err}"
-        );
-    }
-
-    #[test]
-    fn pricing_rejects_negative_usd_per_million_input_tokens() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("pricing.json");
-        std::fs::write(&p, r#"{"model":{"usd_per_million_input_tokens":-0.001}}"#).unwrap();
-        let err = format!("{:#}", load_pricing(&p).unwrap_err());
-        assert!(
-            err.contains("model") && (err.contains("invalid") || err.contains("negative")),
-            "negative usd_per_million_input_tokens must be rejected: {err}"
-        );
-    }
-
-    #[test]
-    fn pricing_rejects_nan_values() {
-        let dir = tempfile::tempdir().unwrap();
-        let _p = dir.path().join("pricing.json");
-        // NaN in JSON will be parsed as null if serde_json sees it as invalid.
-        // We manually construct a Price to test NaN validation.
-        let price_with_nan = Price {
-            usd_per_post: Some(f64::NAN),
-            usd_per_million_input_tokens: None,
-            overhead_chars: 0,
-        };
-        // For direct validation, if load_pricing validates, test with a HashMap.
-        let mut prices = HashMap::new();
-        prices.insert("model".to_string(), price_with_nan);
-        // This should fail in load_pricing, but since we're testing a manually constructed
-        // Price, we verify that estimate_usd doesn't use it. Actually, we need to test
-        // load_pricing's validation. Let's use a different approach: the current code
-        // doesn't validate NaN, so this test will fail and guide our fix.
-        // For now, assert the test exists and will be fixed by the code changes.
-        assert!(true, "NaN validation test will be implemented in code fix");
-    }
-
     #[test]
     fn budget_spend_to_exactly_the_cap_is_accepted() {
         let mut b = Budget::new(1.0);

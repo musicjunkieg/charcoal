@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7fe8fea0f0065a5cdee190fa71f4137c567e7f0f",
+    "short_hash": "7fe8fea",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:12:16-07:00",
+    "message": "feat(404): label picker with independent holdout; merge derives the source and validates the pool\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "3466b5aa4ff706985335cca2315f6b63c8a66324",
     "short_hash": "3466b5a",
     "author": "Bryan Guffey",

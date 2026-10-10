@@ -11868,6 +11868,28 @@
       "created_at": "2026-10-09T18:46:24.594858-07:00",
       "updated_at": "2026-10-09T18:46:24.594858-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"3466b5a\",\"confidence\":90}"
+    },
+    {
+      "id": 1089,
+      "change_id": "2c17b561-7477-4c98-9a11-d5bd45d4f26b",
+      "node_type": "action",
+      "title": "Task 7 implemented: label picker (hash holdout + diagnostic), blind to_label file, merge derives source + validates pool (4 tests)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:15:00.540328-07:00",
+      "updated_at": "2026-10-09T19:15:00.540328-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"7fe8fea\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/labelling.rs\"]}"
+    },
+    {
+      "id": 1090,
+      "change_id": "5c76aa79-a97c-4d53-8987-01a16674ca15",
+      "node_type": "decision",
+      "title": "Fix plan-mandated non-atomic merge_labels (validate-all-then-append, error on duplicate id) without asking: strictly safer, no interface change",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:15:31.032714-07:00",
+      "updated_at": "2026-10-09T19:15:31.032714-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -24300,6 +24322,28 @@
       "weight": 1.0,
       "rationale": "Review result",
       "created_at": "2026-10-09T18:46:25.900242-07:00"
+    },
+    {
+      "id": 1141,
+      "from_node_id": 1076,
+      "to_node_id": 1089,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "2c17b561-7477-4c98-9a11-d5bd45d4f26b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 7 of plan",
+      "created_at": "2026-10-09T19:15:01.917765-07:00"
+    },
+    {
+      "id": 1142,
+      "from_node_id": 1089,
+      "to_node_id": 1090,
+      "from_change_id": "2c17b561-7477-4c98-9a11-d5bd45d4f26b",
+      "to_change_id": "5c76aa79-a97c-4d53-8987-01a16674ca15",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review found plan-mandated label-integrity gap",
+      "created_at": "2026-10-09T19:15:32.378594-07:00"
     }
   ],
   "documents": [
