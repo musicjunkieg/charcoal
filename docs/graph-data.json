@@ -11901,6 +11901,17 @@
       "created_at": "2026-10-09T19:25:19.560227-07:00",
       "updated_at": "2026-10-09T19:25:19.560227-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"041e723\",\"confidence\":90}"
+    },
+    {
+      "id": 1092,
+      "change_id": "b0e0448a-9df1-4158-ba07-fe692f9f2375",
+      "node_type": "outcome",
+      "title": "Task 7 complete: merge validates all rows before writing, rejects duplicate ids, is_multiple_of replaces clippy allows (2e4f18c)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:34:13.625457-07:00",
+      "updated_at": "2026-10-09T19:34:13.625457-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2e4f18c\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24366,6 +24377,17 @@
       "weight": 1.0,
       "rationale": "Review + 2 fix rounds",
       "created_at": "2026-10-09T19:25:20.890470-07:00"
+    },
+    {
+      "id": 1144,
+      "from_node_id": 1090,
+      "to_node_id": 1092,
+      "from_change_id": "5c76aa79-a97c-4d53-8987-01a16674ca15",
+      "to_change_id": "b0e0448a-9df1-4158-ba07-fe692f9f2375",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision implemented, re-review clean",
+      "created_at": "2026-10-09T19:34:15.109133-07:00"
     }
   ],
   "documents": [

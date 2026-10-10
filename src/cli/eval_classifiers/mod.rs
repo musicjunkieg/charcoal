@@ -6,6 +6,7 @@ pub mod cost;
 pub mod data;
 pub mod labelling;
 pub mod metrics;
+pub mod report;
 pub mod runner;
 
 /// FNV-1a 64-bit. A fixed, dependency-free hash: used for content identity

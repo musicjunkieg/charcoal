@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2e4f18caaaf86c8b23aa13c1d815091d59140837",
+    "short_hash": "2e4f18c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:33:30-07:00",
+    "message": "fix(404): merge_labels validates every row before writing and rejects duplicate ids\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "041e723f16fa3a9ac79583b944c55f24c99a1c3a",
     "short_hash": "041e723",
     "author": "Bryan Guffey",

@@ -1,0 +1,403 @@
+//! The report. Headline rates come from HOLDOUT labels only; comparisons are
+//! decided per class by the exact paired test in metrics.rs; every rate shows
+//! its 95 % Wilson interval as description — never a blended score.
+
+use std::collections::HashMap;
+use std::fmt::Write;
+
+use super::cache::VerdictRecord;
+use super::cost::{estimate_usd, Price};
+use super::data::{Answer, Source, Truth};
+use super::metrics::{model_metrics, paired, Comparison, ModelMetrics, Paired, Rate, MIN_CLASS_N};
+
+#[derive(Debug, Clone)]
+pub struct ModelReport {
+    pub name: String,
+    pub calls: HashMap<String, Option<bool>>,
+    pub holdout: ModelMetrics,
+    pub diagnostic: ModelMetrics,
+    pub usd_per_1k: Option<f64>,
+    pub p50_ms: Option<u32>,
+    pub p95_ms: Option<u32>,
+}
+
+pub fn labels_of(answers: &HashMap<String, Answer>, source: Source) -> HashMap<String, Truth> {
+    answers
+        .iter()
+        .filter(|(_, a)| a.source == source)
+        .map(|(id, a)| (id.clone(), a.truth))
+        .collect()
+}
+
+/// Nearest-rank percentile.
+fn percentile(sorted: &[u32], pct: usize) -> Option<u32> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let idx = (sorted.len() * pct).div_ceil(100).saturating_sub(1);
+    sorted.get(idx).copied()
+}
+
+pub fn build(
+    models: &[(String, HashMap<String, VerdictRecord>)],
+    answers: &HashMap<String, Answer>,
+    prices: &HashMap<String, Price>,
+) -> Vec<ModelReport> {
+    let holdout = labels_of(answers, Source::Holdout);
+    let diagnostic = labels_of(answers, Source::Diagnostic);
+    models
+        .iter()
+        .map(|(name, recs)| {
+            let calls: HashMap<String, Option<bool>> = recs
+                .iter()
+                .map(|(id, r)| (id.clone(), r.called_toxic))
+                .collect();
+            let ok: Vec<&VerdictRecord> =
+                recs.values().filter(|r| r.called_toxic.is_some()).collect();
+            let mut lat: Vec<u32> = ok.iter().map(|r| r.latency_ms).collect();
+            lat.sort_unstable();
+            let usd_per_1k = prices.get(name).filter(|_| !ok.is_empty()).map(|p| {
+                let mean_chars = ok.iter().map(|r| r.input_chars).sum::<usize>() / ok.len();
+                estimate_usd(p, mean_chars) * 1000.0
+            });
+            ModelReport {
+                name: name.clone(),
+                holdout: model_metrics(name, &calls, &holdout),
+                diagnostic: model_metrics(name, &calls, &diagnostic),
+                calls,
+                usd_per_1k,
+                p50_ms: percentile(&lat, 50),
+                p95_ms: percentile(&lat, 95),
+            }
+        })
+        .collect()
+}
+
+pub fn vs_baseline(
+    baseline: &ModelReport,
+    candidate: &ModelReport,
+    answers: &HashMap<String, Answer>,
+) -> Paired {
+    paired(
+        &baseline.name,
+        &baseline.calls,
+        &candidate.name,
+        &candidate.calls,
+        &labels_of(answers, Source::Holdout),
+    )
+}
+
+fn rate_cell(r: &Rate) -> String {
+    match (r.value(), r.wilson95()) {
+        (Some(v), Some((lo, hi))) => {
+            format!(
+                "{:>5.1}% [{:.0}–{:.0}] ({}/{})",
+                v * 100.0,
+                lo * 100.0,
+                hi * 100.0,
+                r.hits,
+                r.n
+            )
+        }
+        _ => "no labels".to_string(),
+    }
+}
+
+fn word(c: Comparison) -> String {
+    match c {
+        Comparison::Better => "better".to_string(),
+        Comparison::Worse => "worse".to_string(),
+        Comparison::TooClose => "too close to call — label more".to_string(),
+        Comparison::NotEnoughLabels => {
+            format!("not enough holdout labels (need {MIN_CLASS_N} per class) — label more")
+        }
+        Comparison::LowCoverage => "no verdict — coverage below 90 %".to_string(),
+    }
+}
+
+pub fn render(
+    reports: &[ModelReport],
+    answers: &HashMap<String, Answer>,
+    baseline: &str,
+) -> String {
+    let mut s = String::new();
+    let count = |src: Source| answers.values().filter(|a| a.source == src).count();
+    let _ = writeln!(
+        s,
+        "Labels: {} holdout (scored), {} diagnostic, {} seed (not scored)\n",
+        count(Source::Holdout),
+        count(Source::Diagnostic),
+        count(Source::Seed)
+    );
+    let _ = writeln!(s, "HOLDOUT — the headline numbers");
+    let _ = writeln!(
+        s,
+        "{:<14} {:<28} {:<28} {:>9} {:>6} {:>10} {:>12}",
+        "model",
+        "false alarms (clean→toxic)",
+        "misses (toxic→clean)",
+        "coverage",
+        "errors",
+        "$/1k posts",
+        "p50/p95 ms"
+    );
+    for r in reports {
+        let m = &r.holdout;
+        let cov = m
+            .coverage()
+            .map_or("-".to_string(), |c| format!("{:.0}%", c * 100.0));
+        let cost = r
+            .usd_per_1k
+            .map_or("unpriced".to_string(), |c| format!("{c:.4}"));
+        let lat = match (r.p50_ms, r.p95_ms) {
+            (Some(a), Some(b)) => format!("{a}/{b}"),
+            _ => "-".to_string(),
+        };
+        let _ = writeln!(
+            s,
+            "{:<14} {:<28} {:<28} {:>9} {:>6} {:>10} {:>12}",
+            r.name,
+            rate_cell(&m.false_alarm),
+            rate_cell(&m.miss),
+            cov,
+            m.errors,
+            cost,
+            lat
+        );
+    }
+    match reports.iter().find(|r| r.name == baseline) {
+        Some(base) => {
+            let _ = writeln!(
+                s,
+                "\nCompared with {baseline} (exact paired test, holdout, α = 0.05):"
+            );
+            for r in reports.iter().filter(|r| r.name != baseline) {
+                let p = vs_baseline(base, r, answers);
+                let _ = writeln!(
+                    s,
+                    "  {}: false alarms {}; misses {}",
+                    r.name,
+                    word(p.false_alarm),
+                    word(p.miss)
+                );
+            }
+        }
+        None => {
+            let _ = writeln!(
+                s,
+                "\n(baseline {baseline:?} has no current verdicts — run it first)"
+            );
+        }
+    }
+    let _ = writeln!(
+        s,
+        "\nWHERE MODELS DIFFER — diagnostic labels, picked by disagreement: NOT population rates"
+    );
+    for r in reports {
+        let m = &r.diagnostic;
+        let _ = writeln!(
+            s,
+            "  {:<14} wrong on {}/{} diagnostic posts",
+            r.name,
+            m.false_alarm.hits + m.miss.hits,
+            m.judged
+        );
+    }
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::eval_classifiers::cache::VerdictRecord;
+    use crate::cli::eval_classifiers::metrics::Comparison;
+
+    /// 40 toxic + 40 clean posts, all HOLDOUT.
+    fn holdout() -> HashMap<String, Answer> {
+        (0..80)
+            .map(|i| {
+                (
+                    format!("p{i}"),
+                    Answer {
+                        truth: if i < 40 { Truth::Toxic } else { Truth::Clean },
+                        source: Source::Holdout,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    fn model(
+        name: &str,
+        decide: impl Fn(usize) -> Option<bool>,
+    ) -> (String, HashMap<String, VerdictRecord>) {
+        let recs = (0..80)
+            .map(|i| {
+                let id = format!("p{i}");
+                let call = decide(i);
+                let r = VerdictRecord {
+                    id: id.clone(),
+                    model: name.into(),
+                    content_hash: String::new(),
+                    model_id: name.into(),
+                    policy_version: "p".into(),
+                    called_toxic: call,
+                    error: call.is_none().then(|| "timed out".into()),
+                    latency_ms: 10 + i as u32,
+                    input_chars: 400,
+                    est_usd: 0.0,
+                };
+                (id, r)
+            })
+            .collect();
+        (name.to_string(), recs)
+    }
+
+    /// Good baseline: misses p0,p1; false alarms on p40,p41.
+    fn good(i: usize) -> Option<bool> {
+        Some((2..40).contains(&i) || (40..42).contains(&i))
+    }
+
+    #[test]
+    fn deliberately_bad_models_are_caught() {
+        let reports = build(
+            &[
+                model("cope-b", good),
+                model("always-clean", |_| Some(false)),
+                model("coin-flip", |i| Some(i % 2 == 0)),
+            ],
+            &holdout(),
+            &HashMap::new(),
+        );
+        assert_eq!(
+            vs_baseline(&reports[0], &reports[1], &holdout()).miss,
+            Comparison::Worse,
+            "always-clean misses everything"
+        );
+        let p = vs_baseline(&reports[0], &reports[2], &holdout());
+        assert_eq!(
+            (p.false_alarm, p.miss),
+            (Comparison::Worse, Comparison::Worse),
+            "coin-flip loses on both"
+        );
+        let text = render(&reports, &holdout(), "cope-b");
+        assert!(
+            text.contains("always-clean: false alarms") && text.contains("misses worse"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn close_models_are_too_close_to_call() {
+        let reports = build(
+            &[
+                model("cope-b", |i| Some(i < 39 || i == 79)),
+                model("other", |i| Some(i < 38 || i == 79)),
+            ],
+            &holdout(),
+            &HashMap::new(),
+        );
+        let p = vs_baseline(&reports[0], &reports[1], &holdout());
+        assert_eq!(
+            (p.false_alarm, p.miss),
+            (Comparison::TooClose, Comparison::TooClose)
+        );
+        assert!(render(&reports, &holdout(), "cope-b").contains("too close to call — label more"));
+    }
+
+    #[test]
+    fn a_model_erroring_on_hard_posts_gets_no_verdict_on_that_class() {
+        let dodger = model("dodger", |i| if i < 10 { None } else { Some(i < 40) });
+        let reports = build(
+            &[model("cope-b", good), dodger],
+            &holdout(),
+            &HashMap::new(),
+        );
+        let p = vs_baseline(&reports[0], &reports[1], &holdout());
+        assert_eq!(p.miss, Comparison::LowCoverage, "30/40 toxic answered");
+        assert!(render(&reports, &holdout(), "cope-b")
+            .contains("misses no verdict — coverage below 90 %"));
+    }
+
+    #[test]
+    fn too_few_holdout_labels_say_so() {
+        let few: HashMap<String, Answer> = holdout()
+            .into_iter()
+            .filter(|(id, _)| id[1..].parse::<usize>().unwrap() % 4 == 0)
+            .collect();
+        let reports = build(
+            &[
+                model("cope-b", good),
+                model("always-clean", |_| Some(false)),
+            ],
+            &few,
+            &HashMap::new(),
+        );
+        assert_eq!(
+            vs_baseline(&reports[0], &reports[1], &few).miss,
+            Comparison::NotEnoughLabels,
+            "10 toxic < 20"
+        );
+        assert!(render(&reports, &few, "cope-b").contains("not enough holdout labels"));
+    }
+
+    #[test]
+    fn diagnostic_and_seed_labels_do_not_move_the_headline() {
+        let mut answers = holdout();
+        for i in 80..100 {
+            answers.insert(
+                format!("p{i}"),
+                Answer {
+                    truth: Truth::Toxic,
+                    source: Source::Diagnostic,
+                },
+            );
+        }
+        for i in 100..105 {
+            answers.insert(
+                format!("p{i}"),
+                Answer {
+                    truth: Truth::Clean,
+                    source: Source::Seed,
+                },
+            );
+        }
+        let (name, mut recs) = model("cope-b", good);
+        for i in 80..105 {
+            let id = format!("p{i}");
+            let mut r = recs["p0"].clone();
+            r.id = id.clone();
+            r.called_toxic = Some(i >= 100);
+            recs.insert(id, r);
+        }
+        let r = &build(&[(name, recs)], &answers, &HashMap::new())[0];
+        assert_eq!(
+            (r.holdout.miss.hits, r.holdout.miss.n),
+            (2, 40),
+            "headline = holdout only"
+        );
+        assert_eq!((r.diagnostic.miss.hits, r.diagnostic.miss.n), (20, 20));
+    }
+
+    #[test]
+    fn cost_and_latency_columns() {
+        let prices: HashMap<String, Price> = [(
+            "jev".to_string(),
+            Price {
+                usd_per_post: None,
+                usd_per_million_input_tokens: Some(0.042),
+                overhead_chars: 0,
+            },
+        )]
+        .into();
+        let r = &build(&[model("jev", |_| Some(true))], &holdout(), &prices)[0];
+        // 400 chars ≈ 100 tokens; 1,000 posts ≈ 100k tokens ≈ $0.0042.
+        assert!((r.usd_per_1k.unwrap() - 0.0042).abs() < 1e-9);
+        // Latencies are 10..=89 ms: nearest-rank p50 = 49, p95 = 85.
+        assert_eq!((r.p50_ms, r.p95_ms), (Some(49), Some(85)));
+        assert_eq!(
+            build(&[model("x", |_| Some(true))], &holdout(), &HashMap::new())[0].usd_per_1k,
+            None
+        );
+    }
+}
