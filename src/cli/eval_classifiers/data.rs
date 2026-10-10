@@ -1,6 +1,6 @@
 //! Loading the eval's posts (the pool) and the human answers (labels).
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -43,13 +43,29 @@ pub struct Label {
 pub fn load_pool(path: &Path) -> Result<Vec<FixtureRow>> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    text.lines()
-        .filter(|l| !l.trim().is_empty())
-        .enumerate()
-        .map(|(i, l)| {
-            serde_json::from_str(l).with_context(|| format!("{} line {}", path.display(), i + 1))
-        })
-        .collect()
+    let mut rows: Vec<FixtureRow> = Vec::new();
+    // id -> the file line it first appeared on (1-based, blank lines counted,
+    // so the numbers match what an editor shows).
+    let mut first_seen: HashMap<String, usize> = HashMap::new();
+    for (i, l) in text.lines().enumerate() {
+        if l.trim().is_empty() {
+            continue;
+        }
+        let line = i + 1;
+        let row: FixtureRow =
+            serde_json::from_str(l).with_context(|| format!("{} line {line}", path.display()))?;
+        // The cache, text lookup and labels are all keyed by id: a duplicate
+        // would be paid for twice and a label could bind to the wrong text.
+        if let Some(first) = first_seen.insert(row.id.clone(), line) {
+            bail!(
+                "{}: post id {:?} appears twice (line {first} and line {line}) — every post needs its own id; remove or rename one",
+                path.display(),
+                row.id
+            );
+        }
+        rows.push(row);
+    }
+    Ok(rows)
 }
 
 /// A labels file that does not exist yet is an empty set, not an error.
@@ -102,6 +118,31 @@ mod tests {
         let rows = load_pool(f.path()).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].label, "toxic");
+    }
+
+    /// Final review fix 4: everything downstream is keyed by id, so a
+    /// duplicated id would be paid for twice and labelled against the wrong
+    /// text. The error names the id and both (file) line numbers.
+    #[test]
+    fn a_duplicated_pool_id_is_an_error_naming_both_lines() {
+        let f = file(&[
+            r#"{"id":"a","content":"x"}"#,
+            "",
+            r#"{"id":"b","content":"y"}"#,
+            r#"{"id":"a","content":"z"}"#,
+        ]);
+        let err = format!("{:#}", load_pool(f.path()).unwrap_err());
+        assert!(
+            err.contains("\"a\"") && err.contains("line 1") && err.contains("line 4"),
+            "{err}"
+        );
+    }
+
+    /// The committed pool must still load: its ids are unique.
+    #[test]
+    fn the_committed_pool_has_unique_ids() {
+        let pool = Path::new(env!("CARGO_MANIFEST_DIR")).join("evals/classifiers/pool.jsonl");
+        assert_eq!(load_pool(&pool).unwrap().len(), 110);
     }
 
     #[test]
