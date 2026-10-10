@@ -1,5 +1,13 @@
 [
   {
+    "hash": "f2d4781111ba74e03e7c4136351b6d9448167554",
+    "short_hash": "f2d4781",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:13:40-07:00",
+    "message": "docs(404): tighten provider contracts after review (spend bounds, Clef changelog, Strands window/concurrency)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "8f66166b52202f3e488d5a7582762b7909189a09",
     "short_hash": "8f66166",
     "author": "Bryan Guffey",

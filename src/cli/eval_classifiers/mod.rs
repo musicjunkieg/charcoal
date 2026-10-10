@@ -2,6 +2,7 @@
 //! See docs/superpowers/specs/2026-10-08-404-classifier-eval-design.md.
 
 pub mod data;
+pub mod metrics;
 
 /// FNV-1a 64-bit. A fixed, dependency-free hash: used for content identity
 /// in the verdict cache and for the stable holdout/sample selections, so the

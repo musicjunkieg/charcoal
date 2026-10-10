@@ -11780,6 +11780,17 @@
       "created_at": "2026-10-09T18:13:34.729323-07:00",
       "updated_at": "2026-10-09T18:13:34.729323-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"8f66166\",\"confidence\":90}"
+    },
+    {
+      "id": 1081,
+      "change_id": "86002a5d-c528-458f-bb80-e098bfe7b63e",
+      "node_type": "outcome",
+      "title": "Task 1 complete after fix round (f2d4781): spend bound = client-side usage meter for all 3 providers; Clef-flash 64K->24K + price cut on 2026-10-09 recorded; Strands serialize-requests hard rule",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:14:59.727294-07:00",
+      "updated_at": "2026-10-09T18:14:59.727294-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"f2d4781\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24124,6 +24135,17 @@
       "weight": 1.0,
       "rationale": "Review result",
       "created_at": "2026-10-09T18:13:35.899052-07:00"
+    },
+    {
+      "id": 1133,
+      "from_node_id": 1078,
+      "to_node_id": 1081,
+      "from_change_id": "672b37f9-be76-4ffb-8778-fa3e6477911a",
+      "to_change_id": "86002a5d-c528-458f-bb80-e098bfe7b63e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review + fix round",
+      "created_at": "2026-10-09T18:15:00.935175-07:00"
     }
   ],
   "documents": [
