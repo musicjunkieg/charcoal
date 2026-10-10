@@ -11835,6 +11835,17 @@
       "created_at": "2026-10-09T18:32:34.759378-07:00",
       "updated_at": "2026-10-09T18:32:34.759378-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"d95c8aa\",\"confidence\":90}"
+    },
+    {
+      "id": 1086,
+      "change_id": "4f77bc8a-641a-4870-beee-6fe90a6014e2",
+      "node_type": "action",
+      "title": "Task 5 implemented: required pricing, whole-request estimates, reservation Budget (3 tests)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:40:39.876461-07:00",
+      "updated_at": "2026-10-09T18:40:39.876461-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"cc8d585\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/cost.rs\"]}"
     }
   ],
   "edges": [
@@ -24234,6 +24245,17 @@
       "weight": 1.0,
       "rationale": "Review result",
       "created_at": "2026-10-09T18:32:36.000613-07:00"
+    },
+    {
+      "id": 1138,
+      "from_node_id": 1076,
+      "to_node_id": 1086,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "4f77bc8a-641a-4870-beee-6fe90a6014e2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 5 of plan",
+      "created_at": "2026-10-09T18:40:41.222747-07:00"
     }
   ],
   "documents": [

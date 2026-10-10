@@ -1,5 +1,13 @@
 [
   {
+    "hash": "cc8d585b4189415d57fc8e2b01a9908b363a3409",
+    "short_hash": "cc8d585",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:39:17-07:00",
+    "message": "feat(404): required pricing, whole-request estimates and a reservation budget\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "d95c8aa2e98931b41fff112943f66fc1c3299522",
     "short_hash": "d95c8aa",
     "author": "Bryan Guffey",
