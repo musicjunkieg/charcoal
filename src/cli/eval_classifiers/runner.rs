@@ -614,7 +614,7 @@ mod tests {
     #[derive(Clone, Copy)]
     enum Slot {
         Ok,
-        SlotError,
+        Undecodable,
         ForeignModel,
         ForeignPolicy,
     }
@@ -655,7 +655,9 @@ mod tests {
                         .find(|(w, _)| c.contains(w))
                         .map_or(Slot::Ok, |(_, s)| *s);
                     let (model_id, policy) = match slot {
-                        Slot::SlotError => return ItemOutcome::Error("slot did not decode".into()),
+                        Slot::Undecodable => {
+                            return ItemOutcome::Error("slot did not decode".into())
+                        }
                         Slot::Ok => ("fake-1", "p-1"),
                         Slot::ForeignModel => ("someone-else", "p-1"),
                         Slot::ForeignPolicy => ("fake-1", "p-old"),
@@ -737,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn a_per_slot_error_marks_only_that_post() {
         let dir = tempfile::tempdir().unwrap();
-        let model = BatchFake::new(vec![("three", Slot::SlotError)]);
+        let model = BatchFake::new(vec![("three", Slot::Undecodable)]);
         let s = run_batch(&model, &four(), dir.path()).await;
         assert_eq!(model.batches.load(Ordering::SeqCst), 1);
         assert_eq!((s.judged, s.errors), (3, 1));
