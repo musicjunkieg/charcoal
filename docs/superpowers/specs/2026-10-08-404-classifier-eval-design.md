@@ -108,8 +108,11 @@ Safety:
 
 - false-alarm rate (clean posts called toxic) and miss rate (toxic posts
   called clean), each with a **95 % Wilson interval**, on the **holdout**;
-- comparisons on a **paired cohort** — only posts both models judged — with
-  coverage shown, and **no winner named below 90 % coverage** (Codex review);
+- comparisons decided **per class** by an **exact paired McNemar test** on the
+  posts where the two models disagree (α = 0.05, fixed in advance); the
+  Wilson intervals are descriptive. A verdict needs, in that class, **≥ 20
+  paired holdout labels** and **≥ 90 % coverage for each model** — otherwise
+  the report says why there is no verdict (Codex review, round 2);
 - error rate — calls that failed or timed out, recorded as errors, **never** as
   clean;
 - cost per 1,000 posts; median and p95 latency;
@@ -122,7 +125,22 @@ skip that model with a clear message rather than failing the run.
 
 **Cache identity:** a cached verdict is reused only while the post's content
 hash, the model ID and the policy version all still match — an edited post, a
-new policy or a redeployed model is re-judged (Codex review).
+new policy or a redeployed model is re-judged (Codex review). Each backend's
+identity is probed before any paid call, every returned verdict's
+model/policy must match (else it is an error), and `label` and `report` read
+only verdicts current for the pool's text and the last verified identity
+(round 2).
+
+**Holdout integrity:** the merge step derives each label's stream (holdout
+or diagnostic) from the post id and validates the row against the pool; it
+never trusts the editable file (round 2). The current 110-post pool yields
+32 usable holdout posts, so the pool must grow (via `find-fixtures`) before
+any verdict is possible.
+
+**Real spend:** CoPE-B runs through the RunPod client with the production
+`ScanCostMeter` set to the run's cap (actual worker time), batched as in
+production; the eval's own timeout sits above the client's so jobs are never
+abandoned (round 2).
 
 **Proof the eval can fail:** the test suite includes two deliberately bad fake
 models — always-clean and coin-flip. The report must rank them last and flag

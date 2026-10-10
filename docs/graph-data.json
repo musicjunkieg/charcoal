@@ -11703,6 +11703,17 @@
       "created_at": "2026-10-09T10:05:29.160992-07:00",
       "updated_at": "2026-10-09T10:05:29.160992-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"ee866d0\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-09-404-classifier-eval-harness.md\"]}"
+    },
+    {
+      "id": 1074,
+      "change_id": "a9dd406d-d1a8-4ac7-a880-5fcf6f170962",
+      "node_type": "action",
+      "title": "#404 spec+plan revised after Codex adversarial review: binary decision rule, holdout-only rates, paired coverage, identity-keyed cache, required pricing, timeout, committed verdicts/.gitignore",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T17:24:54.468852-07:00",
+      "updated_at": "2026-10-09T17:24:54.468852-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2b04daf\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -23970,6 +23981,17 @@
       "weight": 1.0,
       "rationale": "plan from the chosen design",
       "created_at": "2026-10-09T10:05:29.574316-07:00"
+    },
+    {
+      "id": 1126,
+      "from_node_id": 1073,
+      "to_node_id": 1074,
+      "from_change_id": "b3a63bb8-a3dc-473c-afc6-27946468bbdd",
+      "to_change_id": "a9dd406d-d1a8-4ac7-a880-5fcf6f170962",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codex adversarial review of the plan",
+      "created_at": "2026-10-09T17:24:55.023269-07:00"
     }
   ],
   "documents": [

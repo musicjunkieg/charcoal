@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2b04daf9c7a8a0e96f92a51b489f696bb35ed1a6",
+    "short_hash": "2b04daf",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T17:24:44-07:00",
+    "message": "docs(404): revise spec and plan after Codex adversarial review\n\nAccepted all 8 findings:\n- critical: score each model on its own binary answer; never derive\n  p(toxic) from CoPE-B confidence (exp(logprob) over the vocabulary)\n- headline rates from an independent hash-chosen holdout only;\n  disagreement labels reported separately as diagnostics\n- unpriced models refused; estimates cover the whole request\n  (overhead_chars); Part B reconciles provider-reported usage\n- paired-cohort comparisons with coverage; no winner below 90 %\n- cache reuse keyed on content hash + model id + policy version\n- committed verdicts/.gitignore (not the untracked .gitignore.local)\n- per-call timeout (60 s) with a genuinely hanging test fake\n- one cargo test filter per command\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "ee866d0ea9fe5938db23a4fde092417b8328a9dc",
     "short_hash": "ee866d0",
     "author": "Bryan Guffey",

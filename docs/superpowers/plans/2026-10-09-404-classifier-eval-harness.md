@@ -2,29 +2,33 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A `charcoal eval-classifiers` command that runs posts through several classifiers, picks the posts worth hand-labelling, and reports each model's false-alarm rate, miss rate, coverage, cost and latency, with honest error bars computed on a random holdout.
+**Goal:** A `charcoal eval-classifiers` command that runs posts through several classifiers, picks the posts worth hand-labelling, and reports each model's false-alarm rate, miss rate, coverage, cost and latency — with comparisons decided by an exact paired test on an independent holdout.
 
 **Architecture:** A new library module `src/cli/eval_classifiers/` (pure, unit-tested pieces: data, verdict cache, cost, metrics, label picker, report, runner, model registry) behind a thin clap subcommand in `src/main.rs`. Models plug in through the existing `ToxicityClassifier` trait. Part A ships the harness with the two models we already have — CoPE-B (RunPod) and Detoxify (local ONNX) — and verifies the new providers' APIs (Task 1). **Part B** (Jev, Clef-flash, Strands Decider adapters) is a separate short plan written from Task 1's verified contracts.
 
-**Tech Stack:** Rust (tokio, async-trait, serde/serde_json, anyhow), the existing `ort` ONNX scorer, `tempfile` for tests. No new dependencies.
+**Tech Stack:** Rust (tokio, async-trait, serde/serde_json, anyhow), the existing `ort` ONNX scorer and RunPod client with its production `ScanCostMeter`, `tempfile` for tests. No new dependencies.
 
-**Revision note (2026-10-09):** rewritten after a Codex adversarial review found eight problems in the first draft — an inverted CoPE-B probability conversion, outcome-biased rates, a bypassable spending cap, error-flattered comparisons, a cache blind to content/policy/model changes, a privacy rule that did not survive a fresh clone, no timeout, and an invalid `cargo test` command. Each is fixed below; the spec was amended to match.
+**Revision notes (2026-10-09):**
+- **Round 1** (Codex adversarial review, 8 findings): models scored on their own binary answer (CoPE-B confidence is not p(toxic)); headline rates from an independent holdout; paired comparisons with coverage; cache keyed on content + model + policy; unpriced models refused; per-call timeout; committed `verdicts/.gitignore`; one `cargo test` filter per command.
+- **Round 2** (Codex adversarial review, 5 findings): CoPE-B spend bounded by the client's **real** `ScanCostMeter` (worker time) and batched like production, with the eval timeout set above the client's own so jobs are never abandoned; backend identity probed before paid calls and **checked on every verdict**, and report/label read only verdicts current for the pool and identity; coverage enforced **per class** with a **20-paired-labels-per-class** minimum and boundary tests; merge **derives** the source rather than trusting the file; comparisons decided by an **exact paired McNemar test** (α = 0.05), Wilson intervals kept as descriptive context. The effective holdout of the current 110-post pool is **32** posts (4 of the hash-chosen 36 are curated seeds), so the pool must grow before any winner can be named.
 
 ## Global Constraints
 
-- Spec: `docs/superpowers/specs/2026-10-08-404-classifier-eval-design.md` (approved 2026-10-09, amended after the Codex review).
+- Spec: `docs/superpowers/specs/2026-10-08-404-classifier-eval-design.md` (approved 2026-10-09, amended after both Codex reviews).
 - Post level only; account-level evaluation is out of scope.
-- **Decision rule:** every model is scored on its **own binary answer** (`ClassifierVerdict::toxic_token`). Never derive a probability from `confidence`: for CoPE-B it is `exp(logprob)` of the emitted token over the whole vocabulary (`gpu/cope-b-runpod/handler.py:122`), so `1 − confidence` is not p(toxic).
-- **Headline rates use holdout labels only.** Holdout = a fixed hash-chosen ~⅓ of the pool, labelled regardless of model votes. Disagreement-picked ("diagnostic") labels and the curated seed labels never enter the headline rates.
-- Report false-alarm rate and miss rate **separately**, each with a **95 % Wilson interval**; **no blended score**.
-- Model-vs-baseline comparisons use a **paired cohort** (holdout posts both models judged). **No winner below 90 % coverage.** Overlapping intervals → **"too close to call — label more"**.
-- Errors and timeouts are recorded as **errors, never as clean**. Every call runs under a timeout (default **60 s**).
-- A cached verdict is reused only while **content hash, model ID and policy version** all match.
-- **A model without a pricing entry is refused.** Default spending cap **$1.00 per run**; reaching it stops cleanly and keeps every paid verdict. Cost estimates cover the whole request (post + the model's `overhead_chars`).
+- **Decision rule:** every model is scored on its **own binary answer** (`ClassifierVerdict::toxic_token`). Never derive a probability from `confidence` (for CoPE-B it is `exp(logprob)` of the emitted token over the whole vocabulary — `gpu/cope-b-runpod/handler.py:122`).
+- **Headline rates use holdout labels only.** Holdout membership = `fnv1a("holdout:" + id) % 3 == 0`, fixed and independent of models. Diagnostic and seed labels never enter headline rates. The merge step **derives** each label's source from the hash; it never trusts the file.
+- Report false-alarm and miss rates **separately**, each with a **95 % Wilson interval** (descriptive); **no blended score**.
+- **Comparisons:** per truth class, on the paired cohort (holdout posts of that class both models answered), by an **exact two-sided McNemar test** on the discordant pairs at **α = 0.05**. A verdict needs, per class, **each model's coverage ≥ 90 %** and **≥ 20 paired posts**; otherwise the report says "no verdict — coverage below 90 %" or "not enough holdout labels (need 20 per class) — label more". Non-significant → "too close to call — label more".
+- Errors, timeouts and **identity mismatches** are recorded as **errors, never as clean**.
+- Before any paid call a backend's `probe_identity()` must pass; every returned verdict's `model_id` and `policy_version` must equal the declared ones.
+- A cached verdict is **current** only while its content hash matches the pool's present text and its model/policy match the identity of the last run. Report and label read **only current** verdicts.
+- **A model without a pricing entry is refused.** Default cap **$1.00 per run**. For CoPE-B the cap is enforced by the RunPod client's real `ScanCostMeter` (worker-seconds × rate); for priced-per-token models it is enforced by reservation from whole-request estimates (Part B adds provider-reported usage).
+- The eval's per-call timeout (default **600 s**) is a last-resort hang guard, set **above** the RunPod client's own warm-up and steady timeouts so the eval never abandons a job the client still owns.
 - New adapters are reachable **only** from eval code (`models::build_eval_model`), never from production `build_from_env`.
 - **CI never calls a paid API.** All tests use fake classifiers.
 - Data: `evals/classifiers/pool.jsonl`, `labels.jsonl`, `pricing.json` committed (PII-scrubbed); `evals/classifiers/verdicts/` never committed, enforced by a committed `evals/classifiers/verdicts/.gitignore`.
-- No new crate dependencies (no `toml`, no `rand`, no `sha2`): pricing is JSON; hashing is FNV-1a 64-bit.
+- No new crate dependencies: pricing is JSON; hashing is FNV-1a 64-bit.
 - `cargo test` accepts **one** name filter per invocation.
 - Charcoal conventions: `anyhow::Result`, `?` not `.unwrap()` outside tests, comments explain *why*, conventional commits, explicit `git add <paths>`.
 
@@ -39,16 +43,16 @@
 | `evals/classifiers/labels.jsonl` | Human answers `{id, label, source, note}` |
 | `evals/classifiers/pricing.json` | List price per model |
 | `evals/classifiers/verdicts/.gitignore` | Keeps verdicts out of git on every clone |
-| `evals/classifiers/README.md` | How to run a round |
+| `evals/classifiers/README.md` | How to run a round, and how to grow the pool |
 | `src/cli/eval_classifiers/mod.rs` | Module root; `fnv1a` and `content_hash` |
 | `src/cli/eval_classifiers/data.rs` | Load pool and labels |
-| `src/cli/eval_classifiers/metrics.rs` | Wilson interval, rates, paired comparison |
-| `src/cli/eval_classifiers/cache.rs` | `VerdictRecord`, append-only JSONL cache, reuse rule |
-| `src/cli/eval_classifiers/cost.rs` | Pricing (required), estimates, spending cap |
-| `src/cli/eval_classifiers/runner.rs` | Run one model over the pool with cache, cap and timeout |
-| `src/cli/eval_classifiers/labelling.rs` | Holdout + diagnostic picker, merge |
+| `src/cli/eval_classifiers/metrics.rs` | Wilson interval, rates, exact paired comparison |
+| `src/cli/eval_classifiers/cache.rs` | `VerdictRecord`, JSONL cache, identity file, `current` filter |
+| `src/cli/eval_classifiers/cost.rs` | Pricing (required), estimates, reservation budget |
+| `src/cli/eval_classifiers/runner.rs` | Probe, batch, check identity, timeout, cap |
+| `src/cli/eval_classifiers/labelling.rs` | Holdout + diagnostic picker; merge that derives the source |
 | `src/cli/eval_classifiers/report.rs` | Plain-text report |
-| `src/cli/eval_classifiers/models.rs` | Eval-only model registry |
+| `src/cli/eval_classifiers/models.rs` | Eval-only model registry (CoPE-B with the real cost meter) |
 | `src/toxicity/detoxify_classifier.rs` | Detoxify as a `ToxicityClassifier` |
 | `src/main.rs` | `eval-classifiers run|label|report` subcommand |
 
@@ -68,14 +72,15 @@
   1. Endpoint URL and auth header.
   2. Request body shape — exact JSON field names.
   3. **Can the instruction be free text?** Can the whole of `gpu/cope-b-runpod/policy.txt` (length: `wc -c gpu/cope-b-runpod/policy.txt`) be the question, with answers `toxic` / `clean`?
-  4. Response shape — where the chosen answer and its probability live, and whether that probability is **normalised over the answer set** (a true p(toxic)) or something else.
+  4. Response shape — where the chosen answer lives, and whether any probability is **normalised over the answer set**.
   5. Batching: several posts per request; can the policy be sent once per batch?
-  6. Token accounting: does the response report input tokens? (Part B must reconcile estimated vs reported cost.)
+  6. **Billing and usage:** does the response report tokens or cost per request? Can a submitted request be cancelled, and is a cancelled/timed-out request still billed? (Part B must bound real spend, not estimates.)
   7. Price per million input tokens (and output, if any), with the date read.
   8. Rate limits.
   9. Data retention / training-use terms for submitted text.
+  10. **Identity:** does the response say which model version served it?
 
-- [ ] **Step 3: Gate.** A provider that cannot take a free-text policy as its instruction (item 3) is marked **BLOCKED** at the top of the file with the reason. Do not plan an adapter for it; bring it to Bryan.
+- [ ] **Step 3: Gate.** A provider that cannot take a free-text policy as its instruction (item 3), or whose spend cannot be bounded by reported usage or an enforced limit (item 6), is marked **BLOCKED** at the top of the file with the reason. Do not plan an adapter for it; bring it to Bryan.
 
 - [ ] **Step 4: Commit**
 
@@ -102,7 +107,7 @@ git commit -m 'docs(404): verified API contracts for Jev, Clef and Strands Decid
   - `pub struct Answer { pub truth: Truth, pub source: Source }`
   - `pub struct Label { pub id: String, pub label: Truth, pub source: Source, pub note: Option<String> }`
   - `pub fn load_pool(path: &Path) -> Result<Vec<FixtureRow>>`
-  - `pub fn load_labels(path: &Path) -> Result<HashMap<String, Answer>>` — missing file → empty map; a label row without `source` is an error
+  - `pub fn load_labels(path: &Path) -> Result<HashMap<String, Answer>>` — missing file → empty map; a row without `source` is an error
 
 - [ ] **Step 1: Build the data files**
 
@@ -120,9 +125,9 @@ printf '*\n!.gitignore\n' > evals/classifiers/verdicts/.gitignore
 wc -l evals/classifiers/pool.jsonl evals/classifiers/labels.jsonl
 ```
 
-Expected: `110 evals/classifiers/pool.jsonl`, `10 evals/classifiers/labels.jsonl`.
+Expected: `110 evals/classifiers/pool.jsonl`, `10 evals/classifiers/labels.jsonl`. (Of the 110, 36 hash into the holdout; 4 of those are seeds, so **32** holdout posts remain to label — too few for a verdict. Growing the pool is a documented step in the README, Task 10.)
 
-Create `evals/classifiers/pricing.json`. The CoPE-B figure is the per-post cost implied by the observed $2.67 / ~20,000-post staging scan; Detoxify runs locally and is explicitly free. Every model the eval runs must appear here.
+Create `evals/classifiers/pricing.json`. The CoPE-B figure is a planning estimate (observed $2.67 / ~20,000-post staging scan); CoPE-B's real spend is bounded by its cost meter (Task 9). Detoxify runs locally and is explicitly free.
 
 ```json
 {
@@ -237,7 +242,7 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 /// Identity of a post's exact text. An edited post gets a new hash, so its
-/// cached verdicts are no longer reused.
+/// cached verdicts stop being current.
 pub fn content_hash(content: &str) -> String {
     format!("{:016x}", fnv1a(content.as_bytes()))
 }
@@ -331,7 +336,7 @@ git commit -m 'feat(404): eval pool, seed labels, pricing, hashing and loaders'
 
 ---
 
-### Task 3: Metrics — Wilson intervals, coverage, paired comparison
+### Task 3: Metrics — Wilson intervals, per-class coverage, exact paired test
 
 **Files:**
 - Create: `src/cli/eval_classifiers/metrics.rs`
@@ -341,13 +346,13 @@ git commit -m 'feat(404): eval pool, seed labels, pricing, hashing and loaders'
 - Consumes: `data::Truth`.
 - Produces:
   - `pub struct Rate { pub hits: u32, pub n: u32 }` with `fn value(&self) -> Option<f64>`, `fn wilson95(&self) -> Option<(f64, f64)>`
-  - `pub struct ModelMetrics { pub model: String, pub false_alarm: Rate, pub miss: Rate, pub labelled: u32, pub judged: u32, pub errors: u32 }` with `fn coverage(&self) -> Option<f64>` (`judged / labelled`)
-  - `pub fn model_metrics(model: &str, calls: &HashMap<String, Option<bool>>, labels: &HashMap<String, Truth>) -> ModelMetrics` — `Some(true)` toxic, `Some(false)` clean, `None` error; a labelled post with no record counts in `labelled` but not `judged`
-  - `pub enum Comparison { Better, Worse, TooClose, NoData }`
-  - `pub fn compare(candidate: &Rate, baseline: &Rate) -> Comparison` — lower is better
-  - `pub const MIN_COVERAGE: f64 = 0.9;`
-  - `pub struct Paired { pub baseline: ModelMetrics, pub candidate: ModelMetrics, pub false_alarm: Comparison, pub miss: Comparison, pub low_coverage: bool }`
-  - `pub fn paired(base_name: &str, base: &HashMap<String, Option<bool>>, cand_name: &str, cand: &HashMap<String, Option<bool>>, labels: &HashMap<String, Truth>) -> Paired` — scores both models on only the labelled posts **both** judged; `low_coverage` when either model's own coverage of `labels` is below `MIN_COVERAGE`, in which case both comparisons are `NoData`
+  - `pub struct ModelMetrics { pub model: String, pub false_alarm: Rate, pub miss: Rate, pub labelled: u32, pub judged: u32, pub errors: u32 }` with `fn coverage(&self) -> Option<f64>`
+  - `pub fn model_metrics(model: &str, calls: &HashMap<String, Option<bool>>, labels: &HashMap<String, Truth>) -> ModelMetrics` — `Some(true)` toxic, `Some(false)` clean, `None` error; a labelled post with no record counts in `labelled` only
+  - `pub const MIN_COVERAGE: f64 = 0.9; pub const MIN_CLASS_N: u32 = 20; pub const ALPHA: f64 = 0.05;`
+  - `pub enum Comparison { Better, Worse, TooClose, NotEnoughLabels, LowCoverage }`
+  - `pub fn mcnemar_exact_p(b: u32, c: u32) -> f64` — two-sided exact sign test on discordant pairs
+  - `pub struct Paired { pub baseline: ModelMetrics, pub candidate: ModelMetrics, pub false_alarm: Comparison, pub miss: Comparison }` — `baseline`/`candidate` are scored on the shared cohort (for display)
+  - `pub fn paired(base_name: &str, base: &HashMap<String, Option<bool>>, cand_name: &str, cand: &HashMap<String, Option<bool>>, labels: &HashMap<String, Truth>) -> Paired` — `false_alarm` decided on the Clean class, `miss` on the Toxic class
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -359,6 +364,30 @@ mod tests {
 
     fn map<T: Clone>(pairs: &[(&str, T)]) -> HashMap<String, T> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    /// `n` toxic labels t0.. and `n` clean labels c0...
+    fn labels(n: usize) -> HashMap<String, Truth> {
+        (0..n)
+            .flat_map(|i| [(format!("t{i}"), Truth::Toxic), (format!("c{i}"), Truth::Clean)])
+            .collect()
+    }
+
+    /// Answers every label correctly, except the given ids (wrong) and
+    /// `errors` (call failed).
+    fn calls(labels: &HashMap<String, Truth>, wrong: &[String], errors: &[String]) -> HashMap<String, Option<bool>> {
+        labels
+            .iter()
+            .map(|(id, t)| {
+                let right = *t == Truth::Toxic;
+                let call = if errors.contains(id) { None } else if wrong.contains(id) { Some(!right) } else { Some(right) };
+                (id.clone(), call)
+            })
+            .collect()
+    }
+
+    fn ids(prefix: &str, range: std::ops::Range<usize>) -> Vec<String> {
+        range.map(|i| format!("{prefix}{i}")).collect()
     }
 
     #[test]
@@ -378,36 +407,52 @@ mod tests {
         assert_eq!((m.miss.hits, m.miss.n), (1, 2), "the errored toxic post is not a miss");
         assert_eq!((m.false_alarm.hits, m.false_alarm.n), (1, 2));
         assert_eq!((m.labelled, m.judged, m.errors), (6, 4, 1));
-        assert!((m.coverage().unwrap() - 4.0 / 6.0).abs() < 1e-9);
     }
 
     #[test]
-    fn comparison_needs_non_overlapping_intervals() {
-        let good = Rate { hits: 1, n: 40 };
-        let bad = Rate { hits: 30, n: 40 };
-        assert_eq!(compare(&bad, &good), Comparison::Worse);
-        assert_eq!(compare(&good, &bad), Comparison::Better);
-        assert_eq!(compare(&Rate { hits: 2, n: 5 }, &Rate { hits: 1, n: 5 }), Comparison::TooClose);
-        assert_eq!(compare(&Rate { hits: 0, n: 0 }, &good), Comparison::NoData);
+    fn mcnemar_exact_values() {
+        // 0 vs 6 discordant pairs: 2 × (1/2)^6 = 0.03125 (Codex's example).
+        assert!((mcnemar_exact_p(0, 6) - 0.031_25).abs() < 1e-12);
+        assert!((mcnemar_exact_p(0, 5) - 0.0625).abs() < 1e-12);
+        assert_eq!(mcnemar_exact_p(1, 1), 1.0);
+        assert_eq!(mcnemar_exact_p(0, 0), 1.0);
     }
 
-    /// Codex review: a model that errors on the hard toxic posts must not
-    /// look better for it. Paired scoring uses only posts both judged.
     #[test]
-    fn a_model_that_fails_on_hard_posts_gains_nothing() {
-        let labels: HashMap<String, Truth> = (0..40)
-            .map(|i| (format!("p{i}"), if i < 20 { Truth::Toxic } else { Truth::Clean }))
-            .collect();
-        // Baseline misses the 5 hard toxic posts p0..p4; the candidate ERRORS on them.
-        let base: HashMap<String, Option<bool>> = (0..40).map(|i| (format!("p{i}"), Some((5..20).contains(&i)))).collect();
-        let cand: HashMap<String, Option<bool>> = (0..40)
-            .map(|i| (format!("p{i}"), if i < 5 { None } else { Some(i < 20) }))
-            .collect();
-        let p = paired("base", &base, "cand", &cand, &labels);
-        assert_eq!(p.candidate.miss.n, 15, "the 5 posts the candidate dodged are excluded for BOTH");
-        assert_eq!(p.baseline.miss.hits, 0, "on the shared cohort the baseline missed nothing either");
-        assert!(p.low_coverage, "35/40 = 87.5 % coverage is below the 90 % floor");
-        assert_eq!((p.false_alarm, p.miss), (Comparison::NoData, Comparison::NoData));
+    fn a_significantly_better_candidate_is_called_better() {
+        let l = labels(25);
+        // The baseline misses t0..t7; the candidate misses none: 8 discordant
+        // pairs all favouring the candidate, p = 2/256 ≈ 0.0078.
+        let base = calls(&l, &ids("t", 0..8), &[]);
+        let cand = calls(&l, &[], &[]);
+        let p = paired("base", &base, "cand", &cand, &l);
+        assert_eq!(p.miss, Comparison::Better);
+        assert_eq!(p.false_alarm, Comparison::TooClose, "no discordant clean pairs");
+    }
+
+    /// Codex review: per-class coverage, tested exactly at the boundary.
+    #[test]
+    fn coverage_is_enforced_per_class_at_the_90_percent_boundary() {
+        let l = labels(30);
+        let base = calls(&l, &[], &[]);
+        // 3 errors out of 30 toxic = 90 % coverage: allowed.
+        let ok = calls(&l, &[], &ids("t", 0..3));
+        assert_ne!(paired("b", &base, "c", &ok, &l).miss, Comparison::LowCoverage);
+        // 4 errors out of 30 toxic = 86.7 %: refused, even though clean is perfect.
+        let low = calls(&l, &[], &ids("t", 0..4));
+        let p = paired("b", &base, "c", &low, &l);
+        assert_eq!(p.miss, Comparison::LowCoverage);
+        assert_ne!(p.false_alarm, Comparison::LowCoverage, "the clean class is judged on its own");
+    }
+
+    /// Codex review: with too few paired labels no winner is named, however
+    /// lopsided the counts.
+    #[test]
+    fn too_few_labels_per_class_gives_no_verdict() {
+        let l = labels(10);
+        let base = calls(&l, &ids("t", 0..6), &[]);
+        let cand = calls(&l, &[], &[]);
+        assert_eq!(paired("b", &base, "c", &cand, &l).miss, Comparison::NotEnoughLabels);
     }
 }
 ```
@@ -420,8 +465,10 @@ Expected: compile error — items not found.
 - [ ] **Step 3: Implement** `src/cli/eval_classifiers/metrics.rs`:
 
 ```rust
-//! Error rates with honest uncertainty. With tens of labels a 5-point gap is
-//! often noise; the Wilson interval says so instead of crowning a winner.
+//! Error rates and model comparisons. Rates carry 95 % Wilson intervals as
+//! description; a comparison is DECIDED by an exact paired test on the posts
+//! where the two models disagree, with minimum label and coverage gates set
+//! in advance (Codex review, round 2).
 
 use std::collections::HashMap;
 
@@ -438,8 +485,7 @@ impl Rate {
         (self.n > 0).then(|| self.hits as f64 / self.n as f64)
     }
 
-    /// 95 % Wilson score interval — well-behaved at 0 and n, unlike the
-    /// normal approximation, which matters with very few labels.
+    /// 95 % Wilson score interval — well-behaved at 0 and n.
     pub fn wilson95(&self) -> Option<(f64, f64)> {
         let p = self.value()?;
         let n = self.n as f64;
@@ -461,13 +507,21 @@ pub struct ModelMetrics {
     pub labelled: u32,
     /// Labelled posts the model actually answered.
     pub judged: u32,
-    /// Labelled posts whose call failed or timed out — never counted as clean.
+    /// Labelled posts whose call failed, timed out or mismatched identity —
+    /// never counted as clean.
     pub errors: u32,
 }
 
 impl ModelMetrics {
     pub fn coverage(&self) -> Option<f64> {
         (self.labelled > 0).then(|| self.judged as f64 / self.labelled as f64)
+    }
+}
+
+fn is_wrong(called_toxic: bool, truth: Truth) -> bool {
+    match truth {
+        Truth::Toxic => !called_toxic,
+        Truth::Clean => called_toxic,
     }
 }
 
@@ -495,11 +549,7 @@ pub fn model_metrics(
                     Truth::Clean => &mut m.false_alarm,
                 };
                 rate.n += 1;
-                let wrong = match truth {
-                    Truth::Toxic => !called_toxic,
-                    Truth::Clean => *called_toxic,
-                };
-                if wrong {
+                if is_wrong(*called_toxic, *truth) {
                     rate.hits += 1;
                 }
             }
@@ -508,34 +558,82 @@ pub fn model_metrics(
     m
 }
 
+/// Gates, fixed before any data is seen.
+pub const MIN_COVERAGE: f64 = 0.9;
+pub const MIN_CLASS_N: u32 = 20;
+pub const ALPHA: f64 = 0.05;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Comparison {
     Better,
     Worse,
     TooClose,
-    NoData,
+    NotEnoughLabels,
+    LowCoverage,
 }
 
-/// Lower is better for both rates. A verdict only when the intervals do not
-/// overlap; otherwise the honest answer is "label more".
-pub fn compare(candidate: &Rate, baseline: &Rate) -> Comparison {
-    match (candidate.wilson95(), baseline.wilson95()) {
-        (Some((c_lo, c_hi)), Some((b_lo, b_hi))) => {
-            if c_hi < b_lo {
-                Comparison::Better
-            } else if c_lo > b_hi {
-                Comparison::Worse
-            } else {
-                Comparison::TooClose
+/// Exact two-sided McNemar (sign) test: under "no difference" each of the
+/// `b + c` discordant pairs is a fair coin. Exact rather than chi-squared
+/// because the counts here are small. Fine for n ≤ 1000 in f64.
+pub fn mcnemar_exact_p(b: u32, c: u32) -> f64 {
+    let n = b + c;
+    if n == 0 {
+        return 1.0;
+    }
+    let k = b.min(c);
+    let mut coef = 1.0_f64; // C(n, 0)
+    let mut tail = 0.0_f64;
+    for i in 0..=k {
+        if i > 0 {
+            coef = coef * f64::from(n - i + 1) / f64::from(i);
+        }
+        tail += coef;
+    }
+    (2.0 * tail / 2.0_f64.powi(n as i32)).min(1.0)
+}
+
+/// One truth class: coverage gate, label gate, then the exact paired test.
+fn compare_class(
+    base: &HashMap<String, Option<bool>>,
+    cand: &HashMap<String, Option<bool>>,
+    labels: &HashMap<String, Truth>,
+    class: Truth,
+) -> Comparison {
+    let in_class: Vec<&String> = labels.iter().filter(|(_, t)| **t == class).map(|(id, _)| id).collect();
+    if in_class.is_empty() {
+        return Comparison::NotEnoughLabels;
+    }
+    let coverage = |calls: &HashMap<String, Option<bool>>| {
+        let judged = in_class.iter().filter(|id| matches!(calls.get(**id), Some(Some(_)))).count();
+        judged as f64 / in_class.len() as f64
+    };
+    // Per class: a model that fails on the hard toxic posts cannot hide it
+    // behind a perfect clean class (Codex review).
+    if coverage(base) < MIN_COVERAGE || coverage(cand) < MIN_COVERAGE {
+        return Comparison::LowCoverage;
+    }
+    let (mut shared, mut b, mut c) = (0u32, 0u32, 0u32);
+    for id in &in_class {
+        if let (Some(Some(bc)), Some(Some(cc))) = (base.get(*id), cand.get(*id)) {
+            shared += 1;
+            match (is_wrong(*bc, class), is_wrong(*cc, class)) {
+                (false, true) => b += 1, // candidate wrong only
+                (true, false) => c += 1, // baseline wrong only
+                _ => {}
             }
         }
-        _ => Comparison::NoData,
+    }
+    if shared < MIN_CLASS_N {
+        return Comparison::NotEnoughLabels;
+    }
+    if mcnemar_exact_p(b, c) >= ALPHA {
+        Comparison::TooClose
+    } else if b < c {
+        Comparison::Better
+    } else {
+        Comparison::Worse
     }
 }
-
-/// Below this share of labelled posts answered, a model's rates describe a
-/// different set of posts than its rival's and no winner is named.
-pub const MIN_COVERAGE: f64 = 0.9;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Paired {
@@ -543,12 +641,8 @@ pub struct Paired {
     pub candidate: ModelMetrics,
     pub false_alarm: Comparison,
     pub miss: Comparison,
-    pub low_coverage: bool,
 }
 
-/// Score two models on the SAME posts: the labelled posts both answered. A
-/// model that errors on the hard cases cannot look better for skipping them
-/// (Codex review).
 pub fn paired(
     base_name: &str,
     base: &HashMap<String, Option<bool>>,
@@ -556,60 +650,52 @@ pub fn paired(
     cand: &HashMap<String, Option<bool>>,
     labels: &HashMap<String, Truth>,
 ) -> Paired {
-    let low_coverage = [base, cand].iter().any(|calls| {
-        model_metrics("", calls, labels).coverage().is_none_or(|c| c < MIN_COVERAGE)
-    });
     let shared: HashMap<String, Truth> = labels
         .iter()
-        .filter(|(id, _)| {
-            matches!(base.get(*id), Some(Some(_))) && matches!(cand.get(*id), Some(Some(_)))
-        })
+        .filter(|(id, _)| matches!(base.get(*id), Some(Some(_))) && matches!(cand.get(*id), Some(Some(_))))
         .map(|(id, t)| (id.clone(), *t))
         .collect();
-    let baseline = model_metrics(base_name, base, &shared);
-    let candidate = model_metrics(cand_name, cand, &shared);
-    let (false_alarm, miss) = if low_coverage {
-        (Comparison::NoData, Comparison::NoData)
-    } else {
-        (
-            compare(&candidate.false_alarm, &baseline.false_alarm),
-            compare(&candidate.miss, &baseline.miss),
-        )
-    };
-    Paired { baseline, candidate, false_alarm, miss, low_coverage }
+    Paired {
+        baseline: model_metrics(base_name, base, &shared),
+        candidate: model_metrics(cand_name, cand, &shared),
+        false_alarm: compare_class(base, cand, labels, Truth::Clean),
+        miss: compare_class(base, cand, labels, Truth::Toxic),
+    }
 }
 ```
 
-`Option::is_none_or` needs Rust 1.82+; the project builds with Rust 1.94 (Dockerfile). Add `pub mod metrics;` to `mod.rs`.
+Add `pub mod metrics;` to `mod.rs`.
 
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib eval_classifiers::metrics`
-Expected: 4 passed.
+Expected: 6 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/cli/eval_classifiers/metrics.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): Wilson metrics with coverage and paired-cohort comparison'
+git commit -m 'feat(404): exact paired McNemar comparison with per-class coverage and label gates'
 ```
 
 ---
 
-### Task 4: Verdict cache with content and model identity
+### Task 4: Verdict cache, identity file and the "current" filter
 
 **Files:**
 - Create: `src/cli/eval_classifiers/cache.rs`
 - Modify: `src/cli/eval_classifiers/mod.rs` (add `pub mod cache;`)
 
 **Interfaces:**
-- Consumes: `ClassifierVerdict`, `super::content_hash`.
+- Consumes: `ClassifierVerdict`, `super::content_hash`, `data::FixtureRow`.
 - Produces:
   - `pub struct VerdictRecord { pub id: String, pub model: String, pub content_hash: String, pub model_id: String, pub policy_version: String, pub called_toxic: Option<bool>, pub error: Option<String>, pub latency_ms: u32, pub input_chars: usize, pub est_usd: f64 }`
   - `pub struct Identity<'a> { pub model_id: &'a str, pub policy_version: &'a str }`
-  - `impl VerdictRecord { pub fn from_verdict(id: &str, model: &str, content: &str, v: &ClassifierVerdict, est_usd: f64) -> Self; pub fn from_error(id: &str, model: &str, content: &str, who: Identity<'_>, detail: &str, est_usd: f64) -> Self; pub fn reusable(&self, content: &str, who: Identity<'_>) -> bool }`
-  - `pub fn append(dir: &Path, rec: &VerdictRecord) -> Result<()>` — `dir/<model>.jsonl`
-  - `pub fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>>` — last record per id wins
+  - `pub struct IdentityRecord { pub model_id: String, pub policy_version: String }` (serde)
+  - `impl VerdictRecord { pub fn from_verdict(id, model, content, &ClassifierVerdict, est_usd) -> Self; pub fn from_error(id, model, content, Identity, detail, est_usd) -> Self; pub fn reusable(&self, content: &str, who: Identity<'_>) -> bool }`
+  - `pub fn append(dir: &Path, rec: &VerdictRecord) -> Result<()>`; `pub fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>>` (last record per id wins)
+  - `pub fn save_identity(dir: &Path, model: &str, who: Identity<'_>) -> Result<()>`; `pub fn load_identity(dir: &Path, model: &str) -> Result<Option<IdentityRecord>>`
+  - `pub fn current(recs: HashMap<String, VerdictRecord>, pool: &[FixtureRow], who: Option<&IdentityRecord>) -> HashMap<String, VerdictRecord>` — keeps only records for posts in the pool whose content hash matches the pool's text and whose model/policy match `who` (no identity recorded → nothing is current)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -623,42 +709,61 @@ mod tests {
         ClassifierVerdict { toxic_token: toxic, confidence: conf, latency_ms: 12, model_id: "m-1".into(), policy_version: "p-1".into() }
     }
     const WHO: Identity<'static> = Identity { model_id: "m-1", policy_version: "p-1" };
+    fn row(id: &str, content: &str) -> FixtureRow {
+        serde_json::from_value(serde_json::json!({"id": id, "content": content})).unwrap()
+    }
 
     /// Codex review, critical: CoPE-B reports confidence as exp(logprob) of the
     /// emitted token over the WHOLE vocabulary. A "clean" answer with 0.1 must
-    /// stay clean — it is not "0.9 toxic". This is the repository's own RunPod
-    /// fixture shape (src/toxicity/runpod_cope_b.rs, `toxic:false, confidence:0.1`).
+    /// stay clean — the repository's own RunPod fixture shape.
     #[test]
     fn the_models_own_answer_is_kept_whatever_its_confidence() {
-        let r = VerdictRecord::from_verdict("a", "cope-b", "x", &verdict(false, 0.1), 0.0);
-        assert_eq!(r.called_toxic, Some(false));
-        let r = VerdictRecord::from_verdict("b", "cope-b", "x", &verdict(true, 0.2), 0.0);
-        assert_eq!(r.called_toxic, Some(true));
-        let e = VerdictRecord::from_error("c", "cope-b", "x", WHO, "timed out", 0.0);
-        assert_eq!(e.called_toxic, None, "an error, never clean");
+        assert_eq!(VerdictRecord::from_verdict("a", "cope-b", "x", &verdict(false, 0.1), 0.0).called_toxic, Some(false));
+        assert_eq!(VerdictRecord::from_verdict("b", "cope-b", "x", &verdict(true, 0.2), 0.0).called_toxic, Some(true));
+        assert_eq!(VerdictRecord::from_error("c", "cope-b", "x", WHO, "timed out", 0.0).called_toxic, None);
     }
 
     #[test]
     fn reuse_requires_same_content_model_and_policy() {
         let r = VerdictRecord::from_verdict("a", "cope-b", "post text", &verdict(true, 0.9), 0.0);
         assert!(r.reusable("post text", WHO));
-        assert!(!r.reusable("post text, edited", WHO), "edited post");
-        assert!(!r.reusable("post text", Identity { model_id: "m-2", policy_version: "p-1" }), "redeployed model");
-        assert!(!r.reusable("post text", Identity { model_id: "m-1", policy_version: "p-2" }), "new policy");
-        let e = VerdictRecord::from_error("a", "cope-b", "post text", WHO, "boom", 0.0);
-        assert!(!e.reusable("post text", WHO), "errors are always retried");
+        assert!(!r.reusable("post text, edited", WHO));
+        assert!(!r.reusable("post text", Identity { model_id: "m-2", policy_version: "p-1" }));
+        assert!(!r.reusable("post text", Identity { model_id: "m-1", policy_version: "p-2" }));
+        assert!(!VerdictRecord::from_error("a", "cope-b", "post text", WHO, "boom", 0.0).reusable("post text", WHO));
     }
 
     #[test]
-    fn cache_round_trips_and_the_last_record_wins() {
+    fn cache_and_identity_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         append(dir.path(), &VerdictRecord::from_error("a", "m", "x", WHO, "timeout", 0.0)).unwrap();
         append(dir.path(), &VerdictRecord::from_verdict("a", "m", "x", &verdict(true, 0.9), 0.01)).unwrap();
-        append(dir.path(), &VerdictRecord::from_verdict("b", "m", "y", &verdict(false, 0.7), 0.01)).unwrap();
         let got = load(dir.path(), "m").unwrap();
-        assert_eq!(got.len(), 2);
-        assert_eq!(got["a"].called_toxic, Some(true));
+        assert_eq!(got["a"].called_toxic, Some(true), "the last record wins");
         assert!(load(dir.path(), "other").unwrap().is_empty());
+        assert_eq!(load_identity(dir.path(), "m").unwrap(), None);
+        save_identity(dir.path(), "m", WHO).unwrap();
+        assert_eq!(load_identity(dir.path(), "m").unwrap().unwrap().model_id, "m-1");
+    }
+
+    /// Codex review, round 2: report and label must not score stale or
+    /// foreign verdicts.
+    #[test]
+    fn only_current_verdicts_survive() {
+        let pool = vec![row("kept", "same"), row("edited", "new text"), row("err", "e")];
+        let mut recs = HashMap::new();
+        recs.insert("kept".into(), VerdictRecord::from_verdict("kept", "m", "same", &verdict(true, 0.9), 0.0));
+        recs.insert("edited".into(), VerdictRecord::from_verdict("edited", "m", "old text", &verdict(true, 0.9), 0.0));
+        recs.insert("gone".into(), VerdictRecord::from_verdict("gone", "m", "x", &verdict(true, 0.9), 0.0));
+        recs.insert("err".into(), VerdictRecord::from_error("err", "m", "e", WHO, "timed out", 0.0));
+        let who = IdentityRecord { model_id: "m-1".into(), policy_version: "p-1".into() };
+        let cur = current(recs.clone(), &pool, Some(&who));
+        let mut keys: Vec<&str> = cur.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["err", "kept"], "errors still count toward coverage");
+        let newer = IdentityRecord { model_id: "m-1".into(), policy_version: "p-2".into() };
+        assert!(current(recs.clone(), &pool, Some(&newer)).is_empty(), "redeployed: nothing current");
+        assert!(current(recs, &pool, None).is_empty(), "no identity recorded: nothing current");
     }
 }
 ```
@@ -671,10 +776,10 @@ Expected: compile error.
 - [ ] **Step 3: Implement** `src/cli/eval_classifiers/cache.rs`:
 
 ```rust
-//! Every verdict ever paid for, one JSONL file per model. A verdict is reused
-//! only while the post text, the deployed model and its policy are unchanged
-//! (Codex review): otherwise "re-ask cheaply when a model changes" would
-//! silently answer with the old model.
+//! Every verdict ever paid for, one JSONL file per model, plus the identity
+//! (model id + policy version) of the last run. A verdict is reused, reported
+//! or labelled from only while it is CURRENT: same post text, same model,
+//! same policy (Codex review, rounds 1 and 2).
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -683,6 +788,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::content_hash;
+use super::data::FixtureRow;
 use crate::toxicity::classifier::ClassifierVerdict;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -691,16 +797,16 @@ pub struct VerdictRecord {
     /// The eval's name for the model (file name), e.g. "cope-b".
     pub model: String,
     pub content_hash: String,
-    /// What the backend reported serving — not just the eval's name for it.
+    /// What the backend reported serving.
     pub model_id: String,
     pub policy_version: String,
-    /// The model's OWN binary answer. `None` = the call failed or timed out.
-    /// Never derived from `confidence` (see the plan's decision rule).
+    /// The model's OWN binary answer. `None` = failed, timed out, or the
+    /// backend reported an unexpected identity. Never derived from confidence.
     pub called_toxic: Option<bool>,
     pub error: Option<String>,
     pub latency_ms: u32,
     pub input_chars: usize,
-    /// Estimated spend for this call, from pricing.json.
+    /// Estimated spend for this post, from pricing.json.
     pub est_usd: f64,
 }
 
@@ -708,6 +814,12 @@ pub struct VerdictRecord {
 pub struct Identity<'a> {
     pub model_id: &'a str,
     pub policy_version: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentityRecord {
+    pub model_id: String,
+    pub policy_version: String,
 }
 
 impl VerdictRecord {
@@ -741,18 +853,24 @@ impl VerdictRecord {
         }
     }
 
-    /// A successful verdict for exactly this text, from exactly this model
-    /// and policy. Anything else is judged again.
+    fn matches(&self, content: &str, model_id: &str, policy_version: &str) -> bool {
+        self.content_hash == content_hash(content)
+            && self.model_id == model_id
+            && self.policy_version == policy_version
+    }
+
+    /// A successful, current verdict: nothing to re-judge.
     pub fn reusable(&self, content: &str, who: Identity<'_>) -> bool {
-        self.called_toxic.is_some()
-            && self.content_hash == content_hash(content)
-            && self.model_id == who.model_id
-            && self.policy_version == who.policy_version
+        self.called_toxic.is_some() && self.matches(content, who.model_id, who.policy_version)
     }
 }
 
 fn path_for(dir: &Path, model: &str) -> PathBuf {
     dir.join(format!("{model}.jsonl"))
+}
+
+fn identity_path(dir: &Path, model: &str) -> PathBuf {
+    dir.join(format!("{model}.identity.json"))
 }
 
 pub fn append(dir: &Path, rec: &VerdictRecord) -> Result<()> {
@@ -782,6 +900,44 @@ pub fn load(dir: &Path, model: &str) -> Result<HashMap<String, VerdictRecord>> {
     }
     Ok(out)
 }
+
+/// The identity the last run verified, so report and label — which build no
+/// backend — know which verdicts are current.
+pub fn save_identity(dir: &Path, model: &str, who: Identity<'_>) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    let rec = IdentityRecord { model_id: who.model_id.to_string(), policy_version: who.policy_version.to_string() };
+    let path = identity_path(dir, model);
+    std::fs::write(&path, serde_json::to_string(&rec)?).with_context(|| format!("writing {}", path.display()))
+}
+
+pub fn load_identity(dir: &Path, model: &str) -> Result<Option<IdentityRecord>> {
+    let path = identity_path(dir, model);
+    match std::fs::read_to_string(&path) {
+        Ok(t) => Ok(Some(serde_json::from_str(&t).with_context(|| format!("parsing {}", path.display()))?)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+/// The ONE gate every consumer goes through: only verdicts for posts still
+/// in the pool, with the pool's present text, from the identity last
+/// verified. Errors that pass are kept — they count against coverage.
+pub fn current(
+    recs: HashMap<String, VerdictRecord>,
+    pool: &[FixtureRow],
+    who: Option<&IdentityRecord>,
+) -> HashMap<String, VerdictRecord> {
+    let Some(who) = who else {
+        return HashMap::new();
+    };
+    let text: HashMap<&str, &str> = pool.iter().map(|r| (r.id.as_str(), r.content.as_str())).collect();
+    recs.into_iter()
+        .filter(|(id, r)| {
+            text.get(id.as_str())
+                .is_some_and(|content| r.matches(content, &who.model_id, &who.policy_version))
+        })
+        .collect()
+}
 ```
 
 Add `pub mod cache;` to `mod.rs`.
@@ -789,18 +945,18 @@ Add `pub mod cache;` to `mod.rs`.
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib eval_classifiers::cache`
-Expected: 3 passed.
+Expected: 4 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/cli/eval_classifiers/cache.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): verdict cache keyed by content, model and policy identity'
+git commit -m 'feat(404): verdict cache with identity file and a single current-verdict gate'
 ```
 
 ---
 
-### Task 5: Pricing (required) and the spending cap
+### Task 5: Pricing (required) and the reservation budget
 
 **Files:**
 - Create: `src/cli/eval_classifiers/cost.rs`
@@ -808,11 +964,13 @@ git commit -m 'feat(404): verdict cache keyed by content, model and policy ident
 
 **Interfaces:**
 - Produces:
-  - `pub struct Price { pub usd_per_post: Option<f64>, pub usd_per_million_input_tokens: Option<f64>, pub overhead_chars: usize }` (serde; `overhead_chars` defaults to 0 — Part B sets it to the policy's length)
+  - `pub struct Price { pub usd_per_post: Option<f64>, pub usd_per_million_input_tokens: Option<f64>, pub overhead_chars: usize }` (serde)
   - `pub fn load_pricing(path: &Path) -> Result<HashMap<String, Price>>` — an entry with neither price field is an error
   - `pub fn price_for<'a>(prices: &'a HashMap<String, Price>, model: &str) -> Result<&'a Price>` — a model with no entry is refused
-  - `pub fn estimate_usd(price: &Price, input_chars: usize) -> f64` — per-post, else `(input_chars + overhead_chars) / 4` tokens × price
+  - `pub fn estimate_usd(price: &Price, input_chars: usize) -> f64`
   - `pub struct Budget` with `pub fn new(cap_usd: f64) -> Self`, `pub fn try_spend(&mut self, usd: f64) -> bool`, `pub fn spent(&self) -> f64`
+
+This budget is the cap for **priced-per-token** models (Part B, plus provider-reported usage). CoPE-B's cap is enforced separately by its real cost meter (Task 9); the budget still reserves CoPE-B's estimate so the printed "estimated spend" stays meaningful.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -837,7 +995,7 @@ mod tests {
     fn the_budget_refuses_a_call_that_would_cross_the_cap() {
         let mut b = Budget::new(1.0);
         assert!(b.try_spend(0.6));
-        assert!(!b.try_spend(0.5), "0.6 + 0.5 > 1.0: refused, nothing spent");
+        assert!(!b.try_spend(0.5));
         assert!((b.spent() - 0.6).abs() < 1e-12);
         assert!(b.try_spend(0.4));
     }
@@ -867,9 +1025,10 @@ Expected: compile error.
 - [ ] **Step 3: Implement** `src/cli/eval_classifiers/cost.rs`:
 
 ```rust
-//! Cost estimates and the per-run spending cap — the lesson of the $193
-//! incident (#385): a run must stop before it can surprise anyone, and a
-//! model nobody priced must not run as if it were free (Codex review).
+//! Cost estimates and the reservation budget. A model nobody priced must not
+//! run as if it were free (Codex review). For CoPE-B, real spend is bounded
+//! by the RunPod client's own cost meter (models.rs); this budget bounds
+//! priced-per-token models and keeps the printed estimate honest.
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -883,8 +1042,7 @@ pub struct Price {
     #[serde(default)]
     pub usd_per_million_input_tokens: Option<f64>,
     /// Characters every request carries besides the post — e.g. the policy a
-    /// decision model is given as its instruction. Without it the estimate
-    /// would miss the dominant part of the bill.
+    /// decision model is given as its instruction.
     #[serde(default)]
     pub overhead_chars: usize,
 }
@@ -907,8 +1065,7 @@ pub fn price_for<'a>(prices: &'a HashMap<String, Price>, model: &str) -> Result<
         .with_context(|| format!("{model:?} has no entry in pricing.json — refusing to run an unpriced model"))
 }
 
-/// ~4 characters per token: a rough English average, good enough for a cap.
-/// Part B adapters record provider-reported usage and reconcile against this.
+/// ~4 characters per token: a rough English average.
 pub fn estimate_usd(price: &Price, input_chars: usize) -> f64 {
     if let Some(per_post) = price.usd_per_post {
         return per_post;
@@ -954,23 +1111,23 @@ Expected: 3 passed.
 
 ```bash
 git add src/cli/eval_classifiers/cost.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): required pricing, whole-request estimates and the spending cap'
+git commit -m 'feat(404): required pricing, whole-request estimates and a reservation budget'
 ```
 
 ---
 
-### Task 6: The runner — cache, cap and timeout
+### Task 6: The runner — probe, batch, identity check, timeout, cap
 
 **Files:**
 - Create: `src/cli/eval_classifiers/runner.rs`
 - Modify: `src/cli/eval_classifiers/mod.rs` (add `pub mod runner;`)
 
 **Interfaces:**
-- Consumes: `data::FixtureRow`, `cache::{append, load, Identity, VerdictRecord}`, `cost::{estimate_usd, Budget, Price}`, `ToxicityClassifier` (`model_id()`, `policy_version()`, `classify()`).
+- Consumes: `data::FixtureRow`, `cache::{append, load, save_identity, Identity, VerdictRecord}`, `cost::{estimate_usd, Budget, Price}`, `ToxicityClassifier` (`probe_identity`, `classify_batch`, `max_batch_size`, `model_id`, `policy_version`), `ItemOutcome`, `crate::toxicity::cost_meter::CostCeilingExceeded`.
 - Produces:
-  - `pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);`
+  - `pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);`
   - `pub struct RunStats { pub model: String, pub judged: usize, pub cached: usize, pub errors: usize, pub stopped_at_cap: bool }`
-  - `pub async fn run_model(model: &str, classifier: &dyn ToxicityClassifier, pool: &[FixtureRow], dir: &Path, price: &Price, budget: &mut Budget, timeout: Duration) -> Result<RunStats>`
+  - `pub async fn run_model(model: &str, classifier: &dyn ToxicityClassifier, pool: &[FixtureRow], dir: &Path, price: &Price, budget: &mut Budget, timeout: Duration) -> Result<RunStats>` — errors (before any paid call) if `probe_identity` fails
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -980,18 +1137,22 @@ mod tests {
     use super::*;
     use crate::cli::eval_classifiers::cost::Price;
     use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+    use crate::toxicity::cost_meter::CostCeilingExceeded;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct Fake {
         calls: AtomicUsize,
         fail_on: Option<&'static str>,
         hang_on: Option<&'static str>,
+        capped_on: Option<&'static str>,
         policy: &'static str,
+        reported_model: &'static str,
+        probe_fails: bool,
     }
 
     impl Fake {
         fn new() -> Self {
-            Self { calls: AtomicUsize::new(0), fail_on: None, hang_on: None, policy: "p-1" }
+            Self { calls: AtomicUsize::new(0), fail_on: None, hang_on: None, capped_on: None, policy: "p-1", reported_model: "fake-1", probe_fails: false }
         }
     }
 
@@ -1002,10 +1163,19 @@ mod tests {
             if self.hang_on.is_some_and(|h| content.contains(h)) {
                 tokio::time::sleep(Duration::from_secs(30)).await;
             }
+            if self.capped_on.is_some_and(|c| content.contains(c)) {
+                return Err(CostCeilingExceeded { est_cents: 100, ceiling_cents: 100 }.into());
+            }
             if self.fail_on.is_some_and(|f| content.contains(f)) {
                 anyhow::bail!("upstream 503");
             }
-            Ok(ClassifierVerdict { toxic_token: content.contains("bad"), confidence: 0.9, latency_ms: 5, model_id: "fake-1".into(), policy_version: self.policy.into() })
+            Ok(ClassifierVerdict { toxic_token: content.contains("bad"), confidence: 0.9, latency_ms: 5, model_id: self.reported_model.into(), policy_version: self.policy.into() })
+        }
+        async fn probe_identity(&self) -> anyhow::Result<()> {
+            if self.probe_fails {
+                anyhow::bail!("endpoint serves policy-old, deployment declares p-1");
+            }
+            Ok(())
         }
         fn name(&self) -> &'static str { "fake" }
         fn model_id(&self) -> &'static str { "fake-1" }
@@ -1030,9 +1200,9 @@ mod tests {
         let s = run_model("m", &model, &pool, dir.path(), &Price::default(), &mut budget, T).await.unwrap();
         assert_eq!((s.judged, s.cached), (0, 2), "nothing re-paid");
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+        assert!(crate::cli::eval_classifiers::cache::load_identity(dir.path(), "m").unwrap().is_some());
     }
 
-    /// Codex review: a changed post or a new policy is judged again.
     #[tokio::test]
     async fn edited_posts_and_new_policies_are_rejudged() {
         let dir = tempfile::tempdir().unwrap();
@@ -1046,22 +1216,44 @@ mod tests {
         assert_eq!(repoliced.calls.load(Ordering::SeqCst), 1);
     }
 
+    /// Codex review, round 2: a backend that fails its identity probe is not
+    /// paid for at all.
+    #[tokio::test]
+    async fn a_failed_identity_probe_stops_before_any_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = Fake { probe_fails: true, ..Fake::new() };
+        let mut budget = Budget::new(1.0);
+        let err = run_model("m", &model, &[row("a", "bad")], dir.path(), &Price::default(), &mut budget, T).await.unwrap_err();
+        assert!(format!("{err:#}").contains("identity"), "{err:#}");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Codex review, round 2: a verdict from an unexpected model is an error.
+    #[tokio::test]
+    async fn a_verdict_from_a_foreign_model_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = Fake { reported_model: "someone-else", ..Fake::new() };
+        let mut budget = Budget::new(1.0);
+        let s = run_model("m", &model, &[row("a", "bad")], dir.path(), &Price::default(), &mut budget, T).await.unwrap();
+        assert_eq!((s.judged, s.errors), (0, 1));
+        let rec = &load(dir.path(), "m").unwrap()["a"];
+        assert_eq!(rec.called_toxic, None);
+        assert!(rec.error.as_deref().unwrap().contains("identity mismatch"));
+    }
+
     #[tokio::test]
     async fn an_error_is_recorded_as_an_error_and_retried_next_run() {
         let dir = tempfile::tempdir().unwrap();
         let pool = vec![row("a", "bad 503")];
         let mut budget = Budget::new(1.0);
-        let failing = Fake { fail_on: Some("503"), ..Fake::new() };
-        let s = run_model("m", &failing, &pool, dir.path(), &Price::default(), &mut budget, T).await.unwrap();
+        let s = run_model("m", &Fake { fail_on: Some("503"), ..Fake::new() }, &pool, dir.path(), &Price::default(), &mut budget, T).await.unwrap();
         assert_eq!(s.errors, 1);
         assert_eq!(load(dir.path(), "m").unwrap()["a"].called_toxic, None, "an error, never clean");
         let ok = Fake::new();
         run_model("m", &ok, &pool, dir.path(), &Price::default(), &mut budget, T).await.unwrap();
         assert_eq!(ok.calls.load(Ordering::SeqCst), 1, "the error was retried");
-        assert_eq!(load(dir.path(), "m").unwrap()["a"].called_toxic, Some(true));
     }
 
-    /// Codex review: a hung model must not stall the run.
     #[tokio::test]
     async fn a_hung_call_times_out_as_an_error_and_the_run_continues() {
         let dir = tempfile::tempdir().unwrap();
@@ -1072,23 +1264,33 @@ mod tests {
         let s = run_model("m", &model, &pool, dir.path(), &Price::default(), &mut budget, Duration::from_millis(50)).await.unwrap();
         assert!(started.elapsed() < Duration::from_secs(5), "did not wait out the 30 s hang");
         assert_eq!((s.errors, s.judged), (1, 1));
-        let recs = load(dir.path(), "m").unwrap();
-        assert!(recs["a"].error.as_deref().unwrap().contains("timed out"));
-        assert_eq!(recs["b"].called_toxic, Some(true));
+        assert!(load(dir.path(), "m").unwrap()["a"].error.as_deref().unwrap().contains("timed out"));
     }
 
     #[tokio::test]
-    async fn the_cap_stops_the_run_and_keeps_what_was_paid_for() {
+    async fn the_reservation_cap_stops_the_run_and_keeps_what_was_paid_for() {
         let dir = tempfile::tempdir().unwrap();
         let pool = vec![row("a", "x"), row("b", "y"), row("c", "z")];
         let price = Price { usd_per_post: Some(0.4), usd_per_million_input_tokens: None, overhead_chars: 0 };
         let mut budget = Budget::new(1.0);
         let s = run_model("m", &Fake::new(), &pool, dir.path(), &price, &mut budget, T).await.unwrap();
         assert!(s.stopped_at_cap);
-        assert_eq!(s.judged, 2, "$0.80 spent; the third $0.40 call would cross $1.00");
-        let recs = load(dir.path(), "m").unwrap();
-        assert_eq!(recs.len(), 2, "both paid verdicts kept");
-        assert!((recs["a"].est_usd - 0.4).abs() < 1e-12);
+        assert_eq!(s.judged, 2);
+        assert_eq!(load(dir.path(), "m").unwrap().len(), 2, "both paid verdicts kept");
+    }
+
+    /// Codex review, round 2: the backend's REAL cost meter tripping stops the
+    /// run too — the cap is not only an estimate.
+    #[tokio::test]
+    async fn the_backends_real_cost_ceiling_stops_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "capped"), row("c", "bad")];
+        let model = Fake { capped_on: Some("capped"), ..Fake::new() };
+        let mut budget = Budget::new(1.0);
+        let s = run_model("m", &model, &pool, dir.path(), &Price::default(), &mut budget, T).await.unwrap();
+        assert!(s.stopped_at_cap);
+        assert_eq!(s.judged, 1);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 2, "c was never sent");
     }
 }
 ```
@@ -1101,20 +1303,28 @@ Expected: compile error.
 - [ ] **Step 3: Implement** `src/cli/eval_classifiers/runner.rs`:
 
 ```rust
-//! Run one model over the pool: reuse only verdicts whose content, model and
-//! policy still match, record every outcome (errors included), bound every
-//! call with a timeout, and stop cleanly at the spending cap.
+//! Run one model over the pool:
+//! 1. probe the backend's identity before any paid call;
+//! 2. reuse only current verdicts;
+//! 3. send the rest in the backend's own batch size (as production does);
+//! 4. reject verdicts from an unexpected model or policy;
+//! 5. bound each batch with a last-resort timeout, set ABOVE the backend's own
+//!    so a job the backend still owns is never abandoned;
+//! 6. stop at the reservation cap or when the backend's real cost meter trips.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
 
-use super::cache::{append, load, Identity, VerdictRecord};
+use super::cache::{append, load, save_identity, Identity, VerdictRecord};
 use super::cost::{estimate_usd, Budget, Price};
 use super::data::FixtureRow;
-use crate::toxicity::classifier::ToxicityClassifier;
+use crate::toxicity::classifier::{ItemOutcome, ToxicityClassifier};
+use crate::toxicity::cost_meter::CostCeilingExceeded;
 
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Above the RunPod client's own warm-up (180–300 s) and steady timeouts:
+/// this guards against a hang, it must not race the backend's own timeout.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStats {
@@ -1134,11 +1344,17 @@ pub async fn run_model(
     budget: &mut Budget,
     timeout: Duration,
 ) -> Result<RunStats> {
-    let cached = load(dir, model)?;
+    classifier
+        .probe_identity()
+        .await
+        .with_context(|| format!("{model}: identity probe failed — not running it"))?;
     let who = Identity {
         model_id: classifier.model_id(),
         policy_version: classifier.policy_version(),
     };
+    save_identity(dir, model, who)?;
+
+    let cached = load(dir, model)?;
     let mut stats = RunStats {
         model: model.to_string(),
         judged: 0,
@@ -1146,55 +1362,101 @@ pub async fn run_model(
         errors: 0,
         stopped_at_cap: false,
     };
-    for row in pool {
-        if cached.get(&row.id).is_some_and(|r| r.reusable(&row.content, who)) {
-            stats.cached += 1;
-            continue;
-        }
-        let est = estimate_usd(price, row.content.chars().count());
-        if !budget.try_spend(est) {
+    let todo: Vec<&FixtureRow> = pool
+        .iter()
+        .filter(|row| {
+            let hit = cached.get(&row.id).is_some_and(|r| r.reusable(&row.content, who));
+            if hit {
+                stats.cached += 1;
+            }
+            !hit
+        })
+        .collect();
+
+    for chunk in todo.chunks(classifier.max_batch_size().max(1)) {
+        let ests: Vec<f64> = chunk.iter().map(|r| estimate_usd(price, r.content.chars().count())).collect();
+        if !budget.try_spend(ests.iter().sum()) {
             stats.stopped_at_cap = true;
             break;
         }
-        let rec = match tokio::time::timeout(timeout, classifier.classify(&row.content)).await {
-            Ok(Ok(v)) => {
-                stats.judged += 1;
-                VerdictRecord::from_verdict(&row.id, model, &row.content, &v, est)
+        let contents: Vec<String> = chunk.iter().map(|r| r.content.clone()).collect();
+        let mut records = Vec::with_capacity(chunk.len());
+        match tokio::time::timeout(timeout, classifier.classify_batch(&contents)).await {
+            Ok(Ok(outcomes)) if outcomes.len() == chunk.len() => {
+                for ((row, est), outcome) in chunk.iter().zip(&ests).zip(outcomes) {
+                    records.push(match outcome {
+                        ItemOutcome::Verdict(v) if v.model_id == who.model_id && v.policy_version == who.policy_version => {
+                            VerdictRecord::from_verdict(&row.id, model, &row.content, &v, *est)
+                        }
+                        ItemOutcome::Verdict(v) => {
+                            let detail = format!(
+                                "identity mismatch: backend reported {}/{}, deployment declares {}/{}",
+                                v.model_id, v.policy_version, who.model_id, who.policy_version
+                            );
+                            VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est)
+                        }
+                        ItemOutcome::Error(detail) => {
+                            VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est)
+                        }
+                    });
+                }
+            }
+            Ok(Ok(outcomes)) => {
+                let detail = format!("backend returned {} outcomes for {} posts", outcomes.len(), chunk.len());
+                for (row, est) in chunk.iter().zip(&ests) {
+                    records.push(VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est));
+                }
+            }
+            // The backend's REAL cost meter tripped: stop, record nothing for
+            // this batch (it was refused, not judged).
+            Ok(Err(e)) if e.downcast_ref::<CostCeilingExceeded>().is_some() => {
+                stats.stopped_at_cap = true;
+                break;
             }
             Ok(Err(e)) => {
-                stats.errors += 1;
-                VerdictRecord::from_error(&row.id, model, &row.content, who, &format!("{e:#}"), est)
+                let detail = format!("{e:#}");
+                for (row, est) in chunk.iter().zip(&ests) {
+                    records.push(VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est));
+                }
             }
             Err(_) => {
-                stats.errors += 1;
-                let detail = format!("timed out after {} ms", timeout.as_millis());
-                VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, est)
+                let detail = format!("timed out after {} s", timeout.as_secs_f64());
+                for (row, est) in chunk.iter().zip(&ests) {
+                    records.push(VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est));
+                }
             }
-        };
-        // Written per post, so a crash or a cap mid-run keeps every paid verdict.
-        append(dir, &rec)?;
+        }
+        for rec in &records {
+            if rec.called_toxic.is_some() {
+                stats.judged += 1;
+            } else {
+                stats.errors += 1;
+            }
+            // Written as each batch returns, so a crash or a cap keeps every paid verdict.
+            append(dir, rec)?;
+        }
     }
     Ok(stats)
 }
 ```
 
-Add `pub mod runner;` to `mod.rs`.
+Add `pub mod runner;` to `mod.rs`. Note: `classify_batch`'s default implementation loops `classify` and short-circuits on the first error, so for a batch size of 1 (the fakes, Detoxify) each post is its own batch — which is what the tests above rely on.
 
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib eval_classifiers::runner`
-Expected: 5 passed, in well under 5 seconds.
+Expected: 8 passed, in well under 5 seconds.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/cli/eval_classifiers/runner.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): eval runner with identity-checked cache, timeout and spending cap'
+git commit -m 'feat(404): runner probes identity, batches, rejects foreign verdicts and honours real cost ceilings'
 ```
 
 ---
 
-### Task 7: The label picker — holdout and diagnostics
+### Task 7: The label picker and a merge that derives the source
 
 **Files:**
 - Create: `src/cli/eval_classifiers/labelling.rs`
@@ -1205,9 +1467,10 @@ git commit -m 'feat(404): eval runner with identity-checked cache, timeout and s
 - Produces:
   - `pub fn in_holdout(id: &str) -> bool` — `fnv1a("holdout:" + id) % 3 == 0`
   - `pub fn sampled(id: &str) -> bool` — `fnv1a(id) % 10 == 0`
-  - `pub fn pick_for_labelling(pool: &[FixtureRow], per_model: &[HashMap<String, VerdictRecord>], labels: &HashMap<String, Answer>) -> Vec<(FixtureRow, Source)>` — unlabelled holdout posts always (as `Holdout`, regardless of votes); other unlabelled posts as `Diagnostic` when ≥ 2 models answered and they disagree, or they agree and `sampled(id)`
-  - `pub fn write_to_label(path: &Path, rows: &[(FixtureRow, Source)]) -> Result<()>` — JSONL `{id, content, source, label: "", note: ""}`; **no model votes**
-  - `pub fn merge_labels(to_label: &Path, labels: &Path) -> Result<usize>` — appends answered rows (`toxic`/`clean`) with their `source`, skips already-labelled ids, errors on any other non-empty label
+  - `pub fn source_for(id: &str) -> Source` — `Holdout` if `in_holdout(id)`, else `Diagnostic`
+  - `pub fn pick_for_labelling(pool: &[FixtureRow], per_model: &[HashMap<String, VerdictRecord>], labels: &HashMap<String, Answer>) -> Vec<(FixtureRow, Source)>` — callers pass **current** verdicts only
+  - `pub fn write_to_label(path: &Path, rows: &[(FixtureRow, Source)]) -> Result<()>` — JSONL `{id, content, source, label: "", note: ""}`; no model votes
+  - `pub fn merge_labels(to_label: &Path, labels: &Path, pool: &[FixtureRow]) -> Result<usize>` — **ignores** the file's `source` and uses `source_for(id)`; errors on an id not in the pool, on content that differs from the pool, or on a label other than `toxic`/`clean`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1226,6 +1489,12 @@ mod tests {
     fn by_id(recs: Vec<VerdictRecord>) -> HashMap<String, VerdictRecord> {
         recs.into_iter().map(|r| (r.id.clone(), r)).collect()
     }
+    fn holdout_id() -> String {
+        (0..100).map(|i| format!("h{i}")).find(|id| in_holdout(id)).unwrap()
+    }
+    fn other_id() -> String {
+        (0..100).map(|i| format!("o{i}")).find(|id| !in_holdout(id)).unwrap()
+    }
 
     #[test]
     fn holdout_and_sample_fractions_are_stable() {
@@ -1233,14 +1502,12 @@ mod tests {
         assert!((900..=1100).contains(&holdout), "{holdout} of 3000 ≈ 1/3");
         let sample = (0..2000).filter(|i| sampled(&format!("post-{i}"))).count();
         assert!((140..=260).contains(&sample), "{sample} of 2000 ≈ 1/10");
-        assert_eq!(in_holdout("post-7"), in_holdout("post-7"));
     }
 
     #[test]
     fn holdout_posts_are_picked_whatever_the_models_say() {
-        let h = (0..100).map(|i| format!("h{i}")).find(|id| in_holdout(id)).unwrap();
-        let picked = pick_for_labelling(&[row(&h)], &[], &HashMap::new());
-        assert_eq!(picked.len(), 1, "no model verdicts needed for the holdout");
+        let picked = pick_for_labelling(&[row(&holdout_id())], &[], &HashMap::new());
+        assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].1, Source::Holdout);
     }
 
@@ -1258,24 +1525,38 @@ mod tests {
         let picked: Vec<(String, Source)> = pick_for_labelling(&pool, &[m1, m2], &labels).into_iter().map(|(r, s)| (r.id, s)).collect();
         assert!(picked.contains(&(dis.clone(), Source::Diagnostic)));
         assert!(picked.contains(&(agree_sampled.clone(), Source::Diagnostic)));
-        assert!(!picked.iter().any(|(id, _)| *id == agree), "agreed and not sampled");
-        assert!(!picked.iter().any(|(id, _)| *id == labelled), "already answered");
+        assert!(!picked.iter().any(|(id, _)| *id == agree));
+        assert!(!picked.iter().any(|(id, _)| *id == labelled));
     }
 
+    /// Codex review, round 2: the source is derived, never trusted — a
+    /// diagnostic post relabelled "holdout" in the file stays diagnostic.
     #[test]
-    fn to_label_rows_are_blind_and_merge_keeps_the_source() {
+    fn merge_derives_the_source_and_validates_against_the_pool() {
         let dir = tempfile::tempdir().unwrap();
         let to_label = dir.path().join("to-label.jsonl");
         let labels = dir.path().join("labels.jsonl");
-        write_to_label(&to_label, &[(row("a"), Source::Holdout), (row("b"), Source::Diagnostic)]).unwrap();
+        let (h, o) = (holdout_id(), other_id());
+        let pool = vec![row(&h), row(&o)];
+        write_to_label(&to_label, &[(row(&h), Source::Holdout), (row(&o), Source::Diagnostic)]).unwrap();
         let text = std::fs::read_to_string(&to_label).unwrap();
         assert!(!text.contains("called_toxic") && !text.contains("model"), "no votes shown: {text}");
-        std::fs::write(&to_label, text.replacen(r#""label":"""#, r#""label":"toxic""#, 1)).unwrap();
-        assert_eq!(merge_labels(&to_label, &labels).unwrap(), 1);
-        assert_eq!(load_labels(&labels).unwrap()["a"].source, Source::Holdout);
-        assert_eq!(merge_labels(&to_label, &labels).unwrap(), 0, "already merged ids are skipped");
-        std::fs::write(&to_label, r#"{"id":"c","content":"x","source":"holdout","label":"maybe","note":""}"#).unwrap();
-        assert!(merge_labels(&to_label, &labels).is_err());
+        // Answer both — and "promote" the diagnostic one to holdout by hand.
+        let edited = text.replace(r#""label":"""#, r#""label":"toxic""#).replace(r#""source":"diagnostic""#, r#""source":"holdout""#);
+        std::fs::write(&to_label, edited).unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 2);
+        let got = load_labels(&labels).unwrap();
+        assert_eq!(got[&h].source, Source::Holdout);
+        assert_eq!(got[&o].source, Source::Diagnostic, "the hand edit is ignored");
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 0, "already merged ids are skipped");
+
+        std::fs::write(&to_label, r#"{"id":"nope","content":"x","source":"holdout","label":"toxic","note":""}"#).unwrap();
+        assert!(merge_labels(&to_label, &labels, &pool).is_err(), "unknown id");
+        std::fs::write(&to_label, format!(r#"{{"id":"{h}x","content":"post {h}x","source":"holdout","label":"maybe","note":""}}"#)).unwrap();
+        assert!(merge_labels(&to_label, &labels, &[row(&format!("{h}x"))]).is_err(), "bad label");
+        let pool2 = vec![row(&format!("{o}y"))];
+        std::fs::write(&to_label, format!(r#"{{"id":"{o}y","content":"different text","source":"diagnostic","label":"clean","note":""}}"#)).unwrap();
+        assert!(merge_labels(&to_label, &labels, &pool2).is_err(), "content differs from the pool");
     }
 }
 ```
@@ -1291,12 +1572,12 @@ Expected: compile error.
 //! Choosing what a human labels next, in two streams kept strictly apart:
 //!
 //! - **Holdout** — a fixed, hash-chosen third of the pool, labelled whatever
-//!   the models say. Only these labels feed the headline rates: posts picked
-//!   BECAUSE models disagreed are outcome-dependent and would bias the rates
-//!   and invalidate the intervals (Codex review).
-//! - **Diagnostic** — disagreements, plus a stable ~10 % of agreed posts to
-//!   catch blind spots every model shares. Useful for understanding models;
-//!   never mixed into the headline numbers.
+//!   the models say. Only these labels feed the headline rates.
+//! - **Diagnostic** — disagreements, plus a stable ~10 % of agreed posts.
+//!   Useful for understanding models; never mixed into the headline numbers.
+//!
+//! The stream a label belongs to is DERIVED from the post id at merge time,
+//! never read from the (human-edited) file (Codex review, round 2).
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -1315,6 +1596,14 @@ pub fn in_holdout(id: &str) -> bool {
 
 pub fn sampled(id: &str) -> bool {
     fnv1a(id.as_bytes()) % 10 == 0
+}
+
+pub fn source_for(id: &str) -> Source {
+    if in_holdout(id) {
+        Source::Holdout
+    } else {
+        Source::Diagnostic
+    }
 }
 
 pub fn pick_for_labelling(
@@ -1352,7 +1641,8 @@ struct ToLabel<'a> {
     note: &'a str,
 }
 
-/// Blind on purpose: no model votes, so they cannot anchor the answer.
+/// Blind on purpose: no model votes, so they cannot anchor the answer. The
+/// `source` is shown for the labeller's information only.
 pub fn write_to_label(path: &Path, rows: &[(FixtureRow, Source)]) -> Result<()> {
     let mut f = std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
     for (r, source) in rows {
@@ -1362,8 +1652,9 @@ pub fn write_to_label(path: &Path, rows: &[(FixtureRow, Source)]) -> Result<()> 
     Ok(())
 }
 
-pub fn merge_labels(to_label: &Path, labels_path: &Path) -> Result<usize> {
+pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) -> Result<usize> {
     let existing = load_labels(labels_path)?;
+    let pool_text: HashMap<&str, &str> = pool.iter().map(|r| (r.id.as_str(), r.content.as_str())).collect();
     let text = std::fs::read_to_string(to_label).with_context(|| format!("reading {}", to_label.display()))?;
     let mut out = std::fs::OpenOptions::new()
         .create(true)
@@ -1372,21 +1663,30 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path) -> Result<usize> {
         .with_context(|| format!("opening {}", labels_path.display()))?;
     let mut merged = 0;
     for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
-        let row: serde_json::Value = serde_json::from_str(l)?;
-        let id = row["id"].as_str().context("row without id")?;
+        let at = || format!("{} line {}", to_label.display(), i + 1);
+        let row: serde_json::Value = serde_json::from_str(l).with_context(at)?;
+        let id = row["id"].as_str().with_context(|| format!("{}: row without id", at()))?;
         let answer = row["label"].as_str().unwrap_or("").trim();
         if answer.is_empty() || existing.contains_key(id) {
             continue;
         }
+        let Some(pool_content) = pool_text.get(id) else {
+            bail!("{}: id {id:?} is not in the pool", at());
+        };
+        if let Some(content) = row["content"].as_str() {
+            if content != *pool_content {
+                bail!("{}: content for {id:?} differs from the pool — re-run `label`", at());
+            }
+        }
         let truth = match answer {
             "toxic" => Truth::Toxic,
             "clean" => Truth::Clean,
-            other => bail!("{} line {}: label {other:?} must be toxic or clean", to_label.display(), i + 1),
+            other => bail!("{}: label {other:?} must be toxic or clean", at()),
         };
-        let source: Source = serde_json::from_value(row["source"].clone())
-            .with_context(|| format!("{} line {}: missing or bad source", to_label.display(), i + 1))?;
         let note = row["note"].as_str().filter(|n| !n.is_empty()).map(str::to_string);
-        let label = Label { id: id.to_string(), label: truth, source, note };
+        // Derived, not read: a hand-edited "source" cannot promote a
+        // disagreement-picked post into the headline rates.
+        let label = Label { id: id.to_string(), label: truth, source: source_for(id), note };
         writeln!(out, "{}", serde_json::to_string(&label)?)?;
         merged += 1;
     }
@@ -1405,7 +1705,7 @@ Expected: 4 passed.
 
 ```bash
 git add src/cli/eval_classifiers/labelling.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): label picker with an independent holdout and separate diagnostics'
+git commit -m 'feat(404): label picker with independent holdout; merge derives the source and validates the pool'
 ```
 
 ---
@@ -1417,12 +1717,12 @@ git commit -m 'feat(404): label picker with an independent holdout and separate 
 - Modify: `src/cli/eval_classifiers/mod.rs` (add `pub mod report;`)
 
 **Interfaces:**
-- Consumes: `metrics::{model_metrics, paired, Comparison, ModelMetrics, Paired, Rate}`, `cache::VerdictRecord`, `cost::{estimate_usd, Price}`, `data::{Answer, Source, Truth}`.
+- Consumes: `metrics::{model_metrics, paired, Comparison, ModelMetrics, Paired, Rate, MIN_CLASS_N}`, `cache::VerdictRecord`, `cost::{estimate_usd, Price}`, `data::{Answer, Source, Truth}`.
 - Produces:
   - `pub struct ModelReport { pub name: String, pub calls: HashMap<String, Option<bool>>, pub holdout: ModelMetrics, pub diagnostic: ModelMetrics, pub usd_per_1k: Option<f64>, pub p50_ms: Option<u32>, pub p95_ms: Option<u32> }`
   - `pub fn labels_of(answers: &HashMap<String, Answer>, source: Source) -> HashMap<String, Truth>`
-  - `pub fn build(models: &[(String, HashMap<String, VerdictRecord>)], answers: &HashMap<String, Answer>, prices: &HashMap<String, Price>) -> Vec<ModelReport>`
-  - `pub fn vs_baseline(baseline: &ModelReport, candidate: &ModelReport, answers: &HashMap<String, Answer>) -> Paired` — paired, holdout labels only
+  - `pub fn build(models: &[(String, HashMap<String, VerdictRecord>)], answers: &HashMap<String, Answer>, prices: &HashMap<String, Price>) -> Vec<ModelReport>` — callers pass **current** verdicts only
+  - `pub fn vs_baseline(baseline: &ModelReport, candidate: &ModelReport, answers: &HashMap<String, Answer>) -> Paired`
   - `pub fn render(reports: &[ModelReport], answers: &HashMap<String, Answer>, baseline: &str) -> String`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1465,35 +1765,38 @@ mod tests {
             &holdout(),
             &HashMap::new(),
         );
-        let p = vs_baseline(&reports[0], &reports[1], &holdout());
-        assert_eq!(p.miss, Comparison::Worse, "always-clean misses every toxic post");
+        assert_eq!(vs_baseline(&reports[0], &reports[1], &holdout()).miss, Comparison::Worse, "always-clean misses everything");
         let p = vs_baseline(&reports[0], &reports[2], &holdout());
-        assert!(p.false_alarm == Comparison::Worse || p.miss == Comparison::Worse, "coin-flip must lose on a rate");
+        assert_eq!((p.false_alarm, p.miss), (Comparison::Worse, Comparison::Worse), "coin-flip loses on both");
         let text = render(&reports, &holdout(), "cope-b");
         assert!(text.contains("always-clean: false alarms") && text.contains("misses worse"), "{text}");
     }
 
     #[test]
     fn close_models_are_too_close_to_call() {
-        let a = model("cope-b", |i| Some(i < 39 || i == 79));
-        let b = model("other", |i| Some(i < 38 || i == 79));
-        let reports = build(&[a, b], &holdout(), &HashMap::new());
+        let reports = build(&[model("cope-b", |i| Some(i < 39 || i == 79)), model("other", |i| Some(i < 38 || i == 79))], &holdout(), &HashMap::new());
         let p = vs_baseline(&reports[0], &reports[1], &holdout());
         assert_eq!((p.false_alarm, p.miss), (Comparison::TooClose, Comparison::TooClose));
         assert!(render(&reports, &holdout(), "cope-b").contains("too close to call — label more"));
     }
 
-    /// Codex review: errors on the hard posts must not buy a better score.
     #[test]
-    fn a_model_erroring_on_hard_posts_gets_no_verdict() {
+    fn a_model_erroring_on_hard_posts_gets_no_verdict_on_that_class() {
         let dodger = model("dodger", |i| if i < 10 { None } else { Some(i < 40) });
         let reports = build(&[model("cope-b", good), dodger], &holdout(), &HashMap::new());
         let p = vs_baseline(&reports[0], &reports[1], &holdout());
-        assert!(p.low_coverage, "70/80 = 87.5 % coverage");
-        assert!(render(&reports, &holdout(), "cope-b").contains("coverage below 90 %"));
+        assert_eq!(p.miss, Comparison::LowCoverage, "30/40 toxic answered");
+        assert!(render(&reports, &holdout(), "cope-b").contains("misses no verdict — coverage below 90 %"));
     }
 
-    /// Codex review: only holdout labels feed the headline rates.
+    #[test]
+    fn too_few_holdout_labels_say_so() {
+        let few: HashMap<String, Answer> = holdout().into_iter().filter(|(id, _)| id[1..].parse::<usize>().unwrap() % 4 == 0).collect();
+        let reports = build(&[model("cope-b", good), model("always-clean", |_| Some(false))], &few, &HashMap::new());
+        assert_eq!(vs_baseline(&reports[0], &reports[1], &few).miss, Comparison::NotEnoughLabels, "10 toxic < 20");
+        assert!(render(&reports, &few, "cope-b").contains("not enough holdout labels"));
+    }
+
     #[test]
     fn diagnostic_and_seed_labels_do_not_move_the_headline() {
         let mut answers = holdout();
@@ -1524,8 +1827,7 @@ mod tests {
         assert!((r.usd_per_1k.unwrap() - 0.0042).abs() < 1e-9);
         // Latencies are 10..=89 ms: nearest-rank p50 = 49, p95 = 85.
         assert_eq!((r.p50_ms, r.p95_ms), (Some(49), Some(85)));
-        let unpriced = &build(&[model("x", |_| Some(true))], &holdout(), &HashMap::new())[0];
-        assert_eq!(unpriced.usd_per_1k, None);
+        assert_eq!(build(&[model("x", |_| Some(true))], &holdout(), &HashMap::new())[0].usd_per_1k, None);
     }
 }
 ```
@@ -1538,9 +1840,9 @@ Expected: compile error.
 - [ ] **Step 3: Implement** `src/cli/eval_classifiers/report.rs`:
 
 ```rust
-//! The report. Headline rates come from HOLDOUT labels only, comparisons are
-//! paired on the posts both models answered, and every rate shows its 95 %
-//! interval — never a blended score (spec).
+//! The report. Headline rates come from HOLDOUT labels only; comparisons are
+//! decided per class by the exact paired test in metrics.rs; every rate shows
+//! its 95 % Wilson interval as description — never a blended score.
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -1548,7 +1850,7 @@ use std::fmt::Write;
 use super::cache::VerdictRecord;
 use super::cost::{estimate_usd, Price};
 use super::data::{Answer, Source, Truth};
-use super::metrics::{model_metrics, paired, Comparison, ModelMetrics, Paired, Rate};
+use super::metrics::{model_metrics, paired, Comparison, ModelMetrics, Paired, Rate, MIN_CLASS_N};
 
 #[derive(Debug, Clone)]
 pub struct ModelReport {
@@ -1611,13 +1913,7 @@ pub fn build(
 }
 
 pub fn vs_baseline(baseline: &ModelReport, candidate: &ModelReport, answers: &HashMap<String, Answer>) -> Paired {
-    paired(
-        &baseline.name,
-        &baseline.calls,
-        &candidate.name,
-        &candidate.calls,
-        &labels_of(answers, Source::Holdout),
-    )
+    paired(&baseline.name, &baseline.calls, &candidate.name, &candidate.calls, &labels_of(answers, Source::Holdout))
 }
 
 fn rate_cell(r: &Rate) -> String {
@@ -1629,12 +1925,15 @@ fn rate_cell(r: &Rate) -> String {
     }
 }
 
-fn word(c: Comparison) -> &'static str {
+fn word(c: Comparison) -> String {
     match c {
-        Comparison::Better => "better",
-        Comparison::Worse => "worse",
-        Comparison::TooClose => "too close to call — label more",
-        Comparison::NoData => "no data",
+        Comparison::Better => "better".to_string(),
+        Comparison::Worse => "worse".to_string(),
+        Comparison::TooClose => "too close to call — label more".to_string(),
+        Comparison::NotEnoughLabels => {
+            format!("not enough holdout labels (need {MIN_CLASS_N} per class) — label more")
+        }
+        Comparison::LowCoverage => "no verdict — coverage below 90 %".to_string(),
     }
 }
 
@@ -1670,18 +1969,14 @@ pub fn render(reports: &[ModelReport], answers: &HashMap<String, Answer>, baseli
     }
     match reports.iter().find(|r| r.name == baseline) {
         Some(base) => {
-            let _ = writeln!(s, "\nCompared with {baseline} (paired: holdout posts both answered):");
+            let _ = writeln!(s, "\nCompared with {baseline} (exact paired test, holdout, α = 0.05):");
             for r in reports.iter().filter(|r| r.name != baseline) {
                 let p = vs_baseline(base, r, answers);
-                if p.low_coverage {
-                    let _ = writeln!(s, "  {}: no verdict — coverage below 90 %", r.name);
-                } else {
-                    let _ = writeln!(s, "  {}: false alarms {}; misses {}", r.name, word(p.false_alarm), word(p.miss));
-                }
+                let _ = writeln!(s, "  {}: false alarms {}; misses {}", r.name, word(p.false_alarm), word(p.miss));
             }
         }
         None => {
-            let _ = writeln!(s, "\n(baseline {baseline:?} has no verdicts — run it first)");
+            let _ = writeln!(s, "\n(baseline {baseline:?} has no current verdicts — run it first)");
         }
     }
     let _ = writeln!(s, "\nWHERE MODELS DIFFER — diagnostic labels, picked by disagreement: NOT population rates");
@@ -1698,13 +1993,13 @@ Add `pub mod report;` to `mod.rs`.
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `cargo test --lib eval_classifiers::report`
-Expected: 5 passed. If `deliberately_bad_models_are_caught` fails on the coin-flip arm, print `render(...)` and check its rates against the good model's intervals; do **not** loosen the assertion — fix the fake.
+Expected: 6 passed. If `deliberately_bad_models_are_caught` fails, print `render(...)` and check the discordant counts; do **not** loosen the assertion — fix the fake.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/cli/eval_classifiers/report.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): holdout-only, paired eval report; proven to catch bad models'
+git commit -m 'feat(404): holdout-only report with exact paired verdicts; proven to catch bad models'
 ```
 
 ---
@@ -1718,11 +2013,12 @@ git commit -m 'feat(404): holdout-only, paired eval report; proven to catch bad 
 - Modify: `src/cli/eval_classifiers/mod.rs` (add `pub mod models;`)
 
 **Interfaces:**
-- Consumes: `OnnxToxicityScorer::load(&Path)`, `ToxicityScorer::score_text`, `download::resolve_model_dir()`, `classifier::build_backend_named`.
+- Consumes: `OnnxToxicityScorer::load(&Path)`, `ToxicityScorer::score_text`, `download::resolve_model_dir()`, `RunPodCopeBClient::new(endpoint, key)` + `.with_meter(Arc<ScanCostMeter>)`, `ScanCostMeter::new(ceiling_cents, rate_cents_per_hour)`, `cost_meter::DEFAULT_RATE_CENTS_PER_HOUR`.
 - Produces:
   - `pub struct DetoxifyClassifier<S: ToxicityScorer> { scorer: S }` with `pub fn new(scorer: S) -> Self` and a `ToxicityClassifier` impl: `toxic_token = toxicity >= 0.5`
   - `pub const KNOWN_MODELS: &[&str] = &["cope-b", "detoxify"];`
-  - `pub fn build_eval_model(name: &str) -> Result<Arc<dyn ToxicityClassifier>>`
+  - `pub fn cap_cents(cap_usd: f64) -> u32` — at least 1 (0 would disable the meter)
+  - `pub fn build_eval_model(name: &str, cap_usd: f64) -> Result<Arc<dyn ToxicityClassifier>>` — CoPE-B is built **with the real cost meter** set to the cap
 
 - [ ] **Step 1: Write the failing tests** — in `src/toxicity/detoxify_classifier.rs`:
 
@@ -1755,13 +2051,24 @@ In `src/cli/eval_classifiers/models.rs`:
 ```rust
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn unknown_models_are_named_in_the_error() {
-        let err = match super::build_eval_model("nope") {
+        let err = match build_eval_model("nope", 1.0) {
             Ok(_) => panic!("unknown model accepted"),
             Err(e) => format!("{e:#}"),
         };
         assert!(err.contains("cope-b") && err.contains("detoxify"), "{err}");
+    }
+
+    /// A zero ceiling DISABLES the meter (cost_meter.rs), so the cap must
+    /// never round down to it.
+    #[test]
+    fn the_cap_never_becomes_a_disabled_meter() {
+        assert_eq!(cap_cents(1.0), 100);
+        assert_eq!(cap_cents(0.004), 1);
+        assert_eq!(cap_cents(0.0), 1);
     }
 }
 ```
@@ -1829,21 +2136,40 @@ impl<S: ToxicityScorer> ToxicityClassifier for DetoxifyClassifier<S> {
 
 ```rust
 //! The eval's model registry. Eval-only by design: nothing here is reachable
-//! from production `build_from_env` (spec: safety). Part B adds jev,
-//! clef-flash, clef and strands-decider here.
+//! from production `build_from_env`. Part B adds jev, clef-flash, clef and
+//! strands-decider here.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::sync::Arc;
 
-use crate::toxicity::classifier::{build_backend_named, ToxicityClassifier};
+use crate::toxicity::classifier::ToxicityClassifier;
+use crate::toxicity::cost_meter::{ScanCostMeter, DEFAULT_RATE_CENTS_PER_HOUR};
 use crate::toxicity::detoxify_classifier::DetoxifyClassifier;
 use crate::toxicity::onnx::OnnxToxicityScorer;
+use crate::toxicity::runpod_cope_b::RunPodCopeBClient;
 
 pub const KNOWN_MODELS: &[&str] = &["cope-b", "detoxify"];
 
-pub fn build_eval_model(name: &str) -> Result<Arc<dyn ToxicityClassifier>> {
+/// The run's cap as the meter's ceiling. Never 0: a zero ceiling disables
+/// the backstop entirely.
+pub fn cap_cents(cap_usd: f64) -> u32 {
+    ((cap_usd * 100.0).ceil() as u32).max(1)
+}
+
+pub fn build_eval_model(name: &str, cap_usd: f64) -> Result<Arc<dyn ToxicityClassifier>> {
     match name {
-        "cope-b" => build_backend_named("runpod"),
+        // Not via `build_backend_named`, which deliberately builds the client
+        // with a DISABLED meter. Here the production cost meter — real GPU
+        // worker time × rate — is set to the run's cap, so CoPE-B's spend is
+        // bounded by what RunPod actually ran, not by an estimate (Codex
+        // review, round 2).
+        "cope-b" => {
+            let endpoint = std::env::var("RUNPOD_ENDPOINT_URL")
+                .context("RUNPOD_ENDPOINT_URL must be set for cope-b")?;
+            let api_key = std::env::var("RUNPOD_API_KEY").context("RUNPOD_API_KEY must be set for cope-b")?;
+            let meter = Arc::new(ScanCostMeter::new(cap_cents(cap_usd), DEFAULT_RATE_CENTS_PER_HOUR));
+            Ok(Arc::new(RunPodCopeBClient::new(endpoint, api_key)?.with_meter(meter)))
+        }
         "detoxify" => {
             let dir = crate::toxicity::download::resolve_model_dir();
             Ok(Arc::new(DetoxifyClassifier::new(OnnxToxicityScorer::load(&dir)?)))
@@ -1853,20 +2179,20 @@ pub fn build_eval_model(name: &str) -> Result<Arc<dyn ToxicityClassifier>> {
 }
 ```
 
-Add `pub mod detoxify_classifier;` to `src/toxicity/mod.rs` and `pub mod models;` to `src/cli/eval_classifiers/mod.rs`. Confirm `OnnxToxicityScorer::load` expects the **base** model dir (the toxicity model sits at the base — `src/toxicity/download.rs:128`); if it expects a subdirectory, pass that.
+Add `pub mod detoxify_classifier;` to `src/toxicity/mod.rs` and `pub mod models;` to `src/cli/eval_classifiers/mod.rs`. Confirm `OnnxToxicityScorer::load` expects the **base** model dir (`src/toxicity/download.rs:128`); if it expects a subdirectory, pass that. Confirm `RunPodCopeBClient`, `with_meter` and `ScanCostMeter` are `pub` at those paths (`src/toxicity/runpod_cope_b.rs:89,330`, `src/toxicity/cost_meter.rs:129`).
 
 - [ ] **Step 4: Run to verify they pass** — one filter per command:
 
 Run: `cargo test --lib detoxify_classifier`
 Expected: 1 passed.
 Run: `cargo test --lib eval_classifiers::models`
-Expected: 1 passed.
+Expected: 2 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/toxicity/detoxify_classifier.rs src/toxicity/mod.rs src/cli/eval_classifiers/models.rs src/cli/eval_classifiers/mod.rs
-git commit -m 'feat(404): Detoxify as an eval classifier and the eval-only model registry'
+git commit -m 'feat(404): Detoxify eval classifier; CoPE-B built with the real cost meter at the run cap'
 ```
 
 ---
@@ -1881,7 +2207,7 @@ git commit -m 'feat(404): Detoxify as an eval classifier and the eval-only model
 
 **Interfaces:**
 - Consumes: every earlier task.
-- Produces: `charcoal eval-classifiers run --models cope-b,detoxify [--cap-usd 1.0] [--timeout-secs 60]`, `charcoal eval-classifiers label [--merge]`, `charcoal eval-classifiers report [--baseline cope-b]`; all take `--dir` (default `evals/classifiers`).
+- Produces: `charcoal eval-classifiers run --models cope-b,detoxify [--cap-usd 1.0] [--timeout-secs 600]`, `charcoal eval-classifiers label [--merge]`, `charcoal eval-classifiers report [--baseline cope-b]`; all take `--dir` (default `evals/classifiers`). Label and report consume **only** `cache::current(...)` verdicts.
 
 - [ ] **Step 1: Write the end-to-end test** `tests/cli_eval_classifiers.rs`:
 
@@ -1910,7 +2236,6 @@ impl ToxicityClassifier for Says {
 #[tokio::test]
 async fn a_full_round_runs_picks_merges_and_reports() {
     let dir = tempfile::tempdir().unwrap();
-    // One holdout id and one non-holdout, non-sampled id, so the round is deterministic.
     let h = (0..200).map(|i| format!("h{i}")).find(|id| labelling::in_holdout(id)).unwrap();
     let d = (0..200)
         .map(|i| format!("d{i}"))
@@ -1930,7 +2255,10 @@ async fn a_full_round_runs_picks_merges_and_reports() {
             .await
             .unwrap();
     }
-    let per_model = vec![cache::load(&verdicts, "good").unwrap(), cache::load(&verdicts, "lazy").unwrap()];
+    let current = |m: &str| {
+        cache::current(cache::load(&verdicts, m).unwrap(), &pool, cache::load_identity(&verdicts, m).unwrap().as_ref())
+    };
+    let per_model = vec![current("good"), current("lazy")];
     let labels_path = dir.path().join("labels.jsonl");
     let picked = labelling::pick_for_labelling(&pool, &per_model, &data::load_labels(&labels_path).unwrap());
     assert_eq!(picked.len(), 2, "the holdout post, and the disagreement");
@@ -1939,13 +2267,14 @@ async fn a_full_round_runs_picks_merges_and_reports() {
     labelling::write_to_label(&to_label, &picked).unwrap();
     let answered = std::fs::read_to_string(&to_label).unwrap().replace("\"label\":\"\"", "\"label\":\"toxic\"");
     std::fs::write(&to_label, answered).unwrap();
-    assert_eq!(labelling::merge_labels(&to_label, &labels_path).unwrap(), 2);
+    assert_eq!(labelling::merge_labels(&to_label, &labels_path, &pool).unwrap(), 2);
 
     let answers = data::load_labels(&labels_path).unwrap();
     let models = vec![("good".to_string(), per_model[0].clone()), ("lazy".to_string(), per_model[1].clone())];
     let text = report::render(&report::build(&models, &answers, &HashMap::new()), &answers, "good");
     assert!(text.contains("1 holdout (scored), 1 diagnostic"), "{text}");
     assert!(text.contains("lazy") && text.contains("(1/1)"), "{text}");
+    assert!(text.contains("not enough holdout labels"), "one label is far below the 20-per-class gate: {text}");
 }
 ```
 
@@ -1973,7 +2302,7 @@ Below `enum Commands`:
 ```rust
 #[derive(Subcommand)]
 enum EvalAction {
-    /// Run models over the pool, reusing cached verdicts that still match.
+    /// Run models over the pool, reusing verdicts that are still current.
     Run {
         /// Comma-separated model names.
         #[arg(long, value_delimiter = ',', default_value = "cope-b,detoxify")]
@@ -1981,8 +2310,8 @@ enum EvalAction {
         /// Stop before spending more than this many US dollars this run.
         #[arg(long, default_value_t = 1.0)]
         cap_usd: f64,
-        /// Per-call timeout; a call past it is recorded as an error.
-        #[arg(long, default_value_t = 60)]
+        /// Last-resort per-batch timeout; must exceed the backends' own.
+        #[arg(long, default_value_t = 600)]
         timeout_secs: u64,
     },
     /// Write to-label.jsonl, or with --merge fold your answers into labels.jsonl.
@@ -2006,7 +2335,10 @@ Handler next to `Commands::ClassifyGate`:
             let verdicts = dir.join("verdicts");
             let pool = data::load_pool(&dir.join("pool.jsonl"))?;
             let labels_path = dir.join("labels.jsonl");
-            let known: Vec<String> = models::KNOWN_MODELS.iter().map(|s| s.to_string()).collect();
+            // The ONE gate for label and report: current verdicts only.
+            let current = |m: &str| -> anyhow::Result<_> {
+                Ok(cache::current(cache::load(&verdicts, m)?, &pool, cache::load_identity(&verdicts, m)?.as_ref()))
+            };
             match action {
                 EvalAction::Run { models: names, cap_usd, timeout_secs } => {
                     let prices = cost::load_pricing(&dir.join("pricing.json"))?;
@@ -2015,7 +2347,7 @@ Handler next to `Commands::ClassifyGate`:
                     for name in &names {
                         // Refuse an unpriced model before building (or paying for) anything.
                         let price = cost::price_for(&prices, name)?;
-                        let classifier = match models::build_eval_model(name) {
+                        let classifier = match models::build_eval_model(name, cap_usd - budget.spent()) {
                             Ok(c) => c,
                             Err(e) => {
                                 // A missing key skips that model, not the run.
@@ -2023,16 +2355,21 @@ Handler next to `Commands::ClassifyGate`:
                                 continue;
                             }
                         };
-                        let s = runner::run_model(name, classifier.as_ref(), &pool, &verdicts, price, &mut budget, timeout).await?;
-                        println!(
-                            "{name}: judged {}, cached {}, errors {}{}",
-                            s.judged,
-                            s.cached,
-                            s.errors,
-                            if s.stopped_at_cap { " — STOPPED AT SPENDING CAP" } else { "" }
-                        );
-                        if s.stopped_at_cap {
-                            break;
+                        match runner::run_model(name, classifier.as_ref(), &pool, &verdicts, price, &mut budget, timeout).await {
+                            Ok(s) => {
+                                println!(
+                                    "{name}: judged {}, cached {}, errors {}{}",
+                                    s.judged,
+                                    s.cached,
+                                    s.errors,
+                                    if s.stopped_at_cap { " — STOPPED AT SPENDING CAP" } else { "" }
+                                );
+                                if s.stopped_at_cap {
+                                    break;
+                                }
+                            }
+                            // An identity-probe failure skips that model, not the run.
+                            Err(e) => eprintln!("skipping {name}: {e:#}"),
                         }
                     }
                     println!("estimated spend this run: ${:.4} (cap ${cap_usd:.2})", budget.spent());
@@ -2040,12 +2377,12 @@ Handler next to `Commands::ClassifyGate`:
                 EvalAction::Label { merge } => {
                     let to_label = dir.join("to-label.jsonl");
                     if merge {
-                        let n = labelling::merge_labels(&to_label, &labels_path)?;
+                        let n = labelling::merge_labels(&to_label, &labels_path, &pool)?;
                         println!("merged {n} labels into {}", labels_path.display());
                     } else {
-                        let per_model: Vec<_> = known
+                        let per_model: Vec<_> = models::KNOWN_MODELS
                             .iter()
-                            .map(|m| cache::load(&verdicts, m))
+                            .map(|m| current(*m))
                             .collect::<anyhow::Result<_>>()?;
                         let answers = data::load_labels(&labels_path)?;
                         let picked = labelling::pick_for_labelling(&pool, &per_model, &answers);
@@ -2063,10 +2400,10 @@ Handler next to `Commands::ClassifyGate`:
                     let answers = data::load_labels(&labels_path)?;
                     let prices = cost::load_pricing(&dir.join("pricing.json"))?;
                     let mut loaded = Vec::new();
-                    for m in &known {
-                        let recs = cache::load(&verdicts, m)?;
+                    for m in models::KNOWN_MODELS {
+                        let recs = current(*m)?;
                         if !recs.is_empty() {
-                            loaded.push((m.clone(), recs));
+                            loaded.push((m.to_string(), recs));
                         }
                     }
                     print!("{}", report::render(&report::build(&loaded, &answers, &prices), &answers, &baseline));
@@ -2086,28 +2423,43 @@ Compares classifiers on the same posts. Design:
 One round:
 
 ```bash
-# 1. Judge every post with each model (cached; $1 cap; 60 s per-call timeout)
+# 1. Judge every post with each model (cached; $1 cap; CoPE-B metered for real)
 cargo run --features web -- eval-classifiers run --models cope-b,detoxify
 # 2. Write the posts worth labelling to evals/classifiers/to-label.jsonl
 cargo run --features web -- eval-classifiers label
-#    ...set each "label" to toxic or clean (optional "note"); leave "source" alone...
+#    ...set each "label" to toxic or clean (optional "note")...
 # 3. Fold your answers into labels.jsonl
 cargo run --features web -- eval-classifiers label --merge
 # 4. Compare
 cargo run --features web -- eval-classifiers report
 ```
 
-How to read it:
+## Grow the pool before expecting a verdict
 
-- **Holdout** posts (a fixed third of the pool, picked by hash) are the only
-  ones scored. **Diagnostic** posts — where models disagree — appear in a
-  separate "where models differ" section; they are not population rates.
-- **too close to call — label more**: the two models' 95 % intervals overlap.
-- **no verdict — coverage below 90 %**: a model failed on too many posts to
-  compare fairly.
-- Every model must have an entry in `pricing.json`; an unpriced model is refused.
+A comparison needs **20 holdout labels in each class** (toxic and clean). The
+starting pool of 110 posts yields only 32 holdout posts, so the report will
+say "not enough holdout labels" until the pool grows. Add PII-scrubbed posts
+with `tools/find-fixtures` (see its README) and append them to `pool.jsonl` —
+roughly 600 posts gives a holdout of ~200. If toxic posts are rare in what
+you harvest, use `find-fixtures`' list mode on known-hostile accounts so the
+toxic class can reach 20.
+
+## How to read the report
+
+- **Holdout** posts (a fixed third, chosen by hash — you cannot move a post
+  into or out of it) are the only ones scored. **Diagnostic** posts — where
+  models disagree — appear in a separate section; they are not rates.
+- **better / worse**: an exact paired test (McNemar) on the posts where the
+  two models disagreed, at the 5 % level. The Wilson intervals are context.
+- **too close to call — label more**: the paired test is not significant.
+- **not enough holdout labels**: fewer than 20 paired labels in that class.
+- **no verdict — coverage below 90 %**: a model answered too few of that
+  class to compare fairly.
+- Every model must be in `pricing.json`. CoPE-B's spend is capped by the
+  RunPod client's real cost meter at the run's cap.
 - CoPE-B needs `RUNPOD_ENDPOINT_URL` and `RUNPOD_API_KEY`; Detoxify needs the
-  local models (`charcoal download-model`). A model missing its keys is skipped.
+  local models (`charcoal download-model`). A model missing its keys, or
+  failing its identity check, is skipped.
 - Verdicts live in `verdicts/` and are never committed (its `.gitignore`).
 ````
 
@@ -2116,17 +2468,17 @@ How to read it:
 ```markdown
 - #404 — `charcoal eval-classifiers`: compares classifiers (today CoPE-B and
   Detoxify; Jev, Clef and Strands Decider follow in Part B) on the same posts.
-  Headline false-alarm and miss rates come from a fixed random holdout, each
-  with a 95 % interval, and models are compared only on posts both answered —
-  "too close to call — label more" when the intervals overlap, no verdict at
-  all below 90 % coverage. Posts where models disagree are labelled too, but
-  reported separately as diagnostics, never as rates. Every model is scored on
-  its own yes/no answer (CoPE-B's confidence is not a probability of toxic).
-  Verdicts are cached and reused only while the post, model and policy are
-  unchanged; every call has a timeout; unpriced models are refused and a $1
-  per-run cap stops a run cleanly. Tests prove the report catches a
-  deliberately bad always-clean and coin-flip model, and a model that hides
-  its misses behind errors.
+  Headline false-alarm and miss rates come from a fixed hash-chosen holdout;
+  "better" or "worse" is decided per class by an exact paired test on the
+  posts where the models disagreed, and only with at least 20 paired labels
+  and 90 % coverage in that class — otherwise the report says why there is
+  no verdict yet. Disagreement-picked labels are reported separately, never as
+  rates, and a label's stream is derived from the post id, not the file.
+  Every model is scored on its own yes/no answer. Backends must pass an
+  identity check, and verdicts from an unexpected model or policy are errors;
+  only verdicts current for the pool's text and the model's identity are
+  reported. Unpriced models are refused; CoPE-B's spend is bounded by the
+  RunPod client's real cost meter at the run's $1 default cap.
 ```
 
 - [ ] **Step 6: Verify** — one filter per command:
@@ -2140,7 +2492,7 @@ cargo test --test cli_eval_classifiers
 cargo run --features web -- eval-classifiers report
 ```
 
-Expected: clippy clean; all tests pass; the report prints `Labels: 0 holdout (scored), 0 diagnostic, 10 seed (not scored)` and the "run it first" baseline line.
+Expected: clippy clean; all tests pass; the report prints `Labels: 0 holdout (scored), 0 diagnostic, 10 seed (not scored)` and the "no current verdicts — run it first" baseline line.
 
 - [ ] **Step 7: Commit**
 
@@ -2153,8 +2505,10 @@ git commit -m 'feat(404): charcoal eval-classifiers run|label|report'
 
 ## After Part A
 
-1. **First live round (by hand, with Bryan's go-ahead to spend up to $1):** `run --models cope-b,detoxify`, then `label`, Bryan labels, `label --merge`, `report`. With 36 holdout posts (of 110) the first report will mostly say "too close to call" — expected; rounds add labels.
-2. **Part B plan**, written from `docs/superpowers/specs/404-provider-contracts.md`. Each unblocked provider gets a `ToxicityClassifier` adapter with wiremock tests from the verified request/response shapes, registered in `models::build_eval_model` and priced in `pricing.json` with `overhead_chars` = the instruction's length. Part B must also:
-   - send the full text of `gpu/cope-b-runpod/policy.txt` as the instruction, with answers `toxic` / `clean` (fairness rule 2);
-   - record provider-reported token usage per call and report estimated vs actual spend, refusing a provider whose usage cannot be read (Codex review);
+1. **Grow the pool** (README, "Grow the pool before expecting a verdict"): harvest PII-scrubbed posts with `tools/find-fixtures` until the holdout can reach 20 labels per class — on the order of 600 posts.
+2. **First live round** (by hand, with Bryan's go-ahead to spend up to $1): `run --models cope-b,detoxify`, then `label`, Bryan labels, `label --merge`, `report`.
+3. **Part B plan**, written from `docs/superpowers/specs/404-provider-contracts.md`. Each unblocked provider gets a `ToxicityClassifier` adapter with wiremock tests from the verified request/response shapes, registered in `models::build_eval_model` and priced in `pricing.json` with `overhead_chars` = the instruction's length. Part B must also:
+   - send the full text of `gpu/cope-b-runpod/policy.txt` as the instruction, with answers `toxic` / `clean`;
+   - bound real spend from **provider-reported usage** (or an enforced provider-side limit), not estimates, and refuse a provider where neither exists;
+   - report the serving model version so the identity check is real;
    - expose a probability only where the provider's is normalised over the answer set.
