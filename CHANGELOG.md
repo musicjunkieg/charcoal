@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- #404 — `charcoal eval-classifiers`: compares classifiers (today CoPE-B and
+  Detoxify; Jev, Clef and Strands Decider follow in Part B) on the same posts.
+  Headline false-alarm and miss rates come from a fixed hash-chosen holdout;
+  "better" or "worse" is decided per class by an exact paired test on the
+  posts where the models disagreed, and only with at least 20 paired labels
+  and 90 % coverage in that class — otherwise the report says why there is
+  no verdict yet. Disagreement-picked labels are reported separately, never as
+  rates, and a label's stream is derived from the post id, not the file.
+  Every model is scored on its own yes/no answer. Backends must pass an
+  identity check, and verdicts from an unexpected model or policy are errors;
+  only verdicts current for the pool's text and the model's identity are
+  reported. Unpriced models are refused; CoPE-B's spend is bounded by the
+  RunPod client's real cost meter at the run's $1 default cap, and a CoPE-B
+  run refuses to start without `CHARCOAL_COPE_B_POLICY_VERSION`.
+
 ### Changed
 - #344 — `charcoal migrate` copies every score row verbatim
   (`export_scores` / `import_score`), including expired, legacy and

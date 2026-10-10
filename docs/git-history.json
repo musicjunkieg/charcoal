@@ -1,5 +1,13 @@
 [
   {
+    "hash": "159f0cebd88e679c3ea9b36459e5c198fa554b45",
+    "short_hash": "159f0ce",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:59:37-07:00",
+    "message": "fix(404): refuse CoPE-B before the GPU wakes without a policy version; eval meter and Detoxify identity match production\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "7d0b965e1dd665b1ab2eb34f6a7e30f597e41550",
     "short_hash": "7d0b965",
     "author": "Bryan Guffey",

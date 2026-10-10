@@ -11956,6 +11956,17 @@
       "created_at": "2026-10-09T19:53:57.451809-07:00",
       "updated_at": "2026-10-09T19:53:57.451809-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"7d0b965\",\"confidence\":90}"
+    },
+    {
+      "id": 1097,
+      "change_id": "1929b8c7-2a0f-44ac-a09e-57f1c4d1dafb",
+      "node_type": "outcome",
+      "title": "Task 9 complete: CoPE-B refuses before GPU wake without policy version; eval meter shares prod rate/workers parsing (from_env proven unchanged); Detoxify id = ONNX_MODEL_ID (159f0ce)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T20:00:52.474229-07:00",
+      "updated_at": "2026-10-09T20:00:52.474229-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"159f0ce\",\"confidence\":92}"
     }
   ],
   "edges": [
@@ -24476,6 +24487,17 @@
       "weight": 1.0,
       "rationale": "Review + test fix",
       "created_at": "2026-10-09T19:53:58.725235-07:00"
+    },
+    {
+      "id": 1149,
+      "from_node_id": 1095,
+      "to_node_id": 1097,
+      "from_change_id": "80c6d487-b984-4198-aa56-2b08b97c858a",
+      "to_change_id": "1929b8c7-2a0f-44ac-a09e-57f1c4d1dafb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Decision implemented, re-review clean",
+      "created_at": "2026-10-09T20:00:53.831576-07:00"
     }
   ],
   "documents": [
