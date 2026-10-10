@@ -43,6 +43,10 @@ added as a new line and replaces the old one.
   worker alive for about 60 seconds of billed idle time after it. So real
   spend can go over the cap by roughly one batch plus that ~60 s of idle time
   for each worker.
+- **Reaching the cap stops paid models, not free ones.** When one model hits
+  the cap, the run still moves on to the next model. A model that costs
+  nothing (Detoxify runs on this machine) still runs; a paid model that
+  cannot afford its first batch stops before waking anything.
 - **A request the eval gives up on may keep running on RunPod.** If a batch
   hits the eval's timeout, the eval records those posts as errors and moves
   on, but RunPod may still finish the job, and that time is not counted

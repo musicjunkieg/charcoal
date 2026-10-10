@@ -1121,54 +1121,44 @@ async fn main() -> Result<()> {
                 } => {
                     let prices = cost::load_pricing(&dir.join("pricing.json"))?;
                     let mut budget = cost::Budget::new(cap_usd);
-                    let timeout = std::time::Duration::from_secs(timeout_secs);
-                    for name in &names {
-                        // Refuse an unpriced model before building (or paying for) anything.
-                        let price = cost::price_for(&prices, name)?;
-                        let classifier =
-                            match models::build_eval_model(name, cap_usd - budget.spent()) {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    // A missing key skips that model, not the run.
-                                    eprintln!("skipping {name}: {e:#}");
-                                    continue;
-                                }
-                            };
-                        match runner::run_model(
-                            name,
-                            classifier.as_ref(),
-                            &pool,
-                            &verdicts,
-                            price,
-                            &mut budget,
-                            timeout,
-                        )
-                        .await
-                        {
-                            Ok(s) => {
-                                println!(
-                                    "{name}: judged {}, cached {}, errors {}{}",
-                                    s.judged,
-                                    s.cached,
-                                    s.errors,
-                                    if s.stopped_at_cap {
-                                        " — STOPPED AT SPENDING CAP"
-                                    } else {
-                                        ""
-                                    }
-                                );
+                    let plan = runner::RunPlan {
+                        pool: &pool,
+                        dir: &verdicts,
+                        prices: &prices,
+                        timeout: std::time::Duration::from_secs(timeout_secs),
+                    };
+                    // The skip/stop rules live in `runner::run_models`, where
+                    // they are tested; this only builds models and prints.
+                    let run = runner::run_models(
+                        &names,
+                        &plan,
+                        &mut budget,
+                        |name, spent| models::build_eval_model(name, cap_usd - spent),
+                        |outcome| match outcome {
+                            runner::ModelOutcome::Ran(s) => println!(
+                                "{}: judged {}, cached {}, errors {}{}",
+                                s.model,
+                                s.judged,
+                                s.cached,
+                                s.errors,
                                 if s.stopped_at_cap {
-                                    break;
+                                    " — STOPPED AT SPENDING CAP"
+                                } else {
+                                    ""
                                 }
+                            ),
+                            runner::ModelOutcome::Skipped { model, reason } => {
+                                eprintln!("skipping {model}: {reason}")
                             }
-                            // An identity-probe failure skips that model, not the run.
-                            Err(e) => eprintln!("skipping {name}: {e:#}"),
-                        }
-                    }
+                        },
+                    )
+                    .await;
+                    // Print what was spent even when the run stops on an error.
                     println!(
                         "estimated spend this run: ${:.4} (cap ${cap_usd:.2})",
                         budget.spent()
                     );
+                    run?;
                 }
                 EvalAction::Label { merge } => {
                     let to_label = dir.join("to-label.jsonl");

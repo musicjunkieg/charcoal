@@ -10,13 +10,15 @@
 //! 6. stop at the reservation cap or when the backend's real cost meter trips.
 
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::cache::{
     append, latest_match, load_all, load_identity, save_identity, Identity, VerdictRecord,
 };
-use super::cost::{estimate_usd, Budget, Price};
+use super::cost::{estimate_usd, price_for, Budget, Price};
 use super::data::FixtureRow;
 use crate::toxicity::classifier::{ItemOutcome, ToxicityClassifier};
 use crate::toxicity::cost_meter::CostCeilingExceeded;
@@ -209,6 +211,76 @@ pub async fn run_model(
         }
     }
     Ok(stats)
+}
+
+/// What happened to one model of a multi-model run.
+#[derive(Debug)]
+pub enum ModelOutcome {
+    Ran(RunStats),
+    /// Not run, before anything was spent on it; the run went on.
+    Skipped {
+        model: String,
+        reason: String,
+    },
+}
+
+/// What every model in one run shares, besides the budget.
+pub struct RunPlan<'a> {
+    pub pool: &'a [FixtureRow],
+    /// The verdicts directory.
+    pub dir: &'a Path,
+    pub prices: &'a HashMap<String, Price>,
+    pub timeout: Duration,
+}
+
+/// The `eval-classifiers run` loop: each named model in turn, sharing one
+/// budget. `build(name, spent_so_far)` constructs a model; `report` is told
+/// each model's outcome as it happens (the CLI prints it). Lives here rather
+/// than in main.rs so its skip/stop rules are tested.
+pub async fn run_models<B, R>(
+    names: &[String],
+    plan: &RunPlan<'_>,
+    budget: &mut Budget,
+    mut build: B,
+    mut report: R,
+) -> Result<()>
+where
+    B: FnMut(&str, f64) -> Result<Arc<dyn ToxicityClassifier>>,
+    R: FnMut(&ModelOutcome),
+{
+    let RunPlan {
+        pool,
+        dir,
+        prices,
+        timeout,
+    } = *plan;
+    for name in names {
+        // Refuse an unpriced model before building (or paying for) anything.
+        let price = price_for(prices, name)?;
+        let classifier = match build(name, budget.spent()) {
+            Ok(c) => c,
+            Err(e) => {
+                // A missing key skips that model, not the run.
+                report(&ModelOutcome::Skipped {
+                    model: name.clone(),
+                    reason: format!("{e:#}"),
+                });
+                continue;
+            }
+        };
+        match run_model(name, classifier.as_ref(), pool, dir, price, budget, timeout).await {
+            // Reaching the cap does NOT end the run: a later model may cost
+            // nothing (Detoxify is local). Each model's own `can_afford`
+            // check, against the same budget, decides whether it can spend
+            // — and stops before its probe if it cannot (Codex fix 3).
+            Ok(s) => report(&ModelOutcome::Ran(s)),
+            Err(e) => report(&ModelOutcome::Skipped {
+                model: name.clone(),
+                reason: format!("{e:#}"),
+            }),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -736,6 +808,94 @@ mod tests {
                 .is_none(),
             "an unverified identity is never recorded"
         );
+    }
+
+    fn priced(per_post: f64) -> Price {
+        Price {
+            usd_per_post: Some(per_post),
+            usd_per_million_input_tokens: None,
+            overhead_chars: 0,
+        }
+    }
+
+    /// Runs `names` through [`run_models`], building each from `models`.
+    async fn run_all(
+        names: &[&str],
+        models: &[(&str, Arc<Fake>)],
+        prices: &HashMap<String, Price>,
+        pool: &[FixtureRow],
+        dir: &Path,
+        budget: &mut Budget,
+    ) -> (Result<()>, Vec<String>) {
+        let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        let plan = RunPlan {
+            pool,
+            dir,
+            prices,
+            timeout: T,
+        };
+        let mut seen = Vec::new();
+        let res = run_models(
+            &names,
+            &plan,
+            budget,
+            |name, _spent| {
+                let m = models
+                    .iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, m)| Arc::clone(m))
+                    .with_context(|| format!("no fake for {name}"))?;
+                Ok(m as Arc<dyn ToxicityClassifier>)
+            },
+            |o| {
+                seen.push(match o {
+                    ModelOutcome::Ran(s) => {
+                        format!(
+                            "ran {} judged {} cap {}",
+                            s.model, s.judged, s.stopped_at_cap
+                        )
+                    }
+                    ModelOutcome::Skipped { model, .. } => format!("skipped {model}"),
+                })
+            },
+        )
+        .await;
+        (res, seen)
+    }
+
+    /// Codex fix 3: reaching the cap on a paid model must not skip the
+    /// models after it — a free one (Detoxify) still fits any budget.
+    #[tokio::test]
+    async fn a_free_model_still_runs_after_a_paid_one_reaches_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let prices: HashMap<String, Price> = [
+            ("paid".to_string(), priced(0.4)),
+            ("free".to_string(), Price::default()),
+        ]
+        .into();
+        let paid = Arc::new(Fake::new());
+        let free = Arc::new(Fake::new());
+        let mut budget = Budget::new(0.5);
+        let (res, seen) = run_all(
+            &["paid", "free"],
+            &[("paid", Arc::clone(&paid)), ("free", Arc::clone(&free))],
+            &prices,
+            &pool,
+            dir.path(),
+            &mut budget,
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(
+            seen,
+            vec![
+                "ran paid judged 1 cap true".to_string(),
+                "ran free judged 2 cap false".to_string()
+            ]
+        );
+        assert_eq!(free.calls.load(Ordering::SeqCst), 2);
+        assert!(budget.spent() <= 0.5, "the cap still holds");
     }
 
     /// What one slot of a scripted batch answers. Keyed by post text.
