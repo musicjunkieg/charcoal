@@ -90,14 +90,30 @@ fn ensure_no_unmerged_answers(path: &Path, merged: &HashMap<String, Answer>) -> 
                 i + 1
             )
         })?;
-        let answered = !row["label"].as_str().unwrap_or("").trim().is_empty();
-        let already_merged = row["id"].as_str().is_some_and(|id| merged.contains_key(id));
-        if answered && !already_merged {
+        let typed = row["label"].as_str().unwrap_or("").trim();
+        let answered = !typed.is_empty();
+        let merged_truth = row["id"].as_str().and_then(|id| merged.get(id));
+        if answered && merged_truth.is_none() {
             bail!(
                 "{} has answers you have not saved yet (line {}). Run `charcoal eval-classifiers label --merge` first, then run `label` again.",
                 path.display(),
                 i + 1
             );
+        }
+        // An answer that DIFFERS from the saved label is an edit, and `merge`
+        // skips ids already saved, so it would be lost without a word.
+        if let Some(a) = merged_truth {
+            let saved = match a.truth {
+                Truth::Toxic => "toxic",
+                Truth::Clean => "clean",
+            };
+            if answered && !typed.eq_ignore_ascii_case(saved) {
+                bail!(
+                    "{} line {}: that post is already in labels.jsonl as {saved}; to change it, edit labels.jsonl directly.",
+                    path.display(),
+                    i + 1
+                );
+            }
         }
     }
     Ok(())
@@ -443,6 +459,38 @@ mod tests {
         let merged = load_labels(&labels).unwrap();
         write_to_label(&to_label, &[(row(&o), Source::Diagnostic)], &merged).unwrap();
         assert!(std::fs::read_to_string(&to_label).unwrap().contains(&o));
+    }
+
+    /// Final round 2, item 3: an edited answer for an already-merged id would
+    /// be silently overwritten (and skipped by merge), so refuse it.
+    #[test]
+    fn label_refuses_an_edited_answer_for_an_already_merged_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let h = holdout_id();
+        let merged = HashMap::from([(
+            h.clone(),
+            Answer {
+                truth: Truth::Toxic,
+                source: Source::Holdout,
+            },
+        )]);
+        let typed = format!(
+            "{{\"id\":\"{h}\",\"content\":\"post {h}\",\"source\":\"holdout\",\"label\":\"clean\",\"note\":\"\"}}\n"
+        );
+        std::fs::write(&to_label, &typed).unwrap();
+        let err = write_to_label(
+            &to_label,
+            &[(row(&other_id()), Source::Diagnostic)],
+            &merged,
+        )
+        .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("already in labels.jsonl as toxic") && msg.contains("edit labels.jsonl"),
+            "{msg}"
+        );
+        assert_eq!(std::fs::read_to_string(&to_label).unwrap(), typed);
     }
 
     /// Review fix: the same id answered twice is a file error, not two labels.
