@@ -11967,6 +11967,39 @@
       "created_at": "2026-10-09T20:00:52.474229-07:00",
       "updated_at": "2026-10-09T20:00:52.474229-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"159f0ce\",\"confidence\":92}"
+    },
+    {
+      "id": 1098,
+      "change_id": "81f877c9-2c77-4c64-855f-3259fe766692",
+      "node_type": "action",
+      "title": "Task 10 implemented: eval-classifiers run|label|report CLI, e2e test, evals README, CHANGELOG",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T20:10:35.024066-07:00",
+      "updated_at": "2026-10-09T20:10:35.024066-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":85,\"files\":[\"src/main.rs\",\"tests/cli_eval_classifiers.rs\",\"evals/classifiers/README.md\",\"CHANGELOG.md\"]}"
+    },
+    {
+      "id": 1099,
+      "change_id": "0b6ad216-2663-4529-9296-fe5a2ef0869d",
+      "node_type": "outcome",
+      "title": "All 10 Part A tasks complete and individually reviewed (base 6e1dba1, head 2c07449); final whole-branch review dispatched (opus)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T20:11:45.345358-07:00",
+      "updated_at": "2026-10-09T20:11:45.345358-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":88}"
+    },
+    {
+      "id": 1100,
+      "change_id": "c325934c-3ded-4f9a-ba59-a93d56fd1d43",
+      "node_type": "outcome",
+      "title": "Final review: ready with fixes - GPU probe before work/budget check, label overwrite loses answers, Detoxify NaN=clean, duplicate pool ids, batch>1 untested, current() gate untested via CLI",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T20:17:34.518122-07:00",
+      "updated_at": "2026-10-09T20:17:34.518122-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24498,6 +24531,39 @@
       "weight": 1.0,
       "rationale": "Decision implemented, re-review clean",
       "created_at": "2026-10-09T20:00:53.831576-07:00"
+    },
+    {
+      "id": 1150,
+      "from_node_id": 1076,
+      "to_node_id": 1098,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "81f877c9-2c77-4c64-855f-3259fe766692",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 10 of plan",
+      "created_at": "2026-10-09T20:10:36.421038-07:00"
+    },
+    {
+      "id": 1151,
+      "from_node_id": 1076,
+      "to_node_id": 1099,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "0b6ad216-2663-4529-9296-fe5a2ef0869d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Part A tasks done",
+      "created_at": "2026-10-09T20:11:46.748380-07:00"
+    },
+    {
+      "id": 1152,
+      "from_node_id": 1099,
+      "to_node_id": 1100,
+      "from_change_id": "0b6ad216-2663-4529-9296-fe5a2ef0869d",
+      "to_change_id": "c325934c-3ded-4f9a-ba59-a93d56fd1d43",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Final whole-branch review",
+      "created_at": "2026-10-09T20:17:36.198895-07:00"
     }
   ],
   "documents": [

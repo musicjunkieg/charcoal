@@ -90,15 +90,22 @@ impl Budget {
         }
     }
 
-    /// Reserve `usd` before a call. `false` means the call must not be made.
-    /// Fails closed: negative or non-finite amounts are always refused.
-    pub fn try_spend(&mut self, usd: f64) -> bool {
-        // Fail closed: validate amount is valid before checking capacity.
+    /// Would `try_spend(usd)` succeed right now? Reserves nothing. The runner
+    /// asks this before waking a paid backend, so a budget that cannot cover
+    /// even the first batch never pays for the wake-up itself.
+    pub fn can_afford(&self, usd: f64) -> bool {
+        // Fail closed: negative or non-finite amounts are never affordable.
         if !(usd.is_finite() && usd >= 0.0) {
             return false;
         }
-        // Capacity check: fail closed if adding this amount would exceed the cap.
-        if self.spent_usd + usd > self.cap_usd {
+        self.spent_usd + usd <= self.cap_usd
+    }
+
+    /// Reserve `usd` before a call. `false` means the call must not be made.
+    /// Fails closed: negative or non-finite amounts are always refused.
+    pub fn try_spend(&mut self, usd: f64) -> bool {
+        // One rule set, shared with `can_afford`, so the two cannot drift.
+        if !self.can_afford(usd) {
             return false;
         }
         self.spent_usd += usd;
@@ -252,6 +259,32 @@ mod tests {
             "negative cap must refuse positive spend"
         );
         assert_eq!(b.spent(), 0.0);
+    }
+
+    /// Final review fix 1: the runner asks "would the first batch fit?" before
+    /// waking a paid GPU, without reserving anything. The answer must follow
+    /// exactly the same fail-closed rules as `try_spend`.
+    #[test]
+    fn can_afford_applies_try_spends_rules_without_reserving() {
+        let mut b = Budget::new(1.0);
+        assert!(b.can_afford(1.0), "exactly the cap fits");
+        assert!(!b.can_afford(1.01), "over the cap does not");
+        assert!(!b.can_afford(-0.1), "negative refused");
+        assert!(!b.can_afford(f64::NAN), "NaN refused");
+        assert!(!b.can_afford(f64::INFINITY), "infinity refused");
+        assert_eq!(b.spent(), 0.0, "asking reserves nothing");
+        assert!(b.try_spend(0.6));
+        assert!(!b.can_afford(0.5));
+        assert!(b.can_afford(0.4));
+        assert!((b.spent() - 0.6).abs() < 1e-12);
+        let nan_cap = Budget::new(f64::NAN);
+        assert!(!nan_cap.can_afford(0.001));
+        assert!(nan_cap.can_afford(0.0));
+        // Agreement with try_spend across a spread of amounts.
+        for usd in [0.0, 0.1, 0.4, 0.40001, 1.0, -1.0, f64::NAN] {
+            let mut probe = b.clone();
+            assert_eq!(b.can_afford(usd), probe.try_spend(usd), "amount {usd}");
+        }
     }
 
     #[test]

@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2c0744936aad94563e90905b3575f62de12e5330",
+    "short_hash": "2c07449",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T20:09:53-07:00",
+    "message": "feat(404): charcoal eval-classifiers run|label|report\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "159f0cebd88e679c3ea9b36459e5c198fa554b45",
     "short_hash": "159f0ce",
     "author": "Bryan Guffey",

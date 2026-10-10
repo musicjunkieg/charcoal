@@ -1,6 +1,8 @@
 //! Run one model over the pool:
-//! 1. probe the backend's identity before any paid call;
-//! 2. reuse only current verdicts;
+//! 1. reuse only current verdicts (by the DECLARED identity, no network), and
+//!    return without waking the backend if nothing is left or the budget
+//!    cannot cover the first batch;
+//! 2. probe the backend's identity before any paid call;
 //! 3. send the rest in the backend's own batch size (as production does);
 //! 4. reject verdicts from an unexpected model or policy;
 //! 5. bound each batch with a last-resort timeout, set ABOVE the backend's own
@@ -39,15 +41,12 @@ pub async fn run_model(
     budget: &mut Budget,
     timeout: Duration,
 ) -> Result<RunStats> {
-    classifier
-        .probe_identity()
-        .await
-        .with_context(|| format!("{model}: identity probe failed — not running it"))?;
+    // The DECLARED identity: local, no network. Deciding what needs judging
+    // with it lets an all-cached run finish without waking the backend.
     let who = Identity {
         model_id: classifier.model_id(),
         policy_version: classifier.policy_version(),
     };
-    save_identity(dir, model, who)?;
 
     let cached = load(dir, model)?;
     let mut stats = RunStats {
@@ -70,7 +69,34 @@ pub async fn run_model(
         })
         .collect();
 
-    for chunk in todo.chunks(classifier.max_batch_size().max(1)) {
+    // Nothing to judge: return before the probe. On RunPod a probe is a real
+    // GPU wake-up (cold start + ~60 s billed idle) that no meter can stop,
+    // because nothing has been spent yet. The identity file is left alone —
+    // it records only identities a probe has actually verified.
+    if todo.is_empty() {
+        return Ok(stats);
+    }
+    let batch = classifier.max_batch_size().max(1);
+    // Would the first batch fit? Asked WITHOUT reserving: if not, the probe
+    // would be the run's only spend, so stop before it.
+    let first_batch_usd: f64 = todo
+        .iter()
+        .take(batch)
+        .map(|r| estimate_usd(price, r.content.chars().count()))
+        .sum();
+    if !budget.can_afford(first_batch_usd) {
+        stats.stopped_at_cap = true;
+        return Ok(stats);
+    }
+
+    // Only now is waking the backend worth paying for.
+    classifier
+        .probe_identity()
+        .await
+        .with_context(|| format!("{model}: identity probe failed — not running it"))?;
+    save_identity(dir, model, who)?;
+
+    for chunk in todo.chunks(batch) {
         let ests: Vec<f64> = chunk
             .iter()
             .map(|r| estimate_usd(price, r.content.chars().count()))
@@ -174,6 +200,8 @@ mod tests {
 
     struct Fake {
         calls: AtomicUsize,
+        /// Counts identity probes: each one is a real GPU wake-up on RunPod.
+        probes: AtomicUsize,
         fail_on: Option<&'static str>,
         hang_on: Option<&'static str>,
         capped_on: Option<&'static str>,
@@ -186,6 +214,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 calls: AtomicUsize::new(0),
+                probes: AtomicUsize::new(0),
                 fail_on: None,
                 hang_on: None,
                 capped_on: None,
@@ -222,6 +251,7 @@ mod tests {
             })
         }
         async fn probe_identity(&self) -> anyhow::Result<()> {
+            self.probes.fetch_add(1, Ordering::SeqCst);
             if self.probe_fails {
                 anyhow::bail!("endpoint serves policy-old, deployment declares p-1");
             }
@@ -502,5 +532,78 @@ mod tests {
         assert!(s.stopped_at_cap);
         assert_eq!(s.judged, 1);
         assert_eq!(model.calls.load(Ordering::SeqCst), 2, "c was never sent");
+    }
+
+    /// Final review fix 1: a probe is a paid GPU wake-up. When every post is
+    /// already answered there is nothing to pay for, so nothing is woken.
+    #[tokio::test]
+    async fn an_all_cached_run_never_wakes_the_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let mut budget = Budget::new(1.0);
+        let first = Fake::new();
+        run_model(
+            "m",
+            &first,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.probes.load(Ordering::SeqCst), 1);
+        let again = Fake::new();
+        let s = run_model(
+            "m",
+            &again,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert_eq!((s.judged, s.cached, s.errors), (0, 2, 0));
+        assert!(!s.stopped_at_cap);
+        assert_eq!(again.probes.load(Ordering::SeqCst), 0, "no wake-up");
+        assert_eq!(again.calls.load(Ordering::SeqCst), 0, "no classify call");
+    }
+
+    /// Final review fix 1: if even the first batch does not fit the budget,
+    /// stop before the probe — the probe itself would be the only spend.
+    #[tokio::test]
+    async fn a_cap_below_one_batch_stops_before_the_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let price = Price {
+            usd_per_post: Some(0.4),
+            usd_per_million_input_tokens: None,
+            overhead_chars: 0,
+        };
+        let mut budget = Budget::new(0.1);
+        let model = Fake::new();
+        let s = run_model(
+            "m",
+            &model,
+            &[row("a", "x")],
+            dir.path(),
+            &price,
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert!(s.stopped_at_cap);
+        assert_eq!(model.probes.load(Ordering::SeqCst), 0, "no wake-up");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(budget.spent(), 0.0, "nothing reserved");
+        assert!(
+            crate::cli::eval_classifiers::cache::load_identity(dir.path(), "m")
+                .unwrap()
+                .is_none(),
+            "an unverified identity is never recorded"
+        );
     }
 }
