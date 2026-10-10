@@ -1,5 +1,13 @@
 [
   {
+    "hash": "db57a0ef103f5caacd78b54de598e54c5e73c57b",
+    "short_hash": "db57a0e",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T17:46:15-07:00",
+    "message": "docs(404): second revision after Codex adversarial review (round 2)\n\nAccepted all 5 findings:\n- CoPE-B spend bounded by the RunPod client real ScanCostMeter at the run\n  cap, batched as in production; eval timeout (600 s) above the client so\n  jobs are never abandoned; the backend cost ceiling stops the run\n- identity probed before paid calls, checked on every verdict; label and\n  report read only verdicts current for pool text + verified identity\n- coverage per class, >= 20 paired labels per class, boundary tests;\n  effective holdout is 32 (4 seeds), so the pool must grow\n- merge derives holdout/diagnostic from the id and validates the pool\n- exact paired McNemar test (alpha 0.05) decides; Wilson is descriptive\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "2b04daf9c7a8a0e96f92a51b489f696bb35ed1a6",
     "short_hash": "2b04daf",
     "author": "Bryan Guffey",

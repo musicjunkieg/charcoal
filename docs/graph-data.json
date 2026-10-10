@@ -11714,6 +11714,28 @@
       "created_at": "2026-10-09T17:24:54.468852-07:00",
       "updated_at": "2026-10-09T17:24:54.468852-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2b04daf\",\"confidence\":85}"
+    },
+    {
+      "id": 1075,
+      "change_id": "04997139-4042-4d68-9c0d-ec459c884a7d",
+      "node_type": "action",
+      "title": "#404 plan round-2 revision: real ScanCostMeter for CoPE-B + batching, identity probe/check + current() gate, per-class coverage + min 20/class, derived merge source, exact McNemar",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T17:46:24.887543-07:00",
+      "updated_at": "2026-10-09T17:46:24.887543-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"db57a0e\",\"confidence\":85}"
+    },
+    {
+      "id": 1076,
+      "change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "node_type": "action",
+      "title": "#404 Part A execution started: subagent-driven; Task 1 (provider API research) dispatched alongside pre-flight plan conflict scan",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:01:31.675059-07:00",
+      "updated_at": "2026-10-09T18:01:31.675059-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"db57a0e\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-09-404-classifier-eval-harness.md\"]}"
     }
   ],
   "edges": [
@@ -23992,6 +24014,28 @@
       "weight": 1.0,
       "rationale": "Codex adversarial review of the plan",
       "created_at": "2026-10-09T17:24:55.023269-07:00"
+    },
+    {
+      "id": 1127,
+      "from_node_id": 1074,
+      "to_node_id": 1075,
+      "from_change_id": "a9dd406d-d1a8-4ac7-a880-5fcf6f170962",
+      "to_change_id": "04997139-4042-4d68-9c0d-ec459c884a7d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codex adversarial review round 2",
+      "created_at": "2026-10-09T17:46:25.413964-07:00"
+    },
+    {
+      "id": 1128,
+      "from_node_id": 1075,
+      "to_node_id": 1076,
+      "from_change_id": "04997139-4042-4d68-9c0d-ec459c884a7d",
+      "to_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Execute the twice-reviewed plan",
+      "created_at": "2026-10-09T18:01:33.051638-07:00"
     }
   ],
   "documents": [
