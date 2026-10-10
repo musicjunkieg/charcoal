@@ -109,6 +109,9 @@ pub async fn run_model(
         let mut records = Vec::with_capacity(chunk.len());
         match tokio::time::timeout(timeout, classifier.classify_batch(&contents)).await {
             Ok(Ok(outcomes)) if outcomes.len() == chunk.len() => {
+                // Positional pairing: the runner trusts the backend to return
+                // outcomes in the order the posts were sent (the trait carries
+                // no ids), as the classifier trait's contract requires.
                 for ((row, est), outcome) in chunk.iter().zip(&ests).zip(outcomes) {
                     records.push(match outcome {
                         ItemOutcome::Verdict(v) if v.model_id == who.model_id && v.policy_version == who.policy_version => {
@@ -604,6 +607,185 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "an unverified identity is never recorded"
+        );
+    }
+
+    /// What one slot of a scripted batch answers. Keyed by post text.
+    #[derive(Clone, Copy)]
+    enum Slot {
+        Ok,
+        SlotError,
+        ForeignModel,
+        ForeignPolicy,
+    }
+
+    /// A backend with CoPE-B's shape: four posts per request, its own
+    /// `classify_batch`, and per-slot outcomes.
+    struct BatchFake {
+        batches: AtomicUsize,
+        /// Post text containing this word → that slot's behaviour.
+        script: Vec<(&'static str, Slot)>,
+        /// Return one outcome fewer than posts sent.
+        short: bool,
+    }
+
+    impl BatchFake {
+        fn new(script: Vec<(&'static str, Slot)>) -> Self {
+            Self {
+                batches: AtomicUsize::new(0),
+                script,
+                short: false,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ToxicityClassifier for BatchFake {
+        async fn classify(&self, _content: &str) -> anyhow::Result<ClassifierVerdict> {
+            anyhow::bail!("the batch path must be used")
+        }
+        async fn classify_batch(&self, contents: &[String]) -> anyhow::Result<Vec<ItemOutcome>> {
+            self.batches.fetch_add(1, Ordering::SeqCst);
+            let mut out: Vec<ItemOutcome> = contents
+                .iter()
+                .map(|c| {
+                    let slot = self
+                        .script
+                        .iter()
+                        .find(|(w, _)| c.contains(w))
+                        .map_or(Slot::Ok, |(_, s)| *s);
+                    let (model_id, policy) = match slot {
+                        Slot::SlotError => return ItemOutcome::Error("slot did not decode".into()),
+                        Slot::Ok => ("fake-1", "p-1"),
+                        Slot::ForeignModel => ("someone-else", "p-1"),
+                        Slot::ForeignPolicy => ("fake-1", "p-old"),
+                    };
+                    ItemOutcome::Verdict(ClassifierVerdict {
+                        toxic_token: c.contains("bad"),
+                        confidence: 0.9,
+                        latency_ms: 5,
+                        model_id: model_id.into(),
+                        policy_version: policy.into(),
+                    })
+                })
+                .collect();
+            if self.short {
+                out.pop();
+            }
+            Ok(out)
+        }
+        fn max_batch_size(&self) -> usize {
+            4
+        }
+        fn name(&self) -> &'static str {
+            "batch-fake"
+        }
+        fn model_id(&self) -> &'static str {
+            "fake-1"
+        }
+        fn policy_version(&self) -> &'static str {
+            "p-1"
+        }
+        fn threshold(&self) -> f32 {
+            0.5
+        }
+    }
+
+    async fn run_batch(model: &BatchFake, pool: &[FixtureRow], dir: &Path) -> RunStats {
+        let mut budget = Budget::new(1.0);
+        run_model("m", model, pool, dir, &Price::default(), &mut budget, T)
+            .await
+            .unwrap()
+    }
+
+    fn four() -> Vec<FixtureRow> {
+        vec![
+            row("a", "bad one"),
+            row("b", "fine two"),
+            row("c", "bad three"),
+            row("d", "fine four"),
+        ]
+    }
+
+    /// Final review fix 5: a wrong-count reply cannot be paired to posts, so
+    /// every post in that batch is an error — none is guessed at.
+    #[tokio::test]
+    async fn a_short_batch_reply_makes_every_post_in_it_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = BatchFake {
+            short: true,
+            ..BatchFake::new(vec![])
+        };
+        let mut pool = four();
+        pool.push(row("e", "bad five"));
+        let s = run_batch(&model, &pool, dir.path()).await;
+        assert_eq!(model.batches.load(Ordering::SeqCst), 2, "4 + 1 posts");
+        // Both batches come back one short: all five posts are errors.
+        assert_eq!((s.judged, s.errors), (0, 5));
+        let recs = load(dir.path(), "m").unwrap();
+        for id in ["a", "b", "c", "d", "e"] {
+            assert_eq!(recs[id].called_toxic, None, "{id}");
+            assert!(
+                recs[id].error.as_deref().unwrap().contains("outcomes for"),
+                "{id}: {:?}",
+                recs[id].error
+            );
+        }
+    }
+
+    /// Final review fix 5: one slot failing does not taint its neighbours.
+    #[tokio::test]
+    async fn a_per_slot_error_marks_only_that_post() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = BatchFake::new(vec![("three", Slot::SlotError)]);
+        let s = run_batch(&model, &four(), dir.path()).await;
+        assert_eq!(model.batches.load(Ordering::SeqCst), 1);
+        assert_eq!((s.judged, s.errors), (3, 1));
+        let recs = load(dir.path(), "m").unwrap();
+        assert_eq!(recs["c"].called_toxic, None);
+        assert!(recs["c"]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("did not decode"));
+        assert_eq!(recs["a"].called_toxic, Some(true));
+        assert_eq!(recs["b"].called_toxic, Some(false));
+        assert_eq!(recs["d"].called_toxic, Some(false));
+    }
+
+    /// Final review fix 5: in a mixed batch, the one slot reporting a foreign
+    /// model is an error; the rest are kept.
+    #[tokio::test]
+    async fn a_foreign_model_in_one_slot_is_an_error_for_that_post_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = BatchFake::new(vec![("two", Slot::ForeignModel)]);
+        let s = run_batch(&model, &four(), dir.path()).await;
+        assert_eq!((s.judged, s.errors), (3, 1));
+        let recs = load(dir.path(), "m").unwrap();
+        assert_eq!(recs["b"].called_toxic, None);
+        assert!(recs["b"]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("identity mismatch"));
+        assert_eq!(recs["a"].called_toxic, Some(true));
+        assert_eq!(recs["c"].called_toxic, Some(true));
+    }
+
+    /// Final review fix 5: the right model under the wrong policy is still
+    /// an identity mismatch, not a verdict.
+    #[tokio::test]
+    async fn a_policy_only_mismatch_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = BatchFake::new(vec![("four", Slot::ForeignPolicy)]);
+        let s = run_batch(&model, &four(), dir.path()).await;
+        assert_eq!((s.judged, s.errors), (3, 1));
+        let rec = &load(dir.path(), "m").unwrap()["d"];
+        assert_eq!(rec.called_toxic, None);
+        let err = rec.error.as_deref().unwrap();
+        assert!(
+            err.contains("identity mismatch") && err.contains("p-old"),
+            "{err}"
         );
     }
 }
