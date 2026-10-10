@@ -11736,6 +11736,28 @@
       "created_at": "2026-10-09T18:01:31.675059-07:00",
       "updated_at": "2026-10-09T18:01:31.675059-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"db57a0e\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-09-404-classifier-eval-harness.md\"]}"
+    },
+    {
+      "id": 1077,
+      "change_id": "66b5b1de-7b0e-4552-a0e7-5595776c773e",
+      "node_type": "outcome",
+      "title": "Pre-flight scan: no blockers; fixed red-step wiring (pub mod in test step), spec 60s->600s and interval-overlap->McNemar wording; Part B cap carry-forward noted",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:05:34.420418-07:00",
+      "updated_at": "2026-10-09T18:05:34.420418-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"4213f11\",\"confidence\":90}"
+    },
+    {
+      "id": 1078,
+      "change_id": "672b37f9-be76-4ffb-8778-fa3e6477911a",
+      "node_type": "outcome",
+      "title": "Task 1 provider contracts (ed8475a): Jev, Clef-flash/27B, Strands Decider all pass gate; concerns: TypeSafe no-training clause, Strands may ignore long policy, one post/request, cancel-billing not documented",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:05:34.430893-07:00",
+      "updated_at": "2026-10-09T18:05:34.430893-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"ed8475a\",\"confidence\":75}"
     }
   ],
   "edges": [
@@ -24036,6 +24058,28 @@
       "weight": 1.0,
       "rationale": "Execute the twice-reviewed plan",
       "created_at": "2026-10-09T18:01:33.051638-07:00"
+    },
+    {
+      "id": 1129,
+      "from_node_id": 1076,
+      "to_node_id": 1077,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "66b5b1de-7b0e-4552-a0e7-5595776c773e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Pre-flight result",
+      "created_at": "2026-10-09T18:05:35.959779-07:00"
+    },
+    {
+      "id": 1130,
+      "from_node_id": 1076,
+      "to_node_id": 1078,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "672b37f9-be76-4ffb-8778-fa3e6477911a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 1 result",
+      "created_at": "2026-10-09T18:05:35.966831-07:00"
     }
   ],
   "documents": [

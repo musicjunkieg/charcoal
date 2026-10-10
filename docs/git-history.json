@@ -1,5 +1,21 @@
 [
   {
+    "hash": "4213f11f9265bd0fe8a420a9e9fb94041802d857",
+    "short_hash": "4213f11",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:04:44-07:00",
+    "message": "docs(404): pre-flight fixes — red steps really fail; spec timeout/verdict wording matches plan\n\nPre-flight scan found the TDD red runs pass with 0 tests (pub mod added\nafter the tests), the spec still said 60 s and \"intervals overlap\", and\nthe spec asked the report to rank bad models last though it only flags\nthem. Also records the Part B cost-cap carry-forward.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "ed8475a3046a25eb61ef26db227b89db50ff020f",
+    "short_hash": "ed8475a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:03:56-07:00",
+    "message": "docs(404): verified API contracts for Jev, Clef and Strands Decider\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "db57a0ef103f5caacd78b54de598e54c5e73c57b",
     "short_hash": "db57a0e",
     "author": "Bryan Guffey",
