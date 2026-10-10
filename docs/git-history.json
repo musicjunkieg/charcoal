@@ -1,5 +1,13 @@
 [
   {
+    "hash": "d95c8aa2e98931b41fff112943f66fc1c3299522",
+    "short_hash": "d95c8aa",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:30:45-07:00",
+    "message": "feat(404): verdict cache with identity file and a single current-verdict gate\n\nCo-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "30904c980482d609c318bd4b12530d9cad449647",
     "short_hash": "30904c9",
     "author": "Bryan Guffey",
