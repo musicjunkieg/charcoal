@@ -21,6 +21,19 @@ pub struct Price {
     pub overhead_chars: usize,
 }
 
+impl Price {
+    /// Does this model cost money at all? Decided from the configured price,
+    /// NOT from one batch's estimate: a per-token model's estimate for an
+    /// empty post can come out as $0, yet calling it still wakes a paid
+    /// backend. Mirrors `estimate_usd`, where a per-post price wins.
+    pub fn is_paid(&self) -> bool {
+        match self.usd_per_post {
+            Some(per_post) => per_post > 0.0,
+            None => self.usd_per_million_input_tokens.unwrap_or(0.0) > 0.0,
+        }
+    }
+}
+
 pub fn load_pricing(path: &Path) -> Result<HashMap<String, Price>> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -120,6 +133,13 @@ impl Budget {
     /// Detoxify) still pass `can_afford(0.0)`.
     pub fn exhaust(&mut self) {
         self.spent_usd = self.spent_usd.max(self.cap_usd);
+    }
+
+    /// Is there no headroom left at all? A paid model is refused once this is
+    /// true, even for a call estimated at $0 (see [`Price::is_paid`]). A cap
+    /// of $0 counts as exhausted from the start: it allows free models only.
+    pub fn is_exhausted(&self) -> bool {
+        self.spent_usd >= self.cap_usd
     }
 
     pub fn spent(&self) -> f64 {
@@ -282,6 +302,25 @@ mod tests {
         assert_eq!(b.spent(), 1.0);
         assert!(!b.can_afford(0.0001), "no paid call after exhaustion");
         assert!(b.can_afford(0.0), "a free model still runs");
+    }
+
+    /// Codex review #2, item 1: "paid" comes from the configured price; a
+    /// per-post price wins over a per-token one, as in `estimate_usd`.
+    #[test]
+    fn paid_is_decided_by_the_configured_price() {
+        assert!(!Price::default().is_paid(), "no price at all = free");
+        assert!(per_tok(0.042, 0).is_paid());
+        assert!(!per_tok(0.0, 0).is_paid());
+        let free_per_post = Price {
+            usd_per_post: Some(0.0),
+            ..per_tok(5.0, 0)
+        };
+        assert!(!free_per_post.is_paid(), "the per-post price wins");
+        assert!(Budget::new(0.0).is_exhausted(), "a $0 cap admits free only");
+        let mut b = Budget::new(1.0);
+        assert!(!b.is_exhausted());
+        b.exhaust();
+        assert!(b.is_exhausted());
     }
 
     #[test]

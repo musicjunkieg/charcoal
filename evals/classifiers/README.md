@@ -51,6 +51,14 @@ added as a new line and replaces the old one.
   runs; every later paid model stops before waking anything. (The eval's
   running total is only an estimate, and the real meter can reach the cap
   well before it, so the remaining "headroom" cannot be trusted.)
+- **A paid model that fails its identity check also ends paid spending.**
+  That check may already have woken (and billed) the GPU, so the run treats
+  it like reaching the cap: free models still run, every later paid model is
+  refused before it wakes anything. A free model failing its check changes
+  nothing.
+- **Each model may be named once.** `--models cope-b,cope-b` is refused
+  before anything runs: running a model twice in one run has no use, and the
+  second pass could wake the GPU again.
 - **A request the eval gives up on may keep running on RunPod.** If a batch
   hits the eval's timeout, the eval records those posts as errors and moves
   on, but RunPod may still finish the job, and that time is not counted

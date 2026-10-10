@@ -125,7 +125,7 @@ pub async fn run_model(
         .take(batch)
         .map(|r| estimate_usd(price, r.content.chars().count()))
         .sum();
-    if !budget.can_afford(first_batch_usd) {
+    if !admits(budget, price, first_batch_usd) {
         stats.stopped_at_cap = true;
         return Ok(stats);
     }
@@ -146,7 +146,9 @@ pub async fn run_model(
             .iter()
             .map(|r| estimate_usd(price, r.content.chars().count()))
             .collect();
-        if !budget.try_spend(ests.iter().sum()) {
+        // `admits` first: `try_spend` alone would let a paid model's $0
+        // estimate through an exhausted budget.
+        if !admits(budget, price, ests.iter().sum()) || !budget.try_spend(ests.iter().sum()) {
             stats.stopped_at_cap = true;
             break;
         }
@@ -238,6 +240,15 @@ pub async fn run_model(
     Ok(stats)
 }
 
+/// May a call estimated at `usd` go ahead? The budget must cover it, AND a
+/// paid model gets nothing from an exhausted budget even when this call's
+/// estimate rounds to $0 — whether a model is paid comes from its configured
+/// price, never from one estimate (Codex review #2, item 1). Free models
+/// (local Detoxify) are unaffected: `can_afford(0.0)` always holds.
+fn admits(budget: &Budget, price: &Price, usd: f64) -> bool {
+    budget.can_afford(usd) && !(price.is_paid() && budget.is_exhausted())
+}
+
 /// What happened to one model of a multi-model run.
 #[derive(Debug)]
 pub enum ModelOutcome {
@@ -280,6 +291,15 @@ where
         prices,
         timeout,
     } = *plan;
+    // Refuse a repeated name before anything runs. Running a model twice in
+    // one run has no use, and for a paid backend the second pass could wake
+    // the GPU again (Codex review #2, item 1b).
+    let mut seen = std::collections::HashSet::new();
+    for name in names {
+        if !seen.insert(name.as_str()) {
+            anyhow::bail!("--models lists {name:?} twice — name each model once");
+        }
+    }
     for name in names {
         // Refuse an unpriced model before building (or paying for) anything.
         let price = price_for(prices, name)?;
@@ -310,12 +330,20 @@ where
                 report(&ModelOutcome::Ran(s))
             }
             // A failed probe bought no verdicts, so there is nothing to lose
-            // by moving on (the probe itself may have woken — and billed —
-            // the GPU; skipping does not undo that, but it spends no more).
-            Err(e) if e.downcast_ref::<ProbeFailed>().is_some() => report(&ModelOutcome::Skipped {
-                model: name.clone(),
-                reason: format!("{e:#}"),
-            }),
+            // by moving on. But for a PAID model the probe itself may have
+            // woken — and billed — the GPU, and no meter saw it. So treat it
+            // like a cap stop: exhaust the budget, and no later paid model is
+            // woken this run. A free model's failed probe cost nothing and
+            // leaves the budget alone (Codex review #2, item 1a).
+            Err(e) if e.downcast_ref::<ProbeFailed>().is_some() => {
+                if price.is_paid() {
+                    budget.exhaust();
+                }
+                report(&ModelOutcome::Skipped {
+                    model: name.clone(),
+                    reason: format!("{e:#}"),
+                })
+            }
             // Anything else may follow a paid batch whose verdicts were not
             // saved: stop the run with a non-zero exit (Codex fix 4).
             Err(e) => return Err(e.context(format!("{name}: run stopped"))),
@@ -987,6 +1015,146 @@ mod tests {
         assert_eq!(paid_b.probes.load(Ordering::SeqCst), 0, "B never woken");
         assert_eq!(paid_b.calls.load(Ordering::SeqCst), 0, "B never called");
         assert_eq!(free.calls.load(Ordering::SeqCst), 3, "free still runs");
+    }
+
+    /// Codex review #2, item 1a: a PAID model whose probe fails may already
+    /// have woken (and billed) the GPU. A later paid model must not wake it
+    /// again — no probe, no call — while a free model still runs.
+    #[tokio::test]
+    async fn a_failed_paid_probe_ends_paid_spending_for_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let prices: HashMap<String, Price> = [
+            ("paid_a".to_string(), priced(0.001)),
+            ("paid_b".to_string(), priced(0.001)),
+            ("free".to_string(), Price::default()),
+        ]
+        .into();
+        let paid_a = Arc::new(Fake {
+            probe_fails: true,
+            ..Fake::new()
+        });
+        let paid_b = Arc::new(Fake::new());
+        let free = Arc::new(Fake::new());
+        let mut budget = Budget::new(1.0);
+        let (res, seen) = run_all(
+            &["paid_a", "paid_b", "free"],
+            &[
+                ("paid_a", Arc::clone(&paid_a)),
+                ("paid_b", Arc::clone(&paid_b)),
+                ("free", Arc::clone(&free)),
+            ],
+            &prices,
+            &pool,
+            dir.path(),
+            &mut budget,
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(
+            seen,
+            vec![
+                "skipped paid_a".to_string(),
+                "ran paid_b judged 0 cap true".to_string(),
+                "ran free judged 2 cap false".to_string(),
+            ]
+        );
+        assert_eq!(paid_b.probes.load(Ordering::SeqCst), 0, "B never woken");
+        assert_eq!(paid_b.calls.load(Ordering::SeqCst), 0, "B never called");
+        assert_eq!(free.calls.load(Ordering::SeqCst), 2, "free still runs");
+    }
+
+    /// Item 1a, the other side: a FREE model's failed probe cost nothing, so
+    /// it must not end paid spending.
+    #[tokio::test]
+    async fn a_failed_free_probe_does_not_stop_a_later_paid_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad")];
+        let prices: HashMap<String, Price> = [
+            ("free".to_string(), Price::default()),
+            ("paid".to_string(), priced(0.001)),
+        ]
+        .into();
+        let free = Arc::new(Fake {
+            probe_fails: true,
+            ..Fake::new()
+        });
+        let paid = Arc::new(Fake::new());
+        let (res, seen) = run_all(
+            &["free", "paid"],
+            &[("free", free), ("paid", Arc::clone(&paid))],
+            &prices,
+            &pool,
+            dir.path(),
+            &mut Budget::new(1.0),
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(
+            seen,
+            vec![
+                "skipped free".to_string(),
+                "ran paid judged 1 cap false".to_string(),
+            ]
+        );
+        assert_eq!(paid.calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Item 1b: naming a model twice is a mistake (it would probe — and on
+    /// RunPod wake — the same backend twice). Refused before anything runs.
+    #[tokio::test]
+    async fn a_model_named_twice_is_refused_up_front() {
+        let dir = tempfile::tempdir().unwrap();
+        let prices: HashMap<String, Price> = [
+            ("a".to_string(), Price::default()),
+            ("b".to_string(), Price::default()),
+        ]
+        .into();
+        let a = Arc::new(Fake::new());
+        let (res, seen) = run_all(
+            &["a", "b", "a"],
+            &[("a", Arc::clone(&a)), ("b", Arc::new(Fake::new()))],
+            &prices,
+            &[row("p", "bad")],
+            dir.path(),
+            &mut Budget::new(1.0),
+        )
+        .await;
+        let err = format!("{:#}", res.unwrap_err());
+        assert!(err.contains("\"a\"") && err.contains("twice"), "{err}");
+        assert!(seen.is_empty(), "nothing ran: {seen:?}");
+        assert_eq!(a.probes.load(Ordering::SeqCst), 0);
+    }
+
+    /// Item 1, the zero-estimate minor: "paid" is decided by the configured
+    /// price, not by the batch estimate. A per-token model whose first batch
+    /// estimates to $0 (an empty post, no overhead) is still paid, so an
+    /// exhausted budget refuses it before its probe.
+    #[tokio::test]
+    async fn a_paid_model_with_a_zero_estimate_is_refused_once_exhausted() {
+        let dir = tempfile::tempdir().unwrap();
+        let per_token = Price {
+            usd_per_post: None,
+            usd_per_million_input_tokens: Some(1.0),
+            overhead_chars: 0,
+        };
+        let mut budget = Budget::new(1.0);
+        budget.exhaust();
+        let model = Fake::new();
+        let s = run_model(
+            "m",
+            &model,
+            &[row("a", "")],
+            dir.path(),
+            &per_token,
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert!(s.stopped_at_cap);
+        assert_eq!(model.probes.load(Ordering::SeqCst), 0, "no wake-up");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 0);
     }
 
     /// Codex fix 4: a failed probe is the one run_model error that is safe to

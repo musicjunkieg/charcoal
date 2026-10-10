@@ -1,5 +1,13 @@
 [
   {
+    "hash": "6968a12af53b7f8a7c6ad4d95184846abb85ac5f",
+    "short_hash": "6968a12",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T16:02:32-07:00",
+    "message": "fix(404): exhaust the shared budget once any model stops at the cap\n\nThe budget only tracks estimates. When CoPE-B real cost meter trips, the\nestimate is still tiny, so the next paid model was built with nearly the\nwhole cap as headroom and woke the GPU again. run_models now calls\nBudget::exhaust() whenever a model stops at the cap, so every later paid\nmodel fails can_afford before its probe while $0 models still run.\n\nRe-review minors in the same change: ProbeFailed keeps its cause as a\n#[source] and no longer repeats the model name; probe-failure wording no\nlonger claims nothing was spent (the probe wakes the GPU); stale\nall-cached comment updated; cache::load/current are test-only so no\nproduction caller can reintroduce last-record-wins; README matches the\nprinted ignored-labels note and the new cap rule.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
     "hash": "e3622ab406205373159f096ea8d83d299ce56075",
     "short_hash": "e3622ab",
     "author": "Bryan Guffey",
