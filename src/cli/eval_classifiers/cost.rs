@@ -169,6 +169,30 @@ mod tests {
     }
 
     #[test]
+    fn pricing_rejects_negative_usd_per_post() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("pricing.json");
+        std::fs::write(&p, r#"{"model":{"usd_per_post":-0.001}}"#).unwrap();
+        let err = format!("{:#}", load_pricing(&p).unwrap_err());
+        assert!(
+            err.contains("model") && (err.contains("invalid") || err.contains("negative")),
+            "negative usd_per_post must be rejected: {err}"
+        );
+    }
+
+    #[test]
+    fn pricing_rejects_negative_usd_per_million_input_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("pricing.json");
+        std::fs::write(&p, r#"{"model":{"usd_per_million_input_tokens":-0.001}}"#).unwrap();
+        let err = format!("{:#}", load_pricing(&p).unwrap_err());
+        assert!(
+            err.contains("model") && (err.contains("invalid") || err.contains("negative")),
+            "negative usd_per_million_input_tokens must be rejected: {err}"
+        );
+    }
+
+    #[test]
     fn budget_spend_to_exactly_the_cap_is_accepted() {
         let mut b = Budget::new(1.0);
         assert!(
