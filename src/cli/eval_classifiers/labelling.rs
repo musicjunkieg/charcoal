@@ -19,14 +19,12 @@ use super::data::{load_labels, Answer, FixtureRow, Label, Source, Truth};
 use super::fnv1a;
 
 /// Salted so holdout membership is independent of the diagnostic sample.
-#[allow(clippy::manual_is_multiple_of)]
 pub fn in_holdout(id: &str) -> bool {
-    fnv1a(format!("holdout:{id}").as_bytes()) % 3 == 0
+    fnv1a(format!("holdout:{id}").as_bytes()).is_multiple_of(3)
 }
 
-#[allow(clippy::manual_is_multiple_of)]
 pub fn sampled(id: &str) -> bool {
-    fnv1a(id.as_bytes()) % 10 == 0
+    fnv1a(id.as_bytes()).is_multiple_of(10)
 }
 
 pub fn source_for(id: &str) -> Source {
@@ -98,12 +96,10 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
         .collect();
     let text = std::fs::read_to_string(to_label)
         .with_context(|| format!("reading {}", to_label.display()))?;
-    let mut out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(labels_path)
-        .with_context(|| format!("opening {}", labels_path.display()))?;
-    let mut merged = 0;
+    // Validate-then-append: every row is checked into `pending` first, so a
+    // bad row N cannot leave rows 1..N-1 already written to labels.jsonl.
+    let mut pending: Vec<Label> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
         let at = || format!("{} line {}", to_label.display(), i + 1);
         let row: serde_json::Value = serde_json::from_str(l).with_context(at)?;
@@ -142,10 +138,25 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
             source: source_for(id),
             note,
         };
-        writeln!(out, "{}", serde_json::to_string(&label)?)?;
-        merged += 1;
+        // Even two agreeing answers are an error: the human should fix the
+        // file rather than have the last one silently win on reload.
+        if !seen.insert(id.to_string()) {
+            bail!("{}: id {id:?} is answered more than once", at());
+        }
+        pending.push(label);
     }
-    Ok(merged)
+    if pending.is_empty() {
+        return Ok(0);
+    }
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(labels_path)
+        .with_context(|| format!("opening {}", labels_path.display()))?;
+    for label in &pending {
+        writeln!(out, "{}", serde_json::to_string(label)?)?;
+    }
+    Ok(pending.len())
 }
 
 #[cfg(test)]
@@ -306,5 +317,38 @@ mod tests {
             merge_labels(&to_label, &labels, &pool2).is_err(),
             "content differs from the pool"
         );
+    }
+
+    /// Review fix: a bad row must not leave the earlier good rows appended.
+    #[test]
+    fn a_failed_merge_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        let pool = vec![row(&h)];
+        let good = format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":""}}"#);
+        let bad = r#"{"id":"nope","content":"x","label":"toxic","note":""}"#;
+        std::fs::write(&to_label, format!("{good}\n{bad}\n")).unwrap();
+        assert!(merge_labels(&to_label, &labels, &pool).is_err());
+        assert!(
+            !labels.exists() || std::fs::read_to_string(&labels).unwrap().is_empty(),
+            "no partial merge"
+        );
+    }
+
+    /// Review fix: the same id answered twice is a file error, not two labels.
+    #[test]
+    fn a_duplicate_id_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        let pool = vec![row(&h)];
+        let line = format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":""}}"#);
+        std::fs::write(&to_label, format!("{line}\n{line}\n")).unwrap();
+        let err = merge_labels(&to_label, &labels, &pool).unwrap_err();
+        assert!(format!("{err:#}").contains(&h), "names the id: {err:#}");
+        assert!(!labels.exists() || std::fs::read_to_string(&labels).unwrap().is_empty());
     }
 }

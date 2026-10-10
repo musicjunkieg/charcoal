@@ -1,5 +1,13 @@
 [
   {
+    "hash": "041e723f16fa3a9ac79583b944c55f24c99a1c3a",
+    "short_hash": "041e723",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:24:57-07:00",
+    "message": "test(404): restore negative-price pricing tests dropped with the placeholder\n\nThe cleanup in b82a60f deleted the two negative-price tests along with\nthe vacuous NaN one; they are the only tests proving load_pricing fails\nclosed on a negative price.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 1
+  },
+  {
     "hash": "7fe8fea0f0065a5cdee190fa71f4137c567e7f0f",
     "short_hash": "7fe8fea",
     "author": "Bryan Guffey",

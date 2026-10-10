@@ -11890,6 +11890,17 @@
       "created_at": "2026-10-09T19:15:31.032714-07:00",
       "updated_at": "2026-10-09T19:15:31.032714-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
+    },
+    {
+      "id": 1091,
+      "change_id": "0be19857-f48b-4255-a491-2646fd8066c8",
+      "node_type": "outcome",
+      "title": "Task 5 complete: budget/pricing fail closed; vacuous test removed; controller restored 2 over-deleted negative-price tests (041e723)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:25:19.560227-07:00",
+      "updated_at": "2026-10-09T19:25:19.560227-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"041e723\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24344,6 +24355,17 @@
       "weight": 1.0,
       "rationale": "Review found plan-mandated label-integrity gap",
       "created_at": "2026-10-09T19:15:32.378594-07:00"
+    },
+    {
+      "id": 1143,
+      "from_node_id": 1086,
+      "to_node_id": 1091,
+      "from_change_id": "4f77bc8a-641a-4870-beee-6fe90a6014e2",
+      "to_change_id": "0be19857-f48b-4255-a491-2646fd8066c8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review + 2 fix rounds",
+      "created_at": "2026-10-09T19:25:20.890470-07:00"
     }
   ],
   "documents": [
