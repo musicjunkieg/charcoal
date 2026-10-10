@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Duration;
 
-use super::cache::{append, load, save_identity, Identity, VerdictRecord};
+use super::cache::{append, load, load_identity, save_identity, Identity, VerdictRecord};
 use super::cost::{estimate_usd, Budget, Price};
 use super::data::FixtureRow;
 use crate::toxicity::classifier::{ItemOutcome, ToxicityClassifier};
@@ -71,9 +71,21 @@ pub async fn run_model(
 
     // Nothing to judge: return before the probe. On RunPod a probe is a real
     // GPU wake-up (cold start + ~60 s billed idle) that no meter can stop,
-    // because nothing has been spent yet. The identity file is left alone —
-    // it records only identities a probe has actually verified.
+    // because nothing has been spent yet. The identity file is still brought
+    // in line, though: it records the identity whose verdicts are current.
+    // Every pool post's latest record is a successful verdict that passed the
+    // per-verdict model/policy check under `who` when it was recorded, which
+    // is stronger evidence than a probe. Without this, an earlier run under
+    // another policy that probed but recorded nothing leaves the file
+    // pointing at that policy, and report/label would drop this model.
     if todo.is_empty() {
+        let recorded = load_identity(dir, model)?;
+        let matches = recorded
+            .as_ref()
+            .is_some_and(|r| r.model_id == who.model_id && r.policy_version == who.policy_version);
+        if !matches {
+            save_identity(dir, model, who)?;
+        }
         return Ok(stats);
     }
     let batch = classifier.max_batch_size().max(1);
@@ -315,6 +327,66 @@ mod tests {
             crate::cli::eval_classifiers::cache::load_identity(dir.path(), "m")
                 .unwrap()
                 .is_some()
+        );
+    }
+
+    /// Final round 2, item 1: a P2 run that probes (identity file -> P2) but
+    /// records nothing must not strand a later all-cached P1 run.
+    #[tokio::test]
+    async fn an_all_cached_run_restores_the_identity_whose_verdicts_are_current() {
+        use crate::cli::eval_classifiers::cache::current_for;
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let mut budget = Budget::new(1.0);
+        let p1 = Fake::new();
+        run_model(
+            "m",
+            &p1,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        // P2 probes fine, then the cost ceiling trips on the first batch.
+        let p2 = Fake {
+            policy: "p-2",
+            capped_on: Some(""),
+            ..Fake::new()
+        };
+        run_model(
+            "m",
+            &p2,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert_eq!(p2.probes.load(Ordering::SeqCst), 1, "P2 did probe");
+        // Back to P1: everything is cached, so no probe -- yet the identity
+        // file (now P2) must be repaired.
+        let p1b = Fake::new();
+        let s = run_model(
+            "m",
+            &p1b,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert_eq!((s.judged, s.cached), (0, 2));
+        assert_eq!(p1b.probes.load(Ordering::SeqCst), 0, "no GPU wake-up");
+        assert!(
+            !current_for(dir.path(), "m", &pool).unwrap().is_empty(),
+            "report/label must still see the P1 verdicts"
         );
     }
 

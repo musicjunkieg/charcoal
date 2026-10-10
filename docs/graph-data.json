@@ -12000,6 +12000,17 @@
       "created_at": "2026-10-09T20:17:34.518122-07:00",
       "updated_at": "2026-10-09T20:17:34.518122-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":90}"
+    },
+    {
+      "id": 1101,
+      "change_id": "1c204ecc-f837-4fd7-b9fb-396ecefdb3a3",
+      "node_type": "action",
+      "title": "Final-review fix batch applied (9 commits): no GPU probe without work+budget, label refuses unmerged answers, Detoxify NaN error, duplicate ids rejected, batch>1 tests, cache::current_for gate, log-space McNemar, README",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T21:21:45.874117-07:00",
+      "updated_at": "2026-10-09T21:21:45.874117-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"5769d8f\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -24564,6 +24575,17 @@
       "weight": 1.0,
       "rationale": "Final whole-branch review",
       "created_at": "2026-10-09T20:17:36.198895-07:00"
+    },
+    {
+      "id": 1153,
+      "from_node_id": 1100,
+      "to_node_id": 1101,
+      "from_change_id": "c325934c-3ded-4f9a-ba59-a93d56fd1d43",
+      "to_change_id": "1c204ecc-f837-4fd7-b9fb-396ecefdb3a3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix batch for final review",
+      "created_at": "2026-10-09T21:21:47.164958-07:00"
     }
   ],
   "documents": [
