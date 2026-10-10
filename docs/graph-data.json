@@ -11846,6 +11846,28 @@
       "created_at": "2026-10-09T18:40:39.876461-07:00",
       "updated_at": "2026-10-09T18:40:39.876461-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"cc8d585\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/cost.rs\"]}"
+    },
+    {
+      "id": 1087,
+      "change_id": "1252fce5-1b7a-48ea-b10e-83ad3b7020dd",
+      "node_type": "action",
+      "title": "Task 6 implemented: runner - probe identity, batch, reject foreign verdicts, per-call timeout, real cost ceiling (8 tests)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:45:22.775507-07:00",
+      "updated_at": "2026-10-09T18:45:22.775507-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"3466b5a\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/runner.rs\"]}"
+    },
+    {
+      "id": 1088,
+      "change_id": "80c7ae44-dceb-44c1-b06a-0af36ce5017e",
+      "node_type": "outcome",
+      "title": "Task 6 review clean (opus): probe-first, identity rejection, timeout cancels, typed cap detection; minor: batch>1 path untested",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T18:46:24.594858-07:00",
+      "updated_at": "2026-10-09T18:46:24.594858-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"3466b5a\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -24256,6 +24278,28 @@
       "weight": 1.0,
       "rationale": "Task 5 of plan",
       "created_at": "2026-10-09T18:40:41.222747-07:00"
+    },
+    {
+      "id": 1139,
+      "from_node_id": 1076,
+      "to_node_id": 1087,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "1252fce5-1b7a-48ea-b10e-83ad3b7020dd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 6 of plan",
+      "created_at": "2026-10-09T18:45:24.215475-07:00"
+    },
+    {
+      "id": 1140,
+      "from_node_id": 1087,
+      "to_node_id": 1088,
+      "from_change_id": "1252fce5-1b7a-48ea-b10e-83ad3b7020dd",
+      "to_change_id": "80c7ae44-dceb-44c1-b06a-0af36ce5017e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review result",
+      "created_at": "2026-10-09T18:46:25.900242-07:00"
     }
   ],
   "documents": [

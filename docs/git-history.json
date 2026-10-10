@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3466b5aa4ff706985335cca2315f6b63c8a66324",
+    "short_hash": "3466b5a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:44:37-07:00",
+    "message": "feat(404): runner probes identity, batches, rejects foreign verdicts and honours real cost ceilings\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "cc8d585b4189415d57fc8e2b01a9908b363a3409",
     "short_hash": "cc8d585",
     "author": "Bryan Guffey",
