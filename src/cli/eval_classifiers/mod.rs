@@ -6,6 +6,7 @@ pub mod cost;
 pub mod data;
 pub mod labelling;
 pub mod metrics;
+pub mod models;
 pub mod report;
 pub mod runner;
 

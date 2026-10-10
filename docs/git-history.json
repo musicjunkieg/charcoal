@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b21f02c27ecb54dffcaaca264d53b1ecfccb1ca0",
+    "short_hash": "b21f02c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:40:51-07:00",
+    "message": "feat(404): holdout-only report with exact paired verdicts; proven to catch bad models\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "2e4f18caaaf86c8b23aa13c1d815091d59140837",
     "short_hash": "2e4f18c",
     "author": "Bryan Guffey",

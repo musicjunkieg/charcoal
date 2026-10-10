@@ -11912,6 +11912,17 @@
       "created_at": "2026-10-09T19:34:13.625457-07:00",
       "updated_at": "2026-10-09T19:34:13.625457-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2e4f18c\",\"confidence\":90}"
+    },
+    {
+      "id": 1093,
+      "change_id": "4d827ec9-d7ee-444a-9709-7061e5c9a0bd",
+      "node_type": "action",
+      "title": "Task 8 implemented: holdout-only report, Wilson + exact paired verdicts, bad-model proof tests (6 tests)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-09T19:41:39.287424-07:00",
+      "updated_at": "2026-10-09T19:41:39.287424-07:00",
+      "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"b21f02c\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/report.rs\"]}"
     }
   ],
   "edges": [
@@ -24388,6 +24399,17 @@
       "weight": 1.0,
       "rationale": "Decision implemented, re-review clean",
       "created_at": "2026-10-09T19:34:15.109133-07:00"
+    },
+    {
+      "id": 1145,
+      "from_node_id": 1076,
+      "to_node_id": 1093,
+      "from_change_id": "2a132c40-e196-4930-8048-0de17a0a54b0",
+      "to_change_id": "4d827ec9-d7ee-444a-9709-7061e5c9a0bd",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 8 of plan",
+      "created_at": "2026-10-09T19:41:40.736529-07:00"
     }
   ],
   "documents": [
