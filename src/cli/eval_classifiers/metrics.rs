@@ -107,22 +107,32 @@ pub enum Comparison {
 
 /// Exact two-sided McNemar (sign) test: under "no difference" each of the
 /// `b + c` discordant pairs is a fair coin. Exact rather than chi-squared
-/// because the counts here are small. Fine for n ≤ 1000 in f64.
+/// because the counts here are small.
+///
+/// Computed in log space: in plain f64, C(n, k) and 2^n both overflow to
+/// infinity above ~1000 pairs and their ratio becomes NaN. Logs keep every
+/// intermediate finite for any `u32` counts; a p-value too small for f64
+/// underflows to 0, which is still the right decision.
 pub fn mcnemar_exact_p(b: u32, c: u32) -> f64 {
-    let n = b + c;
+    let n = u64::from(b) + u64::from(c);
     if n == 0 {
         return 1.0;
     }
-    let k = b.min(c);
-    let mut coef = 1.0_f64; // C(n, 0)
-    let mut tail = 0.0_f64;
-    for i in 0..=k {
-        if i > 0 {
-            coef = coef * f64::from(n - i + 1) / f64::from(i);
-        }
-        tail += coef;
+    let k = u64::from(b.min(c));
+    // ln C(n, i) for i = 0..=k, built by the ratio C(n,i) = C(n,i-1)(n-i+1)/i.
+    let mut log_coefs = Vec::with_capacity(k as usize + 1);
+    let mut log_coef = 0.0_f64; // ln C(n, 0)
+    log_coefs.push(log_coef);
+    for i in 1..=k {
+        log_coef += ((n - i + 1) as f64).ln() - (i as f64).ln();
+        log_coefs.push(log_coef);
     }
-    (2.0 * tail / 2.0_f64.powi(n as i32)).min(1.0)
+    // Log-sum-exp around the largest term (the last: k ≤ n/2, so C(n, i)
+    // grows with i), so the sum itself cannot overflow.
+    let top = log_coef;
+    let log_tail = top + log_coefs.iter().map(|l| (l - top).exp()).sum::<f64>().ln();
+    let log_p = std::f64::consts::LN_2 + log_tail - n as f64 * std::f64::consts::LN_2;
+    log_p.exp().min(1.0)
 }
 
 /// One truth class: coverage gate, label gate, then the exact paired test.
@@ -166,7 +176,10 @@ fn compare_class(
     if shared < MIN_CLASS_N {
         return Comparison::NotEnoughLabels;
     }
-    if mcnemar_exact_p(b, c) >= ALPHA {
+    let p = mcnemar_exact_p(b, c);
+    // Fail closed: a p-value that is not a number never names a winner
+    // (`NaN >= ALPHA` is false and would fall through to Better/Worse).
+    if !p.is_finite() || p >= ALPHA {
         Comparison::TooClose
     } else if b < c {
         Comparison::Better
@@ -302,6 +315,48 @@ mod tests {
         assert!((mcnemar_exact_p(0, 5) - 0.0625).abs() < 1e-12);
         assert_eq!(mcnemar_exact_p(1, 1), 1.0);
         assert_eq!(mcnemar_exact_p(0, 0), 1.0);
+    }
+
+    /// Final review fix 7: above ~1000 discordant pairs the old f64 product
+    /// overflowed (C(n,k) and 2^n both became inf, inf/inf = NaN) and the
+    /// verdict came from that NaN. Reference values are exact (Python big
+    /// integers, `fractions.Fraction`).
+    #[test]
+    fn mcnemar_is_exact_and_finite_for_large_n() {
+        let close = |b, c, want: f64| {
+            let p = mcnemar_exact_p(b, c);
+            assert!(p.is_finite(), "({b},{c}) gave {p}");
+            assert!(
+                (p - want).abs() <= 1e-9 * want.max(1e-300),
+                "({b},{c}): got {p}, want {want}"
+            );
+        };
+        close(550, 650, 0.004_245_640_154_669_528);
+        close(580, 620, 0.260_227_380_296_723_15);
+        close(600, 600, 1.0);
+        close(3, 17, 0.002_576_828_002_929_687_5);
+        // 2 × 2^-1200 is below the smallest f64: 0 is the correctly rounded value.
+        assert_eq!(mcnemar_exact_p(0, 1200), 0.0);
+        assert!(mcnemar_exact_p(10, 1100) < 1e-300);
+    }
+
+    /// Final review fix 7: the decision for large counts is the right one.
+    #[test]
+    fn large_discordant_counts_are_decided_correctly() {
+        let l = labels(1300);
+        // Baseline wrong on t0..t650, candidate wrong on t650..t1200 (550):
+        // b = 550 (candidate only), c = 650 (baseline only), p ≈ 0.0042.
+        let base = calls(&l, &ids("t", 0..650), &[]);
+        let cand = calls(&l, &ids("t", 650..1200), &[]);
+        assert_eq!(paired("b", &base, "c", &cand, &l).miss, Comparison::Better);
+        assert_eq!(paired("b", &cand, "c", &base, &l).miss, Comparison::Worse);
+        // 0 vs 1200: decided, never from a NaN.
+        let none_wrong = calls(&l, &[], &[]);
+        let all_wrong = calls(&l, &ids("t", 0..1200), &[]);
+        assert_eq!(
+            paired("b", &all_wrong, "c", &none_wrong, &l).miss,
+            Comparison::Better
+        );
     }
 
     #[test]
