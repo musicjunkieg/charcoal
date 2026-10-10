@@ -1,0 +1,310 @@
+//! Choosing what a human labels next, in two streams kept strictly apart:
+//!
+//! - **Holdout** — a fixed, hash-chosen third of the pool, labelled whatever
+//!   the models say. Only these labels feed the headline rates.
+//! - **Diagnostic** — disagreements, plus a stable ~10 % of agreed posts.
+//!   Useful for understanding models; never mixed into the headline numbers.
+//!
+//! The stream a label belongs to is DERIVED from the post id at merge time,
+//! never read from the (human-edited) file (Codex review, round 2).
+
+use anyhow::{bail, Context, Result};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::Path;
+
+use super::cache::VerdictRecord;
+use super::data::{load_labels, Answer, FixtureRow, Label, Source, Truth};
+use super::fnv1a;
+
+/// Salted so holdout membership is independent of the diagnostic sample.
+#[allow(clippy::manual_is_multiple_of)]
+pub fn in_holdout(id: &str) -> bool {
+    fnv1a(format!("holdout:{id}").as_bytes()) % 3 == 0
+}
+
+#[allow(clippy::manual_is_multiple_of)]
+pub fn sampled(id: &str) -> bool {
+    fnv1a(id.as_bytes()) % 10 == 0
+}
+
+pub fn source_for(id: &str) -> Source {
+    if in_holdout(id) {
+        Source::Holdout
+    } else {
+        Source::Diagnostic
+    }
+}
+
+pub fn pick_for_labelling(
+    pool: &[FixtureRow],
+    per_model: &[HashMap<String, VerdictRecord>],
+    labels: &HashMap<String, Answer>,
+) -> Vec<(FixtureRow, Source)> {
+    let mut out = Vec::new();
+    for row in pool.iter().filter(|r| !labels.contains_key(&r.id)) {
+        if in_holdout(&row.id) {
+            out.push((row.clone(), Source::Holdout));
+            continue;
+        }
+        let calls: Vec<bool> = per_model
+            .iter()
+            .filter_map(|m| m.get(&row.id).and_then(|r| r.called_toxic))
+            .collect();
+        if calls.len() < 2 {
+            continue;
+        }
+        let disagree = calls.iter().any(|c| *c != calls[0]);
+        if disagree || sampled(&row.id) {
+            out.push((row.clone(), Source::Diagnostic));
+        }
+    }
+    out
+}
+
+#[derive(Serialize)]
+struct ToLabel<'a> {
+    id: &'a str,
+    content: &'a str,
+    source: Source,
+    label: &'a str,
+    note: &'a str,
+}
+
+/// Blind on purpose: no model votes, so they cannot anchor the answer. The
+/// `source` is shown for the labeller's information only.
+pub fn write_to_label(path: &Path, rows: &[(FixtureRow, Source)]) -> Result<()> {
+    let mut f =
+        std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
+    for (r, source) in rows {
+        let line = ToLabel {
+            id: &r.id,
+            content: &r.content,
+            source: *source,
+            label: "",
+            note: "",
+        };
+        writeln!(f, "{}", serde_json::to_string(&line)?)?;
+    }
+    Ok(())
+}
+
+pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) -> Result<usize> {
+    let existing = load_labels(labels_path)?;
+    let pool_text: HashMap<&str, &str> = pool
+        .iter()
+        .map(|r| (r.id.as_str(), r.content.as_str()))
+        .collect();
+    let text = std::fs::read_to_string(to_label)
+        .with_context(|| format!("reading {}", to_label.display()))?;
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(labels_path)
+        .with_context(|| format!("opening {}", labels_path.display()))?;
+    let mut merged = 0;
+    for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let at = || format!("{} line {}", to_label.display(), i + 1);
+        let row: serde_json::Value = serde_json::from_str(l).with_context(at)?;
+        let id = row["id"]
+            .as_str()
+            .with_context(|| format!("{}: row without id", at()))?;
+        let answer = row["label"].as_str().unwrap_or("").trim();
+        if answer.is_empty() || existing.contains_key(id) {
+            continue;
+        }
+        let Some(pool_content) = pool_text.get(id) else {
+            bail!("{}: id {id:?} is not in the pool", at());
+        };
+        if let Some(content) = row["content"].as_str() {
+            if content != *pool_content {
+                bail!(
+                    "{}: content for {id:?} differs from the pool — re-run `label`",
+                    at()
+                );
+            }
+        }
+        let truth = match answer {
+            "toxic" => Truth::Toxic,
+            "clean" => Truth::Clean,
+            other => bail!("{}: label {other:?} must be toxic or clean", at()),
+        };
+        let note = row["note"]
+            .as_str()
+            .filter(|n| !n.is_empty())
+            .map(str::to_string);
+        // Derived, not read: a hand-edited "source" cannot promote a
+        // disagreement-picked post into the headline rates.
+        let label = Label {
+            id: id.to_string(),
+            label: truth,
+            source: source_for(id),
+            note,
+        };
+        writeln!(out, "{}", serde_json::to_string(&label)?)?;
+        merged += 1;
+    }
+    Ok(merged)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::eval_classifiers::cache::VerdictRecord;
+
+    fn row(id: &str) -> FixtureRow {
+        serde_json::from_value(serde_json::json!({"id": id, "content": format!("post {id}")}))
+            .unwrap()
+    }
+    fn rec(id: &str, call: Option<bool>) -> VerdictRecord {
+        VerdictRecord {
+            id: id.into(),
+            model: "m".into(),
+            content_hash: String::new(),
+            model_id: "m".into(),
+            policy_version: "p".into(),
+            called_toxic: call,
+            error: call.is_none().then(|| "e".into()),
+            latency_ms: 1,
+            input_chars: 1,
+            est_usd: 0.0,
+        }
+    }
+    fn by_id(recs: Vec<VerdictRecord>) -> HashMap<String, VerdictRecord> {
+        recs.into_iter().map(|r| (r.id.clone(), r)).collect()
+    }
+    fn holdout_id() -> String {
+        (0..100)
+            .map(|i| format!("h{i}"))
+            .find(|id| in_holdout(id))
+            .unwrap()
+    }
+    fn other_id() -> String {
+        (0..100)
+            .map(|i| format!("o{i}"))
+            .find(|id| !in_holdout(id))
+            .unwrap()
+    }
+
+    #[test]
+    fn holdout_and_sample_fractions_are_stable() {
+        let holdout = (0..3000)
+            .filter(|i| in_holdout(&format!("post-{i}")))
+            .count();
+        assert!((900..=1100).contains(&holdout), "{holdout} of 3000 ≈ 1/3");
+        let sample = (0..2000).filter(|i| sampled(&format!("post-{i}"))).count();
+        assert!((140..=260).contains(&sample), "{sample} of 2000 ≈ 1/10");
+    }
+
+    #[test]
+    fn holdout_posts_are_picked_whatever_the_models_say() {
+        let picked = pick_for_labelling(&[row(&holdout_id())], &[], &HashMap::new());
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].1, Source::Holdout);
+    }
+
+    #[test]
+    fn diagnostics_are_disagreements_plus_the_agreed_sample() {
+        let ids: Vec<String> = (0..400)
+            .map(|i| format!("d{i}"))
+            .filter(|id| !in_holdout(id))
+            .collect();
+        let dis = ids[0].clone();
+        let labelled = ids[1].clone();
+        let agree = ids.iter().skip(2).find(|id| !sampled(id)).unwrap().clone();
+        let agree_sampled = ids.iter().skip(2).find(|id| sampled(id)).unwrap().clone();
+        let pool: Vec<FixtureRow> = [&dis, &agree, &agree_sampled, &labelled]
+            .iter()
+            .map(|id| row(id))
+            .collect();
+        let m1 = by_id(vec![
+            rec(&dis, Some(true)),
+            rec(&agree, Some(true)),
+            rec(&agree_sampled, Some(true)),
+            rec(&labelled, Some(true)),
+        ]);
+        let m2 = by_id(vec![
+            rec(&dis, Some(false)),
+            rec(&agree, Some(true)),
+            rec(&agree_sampled, Some(true)),
+            rec(&labelled, Some(false)),
+        ]);
+        let labels: HashMap<String, Answer> = [(
+            labelled.clone(),
+            Answer {
+                truth: Truth::Toxic,
+                source: Source::Diagnostic,
+            },
+        )]
+        .into();
+        let picked: Vec<(String, Source)> = pick_for_labelling(&pool, &[m1, m2], &labels)
+            .into_iter()
+            .map(|(r, s)| (r.id, s))
+            .collect();
+        assert!(picked.contains(&(dis.clone(), Source::Diagnostic)));
+        assert!(picked.contains(&(agree_sampled.clone(), Source::Diagnostic)));
+        assert!(!picked.iter().any(|(id, _)| *id == agree));
+        assert!(!picked.iter().any(|(id, _)| *id == labelled));
+    }
+
+    /// Codex review, round 2: the source is derived, never trusted — a
+    /// diagnostic post relabelled "holdout" in the file stays diagnostic.
+    #[test]
+    fn merge_derives_the_source_and_validates_against_the_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let (h, o) = (holdout_id(), other_id());
+        let pool = vec![row(&h), row(&o)];
+        write_to_label(
+            &to_label,
+            &[(row(&h), Source::Holdout), (row(&o), Source::Diagnostic)],
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&to_label).unwrap();
+        assert!(
+            !text.contains("called_toxic") && !text.contains("model"),
+            "no votes shown: {text}"
+        );
+        // Answer both — and "promote" the diagnostic one to holdout by hand.
+        let edited = text
+            .replace(r#""label":"""#, r#""label":"toxic""#)
+            .replace(r#""source":"diagnostic""#, r#""source":"holdout""#);
+        std::fs::write(&to_label, edited).unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 2);
+        let got = load_labels(&labels).unwrap();
+        assert_eq!(got[&h].source, Source::Holdout);
+        assert_eq!(
+            got[&o].source,
+            Source::Diagnostic,
+            "the hand edit is ignored"
+        );
+        assert_eq!(
+            merge_labels(&to_label, &labels, &pool).unwrap(),
+            0,
+            "already merged ids are skipped"
+        );
+
+        std::fs::write(
+            &to_label,
+            r#"{"id":"nope","content":"x","source":"holdout","label":"toxic","note":""}"#,
+        )
+        .unwrap();
+        assert!(
+            merge_labels(&to_label, &labels, &pool).is_err(),
+            "unknown id"
+        );
+        std::fs::write(&to_label, format!(r#"{{"id":"{h}x","content":"post {h}x","source":"holdout","label":"maybe","note":""}}"#)).unwrap();
+        assert!(
+            merge_labels(&to_label, &labels, &[row(&format!("{h}x"))]).is_err(),
+            "bad label"
+        );
+        let pool2 = vec![row(&format!("{o}y"))];
+        std::fs::write(&to_label, format!(r#"{{"id":"{o}y","content":"different text","source":"diagnostic","label":"clean","note":""}}"#)).unwrap();
+        assert!(
+            merge_labels(&to_label, &labels, &pool2).is_err(),
+            "content differs from the pool"
+        );
+    }
+}

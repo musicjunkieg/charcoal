@@ -4,6 +4,7 @@
 pub mod cache;
 pub mod cost;
 pub mod data;
+pub mod labelling;
 pub mod metrics;
 pub mod runner;
 
