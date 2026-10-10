@@ -74,15 +74,22 @@ async fn a_full_round_runs_picks_merges_and_reports() {
     let current = |m: &str| cache::current_for(&verdicts, m, &pool).unwrap();
     let per_model = vec![current("good"), current("lazy")];
     let labels_path = dir.path().join("labels.jsonl");
-    let picked =
-        labelling::pick_for_labelling(&pool, &per_model, &data::load_labels(&labels_path).unwrap());
+    let picked = labelling::pick_for_labelling(
+        &pool,
+        &per_model,
+        &data::load_current_labels(&labels_path, &pool)
+            .unwrap()
+            .answers,
+    );
     assert_eq!(picked.len(), 2, "the holdout post, and the disagreement");
 
     let to_label = dir.path().join("to-label.jsonl");
     labelling::write_to_label(
         &to_label,
         &picked,
-        &data::load_labels(&labels_path).unwrap(),
+        &data::load_current_labels(&labels_path, &pool)
+            .unwrap()
+            .answers,
     )
     .unwrap();
     let answered = std::fs::read_to_string(&to_label)
@@ -94,7 +101,9 @@ async fn a_full_round_runs_picks_merges_and_reports() {
         2
     );
 
-    let answers = data::load_labels(&labels_path).unwrap();
+    let current_labels = data::load_current_labels(&labels_path, &pool).unwrap();
+    assert_eq!(current_labels.stale, 0, "merge recorded the pool text hash");
+    let answers = current_labels.answers;
     let models = vec![
         ("good".to_string(), per_model[0].clone()),
         ("lazy".to_string(), per_model[1].clone()),

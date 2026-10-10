@@ -15,8 +15,8 @@ use std::io::Write;
 use std::path::Path;
 
 use super::cache::VerdictRecord;
-use super::data::{load_labels, Answer, FixtureRow, Label, Source, Truth};
-use super::fnv1a;
+use super::data::{load_current_labels, Answer, FixtureRow, Label, Source, Truth};
+use super::{content_hash, fnv1a};
 
 /// Salted so holdout membership is independent of the diagnostic sample.
 pub fn in_holdout(id: &str) -> bool {
@@ -144,7 +144,10 @@ pub fn write_to_label(
 }
 
 pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) -> Result<usize> {
-    let existing = load_labels(labels_path)?;
+    // Only labels that still describe the pool's text count as "already
+    // labelled": an answer for an edited post must be merged, not skipped
+    // (Codex fix 2). The new row is appended and, being newest, wins.
+    let existing = load_current_labels(labels_path, pool)?.answers;
     let pool_text: HashMap<&str, &str> = pool
         .iter()
         .map(|r| (r.id.as_str(), r.content.as_str()))
@@ -192,6 +195,9 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
             label: truth,
             source: source_for(id),
             note,
+            // The pool's text — checked equal to the shown text above when
+            // the row carries it — is what this answer describes.
+            content_hash: content_hash(pool_content),
         };
         // Even two agreeing answers are an error: the human should fix the
         // file rather than have the last one silently win on reload.
@@ -218,6 +224,7 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
 mod tests {
     use super::*;
     use crate::cli::eval_classifiers::cache::VerdictRecord;
+    use crate::cli::eval_classifiers::data::load_labels;
 
     fn row(id: &str) -> FixtureRow {
         serde_json::from_value(serde_json::json!({"id": id, "content": format!("post {id}")}))
@@ -373,6 +380,57 @@ mod tests {
             merge_labels(&to_label, &labels, &pool2).is_err(),
             "content differs from the pool"
         );
+    }
+
+    /// Codex fix 2: merge records WHICH text the answer was given for.
+    #[test]
+    fn merge_records_the_hash_of_the_pool_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        std::fs::write(
+            &to_label,
+            format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":""}}"#),
+        )
+        .unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &[row(&h)]).unwrap(), 1);
+        let saved: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(&labels).unwrap().trim()).unwrap();
+        assert_eq!(saved["content_hash"], content_hash(&format!("post {h}")));
+    }
+
+    /// Codex fix 2: once a labelled post's text changes, its old label is
+    /// not truth any more: the picker offers the post again, and merging the
+    /// new answer is not skipped as "already labelled".
+    #[test]
+    fn an_edited_post_is_offered_again_and_its_new_answer_merged() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        std::fs::write(
+            &labels,
+            format!(
+                "{{\"id\":\"{h}\",\"label\":\"toxic\",\"source\":\"holdout\",\"content_hash\":\"{}\"}}\n",
+                content_hash("the old text")
+            ),
+        )
+        .unwrap();
+        let pool = vec![row(&h)]; // text is now "post {h}"
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        assert_eq!(cur.stale, 1);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        assert_eq!(picked.len(), 1, "offered again");
+        write_to_label(&to_label, &picked, &cur.answers).unwrap();
+        let answered = std::fs::read_to_string(&to_label)
+            .unwrap()
+            .replace(r#""label":"""#, r#""label":"clean""#);
+        std::fs::write(&to_label, answered).unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 1);
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        assert_eq!(cur.stale, 0);
+        assert_eq!(cur.answers[&h].truth, Truth::Clean);
     }
 
     /// Review fix: a bad row must not leave the earlier good rows appended.

@@ -23,6 +23,13 @@ answers you typed but have not merged yet - it tells you to run
 `label --merge` first. Answers that are already merged, or rows you left
 blank, are safe to replace.
 
+**A label belongs to the exact text you labelled.** `label --merge` records a
+fingerprint of the post's text (`content_hash`) next to your answer. If a
+post's text in `pool.jsonl` changes later, its old label is no longer used:
+`label` and `report` print "N labels ignored - post text changed since
+labelling; relabel", and `label` offers that post again. Your new answer is
+added as a new line and replaces the old one.
+
 ## What the spending cap does (and does not) cover
 
 - **The GPU is only woken when there is work and money for it.** Before

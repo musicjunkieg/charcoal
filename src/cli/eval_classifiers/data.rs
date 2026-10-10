@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::content_hash;
 pub use crate::cli::classify_compare::FixtureRow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +39,10 @@ pub struct Label {
     pub source: Source,
     #[serde(default)]
     pub note: Option<String>,
+    /// `content_hash` of the post text this answer was given for. Required:
+    /// a label keyed only by id would survive an edit of the post and be
+    /// scored against text the human never saw (Codex fix 2).
+    pub content_hash: String,
 }
 
 pub fn load_pool(path: &Path) -> Result<Vec<FixtureRow>> {
@@ -69,7 +74,16 @@ pub fn load_pool(path: &Path) -> Result<Vec<FixtureRow>> {
 }
 
 /// A labels file that does not exist yet is an empty set, not an error.
+/// Every label, whatever text it was given for; the newest row per id wins.
+/// Consumers that score or pick should use [`load_current_labels`].
 pub fn load_labels(path: &Path) -> Result<HashMap<String, Answer>> {
+    Ok(load_labels_with_hash(path)?
+        .into_iter()
+        .map(|(id, (answer, _))| (id, answer))
+        .collect())
+}
+
+fn load_labels_with_hash(path: &Path) -> Result<HashMap<String, (Answer, String)>> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
@@ -79,20 +93,56 @@ pub fn load_labels(path: &Path) -> Result<HashMap<String, Answer>> {
     for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
         let label: Label = serde_json::from_str(l).with_context(|| {
             format!(
-                "{} line {} (label must be toxic|clean, source seed|holdout|diagnostic)",
+                "{} line {} (label must be toxic|clean, source seed|holdout|diagnostic, plus the content_hash of the text it describes)",
                 path.display(),
                 i + 1
             )
         })?;
+        // Later rows replace earlier ones: relabelling an edited post appends.
         out.insert(
             label.id,
-            Answer {
-                truth: label.label,
-                source: label.source,
-            },
+            (
+                Answer {
+                    truth: label.label,
+                    source: label.source,
+                },
+                label.content_hash,
+            ),
         );
     }
     Ok(out)
+}
+
+/// The labels that are still truth for the pool as it is now.
+#[derive(Debug)]
+pub struct CurrentLabels {
+    pub answers: HashMap<String, Answer>,
+    /// Labels dropped because their post's text changed since labelling.
+    /// Those posts count as unlabelled (the picker offers them again).
+    pub stale: usize,
+}
+
+/// Labels whose recorded `content_hash` matches the pool's present text for
+/// that post (Codex fix 2). A label for edited text would score a verdict on
+/// the new text against the old text's truth, so it is dropped and counted.
+/// A label for an id no longer in the pool is kept as before: with no
+/// current verdict for it, it is never scored.
+pub fn load_current_labels(path: &Path, pool: &[FixtureRow]) -> Result<CurrentLabels> {
+    let present: HashMap<&str, String> = pool
+        .iter()
+        .map(|r| (r.id.as_str(), content_hash(&r.content)))
+        .collect();
+    let mut answers = HashMap::new();
+    let mut stale = 0;
+    for (id, (answer, hash)) in load_labels_with_hash(path)? {
+        match present.get(id.as_str()) {
+            Some(now) if *now != hash => stale += 1,
+            _ => {
+                answers.insert(id, answer);
+            }
+        }
+    }
+    Ok(CurrentLabels { answers, stale })
 }
 
 #[cfg(test)]
@@ -149,8 +199,8 @@ mod tests {
     #[test]
     fn labels_carry_truth_and_source() {
         let f = file(&[
-            r#"{"id":"a","label":"toxic","source":"holdout"}"#,
-            r#"{"id":"b","label":"clean","source":"seed","note":"ok"}"#,
+            r#"{"id":"a","label":"toxic","source":"holdout","content_hash":"0"}"#,
+            r#"{"id":"b","label":"clean","source":"seed","note":"ok","content_hash":"0"}"#,
         ]);
         let labels = load_labels(f.path()).unwrap();
         assert_eq!(
@@ -170,9 +220,73 @@ mod tests {
                 .is_err()
         );
         assert!(
-            load_labels(file(&[r#"{"id":"c","label":"toxic"}"#]).path()).is_err(),
+            load_labels(file(&[r#"{"id":"c","label":"toxic","content_hash":"0"}"#]).path())
+                .is_err(),
             "source is required"
         );
+    }
+
+    fn pool_of(rows: &[(&str, &str)]) -> Vec<FixtureRow> {
+        rows.iter()
+            .map(|(id, c)| serde_json::from_value(serde_json::json!({"id": id, "content": c})))
+            .collect::<std::result::Result<_, _>>()
+            .unwrap()
+    }
+
+    fn label_line(id: &str, label: &str, text: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","label":"{label}","source":"holdout","content_hash":"{}"}}"#,
+            content_hash(text)
+        )
+    }
+
+    /// Codex fix 2: a label describes the text it was given for. Without the
+    /// hash it would silently survive an edit of the post.
+    #[test]
+    fn a_label_must_say_which_text_it_describes() {
+        let err = load_labels(file(&[r#"{"id":"a","label":"toxic","source":"holdout"}"#]).path())
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("content_hash"), "{err:#}");
+    }
+
+    /// Codex fix 2: a label for text the post no longer has is not truth —
+    /// the post counts as unlabelled, and the number dropped is reported.
+    #[test]
+    fn a_label_for_changed_text_is_not_used() {
+        let f = file(&[
+            &label_line("kept", "toxic", "same"),
+            &label_line("edited", "toxic", "old text"),
+        ]);
+        let pool = pool_of(&[("kept", "same"), ("edited", "new text")]);
+        let cur = load_current_labels(f.path(), &pool).unwrap();
+        assert_eq!(cur.stale, 1);
+        assert!(cur.answers.contains_key("kept"));
+        assert!(!cur.answers.contains_key("edited"));
+    }
+
+    /// Codex fix 2: relabelling an edited post appends a newer row; the
+    /// newest row is the one that counts.
+    #[test]
+    fn a_relabel_of_the_new_text_replaces_the_stale_label() {
+        let f = file(&[
+            &label_line("a", "toxic", "old text"),
+            &label_line("a", "clean", "new text"),
+        ]);
+        let cur = load_current_labels(f.path(), &pool_of(&[("a", "new text")])).unwrap();
+        assert_eq!(cur.stale, 0);
+        assert_eq!(cur.answers["a"].truth, Truth::Clean);
+    }
+
+    /// Codex fix 2: the committed seed labels were backfilled with hashes of
+    /// the committed pool text — every one must still match.
+    #[test]
+    fn the_committed_labels_match_the_committed_pool() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("evals/classifiers");
+        let pool = load_pool(&dir.join("pool.jsonl")).unwrap();
+        let labels = dir.join("labels.jsonl");
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        assert_eq!(cur.stale, 0, "a committed label no longer matches its post");
+        assert_eq!(cur.answers.len(), load_labels(&labels).unwrap().len());
     }
 
     #[test]

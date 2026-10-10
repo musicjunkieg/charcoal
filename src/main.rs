@@ -1180,7 +1180,11 @@ async fn main() -> Result<()> {
                             .iter()
                             .map(|m| cache::current_for(&verdicts, m, &pool))
                             .collect::<anyhow::Result<_>>()?;
-                        let answers = data::load_labels(&labels_path)?;
+                        // Labels for since-edited text are not "already
+                        // labelled": those posts are offered again.
+                        let labels = data::load_current_labels(&labels_path, &pool)?;
+                        print!("{}", report::stale_labels_note(labels.stale));
+                        let answers = labels.answers;
                         let picked = labelling::pick_for_labelling(&pool, &per_model, &answers);
                         let holdout = picked
                             .iter()
@@ -1196,7 +1200,10 @@ async fn main() -> Result<()> {
                     }
                 }
                 EvalAction::Report { baseline } => {
-                    let answers = data::load_labels(&labels_path)?;
+                    // Only labels for the post's present text are truth.
+                    let labels = data::load_current_labels(&labels_path, &pool)?;
+                    print!("{}", report::stale_labels_note(labels.stale));
+                    let answers = labels.answers;
                     let prices = cost::load_pricing(&dir.join("pricing.json"))?;
                     let mut loaded = Vec::new();
                     for m in models::KNOWN_MODELS {

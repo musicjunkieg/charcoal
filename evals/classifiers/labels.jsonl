@@ -1,10 +1,10 @@
-{"id": "smoke-clean-01", "label": "clean", "source": "seed", "note": "obvious clean original"}
-{"id": "smoke-clean-02", "label": "clean", "source": "seed", "note": "obvious clean reply, on-topic helpful"}
-{"id": "smoke-clean-03", "label": "clean", "source": "seed", "note": "supportive ally, same topic space"}
-{"id": "smoke-clean-04", "label": "clean", "source": "seed", "note": "clean announcement"}
-{"id": "smoke-clean-05", "label": "clean", "source": "seed", "note": "news commentary, no hostility despite negative topic"}
-{"id": "smoke-toxic-01", "label": "toxic", "source": "seed", "note": "obvious identity-based hostility + dehumanization"}
-{"id": "smoke-toxic-02", "label": "toxic", "source": "seed", "note": "dehumanization + eliminationist"}
-{"id": "smoke-toxic-03", "label": "toxic", "source": "seed", "note": "dogpiling / incitement"}
-{"id": "smoke-toxic-04", "label": "toxic", "source": "seed", "note": "bad-faith concern trolling, coded hostility"}
-{"id": "smoke-toxic-05", "label": "toxic", "source": "seed", "note": "sarcastic / coded contempt"}
+{"id": "smoke-clean-01", "label": "clean", "source": "seed", "note": "obvious clean original", "content_hash": "5393ca4a48f3d1cc"}
+{"id": "smoke-clean-02", "label": "clean", "source": "seed", "note": "obvious clean reply, on-topic helpful", "content_hash": "725923a78b82c58e"}
+{"id": "smoke-clean-03", "label": "clean", "source": "seed", "note": "supportive ally, same topic space", "content_hash": "a7c9d8cb53b9c795"}
+{"id": "smoke-clean-04", "label": "clean", "source": "seed", "note": "clean announcement", "content_hash": "a4a0f3e0d10524a0"}
+{"id": "smoke-clean-05", "label": "clean", "source": "seed", "note": "news commentary, no hostility despite negative topic", "content_hash": "ffcc990bae0cf5f0"}
+{"id": "smoke-toxic-01", "label": "toxic", "source": "seed", "note": "obvious identity-based hostility + dehumanization", "content_hash": "346a73c394923f73"}
+{"id": "smoke-toxic-02", "label": "toxic", "source": "seed", "note": "dehumanization + eliminationist", "content_hash": "1407fb34ac41ce90"}
+{"id": "smoke-toxic-03", "label": "toxic", "source": "seed", "note": "dogpiling / incitement", "content_hash": "8fd076c77e1ff11f"}
+{"id": "smoke-toxic-04", "label": "toxic", "source": "seed", "note": "bad-faith concern trolling, coded hostility", "content_hash": "4b10395678d95d60"}
+{"id": "smoke-toxic-05", "label": "toxic", "source": "seed", "note": "sarcastic / coded contempt", "content_hash": "4bf740b8c8f1381f"}

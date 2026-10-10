@@ -87,6 +87,18 @@ pub fn vs_baseline(
     )
 }
 
+/// The line saying how many labels were dropped because their post's text
+/// changed since labelling (Codex fix 2). Empty when none were: silence
+/// means every label is in use.
+pub fn stale_labels_note(stale: usize) -> String {
+    if stale == 0 {
+        return String::new();
+    }
+    format!(
+        "{stale} labels ignored — post text changed since labelling; relabel (run `charcoal eval-classifiers label`)\n"
+    )
+}
+
 fn rate_cell(r: &Rate) -> String {
     match (r.value(), r.wilson95()) {
         (Some(v), Some((lo, hi))) => {
@@ -420,6 +432,18 @@ mod tests {
         assert_eq!(r.diagnostic.false_alarm.n, 0);
         assert_eq!(r.diagnostic.false_alarm.value(), None);
         assert_eq!((r.holdout.labelled, r.diagnostic.labelled), (80, 20));
+    }
+
+    /// Codex fix 2: labels dropped because their post changed are counted
+    /// out loud, with what to do about it; none dropped, nothing printed.
+    #[test]
+    fn stale_labels_are_counted_with_the_fix() {
+        let line = stale_labels_note(3);
+        assert!(
+            line.contains("3 labels ignored") && line.contains("relabel"),
+            "{line}"
+        );
+        assert_eq!(stale_labels_note(0), "");
     }
 
     #[test]
