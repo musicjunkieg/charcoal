@@ -68,7 +68,9 @@ added as a new line and replaces the old one.
   180 s for the first warm-up request, plus its retries). If you raise
   `CHARCOAL_CLASSIFIER_TIMEOUT_MS`, `CHARCOAL_CLASSIFIER_WARMUP_TIMEOUT_MS` or
   `CHARCOAL_CLASSIFIER_MAX_RETRIES`, raise `--timeout-secs` to match, or the
-  eval may give up on a request the client is still waiting for.
+  eval may give up on a request the client is still waiting for. The same
+  timeout bounds CoPE-B's identity check: one that takes longer counts as a
+  failed identity check (see below).
 
 ## What a run needs
 

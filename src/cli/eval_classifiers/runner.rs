@@ -5,8 +5,8 @@
 //! 2. probe the backend's identity before any paid call;
 //! 3. send the rest in the backend's own batch size (as production does);
 //! 4. reject verdicts from an unexpected model or policy;
-//! 5. bound each batch with a last-resort timeout, set ABOVE the backend's own
-//!    so a job the backend still owns is never abandoned;
+//! 5. bound the probe and each batch with a last-resort timeout, set ABOVE
+//!    the backend's own so a job the backend still owns is never abandoned;
 //! 6. stop at the reservation cap or when the backend's real cost meter trips.
 
 use anyhow::Result;
@@ -132,7 +132,18 @@ pub async fn run_model(
 
     // Only now is waking the backend worth paying for.
     // Typed, so the run loop can tell "skip this model" from "stop".
-    if let Err(e) = classifier.probe_identity().await {
+    // Bounded by the same last-resort timeout as a batch: a hung endpoint
+    // must not stall the run forever. A probe that times out is a failed
+    // probe like any other — for a paid model it may still have woken the
+    // GPU, so the run loop's paid-probe rule applies (Codex review #2, item 5).
+    let probe = match tokio::time::timeout(timeout, classifier.probe_identity()).await {
+        Ok(result) => result,
+        Err(_) => Err(anyhow::anyhow!(
+            "identity probe timed out after {} s",
+            timeout.as_secs_f64()
+        )),
+    };
+    if let Err(e) = probe {
         return Err(ProbeFailed {
             model: model.to_string(),
             source: e,
@@ -372,6 +383,8 @@ mod tests {
         policy: &'static str,
         reported_model: &'static str,
         probe_fails: bool,
+        /// The probe sleeps this long before answering (a hung endpoint).
+        probe_hangs: Option<Duration>,
     }
 
     impl Fake {
@@ -385,6 +398,7 @@ mod tests {
                 policy: "p-1",
                 reported_model: "fake-1",
                 probe_fails: false,
+                probe_hangs: None,
             }
         }
     }
@@ -416,6 +430,9 @@ mod tests {
         }
         async fn probe_identity(&self) -> anyhow::Result<()> {
             self.probes.fetch_add(1, Ordering::SeqCst);
+            if let Some(d) = self.probe_hangs {
+                tokio::time::sleep(d).await;
+            }
             if self.probe_fails {
                 anyhow::bail!("endpoint serves policy-old, deployment declares p-1");
             }
@@ -1183,6 +1200,37 @@ mod tests {
         let shown = format!("{err:#}");
         assert!(shown.contains("endpoint serves policy-old"), "{shown}");
         assert!(!shown.starts_with("m:"), "{shown}");
+    }
+
+    /// Codex review #2, item 5: `--timeout-secs` bounds the identity probe
+    /// too. A probe that hangs past it is a `ProbeFailed` (so a paid one
+    /// ends paid spending), returned promptly, with no classify call.
+    #[tokio::test]
+    async fn a_hung_probe_times_out_as_a_probe_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = Fake {
+            probe_hangs: Some(Duration::from_secs(30)),
+            ..Fake::new()
+        };
+        let started = std::time::Instant::now();
+        let err = run_model(
+            "m",
+            &model,
+            &[row("a", "bad")],
+            dir.path(),
+            &Price::default(),
+            &mut Budget::new(1.0),
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "did not wait out the 30 s hang"
+        );
+        assert!(err.downcast_ref::<ProbeFailed>().is_some(), "{err:#}");
+        assert!(format!("{err:#}").contains("timed out"), "{err:#}");
+        assert_eq!(model.calls.load(Ordering::SeqCst), 0);
     }
 
     /// Codex fix 4: a local file failure (here: the verdicts "directory" is a
