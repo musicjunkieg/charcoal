@@ -1181,16 +1181,16 @@ async fn main() -> Result<()> {
                         print!("{}", report::stale_labels_note(labels.stale));
                         print!("{}", report::removed_labels_note(labels.removed));
                         let answers = labels.answers;
-                        let picked = labelling::pick_for_labelling(&pool, &per_model, &answers);
-                        let holdout = picked
-                            .iter()
-                            .filter(|(_, s)| *s == data::Source::Holdout)
-                            .count();
+                        // Seed provenance lives only in labels.jsonl, so a
+                        // stale seed is shown (and counted) as a seed.
+                        let seeds = data::seed_ids(&labels_path)?;
+                        let picked =
+                            labelling::pick_for_labelling(&pool, &per_model, &answers, &seeds);
                         labelling::write_to_label(&to_label, &picked, &answers, &pool)?;
                         println!(
-                            "{} posts to label ({holdout} holdout, {} diagnostic) in {} — set label to toxic or clean, then run with --merge",
+                            "{} posts to label ({}) in {} — set label to toxic or clean, then run with --merge",
                             picked.len(),
-                            picked.len() - holdout,
+                            labelling::pick_summary(&picked),
                             to_label.display()
                         );
                     }

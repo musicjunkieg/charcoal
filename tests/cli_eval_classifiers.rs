@@ -80,8 +80,13 @@ async fn a_full_round_runs_picks_merges_and_reports() {
         &data::load_current_labels(&labels_path, &pool)
             .unwrap()
             .answers,
+        &data::seed_ids(&labels_path).unwrap(),
     );
     assert_eq!(picked.len(), 2, "the holdout post, and the disagreement");
+    assert_eq!(
+        labelling::pick_summary(&picked),
+        "1 holdout, 0 seed, 1 diagnostic"
+    );
 
     let to_label = dir.path().join("to-label.jsonl");
     labelling::write_to_label(

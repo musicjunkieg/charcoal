@@ -12,7 +12,7 @@
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 
@@ -41,9 +41,20 @@ pub fn pick_for_labelling(
     pool: &[FixtureRow],
     per_model: &[HashMap<String, VerdictRecord>],
     labels: &HashMap<String, Answer>,
+    seeds: &HashSet<String>,
 ) -> Vec<(FixtureRow, Source)> {
     let mut out = Vec::new();
     for row in pool.iter().filter(|r| !labels.contains_key(&r.id)) {
+        // A seed (from labels.jsonl, see `seed_ids`) that is not in the
+        // current labels has gone stale. Merge keeps it a seed, so show it as
+        // one: labelling it "holdout" would also inflate the holdout count
+        // `label` prints. And offer it always: seeds were hand-picked, so
+        // neither the holdout hash nor the disagreement rule decides whether
+        // it is worth labelling, and the stale note promises it comes back.
+        if seeds.contains(&row.id) {
+            out.push((row.clone(), Source::Seed));
+            continue;
+        }
         if in_holdout(&row.id) {
             out.push((row.clone(), Source::Holdout));
             continue;
@@ -61,6 +72,19 @@ pub fn pick_for_labelling(
         }
     }
     out
+}
+
+/// The "k holdout, s seed, d diagnostic" part of the line `label` prints.
+/// Each stream is counted on its own, so a stale seed never passes for a
+/// holdout post (re-review concern 2).
+pub fn pick_summary(picked: &[(FixtureRow, Source)]) -> String {
+    let count = |want: Source| picked.iter().filter(|(_, s)| *s == want).count();
+    format!(
+        "{} holdout, {} seed, {} diagnostic",
+        count(Source::Holdout),
+        count(Source::Seed),
+        count(Source::Diagnostic)
+    )
 }
 
 #[derive(Serialize)]
@@ -351,7 +375,8 @@ mod tests {
 
     #[test]
     fn holdout_posts_are_picked_whatever_the_models_say() {
-        let picked = pick_for_labelling(&[row(&holdout_id())], &[], &HashMap::new());
+        let picked =
+            pick_for_labelling(&[row(&holdout_id())], &[], &HashMap::new(), &HashSet::new());
         assert_eq!(picked.len(), 1);
         assert_eq!(picked[0].1, Source::Holdout);
     }
@@ -390,10 +415,11 @@ mod tests {
             },
         )]
         .into();
-        let picked: Vec<(String, Source)> = pick_for_labelling(&pool, &[m1, m2], &labels)
-            .into_iter()
-            .map(|(r, s)| (r.id, s))
-            .collect();
+        let picked: Vec<(String, Source)> =
+            pick_for_labelling(&pool, &[m1, m2], &labels, &HashSet::new())
+                .into_iter()
+                .map(|(r, s)| (r.id, s))
+                .collect();
         assert!(picked.contains(&(dis.clone(), Source::Diagnostic)));
         assert!(picked.contains(&(agree_sampled.clone(), Source::Diagnostic)));
         assert!(!picked.iter().any(|(id, _)| *id == agree));
@@ -519,7 +545,7 @@ mod tests {
         let pool = vec![row(&h)]; // text is now "post {h}"
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.stale, 1);
-        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers, &HashSet::new());
         assert_eq!(picked.len(), 1, "offered again");
         write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         let answered = std::fs::read_to_string(&to_label)
@@ -554,7 +580,7 @@ mod tests {
         let pool = vec![row(&h)]; // text is now "post {h}"
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.stale, 1);
-        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers, &seed_ids(&labels).unwrap());
         write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         let answered = std::fs::read_to_string(&to_label)
             .unwrap()
@@ -568,6 +594,33 @@ mod tests {
             crate::cli::eval_classifiers::report::labels_of(&cur.answers, Source::Holdout)
                 .is_empty(),
             "a seed never reaches the headline"
+        );
+    }
+
+    /// Re-review concern 2 / M3: a stale seed written back into
+    /// to-label.jsonl is shown as a seed, not as holdout or diagnostic, so the
+    /// printed holdout count is honest. And it is offered whatever the models
+    /// say: a seed is hand-picked, so the holdout hash and the disagreement
+    /// rule do not apply to it, and the stale note promises it comes back.
+    #[test]
+    fn a_stale_seed_is_offered_and_shown_as_a_seed() {
+        let (h, o) = (holdout_id(), other_id());
+        let pool = vec![row(&h), row(&o)];
+        let seeds: HashSet<String> = [h.clone(), o.clone()].into();
+        // Neither is in the current labels (both seed labels went stale),
+        // and there are no model votes at all.
+        let picked = pick_for_labelling(&pool, &[], &HashMap::new(), &seeds);
+        let got: Vec<(String, Source)> = picked.iter().map(|(r, s)| (r.id.clone(), *s)).collect();
+        assert_eq!(got, vec![(h, Source::Seed), (o, Source::Seed)]);
+        assert_eq!(pick_summary(&picked), "0 holdout, 2 seed, 0 diagnostic");
+
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        write_to_label(&to_label, &picked, &HashMap::new(), &pool).unwrap();
+        let text = std::fs::read_to_string(&to_label).unwrap();
+        assert!(
+            !text.contains("holdout") && !text.contains("diagnostic"),
+            "{text}"
         );
     }
 
@@ -755,7 +808,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&labels).unwrap(), before);
 
         let cur = load_current_labels(&labels, &pool).unwrap();
-        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers, &HashSet::new());
         write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         assert!(!std::fs::read_to_string(&to_label)
             .unwrap()
@@ -794,7 +847,7 @@ mod tests {
 
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.stale, 1);
-        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers, &HashSet::new());
         write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         let text = std::fs::read_to_string(&to_label).unwrap();
         assert!(text.contains("new text"), "offered again: {text}");
