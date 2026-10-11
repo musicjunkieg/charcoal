@@ -1163,8 +1163,13 @@ async fn main() -> Result<()> {
                 EvalAction::Label { merge } => {
                     let to_label = dir.join("to-label.jsonl");
                     if merge {
-                        let n = labelling::merge_labels(&to_label, &labels_path, &pool)?;
-                        println!("merged {n} labels into {}", labels_path.display());
+                        let out = labelling::merge_labels(&to_label, &labels_path, &pool)?;
+                        println!(
+                            "merged {} labels into {}",
+                            out.merged,
+                            labels_path.display()
+                        );
+                        print!("{}", labelling::skipped_note(out.skipped));
                     } else {
                         let per_model: Vec<_> = models::KNOWN_MODELS
                             .iter()
@@ -1181,7 +1186,7 @@ async fn main() -> Result<()> {
                             .iter()
                             .filter(|(_, s)| *s == data::Source::Holdout)
                             .count();
-                        labelling::write_to_label(&to_label, &picked, &answers)?;
+                        labelling::write_to_label(&to_label, &picked, &answers, &pool)?;
                         println!(
                             "{} posts to label ({holdout} holdout, {} diagnostic) in {} — set label to toxic or clean, then run with --merge",
                             picked.len(),

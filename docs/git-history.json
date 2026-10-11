@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9099671f38c6b05b0a3682648ba12fc77291bfa7",
+    "short_hash": "9099671",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T17:35:23-07:00",
+    "message": "fix(404): count failed calls in the reported cost\n\nThe $/1k estimate used only successful verdicts, so an all-error paid model\nshowed as unpriced and a token-priced model that fails on long posts was\nunderstated. Cost now averages over every current record for the model,\nerrors included; latency stays successes-only. current_for already returns\nthose error records, so it is unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "6968a12af53b7f8a7c6ad4d95184846abb85ac5f",
     "short_hash": "6968a12",
     "author": "Bryan Guffey",

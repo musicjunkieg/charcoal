@@ -72,11 +72,43 @@ struct ToLabel<'a> {
     note: &'a str,
 }
 
+/// The pool's present text, by id — what [`mergeable`] checks a row against.
+fn pool_text(pool: &[FixtureRow]) -> HashMap<&str, &str> {
+    pool.iter()
+        .map(|r| (r.id.as_str(), r.content.as_str()))
+        .collect()
+}
+
+/// Can an answer in to-label.jsonl still be saved? Only while its post is in
+/// the pool AND the text it was answered on (the row's `content`, which
+/// `label` always writes) is still the pool's text. Otherwise saving it would
+/// bind the answer to text the human never saw — or to no post at all.
+///
+/// The `label` guard and `merge` BOTH ask this one question (re-review I1).
+/// When they used separate rules, a post answered, merged and then removed
+/// or edited left each command telling the user to run the other one first.
+///
+/// A row without `content` (only a hand-written row could lack it) is judged
+/// by id alone, as merge always has: there is no shown text to compare.
+fn mergeable(id: &str, shown: Option<&str>, pool_text: &HashMap<&str, &str>) -> bool {
+    match pool_text.get(id) {
+        None => false,
+        Some(now) => shown.is_none_or(|s| s == *now),
+    }
+}
+
 /// Refuse to overwrite `path` while it holds a typed answer that has not been
 /// merged into labels.jsonl yet: overwriting would silently lose the human's
 /// work. Answers already in `merged` are safe to drop — they are kept in
 /// labels.jsonl — so the normal label → answer → merge → label cycle works.
-fn ensure_no_unmerged_answers(path: &Path, merged: &HashMap<String, Answer>) -> Result<()> {
+/// So are answers that can never be merged (see [`mergeable`]): there is no
+/// saving them, so protecting them would only block `label` forever.
+fn ensure_no_unmerged_answers(
+    path: &Path,
+    merged: &HashMap<String, Answer>,
+    pool: &[FixtureRow],
+) -> Result<()> {
+    let pool_text = pool_text(pool);
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -94,8 +126,12 @@ fn ensure_no_unmerged_answers(path: &Path, merged: &HashMap<String, Answer>) -> 
         })?;
         let typed = row["label"].as_str().unwrap_or("").trim();
         let answered = !typed.is_empty();
-        let merged_truth = row["id"].as_str().and_then(|id| merged.get(id));
-        if answered && merged_truth.is_none() {
+        let id = row["id"].as_str();
+        let merged_truth = id.and_then(|id| merged.get(id));
+        // A row with no id stays protected (fail closed): merge rejects it
+        // with a message saying what to fix.
+        let can_merge = id.is_none_or(|id| mergeable(id, row["content"].as_str(), &pool_text));
+        if answered && merged_truth.is_none() && can_merge {
             bail!(
                 "{} has answers you have not saved yet (line {}). Run `charcoal eval-classifiers label --merge` first, then run `label` again.",
                 path.display(),
@@ -123,13 +159,15 @@ fn ensure_no_unmerged_answers(path: &Path, merged: &HashMap<String, Answer>) -> 
 
 /// Blind on purpose: no model votes, so they cannot anchor the answer. The
 /// `source` is shown for the labeller's information only. `merged` is the
-/// current labels.jsonl: the file is refused if it holds answers not in it.
+/// current labels.jsonl: the file is refused if it holds answers not in it
+/// that could still be merged into the `pool`.
 pub fn write_to_label(
     path: &Path,
     rows: &[(FixtureRow, Source)],
     merged: &HashMap<String, Answer>,
+    pool: &[FixtureRow],
 ) -> Result<()> {
-    ensure_no_unmerged_answers(path, merged)?;
+    ensure_no_unmerged_answers(path, merged, pool)?;
     let mut f =
         std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
     for (r, source) in rows {
@@ -145,7 +183,33 @@ pub fn write_to_label(
     Ok(())
 }
 
-pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) -> Result<usize> {
+/// What one `label --merge` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeOutcome {
+    /// Answers appended to labels.jsonl.
+    pub merged: usize,
+    /// Answers left out because they can no longer be merged (see
+    /// [`mergeable`]): the post left the pool, or its text changed since it
+    /// was answered.
+    pub skipped: usize,
+}
+
+/// The line `--merge` prints about skipped answers, or "" when none were.
+pub fn skipped_note(skipped: usize) -> String {
+    if skipped == 0 {
+        return String::new();
+    }
+    format!(
+        "{skipped} answer{} not saved — post removed from the pool or its text changed since you labelled it; it will be offered again if still in the pool\n",
+        if skipped == 1 { "" } else { "s" }
+    )
+}
+
+pub fn merge_labels(
+    to_label: &Path,
+    labels_path: &Path,
+    pool: &[FixtureRow],
+) -> Result<MergeOutcome> {
     // Only labels that still describe the pool's text count as "already
     // labelled": an answer for an edited post must be merged, not skipped
     // (Codex fix 2). The new row is appended and, being newest, wins.
@@ -153,10 +217,8 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
     // Read from every row, stale ones included: the stale seed label is
     // exactly the one being replaced, and its provenance must carry over.
     let seeds = seed_ids(labels_path)?;
-    let pool_text: HashMap<&str, &str> = pool
-        .iter()
-        .map(|r| (r.id.as_str(), r.content.as_str()))
-        .collect();
+    let pool_text = pool_text(pool);
+    let mut skipped = 0;
     let text = std::fs::read_to_string(to_label)
         .with_context(|| format!("reading {}", to_label.display()))?;
     // Validate-then-append: every row is checked into `pending` first, so a
@@ -173,22 +235,22 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
         if answer.is_empty() || existing.contains_key(id) {
             continue;
         }
-        let Some(pool_content) = pool_text.get(id) else {
-            bail!("{}: id {id:?} is not in the pool", at());
-        };
-        if let Some(content) = row["content"].as_str() {
-            if content != *pool_content {
-                bail!(
-                    "{}: content for {id:?} differs from the pool — re-run `label`",
-                    at()
-                );
-            }
-        }
+        // Checked even on a row about to be skipped: a typo is still worth
+        // reporting, and validation stays over every answered row.
         let truth = match answer {
             "toxic" => Truth::Toxic,
             "clean" => Truth::Clean,
             other => bail!("{}: label {other:?} must be toxic or clean", at()),
         };
+        // Skip, never stop: the same rule lets `label` replace this file, so
+        // stopping here would only lock the two commands against each other
+        // (re-review I1). Skipping also never saves the answer against text
+        // it was not given for. A post still in the pool is offered again.
+        if !mergeable(id, row["content"].as_str(), &pool_text) {
+            skipped += 1;
+            continue;
+        }
+        let pool_content = pool_text[id];
         let note = row["note"]
             .as_str()
             .filter(|n| !n.is_empty())
@@ -219,8 +281,12 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
         }
         pending.push(label);
     }
+    let outcome = MergeOutcome {
+        merged: pending.len(),
+        skipped,
+    };
     if pending.is_empty() {
-        return Ok(0);
+        return Ok(outcome);
     }
     let mut out = std::fs::OpenOptions::new()
         .create(true)
@@ -230,7 +296,7 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
     for label in &pending {
         writeln!(out, "{}", serde_json::to_string(label)?)?;
     }
-    Ok(pending.len())
+    Ok(outcome)
 }
 
 #[cfg(test)]
@@ -347,6 +413,7 @@ mod tests {
             &to_label,
             &[(row(&h), Source::Holdout), (row(&o), Source::Diagnostic)],
             &HashMap::new(),
+            &pool,
         )
         .unwrap();
         let text = std::fs::read_to_string(&to_label).unwrap();
@@ -359,7 +426,7 @@ mod tests {
             .replace(r#""label":"""#, r#""label":"toxic""#)
             .replace(r#""source":"diagnostic""#, r#""source":"holdout""#);
         std::fs::write(&to_label, edited).unwrap();
-        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 2);
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap().merged, 2);
         let got = load_labels(&labels).unwrap();
         assert_eq!(got[&h].source, Source::Holdout);
         assert_eq!(
@@ -368,18 +435,25 @@ mod tests {
             "the hand edit is ignored"
         );
         assert_eq!(
-            merge_labels(&to_label, &labels, &pool).unwrap(),
+            merge_labels(&to_label, &labels, &pool).unwrap().merged,
             0,
             "already merged ids are skipped"
         );
 
+        // Re-review I1: an id not in the pool, or text that differs from the
+        // pool, is skipped and counted — never saved, never a hard stop.
+        let before = std::fs::read_to_string(&labels).unwrap();
         std::fs::write(
             &to_label,
             r#"{"id":"nope","content":"x","source":"holdout","label":"toxic","note":""}"#,
         )
         .unwrap();
-        assert!(
-            merge_labels(&to_label, &labels, &pool).is_err(),
+        assert_eq!(
+            merge_labels(&to_label, &labels, &pool).unwrap(),
+            MergeOutcome {
+                merged: 0,
+                skipped: 1
+            },
             "unknown id"
         );
         std::fs::write(&to_label, format!(r#"{{"id":"{h}x","content":"post {h}x","source":"holdout","label":"maybe","note":""}}"#)).unwrap();
@@ -387,12 +461,21 @@ mod tests {
             merge_labels(&to_label, &labels, &[row(&format!("{h}x"))]).is_err(),
             "bad label"
         );
+        // Even a skipped row's answer is validated.
+        std::fs::write(
+            &to_label,
+            r#"{"id":"nope","content":"x","source":"holdout","label":"maybe","note":""}"#,
+        )
+        .unwrap();
+        assert!(merge_labels(&to_label, &labels, &pool).is_err());
         let pool2 = vec![row(&format!("{o}y"))];
         std::fs::write(&to_label, format!(r#"{{"id":"{o}y","content":"different text","source":"diagnostic","label":"clean","note":""}}"#)).unwrap();
-        assert!(
-            merge_labels(&to_label, &labels, &pool2).is_err(),
+        assert_eq!(
+            merge_labels(&to_label, &labels, &pool2).unwrap().skipped,
+            1,
             "content differs from the pool"
         );
+        assert_eq!(std::fs::read_to_string(&labels).unwrap(), before);
     }
 
     /// Codex fix 2: merge records WHICH text the answer was given for.
@@ -407,7 +490,10 @@ mod tests {
             format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":""}}"#),
         )
         .unwrap();
-        assert_eq!(merge_labels(&to_label, &labels, &[row(&h)]).unwrap(), 1);
+        assert_eq!(
+            merge_labels(&to_label, &labels, &[row(&h)]).unwrap().merged,
+            1
+        );
         let saved: serde_json::Value =
             serde_json::from_str(std::fs::read_to_string(&labels).unwrap().trim()).unwrap();
         assert_eq!(saved["content_hash"], content_hash(&format!("post {h}")));
@@ -435,12 +521,12 @@ mod tests {
         assert_eq!(cur.stale, 1);
         let picked = pick_for_labelling(&pool, &[], &cur.answers);
         assert_eq!(picked.len(), 1, "offered again");
-        write_to_label(&to_label, &picked, &cur.answers).unwrap();
+        write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         let answered = std::fs::read_to_string(&to_label)
             .unwrap()
             .replace(r#""label":"""#, r#""label":"clean""#);
         std::fs::write(&to_label, answered).unwrap();
-        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 1);
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap().merged, 1);
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.stale, 0);
         assert_eq!(cur.answers[&h].truth, Truth::Clean);
@@ -469,12 +555,12 @@ mod tests {
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.stale, 1);
         let picked = pick_for_labelling(&pool, &[], &cur.answers);
-        write_to_label(&to_label, &picked, &cur.answers).unwrap();
+        write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         let answered = std::fs::read_to_string(&to_label)
             .unwrap()
             .replace(r#""label":"""#, r#""label":"clean""#);
         std::fs::write(&to_label, answered).unwrap();
-        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 1);
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap().merged, 1);
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.answers[&h].truth, Truth::Clean, "the new answer won");
         assert_eq!(cur.answers[&h].source, Source::Seed, "still a seed");
@@ -494,7 +580,9 @@ mod tests {
         let h = holdout_id();
         let pool = vec![row(&h)];
         let good = format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":""}}"#);
-        let bad = r#"{"id":"nope","content":"x","label":"toxic","note":""}"#;
+        // An unknown id alone is now a skip (re-review I1), so the bad row
+        // here is a bad answer, which still stops the whole merge.
+        let bad = r#"{"id":"nope","content":"x","label":"maybe","note":""}"#;
         std::fs::write(&to_label, format!("{good}\n{bad}\n")).unwrap();
         assert!(merge_labels(&to_label, &labels, &pool).is_err());
         assert!(
@@ -518,6 +606,9 @@ mod tests {
             &to_label,
             &[(row(&other_id()), Source::Diagnostic)],
             &HashMap::new(),
+            // h is in the pool with the text shown, so the answer can still
+            // be merged: it must be protected (re-review I1, case c).
+            &[row(&h), row(&other_id())],
         )
         .unwrap_err();
         assert!(
@@ -537,13 +628,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let to_label = dir.path().join("to-label.jsonl");
         let (h, o) = (holdout_id(), other_id());
-        write_to_label(&to_label, &[(row(&h), Source::Holdout)], &HashMap::new()).unwrap();
+        let pool = vec![row(&h), row(&o)];
+        write_to_label(
+            &to_label,
+            &[(row(&h), Source::Holdout)],
+            &HashMap::new(),
+            &pool,
+        )
+        .unwrap();
         // A whitespace-only answer is still blank (merge treats it so too).
         let spaced = std::fs::read_to_string(&to_label)
             .unwrap()
             .replace(r#""label":"""#, r#""label":"  ""#);
         std::fs::write(&to_label, spaced).unwrap();
-        write_to_label(&to_label, &[(row(&o), Source::Diagnostic)], &HashMap::new()).unwrap();
+        write_to_label(
+            &to_label,
+            &[(row(&o), Source::Diagnostic)],
+            &HashMap::new(),
+            &pool,
+        )
+        .unwrap();
         let text = std::fs::read_to_string(&to_label).unwrap();
         assert!(
             text.contains(&o) && !text.contains(&format!("\"{h}\"")),
@@ -560,14 +664,20 @@ mod tests {
         let labels = dir.path().join("labels.jsonl");
         let (h, o) = (holdout_id(), other_id());
         let pool = vec![row(&h), row(&o)];
-        write_to_label(&to_label, &[(row(&h), Source::Holdout)], &HashMap::new()).unwrap();
+        write_to_label(
+            &to_label,
+            &[(row(&h), Source::Holdout)],
+            &HashMap::new(),
+            &pool,
+        )
+        .unwrap();
         let answered = std::fs::read_to_string(&to_label)
             .unwrap()
             .replace(r#""label":"""#, r#""label":"clean""#);
         std::fs::write(&to_label, answered).unwrap();
-        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 1);
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap().merged, 1);
         let merged = load_labels(&labels).unwrap();
-        write_to_label(&to_label, &[(row(&o), Source::Diagnostic)], &merged).unwrap();
+        write_to_label(&to_label, &[(row(&o), Source::Diagnostic)], &merged, &pool).unwrap();
         assert!(std::fs::read_to_string(&to_label).unwrap().contains(&o));
     }
 
@@ -593,6 +703,7 @@ mod tests {
             &to_label,
             &[(row(&other_id()), Source::Diagnostic)],
             &merged,
+            &[row(&h)],
         )
         .unwrap_err();
         let msg = format!("{err:#}");
@@ -601,6 +712,107 @@ mod tests {
             "{msg}"
         );
         assert_eq!(std::fs::read_to_string(&to_label).unwrap(), typed);
+    }
+
+    /// Answer post h in to-label.jsonl and merge it, as a user would.
+    fn answered_and_merged(to_label: &Path, labels: &Path, pool: &[FixtureRow], h: &str) {
+        write_to_label(
+            to_label,
+            &[(row(h), Source::Holdout)],
+            &HashMap::new(),
+            pool,
+        )
+        .unwrap();
+        let answered = std::fs::read_to_string(to_label)
+            .unwrap()
+            .replace(r#""label":"""#, r#""label":"toxic""#);
+        std::fs::write(to_label, answered).unwrap();
+        assert_eq!(merge_labels(to_label, labels, pool).unwrap().merged, 1);
+    }
+
+    /// Re-review I1 (a): once an answered, merged post leaves the pool, its
+    /// row in to-label.jsonl can never be merged, so it is not an unsaved
+    /// answer to protect. Before the fix `label` said "run --merge first"
+    /// while `--merge` said "not in the pool": neither could run.
+    #[test]
+    fn a_post_removed_from_the_pool_does_not_lock_label_or_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let (h, o) = (holdout_id(), other_id());
+        answered_and_merged(&to_label, &labels, &[row(&h), row(&o)], &h);
+        let before = std::fs::read_to_string(&labels).unwrap();
+        let pool = vec![row(&o)]; // h removed from pool.jsonl
+
+        assert_eq!(
+            merge_labels(&to_label, &labels, &pool).unwrap(),
+            MergeOutcome {
+                merged: 0,
+                skipped: 1
+            },
+            "merge runs, skipping h and counting it"
+        );
+        assert_eq!(std::fs::read_to_string(&labels).unwrap(), before);
+
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
+        assert!(!std::fs::read_to_string(&to_label)
+            .unwrap()
+            .contains(&format!("\"{h}\"")));
+    }
+
+    /// Re-review I1 (b): the same with h's text changed. The answer was made
+    /// on the old text, so it must never be saved against the new text; the
+    /// post is offered again with its new text instead.
+    #[test]
+    fn a_post_whose_text_changed_does_not_lock_and_is_offered_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        answered_and_merged(&to_label, &labels, &[row(&h)], &h);
+        let before = std::fs::read_to_string(&labels).unwrap();
+        let pool: Vec<FixtureRow> =
+            vec![
+                serde_json::from_value(serde_json::json!({"id": h, "content": "new text"}))
+                    .unwrap(),
+            ];
+
+        assert_eq!(
+            merge_labels(&to_label, &labels, &pool).unwrap(),
+            MergeOutcome {
+                merged: 0,
+                skipped: 1
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(&labels).unwrap(),
+            before,
+            "no label saved against text it was not made on"
+        );
+
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        assert_eq!(cur.stale, 1);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
+        let text = std::fs::read_to_string(&to_label).unwrap();
+        assert!(text.contains("new text"), "offered again: {text}");
+    }
+
+    /// Re-review I1: the note `--merge` prints says what happened, in plain
+    /// words, and is silent when nothing was skipped.
+    #[test]
+    fn the_skipped_note_explains_itself() {
+        assert_eq!(skipped_note(0), "");
+        let one = skipped_note(1);
+        assert!(one.starts_with("1 answer not saved"), "{one}");
+        assert!(
+            one.contains("removed from the pool or its text changed")
+                && one.contains("offered again"),
+            "{one}"
+        );
+        assert!(skipped_note(2).starts_with("2 answers not saved"));
     }
 
     /// Review fix: the same id answered twice is a file error, not two labels.

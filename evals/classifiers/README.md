@@ -23,6 +23,16 @@ answers you typed but have not merged yet - it tells you to run
 `label --merge` first. Answers that are already merged, or rows you left
 blank, are safe to replace.
 
+**An answer that can no longer be saved is skipped, not blocked.** If you
+answer a post and then remove it from `pool.jsonl`, or change its text,
+before merging (or after), that answer cannot be saved: it would describe a
+post that is gone, or text that is not the post's any more. `label --merge`
+skips such answers and prints "N answers not saved — post removed from the
+pool or its text changed since you labelled it; it will be offered again if
+still in the pool". `label` no longer treats them as unsaved work, so it can
+write a fresh file. An answer is never saved against text other than the
+text you saw when you answered.
+
 **A label belongs to the exact text you labelled.** `label --merge` records a
 fingerprint of the post's text (`content_hash`) next to your answer. If a
 post's text in `pool.jsonl` changes later, its old label is no longer used:

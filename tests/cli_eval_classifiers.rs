@@ -90,6 +90,7 @@ async fn a_full_round_runs_picks_merges_and_reports() {
         &data::load_current_labels(&labels_path, &pool)
             .unwrap()
             .answers,
+        &pool,
     )
     .unwrap();
     let answered = std::fs::read_to_string(&to_label)
@@ -97,7 +98,9 @@ async fn a_full_round_runs_picks_merges_and_reports() {
         .replace("\"label\":\"\"", "\"label\":\"toxic\"");
     std::fs::write(&to_label, answered).unwrap();
     assert_eq!(
-        labelling::merge_labels(&to_label, &labels_path, &pool).unwrap(),
+        labelling::merge_labels(&to_label, &labels_path, &pool)
+            .unwrap()
+            .merged,
         2
     );
 
