@@ -132,7 +132,9 @@ the two lines with the same id.
   class to compare fairly.
 - **$/1k posts** is an estimate from the list prices in `pricing.json` times
   the average post length - not what the GPU actually cost. Check the
-  RunPod billing page for real spend.
+  RunPod billing page for real spend. Failed calls count too (a failed call
+  is still paid for), so a model whose calls all failed still shows a cost;
+  the p50/p95 latency columns use successful calls only.
 - Every model must be in `pricing.json`. CoPE-B's spend is also checked by
   the RunPod client's real cost meter (GPU time used), set to the run's cap -
   with the limits described under "What the spending cap does".

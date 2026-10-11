@@ -52,12 +52,22 @@ pub fn build(
                 .iter()
                 .map(|(id, r)| (id.clone(), r.called_toxic))
                 .collect();
+            // Latency: successful calls only — an error's latency is 0 (or a
+            // timeout), which says nothing about how fast the model answers.
             let ok: Vec<&VerdictRecord> =
                 recs.values().filter(|r| r.called_toxic.is_some()).collect();
             let mut lat: Vec<u32> = ok.iter().map(|r| r.latency_ms).collect();
             lat.sort_unstable();
-            let usd_per_1k = prices.get(name).filter(|_| !ok.is_empty()).map(|p| {
-                let mean_chars = ok.iter().map(|r| r.input_chars).sum::<usize>() / ok.len();
+            // Cost: EVERY attempted call, errors included (timeouts, request
+            // errors, an unexpected identity). A failed call is still paid
+            // for, so counting only successes showed an all-error paid model
+            // as "unpriced" and understated a token-priced model that fails
+            // on long posts (Codex review #2, item 4). `recs` already holds
+            // the newest current-identity record per post, errors included
+            // (that is what `cache::current_for` returns), so no other
+            // selector is needed.
+            let usd_per_1k = prices.get(name).filter(|_| !recs.is_empty()).map(|p| {
+                let mean_chars = recs.values().map(|r| r.input_chars).sum::<usize>() / recs.len();
                 estimate_usd(p, mean_chars) * 1000.0
             });
             ModelReport {
@@ -468,6 +478,46 @@ mod tests {
             "{line}"
         );
         assert_eq!(removed_labels_note(0), "");
+    }
+
+    fn per_token(name: &str) -> HashMap<String, Price> {
+        [(
+            name.to_string(),
+            Price {
+                usd_per_post: None,
+                usd_per_million_input_tokens: Some(0.042),
+                overhead_chars: 0,
+            },
+        )]
+        .into()
+    }
+
+    /// Codex review #2, item 4: a failed call is still paid for. A paid model
+    /// whose every call failed has a cost, not "unpriced".
+    #[test]
+    fn an_all_error_paid_model_still_shows_a_cost() {
+        let r = &build(&[model("jev", |_| None)], &holdout(), &per_token("jev"))[0];
+        // 400 chars ≈ 100 tokens, same as a model that succeeded.
+        assert!((r.usd_per_1k.unwrap() - 0.0042).abs() < 1e-9, "{r:?}");
+        assert_eq!((r.p50_ms, r.p95_ms), (None, None), "no successful latency");
+        let text = render(std::slice::from_ref(r), &holdout(), "jev");
+        assert!(!text.contains("unpriced"), "{text}");
+    }
+
+    /// Item 4: a token-priced model that fails on LONG posts must have those
+    /// failed posts in its cost, not just the short ones it answered.
+    #[test]
+    fn a_mixed_models_cost_counts_its_failed_calls() {
+        let (name, mut recs) = model("jev", |i| (i < 40).then_some(true));
+        for r in recs.values_mut().filter(|r| r.called_toxic.is_none()) {
+            r.input_chars = 4000;
+        }
+        let r = &build(&[(name, recs)], &holdout(), &per_token("jev"))[0];
+        // Mean = (40 × 400 + 40 × 4000) / 80 = 2200 chars ≈ 550 tokens;
+        // 1,000 posts ≈ 550k tokens × $0.042/M = $0.0231.
+        assert!((r.usd_per_1k.unwrap() - 0.0231).abs() < 1e-9, "{r:?}");
+        // Latency stays successes-only: 10..=49 ms over the first 40 posts.
+        assert_eq!((r.p50_ms, r.p95_ms), (Some(29), Some(47)));
     }
 
     #[test]
