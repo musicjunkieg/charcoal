@@ -120,29 +120,40 @@ pub struct CurrentLabels {
     /// Labels dropped because their post's text changed since labelling.
     /// Those posts count as unlabelled (the picker offers them again).
     pub stale: usize,
+    /// Labels dropped because their post is no longer in pool.jsonl. The
+    /// rows stay in labels.jsonl (the post may come back); they just are not
+    /// truth while the post is gone.
+    pub removed: usize,
 }
 
 /// Labels whose recorded `content_hash` matches the pool's present text for
 /// that post (Codex fix 2). A label for edited text would score a verdict on
 /// the new text against the old text's truth, so it is dropped and counted.
-/// A label for an id no longer in the pool is kept as before: with no
-/// current verdict for it, it is never scored.
+/// A label for an id no longer in the pool is dropped and counted too: it
+/// has no verdict to match, yet left in it would still count in the class
+/// and coverage totals, pulling every model toward the 90 % coverage gate
+/// (Codex review #2, item 2).
 pub fn load_current_labels(path: &Path, pool: &[FixtureRow]) -> Result<CurrentLabels> {
     let present: HashMap<&str, String> = pool
         .iter()
         .map(|r| (r.id.as_str(), content_hash(&r.content)))
         .collect();
     let mut answers = HashMap::new();
-    let mut stale = 0;
+    let (mut stale, mut removed) = (0, 0);
     for (id, (answer, hash)) in load_labels_with_hash(path)? {
         match present.get(id.as_str()) {
+            None => removed += 1,
             Some(now) if *now != hash => stale += 1,
-            _ => {
+            Some(_) => {
                 answers.insert(id, answer);
             }
         }
     }
-    Ok(CurrentLabels { answers, stale })
+    Ok(CurrentLabels {
+        answers,
+        stale,
+        removed,
+    })
 }
 
 #[cfg(test)]
@@ -262,6 +273,47 @@ mod tests {
         assert_eq!(cur.stale, 1);
         assert!(cur.answers.contains_key("kept"));
         assert!(!cur.answers.contains_key("edited"));
+    }
+
+    /// Codex review #2, item 2: a label for a post no longer in the pool is
+    /// not truth. Left in, it would sit in the class and coverage
+    /// denominators with no verdict to match, dragging every model toward the
+    /// 90 % coverage gate. It is ignored and counted, never deleted.
+    #[test]
+    fn a_label_for_a_post_no_longer_in_the_pool_is_not_used() {
+        let f = file(&[
+            &label_line("kept", "toxic", "same"),
+            &label_line("gone", "toxic", "whatever"),
+        ]);
+        let pool = pool_of(&[("kept", "same")]);
+        let cur = load_current_labels(f.path(), &pool).unwrap();
+        assert_eq!(cur.removed, 1);
+        assert_eq!(cur.stale, 0, "removed is not the same as edited");
+        assert!(cur.answers.contains_key("kept"));
+        assert!(!cur.answers.contains_key("gone"));
+        assert_eq!(load_labels(f.path()).unwrap().len(), 2, "the row is kept");
+        // And the denominators: a model that answered every pool post has
+        // full coverage over one labelled post, not 1 of 2.
+        let rec = crate::cli::eval_classifiers::cache::VerdictRecord {
+            id: "kept".into(),
+            model: "m".into(),
+            content_hash: content_hash("same"),
+            model_id: "m".into(),
+            policy_version: "p".into(),
+            called_toxic: Some(true),
+            error: None,
+            latency_ms: 1,
+            input_chars: 4,
+            est_usd: 0.0,
+        };
+        let recs: HashMap<String, _> = [("kept".to_string(), rec)].into();
+        let r = &crate::cli::eval_classifiers::report::build(
+            &[("m".to_string(), recs)],
+            &cur.answers,
+            &HashMap::new(),
+        )[0];
+        assert_eq!(r.holdout.labelled, 1);
+        assert_eq!(r.holdout.coverage(), Some(1.0));
     }
 
     /// Codex fix 2: relabelling an edited post appends a newer row; the

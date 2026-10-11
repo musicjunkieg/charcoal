@@ -1174,6 +1174,7 @@ async fn main() -> Result<()> {
                         // labelled": those posts are offered again.
                         let labels = data::load_current_labels(&labels_path, &pool)?;
                         print!("{}", report::stale_labels_note(labels.stale));
+                        print!("{}", report::removed_labels_note(labels.removed));
                         let answers = labels.answers;
                         let picked = labelling::pick_for_labelling(&pool, &per_model, &answers);
                         let holdout = picked
@@ -1193,6 +1194,7 @@ async fn main() -> Result<()> {
                     // Only labels for the post's present text are truth.
                     let labels = data::load_current_labels(&labels_path, &pool)?;
                     print!("{}", report::stale_labels_note(labels.stale));
+                    print!("{}", report::removed_labels_note(labels.removed));
                     let answers = labels.answers;
                     let prices = cost::load_pricing(&dir.join("pricing.json"))?;
                     let mut loaded = Vec::new();

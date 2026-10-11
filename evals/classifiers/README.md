@@ -31,6 +31,11 @@ labelling; relabel (run `charcoal eval-classifiers label`)", and `label`
 offers that post again. Your new answer is
 added as a new line and replaces the old one.
 
+**A label for a post you removed from `pool.jsonl` is not used either.**
+`label` and `report` print "N labels ignored — post no longer in the
+pool". The line stays in `labels.jsonl` (nothing is deleted), so if the
+post comes back with the same text, its label counts again.
+
 ## What the spending cap does (and does not) cover
 
 - **The GPU is only woken when there is work and money for it.** Before

@@ -99,6 +99,18 @@ pub fn stale_labels_note(stale: usize) -> String {
     )
 }
 
+/// The line saying how many labels were dropped because their post is no
+/// longer in pool.jsonl (Codex review #2, item 2). Empty when none were.
+pub fn removed_labels_note(removed: usize) -> String {
+    if removed == 0 {
+        return String::new();
+    }
+    format!(
+        "{removed} labels ignored — post no longer in the pool (kept in labels.jsonl)
+"
+    )
+}
+
 fn rate_cell(r: &Rate) -> String {
     match (r.value(), r.wilson95()) {
         (Some(v), Some((lo, hi))) => {
@@ -444,6 +456,18 @@ mod tests {
             "{line}"
         );
         assert_eq!(stale_labels_note(0), "");
+    }
+
+    /// Codex review #2, item 2: labels for posts removed from the pool are
+    /// counted out loud too; none, nothing printed.
+    #[test]
+    fn removed_labels_are_counted() {
+        let line = removed_labels_note(2);
+        assert!(
+            line.contains("2 labels ignored") && line.contains("no longer in the pool"),
+            "{line}"
+        );
+        assert_eq!(removed_labels_note(0), "");
     }
 
     #[test]
