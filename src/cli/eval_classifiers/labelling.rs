@@ -96,37 +96,125 @@ struct ToLabel<'a> {
     note: &'a str,
 }
 
-/// The pool's present text, by id — what [`mergeable`] checks a row against.
+/// The pool's present text, by id — what [`classify`] checks a row against.
 fn pool_text(pool: &[FixtureRow]) -> HashMap<&str, &str> {
     pool.iter()
         .map(|r| (r.id.as_str(), r.content.as_str()))
         .collect()
 }
 
-/// Can an answer in to-label.jsonl still be saved? Only while its post is in
-/// the pool AND the text it was answered on (the row's `content`, which
-/// `label` always writes) is still the pool's text. Otherwise saving it would
-/// bind the answer to text the human never saw — or to no post at all.
-///
-/// The `label` guard and `merge` BOTH ask this one question (re-review I1).
-/// When they used separate rules, a post answered, merged and then removed
-/// or edited left each command telling the user to run the other one first.
-///
-/// A row without `content` (only a hand-written row could lack it) is judged
-/// by id alone, as merge always has: there is no shown text to compare.
-fn mergeable(id: &str, shown: Option<&str>, pool_text: &HashMap<&str, &str>) -> bool {
-    match pool_text.get(id) {
-        None => false,
-        Some(now) => shown.is_none_or(|s| s == *now),
+/// The text a to-label.jsonl row says it was answered on: its `content`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shown<'a> {
+    /// No `content` key at all. Only a hand-written row lacks it; it is
+    /// judged by id alone, as merge always has: there is no text to compare.
+    Absent,
+    Text(&'a str),
+    /// `content` is there but is not a string (e.g. `null`, after a tool
+    /// mangled the file). It names no text, so the answer cannot be bound
+    /// to any (review 3, M1) — unlike `Absent`, which is a deliberate choice.
+    NotText,
+}
+
+impl<'a> Shown<'a> {
+    fn of(row: &'a serde_json::Value) -> Self {
+        match row.get("content") {
+            None => Shown::Absent,
+            Some(v) => v.as_str().map_or(Shown::NotText, Shown::Text),
+        }
     }
+}
+
+/// What to do with one ANSWERED row of to-label.jsonl. Both the `label`
+/// guard and `--merge` act on this and on nothing else (re-review 3, I1).
+///
+/// Why one function: three review rounds in a row found the two commands
+/// asking the same questions in different orders, and each order left a
+/// case where `label` said "run --merge first" (or "edit labels.jsonl")
+/// while `--merge` quietly did nothing — so neither could move on. With one
+/// answer per row, they cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowStatus {
+    /// The post left the pool, or the text it was answered on is not the
+    /// pool's text now. Saving it would bind the answer to text the human
+    /// never saw, so it is never saved — and so there is nothing to protect.
+    NotMergeable,
+    /// labels.jsonl already holds this same answer for the current text.
+    AlreadyMergedSame,
+    /// labels.jsonl already holds a DIFFERENT answer for the current text:
+    /// an edit. The only case either command refuses.
+    ConflictsWithMerged { saved: Truth },
+    /// A new answer for the current text: merge saves it, `label` keeps it.
+    Mergeable,
+}
+
+/// Classify one answered row. `current` must be the labels that are truth
+/// for the pool as it is now ([`load_current_labels`]).
+///
+/// Mergeability is checked FIRST: a row answered on other text is about
+/// other text, so whatever labels.jsonl says about the current text is no
+/// reason to keep or refuse it. That ordering is what closes the I1 lock.
+///
+/// "Already merged" means a label for the CURRENT text. A stale label (same
+/// id, older text) is ignored here: the row is a fresh answer about the
+/// text now, exactly what relabelling an edited post is for. Counting the
+/// stale label as a conflict would block every relabel.
+fn classify(
+    id: &str,
+    shown: Shown<'_>,
+    answer: Truth,
+    pool_text: &HashMap<&str, &str>,
+    current: &HashMap<String, Answer>,
+) -> RowStatus {
+    let mergeable = match (pool_text.get(id), shown) {
+        (None, _) => false,
+        (Some(_), Shown::Absent) => true,
+        (Some(now), Shown::Text(s)) => s == *now,
+        (Some(_), Shown::NotText) => false,
+    };
+    if !mergeable {
+        return RowStatus::NotMergeable;
+    }
+    match current.get(id) {
+        None => RowStatus::Mergeable,
+        Some(a) if a.truth == answer => RowStatus::AlreadyMergedSame,
+        Some(a) => RowStatus::ConflictsWithMerged { saved: a.truth },
+    }
+}
+
+/// The id and answer of a row someone answered, or `None` for a blank row.
+/// Shared by the guard and merge so both read (and reject) rows alike: a
+/// row without an id, or an answer other than toxic/clean, is an error.
+fn read_answer<'a>(row: &'a serde_json::Value, at: &str) -> Result<Option<(&'a str, Truth)>> {
+    let id = row["id"]
+        .as_str()
+        .with_context(|| format!("{at}: row without id"))?;
+    let truth = match row["label"].as_str().unwrap_or("").trim() {
+        "" => return Ok(None),
+        "toxic" => Truth::Toxic,
+        "clean" => Truth::Clean,
+        other => bail!("{at}: label {other:?} must be toxic or clean"),
+    };
+    Ok(Some((id, truth)))
+}
+
+/// The refusal for [`RowStatus::ConflictsWithMerged`]. Editing labels.jsonl
+/// is safe advice here: the answer was given on the text that label holds.
+fn conflict_error(at: &str, saved: Truth) -> anyhow::Error {
+    let saved = match saved {
+        Truth::Toxic => "toxic",
+        Truth::Clean => "clean",
+    };
+    anyhow::anyhow!(
+        "{at}: that post is already in labels.jsonl as {saved}; to change it, edit labels.jsonl directly."
+    )
 }
 
 /// Refuse to overwrite `path` while it holds a typed answer that has not been
 /// merged into labels.jsonl yet: overwriting would silently lose the human's
-/// work. Answers already in `merged` are safe to drop — they are kept in
-/// labels.jsonl — so the normal label → answer → merge → label cycle works.
-/// So are answers that can never be merged (see [`mergeable`]): there is no
-/// saving them, so protecting them would only block `label` forever.
+/// work. What counts as unsaved comes only from [`classify`]: answers already
+/// merged are safe to drop, and so are answers that can never be merged
+/// (protecting those would only block `label` forever).
 fn ensure_no_unmerged_answers(
     path: &Path,
     merged: &HashMap<String, Answer>,
@@ -139,43 +227,24 @@ fn ensure_no_unmerged_answers(
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
     for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let at = format!("{} line {}", path.display(), i + 1);
         // A line we cannot read might hold an answer: fail closed, never
         // overwrite what we could not check.
         let row: serde_json::Value = serde_json::from_str(l).with_context(|| {
-            format!(
-                "{} line {} is not valid JSON — fix it or run `charcoal eval-classifiers label --merge` first",
-                path.display(),
-                i + 1
-            )
+            format!("{at} is not valid JSON — fix it or run `charcoal eval-classifiers label --merge` first")
         })?;
-        let typed = row["label"].as_str().unwrap_or("").trim();
-        let answered = !typed.is_empty();
-        let id = row["id"].as_str();
-        let merged_truth = id.and_then(|id| merged.get(id));
-        // A row with no id stays protected (fail closed): merge rejects it
-        // with a message saying what to fix.
-        let can_merge = id.is_none_or(|id| mergeable(id, row["content"].as_str(), &pool_text));
-        if answered && merged_truth.is_none() && can_merge {
-            bail!(
+        // A row merge would reject stops `label` too, with merge's message.
+        let Some((id, answer)) = read_answer(&row, &at)? else {
+            continue;
+        };
+        match classify(id, Shown::of(&row), answer, &pool_text, merged) {
+            RowStatus::NotMergeable | RowStatus::AlreadyMergedSame => {}
+            RowStatus::ConflictsWithMerged { saved } => return Err(conflict_error(&at, saved)),
+            RowStatus::Mergeable => bail!(
                 "{} has answers you have not saved yet (line {}). Run `charcoal eval-classifiers label --merge` first, then run `label` again.",
                 path.display(),
                 i + 1
-            );
-        }
-        // An answer that DIFFERS from the saved label is an edit, and `merge`
-        // skips ids already saved, so it would be lost without a word.
-        if let Some(a) = merged_truth {
-            let saved = match a.truth {
-                Truth::Toxic => "toxic",
-                Truth::Clean => "clean",
-            };
-            if answered && !typed.eq_ignore_ascii_case(saved) {
-                bail!(
-                    "{} line {}: that post is already in labels.jsonl as {saved}; to change it, edit labels.jsonl directly.",
-                    path.display(),
-                    i + 1
-                );
-            }
+            ),
         }
     }
     Ok(())
@@ -212,19 +281,21 @@ pub fn write_to_label(
 pub struct MergeOutcome {
     /// Answers appended to labels.jsonl.
     pub merged: usize,
-    /// Answers left out because they can no longer be merged (see
-    /// [`mergeable`]): the post left the pool, or its text changed since it
-    /// was answered.
+    /// Answers left out as [`RowStatus::NotMergeable`]: the post left the
+    /// pool, or its text is not the text it was answered on.
     pub skipped: usize,
 }
 
 /// The line `--merge` prints about skipped answers, or "" when none were.
+/// It promises a re-offer only for holdout and seed posts: a diagnostic post
+/// comes back only if the models' verdicts on its current text pick it again
+/// (review 3, M2).
 pub fn skipped_note(skipped: usize) -> String {
     if skipped == 0 {
         return String::new();
     }
     format!(
-        "{skipped} answer{} not saved — post removed from the pool or its text changed since you labelled it; it will be offered again if still in the pool\n",
+        "{skipped} answer{} not saved — post removed from the pool or its text changed since you labelled it; holdout and seed posts still in the pool are offered again by `label`\n",
         if skipped == 1 { "" } else { "s" }
     )
 }
@@ -236,7 +307,8 @@ pub fn merge_labels(
 ) -> Result<MergeOutcome> {
     // Only labels that still describe the pool's text count as "already
     // labelled": an answer for an edited post must be merged, not skipped
-    // (Codex fix 2). The new row is appended and, being newest, wins.
+    // (Codex fix 2). The new row is appended and, being newest, wins. The
+    // `label` guard is handed this same set, so [`classify`] sees the same.
     let existing = load_current_labels(labels_path, pool)?.answers;
     // Read from every row, stale ones included: the stale seed label is
     // exactly the one being replaced, and its provenance must carry over.
@@ -250,29 +322,28 @@ pub fn merge_labels(
     let mut pending: Vec<Label> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
-        let at = || format!("{} line {}", to_label.display(), i + 1);
-        let row: serde_json::Value = serde_json::from_str(l).with_context(at)?;
-        let id = row["id"]
-            .as_str()
-            .with_context(|| format!("{}: row without id", at()))?;
-        let answer = row["label"].as_str().unwrap_or("").trim();
-        if answer.is_empty() || existing.contains_key(id) {
+        let at = format!("{} line {}", to_label.display(), i + 1);
+        let row: serde_json::Value = serde_json::from_str(l).with_context(|| at.clone())?;
+        // Every answered row is validated here, even one about to be
+        // skipped: a typo is still worth reporting.
+        let Some((id, truth)) = read_answer(&row, &at)? else {
             continue;
-        }
-        // Checked even on a row about to be skipped: a typo is still worth
-        // reporting, and validation stays over every answered row.
-        let truth = match answer {
-            "toxic" => Truth::Toxic,
-            "clean" => Truth::Clean,
-            other => bail!("{}: label {other:?} must be toxic or clean", at()),
         };
-        // Skip, never stop: the same rule lets `label` replace this file, so
-        // stopping here would only lock the two commands against each other
-        // (re-review I1). Skipping also never saves the answer against text
-        // it was not given for. A post still in the pool is offered again.
-        if !mergeable(id, row["content"].as_str(), &pool_text) {
-            skipped += 1;
-            continue;
+        match classify(id, Shown::of(&row), truth, &pool_text, &existing) {
+            // Skip and count, never stop: `label` may replace this file, so
+            // stopping here would lock the two commands against each other
+            // (re-review I1). Skipping also never saves the answer against
+            // text it was not given for.
+            RowStatus::NotMergeable => {
+                skipped += 1;
+                continue;
+            }
+            // Already saved; nothing to report.
+            RowStatus::AlreadyMergedSame => continue,
+            // Refused before anything is appended, with the message `label`
+            // gives: dropping the edit silently would lose it.
+            RowStatus::ConflictsWithMerged { saved } => return Err(conflict_error(&at, saved)),
+            RowStatus::Mergeable => {}
         }
         let pool_content = pool_text[id];
         let note = row["note"]
@@ -301,7 +372,7 @@ pub fn merge_labels(
         // Even two agreeing answers are an error: the human should fix the
         // file rather than have the last one silently win on reload.
         if !seen.insert(id.to_string()) {
-            bail!("{}: id {id:?} is answered more than once", at());
+            bail!("{at}: id {id:?} is answered more than once");
         }
         pending.push(label);
     }
@@ -851,6 +922,151 @@ mod tests {
         write_to_label(&to_label, &picked, &cur.answers, &pool).unwrap();
         let text = std::fs::read_to_string(&to_label).unwrap();
         assert!(text.contains("new text"), "offered again: {text}");
+    }
+
+    /// Re-review 3, I1: merge X on text A, the text changes to B, X is
+    /// answered differently on B without merging, then the text goes back to
+    /// A. The answer was made on B, so it can never be saved; it is not an
+    /// edit of the label saved for A. Before the fix `label` refused forever
+    /// ("already in labels.jsonl as toxic; edit labels.jsonl") and `--merge`
+    /// printed "merged 0" with no skip note.
+    #[test]
+    fn an_answer_on_text_since_reverted_does_not_lock_label_or_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        let pool_a = vec![row(&h)]; // text A = "post {h}"
+        answered_and_merged(&to_label, &labels, &pool_a, &h); // toxic on A
+
+        // The text changes to B: the label for A goes stale, h is offered
+        // again, and the human answers it differently on B — not merged.
+        let pool_b: Vec<FixtureRow> =
+            vec![
+                serde_json::from_value(serde_json::json!({"id": h, "content": "text B"})).unwrap(),
+            ];
+        let cur = load_current_labels(&labels, &pool_b).unwrap();
+        let picked = pick_for_labelling(&pool_b, &[], &cur.answers, &HashSet::new());
+        write_to_label(&to_label, &picked, &cur.answers, &pool_b).unwrap();
+        let answered = std::fs::read_to_string(&to_label)
+            .unwrap()
+            .replace(r#""label":"""#, r#""label":"clean""#);
+        std::fs::write(&to_label, &answered).unwrap();
+        let before = std::fs::read_to_string(&labels).unwrap();
+
+        // The text goes back to A.
+        let cur = load_current_labels(&labels, &pool_a).unwrap();
+        assert_eq!(
+            cur.answers[&h].truth,
+            Truth::Toxic,
+            "A's label is current again"
+        );
+
+        // Merge is honest: nothing saved, and the answer is counted as skipped.
+        assert_eq!(
+            merge_labels(&to_label, &labels, &pool_a).unwrap(),
+            MergeOutcome {
+                merged: 0,
+                skipped: 1
+            }
+        );
+        assert_eq!(
+            std::fs::read_to_string(&labels).unwrap(),
+            before,
+            "an answer about B is never saved against A"
+        );
+
+        // And `label` may replace the file: there is nothing it could save.
+        let picked = pick_for_labelling(&pool_a, &[], &cur.answers, &HashSet::new());
+        write_to_label(&to_label, &picked, &cur.answers, &pool_a).unwrap();
+    }
+
+    /// Re-review 3, I1: every classification, from one table. The pool has
+    /// "a" with text "A" and "c" with text "C"; labels.jsonl currently holds
+    /// "a" as toxic (on "A"). "c" has no current label.
+    #[test]
+    fn each_answered_row_is_classified_once() {
+        use RowStatus::*;
+        let pool: HashMap<&str, &str> = [("a", "A"), ("c", "C")].into();
+        let current: HashMap<String, Answer> = [(
+            "a".to_string(),
+            Answer {
+                truth: Truth::Toxic,
+                source: Source::Holdout,
+            },
+        )]
+        .into();
+        let cases: &[(&str, Shown, Truth, RowStatus)] = &[
+            // Left the pool: nothing to save it against.
+            ("gone", Shown::Text("A"), Truth::Toxic, NotMergeable),
+            ("gone", Shown::Absent, Truth::Toxic, NotMergeable),
+            // Answered on other text. Checked FIRST, so even an answer that
+            // differs from a's saved label is not a conflict (the I1 case).
+            ("a", Shown::Text("B"), Truth::Clean, NotMergeable),
+            ("a", Shown::Text("B"), Truth::Toxic, NotMergeable),
+            ("c", Shown::Text("B"), Truth::Clean, NotMergeable),
+            // A `content` that is not a string (e.g. null) names no text,
+            // so it is not mergeable (review 3, M1).
+            ("c", Shown::NotText, Truth::Clean, NotMergeable),
+            // Same text, same answer as saved.
+            ("a", Shown::Text("A"), Truth::Toxic, AlreadyMergedSame),
+            ("a", Shown::Absent, Truth::Toxic, AlreadyMergedSame),
+            // Same text, a different answer: the one refusal.
+            (
+                "a",
+                Shown::Text("A"),
+                Truth::Clean,
+                ConflictsWithMerged {
+                    saved: Truth::Toxic,
+                },
+            ),
+            (
+                "a",
+                Shown::Absent,
+                Truth::Clean,
+                ConflictsWithMerged {
+                    saved: Truth::Toxic,
+                },
+            ),
+            // Unlabelled (or only stale-labelled) post on its current text;
+            // a row with no `content` is judged by id alone.
+            ("c", Shown::Text("C"), Truth::Clean, Mergeable),
+            ("c", Shown::Absent, Truth::Toxic, Mergeable),
+        ];
+        for (id, shown, answer, want) in cases {
+            assert_eq!(
+                classify(id, *shown, *answer, &pool, &current),
+                *want,
+                "{id} {shown:?} {answer:?}"
+            );
+        }
+    }
+
+    /// Re-review 3, I1: a different answer for the same text as a saved
+    /// label is refused by `--merge` too — before anything is appended — with
+    /// the same message `label` gives. Merge used to drop it silently.
+    #[test]
+    fn merge_refuses_an_edited_answer_for_the_same_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let (h, o) = (holdout_id(), other_id());
+        let pool = vec![row(&h), row(&o)];
+        answered_and_merged(&to_label, &labels, &pool, &h); // h toxic
+        let before = std::fs::read_to_string(&labels).unwrap();
+        let good = format!(r#"{{"id":"{o}","content":"post {o}","label":"toxic","note":""}}"#);
+        let edit = format!(r#"{{"id":"{h}","content":"post {h}","label":"clean","note":""}}"#);
+        std::fs::write(&to_label, format!("{good}\n{edit}\n")).unwrap();
+        let err = format!("{:#}", merge_labels(&to_label, &labels, &pool).unwrap_err());
+        assert!(
+            err.contains("already in labels.jsonl as toxic") && err.contains("line 2"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&labels).unwrap(),
+            before,
+            "nothing appended, not even the good row"
+        );
     }
 
     /// Re-review I1: the note `--merge` prints says what happened, in plain

@@ -24,14 +24,24 @@ answers you typed but have not merged yet - it tells you to run
 blank, are safe to replace.
 
 **An answer that can no longer be saved is skipped, not blocked.** If you
-answer a post and then remove it from `pool.jsonl`, or change its text,
-before merging (or after), that answer cannot be saved: it would describe a
-post that is gone, or text that is not the post's any more. `label --merge`
+answer a post and then, before merging, remove it from `pool.jsonl` or
+change its text, that answer cannot be saved: it would describe a post that
+is gone, or text that is not the post's any more. This holds even if the
+text later changes back to something you labelled earlier: the answer is
+about the text you saw, not the text that is there now. `label --merge`
 skips such answers and prints "N answers not saved — post removed from the
-pool or its text changed since you labelled it; it will be offered again if
-still in the pool". `label` no longer treats them as unsaved work, so it can
-write a fresh file. An answer is never saved against text other than the
-text you saw when you answered.
+pool or its text changed since you labelled it; holdout and seed posts still
+in the pool are offered again by `label`". (A diagnostic post comes back
+only if the models' verdicts pick it again.) `label` does not treat skipped
+answers as unsaved work, so it can write a fresh file. An answer is never
+saved against text other than the text you saw when you answered.
+
+**Changing a saved answer.** If `to-label.jsonl` gives a post a different
+answer from the one `labels.jsonl` already holds for the same text, both
+`label` and `label --merge` stop with "that post is already in labels.jsonl
+as …; to change it, edit labels.jsonl directly". Merge stops before saving
+anything. An old label for text the post no longer has does not count: the
+new answer is saved as a relabel.
 
 **A label belongs to the exact text you labelled.** `label --merge` records a
 fingerprint of the post's text (`content_hash`) next to your answer. If a

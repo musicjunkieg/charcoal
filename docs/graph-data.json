@@ -12143,6 +12143,39 @@
       "created_at": "2026-10-10T17:53:02.482302-07:00",
       "updated_at": "2026-10-10T17:53:02.482302-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9099671\",\"confidence\":85}"
+    },
+    {
+      "id": 1114,
+      "change_id": "7f0d5439-d3e1-4be0-b40a-5f6aae52dfc0",
+      "node_type": "outcome",
+      "title": "I1 fixed (shared mergeable predicate; merge skips+counts) and stale seeds shown/offered as seed; 103 lib + 3 integration pass, clippy/fmt clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T18:37:52.772295-07:00",
+      "updated_at": "2026-10-10T18:37:52.772295-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":90}"
+    },
+    {
+      "id": 1115,
+      "change_id": "aeae40d6-da21-468d-a9ff-9578ad26c877",
+      "node_type": "observation",
+      "title": "Re-review 3: NOT approved - I1 residual label/merge disagreement: edited-answer refusal and merge's already-merged check run before mergeability (text A->B->A); fix by ONE row classifier shared by guard and merge",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T18:41:02.186740-07:00",
+      "updated_at": "2026-10-10T18:41:02.186740-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":90}"
+    },
+    {
+      "id": 1116,
+      "change_id": "075c41b0-5481-4878-945a-bad4f5720580",
+      "node_type": "action",
+      "title": "One classification for answered to-label rows shared by label guard and merge (re-review 3 I1)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T18:41:49.831928-07:00",
+      "updated_at": "2026-10-10T18:41:49.831928-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/labelling.rs\",\"evals/classifiers/README.md\"]}"
     }
   ],
   "edges": [
@@ -24850,6 +24883,39 @@
       "weight": 1.0,
       "rationale": "fix re-review I1",
       "created_at": "2026-10-10T17:53:04.054724-07:00"
+    },
+    {
+      "id": 1166,
+      "from_node_id": 1113,
+      "to_node_id": 1114,
+      "from_change_id": "ed4d408f-c662-4cac-9921-1df3c238b978",
+      "to_change_id": "7f0d5439-d3e1-4be0-b40a-5f6aae52dfc0",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "fix result",
+      "created_at": "2026-10-10T18:37:54.161023-07:00"
+    },
+    {
+      "id": 1167,
+      "from_node_id": 1114,
+      "to_node_id": 1115,
+      "from_change_id": "7f0d5439-d3e1-4be0-b40a-5f6aae52dfc0",
+      "to_change_id": "aeae40d6-da21-468d-a9ff-9578ad26c877",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review of deadlock fix",
+      "created_at": "2026-10-10T18:41:03.665420-07:00"
+    },
+    {
+      "id": 1168,
+      "from_node_id": 1115,
+      "to_node_id": 1116,
+      "from_change_id": "aeae40d6-da21-468d-a9ff-9578ad26c877",
+      "to_change_id": "075c41b0-5481-4878-945a-bad4f5720580",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "fix re-review 3 I1",
+      "created_at": "2026-10-10T18:41:51.313222-07:00"
     }
   ],
   "documents": [

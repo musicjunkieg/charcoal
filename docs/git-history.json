@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2963f609bd82c78eb7bfdb604e034d15323ec2cb",
+    "short_hash": "2963f60",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T18:28:32-07:00",
+    "message": "fix(404): show a stale seed as a seed when label offers it again\n\nThe picker re-derived the source of a stale seed from the id hash, so\nto-label.jsonl showed it as holdout or diagnostic and the printed holdout\ncount was inflated. A seed outside the holdout could also never come back,\nalthough the stale note says it will.\n\npick_for_labelling now takes the seed ids from labels.jsonl, always offers\na stale seed, and tags it Source::Seed. The summary line counts holdout,\nseed and diagnostic separately.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "9099671f38c6b05b0a3682648ba12fc77291bfa7",
     "short_hash": "9099671",
     "author": "Bryan Guffey",
