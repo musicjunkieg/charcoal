@@ -200,13 +200,18 @@ fn read_answer<'a>(row: &'a serde_json::Value, at: &str) -> Result<Option<(&'a s
 
 /// The refusal for [`RowStatus::ConflictsWithMerged`]. Editing labels.jsonl
 /// is safe advice here: the answer was given on the text that label holds.
+/// The message names both halves of the way out, because someone who has
+/// ALREADY edited labels.jsonl lands here too while the old answer still sits
+/// in to-label.jsonl — telling them only "edit labels.jsonl" would loop.
 fn conflict_error(at: &str, saved: Truth) -> anyhow::Error {
     let saved = match saved {
         Truth::Toxic => "toxic",
         Truth::Clean => "clean",
     };
     anyhow::anyhow!(
-        "{at}: that post is already in labels.jsonl as {saved}; to change it, edit labels.jsonl directly."
+        "{at}: that post is already in labels.jsonl as {saved}, but this row answers it differently. \
+         To change the saved answer, edit labels.jsonl directly; then make this row's label in \
+         to-label.jsonl blank (or the same as labels.jsonl) so label and --merge can continue."
     )
 }
 
@@ -834,6 +839,13 @@ mod tests {
         assert!(
             msg.contains("already in labels.jsonl as toxic") && msg.contains("edit labels.jsonl"),
             "{msg}"
+        );
+        // Review 4: someone who already edited labels.jsonl gets this same
+        // refusal, so it must also name the step that clears it — the
+        // differing answer still sitting in to-label.jsonl.
+        assert!(
+            msg.contains("to-label.jsonl") && msg.contains("blank"),
+            "the refusal must say how to clear the to-label row: {msg}"
         );
         assert_eq!(std::fs::read_to_string(&to_label).unwrap(), typed);
     }

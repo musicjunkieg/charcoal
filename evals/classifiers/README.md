@@ -39,9 +39,13 @@ saved against text other than the text you saw when you answered.
 **Changing a saved answer.** If `to-label.jsonl` gives a post a different
 answer from the one `labels.jsonl` already holds for the same text, both
 `label` and `label --merge` stop with "that post is already in labels.jsonl
-as …; to change it, edit labels.jsonl directly". Merge stops before saving
-anything. An old label for text the post no longer has does not count: the
-new answer is saved as a relabel.
+as …, but this row answers it differently". Merge stops before saving
+anything. To change a saved answer: edit `labels.jsonl` directly, then make
+that row's label in `to-label.jsonl` blank (or the same as `labels.jsonl`).
+Both steps matter — after editing `labels.jsonl` alone, the old answer still
+in `to-label.jsonl` now disagrees with it, and both commands keep stopping
+until that row is cleared. An old label for text the post no longer has does
+not count: the new answer is saved as a relabel.
 
 **A label belongs to the exact text you labelled.** `label --merge` records a
 fingerprint of the post's text (`content_hash`) next to your answer. If a

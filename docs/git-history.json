@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b5997d784cec579d868add89ed8ceadff776bebb",
+    "short_hash": "b5997d7",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T19:11:44-07:00",
+    "message": "fix(404): classify each answered to-label row once for both label and merge\n\nThe label guard and --merge each decided about an answered row with their\nown checks, in different orders. Merging X on text A, answering it\ndifferently on text B, then reverting to A made label refuse forever while\nmerge printed \"merged 0\" with no skip note.\n\nBoth now act only on classify(), which returns NotMergeable (checked\nfirst), AlreadyMergedSame, ConflictsWithMerged or Mergeable. Merge now\nrefuses a conflicting edit before appending, instead of dropping it\nsilently. A non-string content is not mergeable (review 3 M1). The skip\nnote and README promise a re-offer only for holdout and seed posts (M2, M3).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "2963f609bd82c78eb7bfdb604e034d15323ec2cb",
     "short_hash": "2963f60",
     "author": "Bryan Guffey",

@@ -12176,6 +12176,28 @@
       "created_at": "2026-10-10T18:41:49.831928-07:00",
       "updated_at": "2026-10-10T18:41:49.831928-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/labelling.rs\",\"evals/classifiers/README.md\"]}"
+    },
+    {
+      "id": 1117,
+      "change_id": "dcbae814-69b3-43f4-a4db-fe9cb87a7d84",
+      "node_type": "outcome",
+      "title": "classify() shared by label guard and merge; A-B-A lock closed; 106 lib + 3 integration tests pass",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T19:11:55.095599-07:00",
+      "updated_at": "2026-10-10T19:11:55.095599-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b5997d7\",\"confidence\":90}"
+    },
+    {
+      "id": 1118,
+      "change_id": "86cba89c-9b8a-451c-af85-7a571c0a2b9e",
+      "node_type": "action",
+      "title": "Conflict refusal names the to-label.jsonl step that clears it (review 4 I1)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T19:32:23.780656-07:00",
+      "updated_at": "2026-10-10T19:32:23.780656-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b5997d7\",\"confidence\":90,\"files\":[\"src/cli/eval_classifiers/labelling.rs\",\"evals/classifiers/README.md\"]}"
     }
   ],
   "edges": [
@@ -24916,6 +24938,28 @@
       "weight": 1.0,
       "rationale": "fix re-review 3 I1",
       "created_at": "2026-10-10T18:41:51.313222-07:00"
+    },
+    {
+      "id": 1169,
+      "from_node_id": 1116,
+      "to_node_id": 1117,
+      "from_change_id": "075c41b0-5481-4878-945a-bad4f5720580",
+      "to_change_id": "dcbae814-69b3-43f4-a4db-fe9cb87a7d84",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result of the fix",
+      "created_at": "2026-10-10T19:11:56.600333-07:00"
+    },
+    {
+      "id": 1170,
+      "from_node_id": 1117,
+      "to_node_id": 1118,
+      "from_change_id": "dcbae814-69b3-43f4-a4db-fe9cb87a7d84",
+      "to_change_id": "86cba89c-9b8a-451c-af85-7a571c0a2b9e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Re-review 4 wording finding",
+      "created_at": "2026-10-10T19:32:27.284517-07:00"
     }
   ],
   "documents": [
