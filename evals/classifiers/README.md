@@ -29,7 +29,9 @@ post's text in `pool.jsonl` changes later, its old label is no longer used:
 `label` and `report` print "N labels ignored — post text changed since
 labelling; relabel (run `charcoal eval-classifiers label`)", and `label`
 offers that post again. Your new answer is
-added as a new line and replaces the old one.
+added as a new line and replaces the old one. A post that started as a
+hand-picked **seed** label stays a seed when you relabel it, so it never
+moves into the scored holdout.
 
 **A label for a post you removed from `pool.jsonl` is not used either.**
 `label` and `report` print "N labels ignored — post no longer in the

@@ -113,6 +113,29 @@ fn load_labels_with_hash(path: &Path) -> Result<HashMap<String, (Answer, String)
     Ok(out)
 }
 
+/// Ids that were EVER labelled as `Source::Seed`, whatever text the label
+/// describes. Seed provenance lives only in labels.jsonl (pool rows carry no
+/// source), so this is where a relabel looks it up: a curated seed whose text
+/// changed must stay a seed when relabelled, or a hand-picked post could land
+/// in the hash-chosen holdout and bias the headline (Codex review #2, item 3).
+/// Any row counts, not just the newest: once a seed, always a seed.
+pub fn seed_ids(path: &Path) -> Result<std::collections::HashSet<String>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut out = std::collections::HashSet::new();
+    for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let label: Label = serde_json::from_str(l)
+            .with_context(|| format!("{} line {}", path.display(), i + 1))?;
+        if label.source == Source::Seed {
+            out.insert(label.id);
+        }
+    }
+    Ok(out)
+}
+
 /// The labels that are still truth for the pool as it is now.
 #[derive(Debug)]
 pub struct CurrentLabels {

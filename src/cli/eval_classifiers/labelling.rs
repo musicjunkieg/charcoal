@@ -6,7 +6,9 @@
 //!   Useful for understanding models; never mixed into the headline numbers.
 //!
 //! The stream a label belongs to is DERIVED from the post id at merge time,
-//! never read from the (human-edited) file (Codex review, round 2).
+//! never read from the (human-edited) file (Codex review, round 2). The one
+//! exception: a post labels.jsonl already holds as a curated **seed** stays a
+//! seed when relabelled (Codex review #2, item 3).
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
@@ -15,7 +17,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::cache::VerdictRecord;
-use super::data::{load_current_labels, Answer, FixtureRow, Label, Source, Truth};
+use super::data::{load_current_labels, seed_ids, Answer, FixtureRow, Label, Source, Truth};
 use super::{content_hash, fnv1a};
 
 /// Salted so holdout membership is independent of the diagnostic sample.
@@ -148,6 +150,9 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
     // labelled": an answer for an edited post must be merged, not skipped
     // (Codex fix 2). The new row is appended and, being newest, wins.
     let existing = load_current_labels(labels_path, pool)?.answers;
+    // Read from every row, stale ones included: the stale seed label is
+    // exactly the one being replaced, and its provenance must carry over.
+    let seeds = seed_ids(labels_path)?;
     let pool_text: HashMap<&str, &str> = pool
         .iter()
         .map(|r| (r.id.as_str(), r.content.as_str()))
@@ -189,11 +194,19 @@ pub fn merge_labels(to_label: &Path, labels_path: &Path, pool: &[FixtureRow]) ->
             .filter(|n| !n.is_empty())
             .map(str::to_string);
         // Derived, not read: a hand-edited "source" cannot promote a
-        // disagreement-picked post into the headline rates.
+        // disagreement-picked post into the headline rates. The one thing
+        // carried over is seed provenance, taken from labels.jsonl itself
+        // (never from to-label.jsonl, which a human edits): a relabelled
+        // seed stays out of the headline (Codex review #2, item 3).
+        let source = if seeds.contains(id) {
+            Source::Seed
+        } else {
+            source_for(id)
+        };
         let label = Label {
             id: id.to_string(),
             label: truth,
-            source: source_for(id),
+            source,
             note,
             // The pool's text — checked equal to the shown text above when
             // the row carries it — is what this answer describes.
@@ -431,6 +444,45 @@ mod tests {
         let cur = load_current_labels(&labels, &pool).unwrap();
         assert_eq!(cur.stale, 0);
         assert_eq!(cur.answers[&h].truth, Truth::Clean);
+    }
+
+    /// Codex review #2, item 3: a curated SEED post whose text changed is
+    /// relabelled through label/merge — and must stay a seed. Re-deriving its
+    /// source from the id hash could drop a hand-picked post into the holdout
+    /// and bias the headline rates. Uses a holdout-hashed id on purpose: that
+    /// is the case where the bug would show.
+    #[test]
+    fn relabelling_a_stale_seed_keeps_it_a_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        let h = holdout_id();
+        std::fs::write(
+            &labels,
+            format!(
+                "{{\"id\":\"{h}\",\"label\":\"toxic\",\"source\":\"seed\",\"content_hash\":\"{}\"}}\n",
+                content_hash("the old text")
+            ),
+        )
+        .unwrap();
+        let pool = vec![row(&h)]; // text is now "post {h}"
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        assert_eq!(cur.stale, 1);
+        let picked = pick_for_labelling(&pool, &[], &cur.answers);
+        write_to_label(&to_label, &picked, &cur.answers).unwrap();
+        let answered = std::fs::read_to_string(&to_label)
+            .unwrap()
+            .replace(r#""label":"""#, r#""label":"clean""#);
+        std::fs::write(&to_label, answered).unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap(), 1);
+        let cur = load_current_labels(&labels, &pool).unwrap();
+        assert_eq!(cur.answers[&h].truth, Truth::Clean, "the new answer won");
+        assert_eq!(cur.answers[&h].source, Source::Seed, "still a seed");
+        assert!(
+            crate::cli::eval_classifiers::report::labels_of(&cur.answers, Source::Holdout)
+                .is_empty(),
+            "a seed never reaches the headline"
+        );
     }
 
     /// Review fix: a bad row must not leave the earlier good rows appended.
