@@ -12198,6 +12198,39 @@
       "created_at": "2026-10-10T19:32:23.780656-07:00",
       "updated_at": "2026-10-10T19:32:23.780656-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b5997d7\",\"confidence\":90,\"files\":[\"src/cli/eval_classifiers/labelling.rs\",\"evals/classifiers/README.md\"]}"
+    },
+    {
+      "id": 1119,
+      "change_id": "df2beb05-af2f-48d1-8282-0a5e0c61f39c",
+      "node_type": "outcome",
+      "title": "Review-4 I1 closed (b190823): conflict message + README name the to-label step; 106 lib tests, fmt, clippy clean. Branch ready for Codex gate #3",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-10T19:32:38.445182-07:00",
+      "updated_at": "2026-10-10T19:32:38.445182-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b190823\",\"confidence\":90}"
+    },
+    {
+      "id": 1120,
+      "change_id": "4f25fb69-7b0d-462b-9765-3502ce7f7ff4",
+      "node_type": "observation",
+      "title": "Codex review #3 (head b190823): 1 P2 accepted - batch-wide identity mismatch keeps paying for unusable verdicts",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-11T21:01:17.810864-07:00",
+      "updated_at": "2026-10-11T21:01:17.810864-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b190823\",\"confidence\":90}"
+    },
+    {
+      "id": 1121,
+      "change_id": "cf89fff7-f4d9-4d1c-82a5-79439e3abc9c",
+      "node_type": "action",
+      "title": "Stop a model on a batch-wide identity mismatch (IdentityMismatch, treated like ProbeFailed)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-11T21:01:17.833183-07:00",
+      "updated_at": "2026-10-11T21:01:17.833183-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b190823\",\"confidence\":90,\"files\":[\"src/cli/eval_classifiers/runner.rs\",\"evals/classifiers/README.md\"]}"
     }
   ],
   "edges": [
@@ -24960,6 +24993,39 @@
       "weight": 1.0,
       "rationale": "Re-review 4 wording finding",
       "created_at": "2026-10-10T19:32:27.284517-07:00"
+    },
+    {
+      "id": 1171,
+      "from_node_id": 1118,
+      "to_node_id": 1119,
+      "from_change_id": "86cba89c-9b8a-451c-af85-7a571c0a2b9e",
+      "to_change_id": "df2beb05-af2f-48d1-8282-0a5e0c61f39c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-10-10T19:32:38.452606-07:00"
+    },
+    {
+      "id": 1172,
+      "from_node_id": 1119,
+      "to_node_id": 1120,
+      "from_change_id": "df2beb05-af2f-48d1-8282-0a5e0c61f39c",
+      "to_change_id": "4f25fb69-7b0d-462b-9765-3502ce7f7ff4",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Codex gate #3",
+      "created_at": "2026-10-11T21:01:22.726485-07:00"
+    },
+    {
+      "id": 1173,
+      "from_node_id": 1120,
+      "to_node_id": 1121,
+      "from_change_id": "4f25fb69-7b0d-462b-9765-3502ce7f7ff4",
+      "to_change_id": "cf89fff7-f4d9-4d1c-82a5-79439e3abc9c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix",
+      "created_at": "2026-10-11T21:01:22.736567-07:00"
     }
   ],
   "documents": [

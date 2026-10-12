@@ -124,7 +124,13 @@ Detoxify needs the local ONNX models (`charcoal download-model`, or
 that fails its identity check, is skipped - no verdicts were bought from it,
 so the rest of the run continues. (A missing key or file is caught before
 anything is contacted; a failed CoPE-B identity check, though, has already
-woken the GPU, so it may have cost one cold start plus the ~60 s idle tail.) **Any other error stops the whole run** with a
+woken the GPU, so it may have cost one cold start plus the ~60 s idle tail.)
+A model is also stopped and skipped when **every post in a batch** comes back
+from another model or policy than the one declared - the deployment itself is
+wrong, so more batches would only buy unusable answers. That batch's answers
+are kept as errors. A single stray post in an otherwise good batch is just that
+post's error, and the run goes on. Either kind of skip of a paid model ends
+paid spending for the rest of the run; free models still run. **Any other error stops the whole run** with a
 non-zero exit - for example a verdict file in `verdicts/` that cannot be read
 or written. That can happen right after a paid batch, so carrying on would
 keep spending while losing what was paid for. Fix the file problem, then run

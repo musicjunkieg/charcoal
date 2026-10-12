@@ -1,5 +1,13 @@
 [
   {
+    "hash": "b1908239883e6f6368f5511e9dacc53b9b582ec8",
+    "short_hash": "b190823",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T19:32:27-07:00",
+    "message": "fix(404): the conflict refusal says how to clear the to-label row\n\nSomeone who already edited labels.jsonl, as the old message told them to,\ngot the same refusal while the old answer still sat in to-label.jsonl:\nthe advice looped. The message and README now name both steps.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "b5997d784cec579d868add89ed8ceadff776bebb",
     "short_hash": "b5997d7",
     "author": "Bryan Guffey",

@@ -47,6 +47,18 @@ pub struct ProbeFailed {
     pub source: anyhow::Error,
 }
 
+/// Every post in a batch came back from another model or policy than the one
+/// declared: the deployment itself is wrong, so later batches would be paid
+/// for and never yield a usable verdict (Codex review #3). The run loop
+/// treats it like [`ProbeFailed`]: skip the model, and if it is paid, end
+/// paid spending for the run. The batch's error records are saved first.
+#[derive(Debug, thiserror::Error)]
+#[error("every post in a batch came back from another identity ({detail}) — stopping this model")]
+pub struct IdentityMismatch {
+    pub model: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStats {
     pub model: String,
@@ -165,8 +177,15 @@ pub async fn run_model(
         }
         let contents: Vec<String> = chunk.iter().map(|r| r.content.clone()).collect();
         let mut records = Vec::with_capacity(chunk.len());
+        // Set when every slot of this batch reported another identity. One
+        // stray slot is that post's error and the run goes on; a whole batch
+        // means the deployment is wrong, and stopping is the only way to stop
+        // paying for verdicts that can never be used (Codex review #3).
+        let mut deployment_mismatch: Option<String> = None;
         match tokio::time::timeout(timeout, classifier.classify_batch(&contents)).await {
             Ok(Ok(outcomes)) if outcomes.len() == chunk.len() => {
+                let mut mismatched = 0;
+                let mut last_detail = String::new();
                 // Positional pairing: the runner trusts the backend to return
                 // outcomes in the order the posts were sent (the trait carries
                 // no ids), as the classifier trait's contract requires.
@@ -180,12 +199,17 @@ pub async fn run_model(
                                 "identity mismatch: backend reported {}/{}, deployment declares {}/{}",
                                 v.model_id, v.policy_version, who.model_id, who.policy_version
                             );
+                            mismatched += 1;
+                            last_detail.clone_from(&detail);
                             VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est)
                         }
                         ItemOutcome::Error(detail) => {
                             VerdictRecord::from_error(&row.id, model, &row.content, who, &detail, *est)
                         }
                     });
+                }
+                if mismatched == chunk.len() {
+                    deployment_mismatch = Some(last_detail);
                 }
             }
             Ok(Ok(outcomes)) => {
@@ -246,6 +270,14 @@ pub async fn run_model(
             }
             // Written as each batch returns, so a crash or a cap keeps every paid verdict.
             append(dir, rec)?;
+        }
+        // Only after the batch's records are saved: they were paid for.
+        if let Some(detail) = deployment_mismatch {
+            return Err(IdentityMismatch {
+                model: model.to_string(),
+                detail,
+            }
+            .into());
         }
     }
     Ok(stats)
@@ -345,8 +377,14 @@ where
             // woken — and billed — the GPU, and no meter saw it. So treat it
             // like a cap stop: exhaust the budget, and no later paid model is
             // woken this run. A free model's failed probe cost nothing and
-            // leaves the budget alone (Codex review #2, item 1a).
-            Err(e) if e.downcast_ref::<ProbeFailed>().is_some() => {
+            // leaves the budget alone (Codex review #2, item 1a). A batch that
+            // came back wholly from another identity gets the same treatment:
+            // its records are already saved, and a paid model's misdeployed
+            // endpoint must not be paid again this run (Codex review #3).
+            Err(e)
+                if e.downcast_ref::<ProbeFailed>().is_some()
+                    || e.downcast_ref::<IdentityMismatch>().is_some() =>
+            {
                 if price.is_paid() {
                     budget.exhaust();
                 }
@@ -685,7 +723,9 @@ mod tests {
             ..Fake::new()
         };
         let mut budget = Budget::new(1.0);
-        let s = run_model(
+        // One post per batch, so its mismatch is batch-wide: the model stops
+        // (Codex review #3) — but the error is still recorded first.
+        let err = run_model(
             "m",
             &model,
             &[row("a", "bad")],
@@ -695,8 +735,8 @@ mod tests {
             T,
         )
         .await
-        .unwrap();
-        assert_eq!((s.judged, s.errors), (0, 1));
+        .unwrap_err();
+        assert!(err.downcast_ref::<IdentityMismatch>().is_some(), "{err:#}");
         let rec = &load(dir.path(), "m").unwrap()["a"];
         assert_eq!(rec.called_toxic, None);
         assert!(rec.error.as_deref().unwrap().contains("identity mismatch"));
@@ -1510,6 +1550,85 @@ mod tests {
             .contains("identity mismatch"));
         assert_eq!(recs["a"].called_toxic, Some(true));
         assert_eq!(recs["c"].called_toxic, Some(true));
+    }
+
+    /// Codex review #3: when EVERY slot of a batch reports another identity,
+    /// the deployment itself is wrong — further batches would be paid for and
+    /// never yield a usable verdict. Stop the model after that batch, keeping
+    /// the batch's (paid) error records.
+    #[tokio::test]
+    async fn a_batch_wide_identity_mismatch_stops_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = BatchFake::new(vec![("post", Slot::ForeignModel)]);
+        let pool: Vec<FixtureRow> = (1..=8)
+            .map(|i| row(&format!("p{i}"), &format!("post {i}")))
+            .collect();
+        let mut budget = Budget::new(1.0);
+        let err = run_model(
+            "m",
+            &model,
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.downcast_ref::<IdentityMismatch>().is_some(), "{err:#}");
+        assert_eq!(
+            model.batches.load(Ordering::SeqCst),
+            1,
+            "no second batch paid for"
+        );
+        let recs = load(dir.path(), "m").unwrap();
+        assert_eq!(recs.len(), 4, "the first batch's records are kept");
+        assert!(recs.values().all(|r| r.called_toxic.is_none()));
+    }
+
+    /// Codex review #3, in the run loop: a PAID model stopped by a
+    /// deployment-wide mismatch ends paid spending (like a failed paid
+    /// probe), and the run goes on to free models.
+    #[tokio::test]
+    async fn a_paid_identity_mismatch_ends_paid_spending_for_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let prices: HashMap<String, Price> = [
+            ("paid_a".to_string(), priced(0.001)),
+            ("paid_b".to_string(), priced(0.001)),
+            ("free".to_string(), Price::default()),
+        ]
+        .into();
+        let paid_a = Arc::new(Fake {
+            reported_model: "someone-else",
+            ..Fake::new()
+        });
+        let paid_b = Arc::new(Fake::new());
+        let free = Arc::new(Fake::new());
+        let mut budget = Budget::new(1.0);
+        let (res, seen) = run_all(
+            &["paid_a", "paid_b", "free"],
+            &[
+                ("paid_a", Arc::clone(&paid_a)),
+                ("paid_b", Arc::clone(&paid_b)),
+                ("free", Arc::clone(&free)),
+            ],
+            &prices,
+            &pool,
+            dir.path(),
+            &mut budget,
+        )
+        .await;
+        res.unwrap();
+        assert_eq!(seen[0], "skipped paid_a");
+        assert_eq!(
+            paid_a.calls.load(Ordering::SeqCst),
+            1,
+            "stopped after one batch"
+        );
+        assert_eq!(paid_b.probes.load(Ordering::SeqCst), 0, "B never woken");
+        assert_eq!(paid_b.calls.load(Ordering::SeqCst), 0, "B never called");
+        assert_eq!(free.calls.load(Ordering::SeqCst), 2, "free still runs");
     }
 
     /// Final review fix 5: the right model under the wrong policy is still
