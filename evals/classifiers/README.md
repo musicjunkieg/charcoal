@@ -55,7 +55,9 @@ labelling; relabel (run `charcoal eval-classifiers label`)", and `label`
 offers that post again. Your new answer is
 added as a new line and replaces the old one. A post that started as a
 hand-picked **seed** label stays a seed when you relabel it, so it never
-moves into the scored holdout. `label` always offers such a post again,
+moves into the scored holdout. Old lines are never thrown away: if a post's
+text later changes back to text you labelled before, the newest label you
+gave for that exact text counts again. `label` always offers such a post again,
 shows its source as `seed` in `to-label.jsonl`, and counts it as a seed
 (not holdout) in the "N posts to label (… holdout, … seed, … diagnostic)"
 line.

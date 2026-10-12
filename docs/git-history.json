@@ -1,5 +1,13 @@
 [
   {
+    "hash": "9bd9cbb2aa9ab0073e37b621e0b61019cdd93cfa",
+    "short_hash": "9bd9cbb",
+    "author": "Bryan Guffey",
+    "date": "2026-10-11T21:01:22-07:00",
+    "message": "fix(404): stop a model when a whole batch reports another identity\n\nA misdeployed endpoint that answers as the wrong model or policy for every\npost would otherwise be paid for batch after batch, on every rerun, without\never producing a usable verdict. A batch where every slot mismatches now\nsaves its error records and stops the model with a typed IdentityMismatch,\nwhich the run loop treats like a failed probe: skip, and for a paid model\nend paid spending for the run. A single stray slot is still that post's\nerror only.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
     "hash": "b1908239883e6f6368f5511e9dacc53b9b582ec8",
     "short_hash": "b190823",
     "author": "Bryan Guffey",

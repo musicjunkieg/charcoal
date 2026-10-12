@@ -84,12 +84,21 @@ pub fn load_labels(path: &Path) -> Result<HashMap<String, Answer>> {
 }
 
 fn load_labels_with_hash(path: &Path) -> Result<HashMap<String, (Answer, String)>> {
+    // Later rows replace earlier ones: relabelling an edited post appends.
+    Ok(load_label_rows(path)?
+        .into_iter()
+        .map(|(id, answer, hash)| (id, (answer, hash)))
+        .collect())
+}
+
+/// Every row of labels.jsonl, oldest first, as (id, answer, content_hash).
+fn load_label_rows(path: &Path) -> Result<Vec<(String, Answer, String)>> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    let mut out = HashMap::new();
+    let mut out = Vec::new();
     for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
         let label: Label = serde_json::from_str(l).with_context(|| {
             format!(
@@ -98,17 +107,14 @@ fn load_labels_with_hash(path: &Path) -> Result<HashMap<String, (Answer, String)
                 i + 1
             )
         })?;
-        // Later rows replace earlier ones: relabelling an edited post appends.
-        out.insert(
+        out.push((
             label.id,
-            (
-                Answer {
-                    truth: label.label,
-                    source: label.source,
-                },
-                label.content_hash,
-            ),
-        );
+            Answer {
+                truth: label.label,
+                source: label.source,
+            },
+            label.content_hash,
+        ));
     }
     Ok(out)
 }
@@ -161,15 +167,25 @@ pub fn load_current_labels(path: &Path, pool: &[FixtureRow]) -> Result<CurrentLa
         .iter()
         .map(|r| (r.id.as_str(), content_hash(&r.content)))
         .collect();
+    // Pick, per post, the NEWEST row whose hash matches the text it has now,
+    // not the newest row overall: a post labelled on text A, relabelled on B
+    // and then restored to A has a valid A label again (Codex review #4).
+    // Rows are oldest first, so a later match simply replaces an earlier one.
     let mut answers = HashMap::new();
+    let mut seen = std::collections::HashSet::new();
+    for (id, answer, hash) in load_label_rows(path)? {
+        if present.get(id.as_str()) == Some(&hash) {
+            answers.insert(id.clone(), answer);
+        }
+        seen.insert(id);
+    }
+    // Counted once per post, however many rows it has.
     let (mut stale, mut removed) = (0, 0);
-    for (id, (answer, hash)) in load_labels_with_hash(path)? {
-        match present.get(id.as_str()) {
-            None => removed += 1,
-            Some(now) if *now != hash => stale += 1,
-            Some(_) => {
-                answers.insert(id, answer);
-            }
+    for id in &seen {
+        if !present.contains_key(id.as_str()) {
+            removed += 1;
+        } else if !answers.contains_key(id) {
+            stale += 1;
         }
     }
     Ok(CurrentLabels {
@@ -349,6 +365,33 @@ mod tests {
         ]);
         let cur = load_current_labels(f.path(), &pool_of(&[("a", "new text")])).unwrap();
         assert_eq!(cur.stale, 0);
+        assert_eq!(cur.answers["a"].truth, Truth::Clean);
+    }
+
+    /// Codex review #4: labelled on text A, relabelled on B, then the post
+    /// goes back to A. The A label is valid again, so it must not be lost
+    /// because a newer row describes other text.
+    #[test]
+    fn a_label_for_restored_text_counts_again() {
+        let f = file(&[
+            &label_line("a", "toxic", "text A"),
+            &label_line("a", "clean", "text B"),
+        ]);
+        let cur = load_current_labels(f.path(), &pool_of(&[("a", "text A")])).unwrap();
+        assert_eq!(cur.stale, 0, "a matching label exists");
+        assert_eq!(cur.answers["a"].truth, Truth::Toxic);
+    }
+
+    /// Codex review #4: several rows for the same text — the newest wins
+    /// (a hand edit appended after a merge, say).
+    #[test]
+    fn the_newest_label_for_the_present_text_wins() {
+        let f = file(&[
+            &label_line("a", "toxic", "text A"),
+            &label_line("a", "clean", "text B"),
+            &label_line("a", "clean", "text A"),
+        ]);
+        let cur = load_current_labels(f.path(), &pool_of(&[("a", "text A")])).unwrap();
         assert_eq!(cur.answers["a"].truth, Truth::Clean);
     }
 
