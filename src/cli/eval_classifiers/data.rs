@@ -173,11 +173,22 @@ pub fn load_current_labels(path: &Path, pool: &[FixtureRow]) -> Result<CurrentLa
     // Rows are oldest first, so a later match simply replaces an earlier one.
     let mut answers = HashMap::new();
     let mut seen = std::collections::HashSet::new();
+    let mut seeds = std::collections::HashSet::new();
     for (id, answer, hash) in load_label_rows(path)? {
+        if answer.source == Source::Seed {
+            seeds.insert(id.clone());
+        }
         if present.get(id.as_str()) == Some(&hash) {
             answers.insert(id.clone(), answer);
         }
         seen.insert(id);
+    }
+    // Once a seed, always a seed (as in [`seed_ids`]): a restored older row
+    // may say holdout, but a hand-picked post must stay out of the headline.
+    for (id, answer) in answers.iter_mut() {
+        if seeds.contains(id) {
+            answer.source = Source::Seed;
+        }
     }
     // Counted once per post, however many rows it has.
     let (mut stale, mut removed) = (0, 0);
@@ -388,11 +399,37 @@ mod tests {
     fn the_newest_label_for_the_present_text_wins() {
         let f = file(&[
             &label_line("a", "toxic", "text A"),
-            &label_line("a", "clean", "text B"),
             &label_line("a", "clean", "text A"),
+            &label_line("a", "toxic", "text B"),
         ]);
         let cur = load_current_labels(f.path(), &pool_of(&[("a", "text A")])).unwrap();
         assert_eq!(cur.answers["a"].truth, Truth::Clean);
+    }
+
+    /// Stale and removed are counted per post, however many rows it has.
+    #[test]
+    fn stale_and_removed_count_posts_not_rows() {
+        let f = file(&[
+            &label_line("edited", "toxic", "v1"),
+            &label_line("edited", "clean", "v2"),
+            &label_line("gone", "toxic", "x"),
+            &label_line("gone", "clean", "y"),
+        ]);
+        let cur = load_current_labels(f.path(), &pool_of(&[("edited", "v3")])).unwrap();
+        assert_eq!((cur.stale, cur.removed), (1, 1));
+    }
+
+    /// Review of Codex #4 fix, M1: once a seed, always a seed. A post
+    /// labelled holdout on text A, hand-labelled seed on text B, then
+    /// restored to A must not come back as holdout and enter the headline.
+    #[test]
+    fn a_restored_label_stays_a_seed_if_the_post_was_ever_one() {
+        let f = file(&[
+            &label_line("a", "toxic", "text A"),
+            &label_line("a", "toxic", "text B").replace("holdout", "seed"),
+        ]);
+        let cur = load_current_labels(f.path(), &pool_of(&[("a", "text A")])).unwrap();
+        assert_eq!(cur.answers["a"].source, Source::Seed);
     }
 
     /// Codex fix 2: the committed seed labels were backfilled with hashes of

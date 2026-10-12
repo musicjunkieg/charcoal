@@ -1632,6 +1632,51 @@ mod tests {
         assert_eq!(free.calls.load(Ordering::SeqCst), 2, "free still runs");
     }
 
+    /// Review of Codex #4 fix, M2: once the budget is exhausted, the next
+    /// model is built with the WHOLE cap counted as gone, so a real cost
+    /// meter sized from it gets no headroom, even though `spent()` (the
+    /// printed estimate) stays small.
+    #[tokio::test]
+    async fn a_model_built_after_exhaustion_is_given_no_headroom() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "bad"), row("b", "fine")];
+        let prices: HashMap<String, Price> = [
+            ("paid".to_string(), priced(0.001)),
+            ("free".to_string(), Price::default()),
+        ]
+        .into();
+        let paid = Arc::new(Fake {
+            reported_model: "someone-else",
+            ..Fake::new()
+        });
+        let free = Arc::new(Fake::new());
+        let mut budget = Budget::new(1.0);
+        let names = vec!["paid".to_string(), "free".to_string()];
+        let plan = RunPlan {
+            pool: &pool,
+            dir: dir.path(),
+            prices: &prices,
+            timeout: T,
+        };
+        let mut given = Vec::new();
+        run_models(
+            &names,
+            &plan,
+            &mut budget,
+            |name, committed| {
+                given.push(committed);
+                let m = if name == "paid" { &paid } else { &free };
+                Ok(Arc::clone(m) as Arc<dyn ToxicityClassifier>)
+            },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(given[0], 0.0, "nothing committed before the first model");
+        assert_eq!(given[1], 1.0, "the whole cap is gone after exhaustion");
+        assert!(budget.spent() < 1.0, "the printed estimate is not the cap");
+    }
+
     /// Final review fix 5: the right model under the wrong policy is still
     /// an identity mismatch, not a verdict.
     #[tokio::test]
