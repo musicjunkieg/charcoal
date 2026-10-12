@@ -86,6 +86,9 @@ pub fn estimate_usd(price: &Price, input_chars: usize) -> f64 {
 pub struct Budget {
     cap_usd: f64,
     spent_usd: f64,
+    /// Set by [`Budget::exhaust`]. Kept apart from `spent_usd` so the
+    /// estimate the CLI prints stays the real reservations (Codex review #4).
+    exhausted: bool,
 }
 
 impl Budget {
@@ -100,6 +103,7 @@ impl Budget {
         Self {
             cap_usd,
             spent_usd: 0.0,
+            exhausted: false,
         }
     }
 
@@ -109,6 +113,10 @@ impl Budget {
     pub fn can_afford(&self, usd: f64) -> bool {
         // Fail closed: negative or non-finite amounts are never affordable.
         if !(usd.is_finite() && usd >= 0.0) {
+            return false;
+        }
+        // Once exhausted, only free calls pass.
+        if self.exhausted && usd > 0.0 {
             return false;
         }
         self.spent_usd + usd <= self.cap_usd
@@ -125,25 +133,39 @@ impl Budget {
         true
     }
 
-    /// Mark the whole cap as used. Called when a model stops at the cap:
+    /// Mark the whole cap as used, without changing the estimate in
+    /// [`Budget::spent`]. Called when a model stops at the cap:
     /// this budget only tracks ESTIMATES, and a backend's real meter (CoPE-B
     /// counts actual GPU seconds) can reach the cap while the estimates are
     /// still small. Exhausting it means no later paid model can be woken on
     /// the strength of headroom that may not really exist; $0 models (local
     /// Detoxify) still pass `can_afford(0.0)`.
     pub fn exhaust(&mut self) {
-        self.spent_usd = self.spent_usd.max(self.cap_usd);
+        self.exhausted = true;
     }
 
     /// Is there no headroom left at all? A paid model is refused once this is
     /// true, even for a call estimated at $0 (see [`Price::is_paid`]). A cap
     /// of $0 counts as exhausted from the start: it allows free models only.
     pub fn is_exhausted(&self) -> bool {
-        self.spent_usd >= self.cap_usd
+        self.exhausted || self.spent_usd >= self.cap_usd
     }
 
+    /// The estimated cost of the calls reserved so far. Exhaustion does not
+    /// change it: this is what the CLI reports as estimated spend.
     pub fn spent(&self) -> f64 {
         self.spent_usd
+    }
+
+    /// How much of the cap is no longer available: the estimate so far, or
+    /// the whole cap once exhausted. A later model's real meter is sized from
+    /// this, so an exhausted budget leaves it no headroom.
+    pub fn committed(&self) -> f64 {
+        if self.exhausted {
+            self.cap_usd
+        } else {
+            self.spent_usd
+        }
     }
 }
 
@@ -299,9 +321,24 @@ mod tests {
         let mut b = Budget::new(1.0);
         assert!(b.try_spend(0.1));
         b.exhaust();
-        assert_eq!(b.spent(), 1.0);
         assert!(!b.can_afford(0.0001), "no paid call after exhaustion");
+        assert!(!b.try_spend(0.0001), "no paid reservation either");
         assert!(b.can_afford(0.0), "a free model still runs");
+    }
+
+    /// Codex review #4: exhausting the budget must not rewrite the estimate.
+    /// `spent()` is what the CLI prints as "estimated spend", so it stays the
+    /// real reservations; `committed()` (what later meters are sized from)
+    /// reports the whole cap as gone.
+    #[test]
+    fn exhausting_keeps_the_real_estimate() {
+        let mut b = Budget::new(1.0);
+        assert!(b.try_spend(0.8));
+        assert!((b.committed() - 0.8).abs() < 1e-12, "not exhausted yet");
+        b.exhaust();
+        assert!((b.spent() - 0.8).abs() < 1e-12, "the estimate is unchanged");
+        assert_eq!(b.committed(), 1.0, "no headroom for a later meter");
+        assert!(b.is_exhausted());
     }
 
     /// Codex review #2, item 1: "paid" comes from the configured price; a

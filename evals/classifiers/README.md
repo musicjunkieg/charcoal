@@ -86,7 +86,9 @@ post comes back with the same text, its label counts again.
   model. A model that costs nothing (Detoxify runs on this machine) still
   runs; every later paid model stops before waking anything. (The eval's
   running total is only an estimate, and the real meter can reach the cap
-  well before it, so the remaining "headroom" cannot be trusted.)
+  well before it, so the remaining "headroom" cannot be trusted.) The
+  "estimated spend this run" line still shows the eval's own estimate of
+  what it asked for; it does not jump to the cap when the cap is reached.
 - **A paid model that fails its identity check also ends paid spending.**
   That check may already have woken (and billed) the GPU, so the run treats
   it like reaching the cap: free models still run, every later paid model is

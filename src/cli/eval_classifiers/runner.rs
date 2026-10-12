@@ -314,7 +314,8 @@ pub struct RunPlan<'a> {
 }
 
 /// The `eval-classifiers run` loop: each named model in turn, sharing one
-/// budget. `build(name, spent_so_far)` constructs a model; `report` is told
+/// budget. `build(name, committed)` constructs a model (`committed` is
+/// [`Budget::committed`]: the whole cap once the budget is exhausted); `report` is told
 /// each model's outcome as it happens (the CLI prints it). Lives here rather
 /// than in main.rs so its skip/stop rules are tested.
 pub async fn run_models<B, R>(
@@ -346,7 +347,7 @@ where
     for name in names {
         // Refuse an unpriced model before building (or paying for) anything.
         let price = price_for(prices, name)?;
-        let classifier = match build(name, budget.spent()) {
+        let classifier = match build(name, budget.committed()) {
             Ok(c) => c,
             Err(e) => {
                 // A missing key skips that model, not the run.

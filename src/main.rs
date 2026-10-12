@@ -1133,7 +1133,7 @@ async fn main() -> Result<()> {
                         &names,
                         &plan,
                         &mut budget,
-                        |name, spent| models::build_eval_model(name, cap_usd - spent),
+                        |name, committed| models::build_eval_model(name, cap_usd - committed),
                         |outcome| match outcome {
                             runner::ModelOutcome::Ran(s) => println!(
                                 "{}: judged {}, cached {}, errors {}{}",
