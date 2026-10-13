@@ -22,7 +22,11 @@ impl<S: ToxicityScorer> DetoxifyClassifier<S> {
 impl<S: ToxicityScorer> ToxicityClassifier for DetoxifyClassifier<S> {
     async fn classify(&self, content: &str) -> Result<ClassifierVerdict> {
         let started = Instant::now();
-        let t = self.scorer.score_text(content).await?.toxicity as f32;
+        // Kept as the scorer's f64 for the check and the cut, as production
+        // does (traits.rs): narrowing to f32 first rounds 0.499999999 up to
+        // 0.5 and turns a clean post toxic (Codex review #5). Only the
+        // confidence field is f32.
+        let t = self.scorer.score_text(content).await?.toxicity;
         // `NaN >= 0.5` is false: without this check a broken model output
         // would be recorded as a clean verdict. Errors are never clean. This
         // backend batches one post per call (the trait default), so an `Err`
@@ -33,7 +37,7 @@ impl<S: ToxicityScorer> ToxicityClassifier for DetoxifyClassifier<S> {
         let toxic = t >= 0.5;
         Ok(ClassifierVerdict {
             toxic_token: toxic,
-            confidence: if toxic { t } else { 1.0 - t },
+            confidence: (if toxic { t } else { 1.0 - t }) as f32,
             latency_ms: started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32,
             model_id: self.model_id().to_string(),
             policy_version: self.policy_version().to_string(),
@@ -94,6 +98,17 @@ mod tests {
         assert!(!below.toxic_token);
     }
 
+    /// Codex review #5: the cut is made on the scorer's own f64, as
+    /// production does. 0.499999999 rounds to 0.5 as an f32, so narrowing
+    /// first would turn a clean post toxic.
+    #[tokio::test]
+    async fn a_score_a_hair_below_half_stays_clean() {
+        let v = DetoxifyClassifier::new(Fixed(0.499_999_999))
+            .classify("x")
+            .await
+            .unwrap();
+        assert!(!v.toxic_token);
+    }
     /// Final review fix 3: `NaN >= 0.5` is false, so a broken model output
     /// used to be recorded as clean. Errors are never clean.
     #[tokio::test]

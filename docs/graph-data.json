@@ -12264,6 +12264,39 @@
       "created_at": "2026-10-12T16:26:02.439167-07:00",
       "updated_at": "2026-10-12T16:26:02.439167-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9bd9cbb\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/data.rs\",\"src/cli/eval_classifiers/cost.rs\"]}"
+    },
+    {
+      "id": 1125,
+      "change_id": "0a4e31d9-eafa-41e3-8a38-08f637b596cb",
+      "node_type": "outcome",
+      "title": "Codex #4 fixed (dc6e7e4, 0eefcd0) + review minors M1-M4 (follow-up commit); 114 lib + 3 e2e pass, clippy web clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-12T16:58:31.145101-07:00",
+      "updated_at": "2026-10-12T16:58:31.145101-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2e10e9d\",\"confidence\":90}"
+    },
+    {
+      "id": 1126,
+      "change_id": "4fe9e501-30ca-4889-b596-c93b5326244e",
+      "node_type": "observation",
+      "title": "Codex review #5 (head 2e10e9d): 1 P2 accepted - Detoxify adapter narrows f64 score to f32 before the 0.5 threshold, flipping near-0.5 clean verdicts to toxic",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-13T16:44:46.629973-07:00",
+      "updated_at": "2026-10-13T16:44:46.629973-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":90}"
+    },
+    {
+      "id": 1127,
+      "change_id": "740ffeaa-95f0-431e-b577-f3f10f0c924c",
+      "node_type": "action",
+      "title": "Compare Detoxify score as f64; cast to f32 only for confidence",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-13T16:44:46.651988-07:00",
+      "updated_at": "2026-10-13T16:44:46.651988-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2e10e9d\",\"confidence\":90,\"files\":[\"src/toxicity/detoxify_classifier.rs\"]}"
     }
   ],
   "edges": [
@@ -25092,6 +25125,39 @@
       "weight": 1.0,
       "rationale": "Fix both accepted findings",
       "created_at": "2026-10-12T16:26:02.446271-07:00"
+    },
+    {
+      "id": 1177,
+      "from_node_id": 1124,
+      "to_node_id": 1125,
+      "from_change_id": "4b816418-0257-4a0b-bb2c-f2e2f54249ed",
+      "to_change_id": "0a4e31d9-eafa-41e3-8a38-08f637b596cb",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix result",
+      "created_at": "2026-10-12T16:58:33.864247-07:00"
+    },
+    {
+      "id": 1178,
+      "from_node_id": 1125,
+      "to_node_id": 1126,
+      "from_change_id": "0a4e31d9-eafa-41e3-8a38-08f637b596cb",
+      "to_change_id": "4fe9e501-30ca-4889-b596-c93b5326244e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Next Codex round",
+      "created_at": "2026-10-13T16:44:46.637836-07:00"
+    },
+    {
+      "id": 1179,
+      "from_node_id": 1126,
+      "to_node_id": 1127,
+      "from_change_id": "4fe9e501-30ca-4889-b596-c93b5326244e",
+      "to_change_id": "740ffeaa-95f0-431e-b577-f3f10f0c924c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix accepted finding",
+      "created_at": "2026-10-13T16:44:46.658896-07:00"
     }
   ],
   "documents": [

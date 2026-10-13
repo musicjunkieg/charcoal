@@ -1,5 +1,13 @@
 [
   {
+    "hash": "2e10e9d0d3625ef417f5573efe27e8fba84e1e29",
+    "short_hash": "2e10e9d",
+    "author": "Bryan Guffey",
+    "date": "2026-10-12T16:58:22-07:00",
+    "message": "fix(404): a restored label stays a seed; pin committed() and per-post counts\n\nReview follow-ups to the Codex #4 fixes: a restored older holdout row no\nlonger moves a post that was ever a seed into the headline; tests pin\nthat later models are built with committed() and that stale/removed\ncount posts, not rows; README sentence moved to the right paragraph.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "9bd9cbb2aa9ab0073e37b621e0b61019cdd93cfa",
     "short_hash": "9bd9cbb",
     "author": "Bryan Guffey",
