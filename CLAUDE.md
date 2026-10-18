@@ -323,9 +323,10 @@ A migrated project wins over the Wrangler-file rule: if the project has a
 `cloudflare.config.ts` or lists `cf` in its `package.json`, use `cf` even
 when a Wrangler config file is still present.
 
-Cloud sessions: the `cloud-setup.sh` SessionStart hook installs `cf` with
-a pinned `cf` and says so (or says why not) at session start. `cf`
-authenticates there from `CLOUDFLARE_API_TOKEN` in the cloud environment.
+Cloud sessions: the `cloud-setup.sh` SessionStart hook installs a pinned
+`cf` and says so (or says why not) at session start. Installing is not
+authenticating: account commands need `CLOUDFLARE_API_TOKEN` set in the
+cloud environment or a configured `cf` auth profile (`cf auth whoami`).
 
 <!-- deciduous:start -->
 ## Decision Graph Workflow
