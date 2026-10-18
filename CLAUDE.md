@@ -324,7 +324,9 @@ A migrated project wins over the Wrangler-file rule: if the project has a
 when a Wrangler config file is still present.
 
 Cloud sessions: the `cloud-setup.sh` SessionStart hook installs a pinned
-`cf` and says so (or says why not) at session start. Installing is not
+`cf` only when it is missing or not the pinned version, and reports that
+install or why it failed; when the pinned `cf` is already present it stays
+silent. Installing is not
 authenticating: account commands need `CLOUDFLARE_API_TOKEN` set in the
 cloud environment or a configured `cf` auth profile (`cf auth whoami`).
 
