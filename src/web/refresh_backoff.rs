@@ -29,7 +29,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// The `scan_state` key holding a user's [`FailureStreak`] as JSON.
-pub const STREAK_KEY: &str = "refresh_failure_streak";
+pub const STREAK_KEY: &str = crate::db::REFRESH_FAILURE_STREAK_KEY;
 
 /// The longest a failing user waits between attempts. The nightly cadence:
 /// a fault nobody has fixed costs one attempt a day per user, not 24.

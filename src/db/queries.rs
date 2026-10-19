@@ -2008,6 +2008,56 @@ pub fn schedule_retry_at(
     Ok(())
 }
 
+/// `Database::pull_refresh_forward_if_streak` — see the trait for the contract.
+pub fn pull_refresh_forward_if_streak(
+    conn: &Connection,
+    user_did: &str,
+    key: &str,
+    observed: &str,
+    observed_deadline: &str,
+    now_rfc3339: &str,
+) -> Result<bool> {
+    // Immediate: the conditional delete decides whether the deadline moves,
+    // so the write lock is taken up front, not at the first statement.
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    // Re-check the deadline under the lock (#387 review): the sweep read it
+    // earlier, and a failed full scan may have written a fresh retry since —
+    // one that touches no streak, so the streak check alone would not notice.
+    let deadline: Option<Option<String>> = tx
+        .query_row(
+            "SELECT next_refresh_at FROM users WHERE did = ?1",
+            params![user_did],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let now = chrono::DateTime::parse_from_rfc3339(now_rfc3339)?;
+    // Exactly the deadline the sweep read (Codex review): a failed full scan
+    // writes a fresh retry without touching the streak, and "still later than
+    // now" alone would let the sweep clobber it.
+    let deadline = deadline.flatten();
+    let unchanged = deadline.as_deref() == Some(observed_deadline);
+    let ahead = deadline
+        .and_then(|d| chrono::DateTime::parse_from_rfc3339(&d).ok())
+        .is_some_and(|d| d > now);
+    if !(unchanged && ahead) {
+        return Ok(false);
+    }
+    let consumed = tx.execute(
+        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2 AND value = ?3",
+        params![user_did, key, observed],
+    )?;
+    if consumed == 0 {
+        // The streak changed (or is gone) since it was read: touch nothing.
+        return Ok(false);
+    }
+    tx.execute(
+        "UPDATE users SET next_refresh_at = ?2 WHERE did = ?1",
+        params![user_did, now_rfc3339],
+    )?;
+    tx.commit()?;
+    Ok(true)
+}
+
 /// `Database::apply_refresh_schedule` — see the trait for the contract.
 pub fn apply_refresh_schedule(
     conn: &Connection,
@@ -2047,15 +2097,44 @@ pub fn apply_refresh_schedule(
                   WHERE did = ?1",
                 params![user_did, next_at_rfc3339, generation],
             )?;
+            // A success ends any refresh failure streak, in THIS transaction
+            // (#387, Codex review): cleared in a separate write after the
+            // healthy deadline, a deploy sweep could land in between, consume
+            // the stale streak and pull that fresh deadline forward to now.
+            tx.execute(
+                "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+                params![user_did, super::REFRESH_FAILURE_STREAK_KEY],
+            )?;
         }
         RefreshScheduleWrite::Retry {
             at_rfc3339,
             attempted_generation,
+            streak,
         } => {
             tx.execute(
                 "UPDATE users SET next_refresh_at = ?2, refresh_attempted_generation = ?3 WHERE did = ?1",
                 params![user_did, at_rfc3339, attempted_generation],
             )?;
+            // The streak moves with the deadline, in this transaction (#387):
+            // written separately, a deploy sweep landing between the two writes
+            // could pair a stale streak with this deadline.
+            match streak {
+                super::traits::StreakWrite::Keep => {}
+                super::traits::StreakWrite::Set(json) => {
+                    tx.execute(
+                        "INSERT INTO scan_state (user_did, key, value, updated_at)
+                         VALUES (?1, ?2, ?3, datetime('now'))
+                         ON CONFLICT(user_did, key) DO UPDATE SET value = ?3, updated_at = datetime('now')",
+                        params![user_did, super::REFRESH_FAILURE_STREAK_KEY, json],
+                    )?;
+                }
+                super::traits::StreakWrite::Clear => {
+                    tx.execute(
+                        "DELETE FROM scan_state WHERE user_did = ?1 AND key = ?2",
+                        params![user_did, super::REFRESH_FAILURE_STREAK_KEY],
+                    )?;
+                }
+            }
         }
     }
     tx.commit()?;

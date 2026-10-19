@@ -19,9 +19,14 @@ pub mod sqlite;
 pub mod traits;
 
 pub use cache_retention::CacheEviction;
+
+/// The `scan_state` key holding a user's refresh failure streak (#387). Lives
+/// here, not in the web module, because the success schedule write clears it
+/// inside its own transaction and the database layer builds without `web`.
+pub const REFRESH_FAILURE_STREAK_KEY: &str = "refresh_failure_streak";
 pub use traits::{
     ClassifierVerdictRow, Database, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow,
-    RefreshCandidate, RefreshScheduleWrite, ScanKind,
+    RefreshCandidate, RefreshScheduleWrite, ScanKind, StreakWrite,
 };
 
 use anyhow::Result;

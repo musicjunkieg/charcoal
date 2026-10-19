@@ -12297,6 +12297,17 @@
       "created_at": "2026-10-13T16:44:46.651988-07:00",
       "updated_at": "2026-10-13T16:44:46.651988-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2e10e9d\",\"confidence\":90,\"files\":[\"src/toxicity/detoxify_classifier.rs\"]}"
+    },
+    {
+      "id": 1128,
+      "change_id": "04ffad33-4477-4333-a3c4-7c4d1c62114f",
+      "node_type": "outcome",
+      "title": "Detoxify cut on f64 (Codex #5 fixed); 5 detoxify + 114 eval tests pass, clippy web clean",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-13T16:55:15.153379-07:00",
+      "updated_at": "2026-10-13T16:55:15.153379-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"596d521\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -25158,6 +25169,17 @@
       "weight": 1.0,
       "rationale": "Fix accepted finding",
       "created_at": "2026-10-13T16:44:46.658896-07:00"
+    },
+    {
+      "id": 1180,
+      "from_node_id": 1127,
+      "to_node_id": 1128,
+      "from_change_id": "740ffeaa-95f0-431e-b577-f3f10f0c924c",
+      "to_change_id": "04ffad33-4477-4333-a3c4-7c4d1c62114f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Fix result",
+      "created_at": "2026-10-13T16:55:15.162119-07:00"
     }
   ],
   "documents": [

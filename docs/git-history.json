@@ -1,5 +1,13 @@
 [
   {
+    "hash": "596d52179934bf584e40c99857f82a74aa4015d7",
+    "short_hash": "596d521",
+    "author": "Bryan Guffey",
+    "date": "2026-10-13T16:55:07-07:00",
+    "message": "fix(404): judge the Detoxify score as f64 before the 0.5 cut\n\nNarrowing to f32 first rounded 0.499999999 up to 0.5 and cached a clean\npost as toxic. The check and cut now use the scorer f64, as production\ndoes; only the confidence field is f32. Codex review #5.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "2e10e9d0d3625ef417f5573efe27e8fba84e1e29",
     "short_hash": "2e10e9d",
     "author": "Bryan Guffey",
