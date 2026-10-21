@@ -42,6 +42,33 @@ enum SweepMode {
     Both,
 }
 
+/// Actions for `charcoal eval-classifiers` (#404).
+#[derive(Subcommand)]
+enum EvalAction {
+    /// Run models over the pool, reusing verdicts that are still current.
+    Run {
+        /// Comma-separated model names.
+        #[arg(long, value_delimiter = ',', default_value = "cope-b,detoxify")]
+        models: Vec<String>,
+        /// Stop before spending more than this many US dollars this run.
+        #[arg(long, default_value_t = 1.0)]
+        cap_usd: f64,
+        /// Last-resort per-batch timeout; must exceed the backends' own.
+        #[arg(long, default_value_t = 600)]
+        timeout_secs: u64,
+    },
+    /// Write to-label.jsonl, or with --merge fold your answers into labels.jsonl.
+    Label {
+        #[arg(long)]
+        merge: bool,
+    },
+    /// Print the comparison report.
+    Report {
+        #[arg(long, default_value = "cope-b")]
+        baseline: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize the database and configuration
@@ -167,6 +194,16 @@ enum Commands {
         /// Where to write the disagreement report.
         #[arg(long, default_value = "target/classify-gate-disagreements.jsonl")]
         disagreements: std::path::PathBuf,
+    },
+
+    /// Compare classifiers on labelled posts (#404): run, pick posts to
+    /// label, and report false alarms, misses, coverage, cost and latency.
+    EvalClassifiers {
+        #[command(subcommand)]
+        action: EvalAction,
+        /// Data directory (pool.jsonl, labels.jsonl, pricing.json, verdicts/).
+        #[arg(long, default_value = "evals/classifiers", global = true)]
+        dir: std::path::PathBuf,
     },
 
     /// Migrate data from SQLite to PostgreSQL
@@ -1067,6 +1104,121 @@ async fn main() -> Result<()> {
             let backend_a = charcoal::toxicity::classifier::build_backend_named(&a)?;
             let backend_b = charcoal::toxicity::classifier::build_backend_named(&b)?;
             charcoal::cli::classify_compare::run(backend_a, backend_b, &input).await?;
+        }
+
+        Commands::EvalClassifiers { action, dir } => {
+            use charcoal::cli::eval_classifiers::{
+                cache, cost, data, labelling, models, report, runner,
+            };
+            let verdicts = dir.join("verdicts");
+            let pool = data::load_pool(&dir.join("pool.jsonl"))?;
+            let labels_path = dir.join("labels.jsonl");
+            match action {
+                EvalAction::Run {
+                    models: names,
+                    cap_usd,
+                    timeout_secs,
+                } => {
+                    let prices = cost::load_pricing(&dir.join("pricing.json"))?;
+                    let mut budget = cost::Budget::new(cap_usd);
+                    let plan = runner::RunPlan {
+                        pool: &pool,
+                        dir: &verdicts,
+                        prices: &prices,
+                        timeout: std::time::Duration::from_secs(timeout_secs),
+                    };
+                    // The skip/stop rules live in `runner::run_models`, where
+                    // they are tested; this only builds models and prints.
+                    let run = runner::run_models(
+                        &names,
+                        &plan,
+                        &mut budget,
+                        |name, committed| models::build_eval_model(name, cap_usd - committed),
+                        |outcome| match outcome {
+                            runner::ModelOutcome::Ran(s) => println!(
+                                "{}: judged {}, cached {}, errors {}{}",
+                                s.model,
+                                s.judged,
+                                s.cached,
+                                s.errors,
+                                if s.stopped_at_cap {
+                                    " — STOPPED AT SPENDING CAP"
+                                } else {
+                                    ""
+                                }
+                            ),
+                            runner::ModelOutcome::Skipped { model, reason } => {
+                                eprintln!("skipping {model}: {reason}")
+                            }
+                        },
+                    )
+                    .await;
+                    // Print what was spent even when the run stops on an error.
+                    println!(
+                        "estimated spend this run: ${:.4} (cap ${cap_usd:.2})",
+                        budget.spent()
+                    );
+                    run?;
+                }
+                EvalAction::Label { merge } => {
+                    let to_label = dir.join("to-label.jsonl");
+                    if merge {
+                        let out = labelling::merge_labels(&to_label, &labels_path, &pool)?;
+                        println!(
+                            "merged {} labels into {}",
+                            out.merged,
+                            labels_path.display()
+                        );
+                        print!("{}", labelling::skipped_note(out.skipped));
+                    } else {
+                        let per_model: Vec<_> = models::KNOWN_MODELS
+                            .iter()
+                            .map(|m| cache::current_for(&verdicts, m, &pool))
+                            .collect::<anyhow::Result<_>>()?;
+                        // Labels for since-edited text are not "already
+                        // labelled": those posts are offered again.
+                        let labels = data::load_current_labels(&labels_path, &pool)?;
+                        print!("{}", report::stale_labels_note(labels.stale));
+                        print!("{}", report::removed_labels_note(labels.removed));
+                        let answers = labels.answers;
+                        // Seed provenance lives only in labels.jsonl, so a
+                        // stale seed is shown (and counted) as a seed.
+                        let seeds = data::seed_ids(&labels_path)?;
+                        let picked =
+                            labelling::pick_for_labelling(&pool, &per_model, &answers, &seeds);
+                        labelling::write_to_label(&to_label, &picked, &answers, &pool)?;
+                        println!(
+                            "{} posts to label ({}) in {} — set label to toxic or clean, then run with --merge",
+                            picked.len(),
+                            labelling::pick_summary(&picked),
+                            to_label.display()
+                        );
+                    }
+                }
+                EvalAction::Report { baseline } => {
+                    // Only labels for the post's present text are truth.
+                    let labels = data::load_current_labels(&labels_path, &pool)?;
+                    print!("{}", report::stale_labels_note(labels.stale));
+                    print!("{}", report::removed_labels_note(labels.removed));
+                    let answers = labels.answers;
+                    let prices = cost::load_pricing(&dir.join("pricing.json"))?;
+                    let mut loaded = Vec::new();
+                    for m in models::KNOWN_MODELS {
+                        let recs = cache::current_for(&verdicts, m, &pool)?;
+                        if !recs.is_empty() {
+                            loaded.push((m.to_string(), recs));
+                        }
+                    }
+                    print!(
+                        "{}",
+                        report::render(
+                            &report::build(&loaded, &answers, &prices),
+                            &answers,
+                            &baseline
+                        )
+                    );
+                }
+            }
         }
 
         Commands::ClassifyGate {

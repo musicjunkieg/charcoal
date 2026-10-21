@@ -1,5 +1,253 @@
 [
   {
+    "hash": "596d52179934bf584e40c99857f82a74aa4015d7",
+    "short_hash": "596d521",
+    "author": "Bryan Guffey",
+    "date": "2026-10-13T16:55:07-07:00",
+    "message": "fix(404): judge the Detoxify score as f64 before the 0.5 cut\n\nNarrowing to f32 first rounded 0.499999999 up to 0.5 and cached a clean\npost as toxic. The check and cut now use the scorer f64, as production\ndoes; only the confidence field is f32. Codex review #5.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "2e10e9d0d3625ef417f5573efe27e8fba84e1e29",
+    "short_hash": "2e10e9d",
+    "author": "Bryan Guffey",
+    "date": "2026-10-12T16:58:22-07:00",
+    "message": "fix(404): a restored label stays a seed; pin committed() and per-post counts\n\nReview follow-ups to the Codex #4 fixes: a restored older holdout row no\nlonger moves a post that was ever a seed into the headline; tests pin\nthat later models are built with committed() and that stale/removed\ncount posts, not rows; README sentence moved to the right paragraph.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "9bd9cbb2aa9ab0073e37b621e0b61019cdd93cfa",
+    "short_hash": "9bd9cbb",
+    "author": "Bryan Guffey",
+    "date": "2026-10-11T21:01:22-07:00",
+    "message": "fix(404): stop a model when a whole batch reports another identity\n\nA misdeployed endpoint that answers as the wrong model or policy for every\npost would otherwise be paid for batch after batch, on every rerun, without\never producing a usable verdict. A batch where every slot mismatches now\nsaves its error records and stops the model with a typed IdentityMismatch,\nwhich the run loop treats like a failed probe: skip, and for a paid model\nend paid spending for the run. A single stray slot is still that post's\nerror only.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "b1908239883e6f6368f5511e9dacc53b9b582ec8",
+    "short_hash": "b190823",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T19:32:27-07:00",
+    "message": "fix(404): the conflict refusal says how to clear the to-label row\n\nSomeone who already edited labels.jsonl, as the old message told them to,\ngot the same refusal while the old answer still sat in to-label.jsonl:\nthe advice looped. The message and README now name both steps.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "b5997d784cec579d868add89ed8ceadff776bebb",
+    "short_hash": "b5997d7",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T19:11:44-07:00",
+    "message": "fix(404): classify each answered to-label row once for both label and merge\n\nThe label guard and --merge each decided about an answered row with their\nown checks, in different orders. Merging X on text A, answering it\ndifferently on text B, then reverting to A made label refuse forever while\nmerge printed \"merged 0\" with no skip note.\n\nBoth now act only on classify(), which returns NotMergeable (checked\nfirst), AlreadyMergedSame, ConflictsWithMerged or Mergeable. Merge now\nrefuses a conflicting edit before appending, instead of dropping it\nsilently. A non-string content is not mergeable (review 3 M1). The skip\nnote and README promise a re-offer only for holdout and seed posts (M2, M3).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "2963f609bd82c78eb7bfdb604e034d15323ec2cb",
+    "short_hash": "2963f60",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T18:28:32-07:00",
+    "message": "fix(404): show a stale seed as a seed when label offers it again\n\nThe picker re-derived the source of a stale seed from the id hash, so\nto-label.jsonl showed it as holdout or diagnostic and the printed holdout\ncount was inflated. A seed outside the holdout could also never come back,\nalthough the stale note says it will.\n\npick_for_labelling now takes the seed ids from labels.jsonl, always offers\na stale seed, and tags it Source::Seed. The summary line counts holdout,\nseed and diagnostic separately.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "9099671f38c6b05b0a3682648ba12fc77291bfa7",
+    "short_hash": "9099671",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T17:35:23-07:00",
+    "message": "fix(404): count failed calls in the reported cost\n\nThe $/1k estimate used only successful verdicts, so an all-error paid model\nshowed as unpriced and a token-priced model that fails on long posts was\nunderstated. Cost now averages over every current record for the model,\nerrors included; latency stays successes-only. current_for already returns\nthose error records, so it is unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "6968a12af53b7f8a7c6ad4d95184846abb85ac5f",
+    "short_hash": "6968a12",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T16:02:32-07:00",
+    "message": "fix(404): exhaust the shared budget once any model stops at the cap\n\nThe budget only tracks estimates. When CoPE-B real cost meter trips, the\nestimate is still tiny, so the next paid model was built with nearly the\nwhole cap as headroom and woke the GPU again. run_models now calls\nBudget::exhaust() whenever a model stops at the cap, so every later paid\nmodel fails can_afford before its probe while $0 models still run.\n\nRe-review minors in the same change: ProbeFailed keeps its cause as a\n#[source] and no longer repeats the model name; probe-failure wording no\nlonger claims nothing was spent (the probe wakes the GPU); stale\nall-cached comment updated; cache::load/current are test-only so no\nproduction caller can reintroduce last-record-wins; README matches the\nprinted ignored-labels note and the new cap rule.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
+    "hash": "e3622ab406205373159f096ea8d83d299ce56075",
+    "short_hash": "e3622ab",
+    "author": "Bryan Guffey",
+    "date": "2026-10-10T15:15:54-07:00",
+    "message": "fix(404): skip a model only when its identity probe fails\n\nEvery run_model error was treated as a skippable probe failure, including\ncache parse errors and failures to save verdicts after a PAID batch, so the\nrun kept spending and exited 0 while losing paid verdicts. The probe now\nreturns a typed ProbeFailed; run_models skips only that and stops with an\nerror on anything else. Build errors stay skippable (nothing spent yet).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "77d8af58b99339b980848df112ec4bce585902d2",
+    "short_hash": "77d8af5",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T21:36:20-07:00",
+    "message": "fix(404): label refuses an edited answer for an already-merged id\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 1
+  },
+  {
+    "hash": "5769d8faaac3d01e3290dd0c0c9bee6c726f5279",
+    "short_hash": "5769d8f",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T21:14:56-07:00",
+    "message": "test(404): rename the batch fake slot variant to satisfy clippy\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 1
+  },
+  {
+    "hash": "2c0744936aad94563e90905b3575f62de12e5330",
+    "short_hash": "2c07449",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T20:09:53-07:00",
+    "message": "feat(404): charcoal eval-classifiers run|label|report\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
+    "hash": "159f0cebd88e679c3ea9b36459e5c198fa554b45",
+    "short_hash": "159f0ce",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:59:37-07:00",
+    "message": "fix(404): refuse CoPE-B before the GPU wakes without a policy version; eval meter and Detoxify identity match production\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "7d0b965e1dd665b1ab2eb34f6a7e30f597e41550",
+    "short_hash": "7d0b965",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:53:25-07:00",
+    "message": "test(404): report leakage test covers false alarms; exercise Better and pin the always-clean line\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "4d207b1cf636a18e038f8225ba082cd66da73e92",
+    "short_hash": "4d207b1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:49:25-07:00",
+    "message": "feat(404): Detoxify eval classifier; CoPE-B built with the real cost meter at the run cap\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
+    "hash": "b21f02c27ecb54dffcaaca264d53b1ecfccb1ca0",
+    "short_hash": "b21f02c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:40:51-07:00",
+    "message": "feat(404): holdout-only report with exact paired verdicts; proven to catch bad models\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "2e4f18caaaf86c8b23aa13c1d815091d59140837",
+    "short_hash": "2e4f18c",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:33:30-07:00",
+    "message": "fix(404): merge_labels validates every row before writing and rejects duplicate ids\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "041e723f16fa3a9ac79583b944c55f24c99a1c3a",
+    "short_hash": "041e723",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:24:57-07:00",
+    "message": "test(404): restore negative-price pricing tests dropped with the placeholder\n\nThe cleanup in b82a60f deleted the two negative-price tests along with\nthe vacuous NaN one; they are the only tests proving load_pricing fails\nclosed on a negative price.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 1
+  },
+  {
+    "hash": "7fe8fea0f0065a5cdee190fa71f4137c567e7f0f",
+    "short_hash": "7fe8fea",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T19:12:16-07:00",
+    "message": "feat(404): label picker with independent holdout; merge derives the source and validates the pool\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "3466b5aa4ff706985335cca2315f6b63c8a66324",
+    "short_hash": "3466b5a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:44:37-07:00",
+    "message": "feat(404): runner probes identity, batches, rejects foreign verdicts and honours real cost ceilings\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "cc8d585b4189415d57fc8e2b01a9908b363a3409",
+    "short_hash": "cc8d585",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:39:17-07:00",
+    "message": "feat(404): required pricing, whole-request estimates and a reservation budget\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "d95c8aa2e98931b41fff112943f66fc1c3299522",
+    "short_hash": "d95c8aa",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:30:45-07:00",
+    "message": "feat(404): verdict cache with identity file and a single current-verdict gate\n\nCo-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "30904c980482d609c318bd4b12530d9cad449647",
+    "short_hash": "30904c9",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:21:15-07:00",
+    "message": "feat(404): exact paired McNemar comparison with per-class coverage and label gates\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "f2d4781111ba74e03e7c4136351b6d9448167554",
+    "short_hash": "f2d4781",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:13:40-07:00",
+    "message": "docs(404): tighten provider contracts after review (spend bounds, Clef changelog, Strands window/concurrency)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "8f66166b52202f3e488d5a7582762b7909189a09",
+    "short_hash": "8f66166",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:10:58-07:00",
+    "message": "feat(404): eval pool, seed labels, pricing, hashing and loaders\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 9
+  },
+  {
+    "hash": "4213f11f9265bd0fe8a420a9e9fb94041802d857",
+    "short_hash": "4213f11",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:04:44-07:00",
+    "message": "docs(404): pre-flight fixes — red steps really fail; spec timeout/verdict wording matches plan\n\nPre-flight scan found the TDD red runs pass with 0 tests (pub mod added\nafter the tests), the spec still said 60 s and \"intervals overlap\", and\nthe spec asked the report to rank bad models last though it only flags\nthem. Also records the Part B cost-cap carry-forward.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "ed8475a3046a25eb61ef26db227b89db50ff020f",
+    "short_hash": "ed8475a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T18:03:56-07:00",
+    "message": "docs(404): verified API contracts for Jev, Clef and Strands Decider\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "db57a0ef103f5caacd78b54de598e54c5e73c57b",
+    "short_hash": "db57a0e",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T17:46:15-07:00",
+    "message": "docs(404): second revision after Codex adversarial review (round 2)\n\nAccepted all 5 findings:\n- CoPE-B spend bounded by the RunPod client real ScanCostMeter at the run\n  cap, batched as in production; eval timeout (600 s) above the client so\n  jobs are never abandoned; the backend cost ceiling stops the run\n- identity probed before paid calls, checked on every verdict; label and\n  report read only verdicts current for pool text + verified identity\n- coverage per class, >= 20 paired labels per class, boundary tests;\n  effective holdout is 32 (4 seeds), so the pool must grow\n- merge derives holdout/diagnostic from the id and validates the pool\n- exact paired McNemar test (alpha 0.05) decides; Wilson is descriptive\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "2b04daf9c7a8a0e96f92a51b489f696bb35ed1a6",
+    "short_hash": "2b04daf",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T17:24:44-07:00",
+    "message": "docs(404): revise spec and plan after Codex adversarial review\n\nAccepted all 8 findings:\n- critical: score each model on its own binary answer; never derive\n  p(toxic) from CoPE-B confidence (exp(logprob) over the vocabulary)\n- headline rates from an independent hash-chosen holdout only;\n  disagreement labels reported separately as diagnostics\n- unpriced models refused; estimates cover the whole request\n  (overhead_chars); Part B reconciles provider-reported usage\n- paired-cohort comparisons with coverage; no winner below 90 %\n- cache reuse keyed on content hash + model id + policy version\n- committed verdicts/.gitignore (not the untracked .gitignore.local)\n- per-call timeout (60 s) with a genuinely hanging test fake\n- one cargo test filter per command\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "ee866d0ea9fe5938db23a4fde092417b8328a9dc",
+    "short_hash": "ee866d0",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T10:05:18-07:00",
+    "message": "docs(404): implementation plan for the classifier eval harness (Part A)\n\nTen TDD tasks: verify provider APIs (gate), eval data + loaders, Wilson\nmetrics, verdict cache, pricing + spending cap, runner, blind label picker\nwith a stable 10% agreed sample, report proven against always-clean and\ncoin-flip fakes, Detoxify adapter + eval-only registry, and the\neval-classifiers run|label|report CLI. Part B (Jev/Clef/Strands adapters)\nis written from Task 1's verified contracts.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "42a8b92e8ccc30938bc6ade7f2b1c28cbac312a2",
+    "short_hash": "42a8b92",
+    "author": "Bryan Guffey",
+    "date": "2026-10-09T06:58:18-07:00",
+    "message": "fix(387): the sweep needs the exact deadline it read; delete locks in the shared order\n\nCodex review:\n- pull_refresh_forward_if_streak now takes the deadline the sweep read and\n  writes only while next_refresh_at still equals it (and is ahead of now).\n  A failed full scan writes a fresh retry without touching the streak, so\n  \"still in the future\" alone let the sweep clobber it.\n- Postgres delete_user_data takes the scan_queue then users row locks up\n  front, the order apply_refresh_schedule and the sweep use; deleting\n  scan_state before users deadlocked against the sweep. (A separate,\n  pre-existing tick-vs-schedule order issue is logged as #405.)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 8
+  },
+  {
     "hash": "0a3dd44be310f41d2471bc5149a4ec01c6e267f0",
     "short_hash": "0a3dd44",
     "author": "Bryan Guffey",
