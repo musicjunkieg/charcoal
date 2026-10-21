@@ -11446,9 +11446,9 @@
       "node_type": "action",
       "title": "#387 review fixes: probe token, scored-only success, resumable extends streak, keep HTTP codes (internal review + CodeRabbit)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-06T19:55:01.722135-07:00",
-      "updated_at": "2026-10-06T19:55:01.722135-07:00",
+      "updated_at": "2026-10-21T16:48:56.528606-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"8c5780a\",\"confidence\":85,\"files\":[\"src/web/refresh_backoff.rs\",\"src/web/refresh_scan.rs\"]}"
     },
     {
@@ -11457,9 +11457,9 @@
       "node_type": "action",
       "title": "#387 Codex review: accepted all 3 (cost-cap not a failure via ScanSummary.interrupted; full-scan success clears streak; deploy sweep every 10 min)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-06T22:18:27.302984-07:00",
-      "updated_at": "2026-10-06T22:18:27.302984-07:00",
+      "updated_at": "2026-10-21T16:48:56.535142-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"826b270\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\",\"src/web/refresh.rs\",\"src/web/admitter.rs\",\"src/pipeline/scan_phases/mod.rs\"]}"
     },
     {
@@ -11468,9 +11468,9 @@
       "node_type": "action",
       "title": "#387 CodeRabbit round 2 + internal review: non-blocking sweep, test encoding repair, 24h breaker window, sweep lifts only 2+ streaks",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-06T23:02:40.629520-07:00",
-      "updated_at": "2026-10-06T23:02:40.629520-07:00",
+      "updated_at": "2026-10-21T16:48:56.540765-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"a2d5062\",\"confidence\":85}"
     },
     {
@@ -11479,9 +11479,9 @@
       "node_type": "action",
       "title": "#387 Codex round 2: accepted recovery-burst interrupt + marker reset on refusal; deferred atomic sweep to #403",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-07T16:43:56.342123-07:00",
-      "updated_at": "2026-10-07T16:43:56.342123-07:00",
+      "updated_at": "2026-10-21T16:48:56.546344-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"d4cf053\",\"confidence\":85}"
     },
     {
@@ -11490,9 +11490,9 @@
       "node_type": "action",
       "title": "#387 CodeRabbit round 3: Inconclusive breaker report; status codes kept only when named",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-07T17:32:44.435703-07:00",
-      "updated_at": "2026-10-07T17:32:44.435703-07:00",
+      "updated_at": "2026-10-21T16:48:56.551844-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"064defa\",\"confidence\":85}"
     },
     {
@@ -11501,9 +11501,9 @@
       "node_type": "action",
       "title": "#387 internal review round 3: rival causes keep breaker open (take over at 2 probes); mask handles/DIDs",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-07T17:50:51.540403-07:00",
-      "updated_at": "2026-10-07T17:50:51.540403-07:00",
+      "updated_at": "2026-10-21T16:48:56.558214-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"b12781c\",\"confidence\":85}"
     },
     {
@@ -11512,9 +11512,9 @@
       "node_type": "action",
       "title": "#387 Codex round 3: ownership-gated breaker report, URL query masking; deferred streak fencing + sweep CAS to #403",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-07T18:50:39.057493-07:00",
-      "updated_at": "2026-10-07T18:50:39.057493-07:00",
+      "updated_at": "2026-10-21T16:48:56.564347-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"commit\":\"09ab228\",\"confidence\":85}"
     },
     {
@@ -11523,9 +11523,9 @@
       "node_type": "outcome",
       "title": "PR #143 (#387 backoff + breaker) merged to staging at 6e1dba1 after 3 internal + 3 Codex + 4 CodeRabbit rounds; CodeRabbit APPROVED, CI green; races deferred to #403",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-07T19:21:24.425458-07:00",
-      "updated_at": "2026-10-07T19:21:24.425458-07:00",
+      "updated_at": "2026-10-21T16:48:56.570112-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":90}"
     },
     {
@@ -11534,9 +11534,9 @@
       "node_type": "action",
       "title": "Promote #387 to prod: PR #144 staging->main; prod backup charcoal-prod-pre-promote387-20261008T230942Z.dump restore-verified",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T16:10:38.858864-07:00",
-      "updated_at": "2026-10-08T16:10:38.858864-07:00",
+      "updated_at": "2026-10-21T16:48:56.575540-07:00",
       "metadata_json": "{\"branch\":\"fix/387-retry-backoff\",\"confidence\":85}"
     },
     {
@@ -11545,9 +11545,9 @@
       "node_type": "action",
       "title": "#387 sweep consumes the streak it acts on (CodeRabbit on promotion PR #144)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T16:31:03.534179-07:00",
-      "updated_at": "2026-10-08T16:31:03.534179-07:00",
+      "updated_at": "2026-10-21T16:48:56.581344-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"7afbf9a\",\"confidence\":85,\"files\":[\"src/web/refresh.rs\"]}"
     },
     {
@@ -11556,9 +11556,9 @@
       "node_type": "goal",
       "title": "#404 Classifier eval harness: compare new decision models vs CoPE-B",
       "description": null,
-      "status": "pending",
+      "status": "active",
       "created_at": "2026-10-08T18:43:08.527158-07:00",
-      "updated_at": "2026-10-08T18:43:08.527158-07:00",
+      "updated_at": "2026-10-21T16:48:56.586924-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85,\"prompt\":\"i want you to brainstorm ways we might use the class of new models coming out called classifiers to help or replace parts of our worldly and design evals that let us compare what is better for our current use cases or future use cases.\"}"
     },
     {
@@ -11567,9 +11567,9 @@
       "node_type": "option",
       "title": "Rust eval-classifiers command on ToxicityClassifier",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T18:43:11.419947-07:00",
-      "updated_at": "2026-10-08T18:43:11.419947-07:00",
+      "updated_at": "2026-10-21T16:48:56.592446-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
     },
     {
@@ -11578,9 +11578,9 @@
       "node_type": "option",
       "title": "Python tool in tools/",
       "description": null,
-      "status": "pending",
+      "status": "rejected",
       "created_at": "2026-10-08T18:43:11.435492-07:00",
-      "updated_at": "2026-10-08T18:43:11.435492-07:00",
+      "updated_at": "2026-10-21T16:48:56.598028-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":40}"
     },
     {
@@ -11589,9 +11589,9 @@
       "node_type": "option",
       "title": "External eval service",
       "description": null,
-      "status": "pending",
+      "status": "rejected",
       "created_at": "2026-10-08T18:43:11.448728-07:00",
-      "updated_at": "2026-10-08T18:43:11.448728-07:00",
+      "updated_at": "2026-10-21T16:48:56.603608-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":20}"
     },
     {
@@ -11600,9 +11600,9 @@
       "node_type": "decision",
       "title": "Chose Rust eval-classifiers command; post-level, label-the-disagreements, both error rates reported",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T18:43:13.157092-07:00",
-      "updated_at": "2026-10-08T18:43:13.157092-07:00",
+      "updated_at": "2026-10-21T16:48:56.609113-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
     },
     {
@@ -11611,9 +11611,9 @@
       "node_type": "action",
       "title": "#387 sweep pull-forward as one conditional write (CAS on streak value), SQLite + Postgres",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T19:07:41.199691-07:00",
-      "updated_at": "2026-10-08T19:07:41.199691-07:00",
+      "updated_at": "2026-10-21T16:48:56.614651-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"0961cd9\",\"confidence\":85}"
     },
     {
@@ -11622,9 +11622,9 @@
       "node_type": "action",
       "title": "#387 failed refresh writes deadline before streak (sweep interleaving)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T19:20:51.569438-07:00",
-      "updated_at": "2026-10-08T19:20:51.569438-07:00",
+      "updated_at": "2026-10-21T16:48:56.620093-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"bddd7d0\",\"confidence\":85,\"files\":[\"src/web/refresh_scan.rs\"]}"
     },
     {
@@ -11633,9 +11633,9 @@
       "node_type": "action",
       "title": "#387 success clears streak inside fenced schedule tx; ending streak cleared before scheduling",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T19:53:29.108183-07:00",
-      "updated_at": "2026-10-08T19:53:29.108183-07:00",
+      "updated_at": "2026-10-21T16:48:56.625832-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"a21b29d\",\"confidence\":85}"
     },
     {
@@ -11644,9 +11644,9 @@
       "node_type": "action",
       "title": "#387/#403 streak written atomically with deadline (StreakWrite in fenced Retry); store_streak removed",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T20:12:41.061187-07:00",
-      "updated_at": "2026-10-08T20:12:41.061187-07:00",
+      "updated_at": "2026-10-21T16:48:56.631294-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"fdf8733\",\"confidence\":90}"
     },
     {
@@ -11655,9 +11655,9 @@
       "node_type": "action",
       "title": "#387 sweep CAS: lock users first (deadlock fix) + deadline re-check inside tx",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-08T20:32:18.026336-07:00",
-      "updated_at": "2026-10-08T20:32:18.026336-07:00",
+      "updated_at": "2026-10-21T16:48:56.636884-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"0a3dd44\",\"confidence\":85}"
     },
     {
@@ -11666,9 +11666,9 @@
       "node_type": "action",
       "title": "#387 sweep CAS includes observed deadline; delete_user_data lock order (Codex)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T06:58:26.450617-07:00",
-      "updated_at": "2026-10-09T06:58:26.450617-07:00",
+      "updated_at": "2026-10-21T16:48:56.642728-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"commit\":\"42a8b92\",\"confidence\":85}"
     },
     {
@@ -11677,9 +11677,9 @@
       "node_type": "outcome",
       "title": "PR #145 merged to staging (29986fb): sweep CAS (streak+exact deadline), atomic StreakWrite in fenced Retry, success clears in tx, lock order; CodeRabbit APPROVED",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T07:51:01.690739-07:00",
-      "updated_at": "2026-10-09T07:51:01.690739-07:00",
+      "updated_at": "2026-10-21T16:48:56.648071-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"confidence\":90}"
     },
     {
@@ -11688,9 +11688,9 @@
       "node_type": "outcome",
       "title": "PROMOTED #387 to prod: PR #144 merged to main (7cf685e) 15:04Z; backup charcoal-prod-pre-promote144-20261009T150329Z.dump restore-verified",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T08:04:07.627562-07:00",
-      "updated_at": "2026-10-09T08:04:07.627562-07:00",
+      "updated_at": "2026-10-21T16:48:56.653610-07:00",
       "metadata_json": "{\"branch\":\"fix/387-sweep-clears-streak\",\"confidence\":90}"
     },
     {
@@ -11699,9 +11699,9 @@
       "node_type": "action",
       "title": "#404 implementation plan Part A written (10 TDD tasks; provider API verification gate; Part B adapters after)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T10:05:29.160992-07:00",
-      "updated_at": "2026-10-09T10:05:29.160992-07:00",
+      "updated_at": "2026-10-21T16:48:56.659757-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"ee866d0\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-09-404-classifier-eval-harness.md\"]}"
     },
     {
@@ -11710,9 +11710,9 @@
       "node_type": "action",
       "title": "#404 spec+plan revised after Codex adversarial review: binary decision rule, holdout-only rates, paired coverage, identity-keyed cache, required pricing, timeout, committed verdicts/.gitignore",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T17:24:54.468852-07:00",
-      "updated_at": "2026-10-09T17:24:54.468852-07:00",
+      "updated_at": "2026-10-21T16:48:56.665698-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2b04daf\",\"confidence\":85}"
     },
     {
@@ -11721,9 +11721,9 @@
       "node_type": "action",
       "title": "#404 plan round-2 revision: real ScanCostMeter for CoPE-B + batching, identity probe/check + current() gate, per-class coverage + min 20/class, derived merge source, exact McNemar",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T17:46:24.887543-07:00",
-      "updated_at": "2026-10-09T17:46:24.887543-07:00",
+      "updated_at": "2026-10-21T16:48:56.671262-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"db57a0e\",\"confidence\":85}"
     },
     {
@@ -11732,9 +11732,9 @@
       "node_type": "action",
       "title": "#404 Part A execution started: subagent-driven; Task 1 (provider API research) dispatched alongside pre-flight plan conflict scan",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:01:31.675059-07:00",
-      "updated_at": "2026-10-09T18:01:31.675059-07:00",
+      "updated_at": "2026-10-21T16:48:56.676686-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"db57a0e\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-09-404-classifier-eval-harness.md\"]}"
     },
     {
@@ -11743,9 +11743,9 @@
       "node_type": "outcome",
       "title": "Pre-flight scan: no blockers; fixed red-step wiring (pub mod in test step), spec 60s->600s and interval-overlap->McNemar wording; Part B cap carry-forward noted",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:05:34.420418-07:00",
-      "updated_at": "2026-10-09T18:05:34.420418-07:00",
+      "updated_at": "2026-10-21T16:48:56.682928-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"4213f11\",\"confidence\":90}"
     },
     {
@@ -11754,9 +11754,9 @@
       "node_type": "outcome",
       "title": "Task 1 provider contracts (ed8475a): Jev, Clef-flash/27B, Strands Decider all pass gate; concerns: TypeSafe no-training clause, Strands may ignore long policy, one post/request, cancel-billing not documented",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:05:34.430893-07:00",
-      "updated_at": "2026-10-09T18:05:34.430893-07:00",
+      "updated_at": "2026-10-21T16:48:56.688912-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"ed8475a\",\"confidence\":75}"
     },
     {
@@ -11765,9 +11765,9 @@
       "node_type": "action",
       "title": "Task 2 implemented: eval pool/labels/pricing, fnv1a + content_hash, loaders (6 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:12:58.565019-07:00",
-      "updated_at": "2026-10-09T18:12:58.565019-07:00",
+      "updated_at": "2026-10-21T16:48:56.694556-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"8f66166\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/mod.rs\",\"src/cli/eval_classifiers/data.rs\",\"evals/classifiers\"]}"
     },
     {
@@ -11776,9 +11776,9 @@
       "node_type": "outcome",
       "title": "Task 2 review clean (3 minor: duplicate-id overwrite, no malformed-pool test, fixture name) — logged for final review",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:13:34.729323-07:00",
-      "updated_at": "2026-10-09T18:13:34.729323-07:00",
+      "updated_at": "2026-10-21T16:48:56.700043-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"8f66166\",\"confidence\":90}"
     },
     {
@@ -11787,9 +11787,9 @@
       "node_type": "outcome",
       "title": "Task 1 complete after fix round (f2d4781): spend bound = client-side usage meter for all 3 providers; Clef-flash 64K->24K + price cut on 2026-10-09 recorded; Strands serialize-requests hard rule",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:14:59.727294-07:00",
-      "updated_at": "2026-10-09T18:14:59.727294-07:00",
+      "updated_at": "2026-10-21T16:48:56.705480-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"f2d4781\",\"confidence\":90}"
     },
     {
@@ -11798,9 +11798,9 @@
       "node_type": "action",
       "title": "Task 3 implemented: Wilson, per-class coverage, exact McNemar comparison (6 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:22:29.285022-07:00",
-      "updated_at": "2026-10-09T18:22:29.285022-07:00",
+      "updated_at": "2026-10-21T16:48:56.711205-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"30904c9\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/metrics.rs\"]}"
     },
     {
@@ -11809,9 +11809,9 @@
       "node_type": "outcome",
       "title": "Task 3 review clean; hand checks of Wilson + exact McNemar match; minor: Paired metrics hide coverage (report must use model_metrics)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:22:55.692599-07:00",
-      "updated_at": "2026-10-09T18:22:55.692599-07:00",
+      "updated_at": "2026-10-21T16:48:56.716516-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"30904c9\",\"confidence\":90}"
     },
     {
@@ -11820,9 +11820,9 @@
       "node_type": "action",
       "title": "Task 4 implemented: verdict cache JSONL, identity file, current() gate (4 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:32:22.466022-07:00",
-      "updated_at": "2026-10-09T18:32:22.466022-07:00",
+      "updated_at": "2026-10-21T16:48:56.721871-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"d95c8aa\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/cache.rs\"]}"
     },
     {
@@ -11831,9 +11831,9 @@
       "node_type": "outcome",
       "title": "Task 4 review clean (minor: torn-line append, line numbers, model-name path, non-atomic identity write)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:32:34.759378-07:00",
-      "updated_at": "2026-10-09T18:32:34.759378-07:00",
+      "updated_at": "2026-10-21T16:48:56.727552-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"d95c8aa\",\"confidence\":90}"
     },
     {
@@ -11842,9 +11842,9 @@
       "node_type": "action",
       "title": "Task 5 implemented: required pricing, whole-request estimates, reservation Budget (3 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:40:39.876461-07:00",
-      "updated_at": "2026-10-09T18:40:39.876461-07:00",
+      "updated_at": "2026-10-21T16:48:56.733541-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"cc8d585\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/cost.rs\"]}"
     },
     {
@@ -11853,9 +11853,9 @@
       "node_type": "action",
       "title": "Task 6 implemented: runner - probe identity, batch, reject foreign verdicts, per-call timeout, real cost ceiling (8 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:45:22.775507-07:00",
-      "updated_at": "2026-10-09T18:45:22.775507-07:00",
+      "updated_at": "2026-10-21T16:48:56.739062-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"3466b5a\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/runner.rs\"]}"
     },
     {
@@ -11864,9 +11864,9 @@
       "node_type": "outcome",
       "title": "Task 6 review clean (opus): probe-first, identity rejection, timeout cancels, typed cap detection; minor: batch>1 path untested",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T18:46:24.594858-07:00",
-      "updated_at": "2026-10-09T18:46:24.594858-07:00",
+      "updated_at": "2026-10-21T16:48:56.744572-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"3466b5a\",\"confidence\":90}"
     },
     {
@@ -11875,9 +11875,9 @@
       "node_type": "action",
       "title": "Task 7 implemented: label picker (hash holdout + diagnostic), blind to_label file, merge derives source + validates pool (4 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:15:00.540328-07:00",
-      "updated_at": "2026-10-09T19:15:00.540328-07:00",
+      "updated_at": "2026-10-21T16:48:56.750029-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"7fe8fea\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/labelling.rs\"]}"
     },
     {
@@ -11886,9 +11886,9 @@
       "node_type": "decision",
       "title": "Fix plan-mandated non-atomic merge_labels (validate-all-then-append, error on duplicate id) without asking: strictly safer, no interface change",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:15:31.032714-07:00",
-      "updated_at": "2026-10-09T19:15:31.032714-07:00",
+      "updated_at": "2026-10-21T16:48:56.755379-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":85}"
     },
     {
@@ -11897,9 +11897,9 @@
       "node_type": "outcome",
       "title": "Task 5 complete: budget/pricing fail closed; vacuous test removed; controller restored 2 over-deleted negative-price tests (041e723)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:25:19.560227-07:00",
-      "updated_at": "2026-10-09T19:25:19.560227-07:00",
+      "updated_at": "2026-10-21T16:48:56.761204-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"041e723\",\"confidence\":90}"
     },
     {
@@ -11908,9 +11908,9 @@
       "node_type": "outcome",
       "title": "Task 7 complete: merge validates all rows before writing, rejects duplicate ids, is_multiple_of replaces clippy allows (2e4f18c)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:34:13.625457-07:00",
-      "updated_at": "2026-10-09T19:34:13.625457-07:00",
+      "updated_at": "2026-10-21T16:48:56.767512-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2e4f18c\",\"confidence\":90}"
     },
     {
@@ -11919,9 +11919,9 @@
       "node_type": "action",
       "title": "Task 8 implemented: holdout-only report, Wilson + exact paired verdicts, bad-model proof tests (6 tests)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:41:39.287424-07:00",
-      "updated_at": "2026-10-09T19:41:39.287424-07:00",
+      "updated_at": "2026-10-21T16:48:56.773093-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"b21f02c\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/report.rs\"]}"
     },
     {
@@ -11930,9 +11930,9 @@
       "node_type": "action",
       "title": "Task 9 implemented: DetoxifyClassifier (toxic >= 0.5) + eval-only registry; CoPE-B built with real ScanCostMeter at run cap",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:50:13.440066-07:00",
-      "updated_at": "2026-10-09T19:50:13.440066-07:00",
+      "updated_at": "2026-10-21T16:48:56.778497-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"4d207b1\",\"confidence\":85,\"files\":[\"src/toxicity/detoxify_classifier.rs\",\"src/cli/eval_classifiers/models.rs\"]}"
     },
     {
@@ -11941,9 +11941,9 @@
       "node_type": "decision",
       "title": "Fix Task 9 plan-mandated literals: eval meter from production env (rate/workers), Detoxify id = ONNX_MODEL_ID; add policy-version precheck before GPU wake ( pattern)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:51:47.536281-07:00",
-      "updated_at": "2026-10-09T19:51:47.536281-07:00",
+      "updated_at": "2026-10-21T16:48:56.783915-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"confidence\":90}"
     },
     {
@@ -11952,9 +11952,9 @@
       "node_type": "outcome",
       "title": "Task 8 complete: leakage test covers false alarms, Better branch exercised, always-clean line pinned (7d0b965)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T19:53:57.451809-07:00",
-      "updated_at": "2026-10-09T19:53:57.451809-07:00",
+      "updated_at": "2026-10-21T16:48:56.789219-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"7d0b965\",\"confidence\":90}"
     },
     {
@@ -11963,9 +11963,9 @@
       "node_type": "outcome",
       "title": "Task 9 complete: CoPE-B refuses before GPU wake without policy version; eval meter shares prod rate/workers parsing (from_env proven unchanged); Detoxify id = ONNX_MODEL_ID (159f0ce)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T20:00:52.474229-07:00",
-      "updated_at": "2026-10-09T20:00:52.474229-07:00",
+      "updated_at": "2026-10-21T16:48:56.794821-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"159f0ce\",\"confidence\":92}"
     },
     {
@@ -11974,9 +11974,9 @@
       "node_type": "action",
       "title": "Task 10 implemented: eval-classifiers run|label|report CLI, e2e test, evals README, CHANGELOG",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T20:10:35.024066-07:00",
-      "updated_at": "2026-10-09T20:10:35.024066-07:00",
+      "updated_at": "2026-10-21T16:48:56.800404-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":85,\"files\":[\"src/main.rs\",\"tests/cli_eval_classifiers.rs\",\"evals/classifiers/README.md\",\"CHANGELOG.md\"]}"
     },
     {
@@ -11985,9 +11985,9 @@
       "node_type": "outcome",
       "title": "All 10 Part A tasks complete and individually reviewed (base 6e1dba1, head 2c07449); final whole-branch review dispatched (opus)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T20:11:45.345358-07:00",
-      "updated_at": "2026-10-09T20:11:45.345358-07:00",
+      "updated_at": "2026-10-21T16:48:56.805949-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":88}"
     },
     {
@@ -11996,9 +11996,9 @@
       "node_type": "outcome",
       "title": "Final review: ready with fixes - GPU probe before work/budget check, label overwrite loses answers, Detoxify NaN=clean, duplicate pool ids, batch>1 untested, current() gate untested via CLI",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T20:17:34.518122-07:00",
-      "updated_at": "2026-10-09T20:17:34.518122-07:00",
+      "updated_at": "2026-10-21T16:48:56.811796-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"2c07449\",\"confidence\":90}"
     },
     {
@@ -12007,9 +12007,9 @@
       "node_type": "action",
       "title": "Final-review fix batch applied (9 commits): no GPU probe without work+budget, label refuses unmerged answers, Detoxify NaN error, duplicate ids rejected, batch>1 tests, cache::current_for gate, log-space McNemar, README",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T21:21:45.874117-07:00",
-      "updated_at": "2026-10-09T21:21:45.874117-07:00",
+      "updated_at": "2026-10-21T16:48:56.817224-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"5769d8f\",\"confidence\":85}"
     },
     {
@@ -12018,9 +12018,9 @@
       "node_type": "outcome",
       "title": "#404 Part A complete at 77d8af5: 10 tasks + final review fixed (incl. stuck-identity round 2); 71 eval + 3 e2e tests, clippy clean; awaiting Codex review gate before push",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-09T21:36:42.394705-07:00",
-      "updated_at": "2026-10-09T21:36:42.394705-07:00",
+      "updated_at": "2026-10-21T16:48:56.822305-07:00",
       "metadata_json": "{\"branch\":\"docs/404-classifier-eval-spec\",\"commit\":\"77d8af5\",\"confidence\":90}"
     },
     {
@@ -12029,9 +12029,9 @@
       "node_type": "observation",
       "title": "Codex review vs staging: 4 P2 accepted - cache drops paid verdicts across identity changes, labels not bound to content, cap break skips free models, persistence errors swallowed as skips",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T13:31:12.875125-07:00",
-      "updated_at": "2026-10-10T13:31:12.875125-07:00",
+      "updated_at": "2026-10-21T16:48:56.827910-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":90}"
     },
     {
@@ -12040,9 +12040,9 @@
       "node_type": "outcome",
       "title": "Codex fixes applied: 73e0260 9b9f355 baf0a08 e3622ab (cache per identity, label content_hash, continue after cap, typed ProbeFailed)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T15:16:36.346418-07:00",
-      "updated_at": "2026-10-10T15:16:36.346418-07:00",
+      "updated_at": "2026-10-21T16:48:56.833459-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"e3622ab\",\"confidence\":85}"
     },
     {
@@ -12051,9 +12051,9 @@
       "node_type": "observation",
       "title": "Re-review of Codex fixes: NOT approved - I1 cap hole: CoPE-B meter trip only records estimate in shared Budget, continue lets a later paid model spend ~whole cap again; 9 minors",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T15:28:35.053484-07:00",
-      "updated_at": "2026-10-10T15:28:35.053484-07:00",
+      "updated_at": "2026-10-21T16:48:56.839206-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"e3622ab\",\"confidence\":90}"
     },
     {
@@ -12062,9 +12062,9 @@
       "node_type": "action",
       "title": "Exhaust shared eval budget when any model stops at the cap (I1) + re-review minors",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T15:29:08.780748-07:00",
-      "updated_at": "2026-10-10T15:29:08.780748-07:00",
+      "updated_at": "2026-10-21T16:48:56.844724-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"e3622ab\",\"confidence\":85}"
     },
     {
@@ -12073,9 +12073,9 @@
       "node_type": "outcome",
       "title": "Budget exhausted on any cap stop; later paid models never probed; minors M1/M2/M5/M7/M8/M9 fixed (88 lib + 3 integration pass)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T16:02:51.176694-07:00",
-      "updated_at": "2026-10-10T16:02:51.176694-07:00",
+      "updated_at": "2026-10-21T16:48:56.850054-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"6968a12\",\"confidence\":90}"
     },
     {
@@ -12084,9 +12084,9 @@
       "node_type": "outcome",
       "title": "Cap-fix re-review APPROVED (0 crit/0 imp/4 minor); branch head 6968a12 ready for pre-push gate",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T16:04:02.657886-07:00",
-      "updated_at": "2026-10-10T16:04:02.657886-07:00",
+      "updated_at": "2026-10-21T16:48:56.855848-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"6968a12\",\"confidence\":90}"
     },
     {
@@ -12095,9 +12095,9 @@
       "node_type": "observation",
       "title": "Codex review #2 vs staging (head 6968a12): 1 P1 + 4 P2 all accepted - failed paid probe doesn't exhaust budget; removed-pool labels in denominators; seed provenance lost on relabel; cost ignores failed calls; probe not under timeout",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T16:39:11.783823-07:00",
-      "updated_at": "2026-10-10T16:39:11.783823-07:00",
+      "updated_at": "2026-10-21T16:48:56.861603-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"6968a12\",\"confidence\":90}"
     },
     {
@@ -12106,9 +12106,9 @@
       "node_type": "action",
       "title": "Fix 5 Codex review #2 findings on eval-classifiers harness",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T16:39:30.783309-07:00",
-      "updated_at": "2026-10-10T16:39:30.783309-07:00",
+      "updated_at": "2026-10-21T16:48:56.867459-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"6968a12\",\"confidence\":85}"
     },
     {
@@ -12117,9 +12117,9 @@
       "node_type": "outcome",
       "title": "Codex review #2: all 5 findings fixed with tests; 99 lib + 3 integration tests pass, clippy/fmt clean",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T17:48:34.675204-07:00",
-      "updated_at": "2026-10-10T17:48:34.675204-07:00",
+      "updated_at": "2026-10-21T16:48:56.873001-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9099671\",\"confidence\":90}"
     },
     {
@@ -12128,9 +12128,9 @@
       "node_type": "observation",
       "title": "Re-review of Codex #2 fixes: NOT approved - I1 label/merge deadlock when an answered post leaves the pool (or its text changes); 4 minors",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T17:51:59.335152-07:00",
-      "updated_at": "2026-10-10T17:51:59.335152-07:00",
+      "updated_at": "2026-10-21T16:48:56.878801-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9099671\",\"confidence\":90}"
     },
     {
@@ -12139,9 +12139,9 @@
       "node_type": "action",
       "title": "Fix I1 label/merge deadlock: shared mergeable predicate; stale seed shown as seed",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T17:53:02.482302-07:00",
-      "updated_at": "2026-10-10T17:53:02.482302-07:00",
+      "updated_at": "2026-10-21T16:48:56.884188-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9099671\",\"confidence\":85}"
     },
     {
@@ -12150,9 +12150,9 @@
       "node_type": "outcome",
       "title": "I1 fixed (shared mergeable predicate; merge skips+counts) and stale seeds shown/offered as seed; 103 lib + 3 integration pass, clippy/fmt clean",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T18:37:52.772295-07:00",
-      "updated_at": "2026-10-10T18:37:52.772295-07:00",
+      "updated_at": "2026-10-21T16:48:56.889698-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":90}"
     },
     {
@@ -12161,9 +12161,9 @@
       "node_type": "observation",
       "title": "Re-review 3: NOT approved - I1 residual label/merge disagreement: edited-answer refusal and merge's already-merged check run before mergeability (text A->B->A); fix by ONE row classifier shared by guard and merge",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T18:41:02.186740-07:00",
-      "updated_at": "2026-10-10T18:41:02.186740-07:00",
+      "updated_at": "2026-10-21T16:48:56.895062-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":90}"
     },
     {
@@ -12172,9 +12172,9 @@
       "node_type": "action",
       "title": "One classification for answered to-label rows shared by label guard and merge (re-review 3 I1)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T18:41:49.831928-07:00",
-      "updated_at": "2026-10-10T18:41:49.831928-07:00",
+      "updated_at": "2026-10-21T16:48:56.900408-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2963f60\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/labelling.rs\",\"evals/classifiers/README.md\"]}"
     },
     {
@@ -12183,9 +12183,9 @@
       "node_type": "outcome",
       "title": "classify() shared by label guard and merge; A-B-A lock closed; 106 lib + 3 integration tests pass",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T19:11:55.095599-07:00",
-      "updated_at": "2026-10-10T19:11:55.095599-07:00",
+      "updated_at": "2026-10-21T16:48:56.906038-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b5997d7\",\"confidence\":90}"
     },
     {
@@ -12194,9 +12194,9 @@
       "node_type": "action",
       "title": "Conflict refusal names the to-label.jsonl step that clears it (review 4 I1)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T19:32:23.780656-07:00",
-      "updated_at": "2026-10-10T19:32:23.780656-07:00",
+      "updated_at": "2026-10-21T16:48:56.911383-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b5997d7\",\"confidence\":90,\"files\":[\"src/cli/eval_classifiers/labelling.rs\",\"evals/classifiers/README.md\"]}"
     },
     {
@@ -12205,9 +12205,9 @@
       "node_type": "outcome",
       "title": "Review-4 I1 closed (b190823): conflict message + README name the to-label step; 106 lib tests, fmt, clippy clean. Branch ready for Codex gate #3",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-10T19:32:38.445182-07:00",
-      "updated_at": "2026-10-10T19:32:38.445182-07:00",
+      "updated_at": "2026-10-21T16:48:56.916959-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b190823\",\"confidence\":90}"
     },
     {
@@ -12216,9 +12216,9 @@
       "node_type": "observation",
       "title": "Codex review #3 (head b190823): 1 P2 accepted - batch-wide identity mismatch keeps paying for unusable verdicts",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-11T21:01:17.810864-07:00",
-      "updated_at": "2026-10-11T21:01:17.810864-07:00",
+      "updated_at": "2026-10-21T16:48:56.922403-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b190823\",\"confidence\":90}"
     },
     {
@@ -12227,9 +12227,9 @@
       "node_type": "action",
       "title": "Stop a model on a batch-wide identity mismatch (IdentityMismatch, treated like ProbeFailed)",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-11T21:01:17.833183-07:00",
-      "updated_at": "2026-10-11T21:01:17.833183-07:00",
+      "updated_at": "2026-10-21T16:48:56.928216-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"b190823\",\"confidence\":90,\"files\":[\"src/cli/eval_classifiers/runner.rs\",\"evals/classifiers/README.md\"]}"
     },
     {
@@ -12238,9 +12238,9 @@
       "node_type": "outcome",
       "title": "Batch-wide identity mismatch stops the model (9bd9cbb); 108 lib + 3 e2e pass, clippy/fmt clean",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-11T21:01:33.408304-07:00",
-      "updated_at": "2026-10-11T21:01:33.408304-07:00",
+      "updated_at": "2026-10-21T16:48:56.933831-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9bd9cbb\",\"confidence\":90}"
     },
     {
@@ -12249,9 +12249,9 @@
       "node_type": "observation",
       "title": "Codex review #4 (head 9bd9cbb): 2 P2 accepted - label history collapsed before hash match (A->B->A loses A label); exhaust() inflates printed estimated spend to the cap",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-12T16:26:02.418795-07:00",
-      "updated_at": "2026-10-12T16:26:02.418795-07:00",
+      "updated_at": "2026-10-21T16:48:56.940092-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":90}"
     },
     {
@@ -12260,9 +12260,9 @@
       "node_type": "action",
       "title": "Fix Codex #4: newest label whose hash matches current text; Budget tracks exhaustion as a flag so spent() stays the real estimate",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-12T16:26:02.439167-07:00",
-      "updated_at": "2026-10-12T16:26:02.439167-07:00",
+      "updated_at": "2026-10-21T16:48:56.947401-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"9bd9cbb\",\"confidence\":85,\"files\":[\"src/cli/eval_classifiers/data.rs\",\"src/cli/eval_classifiers/cost.rs\"]}"
     },
     {
@@ -12271,9 +12271,9 @@
       "node_type": "outcome",
       "title": "Codex #4 fixed (dc6e7e4, 0eefcd0) + review minors M1-M4 (follow-up commit); 114 lib + 3 e2e pass, clippy web clean",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-12T16:58:31.145101-07:00",
-      "updated_at": "2026-10-12T16:58:31.145101-07:00",
+      "updated_at": "2026-10-21T16:48:56.954677-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2e10e9d\",\"confidence\":90}"
     },
     {
@@ -12282,9 +12282,9 @@
       "node_type": "observation",
       "title": "Codex review #5 (head 2e10e9d): 1 P2 accepted - Detoxify adapter narrows f64 score to f32 before the 0.5 threshold, flipping near-0.5 clean verdicts to toxic",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-13T16:44:46.629973-07:00",
-      "updated_at": "2026-10-13T16:44:46.629973-07:00",
+      "updated_at": "2026-10-21T16:48:56.961402-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":90}"
     },
     {
@@ -12293,9 +12293,9 @@
       "node_type": "action",
       "title": "Compare Detoxify score as f64; cast to f32 only for confidence",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-13T16:44:46.651988-07:00",
-      "updated_at": "2026-10-13T16:44:46.651988-07:00",
+      "updated_at": "2026-10-21T16:48:56.967849-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"2e10e9d\",\"confidence\":90,\"files\":[\"src/toxicity/detoxify_classifier.rs\"]}"
     },
     {
@@ -12304,10 +12304,65 @@
       "node_type": "outcome",
       "title": "Detoxify cut on f64 (Codex #5 fixed); 5 detoxify + 114 eval tests pass, clippy web clean",
       "description": null,
-      "status": "pending",
+      "status": "completed",
       "created_at": "2026-10-13T16:55:15.153379-07:00",
-      "updated_at": "2026-10-13T16:55:15.153379-07:00",
+      "updated_at": "2026-10-21T16:48:56.973514-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"596d521\",\"confidence\":90}"
+    },
+    {
+      "id": 1129,
+      "change_id": "41b876c1-4238-4ea3-9c00-1be75b5f09af",
+      "node_type": "action",
+      "title": "Pushed feat/404-classifier-eval (75160fa, staging integrated) and opened PR #146 to staging",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-19T16:43:46.309449-07:00",
+      "updated_at": "2026-10-21T16:48:56.979051-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"75160fa\",\"confidence\":90}"
+    },
+    {
+      "id": 1130,
+      "change_id": "d966dca5-1df9-4fad-ba21-2b16fb079cd5",
+      "node_type": "outcome",
+      "title": "PR #146 green: all CI incl. Postgres pass, CodeRabbit APPROVED first pass, 0 threads; ready for Bryan to merge to staging",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-19T16:52:31.385061-07:00",
+      "updated_at": "2026-10-21T16:48:56.985332-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"75160fa\",\"confidence\":95}"
+    },
+    {
+      "id": 1131,
+      "change_id": "7cdec184-683d-49c5-93df-2dd40dd1b0d5",
+      "node_type": "observation",
+      "title": "Part B vendor research (partb-research.md): Jev MCA silent on benchmarking; Strands v1 still warns questions read less than docs; no vendor batching example (TypeSafe own toxicity filter = 1 req/msg); cancel billing still undocumented; Cloudflare credit can go negative",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-19T17:22:13.717360-07:00",
+      "updated_at": "2026-10-21T16:48:56.990663-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":80}"
+    },
+    {
+      "id": 1132,
+      "change_id": "b38a6ba1-60e2-46c3-a717-93d7060e1bce",
+      "node_type": "decision",
+      "title": "Part B: Jev eval-only (written OK before prod), Strands 2-arm policy placement, one post/request, assume all requests billed",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-19T23:10:41.941380-07:00",
+      "updated_at": "2026-10-21T16:48:56.996201-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"confidence\":85}"
+    },
+    {
+      "id": 1133,
+      "change_id": "de15f16c-32e8-4927-8a2d-d4899352e97f",
+      "node_type": "outcome",
+      "title": "PR #146 merged to staging (36019d9) by Bryan 2026-10-21; #404 Part A shipped to staging",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-21T16:46:31.689850-07:00",
+      "updated_at": "2026-10-21T16:48:57.001625-07:00",
+      "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"36019d9\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -25180,6 +25235,61 @@
       "weight": 1.0,
       "rationale": "Fix result",
       "created_at": "2026-10-13T16:55:15.162119-07:00"
+    },
+    {
+      "id": 1181,
+      "from_node_id": 1128,
+      "to_node_id": 1129,
+      "from_change_id": "04ffad33-4477-4333-a3c4-7c4d1c62114f",
+      "to_change_id": "41b876c1-4238-4ea3-9c00-1be75b5f09af",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review gate passed (Codex #6 clean); push + PR",
+      "created_at": "2026-10-19T16:43:46.317230-07:00"
+    },
+    {
+      "id": 1182,
+      "from_node_id": 1129,
+      "to_node_id": 1130,
+      "from_change_id": "41b876c1-4238-4ea3-9c00-1be75b5f09af",
+      "to_change_id": "d966dca5-1df9-4fad-ba21-2b16fb079cd5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "PR result",
+      "created_at": "2026-10-19T16:52:31.391634-07:00"
+    },
+    {
+      "id": 1183,
+      "from_node_id": 1130,
+      "to_node_id": 1131,
+      "from_change_id": "d966dca5-1df9-4fad-ba21-2b16fb079cd5",
+      "to_change_id": "7cdec184-683d-49c5-93df-2dd40dd1b0d5",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Open Part B questions researched",
+      "created_at": "2026-10-19T17:22:13.724545-07:00"
+    },
+    {
+      "id": 1184,
+      "from_node_id": 1131,
+      "to_node_id": 1132,
+      "from_change_id": "7cdec184-683d-49c5-93df-2dd40dd1b0d5",
+      "to_change_id": "b38a6ba1-60e2-46c3-a717-93d7060e1bce",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Bryan accepted research recommendations",
+      "created_at": "2026-10-19T23:10:41.949135-07:00"
+    },
+    {
+      "id": 1185,
+      "from_node_id": 1130,
+      "to_node_id": 1133,
+      "from_change_id": "d966dca5-1df9-4fad-ba21-2b16fb079cd5",
+      "to_change_id": "de15f16c-32e8-4927-8a2d-d4899352e97f",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "merge of the approved PR",
+      "created_at": "2026-10-21T16:46:31.696722-07:00"
     }
   ],
   "documents": [
