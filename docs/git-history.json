@@ -1,5 +1,21 @@
 [
   {
+    "hash": "36019d963e0890d539ba2ce062c4bd0b10046e15",
+    "short_hash": "36019d9",
+    "author": "Bryan Guffey",
+    "date": "2026-10-21T16:39:20-07:00",
+    "message": "Merge pull request #146 from musicjunkieg/feat/404-classifier-eval",
+    "files_changed": 0
+  },
+  {
+    "hash": "75160faee0afd2586c65fd3985da5b6c5857f2cc",
+    "short_hash": "75160fa",
+    "author": "Bryan Guffey",
+    "date": "2026-10-19T16:14:04-07:00",
+    "message": "Merge branch 'staging' of github.com:musicjunkieg/charcoal into feat/404-classifier-eval\n\n# Conflicts:\n#\tdocs/git-history.json\n#\tdocs/graph-data.json",
+    "files_changed": 0
+  },
+  {
     "hash": "596d52179934bf584e40c99857f82a74aa4015d7",
     "short_hash": "596d521",
     "author": "Bryan Guffey",
