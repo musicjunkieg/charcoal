@@ -1,5 +1,13 @@
 [
   {
+    "hash": "1bc85a481e516d421b7e6a6f8cf447222fd4a24e",
+    "short_hash": "1bc85a4",
+    "author": "Bryan Guffey",
+    "date": "2026-10-21T16:49:19-07:00",
+    "message": "chore(404): sync decision graph after Part A merge\n\nMarks the finished #387 and #404 Part A nodes completed, the rejected\neval options rejected, and the #404 goal active (Part B remains).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "36019d963e0890d539ba2ce062c4bd0b10046e15",
     "short_hash": "36019d9",
     "author": "Bryan Guffey",

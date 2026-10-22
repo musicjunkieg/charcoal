@@ -12363,6 +12363,94 @@
       "created_at": "2026-10-21T16:46:31.689850-07:00",
       "updated_at": "2026-10-21T16:48:57.001625-07:00",
       "metadata_json": "{\"branch\":\"feat/404-classifier-eval\",\"commit\":\"36019d9\",\"confidence\":95}"
+    },
+    {
+      "id": 1134,
+      "change_id": "861f27a4-62ab-4e4e-a9e6-0f30ef4a7f41",
+      "node_type": "goal",
+      "title": "Respond to Railway env-var security incident 2026-10-21",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-21T18:09:10.780998-07:00",
+      "updated_at": "2026-10-21T18:09:10.780998-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"confidence\":95,\"prompt\":\"Before we get started on anything else, we need to deal with this [Railway Security Disclosure email screenshot]\"}"
+    },
+    {
+      "id": 1135,
+      "change_id": "45240e83-f261-4ca3-9f3c-5cad3cb2322b",
+      "node_type": "action",
+      "title": "Remove public TCP proxies on prod+staging Postgres",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-21T18:09:10.798629-07:00",
+      "updated_at": "2026-10-21T18:09:14.733531-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"commit\":\"1bc85a4\",\"confidence\":95}"
+    },
+    {
+      "id": 1136,
+      "change_id": "b2eac900-42b2-4e58-b7be-2df9ddad6c7d",
+      "node_type": "outcome",
+      "title": "Public DB access closed; external login with real password fails; sites 200",
+      "description": null,
+      "status": "completed",
+      "created_at": "2026-10-21T18:09:10.814426-07:00",
+      "updated_at": "2026-10-21T18:09:14.741163-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"commit\":\"1bc85a4\",\"confidence\":95}"
+    },
+    {
+      "id": 1137,
+      "change_id": "a351cab8-8405-435f-9a1a-e1c82d303985",
+      "node_type": "goal",
+      "title": "Evaluate CoPE-B-S1 multi-label; decompose master policy into explainable component policies",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T11:52:56.872797-07:00",
+      "updated_at": "2026-10-22T11:52:56.872797-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"confidence\":85,\"prompt\":\"Okay, I'm going to hand you some information and I want you to go research it fully, and I am guessing this is going to go into our testing we're already doing because, Zentropi released a new model that lets us have a bunch of policies and it evaluates against ALL of them at once. It's also natively system one/Jev compatible!! This is incredible, but I want to think about how we test and how we'd split up policies so they test for components of our master policy so we can tell people exactly why we flagged things!! [attached: CoPE-B-S1 announcement email PDF]\"}"
+    },
+    {
+      "id": 1138,
+      "change_id": "6e2d95a4-cf40-444a-a541-2cc866b18b67",
+      "node_type": "option",
+      "title": "Approach 1: master policy decides, component policies explain",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T12:40:23.818629-07:00",
+      "updated_at": "2026-10-22T12:40:23.818629-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"confidence\":70}"
+    },
+    {
+      "id": 1139,
+      "change_id": "c3f0192e-54e5-4d06-b6ef-6c31d50d674e",
+      "node_type": "option",
+      "title": "Approach 2: components decide (any fires = toxic)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T12:40:23.831604-07:00",
+      "updated_at": "2026-10-22T12:40:23.831604-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"confidence\":70}"
+    },
+    {
+      "id": 1140,
+      "change_id": "b2902886-19c9-4b19-ad55-b788c0f5eefe",
+      "node_type": "option",
+      "title": "Approach 3: orthogonal axes (target/kind/severity) combined in code",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T12:40:23.849823-07:00",
+      "updated_at": "2026-10-22T12:40:23.849823-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"confidence\":70}"
+    },
+    {
+      "id": 1141,
+      "change_id": "b34cd419-0848-4c96-b744-7cd9a71d9ea3",
+      "node_type": "decision",
+      "title": "Master decides + 6 distinct reason families explain (UI-only audience)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T12:40:23.862230-07:00",
+      "updated_at": "2026-10-22T12:40:23.862230-07:00",
+      "metadata_json": "{\"branch\":\"chore/404-graph-sync\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -25290,6 +25378,94 @@
       "weight": 1.0,
       "rationale": "merge of the approved PR",
       "created_at": "2026-10-21T16:46:31.696722-07:00"
+    },
+    {
+      "id": 1186,
+      "from_node_id": 1134,
+      "to_node_id": 1135,
+      "from_change_id": "861f27a4-62ab-4e4e-a9e6-0f30ef4a7f41",
+      "to_change_id": "45240e83-f261-4ca3-9f3c-5cad3cb2322b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Immediate containment without breaking prod",
+      "created_at": "2026-10-21T18:09:14.720940-07:00"
+    },
+    {
+      "id": 1187,
+      "from_node_id": 1135,
+      "to_node_id": 1136,
+      "from_change_id": "45240e83-f261-4ca3-9f3c-5cad3cb2322b",
+      "to_change_id": "b2eac900-42b2-4e58-b7be-2df9ddad6c7d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Result",
+      "created_at": "2026-10-21T18:09:14.727506-07:00"
+    },
+    {
+      "id": 1188,
+      "from_node_id": 1137,
+      "to_node_id": 1138,
+      "from_change_id": "a351cab8-8405-435f-9a1a-e1c82d303985",
+      "to_change_id": "6e2d95a4-cf40-444a-a541-2cc866b18b67",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Candidate approach",
+      "created_at": "2026-10-22T12:40:28.531169-07:00"
+    },
+    {
+      "id": 1189,
+      "from_node_id": 1138,
+      "to_node_id": 1141,
+      "from_change_id": "6e2d95a4-cf40-444a-a541-2cc866b18b67",
+      "to_change_id": "b34cd419-0848-4c96-b744-7cd9a71d9ea3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Considered",
+      "created_at": "2026-10-22T12:40:28.539968-07:00"
+    },
+    {
+      "id": 1190,
+      "from_node_id": 1137,
+      "to_node_id": 1139,
+      "from_change_id": "a351cab8-8405-435f-9a1a-e1c82d303985",
+      "to_change_id": "c3f0192e-54e5-4d06-b6ef-6c31d50d674e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Candidate approach",
+      "created_at": "2026-10-22T12:40:28.547113-07:00"
+    },
+    {
+      "id": 1191,
+      "from_node_id": 1139,
+      "to_node_id": 1141,
+      "from_change_id": "c3f0192e-54e5-4d06-b6ef-6c31d50d674e",
+      "to_change_id": "b34cd419-0848-4c96-b744-7cd9a71d9ea3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Considered",
+      "created_at": "2026-10-22T12:40:28.554200-07:00"
+    },
+    {
+      "id": 1192,
+      "from_node_id": 1137,
+      "to_node_id": 1140,
+      "from_change_id": "a351cab8-8405-435f-9a1a-e1c82d303985",
+      "to_change_id": "b2902886-19c9-4b19-ad55-b788c0f5eefe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Candidate approach",
+      "created_at": "2026-10-22T12:40:28.561368-07:00"
+    },
+    {
+      "id": 1193,
+      "from_node_id": 1140,
+      "to_node_id": 1141,
+      "from_change_id": "b2902886-19c9-4b19-ad55-b788c0f5eefe",
+      "to_change_id": "b34cd419-0848-4c96-b744-7cd9a71d9ea3",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Considered",
+      "created_at": "2026-10-22T12:40:28.568382-07:00"
     }
   ],
   "documents": [
