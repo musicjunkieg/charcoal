@@ -1,5 +1,13 @@
 [
   {
+    "hash": "3dc92c66a014397a8971a603adc1a9403d0fb6ff",
+    "short_hash": "3dc92c6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T18:40:28-07:00",
+    "message": "feat(407): reason families and their draft policies\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 10
+  },
+  {
     "hash": "530d5753dc4fcec400fcca4787cd0f1a8963dfc8",
     "short_hash": "530d575",
     "author": "Bryan Guffey",

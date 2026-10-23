@@ -12473,6 +12473,39 @@
       "created_at": "2026-10-22T17:36:54.887210-07:00",
       "updated_at": "2026-10-22T17:36:54.887210-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"530d575\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-22-407-cope-b-s1-eval.md\"]}"
+    },
+    {
+      "id": 1144,
+      "change_id": "dfa34f62-dd6b-4d20-964b-0f6115548e24",
+      "node_type": "action",
+      "title": "Task 1: reason families + policies (#407)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T18:40:42.478928-07:00",
+      "updated_at": "2026-10-22T18:40:42.478928-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"3dc92c6\",\"confidence\":85}"
+    },
+    {
+      "id": 1145,
+      "change_id": "2d2a634f-7fc0-46ae-8a79-0ed2575d6e10",
+      "node_type": "outcome",
+      "title": "Task 1 committed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T18:40:45.574907-07:00",
+      "updated_at": "2026-10-22T18:40:45.574907-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"3dc92c6\",\"confidence\":90}"
+    },
+    {
+      "id": 1146,
+      "change_id": "58ade7e8-f4a8-495d-92fa-60e3a936a0a6",
+      "node_type": "action",
+      "title": "Task 2: S1 hosted client (#407)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T18:42:11.243016-07:00",
+      "updated_at": "2026-10-22T18:42:11.243016-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"3dc92c6\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -25510,6 +25543,28 @@
       "weight": 1.0,
       "rationale": "Plan implements the approved spec",
       "created_at": "2026-10-22T17:36:57.058577-07:00"
+    },
+    {
+      "id": 1196,
+      "from_node_id": 1143,
+      "to_node_id": 1144,
+      "from_change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "to_change_id": "dfa34f62-dd6b-4d20-964b-0f6115548e24",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implementation of Task 1",
+      "created_at": "2026-10-22T18:40:48.303058-07:00"
+    },
+    {
+      "id": 1197,
+      "from_node_id": 1144,
+      "to_node_id": 1145,
+      "from_change_id": "dfa34f62-dd6b-4d20-964b-0f6115548e24",
+      "to_change_id": "2d2a634f-7fc0-46ae-8a79-0ed2575d6e10",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 1 implementation complete",
+      "created_at": "2026-10-22T18:40:50.329064-07:00"
     }
   ],
   "documents": [

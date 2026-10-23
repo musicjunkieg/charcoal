@@ -10,6 +10,7 @@ pub mod models;
 pub mod reasons;
 pub mod report;
 pub mod runner;
+pub mod s1;
 
 /// FNV-1a 64-bit. A fixed, dependency-free hash: used for content identity
 /// in the verdict cache and for the stable holdout/sample selections, so the
