@@ -281,15 +281,12 @@ mod tests {
     fn fam<'a>(s: &'a ReasonStats, k: &str) -> &'a FamilyStats {
         s.families.iter().find(|f| f.key == k).unwrap()
     }
-    fn one(
-        r: (String, VerdictRecord),
-        a: Answer,
-        ticks: &[&str],
-    ) -> (
+    type Fixture = (
         HashMap<String, VerdictRecord>,
         HashMap<String, Answer>,
         HashMap<String, Vec<String>>,
-    ) {
+    );
+    fn one(r: (String, VerdictRecord), a: Answer, ticks: &[&str]) -> Fixture {
         let id = r.0.clone();
         (
             [r].into(),
@@ -352,21 +349,23 @@ mod tests {
 
     #[test]
     fn every_family_row_ends_in_the_on_clean_column() {
-        let mut s = ReasonStats::default();
-        s.families = vec![
-            FamilyStats {
-                key: "pile_on",
-                when_ticked: Rate { hits: 2, n: 3 },
-                on_clean_calls: 7,
-                ..FamilyStats::default()
-            },
-            FamilyStats {
-                key: "mockery",
-                when_ticked: Rate { hits: 9, n: 12 },
-                when_not_ticked: Rate { hits: 1, n: 30 },
-                on_clean_calls: 12,
-            },
-        ];
+        let s = ReasonStats {
+            families: vec![
+                FamilyStats {
+                    key: "pile_on",
+                    when_ticked: Rate { hits: 2, n: 3 },
+                    on_clean_calls: 7,
+                    ..FamilyStats::default()
+                },
+                FamilyStats {
+                    key: "mockery",
+                    when_ticked: Rate { hits: 9, n: 12 },
+                    when_not_ticked: Rate { hits: 1, n: 30 },
+                    on_clean_calls: 12,
+                },
+            ],
+            ..ReasonStats::default()
+        };
         let out = render_reasons("s1-bundle", &s);
         let width = |needle: &str| {
             out.lines()
