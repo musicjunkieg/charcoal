@@ -1,5 +1,13 @@
 [
   {
+    "hash": "0ea193b721302d1132b4a90752653ee5f3e161a6",
+    "short_hash": "0ea193b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T19:34:47-07:00",
+    "message": "feat(407): optional reasons on toxic labels, validated at merge\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "e34aa86f8b640c6a3067e2c886c5c15affc37d55",
     "short_hash": "e34aa86",
     "author": "Bryan Guffey",

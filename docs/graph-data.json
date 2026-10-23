@@ -12550,6 +12550,28 @@
       "created_at": "2026-10-22T19:19:46.910729-07:00",
       "updated_at": "2026-10-22T19:19:46.910729-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"e34aa86\",\"confidence\":85}"
+    },
+    {
+      "id": 1151,
+      "change_id": "af006204-255d-4ff5-a3ba-afc941156ee8",
+      "node_type": "outcome",
+      "title": "Task 4 committed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T19:34:56.255881-07:00",
+      "updated_at": "2026-10-22T19:34:56.255881-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"0ea193b\",\"confidence\":90}"
+    },
+    {
+      "id": 1152,
+      "change_id": "27b6ceb2-bc56-47fd-a565-2dbd8473331a",
+      "node_type": "action",
+      "title": "Task 5: reasons report (#407)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T19:35:29.761993-07:00",
+      "updated_at": "2026-10-22T19:35:29.761993-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"0ea193b\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -25653,6 +25675,28 @@
       "weight": 1.0,
       "rationale": "committed",
       "created_at": "2026-10-22T19:19:16.276718-07:00"
+    },
+    {
+      "id": 1202,
+      "from_node_id": 1143,
+      "to_node_id": 1150,
+      "from_change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "to_change_id": "602b6203-612c-422c-9279-0980c57bb68a",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 4",
+      "created_at": "2026-10-22T19:34:56.262166-07:00"
+    },
+    {
+      "id": 1203,
+      "from_node_id": 1150,
+      "to_node_id": 1151,
+      "from_change_id": "602b6203-612c-422c-9279-0980c57bb68a",
+      "to_change_id": "af006204-255d-4ff5-a3ba-afc941156ee8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "committed",
+      "created_at": "2026-10-22T19:34:56.281177-07:00"
     }
   ],
   "documents": [

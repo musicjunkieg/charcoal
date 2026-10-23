@@ -1108,7 +1108,7 @@ async fn main() -> Result<()> {
 
         Commands::EvalClassifiers { action, dir } => {
             use charcoal::cli::eval_classifiers::{
-                cache, cost, data, labelling, models, report, runner,
+                cache, cost, data, labelling, models, reason_report, report, runner,
             };
             let verdicts = dir.join("verdicts");
             let pool = data::load_pool(&dir.join("pool.jsonl"))?;
@@ -1217,6 +1217,18 @@ async fn main() -> Result<()> {
                             &baseline
                         )
                     );
+                    let names: Vec<&str> = loaded.iter().map(|(m, _)| m.as_str()).collect();
+                    print!("{}", report::dev_pricing_note(&names));
+                    if let Some((_, recs)) = loaded.iter().find(|(m, _)| m == "s1-bundle") {
+                        let ticked = data::load_current_reasons(&labels_path, &pool)?;
+                        print!(
+                            "{}",
+                            reason_report::render_reasons(
+                                "s1-bundle",
+                                &reason_report::reason_stats(recs, &answers, &ticked)
+                            )
+                        );
+                    }
                 }
             }
         }

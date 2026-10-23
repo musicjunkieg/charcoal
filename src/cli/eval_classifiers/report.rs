@@ -121,7 +121,7 @@ pub fn removed_labels_note(removed: usize) -> String {
     )
 }
 
-fn rate_cell(r: &Rate) -> String {
+pub(crate) fn rate_cell(r: &Rate) -> String {
     match (r.value(), r.wilson95()) {
         (Some(v), Some((lo, hi))) => {
             format!(
@@ -238,6 +238,15 @@ pub fn render(
         );
     }
     s
+}
+
+/// S1's $0 is Zentropi's free development tier, not a production price
+/// (spec §4.5), so say so wherever it shows up.
+pub fn dev_pricing_note(models: &[&str]) -> String {
+    if !models.iter().any(|m| m.starts_with("s1-")) {
+        return String::new();
+    }
+    "note: s1-* shows $0 because Zentropi's hosted API is free for development; production pricing is unpublished\n".to_string()
 }
 
 #[cfg(test)]

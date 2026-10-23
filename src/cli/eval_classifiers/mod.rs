@@ -7,6 +7,7 @@ pub mod data;
 pub mod labelling;
 pub mod metrics;
 pub mod models;
+pub mod reason_report;
 pub mod reasons;
 pub mod report;
 pub mod runner;
