@@ -43,6 +43,10 @@ pub struct Label {
     /// a label keyed only by id would survive an edit of the post and be
     /// scored against text the human never saw (Codex fix 2).
     pub content_hash: String,
+    /// #407: the reason families the human ticked. Toxic labels only;
+    /// absent on lines written before #407.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
 }
 
 pub fn load_pool(path: &Path) -> Result<Vec<FixtureRow>> {
@@ -153,6 +157,44 @@ pub struct CurrentLabels {
     /// rows stay in labels.jsonl (the post may come back); they just are not
     /// truth while the post is gone.
     pub removed: usize,
+}
+
+/// Each post's ticked reasons, from the newest label row whose hash matches
+/// the post's present text — the same rule [`load_current_labels`] uses, so
+/// reasons never outlive the answer they belong to. Only posts with at least
+/// one reason are returned. A hand-edited bad reason is an error naming the
+/// line: silently skipping it would score a family on missing data.
+pub fn load_current_reasons(
+    path: &Path,
+    pool: &[FixtureRow],
+) -> Result<HashMap<String, Vec<String>>> {
+    let present: HashMap<&str, String> = pool
+        .iter()
+        .map(|r| (r.id.as_str(), content_hash(&r.content)))
+        .collect();
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut out = HashMap::new();
+    for (i, l) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        let at = format!("{} line {}", path.display(), i + 1);
+        let label: Label = serde_json::from_str(l).with_context(|| at.clone())?;
+        if !label.reasons.is_empty() && label.label != Truth::Toxic {
+            bail!("{at}: reasons are only for toxic labels");
+        }
+        super::reasons::check_reason_keys(&label.reasons).with_context(|| at.clone())?;
+        if present.get(label.id.as_str()) == Some(&label.content_hash) {
+            // Newest matching row wins, as for the answer itself.
+            if label.reasons.is_empty() {
+                out.remove(&label.id);
+            } else {
+                out.insert(label.id, label.reasons);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Labels whose recorded `content_hash` matches the pool's present text for
@@ -299,6 +341,46 @@ mod tests {
             r#"{{"id":"{id}","label":"{label}","source":"holdout","content_hash":"{}"}}"#,
             content_hash(text)
         )
+    }
+
+    fn reasons_line(id: &str, label: &str, text: &str, reasons: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","label":"{label}","source":"holdout","content_hash":"{}","reasons":{reasons}}}"#,
+            content_hash(text)
+        )
+    }
+
+    /// #407: older label lines have no reasons and still load.
+    #[test]
+    fn labels_without_reasons_still_load() {
+        let f = file(&[&label_line("a", "toxic", "x")]);
+        assert!(load_current_reasons(f.path(), &pool_of(&[("a", "x")]))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn reasons_follow_the_label_for_the_present_text() {
+        let f = file(&[
+            &reasons_line("a", "toxic", "old", r#"["threat"]"#),
+            &reasons_line("a", "toxic", "new", r#"["mockery","personal_attack"]"#),
+            &reasons_line("gone", "toxic", "z", r#"["threat"]"#),
+        ]);
+        let got = load_current_reasons(f.path(), &pool_of(&[("a", "new")])).unwrap();
+        assert_eq!(got["a"], vec!["mockery", "personal_attack"]);
+        assert!(!got.contains_key("gone"));
+    }
+
+    #[test]
+    fn a_bad_reason_in_labels_jsonl_is_an_error_naming_the_line() {
+        let unknown = file(&[&reasons_line("a", "toxic", "x", r#"["rude"]"#)]);
+        let err = format!(
+            "{:#}",
+            load_current_reasons(unknown.path(), &pool_of(&[("a", "x")])).unwrap_err()
+        );
+        assert!(err.contains("line 1") && err.contains("rude"), "{err}");
+        let on_clean = file(&[&reasons_line("a", "clean", "x", r#"["threat"]"#)]);
+        assert!(load_current_reasons(on_clean.path(), &pool_of(&[("a", "x")])).is_err());
     }
 
     /// Codex fix 2: a label describes the text it was given for. Without the

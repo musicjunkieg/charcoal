@@ -1188,7 +1188,7 @@ async fn main() -> Result<()> {
                             labelling::pick_for_labelling(&pool, &per_model, &answers, &seeds);
                         labelling::write_to_label(&to_label, &picked, &answers, &pool)?;
                         println!(
-                            "{} posts to label ({}) in {} — set label to toxic or clean, then run with --merge",
+                            "{} posts to label ({}) in {} — set label to toxic or clean (for toxic, optionally list reasons: personal_attack, identity_hate, mockery, threat, pile_on, bad_faith), then run with --merge",
                             picked.len(),
                             labelling::pick_summary(&picked),
                             to_label.display()

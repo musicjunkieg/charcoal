@@ -12528,6 +12528,28 @@
       "created_at": "2026-10-22T18:56:01.178137-07:00",
       "updated_at": "2026-10-22T18:56:01.178137-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"7a080f5\",\"confidence\":85}"
+    },
+    {
+      "id": 1149,
+      "change_id": "45bf43b6-0d9e-407e-8b3e-2451fdec05d2",
+      "node_type": "outcome",
+      "title": "Task 3 committed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T19:19:12.214063-07:00",
+      "updated_at": "2026-10-22T19:19:12.214063-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"e34aa86\",\"confidence\":90}"
+    },
+    {
+      "id": 1150,
+      "change_id": "602b6203-612c-422c-9279-0980c57bb68a",
+      "node_type": "action",
+      "title": "Task 4: reasons on human labels (#407)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T19:19:46.910729-07:00",
+      "updated_at": "2026-10-22T19:19:46.910729-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"e34aa86\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -25609,6 +25631,28 @@
       "weight": 1.0,
       "rationale": "Task 2 result",
       "created_at": "2026-10-22T18:55:21.793721-07:00"
+    },
+    {
+      "id": 1200,
+      "from_node_id": 1143,
+      "to_node_id": 1148,
+      "from_change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "to_change_id": "5ff72593-769a-47ae-9a9f-4ea4e51051fe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 3 implementation",
+      "created_at": "2026-10-22T19:19:16.269573-07:00"
+    },
+    {
+      "id": 1201,
+      "from_node_id": 1148,
+      "to_node_id": 1149,
+      "from_change_id": "5ff72593-769a-47ae-9a9f-4ea4e51051fe",
+      "to_change_id": "45bf43b6-0d9e-407e-8b3e-2451fdec05d2",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "committed",
+      "created_at": "2026-10-22T19:19:16.276718-07:00"
     }
   ],
   "documents": [

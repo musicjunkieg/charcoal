@@ -94,6 +94,8 @@ struct ToLabel<'a> {
     source: Source,
     label: &'a str,
     note: &'a str,
+    /// #407: for toxic answers, tick any of the reason families.
+    reasons: &'a [&'a str],
 }
 
 /// The pool's present text, by id — what [`classify`] checks a row against.
@@ -275,6 +277,7 @@ pub fn write_to_label(
             source: *source,
             label: "",
             note: "",
+            reasons: &[],
         };
         writeln!(f, "{}", serde_json::to_string(&line)?)?;
     }
@@ -303,6 +306,28 @@ pub fn skipped_note(skipped: usize) -> String {
         "{skipped} answer{} not saved — post removed from the pool or its text changed since you labelled it; holdout and seed posts still in the pool are offered again by `label`\n",
         if skipped == 1 { "" } else { "s" }
     )
+}
+
+/// The `reasons` a row lists: absent or null means none. Only toxic answers
+/// may carry them, and every key must be a known family.
+fn read_reasons(row: &serde_json::Value, truth: Truth, at: &str) -> Result<Vec<String>> {
+    let keys: Vec<String> = match row.get("reasons") {
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(serde_json::Value::Array(a)) => a
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(|s| s.trim().to_string())
+                    .with_context(|| format!("{at}: every reason must be text, e.g. \"mockery\""))
+            })
+            .collect::<Result<_>>()?,
+        Some(_) => bail!("{at}: reasons must be a list, e.g. [\"mockery\"]"),
+    };
+    if !keys.is_empty() && truth == Truth::Clean {
+        bail!("{at}: reasons are only for toxic posts — clear them or label the post toxic");
+    }
+    super::reasons::check_reason_keys(&keys).with_context(|| at.to_string())?;
+    Ok(keys)
 }
 
 pub fn merge_labels(
@@ -334,6 +359,8 @@ pub fn merge_labels(
         let Some((id, truth)) = read_answer(&row, &at)? else {
             continue;
         };
+        // Validated even for rows about to be skipped: a typo is worth reporting.
+        let reasons = read_reasons(&row, truth, &at)?;
         match classify(id, Shown::of(&row), truth, &pool_text, &existing) {
             // Skip and count, never stop: `label` may replace this file, so
             // stopping here would lock the two commands against each other
@@ -373,6 +400,7 @@ pub fn merge_labels(
             // The pool's text — checked equal to the shown text above when
             // the row carries it — is what this answer describes.
             content_hash: content_hash(pool_content),
+            reasons,
         };
         // Even two agreeing answers are an error: the human should fix the
         // file rather than have the last one silently win on reload.
@@ -438,6 +466,54 @@ mod tests {
             .map(|i| format!("o{i}"))
             .find(|id| !in_holdout(id))
             .unwrap()
+    }
+
+    #[test]
+    fn merge_saves_reasons_on_a_toxic_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = holdout_id();
+        let pool = vec![row(&h)];
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        std::fs::write(&to_label, format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":"","reasons":["mockery"]}}"#)).unwrap();
+        merge_labels(&to_label, &labels, &pool).unwrap();
+        let saved = std::fs::read_to_string(&labels).unwrap();
+        assert!(saved.contains(r#""reasons":["mockery"]"#), "{saved}");
+    }
+
+    #[test]
+    fn merge_refuses_bad_reasons_before_writing_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = holdout_id();
+        let pool = vec![row(&h)];
+        let labels = dir.path().join("labels.jsonl");
+        let to_label = dir.path().join("to-label.jsonl");
+        for (label, reasons, needle) in [
+            ("clean", r#"["threat"]"#, "only for toxic"),
+            ("toxic", r#"["rude"]"#, "rude"),
+            ("toxic", r#""threat""#, "must be a list"),
+        ] {
+            std::fs::write(&to_label, format!(r#"{{"id":"{h}","content":"post {h}","label":"{label}","note":"","reasons":{reasons}}}"#)).unwrap();
+            let err = format!("{:#}", merge_labels(&to_label, &labels, &pool).unwrap_err());
+            assert!(err.contains(needle) && err.contains("line 1"), "{err}");
+            assert!(!labels.exists(), "nothing written");
+        }
+    }
+
+    #[test]
+    fn to_label_rows_offer_an_empty_reasons_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("to-label.jsonl");
+        write_to_label(
+            &p,
+            &[(row("a"), Source::Holdout)],
+            &HashMap::new(),
+            &[row("a")],
+        )
+        .unwrap();
+        assert!(std::fs::read_to_string(&p)
+            .unwrap()
+            .contains(r#""reasons":[]"#));
     }
 
     #[test]
