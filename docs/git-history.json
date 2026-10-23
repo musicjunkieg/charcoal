@@ -1,5 +1,13 @@
 [
   {
+    "hash": "84c3ab4ea68ec6654dff8dd046ee10e2cbbbc83c",
+    "short_hash": "84c3ab4",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T15:53:21-07:00",
+    "message": "docs(407): design spec for CoPE-B-S1 eval with explainable reasons\n\nMaster policy decides; six distinct reason families explain. Hosted\nmultilabel API first (free for dev), self-host later only if earned.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "1bc85a481e516d421b7e6a6f8cf447222fd4a24e",
     "short_hash": "1bc85a4",
     "author": "Bryan Guffey",
