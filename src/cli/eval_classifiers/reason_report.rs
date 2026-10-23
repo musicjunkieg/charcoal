@@ -17,9 +17,10 @@ pub const MIN_TICKED: u32 = 10;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FamilyStats {
     pub key: &'static str,
-    /// Of posts where Bryan ticked this family: how often S1 said yes.
+    /// Of posts S1 flagged that Bryan labelled toxic with ticked reasons,
+    /// those where he ticked this family: how often S1's family said yes.
     pub when_ticked: Rate,
-    /// Of posts where he ticked others but not this one: how often S1 said yes.
+    /// Same posts, where he ticked others but not this one: how often S1 said yes.
     pub when_not_ticked: Rate,
     /// Posts the master called clean where this family still fired.
     pub on_clean_calls: u32,
@@ -35,6 +36,9 @@ pub struct ReasonStats {
     /// A high count means some reason policy is broader than the master.
     pub clean_with_reasons: u32,
     pub incomplete: u32,
+    /// Of posts S1 flagged that Bryan labelled toxic with >=1 ticked reason:
+    /// how often S1's top reason is one he ticked. A flag with no reason
+    /// fired counts in `n` as a miss.
     pub top_agree: Rate,
     pub families: Vec<FamilyStats>,
 }
@@ -80,6 +84,12 @@ pub fn reason_stats(
                 f.on_clean_calls += 1;
             }
         }
+        // Reasons only explain flags S1 made. A post S1 missed is a master
+        // miss, already scored in the headline; counting it here would dilute
+        // the reason score with a different failure.
+        if !called {
+            continue;
+        }
         let Some(ticks) = ticked.get(id).filter(|t| !t.is_empty()) else {
             continue;
         };
@@ -97,11 +107,11 @@ pub fn reason_stats(
                 rate.hits += 1;
             }
         }
-        if let Some(top) = set.top() {
-            s.top_agree.n += 1;
-            if ticks.iter().any(|t| t == top) {
-                s.top_agree.hits += 1;
-            }
+        // No reason fired counts as a miss, so "flagged with no reason"
+        // cannot inflate agreement.
+        s.top_agree.n += 1;
+        if set.top().is_some_and(|top| ticks.iter().any(|t| t == top)) {
+            s.top_agree.hits += 1;
         }
     }
     s
@@ -123,7 +133,7 @@ pub fn render_reasons(model: &str, s: &ReasonStats) -> String {
     let _ = writeln!(out, "  left out (incomplete reasons): {}", s.incomplete);
     let _ = writeln!(
         out,
-        "  top reason is one you ticked: {}",
+        "  top reason is one you ticked (posts S1 flagged that you labelled toxic with reasons): {}",
         rate_cell(&s.top_agree)
     );
     let _ = writeln!(
@@ -133,11 +143,10 @@ pub fn render_reasons(model: &str, s: &ReasonStats) -> String {
     );
     for f in &s.families {
         if f.when_ticked.n < MIN_TICKED {
-            let _ = writeln!(
-                out,
-                "  {:<16} too few examples ({} < {MIN_TICKED}) {:>40}",
-                f.key, f.when_ticked.n, f.on_clean_calls
-            );
+            // Pad the message to the width of the two rate columns plus the
+            // gap between them (28 + 1 + 28) so "on clean" lines up.
+            let msg = format!("too few examples ({} < {MIN_TICKED})", f.when_ticked.n);
+            let _ = writeln!(out, "  {:<16} {:<57} {:>9}", f.key, msg, f.on_clean_calls);
             continue;
         }
         let _ = writeln!(
@@ -269,10 +278,114 @@ mod tests {
         assert!(out.contains("REASONS"), "{out}");
     }
 
+    fn fam<'a>(s: &'a ReasonStats, k: &str) -> &'a FamilyStats {
+        s.families.iter().find(|f| f.key == k).unwrap()
+    }
+    fn one(
+        r: (String, VerdictRecord),
+        a: Answer,
+        ticks: &[&str],
+    ) -> (
+        HashMap<String, VerdictRecord>,
+        HashMap<String, Answer>,
+        HashMap<String, Vec<String>>,
+    ) {
+        let id = r.0.clone();
+        (
+            [r].into(),
+            [(id.clone(), a)].into(),
+            [(id, ticks.iter().map(|t| t.to_string()).collect())].into(),
+        )
+    }
+
+    #[test]
+    fn a_post_labelled_clean_with_ticks_is_left_out_of_agreement() {
+        let (v, a, t) = one(
+            rec("a", true, &[("mockery", 0.9)], true),
+            ans(Truth::Clean, Source::Holdout),
+            &["mockery"],
+        );
+        let s = reason_stats(&v, &a, &t);
+        assert_eq!(s.top_agree, Rate::default());
+        assert_eq!(fam(&s, "mockery").when_ticked, Rate::default());
+    }
+
+    #[test]
+    fn ticks_on_a_non_holdout_post_are_left_out() {
+        let (v, a, t) = one(
+            rec("a", true, &[("mockery", 0.9)], true),
+            ans(Truth::Toxic, Source::Seed),
+            &["mockery"],
+        );
+        let s = reason_stats(&v, &a, &t);
+        assert_eq!(s.top_agree, Rate::default());
+        assert_eq!(fam(&s, "mockery").when_ticked, Rate::default());
+    }
+
+    #[test]
+    fn a_master_miss_does_not_dilute_the_reason_score() {
+        // S1 called clean, Bryan toxic with ticks, a reason still fired.
+        let (v, a, t) = one(
+            rec("a", false, &[("mockery", 0.9)], true),
+            ans(Truth::Toxic, Source::Holdout),
+            &["mockery"],
+        );
+        let s = reason_stats(&v, &a, &t);
+        assert_eq!(s.top_agree, Rate::default());
+        assert_eq!(fam(&s, "mockery").when_ticked, Rate::default());
+        assert_eq!(fam(&s, "mockery").when_not_ticked, Rate::default());
+        assert_eq!(s.clean_calls, 1);
+        assert_eq!(fam(&s, "mockery").on_clean_calls, 1);
+    }
+
+    #[test]
+    fn flagged_ticked_but_no_reason_fired_counts_as_a_top_reason_miss() {
+        let (v, a, t) = one(
+            rec("a", true, &[], true),
+            ans(Truth::Toxic, Source::Holdout),
+            &["mockery"],
+        );
+        let s = reason_stats(&v, &a, &t);
+        assert_eq!(s.top_agree, Rate { hits: 0, n: 1 });
+        assert_eq!(fam(&s, "mockery").when_ticked, Rate { hits: 0, n: 1 });
+    }
+
+    #[test]
+    fn every_family_row_ends_in_the_on_clean_column() {
+        let mut s = ReasonStats::default();
+        s.families = vec![
+            FamilyStats {
+                key: "pile_on",
+                when_ticked: Rate { hits: 2, n: 3 },
+                on_clean_calls: 7,
+                ..FamilyStats::default()
+            },
+            FamilyStats {
+                key: "mockery",
+                when_ticked: Rate { hits: 9, n: 12 },
+                when_not_ticked: Rate { hits: 1, n: 30 },
+                on_clean_calls: 12,
+            },
+        ];
+        let out = render_reasons("s1-bundle", &s);
+        let width = |needle: &str| {
+            out.lines()
+                .find(|l| l.contains(needle))
+                .unwrap()
+                .trim_end()
+                .chars()
+                .count()
+        };
+        let header = width("on clean");
+        assert_eq!(width("pile_on"), header, "{out}");
+        assert_eq!(width("mockery"), header, "{out}");
+    }
+
     #[test]
     fn the_dev_pricing_note_appears_only_for_s1() {
         use crate::cli::eval_classifiers::report::dev_pricing_note;
         assert_eq!(dev_pricing_note(&["cope-b"]), "");
         assert!(dev_pricing_note(&["cope-b", "s1-bundle"]).contains("free for development"));
+        assert!(dev_pricing_note(&["s1-master"]).contains("free for development"));
     }
 }
