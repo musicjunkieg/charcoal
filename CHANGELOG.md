@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- #407 — CoPE-B-S1 in the classifier eval, with reasons. New eval models
+  `s1-master` and `s1-bundle` call Zentropi's hosted multilabel API. The
+  master policy still decides; six reason families (personal attack, identity
+  hate, mockery, threat, pile-on, bad faith) explain each flag. Labels can
+  carry ticked reasons, and the report scores how well S1's reasons match
+  them. Eval-only: production is unchanged.
 - #404 — `charcoal eval-classifiers`: compares classifiers (today CoPE-B and
   Detoxify; Jev, Clef and Strands Decider follow in Part B) on the same posts.
   Headline false-alarm and miss rates come from a fixed hash-chosen holdout;

@@ -181,3 +181,32 @@ the two lines with the same id.
 - Known limit: after CoPE-B, the next model's cap is the cap minus the
   *estimated* spend so far (real provider-reported usage arrives in Part B).
 - Verdicts live in `verdicts/` and are never committed (its `.gitignore`).
+
+## CoPE-B-S1 and reasons (#407)
+
+Two more models call Zentropi's hosted CoPE-B-S1 with `ZENTROPI_API_KEY`.
+The hosted API is free for development, so they are priced $0 and keep running
+after a paid model reaches the cap.
+
+- `s1-master` asks only your master policy (`gpu/cope-b-runpod/policy.txt`).
+- `s1-bundle` asks the master policy plus six reason policies in one request.
+  The master alone decides toxic or clean; the reasons only explain.
+
+Compare `s1-bundle` with `s1-master` in the report to see whether bundling hurts.
+
+**Ticking reasons.** In `to-label.jsonl`, a toxic post may list the reasons
+that apply: `"reasons": ["mockery", "threat"]`. Valid reasons are
+`personal_attack`, `identity_hate`, `mockery`, `threat`, `pile_on`, and
+`bad_faith`. Reasons on a clean post, or an unknown name, stop `--merge`
+before anything is saved. To add reasons to a post that is already in
+`labels.jsonl`, edit that line directly (`--merge` skips answers it already has).
+
+**Editing a reason policy.** The policies live in `evals/classifiers/reasons/`.
+Editing one changes `s1-bundle`'s policy version, so the next run re-asks every
+post for `s1-bundle` only. `s1-master` answers are reused.
+
+**The REASONS section** of the report (holdout only):
+- flagged with no reason: a high count means a family is missing or too narrow;
+- clean calls where a reason still fired: a high count means a reason policy is too broad;
+- top reason is one you ticked, and per family how often it fired when you did and did not tick it.
+  A family with fewer than 10 ticked posts shows "too few examples".
