@@ -12462,6 +12462,17 @@
       "created_at": "2026-10-22T15:53:29.371529-07:00",
       "updated_at": "2026-10-22T15:53:29.371529-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"84c3ab4\",\"confidence\":85,\"files\":[\"docs/superpowers/specs/2026-10-22-407-cope-b-s1-policy-decomposition-design.md\"]}"
+    },
+    {
+      "id": 1143,
+      "change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "node_type": "action",
+      "title": "Write #407 implementation plan (6 TDD tasks)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T17:36:54.887210-07:00",
+      "updated_at": "2026-10-22T17:36:54.887210-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"530d575\",\"confidence\":85,\"files\":[\"docs/superpowers/plans/2026-10-22-407-cope-b-s1-eval.md\"]}"
     }
   ],
   "edges": [
@@ -25488,6 +25499,17 @@
       "weight": 1.0,
       "rationale": "Spec documents the chosen design",
       "created_at": "2026-10-22T15:53:31.543211-07:00"
+    },
+    {
+      "id": 1195,
+      "from_node_id": 1142,
+      "to_node_id": 1143,
+      "from_change_id": "5bf86a72-e5ab-4ca5-9cad-642b6d939b9a",
+      "to_change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Plan implements the approved spec",
+      "created_at": "2026-10-22T17:36:57.058577-07:00"
     }
   ],
   "documents": [
