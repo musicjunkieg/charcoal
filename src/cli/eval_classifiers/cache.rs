@@ -30,6 +30,10 @@ pub struct VerdictRecord {
     pub input_chars: usize,
     /// Estimated spend for this post, from pricing.json.
     pub est_usd: f64,
+    /// #407: the reason families S1's bundle answered for this post. `None`
+    /// for models without reasons, and in every line written before #407.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasons: Option<super::reasons::ReasonSet>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,6 +67,7 @@ impl VerdictRecord {
             latency_ms: v.latency_ms,
             input_chars: content.chars().count(),
             est_usd,
+            reasons: None,
         }
     }
 
@@ -85,6 +90,7 @@ impl VerdictRecord {
             latency_ms: 0,
             input_chars: content.chars().count(),
             est_usd,
+            reasons: None,
         }
     }
 
@@ -439,5 +445,33 @@ mod tests {
             current(recs, &pool, None).is_empty(),
             "no identity recorded: nothing current"
         );
+    }
+
+    /// #407: old verdict lines (no `reasons`) still load, and a record with
+    /// reasons round-trips.
+    #[test]
+    fn reasons_are_optional_and_round_trip() {
+        let old = r#"{"id":"a","model":"m","content_hash":"0","model_id":"m-1","policy_version":"p-1","called_toxic":true,"error":null,"latency_ms":1,"input_chars":1,"est_usd":0.0}"#;
+        let rec: VerdictRecord = serde_json::from_str(old).unwrap();
+        assert!(rec.reasons.is_none());
+        assert!(
+            !serde_json::to_string(&rec).unwrap().contains("reasons"),
+            "absent stays absent"
+        );
+        let mut with = rec.clone();
+        with.reasons = Some(crate::cli::eval_classifiers::reasons::ReasonSet {
+            answers: [(
+                "threat".to_string(),
+                crate::cli::eval_classifiers::reasons::ReasonAnswer {
+                    fired: true,
+                    confidence: 0.9,
+                },
+            )]
+            .into(),
+            complete: true,
+        });
+        let back: VerdictRecord =
+            serde_json::from_str(&serde_json::to_string(&with).unwrap()).unwrap();
+        assert_eq!(back, with);
     }
 }

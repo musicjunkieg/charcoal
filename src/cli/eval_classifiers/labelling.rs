@@ -421,6 +421,7 @@ mod tests {
             latency_ms: 1,
             input_chars: 1,
             est_usd: 0.0,
+            reasons: None,
         }
     }
     fn by_id(recs: Vec<VerdictRecord>) -> HashMap<String, VerdictRecord> {

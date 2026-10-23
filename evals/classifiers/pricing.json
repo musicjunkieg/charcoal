@@ -1,4 +1,6 @@
 {
   "cope-b": { "usd_per_post": 0.00013 },
-  "detoxify": { "usd_per_post": 0.0 }
+  "detoxify": { "usd_per_post": 0.0 },
+  "s1-master": { "usd_per_post": 0.0 },
+  "s1-bundle": { "usd_per_post": 0.0 }
 }

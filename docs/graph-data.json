@@ -12506,6 +12506,28 @@
       "created_at": "2026-10-22T18:42:11.243016-07:00",
       "updated_at": "2026-10-22T18:42:11.243016-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"3dc92c6\",\"confidence\":85}"
+    },
+    {
+      "id": 1147,
+      "change_id": "d83ae3eb-4fa6-4add-9f0e-1f8b2a564eea",
+      "node_type": "outcome",
+      "title": "Task 2 committed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T18:55:19.969762-07:00",
+      "updated_at": "2026-10-22T18:55:19.969762-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"7a080f5\",\"confidence\":90}"
+    },
+    {
+      "id": 1148,
+      "change_id": "5ff72593-769a-47ae-9a9f-4ea4e51051fe",
+      "node_type": "action",
+      "title": "Task 3: save reasons + register s1 models (#407)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T18:56:01.178137-07:00",
+      "updated_at": "2026-10-22T18:56:01.178137-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"7a080f5\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -25565,6 +25587,28 @@
       "weight": 1.0,
       "rationale": "Task 1 implementation complete",
       "created_at": "2026-10-22T18:40:50.329064-07:00"
+    },
+    {
+      "id": 1198,
+      "from_node_id": 1143,
+      "to_node_id": 1146,
+      "from_change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "to_change_id": "58ade7e8-f4a8-495d-92fa-60e3a936a0a6",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 action",
+      "created_at": "2026-10-22T18:55:21.786834-07:00"
+    },
+    {
+      "id": 1199,
+      "from_node_id": 1146,
+      "to_node_id": 1147,
+      "from_change_id": "58ade7e8-f4a8-495d-92fa-60e3a936a0a6",
+      "to_change_id": "d83ae3eb-4fa6-4add-9f0e-1f8b2a564eea",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Task 2 result",
+      "created_at": "2026-10-22T18:55:21.793721-07:00"
     }
   ],
   "documents": [

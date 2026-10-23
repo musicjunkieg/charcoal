@@ -20,6 +20,7 @@ use super::cache::{
 };
 use super::cost::{estimate_usd, price_for, Budget, Price};
 use super::data::FixtureRow;
+use super::reasons::ReasonSource;
 use crate::toxicity::classifier::{ItemOutcome, ToxicityClassifier};
 use crate::toxicity::cost_meter::CostCeilingExceeded;
 
@@ -68,9 +69,40 @@ pub struct RunStats {
     pub stopped_at_cap: bool,
 }
 
+/// A model as the run loop sees it: the classifier, plus — for S1's bundle —
+/// where to collect the reasons behind each verdict.
+pub struct EvalModel {
+    pub classifier: Arc<dyn ToxicityClassifier>,
+    pub reasons: Option<Arc<dyn ReasonSource>>,
+}
+
+impl From<Arc<dyn ToxicityClassifier>> for EvalModel {
+    fn from(classifier: Arc<dyn ToxicityClassifier>) -> Self {
+        Self {
+            classifier,
+            reasons: None,
+        }
+    }
+}
+
 pub async fn run_model(
     model: &str,
     classifier: &dyn ToxicityClassifier,
+    pool: &[FixtureRow],
+    dir: &Path,
+    price: &Price,
+    budget: &mut Budget,
+    timeout: Duration,
+) -> Result<RunStats> {
+    run_model_with_reasons(model, classifier, None, pool, dir, price, budget, timeout).await
+}
+
+/// [`run_model`], also saving each verdict's reasons when `reasons` is given.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_model_with_reasons(
+    model: &str,
+    classifier: &dyn ToxicityClassifier,
+    reasons: Option<&dyn ReasonSource>,
     pool: &[FixtureRow],
     dir: &Path,
     price: &Price,
@@ -192,9 +224,15 @@ pub async fn run_model(
                 for ((row, est), outcome) in chunk.iter().zip(&ests).zip(outcomes) {
                     records.push(match outcome {
                         ItemOutcome::Verdict(v) if v.model_id == who.model_id && v.policy_version == who.policy_version => {
-                            VerdictRecord::from_verdict(&row.id, model, &row.content, &v, *est)
+                            let mut rec = VerdictRecord::from_verdict(&row.id, model, &row.content, &v, *est);
+                            rec.reasons = reasons.and_then(|r| r.take_reasons(&row.content));
+                            rec
                         }
                         ItemOutcome::Verdict(v) => {
+                            // Drop any reasons for it: they belong to a verdict we refuse.
+                            if let Some(r) = reasons {
+                                let _ = r.take_reasons(&row.content);
+                            }
                             let detail = format!(
                                 "identity mismatch: backend reported {}/{}, deployment declares {}/{}",
                                 v.model_id, v.policy_version, who.model_id, who.policy_version
@@ -326,7 +364,7 @@ pub async fn run_models<B, R>(
     mut report: R,
 ) -> Result<()>
 where
-    B: FnMut(&str, f64) -> Result<Arc<dyn ToxicityClassifier>>,
+    B: FnMut(&str, f64) -> Result<EvalModel>,
     R: FnMut(&ModelOutcome),
 {
     let RunPlan {
@@ -347,7 +385,7 @@ where
     for name in names {
         // Refuse an unpriced model before building (or paying for) anything.
         let price = price_for(prices, name)?;
-        let classifier = match build(name, budget.committed()) {
+        let built = match build(name, budget.committed()) {
             Ok(c) => c,
             Err(e) => {
                 // A missing key skips that model, not the run.
@@ -358,7 +396,18 @@ where
                 continue;
             }
         };
-        match run_model(name, classifier.as_ref(), pool, dir, price, budget, timeout).await {
+        match run_model_with_reasons(
+            name,
+            built.classifier.as_ref(),
+            built.reasons.as_deref(),
+            pool,
+            dir,
+            price,
+            budget,
+            timeout,
+        )
+        .await
+        {
             // Reaching the cap does NOT end the run: a later model may cost
             // nothing (Detoxify is local) (Codex fix 3). But it DOES end all
             // paid work: the budget holds only estimates, and if the stop came
@@ -973,7 +1022,7 @@ mod tests {
                     .find(|(n, _)| *n == name)
                     .map(|(_, m)| Arc::clone(m))
                     .with_context(|| format!("no fake for {name}"))?;
-                Ok(m as Arc<dyn ToxicityClassifier>)
+                Ok(EvalModel::from(m as Arc<dyn ToxicityClassifier>))
             },
             |o| {
                 seen.push(match o {
@@ -1666,7 +1715,7 @@ mod tests {
             |name, committed| {
                 given.push(committed);
                 let m = if name == "paid" { &paid } else { &free };
-                Ok(Arc::clone(m) as Arc<dyn ToxicityClassifier>)
+                Ok(EvalModel::from(Arc::clone(m) as Arc<dyn ToxicityClassifier>))
             },
             |_| {},
         )
@@ -1692,5 +1741,100 @@ mod tests {
             err.contains("identity mismatch") && err.contains("p-old"),
             "{err}"
         );
+    }
+
+    /// A fake S1: answers toxic and has reasons for every post it judged.
+    struct WithReasons {
+        given: std::sync::Mutex<Vec<String>>,
+    }
+    #[async_trait::async_trait]
+    impl ToxicityClassifier for WithReasons {
+        async fn classify(&self, content: &str) -> anyhow::Result<ClassifierVerdict> {
+            self.given.lock().unwrap().push(content.to_string());
+            Ok(ClassifierVerdict {
+                toxic_token: true,
+                confidence: 0.9,
+                latency_ms: 1,
+                model_id: "s1".into(),
+                policy_version: "v".into(),
+            })
+        }
+        fn name(&self) -> &'static str {
+            "s1"
+        }
+        fn model_id(&self) -> &'static str {
+            "s1"
+        }
+        fn policy_version(&self) -> &'static str {
+            "v"
+        }
+        fn threshold(&self) -> f32 {
+            0.0
+        }
+    }
+    impl crate::cli::eval_classifiers::reasons::ReasonSource for WithReasons {
+        fn take_reasons(
+            &self,
+            content: &str,
+        ) -> Option<crate::cli::eval_classifiers::reasons::ReasonSet> {
+            let fired = content.contains("threat");
+            Some(crate::cli::eval_classifiers::reasons::ReasonSet {
+                answers: [(
+                    "threat".to_string(),
+                    crate::cli::eval_classifiers::reasons::ReasonAnswer {
+                        fired,
+                        confidence: 0.8,
+                    },
+                )]
+                .into(),
+                complete: true,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn reasons_are_saved_with_each_verdict() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = vec![row("a", "a threat"), row("b", "fine")];
+        let m = WithReasons {
+            given: Default::default(),
+        };
+        let mut budget = Budget::new(1.0);
+        run_model_with_reasons(
+            "s1",
+            &m,
+            Some(&m),
+            &pool,
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        let got = load(dir.path(), "s1").unwrap();
+        assert_eq!(got["a"].reasons.as_ref().unwrap().fired(), vec!["threat"]);
+        assert!(got["b"].reasons.as_ref().unwrap().fired().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_model_without_a_reason_source_saves_no_reasons() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = WithReasons {
+            given: Default::default(),
+        };
+        let mut budget = Budget::new(1.0);
+        run_model(
+            "s1",
+            &m,
+            &[row("a", "a threat")],
+            dir.path(),
+            &Price::default(),
+            &mut budget,
+            T,
+        )
+        .await
+        .unwrap();
+        assert!(load(dir.path(), "s1").unwrap()["a"].reasons.is_none());
     }
 }

@@ -280,6 +280,7 @@ mod tests {
                     latency_ms: 10 + i as u32,
                     input_chars: 400,
                     est_usd: 0.0,
+                    reasons: None,
                 };
                 (id, r)
             })
