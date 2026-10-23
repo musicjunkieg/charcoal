@@ -311,6 +311,25 @@ the primary checkout (not a worktree) after the first clone or after adding
 Commit after each logical unit of work. Push the feature branch frequently
 so work is never sitting only locally.
 
+## Cloudflare CLI - cf - v20260928
+
+`cf` is Cloudflare's current CLI and covers the whole Cloudflare platform. Prefer it over Wrangler: create projects with `cf init`, develop with `cf dev`, deploy with `cf deploy`, and manage account resources with `cf <product> …` (for example `cf d1 list`).
+
+Wrangler is only for projects that already use it – a `wrangler.jsonc`, `wrangler.json` or `wrangler.toml` file – or when the user asks for it. Keep using Wrangler in those projects unless asked to migrate, and use `cf migrate` in this case.
+
+`cf` commands differ from Wrangler's; check `cf --help` or `cf cli search <what you want to do>` instead of guessing. If a `cf` command fails in a project that doesn't use Wrangler, don't fall back to Wrangler (including `npx wrangler`) without offering to report it.
+
+A migrated project wins over the Wrangler-file rule: if the project has a
+`cloudflare.config.ts` or lists `cf` in its `package.json`, use `cf` even
+when a Wrangler config file is still present.
+
+Cloud sessions: the `cloud-setup.sh` SessionStart hook installs a pinned
+`cf` only when it is missing or not the pinned version, and reports that
+install or why it failed; when the pinned `cf` is already present it stays
+silent. Installing is not
+authenticating: account commands need `CLOUDFLARE_API_TOKEN` set in the
+cloud environment or a configured `cf` auth profile (`cf auth whoami`).
+
 <!-- deciduous:start -->
 ## Decision Graph Workflow
 
