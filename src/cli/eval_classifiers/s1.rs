@@ -10,7 +10,6 @@
 //! a missing or odd field is an error, never a quiet "no".
 
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -122,15 +121,6 @@ pub fn build_request(mode: S1Mode, content: &str) -> serde_json::Value {
     })
 }
 
-/// One item of the response array. Fields are Options so a missing one
-/// is reported by us, per key, instead of failing the whole array decode.
-#[derive(Deserialize)]
-struct Item {
-    key: Option<String>,
-    label: Option<String>,
-    confidence: Option<f64>,
-}
-
 /// The decoded answer to one post.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parsed {
@@ -140,13 +130,19 @@ pub struct Parsed {
     pub reasons: Option<ReasonSet>,
 }
 
-fn decode(item: &Item) -> Result<(bool, f32)> {
-    let fired = match item.label.as_deref() {
+/// Read one item's label and confidence. Items stay raw JSON so a wrongly
+/// typed field is reported per item (spec §5) instead of failing the whole
+/// array decode and losing a good master answer.
+fn decode(item: &serde_json::Value) -> Result<(bool, f32)> {
+    let fired = match item.get("label").and_then(|l| l.as_str()) {
         Some("1") => true,
         Some("0") => false,
-        other => bail!("label {other:?} is not \"0\" or \"1\""),
+        _ => bail!("label {:?} is not \"0\" or \"1\"", item.get("label")),
     };
-    let c = item.confidence.context("confidence missing")?;
+    let c = item
+        .get("confidence")
+        .and_then(|c| c.as_f64())
+        .context("confidence missing or not a number")?;
     if !(c.is_finite() && (0.0..=1.0).contains(&c)) {
         bail!("confidence {c} is outside 0–1");
     }
@@ -154,12 +150,18 @@ fn decode(item: &Item) -> Result<(bool, f32)> {
 }
 
 pub fn parse_response(mode: S1Mode, body: &str) -> Result<Parsed> {
-    let items: Vec<Item> =
+    let items: Vec<serde_json::Value> =
         serde_json::from_str(body).context("S1 response is not the documented array")?;
     let allowed: Vec<&str> = mode.labelers().into_iter().map(|(k, _)| k).collect();
-    let mut by_key: HashMap<String, Item> = HashMap::new();
+    let mut by_key: HashMap<String, serde_json::Value> = HashMap::new();
     for item in items {
-        let key = item.key.clone().context("S1 response item without a key")?;
+        // An item with no usable key can't be attributed to any question, so
+        // the whole response is unusable — unlike a bad label/confidence.
+        let key = item
+            .get("key")
+            .and_then(|k| k.as_str())
+            .context("S1 response item without a string key")?
+            .to_string();
         if !allowed.contains(&key.as_str()) {
             bail!("S1 response has unexpected key {key:?}");
         }
@@ -206,7 +208,9 @@ pub struct S1Client {
     mode: S1Mode,
     initial_backoff: Duration,
     /// Reasons from each answered post, keyed by its exact text, until the
-    /// runner takes them (see [`ReasonSource`]).
+    /// runner takes them (see [`ReasonSource`]). Keying by text is safe only
+    /// because the runner sends one post per request, sequentially, and takes
+    /// the reasons right after each verdict.
     reasons: Mutex<HashMap<String, ReasonSet>>,
 }
 
@@ -220,10 +224,18 @@ impl S1Client {
         if api_key.trim().is_empty() {
             bail!("ZENTROPI_API_KEY is empty");
         }
-        let http = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .context("building the S1 HTTP client")?;
+        let url = reqwest::Url::parse(&api_url).context("S1 api url is not a valid URL")?;
+        let mut builder = reqwest::Client::builder().timeout(REQUEST_TIMEOUT);
+        // On macOS reqwest's system-proxy lookup stalls ~58 s per request to a
+        // loopback mock server. Skip the proxy for loopback hosts only; the
+        // real api.zentropi.ai keeps normal system proxy behaviour.
+        if matches!(
+            url.host_str(),
+            Some("127.0.0.1" | "localhost" | "[::1]" | "::1")
+        ) {
+            builder = builder.no_proxy();
+        }
+        let http = builder.build().context("building the S1 HTTP client")?;
         Ok(Self {
             http,
             api_key,
@@ -254,7 +266,11 @@ impl S1Client {
         if status.is_success() {
             return Ok(body);
         }
-        let err = anyhow::anyhow!("S1 API error {status}: {body}");
+        // An HTML/CDN error page can be huge; keep error rows readable.
+        let err = anyhow::anyhow!(
+            "S1 API error {status}: {}",
+            crate::output::truncate_chars(&body, 300)
+        );
         if status.as_u16() == 429 || status.is_server_error() {
             Err(Attempt::Retry(err))
         } else {
@@ -473,6 +489,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(429))
             .up_to_n_times(2)
             .with_priority(1)
+            .expect(2)
             .mount(&server)
             .await;
         Mock::given(method("POST"))
@@ -480,6 +497,7 @@ mod tests {
                 ResponseTemplate::new(200).set_body_json(json!([item("master", "0", 0.8)])),
             )
             .with_priority(2)
+            .expect(1)
             .mount(&server)
             .await;
         let v = client(&server, S1Mode::Master).classify("p").await.unwrap();
@@ -510,6 +528,59 @@ mod tests {
             .mount(&server)
             .await;
         assert!(client(&server, S1Mode::Master).classify("p").await.is_err());
+    }
+
+    #[test]
+    fn an_unparsable_api_url_is_refused() {
+        let err = S1Client::with_api_url("k".into(), S1Mode::Master, "not a url".into())
+            .err()
+            .expect("bad url must be an error");
+        assert!(format!("{err:#}").contains("api"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn a_huge_error_body_is_truncated_in_the_message() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("x".repeat(5000)))
+            .mount(&server)
+            .await;
+        let err = client(&server, S1Mode::Master)
+            .classify("p")
+            .await
+            .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("401") && msg.len() < 400,
+            "{} chars",
+            msg.len()
+        );
+    }
+
+    #[test]
+    fn a_wrong_typed_reason_field_keeps_the_master() {
+        let mut v = bundle_body("1");
+        let arr = v.as_array_mut().unwrap();
+        arr.iter_mut().find(|i| i["key"] == "threat").unwrap()["confidence"] = json!("high");
+        arr.iter_mut().find(|i| i["key"] == "pile_on").unwrap()["label"] = json!(1);
+        let p = parse_response(S1Mode::Bundle, &v.to_string()).unwrap();
+        assert!(p.toxic);
+        let r = p.reasons.unwrap();
+        assert!(!r.complete);
+        assert!(!r.answers.contains_key("threat") && !r.answers.contains_key("pile_on"));
+    }
+
+    #[test]
+    fn a_wrong_typed_master_field_is_an_error() {
+        for bad in [
+            json!({"key": "master", "label": 1, "confidence": 0.9}),
+            json!({"key": "master", "label": "1", "confidence": "high"}),
+        ] {
+            let body = serde_json::Value::Array(vec![bad]).to_string();
+            assert!(parse_response(S1Mode::Master, &body).is_err(), "{body}");
+        }
+        let keyless = json!([{"key": 7, "label": "1", "confidence": 0.9}]).to_string();
+        assert!(parse_response(S1Mode::Master, &keyless).is_err());
     }
 
     #[test]

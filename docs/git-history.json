@@ -1,5 +1,13 @@
 [
   {
+    "hash": "19c35a10196edd620e8dacf807fa7f66dcc992e7",
+    "short_hash": "19c35a1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T20:22:02-07:00",
+    "message": "docs(407): S1 eval models and reason labelling\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "8d322c356a5941825fd7e7c1c7e1f46796630cf4",
     "short_hash": "8d322c3",
     "author": "Bryan Guffey",

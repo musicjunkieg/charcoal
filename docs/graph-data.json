@@ -12583,6 +12583,28 @@
       "created_at": "2026-10-22T19:54:12.540055-07:00",
       "updated_at": "2026-10-22T19:54:12.540055-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"8d322c3\",\"confidence\":90}"
+    },
+    {
+      "id": 1154,
+      "change_id": "ad670f93-c1df-4ed3-a55a-bc727cc732c9",
+      "node_type": "observation",
+      "title": "Reason-agreement metrics count only posts S1 flagged; a flag with no fired reason counts as a miss (S1 misses stay in the headline)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T20:26:06.362220-07:00",
+      "updated_at": "2026-10-22T20:26:06.362220-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"confidence\":80}"
+    },
+    {
+      "id": 1155,
+      "change_id": "28ef6344-0da1-402b-87b6-9c1fe7eb0e79",
+      "node_type": "action",
+      "title": "Final fix batch (#407)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T20:26:15.071928-07:00",
+      "updated_at": "2026-10-22T20:26:15.071928-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"19c35a1\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -25730,6 +25752,28 @@
       "weight": 1.0,
       "rationale": "committed",
       "created_at": "2026-10-22T19:54:17.055452-07:00"
+    },
+    {
+      "id": 1206,
+      "from_node_id": 1141,
+      "to_node_id": 1154,
+      "from_change_id": "b34cd419-0848-4c96-b744-7cd9a71d9ea3",
+      "to_change_id": "ad670f93-c1df-4ed3-a55a-bc727cc732c9",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Refines how reason explanations are scored",
+      "created_at": "2026-10-22T20:26:08.175287-07:00"
+    },
+    {
+      "id": 1207,
+      "from_node_id": 1143,
+      "to_node_id": 1155,
+      "from_change_id": "07717dcc-c3c2-4eb1-b5e8-55bf14368930",
+      "to_change_id": "28ef6344-0da1-402b-87b6-9c1fe7eb0e79",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "final fixes",
+      "created_at": "2026-10-22T20:26:22.502147-07:00"
     }
   ],
   "documents": [
