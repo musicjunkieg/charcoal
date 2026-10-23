@@ -209,4 +209,7 @@ post for `s1-bundle` only. `s1-master` answers are reused.
 - flagged with no reason: a high count means a family is missing or too narrow;
 - clean calls where a reason still fired: a high count means a reason policy is too broad;
 - top reason is one you ticked, and per family how often it fired when you did and did not tick it.
+  These figures use only posts S1 flagged that you labelled toxic with ticked reasons: reasons
+  explain flags, and a post S1 missed is a master miss already scored in the headline. A flag
+  where no reason fired counts as a miss.
   A family with fewer than 10 ticked posts shows "too few examples".

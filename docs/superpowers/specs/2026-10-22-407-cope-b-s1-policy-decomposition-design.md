@@ -1,6 +1,6 @@
 # #407 — CoPE-B-S1 in the classifier eval, with explainable reasons
 
-Status: design approved in brainstorming 2026-10-22; awaiting spec review.
+Status: approved 2026-10-22; implemented on feat/407-cope-b-s1-design.
 Builds on: #404 classifier eval (`docs/superpowers/specs/2026-10-08-404-classifier-eval-design.md`,
 `evals/classifiers/README.md`).
 Research: chainlink #407 comment (model card verified 2026-10-22).
@@ -187,7 +187,10 @@ Three questions, all on **holdout** posts only:
    "screen broadly, then confirm" pattern: master alone, then reasons asked
    only for flagged posts.
 3. **Are the reasons right?** On holdout posts Bryan labelled toxic *with*
-   reasons:
+   reasons, **and S1's master also called toxic** (reasons only explain flags
+   S1 made; a post S1 missed is a master miss, already scored in the headline,
+   and must not dilute the reason score; a flag where no reason fired counts as
+   a top-reason miss):
    - **top-reason agreement**: S1's highest-confidence fired reason is one
      Bryan ticked;
    - **per family**: fired-when-ticked rate and fired-when-not-ticked rate,
