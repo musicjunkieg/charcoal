@@ -364,11 +364,26 @@ mod tests {
         let f = file(&[
             &reasons_line("a", "toxic", "old", r#"["threat"]"#),
             &reasons_line("a", "toxic", "new", r#"["mockery","personal_attack"]"#),
+            // A stale row AFTER the matching one: taking "the last row for
+            // the id" instead of "the last row whose hash matches" would
+            // pick this one up.
+            &reasons_line("a", "toxic", "older-edit", r#"["threat"]"#),
             &reasons_line("gone", "toxic", "z", r#"["threat"]"#),
         ]);
         let got = load_current_reasons(f.path(), &pool_of(&[("a", "new")])).unwrap();
         assert_eq!(got["a"], vec!["mockery", "personal_attack"]);
         assert!(!got.contains_key("gone"));
+    }
+
+    /// A newer matching row with no reasons is the human clearing them.
+    #[test]
+    fn a_newer_matching_row_without_reasons_clears_older_ones() {
+        let f = file(&[
+            &reasons_line("a", "toxic", "x", r#"["threat"]"#),
+            &label_line("a", "toxic", "x"),
+        ]);
+        let got = load_current_reasons(f.path(), &pool_of(&[("a", "x")])).unwrap();
+        assert!(!got.contains_key("a"), "{got:?}");
     }
 
     #[test]

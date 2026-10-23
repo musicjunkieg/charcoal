@@ -500,6 +500,57 @@ mod tests {
         }
     }
 
+    /// No reasons means no `reasons` key on the saved line, so older readers
+    /// and diffs of labels.jsonl stay unchanged.
+    #[test]
+    fn merge_omits_empty_reasons_from_the_saved_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = holdout_id();
+        let pool = vec![row(&h)];
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        std::fs::write(
+            &to_label,
+            format!(
+                r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":"","reasons":[]}}"#
+            ),
+        )
+        .unwrap();
+        assert_eq!(merge_labels(&to_label, &labels, &pool).unwrap().merged, 1);
+        let saved = std::fs::read_to_string(&labels).unwrap();
+        assert!(!saved.contains("reasons"), "{saved}");
+    }
+
+    /// A bad reason is reported even on a row merge would skip, because a
+    /// typo is still a typo.
+    #[test]
+    fn merge_still_refuses_bad_reasons_on_rows_it_would_skip() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = holdout_id();
+        let pool = vec![row(&h)];
+        let to_label = dir.path().join("to-label.jsonl");
+        let labels = dir.path().join("labels.jsonl");
+        // Already saved with the same answer: AlreadyMergedSame.
+        std::fs::write(
+            &labels,
+            format!(
+                r#"{{"id":"{h}","label":"toxic","source":"holdout","content_hash":"{}"}}"#,
+                content_hash(&format!("post {h}"))
+            ) + "\n",
+        )
+        .unwrap();
+        std::fs::write(&to_label, format!(r#"{{"id":"{h}","content":"post {h}","label":"toxic","note":"","reasons":["rude"]}}"#)).unwrap();
+        let err = format!("{:#}", merge_labels(&to_label, &labels, &pool).unwrap_err());
+        assert!(err.contains("rude") && err.contains("line 1"), "{err}");
+
+        // The post's text changed since it was shown: NotMergeable.
+        let fresh = dir.path().join("fresh-labels.jsonl");
+        std::fs::write(&to_label, format!(r#"{{"id":"{h}","content":"older text","label":"toxic","note":"","reasons":["rude"]}}"#)).unwrap();
+        let err = format!("{:#}", merge_labels(&to_label, &fresh, &pool).unwrap_err());
+        assert!(err.contains("rude") && err.contains("line 1"), "{err}");
+        assert!(!fresh.exists(), "nothing written");
+    }
+
     #[test]
     fn to_label_rows_offer_an_empty_reasons_list() {
         let dir = tempfile::tempdir().unwrap();
