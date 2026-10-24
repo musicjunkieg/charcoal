@@ -637,3 +637,111 @@ async fn narrowed_refresh_does_not_delete_a_newer_session() {
     let st = s1.status(db.as_ref(), DID).await.unwrap();
     assert!(st.is_some(), "the re-consented session must survive");
 }
+
+/// A store under a different `CHARCOAL_TOKEN_KEY` — what the app sees after
+/// the key is rotated (#406/#408).
+fn store_with_other_key() -> SessionStore {
+    let mut config = Config::test_defaults();
+    config.token_key =
+        Some("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100".to_string());
+    SessionStore::from_config(&config).expect("valid 32-byte key")
+}
+
+/// #408: after a key rotation, rows sealed under the old key can never be
+/// decrypted again. They must read as NOT connected everywhere — `status` (so
+/// the UI offers to reconnect instead of showing a dead "connected") and
+/// `load_for_write` (so the runner parks the batch as `not_connected` rather
+/// than failing it with a crypto error).
+#[tokio::test]
+async fn row_sealed_under_a_rotated_key_reads_as_not_connected() {
+    let db = setup_db();
+    let key = generate_key(KeyType::P256Private).unwrap();
+    store()
+        .store(
+            db.as_ref(),
+            DID,
+            "https://pds.test",
+            &key,
+            &tokens("acc1", "ref1", 3600),
+        )
+        .await
+        .unwrap();
+
+    let rotated = store_with_other_key();
+    assert!(rotated.status(db.as_ref(), DID).await.unwrap().is_none());
+    let http = reqwest::Client::new();
+    let err = rotated
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+}
+
+/// The expiring path decrypts too (before refreshing) — it must also read as
+/// not connected, and must never spend a refresh request on a row it cannot
+/// read.
+#[tokio::test]
+async fn expiring_row_sealed_under_a_rotated_key_reads_as_not_connected() {
+    let db = setup_db();
+    let pds = mock_pds().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&pds)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    store()
+        .store(
+            db.as_ref(),
+            DID,
+            &pds.uri(),
+            &key,
+            &tokens("acc1", "ref1", 5),
+        )
+        .await
+        .unwrap();
+
+    let http = reqwest::Client::new();
+    let err = store_with_other_key()
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+}
+
+/// Reconnecting after a rotation replaces the dead row with a readable one.
+#[tokio::test]
+async fn reconsent_after_rotation_restores_the_session() {
+    let db = setup_db();
+    let key = generate_key(KeyType::P256Private).unwrap();
+    store()
+        .store(
+            db.as_ref(),
+            DID,
+            "https://pds.test",
+            &key,
+            &tokens("old", "ref-old", 3600),
+        )
+        .await
+        .unwrap();
+
+    let rotated = store_with_other_key();
+    rotated
+        .store(
+            db.as_ref(),
+            DID,
+            "https://pds.test",
+            &key,
+            &tokens("new", "ref-new", 3600),
+        )
+        .await
+        .unwrap();
+    assert!(rotated.status(db.as_ref(), DID).await.unwrap().is_some());
+    let http = reqwest::Client::new();
+    let ws = rotated
+        .load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+        .await
+        .unwrap();
+    assert_eq!(ws.access_token, "new");
+}

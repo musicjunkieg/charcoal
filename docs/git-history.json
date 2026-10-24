@@ -1,5 +1,101 @@
 [
   {
+    "hash": "484141353321eaacea743e52d2acda821f60f9e8",
+    "short_hash": "4841413",
+    "author": "Bryan Guffey",
+    "date": "2026-10-23T17:40:18-07:00",
+    "message": "fix(407): S1 client paces requests and honors Retry-After with jitter\n\nThe first live run hit 429s sending back-to-back and retried on a fixed\nschedule. Zentropi asks callers to honor Retry-After and to back off with\njitter. Pace at 1 request/second, wait what the server asks (capped at\n60 s), otherwise back off with up to 50% jitter.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "c3fe99a708d07517d26e766f467eabb24650af38",
+    "short_hash": "c3fe99a",
+    "author": "Bryan Guffey",
+    "date": "2026-10-23T11:53:31-07:00",
+    "message": "docs(408): Bluesky reset notice and graceful secret rotation design\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "a20c398f489d26bf9ac2b96cccd31f20446daa32",
+    "short_hash": "a20c398",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T20:54:22-07:00",
+    "message": "docs(407): spec status and reason-agreement population\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "19c35a10196edd620e8dacf807fa7f66dcc992e7",
+    "short_hash": "19c35a1",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T20:22:02-07:00",
+    "message": "docs(407): S1 eval models and reason labelling\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
+    "hash": "8d322c356a5941825fd7e7c1c7e1f46796630cf4",
+    "short_hash": "8d322c3",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T19:54:03-07:00",
+    "message": "feat(407): report how well S1 reasons explain its flags\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 6
+  },
+  {
+    "hash": "0ea193b721302d1132b4a90752653ee5f3e161a6",
+    "short_hash": "0ea193b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T19:34:47-07:00",
+    "message": "feat(407): optional reasons on toxic labels, validated at merge\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "e34aa86f8b640c6a3067e2c886c5c15affc37d55",
+    "short_hash": "e34aa86",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T19:19:03-07:00",
+    "message": "feat(407): s1-master and s1-bundle eval models save reasons with verdicts\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 9
+  },
+  {
+    "hash": "7a080f57c74aae7cc2ae9ee8c65a43928bb393b0",
+    "short_hash": "7a080f5",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T18:55:11-07:00",
+    "message": "feat(407): hosted CoPE-B-S1 multilabel client for the eval\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 4
+  },
+  {
+    "hash": "3dc92c66a014397a8971a603adc1a9403d0fb6ff",
+    "short_hash": "3dc92c6",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T18:40:28-07:00",
+    "message": "feat(407): reason families and their draft policies\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 10
+  },
+  {
+    "hash": "530d5753dc4fcec400fcca4787cd0f1a8963dfc8",
+    "short_hash": "530d575",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T17:36:46-07:00",
+    "message": "docs(407): implementation plan for S1 eval models and reasons\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "84c3ab4ea68ec6654dff8dd046ee10e2cbbbc83c",
+    "short_hash": "84c3ab4",
+    "author": "Bryan Guffey",
+    "date": "2026-10-22T15:53:21-07:00",
+    "message": "docs(407): design spec for CoPE-B-S1 eval with explainable reasons\n\nMaster policy decides; six distinct reason families explain. Hosted\nmultilabel API first (free for dev), self-host later only if earned.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
+    "hash": "1bc85a481e516d421b7e6a6f8cf447222fd4a24e",
+    "short_hash": "1bc85a4",
+    "author": "Bryan Guffey",
+    "date": "2026-10-21T16:49:19-07:00",
+    "message": "chore(404): sync decision graph after Part A merge\n\nMarks the finished #387 and #404 Part A nodes completed, the rejected\neval options rejected, and the #404 goal active (Part B remains).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 2
+  },
+  {
     "hash": "36019d963e0890d539ba2ce062c4bd0b10046e15",
     "short_hash": "36019d9",
     "author": "Bryan Guffey",
