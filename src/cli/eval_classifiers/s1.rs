@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use super::content_hash;
 use super::reasons::{ReasonAnswer, ReasonSet, ReasonSource, REASON_KEYS};
 use crate::toxicity::classifier::{ClassifierVerdict, ToxicityClassifier};
+use crate::toxicity::rate_limiter::RateLimiter;
 
 pub const S1_API_URL: &str = "https://api.zentropi.ai/v1/multilabel";
 pub const S1_MODEL_ID: &str = "cope-b-s1";
@@ -26,6 +27,39 @@ const MASTER_KEY: &str = "master";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
+/// The longest a server's `Retry-After` may make us wait before one retry.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+/// Requests per second. Zentropi publishes no limit for the free API; the
+/// first live run (2026-10-23) hit 429s sending back-to-back, so pace well
+/// under that. A 600-post pool still finishes in ~10 minutes per model.
+const REQUESTS_PER_SECOND: f64 = 1.0;
+
+/// `Retry-After` in its whole-seconds form. The HTTP-date form is rare for
+/// APIs and not worth a date parser; it falls back to our own backoff.
+fn parse_retry_after(value: &str) -> Option<Duration> {
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
+/// How long to wait before a retry. The server's `Retry-After` wins (capped);
+/// otherwise our backoff plus up to half again as jitter, so concurrent
+/// clients do not retry in lockstep (Zentropi's docs ask for both).
+fn retry_delay(backoff: Duration, retry_after: Option<Duration>, jitter: f64) -> Duration {
+    match retry_after {
+        Some(wait) => wait.min(MAX_RETRY_AFTER),
+        None => backoff.mul_f64(1.0 + 0.5 * jitter.clamp(0.0, 1.0)),
+    }
+}
+
+/// A fraction in [0, 1) for jitter. Taken from the clock's nanoseconds: the
+/// jitter only has to differ between clients, not be unpredictable, so this
+/// avoids pulling in a random-number crate.
+fn jitter_fraction() -> f64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    f64::from(nanos) / 1_000_000_000.0
+}
 
 /// Compiled in, so the policy a verdict was made under is exactly the one
 /// its version hash describes. Editing a file takes effect on the next build.
@@ -195,9 +229,10 @@ pub fn parse_response(mode: S1Mode, body: &str) -> Result<Parsed> {
     })
 }
 
-/// Whether a failed attempt is worth repeating.
+/// Whether a failed attempt is worth repeating, and how long the server
+/// asked us to wait if it said.
 enum Attempt {
-    Retry(anyhow::Error),
+    Retry(anyhow::Error, Option<Duration>),
     Fatal(anyhow::Error),
 }
 
@@ -207,6 +242,8 @@ pub struct S1Client {
     api_url: String,
     mode: S1Mode,
     initial_backoff: Duration,
+    /// Paces every attempt, retries included.
+    limiter: RateLimiter,
     /// Reasons from each answered post, keyed by its exact text, until the
     /// runner takes them (see [`ReasonSource`]). Keying by text is safe only
     /// because the runner sends one post per request, sequentially, and takes
@@ -242,6 +279,7 @@ impl S1Client {
             api_url,
             mode,
             initial_backoff: INITIAL_BACKOFF,
+            limiter: RateLimiter::new(REQUESTS_PER_SECOND),
             reasons: Mutex::new(HashMap::new()),
         })
     }
@@ -252,7 +290,14 @@ impl S1Client {
         self
     }
 
+    /// A different pace, for tests; production keeps [`REQUESTS_PER_SECOND`].
+    pub fn with_rate(mut self, requests_per_second: f64) -> Self {
+        self.limiter = RateLimiter::new(requests_per_second);
+        self
+    }
+
     async fn send_once(&self, content: &str) -> std::result::Result<String, Attempt> {
+        self.limiter.acquire().await;
         let resp = self
             .http
             .post(&self.api_url)
@@ -260,8 +305,15 @@ impl S1Client {
             .json(&build_request(self.mode, content))
             .send()
             .await
-            .map_err(|e| Attempt::Retry(anyhow::Error::new(e).context("reaching the S1 API")))?;
+            .map_err(|e| {
+                Attempt::Retry(anyhow::Error::new(e).context("reaching the S1 API"), None)
+            })?;
         let status = resp.status();
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_retry_after);
         let body = resp.text().await.unwrap_or_default();
         if status.is_success() {
             return Ok(body);
@@ -272,7 +324,7 @@ impl S1Client {
             crate::output::truncate_chars(&body, 300)
         );
         if status.as_u16() == 429 || status.is_server_error() {
-            Err(Attempt::Retry(err))
+            Err(Attempt::Retry(err, retry_after))
         } else {
             Err(Attempt::Fatal(err))
         }
@@ -284,13 +336,14 @@ impl S1Client {
         let body = loop {
             match self.send_once(content).await {
                 Ok(body) => break body,
-                Err(Attempt::Retry(e)) if attempt < MAX_RETRIES => {
+                Err(Attempt::Retry(e, retry_after)) if attempt < MAX_RETRIES => {
                     attempt += 1;
-                    tracing::debug!(attempt, error = %e, "S1 retry");
-                    tokio::time::sleep(backoff).await;
+                    let wait = retry_delay(backoff, retry_after, jitter_fraction());
+                    tracing::debug!(attempt, wait_ms = wait.as_millis() as u64, error = %e, "S1 retry");
+                    tokio::time::sleep(wait).await;
                     backoff *= 2;
                 }
-                Err(Attempt::Retry(e)) | Err(Attempt::Fatal(e)) => return Err(e),
+                Err(Attempt::Retry(e, _)) | Err(Attempt::Fatal(e)) => return Err(e),
             }
         };
         // A shape error is not retried: the same request gets the same shape.
@@ -462,6 +515,85 @@ mod tests {
         S1Client::with_api_url("k".into(), mode, format!("{}/v1/multilabel", server.uri()))
             .unwrap()
             .with_backoff(std::time::Duration::from_millis(1))
+            .with_rate(1000.0)
+    }
+
+    #[test]
+    fn retry_after_header_parses_whole_seconds_only() {
+        assert_eq!(parse_retry_after("7"), Some(Duration::from_secs(7)));
+        assert_eq!(parse_retry_after(" 2 "), Some(Duration::from_secs(2)));
+        // The HTTP-date form and junk fall back to our own backoff.
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2026 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("-1"), None);
+        assert_eq!(parse_retry_after(""), None);
+    }
+
+    #[test]
+    fn retry_after_wins_over_backoff_and_is_capped() {
+        let b = Duration::from_millis(500);
+        assert_eq!(
+            retry_delay(b, Some(Duration::from_secs(3)), 0.9),
+            Duration::from_secs(3)
+        );
+        assert_eq!(
+            retry_delay(b, Some(Duration::from_secs(3600)), 0.0),
+            MAX_RETRY_AFTER
+        );
+    }
+
+    #[test]
+    fn backoff_gets_up_to_half_again_as_jitter() {
+        let b = Duration::from_millis(500);
+        assert_eq!(retry_delay(b, None, 0.0), b);
+        assert_eq!(retry_delay(b, None, 1.0), Duration::from_millis(750));
+        let mid = retry_delay(b, None, jitter_fraction());
+        assert!(mid >= b && mid <= Duration::from_millis(750), "{mid:?}");
+    }
+
+    #[tokio::test]
+    async fn a_retry_after_header_sets_the_wait() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "1"))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!([item("master", "0", 0.8)])),
+            )
+            .with_priority(2)
+            .mount(&server)
+            .await;
+        let start = Instant::now();
+        client(&server, S1Mode::Master).classify("p").await.unwrap();
+        // Backoff alone is 1 ms here; only the header can explain a 1 s wait.
+        assert!(
+            start.elapsed() >= Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn requests_are_paced() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!([item("master", "0", 0.8)])),
+            )
+            .mount(&server)
+            .await;
+        let c = client(&server, S1Mode::Master).with_rate(20.0); // one per 50 ms
+        let start = Instant::now();
+        c.classify("a").await.unwrap();
+        c.classify("b").await.unwrap();
+        assert!(
+            start.elapsed() >= Duration::from_millis(45),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[tokio::test]

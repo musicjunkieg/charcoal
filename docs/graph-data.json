@@ -12605,6 +12605,61 @@
       "created_at": "2026-10-22T20:26:15.071928-07:00",
       "updated_at": "2026-10-22T20:26:15.071928-07:00",
       "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"19c35a1\",\"confidence\":85}"
+    },
+    {
+      "id": 1156,
+      "change_id": "fe56856b-9000-4f66-b6de-5ba3661d5e02",
+      "node_type": "outcome",
+      "title": "Final fix batch committed",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-22T21:02:52.901045-07:00",
+      "updated_at": "2026-10-22T21:02:52.901045-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"a20c398\",\"confidence\":90}"
+    },
+    {
+      "id": 1157,
+      "change_id": "09c9dcf6-65af-463c-98b0-05fde899ebe8",
+      "node_type": "goal",
+      "title": "#408 Bluesky reset notice + graceful secret rotation",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-23T11:52:30.982275-07:00",
+      "updated_at": "2026-10-23T11:52:30.982275-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"confidence\":90,\"prompt\":\"yeah, we should do it. can you also build something that will alert people who have actually logged in that we did this so they're aware as to why they have to reconnect thier bluesky account? they should also be prompted to reconnect.\\n\\n[follow-ups] \\\"A\\\" (only users who had connected Bluesky see the banner). \\\"looks great, and yes, rotate the two database passwords. and then we should probably handle this stuff more gracefully if it has to happen again.\\\"\"}"
+    },
+    {
+      "id": 1158,
+      "change_id": "edc4666f-5e6d-4781-a578-9442bfa2a161",
+      "node_type": "action",
+      "title": "Rotated staging + prod Postgres passwords via railway ssh ALTER USER + referenced PGPASSWORD/POSTGRES_PASSWORD",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-23T11:52:30.998556-07:00",
+      "updated_at": "2026-10-23T11:52:30.998556-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"commit\":\"a20c398\",\"confidence\":95}"
+    },
+    {
+      "id": 1159,
+      "change_id": "741fac6f-db69-4c5c-a635-ef19d7666ffe",
+      "node_type": "outcome",
+      "title": "Both Postgres passwords rotated; old rejected over network auth; staging+prod redeployed healthy",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-23T11:54:54.189377-07:00",
+      "updated_at": "2026-10-23T11:54:54.189377-07:00",
+      "metadata_json": "{\"branch\":\"feat/408-reset-notice\",\"commit\":\"c3fe99a\",\"confidence\":95}"
+    },
+    {
+      "id": 1160,
+      "change_id": "644adc52-bbcb-4541-9073-082bf22a441b",
+      "node_type": "observation",
+      "title": "S1 hosted API is Enterprise-only (403 subscription); free tier = prior-gen models; 429s need Retry-After + jitter + pacing",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-23T17:21:08.629023-07:00",
+      "updated_at": "2026-10-23T17:21:08.629023-07:00",
+      "metadata_json": "{\"branch\":\"feat/407-cope-b-s1-design\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -25774,6 +25829,50 @@
       "weight": 1.0,
       "rationale": "final fixes",
       "created_at": "2026-10-22T20:26:22.502147-07:00"
+    },
+    {
+      "id": 1208,
+      "from_node_id": 1155,
+      "to_node_id": 1156,
+      "from_change_id": "28ef6344-0da1-402b-87b6-9c1fe7eb0e79",
+      "to_change_id": "fe56856b-9000-4f66-b6de-5ba3661d5e02",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-10-22T21:02:52.914359-07:00"
+    },
+    {
+      "id": 1209,
+      "from_node_id": 1134,
+      "to_node_id": 1158,
+      "from_change_id": "861f27a4-62ab-4e4e-a9e6-0f30ef4a7f41",
+      "to_change_id": "edc4666f-5e6d-4781-a578-9442bfa2a161",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "DB password rotation step of incident response",
+      "created_at": "2026-10-23T11:52:34.640051-07:00"
+    },
+    {
+      "id": 1210,
+      "from_node_id": 1134,
+      "to_node_id": 1157,
+      "from_change_id": "861f27a4-62ab-4e4e-a9e6-0f30ef4a7f41",
+      "to_change_id": "09c9dcf6-65af-463c-98b0-05fde899ebe8",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Follow-up: tell affected users, make rotation graceful",
+      "created_at": "2026-10-23T11:52:34.647216-07:00"
+    },
+    {
+      "id": 1211,
+      "from_node_id": 1158,
+      "to_node_id": 1159,
+      "from_change_id": "edc4666f-5e6d-4781-a578-9442bfa2a161",
+      "to_change_id": "741fac6f-db69-4c5c-a635-ef19d7666ffe",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "result",
+      "created_at": "2026-10-23T11:55:00.290638-07:00"
     }
   ],
   "documents": [
