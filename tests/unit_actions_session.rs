@@ -745,3 +745,72 @@ async fn reconsent_after_rotation_restores_the_session() {
         .unwrap();
     assert_eq!(ws.access_token, "new");
 }
+
+/// Rolling rotation: a replica still on the old key loses a refresh race to
+/// a replica on the new key that re-consented. The replacement row is
+/// unreadable to the old-key replica, so it must report NotConnected (the
+/// runner parks the batch) — not a crypto error (the runner fails it).
+#[tokio::test]
+async fn lost_race_to_a_row_sealed_under_another_key_is_not_connected() {
+    let db = setup_db();
+    let old_key_replica = Arc::new(store());
+    let new_key_replica = store_with_other_key();
+    let mock = mock_pds().await;
+    let token_call = Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(serde_json::json!({ "error": "invalid_grant" }))
+                .set_delay(std::time::Duration::from_millis(500)),
+        )
+        .expect(1)
+        .mount_as_scoped(&mock)
+        .await;
+    let key = generate_key(KeyType::P256Private).unwrap();
+    old_key_replica
+        .store(
+            db.as_ref(),
+            DID,
+            &mock.uri(),
+            &key,
+            &tokens("acc1", "ref1", 0),
+        )
+        .await
+        .unwrap();
+
+    let http = reqwest::Client::new();
+    let loader = {
+        let s = Arc::clone(&old_key_replica);
+        let db = Arc::clone(&db);
+        let http = http.clone();
+        tokio::spawn(async move {
+            s.load_for_write(db.as_ref(), &http, &oauth_client(), DID)
+                .await
+        })
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        token_call.wait_until_satisfied(),
+    )
+    .await
+    .expect("refresh request never reached the token endpoint");
+    new_key_replica
+        .store(
+            db.as_ref(),
+            DID,
+            &mock.uri(),
+            &key,
+            &tokens("acc-new", "ref-new", 3600),
+        )
+        .await
+        .unwrap();
+
+    let err = loader.await.unwrap().unwrap_err();
+    assert!(matches!(err, SessionError::NotConnected), "got {err:?}");
+    // The new-key row is the live session and must survive.
+    assert!(new_key_replica
+        .status(db.as_ref(), DID)
+        .await
+        .unwrap()
+        .is_some());
+}

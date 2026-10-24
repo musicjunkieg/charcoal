@@ -16,7 +16,7 @@ use atproto_oauth::resources::{pds_resources, AuthorizationServer};
 use atproto_oauth::workflow::{OAuthClient, TokenResponse};
 use rand::distr::{Alphanumeric, SampleString};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::crypto::TokenCrypto;
 use super::dpop_http::{send_dpop, NonceCache};
@@ -311,9 +311,11 @@ impl SessionStore {
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?;
         match row {
-            Some(r) if r.updated_at != seen_updated_at && usable(&r) => self.decrypt(&r),
+            Some(r) if r.updated_at != seen_updated_at && self.connected(&r) => self.decrypt(&r),
             Some(r) if r.updated_at != seen_updated_at => {
-                warn!(did, "replacement OAuth row has an insufficient grant");
+                // Insufficient grant, or sealed under a key this replica does
+                // not hold (a rolling key rotation) — either way, not ours to use.
+                warn!(did, "replacement OAuth row is unusable by this replica");
                 Err(SessionError::NotConnected)
             }
             Some(_) => {
@@ -391,8 +393,10 @@ impl SessionStore {
             && self
                 .decrypt_field(&row.refresh_token_enc, "refresh_token")
                 .is_ok();
+        // debug, not warn: the runner rechecks every parked batch on each
+        // wake, so a retained unreadable row would repeat this indefinitely.
         if !readable {
-            warn!(
+            debug!(
                 did = %row.user_did,
                 "OAuth write session cannot be decrypted (token key rotated?) — treating as not connected"
             );

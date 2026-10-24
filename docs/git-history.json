@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7589403b5a9afa69d4c7f8eddd0819d3ab9b5f36",
+    "short_hash": "7589403",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T15:59:35-07:00",
+    "message": "fix(408): undecryptable OAuth session reads as not connected\n\nAfter CHARCOAL_TOKEN_KEY is rotated, rows sealed under the old key can\nnever be decrypted. status() reported them as connected and every\nload_for_write failed with a crypto error. Both now treat an unreadable\nrow as not connected, so the person is asked to reconnect and the runner\nparks batches as not_connected. The row is kept (not deleted) so that\nrestoring a mistakenly changed key brings sessions back.\n\nReplaces the planned reset banner: the #406 rotation found 0 prod and 1\nstaging session.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "484141353321eaacea743e52d2acda821f60f9e8",
     "short_hash": "4841413",
     "author": "Bryan Guffey",
