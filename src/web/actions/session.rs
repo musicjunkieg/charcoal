@@ -16,7 +16,7 @@ use atproto_oauth::resources::{pds_resources, AuthorizationServer};
 use atproto_oauth::workflow::{OAuthClient, TokenResponse};
 use rand::distr::{Alphanumeric, SampleString};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::crypto::TokenCrypto;
 use super::dpop_http::{send_dpop, NonceCache};
@@ -180,7 +180,7 @@ impl SessionStore {
             .get_oauth_session(did)
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?;
-        Ok(row.filter(usable).map(|r| SessionStatus {
+        Ok(row.filter(|r| self.connected(r)).map(|r| SessionStatus {
             scope: r.scope,
             pds_url: r.pds_url,
             connected_at: r.created_at,
@@ -200,7 +200,7 @@ impl SessionStore {
             .get_oauth_session(did)
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?
-            .filter(usable)
+            .filter(|r| self.connected(r))
             .ok_or(SessionError::NotConnected)?;
         if !needs_refresh(&row) {
             return self.decrypt(&row);
@@ -215,7 +215,7 @@ impl SessionStore {
             .get_oauth_session(did)
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?
-            .filter(usable)
+            .filter(|r| self.connected(r))
             .ok_or(SessionError::NotConnected)?;
         if !needs_refresh(&row) {
             return self.decrypt(&row);
@@ -311,9 +311,11 @@ impl SessionStore {
             .await
             .map_err(|e| SessionError::Db(e.to_string()))?;
         match row {
-            Some(r) if r.updated_at != seen_updated_at && usable(&r) => self.decrypt(&r),
+            Some(r) if r.updated_at != seen_updated_at && self.connected(&r) => self.decrypt(&r),
             Some(r) if r.updated_at != seen_updated_at => {
-                warn!(did, "replacement OAuth row has an insufficient grant");
+                // Insufficient grant, or sealed under a key this replica does
+                // not hold (a rolling key rotation) — either way, not ours to use.
+                warn!(did, "replacement OAuth row is unusable by this replica");
                 Err(SessionError::NotConnected)
             }
             Some(_) => {
@@ -371,6 +373,35 @@ impl SessionStore {
         map.entry(did.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
+    }
+
+    /// A row is a live connection only when its grant covers the writes AND
+    /// this process can read it. After `CHARCOAL_TOKEN_KEY` is rotated
+    /// (#406/#408) every row sealed under the old key is unreadable forever;
+    /// reporting it as connected would show a dead "connected" badge and fail
+    /// every batch with a crypto error. Not connected sends the person through
+    /// consent, which overwrites the row with one sealed under the new key.
+    ///
+    /// The row is deliberately NOT deleted here. If a wrong key were deployed
+    /// by mistake, deleting would destroy every good session; leaving it means
+    /// restoring the right key brings everyone back.
+    fn connected(&self, row: &OauthSessionRow) -> bool {
+        if !usable(row) {
+            return false;
+        }
+        let readable = self.decrypt(row).is_ok()
+            && self
+                .decrypt_field(&row.refresh_token_enc, "refresh_token")
+                .is_ok();
+        // debug, not warn: the runner rechecks every parked batch on each
+        // wake, so a retained unreadable row would repeat this indefinitely.
+        if !readable {
+            debug!(
+                did = %row.user_did,
+                "OAuth write session cannot be decrypted (token key rotated?) — treating as not connected"
+            );
+        }
+        readable
     }
 
     fn decrypt(&self, row: &OauthSessionRow) -> Result<WriteSession, SessionError> {
