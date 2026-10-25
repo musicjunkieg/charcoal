@@ -16,6 +16,7 @@ import type {
 	AdminUsersResponse,
 	PreSeedResponse,
 	AccessListResponse,
+	ScanCostsResponse,
 	ApproveScanResponse,
 	ActionsStatus,
 	ActionBatchSummary,
@@ -283,6 +284,10 @@ export async function deleteAdminUser(did: string): Promise<void> {
 
 export async function getAccessRequests(): Promise<AccessListResponse> {
 	return apiFetch<AccessListResponse>('/api/admin/access');
+}
+
+export async function getScanCosts(): Promise<ScanCostsResponse> {
+	return apiFetch<ScanCostsResponse>('/api/admin/costs');
 }
 
 export async function grantAccess(

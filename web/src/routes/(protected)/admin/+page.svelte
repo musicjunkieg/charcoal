@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser, getIdentity } from '$lib/api.js';
+	import { getAdminUsers, preSeedUser, triggerAdminScan, deleteAdminUser, getIdentity, getScanCosts } from '$lib/api.js';
 	import {
 		getAccessRequests,
 		grantAccess,
@@ -12,7 +12,8 @@
 	import { AuthError, AccessRevokedError } from '$lib/api.js';
 	import '$lib/website/styles/tokens.css';
 	import type { AdminUser, AdminQueue, AdminScanRow } from '$lib/types.js';
-	import type { AccessListResponse, AccessRequest } from '$lib/types.js';
+	import type { AccessListResponse, AccessRequest, ScanCostsResponse } from '$lib/types.js';
+	import { formatCents } from '$lib/scan-costs.js';
 
 	let users = $state<AdminUser[]>([]);
 	let queue = $state<AdminQueue | null>(null);
@@ -28,6 +29,10 @@
 	let anyBuilding = $derived(users.some((u) => u.fingerprint_building));
 	let anyScanning = $derived(scanningDid !== null);
 	let queueActive = $derived((queue?.active.length ?? 0) > 0);
+
+	// ── GPU cost (#393): loaded once, not polled — it changes slowly ──
+	let costs = $state<ScanCostsResponse | null>(null);
+	let costsError = $state(false);
 
 	// ── Access (#309): who may sign in at all ──
 	let access = $state<AccessListResponse | null>(null);
@@ -252,6 +257,15 @@
 		}
 	}
 
+	async function loadCosts() {
+		try {
+			costs = await getScanCosts();
+		} catch (err) {
+			if (await routeAuthFailure(err)) return;
+			costsError = true;
+		}
+	}
+
 	async function handleGrant() {
 		const trimmed = grantHandle.trim().replace(/^@/, '');
 		if (!trimmed) return;
@@ -378,6 +392,7 @@
 	onMount(() => {
 		loadUsers();
 		loadAccess();
+		loadCosts();
 		getIdentity()
 			.then((i) => (gateActive = i.access_gate_active))
 			.catch(() => {});
@@ -442,6 +457,47 @@
 				</ul>
 			{/if}
 		{:else if loading}
+			<div class="loading-state"><div class="spinner"></div></div>
+		{/if}
+	</section>
+
+	<!-- GPU cost (#393): estimated spend per user, so a runaway onboarding scan
+	     is visible. Estimate only — idle time is billed but not counted here. -->
+	<section class="costs-section">
+		<h2 class="section-title">GPU cost <span class="costs-note">est., excludes idle time</span></h2>
+		{#if costs}
+			<p class="costs-totals">
+				Last 7 days <strong>{formatCents(costs.last_7d_cents)}</strong> ·
+				last 30 days <strong>{formatCents(costs.last_30d_cents)}</strong>
+			</p>
+			{#if costs.users.length === 0}
+				<p class="queue-idle">No scans recorded yet.</p>
+			{:else}
+				<table class="costs-table">
+					<thead>
+						<tr><th>User</th><th>First scan</th><th>Refreshes</th><th>Total</th><th>Runs</th></tr>
+					</thead>
+					<tbody>
+						{#each costs.users as u (u.user_did)}
+							<tr class={{ 'over-target': u.over_onboarding_target }}>
+								<td class="costs-user">{u.handle ?? u.user_did}</td>
+								<td>
+									{formatCents(u.first_full_scan_cents)}
+									{#if u.over_onboarding_target}
+										<span class="over-flag">over {formatCents(costs.onboarding_target_cents)}</span>
+									{/if}
+								</td>
+								<td>{formatCents(u.refresh_cents)}</td>
+								<td>{formatCents(u.total_cents)}</td>
+								<td>{u.runs}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		{:else if costsError}
+			<p class="queue-idle">Could not load GPU costs.</p>
+		{:else}
 			<div class="loading-state"><div class="spinner"></div></div>
 		{/if}
 	</section>
@@ -1197,6 +1253,46 @@
 	.btn-delete:hover:not(:disabled) { background: rgb(var(--status-error-rgb) / 0.08); }
 	.btn-delete:disabled { opacity: 0.4; cursor: not-allowed; }
 
+	/* ── GPU cost (#393) — tokens only, no new literals ── */
+	.costs-section {
+		margin-bottom: var(--space-40);
+		padding: var(--space-20);
+		background: rgb(var(--charcoal-900-rgb) / 0.5);
+		border: 1px solid rgb(var(--charcoal-400-rgb) / 0.1);
+		border-radius: var(--radius-12);
+	}
+	.costs-note {
+		font-size: var(--text-label);
+		font-weight: 400;
+		color: var(--charcoal-400);
+		margin-left: var(--space-6);
+	}
+	.costs-totals {
+		font-size: var(--text-body);
+		color: var(--charcoal-300);
+		margin: 0 0 var(--space-12);
+	}
+	.costs-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--text-label);
+		color: var(--charcoal-300);
+		font-variant-numeric: tabular-nums;
+	}
+	.costs-table th,
+	.costs-table td {
+		text-align: left;
+		padding: var(--space-8) var(--space-6);
+	}
+	.costs-table th { color: var(--charcoal-400); font-weight: 500; }
+	/* A raw DID has no spaces to break on and would widen the whole table. */
+	.costs-user { overflow-wrap: anywhere; }
+	.over-flag {
+		display: inline-block;
+		margin-left: var(--space-4);
+		color: var(--status-error);
+	}
+
 	@media (max-width: 640px) {
 		.add-form { flex-direction: column; }
 		.add-input-wrap { width: 100%; }
@@ -1205,5 +1301,9 @@
 		/* Pending rows stack: actions drop below the handle at full width
 		   rather than cramming three buttons beside it. */
 		.access-actions { margin-left: 0; width: 100%; }
+		.costs-section { padding: var(--space-12); }
+		.costs-table th,
+		.costs-table td { padding: var(--space-6) var(--space-4); }
+		.over-flag { display: block; margin-left: 0; }
 	}
 </style>
