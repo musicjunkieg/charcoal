@@ -176,8 +176,6 @@ pub(crate) struct ScanScorers {
     pub classifier_stats: Arc<CacheStats>,
     /// This scan's GPU cost meter (#393). Zentropi scans leave it at zero —
     /// that backend bills per request, not per GPU-second.
-    // Read by the end-of-scan cost ledger, which lands in a later #393 task.
-    #[allow(dead_code)]
     pub cost_meter: Arc<crate::toxicity::cost_meter::ScanCostMeter>,
 }
 

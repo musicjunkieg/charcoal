@@ -996,73 +996,89 @@ pub(crate) async fn run_refresh(
             models: Arc::clone(&models),
         });
         let pipeline = move |plan: RefreshPlan| async move {
-            let candidates = plan.candidates.len();
-            // No up-front classifier probe (#394). The probe is paid lazily
-            // inside `CachedClassifier`, once, on the first verdict that has to
-            // be computed. A refresh that gathers nothing classifiable — every
-            // candidate deleted, or nothing due — never wakes the GPU; one that
-            // does classify still refuses a mismatched Stage-2 policy before
-            // its first batch is sent (#344 F5), now after gather rather than
-            // before it. Gather is Bluesky I/O; the GPU is what costs money.
-            db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
+            // #393: record this refresh's GPU cost whether it scores or fails.
+            let started_at = crate::observability::scan_cost::now_rfc3339();
+            let result: anyhow::Result<_> = async {
+                let candidates = plan.candidates.len();
+                // No up-front classifier probe (#394). The probe is paid lazily
+                // inside `CachedClassifier`, once, on the first verdict that has to
+                // be computed. A refresh that gathers nothing classifiable — every
+                // candidate deleted, or nothing due — never wakes the GPU; one that
+                // does classify still refuses a mismatched Stage-2 policy before
+                // its first batch is sent (#344 F5), now after gather rather than
+                // before it. Gather is Bluesky I/O; the GPU is what costs money.
+                db.set_scan_state(&uid, "refresh_candidates", &candidates.to_string())
+                    .await?;
+                // Minor 5: `candidates_total` is the denominator GET /api/status
+                // renders. `amplification::run` writes it for a full scan and
+                // `run_candidates` does not, so without this the dashboard showed
+                // the PREVIOUS full scan's denominator against this refresh's
+                // progress — two runs' numbers in one fraction.
+                db.set_scan_state(&uid, "candidates_total", &candidates.to_string())
+                    .await?;
+                // The feed cache measured nothing when nothing was due, and a
+                // "0 % hit rate" from an empty run is worse than no number (R08).
+                db.set_scan_state(
+                    &uid,
+                    "refresh_feed_cache_applicable",
+                    if candidates == 0 { "0" } else { "1" },
+                )
                 .await?;
-            // Minor 5: `candidates_total` is the denominator GET /api/status
-            // renders. `amplification::run` writes it for a full scan and
-            // `run_candidates` does not, so without this the dashboard showed
-            // the PREVIOUS full scan's denominator against this refresh's
-            // progress — two runs' numbers in one fraction.
-            db.set_scan_state(&uid, "candidates_total", &candidates.to_string())
+                // From here the pipeline reports through the `scan_phase` marker
+                // and the classification counts, exactly as the full scan does —
+                // GET /api/status refines this message from them.
+                set_progress(
+                    &progress_manager,
+                    &uid,
+                    &progress_claim,
+                    WebScanPhase::Scoring,
+                    &format!("Re-scoring {candidates} accounts whose scores are expiring…"),
+                )
+                .await;
+                let weights = crate::scoring::threat::ThreatWeights::default();
+                let summary = crate::pipeline::amplification::run_candidates(
+                    &client,
+                    &scorers.scorer,
+                    &db,
+                    &uid,
+                    &plan.candidates,
+                    &plan.fingerprint,
+                    &weights,
+                    Some(&models.embedder),
+                    plan.protected_embedding.as_deref(),
+                    Some(&plan.centroids),
+                    Some(&models.nli),
+                    Some(&plan.protected_posts),
+                    Some(config.data_dir()),
+                    plan.median_engagement,
+                    REFRESH_GATHER_CONCURRENCY,
+                    RunIdentity::refresh(),
+                    "refresh_feed",
+                )
                 .await?;
-            // The feed cache measured nothing when nothing was due, and a
-            // "0 % hit rate" from an empty run is worse than no number (R08).
-            db.set_scan_state(
+                db.set_scan_state(&uid, "refresh_scored", &summary.accounts_scored.to_string())
+                    .await?;
+                record_scan_cache_stats(db.as_ref(), &uid, &scorers).await;
+                info!(
+                    user_did = %uid,
+                    candidates,
+                    scored = summary.accounts_scored,
+                    "refresh pipeline finished"
+                );
+                Ok::<_, anyhow::Error>(summary)
+            }
+            .await;
+            crate::observability::scan_cost::record_scan_cost(
+                db.as_ref(),
                 &uid,
-                "refresh_feed_cache_applicable",
-                if candidates == 0 { "0" } else { "1" },
-            )
-            .await?;
-            // From here the pipeline reports through the `scan_phase` marker
-            // and the classification counts, exactly as the full scan does —
-            // GET /api/status refines this message from them.
-            set_progress(
-                &progress_manager,
-                &uid,
-                &progress_claim,
-                WebScanPhase::Scoring,
-                &format!("Re-scoring {candidates} accounts whose scores are expiring…"),
+                crate::db::ScanKind::Refresh,
+                result.is_ok(),
+                &started_at,
+                &scorers.cost_meter,
+                &scorers.classifier_stats,
             )
             .await;
-            let weights = crate::scoring::threat::ThreatWeights::default();
-            let summary = crate::pipeline::amplification::run_candidates(
-                &client,
-                &scorers.scorer,
-                &db,
-                &uid,
-                &plan.candidates,
-                &plan.fingerprint,
-                &weights,
-                Some(&models.embedder),
-                plan.protected_embedding.as_deref(),
-                Some(&plan.centroids),
-                Some(&models.nli),
-                Some(&plan.protected_posts),
-                Some(config.data_dir()),
-                plan.median_engagement,
-                REFRESH_GATHER_CONCURRENCY,
-                RunIdentity::refresh(),
-                "refresh_feed",
-            )
-            .await?;
-            db.set_scan_state(&uid, "refresh_scored", &summary.accounts_scored.to_string())
-                .await?;
-            record_scan_cache_stats(db.as_ref(), &uid, &scorers).await;
-            info!(
-                user_did = %uid,
-                candidates,
-                scored = summary.accounts_scored,
-                "refresh pipeline finished"
-            );
-            Ok(summary)
+            result
         };
         Ok((ctx, pipeline))
     };

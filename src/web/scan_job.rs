@@ -1389,10 +1389,49 @@ async fn run_scan_inner(
 
     let scorers = build_scan_scorers(&models, &db)?;
 
+    // #393: the meter starts here, so even a scan refused by the Stage-2
+    // identity probe below leaves a cost row — that probe can wake a GPU.
+    let started_at = crate::observability::scan_cost::now_rfc3339();
+    let run = run_scan_body(
+        config,
+        Arc::clone(&db),
+        models,
+        scan_manager,
+        user_did,
+        actor_handle,
+        claim_id,
+        &scorers,
+    )
+    .await;
+    crate::observability::scan_cost::record_scan_cost(
+        db.as_ref(),
+        user_did,
+        crate::db::ScanKind::Full,
+        run.is_ok(),
+        &started_at,
+        &scorers.cost_meter,
+        &scorers.classifier_stats,
+    )
+    .await;
+    run
+}
+
+// #393: one call site; `scorers` is the only seam the cost wrapper adds.
+#[allow(clippy::too_many_arguments)]
+async fn run_scan_body(
+    config: Arc<Config>,
+    db: Arc<dyn Database>,
+    models: Arc<ScanModels>,
+    scan_manager: Arc<RwLock<ScanManager>>,
+    user_did: &str,
+    actor_handle: &str,
+    claim_id: &str,
+    scorers: &crate::web::scan_setup::ScanScorers,
+) -> anyhow::Result<FullScanRun> {
     // #344 F5: refuse the scan now if the Stage-2 endpoint is not serving the
     // policy this deployment declared. Discovering it in `map_verdicts`
     // instead costs a full gather and then skips every account.
-    crate::web::scan_setup::probe_classifier_identity(&scorers).await?;
+    crate::web::scan_setup::probe_classifier_identity(scorers).await?;
 
     // Phase 2: embedding model — loaded once at boot, shared via Arc::clone.
     //
@@ -1873,7 +1912,7 @@ async fn run_scan_inner(
 
     record_observed_rate_limit(db.as_ref(), user_did, client.observed_rate_limit()).await;
 
-    record_scan_cache_stats(db.as_ref(), user_did, &scorers).await;
+    record_scan_cache_stats(db.as_ref(), user_did, scorers).await;
 
     run
 }
