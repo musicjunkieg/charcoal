@@ -233,6 +233,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/admin/users/{did}",
             delete(handlers::admin::delete_user),
         )
+        .route("/api/admin/costs", get(handlers::admin::scan_costs))
         .route(
             "/api/admin/access",
             get(handlers::access::list_access).post(handlers::access::grant_access_by_handle),
