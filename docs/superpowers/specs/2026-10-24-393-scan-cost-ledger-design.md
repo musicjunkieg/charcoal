@@ -48,7 +48,7 @@ succeeded or failed.
 |---|---|---|
 | `id` | integer / bigserial PK | |
 | `user_did` | text, not null | whose scan |
-| `kind` | text, not null, `'scan'` or `'refresh'` | |
+| `kind` | text, not null, `'full'` or `'refresh'` | |
 | `outcome` | text, not null, `'completed'` or `'failed'` | |
 | `started_at` | text (RFC 3339), not null | |
 | `finished_at` | text (RFC 3339), not null | |
@@ -117,7 +117,7 @@ attribute it to. Parts 1 and 3 cover it.
 - **Railway logs:** the per-scan line above.
 - **Admin page** (`/admin`, existing admin-only route): a "GPU cost" section.
   - Totals for the last 7 and 30 days (sum of `est_cents`).
-  - Per user: first-scan cost (the earliest `kind='scan'` row), refreshes to
+  - Per user: first-scan cost (the earliest `kind='full'` row), refreshes to
     date (sum of `kind='refresh'`), total, and last scan time.
   - A user whose first scan estimate is over **$2.00** is flagged.
   - Served by a new admin-only endpoint `GET /api/admin/costs`, behind the
@@ -130,10 +130,8 @@ attribute it to. Parts 1 and 3 cover it.
 - DB (SQLite unit + Postgres integration): insert/list round trip; per-user
   and windowed aggregates; `delete_user_data` removes the rows; migration v20
   applies on a v19 database and is idempotent.
-- Scan paths: a completed scan writes exactly one row with `outcome =
-  completed`; a scan that fails after classifying writes one row with
-  `outcome = failed` and non-zero worker-seconds; a scan where every verdict
-  was cached writes zero worker-seconds; a refresh writes `kind = refresh`.
+- Scan-path wiring is verified on staging (plan Task 8): the scan body needs
+  live Bluesky and models, which the unit suites fake.
 - A DB write failure on the cost row does not fail the scan.
 - Endpoint: non-admins get 403; aggregates and the $2.00 flag are correct.
 - Frontend (vitest): the cost section renders totals, the flag, and the
