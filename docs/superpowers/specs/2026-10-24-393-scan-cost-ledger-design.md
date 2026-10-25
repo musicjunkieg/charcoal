@@ -117,9 +117,9 @@ attribute it to. Parts 1 and 3 cover it.
 - **Railway logs:** the per-scan line above.
 - **Admin page** (`/admin`, existing admin-only route): a "GPU cost" section.
   - Totals for the last 7 and 30 days (sum of `est_cents`).
-  - Per user: first-scan cost (the earliest `kind='full'` row), refreshes to
+  - Per user: full-scan cost to date (all `kind='full'` rows), refreshes to
     date (sum of `kind='refresh'`), total, and last scan time.
-  - A user whose first scan estimate is over **$2.00** is flagged.
+  - A user whose full-scan cost to date is over **$2.00** is flagged.
   - Served by a new admin-only endpoint `GET /api/admin/costs`, behind the
     same admin check as the other admin endpoints.
 

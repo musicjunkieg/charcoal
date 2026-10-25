@@ -475,14 +475,14 @@
 			{:else}
 				<table class="costs-table">
 					<thead>
-						<tr><th>User</th><th>First scan</th><th>Refreshes</th><th>Total</th><th>Runs</th></tr>
+						<tr><th>User</th><th>Full scans</th><th>Refreshes</th><th>Total</th><th>Runs</th></tr>
 					</thead>
 					<tbody>
 						{#each costs.users as u (u.user_did)}
 							<tr class={{ 'over-target': u.over_onboarding_target }}>
 								<td class="costs-user">{u.handle ?? u.user_did}</td>
 								<td>
-									{formatCents(u.first_full_scan_cents)}
+									{formatCents(u.full_scan_cents)}
 									{#if u.over_onboarding_target}
 										<span class="over-flag">over {formatCents(costs.onboarding_target_cents)}</span>
 									{/if}

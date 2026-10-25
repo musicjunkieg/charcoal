@@ -3046,7 +3046,7 @@ impl Database for PgDatabase {
             .map(|r| UserScanCost {
                 user_did: r.get::<String, _>(0),
                 handle: r.get::<Option<String>, _>(1),
-                first_full_scan_cents: r.get::<Option<i64>, _>(2),
+                full_scan_cents: r.get::<Option<i64>, _>(2),
                 refresh_cents: r.get::<i64, _>(3),
                 total_cents: r.get::<i64, _>(4),
                 runs: r.get::<i64, _>(5),

@@ -257,7 +257,8 @@ export interface AccessListResponse {
 export interface UserScanCost {
 	user_did: string;
 	handle: string | null;
-	first_full_scan_cents: number | null;
+	/** Every full-scan row summed (resumes and failed attempts included); null when none. */
+	full_scan_cents: number | null;
 	refresh_cents: number;
 	total_cents: number;
 	runs: number;

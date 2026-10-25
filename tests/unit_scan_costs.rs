@@ -28,7 +28,7 @@ fn row(did: &str, kind: &str, started: &str, cents: i64) -> ScanCostRow {
 }
 
 #[tokio::test]
-async fn aggregates_first_full_scan_refreshes_and_total_per_user() {
+async fn aggregates_full_scans_refreshes_and_total_per_user() {
     let db = setup_db();
     db.insert_scan_cost(&row("did:plc:a", "full", "2026-10-01T00:00:00Z", 150))
         .await
@@ -47,15 +47,16 @@ async fn aggregates_first_full_scan_refreshes_and_total_per_user() {
     assert_eq!(users.len(), 2);
     let a = &users[0]; // highest total first
     assert_eq!(a.user_did, "did:plc:a");
-    assert_eq!(a.first_full_scan_cents, Some(150), "the EARLIEST full scan");
+    assert_eq!(
+        a.full_scan_cents,
+        Some(190),
+        "EVERY full-scan row: a resumed or retried onboarding costs all of them"
+    );
     assert_eq!(a.refresh_cents, 7);
     assert_eq!(a.total_cents, 197);
     assert_eq!(a.runs, 3);
     assert_eq!(a.last_finished_at, "2026-10-05T00:00:00Z");
-    assert_eq!(
-        users[1].first_full_scan_cents, None,
-        "b never had a full scan"
-    );
+    assert_eq!(users[1].full_scan_cents, None, "b never had a full scan");
 }
 
 #[tokio::test]

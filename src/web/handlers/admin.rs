@@ -443,8 +443,9 @@ pub async fn delete_user(
     Ok(Json(serde_json::json!({"deleted": target_did})))
 }
 
-/// First-scan cost above which an onboarding is flagged (#385: Bryan's
-/// target is under $2.00 per new user).
+/// Full-scan cost to date (every `kind='full'` row: failed attempts and
+/// resumed chunks included) above which an onboarding is flagged (#385:
+/// Bryan's target is under $2.00 per new user).
 const ONBOARDING_TARGET_CENTS: i64 = 200;
 
 /// GET /api/admin/costs — estimated GPU spend (#393). Figures are the
@@ -484,12 +485,12 @@ pub async fn scan_costs(
         .into_iter()
         .map(|u| {
             let over = u
-                .first_full_scan_cents
+                .full_scan_cents
                 .is_some_and(|c| c > ONBOARDING_TARGET_CENTS);
             serde_json::json!({
                 "user_did": u.user_did,
                 "handle": u.handle,
-                "first_full_scan_cents": u.first_full_scan_cents,
+                "full_scan_cents": u.full_scan_cents,
                 "refresh_cents": u.refresh_cents,
                 "total_cents": u.total_cents,
                 "runs": u.runs,

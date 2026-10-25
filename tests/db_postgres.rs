@@ -6208,13 +6208,8 @@ async fn test_pg_scan_costs_aggregate_window_and_delete() {
     let users = db.list_user_scan_costs().await.unwrap();
     let a = users.iter().find(|u| u.user_did == A).expect("A listed");
     assert_eq!(
-        (
-            a.first_full_scan_cents,
-            a.refresh_cents,
-            a.total_cents,
-            a.runs
-        ),
-        (Some(150), 7, 197, 3)
+        (a.full_scan_cents, a.refresh_cents, a.total_cents, a.runs),
+        (Some(190), 7, 197, 3)
     );
     // 2099 dates keep this window free of other tests' rows.
     assert_eq!(

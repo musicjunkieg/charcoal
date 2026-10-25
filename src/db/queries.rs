@@ -3186,9 +3186,7 @@ pub fn insert_scan_cost(conn: &Connection, r: &crate::db::traits::ScanCostRow) -
 /// sums BIGINT into NUMERIC, which does not decode as i64.
 pub const USER_SCAN_COSTS_SQL: &str =
     "SELECT c.user_did, u.handle,
-            (SELECT f.est_cents FROM scan_costs f
-              WHERE f.user_did = c.user_did AND f.kind = 'full'
-              ORDER BY f.started_at ASC, f.id ASC LIMIT 1) AS first_full_scan_cents,
+            CAST(SUM(CASE WHEN c.kind = 'full' THEN c.est_cents END) AS BIGINT) AS full_scan_cents,
             CAST(COALESCE(SUM(CASE WHEN c.kind = 'refresh' THEN c.est_cents ELSE 0 END), 0) AS BIGINT) AS refresh_cents,
             CAST(COALESCE(SUM(c.est_cents), 0) AS BIGINT) AS total_cents,
             COUNT(*) AS runs,
@@ -3205,7 +3203,7 @@ pub fn list_user_scan_costs(conn: &Connection) -> Result<Vec<crate::db::traits::
             Ok(crate::db::traits::UserScanCost {
                 user_did: r.get(0)?,
                 handle: r.get(1)?,
-                first_full_scan_cents: r.get(2)?,
+                full_scan_cents: r.get(2)?,
                 refresh_cents: r.get(3)?,
                 total_cents: r.get(4)?,
                 runs: r.get(5)?,

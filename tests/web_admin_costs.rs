@@ -73,6 +73,14 @@ async fn reports_per_user_totals_windows_and_the_onboarding_flag() {
     db.insert_scan_cost(&row("did:plc:big", "full", at(20), 250))
         .await
         .unwrap();
+    // Two full-scan rows (a capped chunk and its resume), neither over $2.00
+    // alone: the flag judges the full-scan cost to date, so this one is over.
+    db.insert_scan_cost(&row("did:plc:split", "full", at(40), 120))
+        .await
+        .unwrap();
+    db.insert_scan_cost(&row("did:plc:split", "full", at(39), 120))
+        .await
+        .unwrap();
     db.insert_scan_cost(&row("did:plc:small", "full", at(1), 90))
         .await
         .unwrap();
@@ -85,7 +93,24 @@ async fn reports_per_user_totals_windows_and_the_onboarding_flag() {
     assert_eq!(body["last_7d_cents"], 94);
     assert_eq!(body["last_30d_cents"], 344);
     assert_eq!(body["onboarding_target_cents"], 200);
+    let user = |did: &str| -> Value {
+        body["users"]
+            .as_array()
+            .expect("users array")
+            .iter()
+            .find(|u| u["user_did"] == did)
+            .unwrap_or_else(|| panic!("{did} listed"))
+            .clone()
+    };
     assert_eq!(body["users"][0]["user_did"], "did:plc:big");
-    assert_eq!(body["users"][0]["over_onboarding_target"], true);
-    assert_eq!(body["users"][1]["over_onboarding_target"], false);
+    assert_eq!(user("did:plc:big")["full_scan_cents"], 250);
+    assert_eq!(user("did:plc:big")["over_onboarding_target"], true);
+    assert_eq!(user("did:plc:split")["full_scan_cents"], 240);
+    assert_eq!(user("did:plc:split")["over_onboarding_target"], true);
+    assert_eq!(user("did:plc:small")["full_scan_cents"], 90);
+    assert_eq!(user("did:plc:small")["over_onboarding_target"], false);
+    assert!(
+        user("did:plc:small").get("first_full_scan_cents").is_none(),
+        "the old field name is gone"
+    );
 }

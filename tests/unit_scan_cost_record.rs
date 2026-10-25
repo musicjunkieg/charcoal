@@ -54,7 +54,7 @@ async fn a_run_writes_exactly_one_row() {
     assert_eq!(users.len(), 1);
     assert_eq!(users[0].runs, 1);
     assert_eq!(
-        users[0].first_full_scan_cents,
+        users[0].full_scan_cents,
         Some(0),
         "an all-cached scan costs 0"
     );

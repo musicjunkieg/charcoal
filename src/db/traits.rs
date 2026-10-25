@@ -406,7 +406,10 @@ pub struct ScanCostRow {
 pub struct UserScanCost {
     pub user_did: String,
     pub handle: Option<String>,
-    pub first_full_scan_cents: Option<i64>,
+    /// Every `kind='full'` row summed — refused probes, failed attempts and
+    /// each resumed chunk alike, since all of it is onboarding spend. `None`
+    /// when the user has no full-scan row at all.
+    pub full_scan_cents: Option<i64>,
     pub refresh_cents: i64,
     pub total_cents: i64,
     pub runs: i64,
