@@ -1,5 +1,13 @@
 [
   {
+    "hash": "632169b7b65d96f2d5b9f29a5183e3a85ed1d5af",
+    "short_hash": "632169b",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T18:07:56-07:00",
+    "message": "docs(393): scan cost ledger and alpha spend guardrails design\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "cee73e77a55a835b961c99d3b11210d1d56e6a72",
     "short_hash": "cee73e7",
     "author": "Bryan Guffey",

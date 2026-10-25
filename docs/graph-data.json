@@ -12825,6 +12825,17 @@
       "created_at": "2026-10-24T17:56:34.413916-07:00",
       "updated_at": "2026-10-24T17:56:34.413916-07:00",
       "metadata_json": "{\"branch\":\"fix/408-undecryptable-session\",\"confidence\":85}"
+    },
+    {
+      "id": 1176,
+      "change_id": "7d08fdf6-8f98-4c7d-b507-7198376fb8e1",
+      "node_type": "action",
+      "title": "Write #393 cost ledger spec",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-24T18:08:04.355041-07:00",
+      "updated_at": "2026-10-24T18:08:04.355041-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"632169b\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-10-24-393-scan-cost-ledger-design.md\"]}"
     }
   ],
   "edges": [
@@ -26170,6 +26181,61 @@
       "weight": 1.0,
       "rationale": "result",
       "created_at": "2026-10-24T16:39:19.515575-07:00"
+    },
+    {
+      "id": 1224,
+      "from_node_id": 1171,
+      "to_node_id": 1172,
+      "from_change_id": "5d65de16-d5e4-4633-a6ba-e19a3ab57d1c",
+      "to_change_id": "64d4fa0e-83b7-4b79-bcef-fce717aee660",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-24T18:08:04.307959-07:00"
+    },
+    {
+      "id": 1225,
+      "from_node_id": 1171,
+      "to_node_id": 1173,
+      "from_change_id": "5d65de16-d5e4-4633-a6ba-e19a3ab57d1c",
+      "to_change_id": "e25d6fec-219c-4ecc-ab54-bef829ecf36b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-24T18:08:04.315094-07:00"
+    },
+    {
+      "id": 1226,
+      "from_node_id": 1171,
+      "to_node_id": 1174,
+      "from_change_id": "5d65de16-d5e4-4633-a6ba-e19a3ab57d1c",
+      "to_change_id": "a4f24a34-0aaf-48ca-8a5d-16dc90ddcd6c",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "option",
+      "created_at": "2026-10-24T18:08:04.322242-07:00"
+    },
+    {
+      "id": 1227,
+      "from_node_id": 1174,
+      "to_node_id": 1175,
+      "from_change_id": "a4f24a34-0aaf-48ca-8a5d-16dc90ddcd6c",
+      "to_change_id": "ad4b4035-0fe7-4e70-9c4f-65a544467a44",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "chosen",
+      "created_at": "2026-10-24T18:08:04.330077-07:00"
+    },
+    {
+      "id": 1228,
+      "from_node_id": 1173,
+      "to_node_id": 1175,
+      "from_change_id": "e25d6fec-219c-4ecc-ab54-bef829ecf36b",
+      "to_change_id": "ad4b4035-0fe7-4e70-9c4f-65a544467a44",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "rejected: billing key in Railway",
+      "created_at": "2026-10-24T18:08:04.338744-07:00"
     }
   ],
   "documents": [
