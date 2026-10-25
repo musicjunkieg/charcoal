@@ -12847,6 +12847,28 @@
       "created_at": "2026-10-24T18:34:36.415555-07:00",
       "updated_at": "2026-10-24T18:34:36.415555-07:00",
       "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"045f2be\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-10-24-393-scan-cost-ledger.md\"]}"
+    },
+    {
+      "id": 1178,
+      "change_id": "12f1297f-d32c-47e0-abd0-8f2c945d2e2e",
+      "node_type": "observation",
+      "title": "Final review: paused (cost-capped) scans were recorded as completed; first-full-scan figure could hide real onboarding cost",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-24T20:52:54.138125-07:00",
+      "updated_at": "2026-10-24T20:52:54.138125-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"confidence\":90}"
+    },
+    {
+      "id": 1179,
+      "change_id": "d8d41353-a294-467c-9f8a-c6858a54f515",
+      "node_type": "decision",
+      "title": "Onboarding flag judges SUM of full-scan cost to date; add 'paused' outcome (amend unshipped v20 in place)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-24T20:52:57.696401-07:00",
+      "updated_at": "2026-10-24T20:52:57.696401-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"confidence\":85}"
     }
   ],
   "edges": [
@@ -26269,6 +26291,28 @@
       "weight": 1.0,
       "rationale": "plan",
       "created_at": "2026-10-24T18:34:36.429963-07:00"
+    },
+    {
+      "id": 1231,
+      "from_node_id": 1177,
+      "to_node_id": 1178,
+      "from_change_id": "96691951-4968-4358-9a9d-7ee069c9f541",
+      "to_change_id": "12f1297f-d32c-47e0-abd0-8f2c945d2e2e",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "found in final review",
+      "created_at": "2026-10-24T20:52:57.685424-07:00"
+    },
+    {
+      "id": 1232,
+      "from_node_id": 1178,
+      "to_node_id": 1179,
+      "from_change_id": "12f1297f-d32c-47e0-abd0-8f2c945d2e2e",
+      "to_change_id": "d8d41353-a294-467c-9f8a-c6858a54f515",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "informs",
+      "created_at": "2026-10-24T20:53:00.350574-07:00"
     }
   ],
   "documents": [

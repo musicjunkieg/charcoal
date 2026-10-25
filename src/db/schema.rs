@@ -689,7 +689,7 @@ pub fn create_tables_through(conn: &Connection, max_version: i64) -> Result<()> 
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
                  user_did TEXT NOT NULL,
                  kind TEXT NOT NULL CHECK (kind IN ('full', 'refresh')),
-                 outcome TEXT NOT NULL CHECK (outcome IN ('completed', 'failed')),
+                 outcome TEXT NOT NULL CHECK (outcome IN ('completed', 'paused', 'failed')),
                  started_at TEXT NOT NULL,
                  finished_at TEXT NOT NULL,
                  classifications INTEGER NOT NULL,

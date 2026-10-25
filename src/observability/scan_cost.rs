@@ -17,10 +17,34 @@ pub fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// How a run ended, as the `scan_costs.outcome` column records it.
+///
+/// Three values, not a bool: a run that returned without error but did not
+/// finish — cost ceiling or interruption — is `Paused`. Its resumed run
+/// writes its own row, so the user's total still adds up; calling the first
+/// chunk `completed` would make every capped scan look finished.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanCostOutcome {
+    Completed,
+    Paused,
+    Failed,
+}
+
+impl ScanCostOutcome {
+    /// The stored value; the table's CHECK constraint lists exactly these.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanCostOutcome::Completed => "completed",
+            ScanCostOutcome::Paused => "paused",
+            ScanCostOutcome::Failed => "failed",
+        }
+    }
+}
+
 pub fn build_scan_cost_row(
     user_did: &str,
     kind: ScanKind,
-    completed: bool,
+    outcome: ScanCostOutcome,
     started_at: &str,
     finished_at: &str,
     snap: CostSnapshot,
@@ -29,7 +53,7 @@ pub fn build_scan_cost_row(
     ScanCostRow {
         user_did: user_did.to_string(),
         kind: kind.as_str().to_string(),
-        outcome: if completed { "completed" } else { "failed" }.to_string(),
+        outcome: outcome.as_str().to_string(),
         started_at: started_at.to_string(),
         finished_at: finished_at.to_string(),
         // Cache misses are the verdicts that actually went to the backend.
@@ -49,7 +73,7 @@ pub async fn record_scan_cost(
     db: &dyn Database,
     user_did: &str,
     kind: ScanKind,
-    completed: bool,
+    outcome: ScanCostOutcome,
     started_at: &str,
     meter: &ScanCostMeter,
     classifier_stats: &CacheStats,
@@ -57,7 +81,7 @@ pub async fn record_scan_cost(
     let row = build_scan_cost_row(
         user_did,
         kind,
-        completed,
+        outcome,
         started_at,
         &now_rfc3339(),
         meter.snapshot(),

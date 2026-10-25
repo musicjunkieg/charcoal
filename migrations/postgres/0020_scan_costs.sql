@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS scan_costs (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_did TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('full', 'refresh')),
-    outcome TEXT NOT NULL CHECK (outcome IN ('completed', 'failed')),
+    outcome TEXT NOT NULL CHECK (outcome IN ('completed', 'paused', 'failed')),
     started_at TEXT NOT NULL,
     finished_at TEXT NOT NULL,
     classifications BIGINT NOT NULL,

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use charcoal::db::sqlite::SqliteDatabase;
 use charcoal::db::{Database, ScanKind};
 use charcoal::observability::cache_stats::CacheStats;
-use charcoal::observability::scan_cost::{build_scan_cost_row, record_scan_cost};
+use charcoal::observability::scan_cost::{build_scan_cost_row, record_scan_cost, ScanCostOutcome};
 use charcoal::toxicity::cost_meter::ScanCostMeter;
 use rusqlite::Connection;
 
@@ -24,7 +24,7 @@ fn row_carries_meter_and_cache_counts() {
     let r = build_scan_cost_row(
         "did:plc:a",
         ScanKind::Refresh,
-        false,
+        ScanCostOutcome::Failed,
         "2026-10-24T00:00:00Z",
         "2026-10-24T00:01:00Z",
         m.snapshot(),
@@ -44,7 +44,7 @@ async fn a_run_writes_exactly_one_row() {
         db.as_ref(),
         "did:plc:a",
         ScanKind::Full,
-        true,
+        ScanCostOutcome::Completed,
         "2026-10-24T00:00:00Z",
         &m,
         &CacheStats::default(),
@@ -70,10 +70,41 @@ async fn a_db_failure_is_swallowed() {
         db.as_ref(),
         "did:plc:a",
         ScanKind::Full,
-        true,
+        ScanCostOutcome::Completed,
         "2026-10-24T00:00:00Z",
         &m,
         &CacheStats::default(),
     )
     .await;
+}
+
+#[tokio::test]
+async fn a_paused_row_round_trips() {
+    // `paused`: returned Ok but did not finish (cost ceiling or interruption).
+    // Inserting it proves the SQLite CHECK constraint accepts the value.
+    let db = setup_db();
+    let m = ScanCostMeter::new(500, 329);
+    let row = build_scan_cost_row(
+        "did:plc:a",
+        ScanKind::Full,
+        ScanCostOutcome::Paused,
+        "2026-10-24T00:00:00Z",
+        "2026-10-24T00:01:00Z",
+        m.snapshot(),
+        &CacheStats::default(),
+    );
+    assert_eq!(row.outcome, "paused");
+    db.insert_scan_cost(&row)
+        .await
+        .expect("the CHECK constraint must accept 'paused'");
+    let users = db.list_user_scan_costs().await.unwrap();
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0].runs, 1);
+}
+
+#[test]
+fn outcome_strings_are_stable() {
+    assert_eq!(ScanCostOutcome::Completed.as_str(), "completed");
+    assert_eq!(ScanCostOutcome::Paused.as_str(), "paused");
+    assert_eq!(ScanCostOutcome::Failed.as_str(), "failed");
 }

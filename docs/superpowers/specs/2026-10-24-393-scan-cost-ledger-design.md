@@ -49,7 +49,7 @@ succeeded or failed.
 | `id` | integer / bigserial PK | |
 | `user_did` | text, not null | whose scan |
 | `kind` | text, not null, `'full'` or `'refresh'` | |
-| `outcome` | text, not null, `'completed'` or `'failed'` | |
+| `outcome` | text, not null, `'completed'`, `'paused'` or `'failed'` | `paused` = returned without error but did not finish (cost ceiling or interruption); the resumed run writes its own row. |
 | `started_at` | text (RFC 3339), not null | |
 | `finished_at` | text (RFC 3339), not null | |
 | `classifications` | integer, not null | Stage-2 classifier calls that reached the backend (cache misses) |

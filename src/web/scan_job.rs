@@ -1407,13 +1407,29 @@ async fn run_scan_inner(
         db.as_ref(),
         user_did,
         crate::db::ScanKind::Full,
-        run.is_ok(),
+        full_scan_cost_outcome(&run),
         &started_at,
         &scorers.cost_meter,
         &scorers.classifier_stats,
     )
     .await;
     run
+}
+
+/// #393: what a full scan's cost row records. `Ok` is not enough — the
+/// pipeline returns `Ok(Resumable)` for a cost-capped or interrupted run,
+/// which did not finish and is `Paused`; its resumed run writes its own row.
+/// Every other completion reached `done` (with or without skips, verified or
+/// not) and is `Completed`.
+pub(crate) fn full_scan_cost_outcome(
+    run: &anyhow::Result<FullScanRun>,
+) -> crate::observability::scan_cost::ScanCostOutcome {
+    use crate::observability::scan_cost::ScanCostOutcome;
+    match run {
+        Err(_) => ScanCostOutcome::Failed,
+        Ok(r) if r.completion == ScanCompletion::Resumable => ScanCostOutcome::Paused,
+        Ok(_) => ScanCostOutcome::Completed,
+    }
 }
 
 // #393: one call site; `scorers` is the only seam the cost wrapper adds.
@@ -2632,6 +2648,39 @@ mod completion_tests {
                 .await
                 .unwrap(),
             "a foreign claim"
+        );
+    }
+
+    /// #393: the cost row's outcome. `Ok` alone is not "completed" — a
+    /// cost-capped or interrupted scan returns `Ok(Resumable)` and is paused.
+    #[test]
+    fn full_scan_cost_outcome_separates_paused_from_completed() {
+        use crate::observability::scan_cost::ScanCostOutcome;
+        let ok = |completion| -> anyhow::Result<FullScanRun> {
+            Ok(FullScanRun {
+                events: 1,
+                scored: 1,
+                completion,
+            })
+        };
+        assert_eq!(
+            full_scan_cost_outcome(&ok(ScanCompletion::Resumable)),
+            ScanCostOutcome::Paused
+        );
+        for done in [
+            ScanCompletion::Complete,
+            ScanCompletion::CompleteWithSkips { n: 2 },
+            ScanCompletion::CompleteUnverified,
+        ] {
+            assert_eq!(
+                full_scan_cost_outcome(&ok(done)),
+                ScanCostOutcome::Completed,
+                "{done:?} reached done"
+            );
+        }
+        assert_eq!(
+            full_scan_cost_outcome(&Err(anyhow::anyhow!("boom"))),
+            ScanCostOutcome::Failed
         );
     }
 

@@ -949,6 +949,36 @@ impl RefreshContextSource for LiveRefreshContext {
     }
 }
 
+/// #393: what a refresh's cost row records, or `None` for no row.
+///
+/// - `Err(OwnedByOtherKind)` → `None`. `run_phased_scan` raises it while
+///   reading the ownership markers, before gather; there is no up-front
+///   classifier probe on this path (#394), so it spent no GPU time.
+///   `run_refresh_with` turns it into a deferral, not a failure.
+/// - Any other `Err` → `Failed`.
+/// - `Ok` whose staging was left resumable (cost cap, or a transient
+///   classifier stop mid-burst) → `Paused` — the same line
+///   [`classify_refresh`] draws for `RefreshOutcome::Resumable`.
+/// - Otherwise → `Completed`.
+pub(crate) fn refresh_cost_outcome(
+    result: &anyhow::Result<ScanSummary>,
+) -> Option<crate::observability::scan_cost::ScanCostOutcome> {
+    use crate::observability::scan_cost::ScanCostOutcome;
+    use crate::web::scan_job::{classify_full_scan, ScanCompletion};
+    match result {
+        Err(e) => match e.downcast_ref::<PhasedScanError>() {
+            Some(PhasedScanError::OwnedByOtherKind(_)) => None,
+            None => Some(ScanCostOutcome::Failed),
+        },
+        Ok(s) => Some(
+            match classify_full_scan(s.degraded, s.final_phase.as_deref(), s.skipped) {
+                ScanCompletion::Resumable => ScanCostOutcome::Paused,
+                _ => ScanCostOutcome::Completed,
+            },
+        ),
+    }
+}
+
 /// Production entry: everything fallible is inside `setup`.
 ///
 /// Returns the same `ScanReport` as `run_scan`, so `run_claim`'s two arms have
@@ -1068,16 +1098,20 @@ pub(crate) async fn run_refresh(
                 Ok::<_, anyhow::Error>(summary)
             }
             .await;
-            crate::observability::scan_cost::record_scan_cost(
-                db.as_ref(),
-                &uid,
-                crate::db::ScanKind::Refresh,
-                result.is_ok(),
-                &started_at,
-                &scorers.cost_meter,
-                &scorers.classifier_stats,
-            )
-            .await;
+            // A deferral to a full scan's staging (`None`) is not a run: it is
+            // raised before gather, so nothing reached the GPU to record.
+            if let Some(outcome) = refresh_cost_outcome(&result) {
+                crate::observability::scan_cost::record_scan_cost(
+                    db.as_ref(),
+                    &uid,
+                    crate::db::ScanKind::Refresh,
+                    outcome,
+                    &started_at,
+                    &scorers.cost_meter,
+                    &scorers.classifier_stats,
+                )
+                .await;
+            }
             result
         };
         Ok((ctx, pipeline))
@@ -2116,6 +2150,52 @@ mod tests {
         );
         assert_eq!(db.next_refresh_at("did:plc:u").await.unwrap(), None);
         assert_eq!(db.export_scores("did:plc:u").await.unwrap(), before);
+    }
+
+    /// #393: the refresh's cost-row outcome. A pause (cost cap or a
+    /// transient classifier stop that left staging resumable) is `paused`; a
+    /// deferral to a full scan's staging is not recorded at all, because it
+    /// is raised before gather — no classifier call can precede it.
+    #[test]
+    fn refresh_cost_outcome_maps_pause_failure_and_deferral() {
+        use crate::observability::scan_cost::ScanCostOutcome;
+        use crate::pipeline::scan_phases::PhasedScanError;
+        let summary = |phase: &str, degraded, interrupted, skipped| ScanSummary {
+            accounts_scored: 1,
+            regathered: 0,
+            degraded,
+            interrupted,
+            final_phase: Some(phase.into()),
+            skipped,
+        };
+        let ok = |s| -> anyhow::Result<ScanSummary> { Ok(s) };
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("done", false, false, Some(0)))),
+            Some(ScanCostOutcome::Completed)
+        );
+        // Cost-capped: staging left at burst.
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("burst", true, false, Some(0)))),
+            Some(ScanCostOutcome::Paused)
+        );
+        // Transient classifier stop mid-burst.
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("burst", true, true, Some(0)))),
+            Some(ScanCostOutcome::Paused)
+        );
+        // A recovery-burst timeout that still reached `done` finished (with
+        // skips) — the same line `classify_refresh` draws.
+        assert_eq!(
+            refresh_cost_outcome(&ok(summary("done", false, true, Some(1)))),
+            Some(ScanCostOutcome::Completed)
+        );
+        assert_eq!(
+            refresh_cost_outcome(&Err(anyhow::anyhow!("boom"))),
+            Some(ScanCostOutcome::Failed)
+        );
+        let deferred: anyhow::Result<ScanSummary> =
+            Err(PhasedScanError::OwnedByOtherKind(ScanKind::Full).into());
+        assert_eq!(refresh_cost_outcome(&deferred), None);
     }
 
     /// Completion is classified from persisted state, not from the invocation's

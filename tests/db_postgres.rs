@@ -6190,6 +6190,14 @@ async fn test_pg_scan_costs_aggregate_window_and_delete() {
     db.insert_scan_cost(&row(A, "full", "2099-01-01T00:00:00Z", 150))
         .await
         .unwrap();
+    // A resumed full scan's first, cost-capped chunk: `paused` must pass the
+    // CHECK constraint, and its cents still count toward the user's total.
+    db.insert_scan_cost(&charcoal::db::ScanCostRow {
+        outcome: "paused".into(),
+        ..row(A, "full", "2099-01-01T06:00:00Z", 40)
+    })
+    .await
+    .unwrap();
     db.insert_scan_cost(&row(A, "refresh", "2099-01-02T00:00:00Z", 7))
         .await
         .unwrap();
@@ -6206,7 +6214,7 @@ async fn test_pg_scan_costs_aggregate_window_and_delete() {
             a.total_cents,
             a.runs
         ),
-        (Some(150), 7, 157, 2)
+        (Some(150), 7, 197, 3)
     );
     // 2099 dates keep this window free of other tests' rows.
     assert_eq!(
