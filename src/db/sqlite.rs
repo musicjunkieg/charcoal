@@ -20,8 +20,8 @@ use super::models::{
 use super::traits::{
     validate_bundle, AccessRequestRow, ActionBatchRow, ActionRow, ClassifierVerdictRow, Database,
     EnqueueOutcome, FeedSnapshot, FinishCompletion, NewAction, OauthSessionRow, OnnxScoreRow,
-    RefreshCandidate, ScanClaim, ScanQueueDepth, ScanQueueEntry, ScanQueueRow, ScanSkip,
-    ScoreSnapshot,
+    RefreshCandidate, ScanClaim, ScanCostRow, ScanQueueDepth, ScanQueueEntry, ScanQueueRow,
+    ScanSkip, ScoreSnapshot, UserScanCost,
 };
 use crate::pipeline::scan_phases::staging::{QueueRow, VerdictRow};
 
@@ -707,6 +707,23 @@ impl Database for SqliteDatabase {
         super::queries::list_access_requests(&conn)
     }
 
+    // --- Scan cost ledger (#393) ---
+
+    async fn insert_scan_cost(&self, row: &ScanCostRow) -> Result<()> {
+        let conn = self.conn.lock().await;
+        super::queries::insert_scan_cost(&conn, row)
+    }
+
+    async fn list_user_scan_costs(&self) -> Result<Vec<UserScanCost>> {
+        let conn = self.conn.lock().await;
+        super::queries::list_user_scan_costs(&conn)
+    }
+
+    async fn scan_cost_cents_since(&self, since: &str) -> Result<i64> {
+        let conn = self.conn.lock().await;
+        super::queries::scan_cost_cents_since(&conn, since)
+    }
+
     // --- OAuth write sessions (#315) ---
 
     async fn get_oauth_session(&self, user_did: &str) -> Result<Option<OauthSessionRow>> {
@@ -1209,8 +1226,8 @@ mod tests {
         // scan_queue, topic_clusters, access_requests,
         // oauth_sessions, action_batches, actions (v15),
         // account_feed_snapshots, onnx_scores, classifier_verdicts (v16)
-        // = 20 tables
-        assert_eq!(count, 20);
+        // scan_costs (v20) = 21 tables
+        assert_eq!(count, 21);
     }
 
     #[tokio::test]

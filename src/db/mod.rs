@@ -26,7 +26,7 @@ pub use cache_retention::CacheEviction;
 pub const REFRESH_FAILURE_STREAK_KEY: &str = "refresh_failure_streak";
 pub use traits::{
     ClassifierVerdictRow, Database, EnqueueOutcome, FeedSnapshot, FinishCompletion, OnnxScoreRow,
-    RefreshCandidate, RefreshScheduleWrite, ScanKind, StreakWrite,
+    RefreshCandidate, RefreshScheduleWrite, ScanCostRow, ScanKind, StreakWrite, UserScanCost,
 };
 
 use anyhow::Result;

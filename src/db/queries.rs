@@ -1402,6 +1402,11 @@ pub fn delete_user_data(conn: &Connection, user_did: &str) -> Result<()> {
         "DELETE FROM scan_skips WHERE user_did = ?1",
         params![user_did],
     )?;
+    // #393: the cost ledger is keyed by user DID and must not outlive the account.
+    tx.execute(
+        "DELETE FROM scan_costs WHERE user_did = ?1",
+        params![user_did],
+    )?;
     // #257: scan_queue holds the user's admission state; a queued or running
     // row must not outlive the account.
     tx.execute(
@@ -3150,6 +3155,73 @@ pub fn evict_stale_cache(
         onnx_scores,
         classifier_verdicts,
     })
+}
+
+// --- Scan cost ledger (#393) ---
+
+pub fn insert_scan_cost(conn: &Connection, r: &crate::db::traits::ScanCostRow) -> Result<()> {
+    conn.execute(
+        "INSERT INTO scan_costs (user_did, kind, outcome, started_at, finished_at,
+             classifications, classifier_cache_hits, metered_worker_secs,
+             peak_in_flight, est_cents, rate_cents_per_hour)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            r.user_did,
+            r.kind,
+            r.outcome,
+            r.started_at,
+            r.finished_at,
+            r.classifications,
+            r.classifier_cache_hits,
+            r.metered_worker_secs,
+            r.peak_in_flight,
+            r.est_cents,
+            r.rate_cents_per_hour
+        ],
+    )?;
+    Ok(())
+}
+
+/// Shared by both backends (no placeholders). The CASTs matter: Postgres
+/// sums BIGINT into NUMERIC, which does not decode as i64.
+pub const USER_SCAN_COSTS_SQL: &str =
+    "SELECT c.user_did, u.handle,
+            (SELECT f.est_cents FROM scan_costs f
+              WHERE f.user_did = c.user_did AND f.kind = 'full'
+              ORDER BY f.started_at ASC, f.id ASC LIMIT 1) AS first_full_scan_cents,
+            CAST(COALESCE(SUM(CASE WHEN c.kind = 'refresh' THEN c.est_cents ELSE 0 END), 0) AS BIGINT) AS refresh_cents,
+            CAST(COALESCE(SUM(c.est_cents), 0) AS BIGINT) AS total_cents,
+            COUNT(*) AS runs,
+            MAX(c.finished_at) AS last_finished_at
+       FROM scan_costs c
+       LEFT JOIN users u ON u.did = c.user_did
+      GROUP BY c.user_did, u.handle
+      ORDER BY total_cents DESC, c.user_did ASC";
+
+pub fn list_user_scan_costs(conn: &Connection) -> Result<Vec<crate::db::traits::UserScanCost>> {
+    let mut stmt = conn.prepare(USER_SCAN_COSTS_SQL)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(crate::db::traits::UserScanCost {
+                user_did: r.get(0)?,
+                handle: r.get(1)?,
+                first_full_scan_cents: r.get(2)?,
+                refresh_cents: r.get(3)?,
+                total_cents: r.get(4)?,
+                runs: r.get(5)?,
+                last_finished_at: r.get(6)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn scan_cost_cents_since(conn: &Connection, since: &str) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(est_cents), 0) FROM scan_costs WHERE started_at >= ?1",
+        params![since],
+        |r| r.get(0),
+    )?)
 }
 
 #[cfg(test)]

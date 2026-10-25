@@ -6162,3 +6162,66 @@ async fn test_pg_success_schedule_write_clears_the_streak() {
     assert_eq!(db.get_scan_state(DID, KEY).await.unwrap(), None);
     db.delete_user_data(DID).await.unwrap();
 }
+
+#[tokio::test]
+async fn test_pg_scan_costs_aggregate_window_and_delete() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    let db = charcoal::db::connect_postgres(&url).await.unwrap();
+    const A: &str = "did:plc:pgtest_scancost_a";
+    const B: &str = "did:plc:pgtest_scancost_b";
+    for d in [A, B] {
+        db.delete_user_data(d).await.unwrap();
+    }
+    let row = |did: &str, kind: &str, at: &str, cents: i64| charcoal::db::ScanCostRow {
+        user_did: did.into(),
+        kind: kind.into(),
+        outcome: "completed".into(),
+        started_at: at.into(),
+        finished_at: at.into(),
+        classifications: 10,
+        classifier_cache_hits: 2,
+        metered_worker_secs: 1.5,
+        peak_in_flight: 1,
+        est_cents: cents,
+        rate_cents_per_hour: 329,
+    };
+    db.insert_scan_cost(&row(A, "full", "2099-01-01T00:00:00Z", 150))
+        .await
+        .unwrap();
+    db.insert_scan_cost(&row(A, "refresh", "2099-01-02T00:00:00Z", 7))
+        .await
+        .unwrap();
+    db.insert_scan_cost(&row(B, "refresh", "2099-01-03T00:00:00Z", 3))
+        .await
+        .unwrap();
+
+    let users = db.list_user_scan_costs().await.unwrap();
+    let a = users.iter().find(|u| u.user_did == A).expect("A listed");
+    assert_eq!(
+        (
+            a.first_full_scan_cents,
+            a.refresh_cents,
+            a.total_cents,
+            a.runs
+        ),
+        (Some(150), 7, 157, 2)
+    );
+    // 2099 dates keep this window free of other tests' rows.
+    assert_eq!(
+        db.scan_cost_cents_since("2099-01-02T00:00:00Z")
+            .await
+            .unwrap(),
+        10
+    );
+
+    db.delete_user_data(A).await.unwrap();
+    assert!(db
+        .list_user_scan_costs()
+        .await
+        .unwrap()
+        .iter()
+        .all(|u| u.user_did != A));
+    db.delete_user_data(B).await.unwrap();
+}
