@@ -122,6 +122,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   failed sweep warns and lets the scan continue.
 
 ### Fixed
+- #408 — after `CHARCOAL_TOKEN_KEY` is rotated, a stored Bluesky connection
+  sealed under the old key now reads as "not connected" (status and the
+  action runner alike) instead of showing as connected while every mute/block
+  failed with a crypto error. Reconnecting overwrites it. The row is kept, not
+  deleted, so restoring a mistakenly changed key brings sessions back. This
+  replaces the planned reset banner: the 2026-10-24 rotation (#406) found 0
+  sessions on prod and 1 on staging, revoked by hand.
 - #387 — a refresh that keeps failing for the same reason no longer retries
   every hour at full cost. Each failure extends the user's streak of
   identical failures (the cause with job ids, DIDs and counts masked out,

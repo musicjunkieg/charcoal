@@ -1,5 +1,21 @@
 [
   {
+    "hash": "49d61316922554df9c9b642b091c1536ce4587ab",
+    "short_hash": "49d6131",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T01:33:50-07:00",
+    "message": "fix(393): round ledger cents so small refreshes are not free\n\nCodeRabbit: truncation recorded a ~0.7c refresh as 0, so every ledger\nsum understated spend. Only the snapshot rounds; trip logic unchanged.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
+    "hash": "593b04802c22b70815a16bb10c2757c60b5111a9",
+    "short_hash": "593b048",
+    "author": "Bryan Guffey",
+    "date": "2026-10-25T01:07:10-07:00",
+    "message": "Merge pull request #148 from musicjunkieg/fix/408-undecryptable-session\n\nfix(408): undecryptable OAuth session reads as not connected",
+    "files_changed": 0
+  },
+  {
     "hash": "7e07b38169280389e8c978904eafc9437043ade3",
     "short_hash": "7e07b38",
     "author": "Bryan Guffey",

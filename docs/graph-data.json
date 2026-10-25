@@ -12924,6 +12924,17 @@
       "created_at": "2026-10-25T01:07:17.203361-07:00",
       "updated_at": "2026-10-25T01:07:17.203361-07:00",
       "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"593b048\",\"confidence\":95}"
+    },
+    {
+      "id": 1185,
+      "change_id": "06df5842-6fc0-4a33-84ad-0ff26f4f5173",
+      "node_type": "action",
+      "title": "Round snapshot est_cents (CodeRabbit PR #149)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-25T01:34:00.162315-07:00",
+      "updated_at": "2026-10-25T01:34:00.162315-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"49d6131\",\"confidence\":90,\"files\":[\"src/toxicity/cost_meter.rs\",\"tests/unit_cost_meter.rs\"]}"
     }
   ],
   "edges": [
@@ -26434,6 +26445,17 @@
       "weight": 1.0,
       "rationale": "Merge of the runner fix",
       "created_at": "2026-10-25T01:07:28.022391-07:00"
+    },
+    {
+      "id": 1239,
+      "from_node_id": 1183,
+      "to_node_id": 1185,
+      "from_change_id": "18f02fb2-21f8-49a7-9fbd-303953531729",
+      "to_change_id": "06df5842-6fc0-4a33-84ad-0ff26f4f5173",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "CodeRabbit fix on the PR",
+      "created_at": "2026-10-25T01:34:00.260189-07:00"
     }
   ],
   "documents": [
