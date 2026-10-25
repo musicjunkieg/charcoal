@@ -9,3 +9,4 @@ pub mod cache_stats;
 pub mod classifier_metrics;
 pub mod cpu_sample;
 pub mod refresh_metrics;
+pub mod scan_cost;
