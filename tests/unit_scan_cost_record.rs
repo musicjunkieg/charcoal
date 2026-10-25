@@ -65,6 +65,21 @@ async fn a_db_failure_is_swallowed() {
     let conn = Connection::open_in_memory().unwrap(); // no tables: insert must fail
     let db: Arc<dyn Database> = Arc::new(SqliteDatabase::new(conn));
     let m = ScanCostMeter::new(500, 329);
+    // Prove the failure path is real: without this, a DB that silently
+    // accepted the insert would let the test pass without testing anything.
+    let row = build_scan_cost_row(
+        "did:plc:a",
+        ScanKind::Full,
+        ScanCostOutcome::Completed,
+        "2026-10-24T00:00:00Z",
+        "2026-10-24T00:01:00Z",
+        m.snapshot(),
+        &CacheStats::default(),
+    );
+    assert!(
+        db.insert_scan_cost(&row).await.is_err(),
+        "table-less DB must reject the insert"
+    );
     // Must return normally — the cost row is bookkeeping, never the scan's result.
     record_scan_cost(
         db.as_ref(),

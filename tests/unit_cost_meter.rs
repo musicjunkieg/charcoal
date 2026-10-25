@@ -112,3 +112,13 @@ fn snapshot_of_an_unused_meter_is_zero() {
     let s = ScanCostMeter::new(500, 329).snapshot();
     assert_eq!((s.worker_secs, s.est_cents, s.peak_in_flight), (0.0, 0, 0));
 }
+
+#[test]
+fn snapshot_reports_peak_concurrency_through_the_public_api() {
+    let m = ScanCostMeter::new(500, 329);
+    {
+        let _a = m.guard();
+        let _b = m.guard();
+    }
+    assert_eq!(m.snapshot().peak_in_flight, 2);
+}

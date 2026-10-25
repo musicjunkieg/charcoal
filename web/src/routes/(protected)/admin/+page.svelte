@@ -475,11 +475,18 @@
 			{:else}
 				<table class="costs-table">
 					<thead>
-						<tr><th>User</th><th>Full scans</th><th>Refreshes</th><th>Total</th><th>Runs</th></tr>
+						<tr>
+							<th scope="col">User</th>
+							<th scope="col">Full scans</th>
+							<th scope="col">Refreshes</th>
+							<th scope="col">Total</th>
+							<th scope="col">Runs</th>
+							<th scope="col" class="col-last-run">Last run</th>
+						</tr>
 					</thead>
 					<tbody>
 						{#each costs.users as u (u.user_did)}
-							<tr class={{ 'over-target': u.over_onboarding_target }}>
+							<tr>
 								<td class="costs-user">{u.handle ?? u.user_did}</td>
 								<td>
 									{formatCents(u.full_scan_cents)}
@@ -490,6 +497,7 @@
 								<td>{formatCents(u.refresh_cents)}</td>
 								<td>{formatCents(u.total_cents)}</td>
 								<td>{u.runs}</td>
+								<td class="col-last-run">{formatDate(u.last_finished_at)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -1305,5 +1313,8 @@
 		.costs-table th,
 		.costs-table td { padding: var(--space-6) var(--space-4); }
 		.over-flag { display: block; margin-left: 0; }
+		/* Six columns do not fit a phone; the last-run time is the least
+		   needed to spot a runaway onboarding, so it goes first. */
+		.col-last-run { display: none; }
 	}
 </style>

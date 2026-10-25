@@ -88,6 +88,18 @@ async fn reports_per_user_totals_windows_and_the_onboarding_flag() {
         .await
         .unwrap();
 
+    // Exactly at the target is not over it.
+    db.insert_scan_cost(&row("did:plc:edge", "full", at(45), 200))
+        .await
+        .unwrap();
+    // A handle comes from the users table when there is a row...
+    db.upsert_user("did:plc:edge", "edge.test").await.unwrap();
+    // ...and is null when there is not. This test app starts from an empty
+    // in-memory DB, so this DID certainly has no users row.
+    db.insert_scan_cost(&row("did:plc:nousersrow", "refresh", at(50), 1))
+        .await
+        .unwrap();
+
     let (status, body) = call(&app, "GET", "/api/admin/costs", TEST_DID).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["last_7d_cents"], 94);
@@ -109,6 +121,17 @@ async fn reports_per_user_totals_windows_and_the_onboarding_flag() {
     assert_eq!(user("did:plc:split")["over_onboarding_target"], true);
     assert_eq!(user("did:plc:small")["full_scan_cents"], 90);
     assert_eq!(user("did:plc:small")["over_onboarding_target"], false);
+    assert_eq!(user("did:plc:edge")["full_scan_cents"], 200);
+    assert_eq!(
+        user("did:plc:edge")["over_onboarding_target"],
+        false,
+        "exactly $2.00 is on target, not over it"
+    );
+    assert_eq!(user("did:plc:edge")["handle"], "edge.test");
+    assert!(
+        user("did:plc:nousersrow")["handle"].is_null(),
+        "no users row: handle is null, the row is still listed"
+    );
     assert!(
         user("did:plc:small").get("first_full_scan_cents").is_none(),
         "the old field name is gone"

@@ -134,8 +134,8 @@ attribute it to. Parts 1 and 3 cover it.
   live Bluesky and models, which the unit suites fake.
 - A DB write failure on the cost row does not fail the scan.
 - Endpoint: non-admins get 403; aggregates and the $2.00 flag are correct.
-- Frontend (vitest): the cost section renders totals, the flag, and the
-  "est., excludes idle time" label.
+- Frontend (vitest): `formatCents` formatting and the null case. The
+  section's rendering is checked on staging.
 
 ## Part 3 — Weekly billing check (follow-up, separate issue)
 
