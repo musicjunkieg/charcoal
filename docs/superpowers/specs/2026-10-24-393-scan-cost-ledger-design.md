@@ -56,7 +56,7 @@ succeeded or failed.
 | `classifier_cache_hits` | integer, not null | verdicts served from the cache |
 | `metered_worker_secs` | real / double, not null | the meter's worker-seconds integral |
 | `peak_in_flight` | integer, not null | most concurrent in-flight requests seen (capped at workers max) |
-| `est_cents` | integer, not null | `metered_worker_secs` × rate, rounded down |
+| `est_cents` | integer, not null | `metered_worker_secs` × rate, rounded to the nearest cent (truncating would record every small refresh as 0) |
 | `rate_cents_per_hour` | integer, not null | rate used, so old rows stay interpretable if it changes |
 
 Index on `(user_did, started_at)` and on `started_at`.

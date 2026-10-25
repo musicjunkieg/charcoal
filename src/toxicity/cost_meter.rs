@@ -245,7 +245,10 @@ impl ScanCostMeter {
         CostSnapshot {
             worker_secs: acc.worker_secs,
             peak_in_flight: acc.peak_in_flight,
-            est_cents: (acc.worker_secs / 3600.0 * self.rate_cents_per_hour as f64) as u32,
+            // Rounded, not truncated: the ledger sums this per row, and a
+            // small refresh (~0.7c) truncated to 0 would vanish from every
+            // total. The trip logic keeps its own arithmetic.
+            est_cents: (acc.worker_secs / 3600.0 * self.rate_cents_per_hour as f64).round() as u32,
             rate_cents_per_hour: self.rate_cents_per_hour,
         }
     }

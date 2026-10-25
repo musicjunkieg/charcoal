@@ -108,6 +108,15 @@ fn snapshot_reports_integral_rate_and_matching_cents() {
 }
 
 #[test]
+fn snapshot_rounds_cents_so_small_refreshes_are_not_recorded_as_free() {
+    // ~8 worker-seconds at 329c/h is ~0.73c. Truncating would store 0 for
+    // every small nightly refresh and the ledger's sums would understate spend.
+    let m = ScanCostMeter::new(500, 329);
+    m.force_worker_seconds(8.0);
+    assert_eq!(m.snapshot().est_cents, 1);
+}
+
+#[test]
 fn snapshot_of_an_unused_meter_is_zero() {
     let s = ScanCostMeter::new(500, 329).snapshot();
     assert_eq!((s.worker_secs, s.est_cents, s.peak_in_flight), (0.0, 0, 0));

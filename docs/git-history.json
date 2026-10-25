@@ -1,5 +1,13 @@
 [
   {
+    "hash": "7e07b38169280389e8c978904eafc9437043ade3",
+    "short_hash": "7e07b38",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T22:14:16-07:00",
+    "message": "docs(393): record why pre-work failures write no cost row\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "786e3ba3dd5535d8af1245ff4d1d6c4d865bf75f",
     "short_hash": "786e3ba",
     "author": "Bryan Guffey",
