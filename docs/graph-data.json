@@ -12869,6 +12869,28 @@
       "created_at": "2026-10-24T20:52:57.696401-07:00",
       "updated_at": "2026-10-24T20:52:57.696401-07:00",
       "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"confidence\":85}"
+    },
+    {
+      "id": 1180,
+      "change_id": "464a8f74-6e91-4fb7-82e9-35d6f53bef81",
+      "node_type": "action",
+      "title": "Apply #393 final fix batch: paused outcome, full-scan flag, v19->v20 tests, last-run column",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-24T22:09:12.174475-07:00",
+      "updated_at": "2026-10-24T22:09:12.174475-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"786e3ba\",\"confidence\":90,\"files\":[\"src/observability/scan_cost.rs\",\"src/web/scan_job.rs\",\"src/web/refresh_scan.rs\",\"src/db/queries.rs\",\"migrations/postgres/0020_scan_costs.sql\",\"web/src/routes/(protected)/admin/+page.svelte\"]}"
+    },
+    {
+      "id": 1181,
+      "change_id": "e40210b8-ddb3-4faa-8f7f-071cc054e427",
+      "node_type": "outcome",
+      "title": "#393 fix batch re-review approved (no critical/important)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-24T22:09:33.912065-07:00",
+      "updated_at": "2026-10-24T22:09:33.912065-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"786e3ba\",\"confidence\":90}"
     }
   ],
   "edges": [
@@ -26313,6 +26335,28 @@
       "weight": 1.0,
       "rationale": "informs",
       "created_at": "2026-10-24T20:53:00.350574-07:00"
+    },
+    {
+      "id": 1233,
+      "from_node_id": 1179,
+      "to_node_id": 1180,
+      "from_change_id": "d8d41353-a294-467c-9f8a-c6858a54f515",
+      "to_change_id": "464a8f74-6e91-4fb7-82e9-35d6f53bef81",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Implements the decision",
+      "created_at": "2026-10-24T22:09:14.961288-07:00"
+    },
+    {
+      "id": 1234,
+      "from_node_id": 1180,
+      "to_node_id": 1181,
+      "from_change_id": "464a8f74-6e91-4fb7-82e9-35d6f53bef81",
+      "to_change_id": "e40210b8-ddb3-4faa-8f7f-071cc054e427",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Review result of fix batch",
+      "created_at": "2026-10-24T22:09:42.661815-07:00"
     }
   ],
   "documents": [

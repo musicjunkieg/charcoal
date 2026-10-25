@@ -1,5 +1,13 @@
 [
   {
+    "hash": "786e3ba3dd5535d8af1245ff4d1d6c4d865bf75f",
+    "short_hash": "786e3ba",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T22:07:59-07:00",
+    "message": "fix(393): harden cost tests, add last-run column\n\nPeak concurrency is tested through the public guard API; the swallowed\nDB-failure test first proves the insert really fails; the endpoint test\ncovers exactly-$2.00 (not over) and a DID with no users row (null\nhandle). The admin table drops a dead row class, gains scope=col\nheaders and a Last run column (hidden under 640px).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 5
+  },
+  {
     "hash": "045f2beb4998b541ff42d104d2d64d0e110bc4a6",
     "short_hash": "045f2be",
     "author": "Bryan Guffey",

@@ -112,6 +112,14 @@ Spend outside a scan — e.g. a classifier identity probe that wakes a worker
 and then refuses (the 2026-10-02 incident class). There is no scan to
 attribute it to. Parts 1 and 3 cover it.
 
+Runs that fail before any classifier work also write no row: a full scan
+whose scorers fail to build (`build_scan_scorers` is synchronous and makes
+no network call), and a refresh refused by the circuit breaker or failing
+its marker reset, setup or context load. These spend no GPU time, and the
+scan lifecycle and refresh markers already record them as failed. A row per
+refused refresh would add one zero-cost row per user per tick during an
+outage. (Codex review, 2026-10-24: considered and declined.)
+
 ### Where it shows
 
 - **Railway logs:** the per-scan line above.
