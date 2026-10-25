@@ -1,5 +1,13 @@
 [
   {
+    "hash": "045f2beb4998b541ff42d104d2d64d0e110bc4a6",
+    "short_hash": "045f2be",
+    "author": "Bryan Guffey",
+    "date": "2026-10-24T18:34:19-07:00",
+    "message": "docs(393): scan cost ledger implementation plan\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_011A7Hxj42hpg7y8W875eVv3",
+    "files_changed": 3
+  },
+  {
     "hash": "632169b7b65d96f2d5b9f29a5183e3a85ed1d5af",
     "short_hash": "632169b",
     "author": "Bryan Guffey",

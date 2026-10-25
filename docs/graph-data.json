@@ -12836,6 +12836,17 @@
       "created_at": "2026-10-24T18:08:04.355041-07:00",
       "updated_at": "2026-10-24T18:08:04.355041-07:00",
       "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"632169b\",\"confidence\":90,\"files\":[\"docs/superpowers/specs/2026-10-24-393-scan-cost-ledger-design.md\"]}"
+    },
+    {
+      "id": 1177,
+      "change_id": "96691951-4968-4358-9a9d-7ee069c9f541",
+      "node_type": "action",
+      "title": "Write #393 implementation plan (8 tasks)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-10-24T18:34:36.415555-07:00",
+      "updated_at": "2026-10-24T18:34:36.415555-07:00",
+      "metadata_json": "{\"branch\":\"feat/393-scan-cost-ledger\",\"commit\":\"045f2be\",\"confidence\":90,\"files\":[\"docs/superpowers/plans/2026-10-24-393-scan-cost-ledger.md\"]}"
     }
   ],
   "edges": [
@@ -26236,6 +26247,28 @@
       "weight": 1.0,
       "rationale": "rejected: billing key in Railway",
       "created_at": "2026-10-24T18:08:04.338744-07:00"
+    },
+    {
+      "id": 1229,
+      "from_node_id": 1175,
+      "to_node_id": 1176,
+      "from_change_id": "ad4b4035-0fe7-4e70-9c4f-65a544467a44",
+      "to_change_id": "7d08fdf6-8f98-4c7d-b507-7198376fb8e1",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "spec",
+      "created_at": "2026-10-24T18:34:36.423247-07:00"
+    },
+    {
+      "id": 1230,
+      "from_node_id": 1176,
+      "to_node_id": 1177,
+      "from_change_id": "7d08fdf6-8f98-4c7d-b507-7198376fb8e1",
+      "to_change_id": "96691951-4968-4358-9a9d-7ee069c9f541",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "plan",
+      "created_at": "2026-10-24T18:34:36.429963-07:00"
     }
   ],
   "documents": [
